@@ -90,6 +90,22 @@ pub fn step_detail_why(detail: &str) -> &str {
 /// not be written again.
 pub const OUT_OF_TIME: &str = "time";
 
+/// The reason a step-wise write gives when it gave up because the provider
+/// kept asking it to wait (decision 276): the wait it asked for last did not
+/// fit the budget, or waiting for it used up half the time to settle or more
+/// ([`busy_used_up`]). With [`crate::WriteRefusal::DeletionsNotKept`] the
+/// surfaces say the provider was busy and to try again later; with
+/// [`crate::WriteLeftover::CreatedMayStand`] it is for the log only.
+/// [`OUT_OF_TIME`] stays for a slow provider and very many deletions.
+pub const PROVIDER_BUSY: &str = "busy";
+
+/// Whether waiting for a busy provider used up a decisive share of a
+/// step-wise write's time to settle: half of it or more (decision 276). A run
+/// that then runs out of time gives [`PROVIDER_BUSY`], not [`OUT_OF_TIME`].
+pub fn busy_used_up(waited: Duration, budget: SettleBudget) -> bool {
+    waited.saturating_mul(2) >= budget.settle
+}
+
 /// The day an all-day deletion names on `device`: its own date where it is
 /// the device's midnight — the spelling the views and the device's own reads
 /// give —, else the day the 13:45 rule reads ([`all_day_slot_day`]), for a

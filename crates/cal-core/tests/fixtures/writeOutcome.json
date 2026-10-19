@@ -63,6 +63,41 @@
       "leftover": null,
       "invited": true,
       "why": "time"
+    },
+    {
+      "message": "provider-busy: http-429",
+      "refusal": "provider-busy",
+      "leftover": null,
+      "invited": false,
+      "why": "http-429"
+    },
+    {
+      "message": "provider-busy",
+      "refusal": "provider-busy",
+      "leftover": null,
+      "invited": false,
+      "why": ""
+    },
+    {
+      "message": "provider-busy-elsewhere: x",
+      "refusal": null,
+      "leftover": null,
+      "invited": false,
+      "why": null
+    },
+    {
+      "message": "partly-saved: members",
+      "refusal": null,
+      "leftover": "partly-saved",
+      "invited": false,
+      "why": "members"
+    },
+    {
+      "message": "deletions-not-kept: invited busy",
+      "refusal": "deletions-not-kept",
+      "leftover": null,
+      "invited": true,
+      "why": "busy"
     }
   ]
 }

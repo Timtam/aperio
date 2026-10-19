@@ -89,6 +89,53 @@ pub enum WriteRefusal {
     /// after), `time`, `invitation`, `network`, `http-<status>` or a code of the
     /// provider's own, `<provider>-<code>`.
     DeletionsNotKept,
+    /// The provider turned the request away because it is throttling, and the
+    /// request wrote nothing (decision 270): try again later. Reads carry it
+    /// too, as for [`Self::AccessNotGranted`]. The detail is a
+    /// [`BusyDetail`] word for the log: never a status or a word an older
+    /// host's text heuristic takes for a sign-in failure. A throttle after a
+    /// request of the same save had landed is no refusal but
+    /// [`crate::WriteLeftover::PartlySaved`] (277).
+    ProviderBusy,
+}
+
+/// What a provider answered when it turned a request away for throttling, as
+/// the detail of [`WriteRefusal::ProviderBusy`]: a closed set of neutral
+/// words, so that none of them, on any host, reads as a sign-in failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BusyDetail {
+    /// HTTP 429, too many requests.
+    TooManyRequests,
+    /// HTTP 503 with a wait to keep: a provider that throttles that way.
+    Unavailable,
+    /// The provider's own answer that a rate limit was reached.
+    RateLimit,
+    /// The provider's own answer that this user's rate limit was reached.
+    UserRateLimit,
+    /// The provider's own answer that its server is busy.
+    ServerBusy,
+}
+
+impl BusyDetail {
+    /// Every detail, for the tests that keep them neutral.
+    pub const ALL: [Self; 5] = [
+        Self::TooManyRequests,
+        Self::Unavailable,
+        Self::RateLimit,
+        Self::UserRateLimit,
+        Self::ServerBusy,
+    ];
+
+    /// The word the detail is written as.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::TooManyRequests => "http-429",
+            Self::Unavailable => "http-503",
+            Self::RateLimit => "rate-limit",
+            Self::UserRateLimit => "user-rate-limit",
+            Self::ServerBusy => "server-busy",
+        }
+    }
 }
 
 /// What an update writes again that makes a provider drop a series' changed
@@ -159,6 +206,7 @@ impl WriteRefusal {
             Self::CopyUnreadable => "copy-unreadable",
             Self::ExceptionsWouldBeLost => "exceptions-would-be-lost",
             Self::DeletionsNotKept => "deletions-not-kept",
+            Self::ProviderBusy => "provider-busy",
         }
     }
 
@@ -176,6 +224,18 @@ impl WriteRefusal {
     /// the truth.
     pub const fn refused_status(status: u16) -> bool {
         matches!(status, 400 | 413 | 415 | 422 | 429 | 507)
+    }
+
+    /// The refusal a write turned down whole with this HTTP status names: a
+    /// busy provider for 429 (decision 270), the server's own refusal for the
+    /// other statuses [`Self::refused_status`] knows, `None` otherwise. The one
+    /// place that says which comes first, for every adapter.
+    pub const fn turned_down_by_status(status: u16) -> Option<Self> {
+        match status {
+            429 => Some(Self::ProviderBusy),
+            400 | 413 | 415 | 422 | 507 => Some(Self::ServerRefused),
+            _ => None,
+        }
     }
 
     /// The message: the token, and the detail behind a colon when there is one.
@@ -205,6 +265,7 @@ impl WriteRefusal {
             Self::CopyUnreadable,
             Self::ExceptionsWouldBeLost,
             Self::DeletionsNotKept,
+            Self::ProviderBusy,
         ] {
             let token = refusal.token();
             let rest = match message.strip_prefix(token) {
@@ -225,6 +286,79 @@ impl WriteRefusal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_busy_refusal_comes_back_from_its_message() {
+        let msg = WriteRefusal::ProviderBusy.message(BusyDetail::RateLimit.word());
+        assert_eq!(msg, "provider-busy: rate-limit");
+        assert_eq!(
+            WriteRefusal::parse(&msg),
+            Some((WriteRefusal::ProviderBusy, "rate-limit"))
+        );
+        assert_eq!(
+            WriteRefusal::parse("provider-busy"),
+            Some((WriteRefusal::ProviderBusy, ""))
+        );
+        assert_eq!(WriteRefusal::parse("provider-busy-elsewhere: x"), None);
+        assert_eq!(
+            serde_json::to_value(WriteRefusal::ProviderBusy).unwrap(),
+            serde_json::json!("provider-busy")
+        );
+    }
+
+    #[test]
+    fn a_status_turned_down_whole_names_busy_first() {
+        assert_eq!(
+            WriteRefusal::turned_down_by_status(429),
+            Some(WriteRefusal::ProviderBusy)
+        );
+        for status in [400, 413, 415, 422, 507] {
+            assert_eq!(
+                WriteRefusal::turned_down_by_status(status),
+                Some(WriteRefusal::ServerRefused),
+                "{status}"
+            );
+        }
+        for status in [200, 401, 403, 404, 409, 412, 500, 502, 503] {
+            assert_eq!(
+                WriteRefusal::turned_down_by_status(status),
+                None,
+                "{status}"
+            );
+        }
+        // Every status it names is one turned down whole.
+        for status in 0..1000u16 {
+            if WriteRefusal::turned_down_by_status(status).is_some() {
+                assert!(WriteRefusal::refused_status(status), "{status}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_busy_detail_never_looks_like_a_sign_in_failure() {
+        // The needles an older host's heuristic reads a login problem by
+        // (host-core `is_auth_shaped`); host-core's own test reads the same
+        // messages with the real heuristic.
+        let needles = [
+            "401",
+            "403",
+            "unauthorized",
+            "unauthorised",
+            "forbidden",
+            "authentication",
+            "invalid credentials",
+            "password",
+            "invalid_grant",
+            "invalid_client",
+            "expired or revoked",
+        ];
+        for detail in BusyDetail::ALL {
+            let msg = WriteRefusal::ProviderBusy.message(detail.word());
+            for needle in needles {
+                assert!(!msg.to_lowercase().contains(needle), "{msg} {needle}");
+            }
+        }
+    }
 
     #[test]
     fn the_access_refusal_comes_back_from_its_message() {

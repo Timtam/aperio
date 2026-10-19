@@ -1747,6 +1747,9 @@
         "invitationsCancelledToo": "If invitations were sent, the invitees also received its cancellation.",
         "createdMayStand": "A new series was created in the calendar but could not be completed, and Aperio could not remove it again. It may now stand there as well. Please check the calendar.",
         "invitationsMayHaveGone": "The invitees may have received an invitation.",
+        "providerBusy": "The provider is busy right now. Nothing was changed. Try again later.",
+        "deletionsNotKeptBusy": "The provider was busy, so Aperio could not finish the new series in time and removed it again. Nothing was changed. Try again later.",
+        "partlySaved": "The change was only partly saved, because the provider is busy right now. Check it, and try the rest again later.",
         "reason": {
           "replyOnly": "only the organizer can change this meeting",
           "serverRefused": "the calendar server refused it ({{detail}})",
@@ -1761,7 +1764,10 @@
           "changedOnServer": "it changed on the server since you opened it",
           "deletionsNotKeptTime": "deleting its deleted occurrences again one by one took too long",
           "deletionsNotKept": "the calendar did not take its deleted occurrences",
-          "createdMayStand": "a new series was created but could neither be completed nor removed again"
+          "createdMayStand": "a new series was created but could neither be completed nor removed again",
+          "providerBusy": "the provider is busy right now",
+          "deletionsNotKeptBusy": "the provider was busy, so the new series could not be finished in time",
+          "partlySaved": "it was only partly saved, because the provider is busy right now"
         }
       },
       "deleteAndDecline": "Delete and decline"

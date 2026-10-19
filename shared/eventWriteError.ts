@@ -29,6 +29,7 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
   'copy-unreadable': 'dialogs.event.writeError.copyUnreadable',
   'exceptions-would-be-lost': 'dialogs.event.writeError.exceptionsWouldBeLost',
   'deletions-not-kept': 'dialogs.event.writeError.deletionsNotKept',
+  'provider-busy': 'dialogs.event.writeError.providerBusy',
 };
 
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];
@@ -46,17 +47,20 @@ const REFUSAL_REASON_KEYS: Record<WriteRefusal, string> = {
   'copy-unreadable': 'dialogs.event.writeError.reason.copyUnreadable',
   'exceptions-would-be-lost': 'dialogs.event.writeError.reason.exceptionsWouldBeLost',
   'deletions-not-kept': 'dialogs.event.writeError.reason.deletionsNotKept',
+  'provider-busy': 'dialogs.event.writeError.reason.providerBusy',
 };
 
 /** The sentence each leftover reads as (`cal_core::WriteLeftover`): something
  *  was written and may still stand. Typed by the generated union, as above. */
 const LEFTOVER_KEYS: Record<WriteLeftover, string> = {
   'created-may-stand': 'dialogs.event.writeError.createdMayStand',
+  'partly-saved': 'dialogs.event.writeError.partlySaved',
 };
 
 /** The same leftovers as a reason alone. */
 const LEFTOVER_REASON_KEYS: Record<WriteLeftover, string> = {
   'created-may-stand': 'dialogs.event.writeError.reason.createdMayStand',
+  'partly-saved': 'dialogs.event.writeError.reason.partlySaved',
 };
 
 const LEFTOVER_TOKENS = Object.keys(LEFTOVER_KEYS) as WriteLeftover[];
@@ -68,6 +72,10 @@ const INVITED = 'invited';
 /** The reason a step-wise write gives when its steps took too long
  *  (`cal_core::step_write::OUT_OF_TIME`). */
 const OUT_OF_TIME = 'time';
+
+/** The reason a step-wise write gives when the provider kept asking it to wait
+ *  (`cal_core::step_write::PROVIDER_BUSY`, decision 276). */
+const PROVIDER_BUSY = 'busy';
 
 /**
  * The detail of a write that settles in steps (`cal_core::step_detail`): its
@@ -253,13 +261,12 @@ export function eventWriteFailureReason(err: unknown, t: Translate): string {
   if (leftover) return t(LEFTOVER_REASON_KEYS[leftover.leftover]);
   const refusal = eventWriteRefusal(err);
   if (refusal) {
-    // A series taken back because its steps took too long says so (decision
-    // 213), as its sentence does.
-    if (
-      refusal.refusal === 'deletions-not-kept' &&
-      stepDetail(refusal.detail).why === OUT_OF_TIME
-    ) {
-      return t('dialogs.event.writeError.reason.deletionsNotKeptTime');
+    // A series taken back because its steps took too long, or because the
+    // provider was busy, says so (decisions 213, 276), as its sentence does.
+    if (refusal.refusal === 'deletions-not-kept') {
+      const { why } = stepDetail(refusal.detail);
+      if (why === OUT_OF_TIME) return t('dialogs.event.writeError.reason.deletionsNotKeptTime');
+      if (why === PROVIDER_BUSY) return t('dialogs.event.writeError.reason.deletionsNotKeptBusy');
     }
     return t(REFUSAL_REASON_KEYS[refusal.refusal], { detail: refusal.detail });
   }
@@ -288,7 +295,11 @@ function refusalSentence(
   }
   const { invited, why } = stepDetail(refusal.detail);
   const sentence =
-    why === OUT_OF_TIME ? t('dialogs.event.writeError.deletionsNotKeptTime') : t(refusal.key);
+    why === OUT_OF_TIME
+      ? t('dialogs.event.writeError.deletionsNotKeptTime')
+      : why === PROVIDER_BUSY
+        ? t('dialogs.event.writeError.deletionsNotKeptBusy')
+        : t(refusal.key);
   return invited ? `${sentence} ${t('dialogs.event.writeError.invitationsCancelledToo')}` : sentence;
 }
 

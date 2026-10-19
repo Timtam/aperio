@@ -155,8 +155,9 @@ pub use signatures::{
 };
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use step_write::{
-    all_day_deletion_day, deletions_from_today, may_send, step_detail, step_detail_invited,
-    step_detail_why, DeletionsFromToday, SettleBudget, INVITED, OUT_OF_TIME, SERIES_WITH_DELETIONS,
+    all_day_deletion_day, busy_used_up, deletions_from_today, may_send, step_detail,
+    step_detail_invited, step_detail_why, DeletionsFromToday, SettleBudget, INVITED, OUT_OF_TIME,
+    PROVIDER_BUSY, SERIES_WITH_DELETIONS,
 };
 pub use suggestion_decline::SuggestionDecline;
 pub use tail_exceptions::{
@@ -212,7 +213,7 @@ pub use types::{
     TaskListShare, TaskPriority, TaskRecurrence, TaskStatus, TaskUser, Weekday,
 };
 pub use write_leftover::WriteLeftover;
-pub use write_refusal::{SeriesRewrite, WriteRefusal};
+pub use write_refusal::{BusyDetail, SeriesRewrite, WriteRefusal};
 pub use zone_list::{
     listed_zone_labels, zone_choice, zone_choice_json, zone_labels_json, zone_search,
     zone_search_json, ListedOffset, ListedZone, MatchField, OffsetSign, RegionName, ZoneAlias,

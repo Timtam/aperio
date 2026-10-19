@@ -1747,6 +1747,9 @@
         "invitationsCancelledToo": "Falls Einladungen verschickt wurden, haben die Eingeladenen auch die Absage bekommen.",
         "createdMayStand": "Im Kalender wurde eine neue Serie angelegt, ließ sich aber nicht fertigstellen, und Aperio konnte sie nicht wieder entfernen. Sie steht dort möglicherweise zusätzlich. Bitte prüfe den Kalender.",
         "invitationsMayHaveGone": "Möglicherweise haben die Eingeladenen eine Einladung bekommen.",
+        "providerBusy": "Der Anbieter ist gerade ausgelastet. Es wurde nichts geändert. Versuche es später noch einmal.",
+        "deletionsNotKeptBusy": "Der Anbieter war ausgelastet, deshalb konnte Aperio die neue Serie nicht rechtzeitig fertigstellen und hat sie wieder entfernt. Es wurde nichts geändert. Versuche es später noch einmal.",
+        "partlySaved": "Die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist. Prüfe sie und versuche den Rest später noch einmal.",
         "reason": {
           "replyOnly": "nur der Organisator kann diese Besprechung ändern",
           "serverRefused": "der Kalenderserver hat es abgelehnt ({{detail}})",
@@ -1761,7 +1764,10 @@
           "changedOnServer": "sie wurde auf dem Server geändert, seit du sie geöffnet hast",
           "deletionsNotKeptTime": "ihre gelöschten Termine einzeln wieder zu löschen, hat zu lange gedauert",
           "deletionsNotKept": "der Kalender hat ihre gelöschten Termine nicht übernommen",
-          "createdMayStand": "eine neue Serie wurde angelegt, ließ sich aber weder fertigstellen noch wieder entfernen"
+          "createdMayStand": "eine neue Serie wurde angelegt, ließ sich aber weder fertigstellen noch wieder entfernen",
+          "providerBusy": "der Anbieter ist gerade ausgelastet",
+          "deletionsNotKeptBusy": "der Anbieter war ausgelastet, deshalb ließ sich die neue Serie nicht rechtzeitig fertigstellen",
+          "partlySaved": "sie ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist"
         }
       },
       "deleteAndDecline": "Löschen und absagen"

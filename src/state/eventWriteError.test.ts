@@ -394,3 +394,75 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
     }
   });
 });
+
+describe('a provider that is busy (decisions 270, 276, 277)', () => {
+  const de = i18n.getFixedT('de');
+  const en = i18n.getFixedT('en');
+  /** The ways a message reaches a surface: the desktop's command error under
+   *  two codes, and the phone's native error behind Expo's wrapper. */
+  const carriers = (message: string) => [
+    command('forbidden', message),
+    command('network', message),
+    new Error(`Calling the 'updateTaskJson' function has failed\n→ Caused by: ${message}`),
+  ];
+
+  it('says a busy provider in words, as nothing written, whatever carried it', () => {
+    for (const err of carriers('provider-busy: rate-limit')) {
+      expect(eventWriteErrorMessage(err, t)).toBe(
+        'Der Anbieter ist gerade ausgelastet. Es wurde nichts geändert. Versuche es später noch einmal.',
+      );
+      expect(writeErrorMessage(err, t)).toBe(eventWriteErrorMessage(err, t));
+      expect(writeNeverLanded(err)).toBe(true);
+      expect(eventWriteFailureReason(err, t)).toBe('der Anbieter ist gerade ausgelastet');
+    }
+    // No machine word reaches the reader, in either language.
+    const english = eventWriteErrorMessage(command('forbidden', 'provider-busy: http-429'), (k, v) =>
+      en(k, v as never) as unknown as string,
+    );
+    expect(english).toBe('The provider is busy right now. Nothing was changed. Try again later.');
+    expect(english).not.toMatch(/429|provider-busy|rate/);
+  });
+
+  it('says a save that stands only in part, never as nothing written', () => {
+    for (const err of carriers('partly-saved: members')) {
+      expect(eventWriteErrorMessage(err, t)).toBe(
+        'Die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist. ' +
+          'Prüfe sie und versuche den Rest später noch einmal.',
+      );
+      expect(writeNeverLanded(err)).toBe(false);
+      expect(eventWriteFailureReason(err, t)).toBe(
+        'sie ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist',
+      );
+    }
+  });
+
+  it('says a new series taken back while the provider was busy', () => {
+    expect(eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: invited busy'), t)).toBe(
+      'Der Anbieter war ausgelastet, deshalb konnte Aperio die neue Serie nicht rechtzeitig ' +
+        'fertigstellen und hat sie wieder entfernt. Es wurde nichts geändert. Versuche es später noch ' +
+        'einmal. Falls Einladungen verschickt wurden, haben die Eingeladenen auch die Absage bekommen.',
+    );
+    expect(eventWriteFailureReason(command('forbidden', 'deletions-not-kept: busy'), t)).toBe(
+      'der Anbieter war ausgelastet, deshalb ließ sich die neue Serie nicht rechtzeitig fertigstellen',
+    );
+    // "Took too long" stays for a slow provider.
+    expect(eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: time'), t)).toMatch(
+      /hat zu lange gedauert/,
+    );
+  });
+
+  it('has every sentence in both languages', () => {
+    for (const key of [
+      'dialogs.event.writeError.providerBusy',
+      'dialogs.event.writeError.deletionsNotKeptBusy',
+      'dialogs.event.writeError.partlySaved',
+      'dialogs.event.writeError.reason.providerBusy',
+      'dialogs.event.writeError.reason.deletionsNotKeptBusy',
+      'dialogs.event.writeError.reason.partlySaved',
+    ]) {
+      expect(i18n.exists(key, { lng: 'de' }), key).toBe(true);
+      expect(i18n.exists(key, { lng: 'en' }), key).toBe(true);
+      expect(de(key), key).not.toBe(en(key));
+    }
+  });
+});
