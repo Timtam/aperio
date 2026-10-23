@@ -1481,24 +1481,12 @@ impl Host {
         config_json: &str,
         secret: Option<&str>,
     ) -> Result<(), StoreError> {
-        use host_core::registry::RegistryError as Re;
-        match self.runtime.block_on(
-            self.registry
-                .probe_account(adapter_kind, config_json, secret),
-        ) {
-            Ok(()) | Err(Re::Unsupported(_)) => Ok(()),
-            Err(Re::Secret(detail)) => Err(StoreError::InvalidField {
-                field: "secret".to_string(),
-                detail,
-            }),
-            Err(Re::Config(detail)) => Err(StoreError::InvalidField {
-                field: "config".to_string(),
-                detail,
-            }),
-            Err(other) => Err(StoreError::Storage {
-                detail: other.to_string(),
-            }),
-        }
+        probe_outcome(
+            self.runtime.block_on(
+                self.registry
+                    .probe_account(adapter_kind, config_json, secret),
+            ),
+        )
     }
 
     /// Write the chosen target down as the account row this device syncs
@@ -2082,6 +2070,29 @@ fn parse_day_key(day: &str) -> Result<chrono::NaiveDate, StoreError> {
         field: "day".to_string(),
         detail: format!("not a YYYY-MM-DD day: {day}"),
     })
+}
+
+/// A credential probe's outcome as the phone reads it: a non-credential kind
+/// (Local / OAuth) is a silent skip, a missing/invalid field is an
+/// InvalidField, the adapter's own failure keeps its kind and its token first
+/// (a busy provider, decision 273), and anything else surfaces its message.
+fn probe_outcome(result: Result<(), host_core::registry::RegistryError>) -> Result<(), StoreError> {
+    use host_core::registry::RegistryError as Re;
+    match result {
+        Ok(()) | Err(Re::Unsupported(_)) => Ok(()),
+        Err(Re::Secret(detail)) => Err(StoreError::InvalidField {
+            field: "secret".to_string(),
+            detail,
+        }),
+        Err(Re::Config(detail)) => Err(StoreError::InvalidField {
+            field: "config".to_string(),
+            detail,
+        }),
+        Err(Re::Probe(err)) => Err(map_store_err(err)),
+        Err(other) => Err(StoreError::Storage {
+            detail: other.to_string(),
+        }),
+    }
 }
 
 #[uniffi::export]
@@ -9804,6 +9815,24 @@ fn unbuildable_err(err: host_core::sync_target::Unbuildable) -> StoreError {
 
 #[cfg(test)]
 mod tests {
+
+    /// A probe the adapter failed keeps the adapter's kind and its token: a
+    /// busy provider is said as one (decision 273), never as a storage error;
+    /// a missing secret or config stays a field error.
+    #[test]
+    fn a_busy_probe_keeps_its_token() {
+        use host_core::registry::RegistryError as Re;
+        let busy = cal_core::Error::provider_busy(cal_core::BusyDetail::TooManyRequests);
+        match super::probe_outcome(Err(Re::Probe(busy))) {
+            Err(StoreError::Forbidden { detail }) => assert_eq!(detail, "provider-busy: http-429"),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            super::probe_outcome(Err(Re::Secret("x".into()))),
+            Err(StoreError::InvalidField { .. })
+        ));
+        assert!(matches!(super::probe_outcome(Ok(())), Ok(())));
+    }
     use super::*;
     use std::collections::HashMap;
     use std::sync::Mutex;

@@ -956,7 +956,7 @@ impl AdapterRegistry {
                 .list_calendars()
                 .await
                 .map(|_| ())
-                .map_err(|err| RegistryError::Probe(err.to_string()))
+                .map_err(RegistryError::Probe)
         } else if caps.contains(&plugin_core::Capability::Tasks) {
             let adapter = FfiTasksAdapter::new(instance).ok_or_else(|| {
                 RegistryError::Construct("plugin doesn't expose the TasksFeature surface".into())
@@ -965,7 +965,7 @@ impl AdapterRegistry {
                 .list_task_lists()
                 .await
                 .map(|_| ())
-                .map_err(|err| RegistryError::Probe(err.to_string()))
+                .map_err(RegistryError::Probe)
         } else {
             // Nothing cheap to list. Opening the instance already exercised the
             // config, which is most of what a probe is for, so this is a pass
@@ -1350,10 +1350,11 @@ pub enum RegistryError {
     #[error("adapter construction failed: {0}")]
     Construct(String),
     /// A credential smoke-test reached the adapter but its read probe failed —
-    /// bad auth, an unreachable host, a protocol error. The string is the
-    /// underlying adapter error, surfaced to the user.
+    /// bad auth, an unreachable host, a protocol error, a busy provider. The
+    /// adapter's error itself, so the shells say it by its kind and its token
+    /// (decision 273): a busy provider is no failed probe of the credentials.
     #[error("{0}")]
-    Probe(String),
+    Probe(cal_core::Error),
     /// The plugin id referenced by the account isn't loaded into
     /// the host's [`PluginManager`] — typically because the user's
     /// other device installed a community plugin Aperio doesn't
