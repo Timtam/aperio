@@ -1595,6 +1595,14 @@ Vorschläge sind nicht aufgenommen.
       Bildschirm, der oberste gewinnt); für das Deckblatt vom obersten
       gezeigten Controller aus. Gefunden in der sechsten Prüfrunde von #127
       (2026-10-18), älter als #127.
+- [ ] **Verfügbarkeit: jeder andere Fehler heißt „alle frei“.** Seit PR 7
+      sagt eine Verfügbarkeitsprüfung, die ein ausgelasteter Anbieter
+      abweist, das in Worten (`host_core::free_busy::query_free_busy`, beide
+      Geräte). Jeder andere Fehler (Netz, Rechte, ein Anbieter ohne
+      Frei/Belegt) gibt weiter eine leere Antwort, und der Editor sagt „Alle
+      Teilnehmer sind zu dieser Zeit frei.“ Zu entscheiden: welche Fehler
+      einen Satz bekommen (ein Anbieter ohne Frei/Belegt ist keiner). Aus
+      der Planung von PR 7 (2026-10-23).
 - [ ] **Google: eine Unteraufgabe lösen erreicht Google nicht.**
       `tasks::update_task` schickt `/move` nur mit einer neuen übergeordneten
       Aufgabe. Ist `parent_id` leer, die Aufgabe bei Google aber noch

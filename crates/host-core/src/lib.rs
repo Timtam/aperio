@@ -29,6 +29,7 @@ pub mod event_groups;
 pub mod event_log;
 pub mod event_reminders;
 pub mod event_write;
+pub mod free_busy;
 pub mod logging;
 pub mod meetings;
 pub mod overrides;

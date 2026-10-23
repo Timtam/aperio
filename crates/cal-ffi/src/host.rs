@@ -6889,15 +6889,18 @@ impl Host {
     /// "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
     pub fn query_free_busy_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: FreeBusyRequest = from_json("request", &request_json)?;
-        let Some(ext) = self.route(&req.calendar_id).ok().flatten() else {
-            return to_json(&Vec::<cal_core::FreeBusy>::new());
-        };
+        let ext = self.route(&req.calendar_id).ok().flatten();
         let range = DateRange::new(req.range_start, req.range_end);
         let refs: Vec<&str> = req.emails.iter().map(String::as_str).collect();
+        // The rule once, in the core (decision 270): a busy provider is said.
         let fb = self
             .runtime
-            .block_on(async { ext.get_free_busy(&refs, range).await })
-            .unwrap_or_default();
+            .block_on(host_core::free_busy::query_free_busy(
+                ext.as_deref(),
+                &refs,
+                range,
+            ))
+            .map_err(map_store_err)?;
         to_json(&fb)
     }
 

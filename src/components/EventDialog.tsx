@@ -84,6 +84,7 @@ import {
   planCarry,
   recurrenceSummaryText,
   privateReminderWrites,
+  readFailureSentence,
   seriesDayKey,
   worthCarrying,
   type CarryableFields,
@@ -1206,8 +1207,12 @@ export function EventDialog({
           : t('dialogs.event.availability.someBusy', { count: busyCount }),
       );
     } catch (err) {
+      // A check that failed says why, and the previous answer goes: "All
+      // attendees are free" must never stand beside it (decision 273).
+      setAvailability(null);
+      setAvailabilityWindow(null);
       setAvailabilityError(
-        eventWriteErrorMessage(err, t),
+        readFailureSentence('dialogs.event.availability.failed', err, t),
       );
     } finally {
       setCheckingAvailability(false);

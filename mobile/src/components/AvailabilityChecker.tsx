@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { readFailureSentence } from '@aperio/shared';
+
 import { FreeBusy, FreeBusySlot, queryFreeBusy } from '../api/calendar';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -87,7 +89,11 @@ export function AvailabilityChecker({
           : t('dialogs.event.availability.someBusy', { count: busyCount }),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // A check that failed says why, and the previous answer goes: "All
+      // attendees are free" must never stand beside it (decision 273).
+      setAvailability(null);
+      setCheckedWindow(null);
+      setError(readFailureSentence('dialogs.event.availability.failed', err, t));
     } finally {
       setChecking(false);
     }

@@ -997,23 +997,11 @@ pub async fn query_free_busy(
     if account == LOCAL_ID {
         return Ok(Vec::new());
     }
-    let Some(ext) = registry.calendar_adapter(&account) else {
-        return Ok(Vec::new());
-    };
+    let ext = registry.calendar_adapter(&account);
     let range = DateRange::new(request.range_start, request.range_end);
     let refs: Vec<&str> = request.emails.iter().map(|s| s.as_str()).collect();
-    match ext.get_free_busy(&refs, range).await {
-        Ok(fb) => Ok(fb),
-        Err(err) => {
-            tracing::warn!(
-                target: "aperio::commands",
-                account = %account,
-                ?err,
-                "free/busy query failed; returning empty",
-            );
-            Ok(Vec::new())
-        }
-    }
+    // The rule once, in the core (decision 270): a busy provider is said.
+    Ok(host_core::free_busy::query_free_busy(ext.as_deref(), &refs, range).await?)
 }
 
 /// The connected account's email for `calendar_id`, used by the RSVP
