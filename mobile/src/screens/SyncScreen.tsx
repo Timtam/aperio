@@ -41,7 +41,7 @@ import { RadioGroup } from '../components/RadioGroup';
 import { SyncDevicesPanel } from '../components/sync/SyncDevicesPanel';
 import { SyncTargetAccountPicker } from '../components/sync/SyncTargetAccountPicker';
 import { formatLongDateTime } from '../intl/dateFormat';
-import { withheldPhrase, withheldSince } from '@aperio/shared';
+import { refreshErrorRowText, withheldPhrase, withheldSince } from '@aperio/shared';
 import { clampErrorText, useRefreshErrors } from '../state/useRefreshErrors';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import CalFfi from '../../modules/cal-ffi';
@@ -896,6 +896,13 @@ export default function SyncScreen() {
                   {t('refreshErrors.authHint')}
                 </Text>
               )}
+              {/* A busy provider: nothing to do, and when Aperio tries again
+                  (decision 272) — the phone has no periodic refresh. */}
+              {acc.cause === 'busy' && (
+                <Text style={styles.refreshErrorEntry} accessibilityRole="text">
+                  {t('refreshErrors.busyHint')}
+                </Text>
+              )}
               {/* A withheld grant is one fact for the account, said once
                   with the way to it (decision 184); its other failures, if
                   any, follow as rows. Worded without promising "Allow
@@ -929,7 +936,11 @@ export default function SyncScreen() {
                       t(`refreshErrors.scope.${err.scope}`, {
                         defaultValue: err.scope,
                       }),
-                    error: clampErrorText(err.error),
+                    error: refreshErrorRowText(
+                      err,
+                      t('refreshErrors.busyEntry'),
+                      clampErrorText,
+                    ),
                   })}{' '}
                   {lastSuccessWords(err.last_success_at)}
                 </Text>

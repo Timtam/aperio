@@ -345,19 +345,22 @@ pub struct AccountRefreshErrors {
 
 /// Why a refresh fails, in the order the surfaces lead with it: a withheld
 /// grant (only the system settings help), then a login problem (only the
-/// user's credentials help), then everything else, which may heal by
-/// itself. Declared from least to most severe, so `Ord` is the severity.
+/// user's credentials help), then a busy provider (nothing to do: it heals
+/// by itself, and the surfaces say when Aperio tries again, decision 272),
+/// then everything else. Declared from least to most severe, so `Ord` is the
+/// severity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum RefreshCause {
     Other,
+    Busy,
     Auth,
     Access,
 }
 
 impl RefreshCause {
-    /// The severity as a number for the wire: 0 (other) to 2 (access).
+    /// The severity as a number for the wire: 0 (other) to 3 (access).
     pub fn rank(self) -> u8 {
         self as u8
     }
@@ -844,6 +847,8 @@ impl CacheStore {
                 RefreshCause::Access
             } else if row_auth {
                 RefreshCause::Auth
+            } else if row.kind.as_deref() == Some(FAILURE_BUSY) {
+                RefreshCause::Busy
             } else {
                 RefreshCause::Other
             };

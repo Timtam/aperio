@@ -2767,7 +2767,7 @@ fn a_withheld_os_grant_is_one_fact_per_family_and_never_a_login_problem() {
     assert!(acc.no_access);
     assert!(!acc.auth_suspected, "a withheld grant is no login problem");
     assert_eq!(acc.cause, RefreshCause::Access);
-    assert_eq!(acc.rank, 2);
+    assert_eq!(acc.rank, RefreshCause::Access.rank());
     let shown: Vec<(&str, &str)> = acc
         .errors
         .iter()
@@ -2915,6 +2915,40 @@ fn the_busy_pause_ends_and_outlives_a_restart() {
         .unwrap();
     store.invalidate(ACC, SyncScope::Calendars, "").unwrap();
     assert!(!store.busy_paused(ACC, SyncScope::Calendars, ""));
+}
+
+/// An account leads with the most severe of its rows: access before auth
+/// before a busy provider before anything else (decisions 181, 272).
+#[test]
+fn an_account_ranks_busy_between_other_and_auth() {
+    let lead = |rows: &[(&str, cal_core::Error)]| {
+        let store = setup();
+        for (cal, err) in rows {
+            store
+                .mark_failure(
+                    ACC,
+                    SyncScope::Events,
+                    cal,
+                    err,
+                    Attempt::Forced { generation: 0 },
+                )
+                .unwrap();
+        }
+        let errors = store.refresh_errors().unwrap();
+        (errors[0].cause, errors[0].rank)
+    };
+    let other = || cal_core::Error::Network("down".into());
+    let auth = || cal_core::Error::Authentication("refused".into());
+    assert_eq!(
+        lead(&[("a", other()), ("b", busy())]),
+        (RefreshCause::Busy, 1)
+    );
+    assert_eq!(
+        lead(&[("a", busy()), ("b", auth())]),
+        (RefreshCause::Auth, 2)
+    );
+    assert_eq!(lead(&[("a", other())]), (RefreshCause::Other, 0));
+    assert_eq!(RefreshCause::Access.rank(), 3);
 }
 
 /// A busy row never reads as a login problem, even when its text holds

@@ -73,17 +73,30 @@ Gibt das Betriebssystem die Daten eines Kontos nicht frei — die Kalender des
 Telefons ohne Zugriff —, steht beim Konto eine Zeile statt einer pro Kalender
 („Aperio darf die Kalender nicht lesen“), am Handy mit einer Schaltfläche, die
 die Konten öffnet, wo **Zugriff erlauben…** steht. Wo Aperio nur eines nennt,
-geht fehlender Zugriff einem Anmeldeproblem vor und ein Anmeldeproblem allem
-anderen. Ein Konto, das schon ausfällt, wird nur dann noch einmal angesagt,
-wenn seine Ursache schwerer wird.
+geht fehlender Zugriff einem Anmeldeproblem vor, ein Anmeldeproblem einem
+ausgelasteten Anbieter und ein ausgelasteter Anbieter allem anderen. Ein
+Konto, das schon ausfällt, wird nur dann noch einmal angesagt, wenn seine
+Ursache schwerer wird.
 
-Ein kurzer, einmaliger Verbindungsaussetzer löst die Warnung nicht aus:
-Ein Netzwerkfehler wird erst gezeigt, wenn er erneut auftritt — ein
-Kaltstart mit noch nicht bereitem Netz erzeugt so keinen Fehlalarm. Ein
-Anmeldeproblem, das sich nie von selbst behebt, erscheint sofort, und eine
-manuelle Aktualisierung meldet ihr Ergebnis immer unmittelbar, auch in den
-ersten Sekunden nach dem Start. Die Warnung verschwindet von selbst, sobald
-eine Aktualisierung wieder gelingt.
+Ist der Anbieter ausgelastet — er weist Anfragen ab, weil in kurzer Zeit
+viele kamen —, sagt die Warnung das, und dass du nichts tun musst: Am Desktop
+versucht Aperio es von selbst erneut, am Handy beim nächsten Aktualisieren,
+zum Beispiel wenn du die App wieder öffnest. Seine Zeilen sagen „Der Anbieter
+ist ausgelastet.“ Solange er ausgelastet ist, fragen die Ansichten ihn nicht
+nach dem, was sie schon zeigen; eine Woche oder ein Monat, die noch nie
+geladen wurden, werden trotzdem angefragt.
+
+Ein kurzer, einmaliger Verbindungsaussetzer löst die Warnung nicht aus: Ein
+Netzwerkfehler oder ein ausgelasteter Anbieter wird erst gezeigt, wenn er bei
+einer zweiten automatischen Aktualisierung mindestens eine Minute nach der
+ersten wieder auftritt — ein Kaltstart mit noch nicht bereitem Netz erzeugt
+so keinen Fehlalarm, und die zwei oder drei Aktualisierungen beim Öffnen des
+Handys zählen einmal. Was die Ansichten von sich aus anfragen, zählt nicht.
+Ein Anmeldeproblem, das sich nie von selbst behebt, erscheint sofort, und
+eine Aktualisierung, die du startest, oder die Änderung eines Kontos meldet
+ihr Ergebnis für die betroffenen Konten unmittelbar, auch in den ersten
+Sekunden nach dem Start. Die Warnung verschwindet von selbst, sobald eine
+Aktualisierung wieder gelingt.
 
 ## „Dieses Gerät“ aktualisiert sich nach dem Umzug auf ein neues Telefon nicht mehr
 

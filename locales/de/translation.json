@@ -385,7 +385,11 @@
       "tasks": "Aufgabenliste",
       "sections": "Abschnitte",
       "contacts": "Adressbuch"
-    }
+    },
+    "announceBusy": "Achtung: Die Aktualisierung mindestens eines Kontos schlägt fehl, weil ein Anbieter gerade ausgelastet ist. Aperio versucht es beim nächsten Aktualisieren erneut. Details im Bereich Synchronisierung.",
+    "bannerBusy": "Einige Konten werden nicht aktualisiert, weil ein Anbieter ausgelastet ist. Details im Bereich Synchronisierung.",
+    "busyHint": "Der Anbieter ist gerade ausgelastet und lehnt Aktualisierungen ab. Du musst nichts tun: Aperio versucht es beim nächsten Aktualisieren erneut, zum Beispiel wenn du die App wieder öffnest. Die Warnung verschwindet, sobald eine Aktualisierung gelingt.",
+    "busyEntry": "Der Anbieter ist ausgelastet."
   },
   "syncStatus": {
     "label": "Sync-Status",
@@ -2085,7 +2089,10 @@
           "tasks": "Aufgabenliste",
           "sections": "Abschnitte",
           "contacts": "Adressbuch"
-        }
+        },
+        "announceBusy": "Achtung: Die Aktualisierung mindestens eines Kontos schlägt fehl, weil ein Anbieter gerade ausgelastet ist. Aperio versucht es von selbst erneut. Details unter Einstellungen, Konten.",
+        "busyHint": "Der Anbieter ist gerade ausgelastet und lehnt Aktualisierungen ab. Du musst nichts tun: Aperio versucht es von selbst erneut, und die Warnung verschwindet, sobald eine Aktualisierung gelingt.",
+        "busyEntry": "Der Anbieter ist ausgelastet."
       },
       "missingPluginBadge": "Plugin fehlt",
       "missingCredentials_one": "1 Konto benötigt auf diesem Gerät Zugangsdaten.",
@@ -2304,7 +2311,8 @@
       "needsConnect": "Achtung: Dieses Gerät ist bei diesem Konto nicht angemeldet — bitte unter Einstellungen, Konten neu anmelden. Bis dahin wird nichts abgerufen.",
       "sectionLabel": "{{name}}",
       "empty": "Noch keine Kalender oder Aufgabenlisten — über „Konten verwalten\" die Verbindung prüfen.",
-      "contextMenuHint": "Mit den Pfeiltasten navigieren, Leertaste zum Ein-/Ausblenden, Umschalt+F10 oder Menü-Taste für Aktionen."
+      "contextMenuHint": "Mit den Pfeiltasten navigieren, Leertaste zum Ein-/Ausblenden, Umschalt+F10 oder Menü-Taste für Aktionen.",
+      "refreshErrorBusy": "Achtung: Die Aktualisierung dieses Kontos schlägt fehl, weil der Anbieter gerade ausgelastet ist; angezeigte Daten sind möglicherweise veraltet."
     },
     "taskListDeleted": "Aufgabenliste „{{name}}\" wurde gelöscht.",
     "menu": {

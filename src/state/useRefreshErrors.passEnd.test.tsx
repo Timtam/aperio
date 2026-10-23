@@ -30,7 +30,7 @@ const failingAuth: AccountRefreshErrors = {
   auth_suspected: true,
   no_access: false,
   cause: 'auth',
-  rank: 1,
+  rank: 2,
   errors: [],
 };
 
@@ -51,7 +51,7 @@ describe('the warning after a manual refresh', () => {
       // "Nothing could be updated" names nobody: the cause is still owed.
       cause = await notePassEndSpoken({
         failing: [
-          { account_id: 'acc-1', name: 'Arbeit', cause: 'auth', rank: 1 },
+          { account_id: 'acc-1', name: 'Arbeit', cause: 'auth', rank: 2 },
         ],
         all_failed: true,
       });
@@ -67,7 +67,7 @@ describe('the warning after a manual refresh', () => {
     let cause: Awaited<ReturnType<typeof notePassEndSpoken>> = 'other';
     await act(async () => {
       cause = await notePassEndSpoken({
-        failing: [{ account_id: 'acc-1', name: 'Arbeit', cause: 'auth', rank: 1 }],
+        failing: [{ account_id: 'acc-1', name: 'Arbeit', cause: 'auth', rank: 2 }],
         all_failed: false,
       });
     });

@@ -385,7 +385,11 @@
       "tasks": "Task list",
       "sections": "Sections",
       "contacts": "Address book"
-    }
+    },
+    "announceBusy": "Warning: updating one or more accounts is failing because a provider is busy right now. Aperio tries again the next time it updates. Details are on the Sync screen.",
+    "bannerBusy": "Some accounts are not updating because a provider is busy. Details are on the Sync screen.",
+    "busyHint": "The provider is busy right now and is turning updates away. You do not need to do anything: Aperio tries again the next time it updates, for instance when you open the app again. The warning goes away once an update succeeds.",
+    "busyEntry": "The provider is busy."
   },
   "syncStatus": {
     "label": "Sync status",
@@ -2085,7 +2089,10 @@
           "tasks": "Task list",
           "sections": "Sections",
           "contacts": "Address book"
-        }
+        },
+        "announceBusy": "Warning: updating one or more accounts is failing because a provider is busy right now. Aperio tries again by itself. Details: Settings, Accounts.",
+        "busyHint": "The provider is busy right now and is turning updates away. You do not need to do anything: Aperio tries again by itself, and the warning goes away once an update succeeds.",
+        "busyEntry": "The provider is busy."
       },
       "missingPluginBadge": "plugin missing",
       "missingCredentials_one": "1 account needs credentials on this device.",
@@ -2304,7 +2311,8 @@
       "needsConnect": "Warning: this device is not signed in to this account — sign in again under Settings, Accounts. Nothing is being fetched until then.",
       "sectionLabel": "{{name}}",
       "empty": "No calendars or task lists yet — open this account in \"Manage accounts\" to check the connection.",
-      "contextMenuHint": "Use arrow keys to navigate, Space to toggle visibility, Shift+F10 or the Menu key for actions."
+      "contextMenuHint": "Use arrow keys to navigate, Space to toggle visibility, Shift+F10 or the Menu key for actions.",
+      "refreshErrorBusy": "Warning: updating this account is failing because the provider is busy right now; shown data may be outdated."
     },
     "taskListDeleted": "Task list \"{{name}}\" deleted.",
     "menu": {

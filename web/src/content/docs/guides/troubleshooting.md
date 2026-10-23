@@ -67,16 +67,26 @@ When the operating system withholds an account's data — the phone's own
 calendars without access — the account shows one line instead of one row per
 calendar ("Aperio may not read the calendars"), and on the phone a button that
 opens the accounts, where **Allow access…** is. A withheld grant comes before
-a login problem, and a login problem before anything else, wherever Aperio
-names only one of them. An account that is already failing is announced again
-only when its cause grows more severe.
+a login problem, a login problem before a busy provider, and a busy provider
+before anything else, wherever Aperio names only one of them. An account that
+is already failing is announced again only when its cause grows more severe.
+
+When the provider is busy — it turns requests away because many arrived in a
+short time — the warning says so, and that you need do nothing: on the
+desktop Aperio tries again by itself, on the phone the next time it updates,
+for instance when you open the app again. Its rows say "The provider is
+busy." While it is busy, the views stop asking the provider for what they
+already show; a week or month that was never loaded is still asked for.
 
 A brief, one-off connection hiccup does not raise the warning: a network
-failure is only shown once it recurs, so a cold start on a not-yet-ready
-network never flashes a false alarm. A login problem — which never fixes
-itself — shows straight away, and a manual refresh always reports its
-result at once, also in the first seconds after the app starts. The warning
-clears by itself as soon as an update succeeds again.
+failure or a busy provider is only shown once it recurs in a second automatic
+update at least a minute after the first, so a cold start on a not-yet-ready
+network never flashes a false alarm, and the two or three updates that
+opening the phone starts count once. What the views ask for on their own does
+not count. A login problem — which never fixes itself — shows straight away,
+and a refresh you start, or the change of an account, reports its result at
+once for the accounts concerned, also in the first seconds after the app
+starts. The warning clears by itself as soon as an update succeeds again.
 
 ## This device stops updating after a move to a new phone
 

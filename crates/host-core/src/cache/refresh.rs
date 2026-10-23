@@ -1385,7 +1385,7 @@ mod tests {
                     account_id: "acc-1".into(),
                     name: "Work".into(),
                     cause: super::super::RefreshCause::Access,
-                    rank: 2,
+                    rank: super::super::RefreshCause::Access.rank(),
                 }],
                 // Work was the only account the pass tried.
                 all_failed: true,

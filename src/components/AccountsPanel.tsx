@@ -15,6 +15,7 @@ import {
   firstMissingField,
   withheldPhrase,
   withheldSince,
+  refreshErrorRowText,
 } from '@aperio/shared';
 import type { AccountFormAction } from '@aperio/shared';
 
@@ -1068,6 +1069,14 @@ export function AccountsPanel() {
                     )}
                   </FocusableNote>
                 )}
+                {/* A busy provider: nothing to do, and Aperio tries again by
+                    itself (decision 272). No reconnect button. */}
+                {errorsByAccount.get(accounts[focusIndex].id)?.cause ===
+                  'busy' && (
+                  <FocusableNote className="accounts-refresh-errors__busy-hint">
+                    {t('dialogs.accounts.refreshErrors.busyHint')}
+                  </FocusableNote>
+                )}
                 {/* A withheld grant is one fact for the whole account, said
                     once; the account's other failures (if any) follow as
                     rows. No "allow access" to point at: the desktop has
@@ -1101,7 +1110,11 @@ export function AccountsPanel() {
                               `dialogs.accounts.refreshErrors.scope.${err.scope}`,
                               { defaultValue: err.scope },
                             ),
-                          error: clampErrorText(err.error),
+                          error: refreshErrorRowText(
+                            err,
+                            t('dialogs.accounts.refreshErrors.busyEntry'),
+                            clampErrorText,
+                          ),
                         },
                       )} ${lastSuccessWords(err.last_success_at)}`;
                       return (

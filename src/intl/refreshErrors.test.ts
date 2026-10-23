@@ -5,6 +5,7 @@ import {
   leadingCause,
   namedByPassEnd,
   passEndSentence,
+  refreshErrorRowText,
   toAnnounce,
   withheldPhrase,
   withheldSince,
@@ -19,7 +20,7 @@ import i18n from '../i18n';
 const de = i18n.getFixedT('de');
 const en = i18n.getFixedT('en');
 
-const RANK: Record<RefreshCause, number> = { other: 0, auth: 1, access: 2 };
+const RANK: Record<RefreshCause, number> = { other: 0, busy: 1, auth: 2, access: 3 };
 const row = (account_id: string, cause: RefreshCause) => ({ account_id, cause, rank: RANK[cause] });
 const failing = (name: string, cause: RefreshCause): FailingAccount => ({
   account_id: name.toLowerCase(),
@@ -161,5 +162,46 @@ describe('the one line for a withheld account', () => {
         error('task_lists', 'access', null),
       ]),
     ).toBeNull();
+  });
+});
+
+describe('a busy provider on the refresh surfaces (decisions 271, 272)', () => {
+  it('ranks busy between anything else and a login problem', () => {
+    expect(leadingCause([row('a', 'other'), row('b', 'busy')])).toBe('busy');
+    expect(leadingCause([row('a', 'busy'), row('b', 'auth')])).toBe('auth');
+    // other to busy is news; busy to other is not; busy to auth is.
+    expect(toAnnounce([row('w', 'busy')], new Map([['w', RANK.other]]))).toHaveLength(1);
+    expect(toAnnounce([row('w', 'other')], new Map([['w', RANK.busy]]))).toHaveLength(0);
+    expect(toAnnounce([row('w', 'auth')], new Map([['w', RANK.busy]]))).toHaveLength(1);
+  });
+
+  it('says a busy row in words, never its recorded token', () => {
+    const clamp = (raw: string) => `<${raw}>`;
+    const busy = { cause: 'busy' as const, error: 'access denied: provider-busy: http-429' };
+    expect(refreshErrorRowText(busy, 'Der Anbieter ist ausgelastet.', clamp)).toBe(
+      'Der Anbieter ist ausgelastet.',
+    );
+    expect(refreshErrorRowText({ cause: 'other', error: 'down' }, 'x', clamp)).toBe('<down>');
+  });
+
+  it('has every busy sentence in both languages, the phone saying when it tries again', () => {
+    for (const key of [
+      'sidebar.tree.refreshErrorBusy',
+      'dialogs.accounts.refreshErrors.announceBusy',
+      'dialogs.accounts.refreshErrors.busyHint',
+      'dialogs.accounts.refreshErrors.busyEntry',
+      'refreshErrors.announceBusy',
+      'refreshErrors.bannerBusy',
+      'refreshErrors.busyHint',
+      'refreshErrors.busyEntry',
+    ]) {
+      expect(i18n.exists(key, { lng: 'de' }), key).toBe(true);
+      expect(i18n.exists(key, { lng: 'en' }), key).toBe(true);
+      expect(de(key), key).not.toBe(en(key));
+      // No duration (decision 278).
+      expect(de(key), key).not.toMatch(/\d/);
+    }
+    expect(de('refreshErrors.busyHint')).toMatch(/wenn du die App wieder öffnest/);
+    expect(de('dialogs.accounts.refreshErrors.busyHint')).toMatch(/von selbst erneut/);
   });
 });
