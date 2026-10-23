@@ -47,6 +47,12 @@ pub enum CaldavError {
     /// there it means the credentials.
     #[error("refused: {0}")]
     Forbidden(String),
+
+    /// A read the server turned away for throttling with a wait to keep: 503
+    /// with `Retry-After` (decision 270). A 429 stays [`CaldavError::Http`];
+    /// both read as a busy provider (`crate::busy_detail`).
+    #[error("the server is busy ({})", .0.word())]
+    Busy(cal_core::BusyDetail),
 }
 
 impl From<reqwest::Error> for CaldavError {

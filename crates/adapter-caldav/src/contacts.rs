@@ -318,15 +318,7 @@ async fn fetch_vcard_body(
         .await?;
     let status = response.status();
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if body.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                body.chars().take(200).collect()
-            },
-        });
+        return Err(crate::http::read_failure(response).await);
     }
     Ok(response.text().await?)
 }
@@ -518,15 +510,7 @@ async fn propfind(
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if body.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                body.chars().take(200).collect()
-            },
-        });
+        return Err(crate::http::read_failure(response).await);
     }
     let text = response.text().await?;
     parse_multistatus(&text)

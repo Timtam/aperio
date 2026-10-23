@@ -86,15 +86,7 @@ pub async fn query_free_busy(
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
-        let text = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if text.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                text.chars().take(200).collect()
-            },
-        });
+        return Err(crate::http::read_failure(response).await);
     }
     let text = response.text().await?;
     Ok(map_schedule_response(&text, emails))

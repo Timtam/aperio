@@ -132,6 +132,31 @@ impl SendRetrying for RequestBuilder {
     }
 }
 
+/// The error for a read's failed answer — a GET, a PROPFIND, a REPORT, or a
+/// free/busy POST, all of which write nothing: a 503 with `Retry-After` is a
+/// busy server (decision 270; a write answered so may have been carried out,
+/// so writes never come here), anything else its status. A 429 stays its
+/// status and reads as busy in `crate::busy_detail`.
+pub(crate) async fn read_failure(response: Response) -> CaldavError {
+    let status = response.status();
+    if status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+        && response
+            .headers()
+            .contains_key(reqwest::header::RETRY_AFTER)
+    {
+        return CaldavError::Busy(cal_core::BusyDetail::Unavailable);
+    }
+    let text = response.text().await.unwrap_or_default();
+    CaldavError::Http {
+        status: status.as_u16(),
+        message: if text.is_empty() {
+            status.canonical_reason().unwrap_or("").to_string()
+        } else {
+            text.chars().take(200).collect()
+        },
+    }
+}
+
 /// A server whose first connection reads the request and dies without an
 /// answer, and whose second answers the replay with `reply`. Returns its
 /// base URL.

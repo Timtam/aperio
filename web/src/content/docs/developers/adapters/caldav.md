@@ -53,6 +53,17 @@ Apple's well-known endpoints.
   at the first busy answer; a delete walk that met a replayed 404 before it is
   unsure, never done. A contact's PUT replaces the whole vCard, so a busy read
   of its photo sends nothing rather than wiping the avatar.
+- **A busy server on a read.** A read answered 429, or 503 with
+  `Retry-After` (`http::read_failure`; a write answered so may have been
+  carried out, so writes never read it that way), is a busy provider, and it
+  starts no fallback: a delta does not fall back to a full bootstrap, the
+  bootstrap's PROPFIND not to a windowed read, a multiget batch is not asked
+  again one resource at a time, and a bootstrap that cannot read its token
+  fails rather than storing a snapshot without one. The scheduling probe met
+  by a busy server is asked again, never cached as "does not schedule", and a
+  free/busy query says busy instead of "availability unknown", which read as
+  every attendee free. Well-known discovery reads a 429 as busy, not as a
+  missing well-known. How iCloud throttles is not measured.
 - **Both homes are best-effort.** Discovery probes `calendar-home-set`
   AND `addressbook-home-set` independently and fails only when **neither**
   is found. A CalDAV-only server (no address books) and a CardDAV-only

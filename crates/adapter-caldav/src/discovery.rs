@@ -197,10 +197,14 @@ pub struct Scheduling {
     /// Every href of `calendar-user-address-set`, in the server's order.
     pub calendar_user_hrefs: Vec<String>,
     pub schedule_outbox_url: Option<Url>,
-    /// A network error or a server error (5xx) stopped the probe, so it says
-    /// nothing about the server. A 4xx or an answer without the properties
-    /// is the server's answer: no scheduling, no addresses.
+    /// A network error, a server error (5xx) or a busy server stopped the
+    /// probe, so it says nothing about the server. Any other 4xx or an answer
+    /// without the properties is the server's answer: no scheduling, no
+    /// addresses.
     pub failed: bool,
+    /// The probe met a busy server (decision 270), and how: asked again, it
+    /// says so rather than that the addresses could not be read.
+    pub busy: Option<cal_core::BusyDetail>,
 }
 
 /// Best-effort RFC 6638 probe on the principal. Never errors: any failure,
@@ -217,10 +221,15 @@ pub async fn probe_scheduling(
         Ok(resp) => match expect_207(resp).await {
             Ok(b) => b,
             Err(err) => {
-                let failed = !matches!(err, CaldavError::Http { status, .. } if status < 500);
+                // A 429 is no answer about the server: never cached as "does
+                // not schedule" (decision 270).
+                let busy = crate::busy_detail(&err);
+                let failed = busy.is_some()
+                    || !matches!(err, CaldavError::Http { status, .. } if status < 500);
                 debug!(?err, failed, "scheduling probe answered with an error");
                 return Scheduling {
                     failed,
+                    busy,
                     ..Scheduling::default()
                 };
             }
@@ -249,6 +258,7 @@ pub async fn probe_scheduling(
         calendar_user_hrefs: hrefs.into_iter().map(|h| h.href).collect(),
         schedule_outbox_url: outbox_url,
         failed: false,
+        busy: None,
     }
 }
 
@@ -368,6 +378,11 @@ async fn probe_well_known(
         // Common case — many servers don't bother. Try the next probe.
         return Ok(None);
     }
+    // A busy server says so (decision 270): treated as soft, the base-URL
+    // fallback ran discovery somewhere the server never pointed to.
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        return Err(crate::http::read_failure(response).await);
+    }
     // Anything else (5xx, 401) we treat as soft — let the next probe or
     // the base-URL fallback surface a real error downstream.
     debug!(path, ?status, "well-known returned unexpected status");
@@ -449,15 +464,7 @@ async fn propfind(
 async fn expect_207(response: Response) -> CaldavResult<String> {
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if body.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                body.chars().take(200).collect()
-            },
-        });
+        return Err(crate::http::read_failure(response).await);
     }
     response.text().await.map_err(Into::into)
 }
