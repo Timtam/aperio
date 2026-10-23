@@ -837,6 +837,13 @@ fn server_reason(body: &str) -> Option<String> {
     Some(reason.chars().take(160).collect())
 }
 
+/// A Google error as the core error it maps to, for the plugin's
+/// interactive auth, which reports its failures as text
+/// (`plugin_sdk::auth_error`).
+pub fn core_error(err: GoogleError) -> CoreError {
+    to_core_error(err)
+}
+
 fn to_core_error(err: GoogleError) -> CoreError {
     use GoogleError::*;
     match err {

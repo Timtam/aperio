@@ -1061,6 +1061,12 @@ fn verify_oauth_state(issued: Option<&str>, returned: Option<&str>) -> Result<()
     Ok(())
 }
 
+/// A failed auth phase as the text the host carries: a busy token endpoint
+/// keeps its token first (decision 270).
+fn auth_failure(phase: &str, err: adapter_google::GoogleError) -> String {
+    plugin_sdk::auth_error(phase, &adapter_google::core_error(err))
+}
+
 async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
     let args: InteractiveAuthArgs = serde_json::from_str(&args_json)
         .map_err(|e| format!("malformed interactive_auth args: {e}"))?;
@@ -1074,7 +1080,7 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
                 .redirect_uri
                 .ok_or_else(|| "redirect_uri is required in the authorize phase".to_string())?;
             let authz = GoogleAdapter::oauth_authorize(client_id, &redirect_uri)
-                .map_err(|e| format!("Google authorize: {e}"))?;
+                .map_err(|e| auth_failure("Google authorize", e))?;
             serde_json::to_vec(&authz).map_err(|e| format!("serialise authorize response: {e}"))
         }
         Some("exchange") => {
@@ -1105,7 +1111,7 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
                 &redirect_uri,
             )
             .await
-            .map_err(|e| format!("Google exchange: {e}"))?;
+            .map_err(|e| auth_failure("Google exchange", e))?;
             serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
         }
         None | Some("full") => {
@@ -1117,7 +1123,7 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
             }
             let tokens = GoogleAdapter::authenticate_interactive(client_id, secret.trim())
                 .await
-                .map_err(|e| format!("Google OAuth: {e}"))?;
+                .map_err(|e| auth_failure("Google OAuth", e))?;
             serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
         }
         Some(other) => Err(format!("unknown interactive_auth phase: {other}")),
@@ -1130,6 +1136,26 @@ plugin_sdk::declare_interactive_auth! {
 
 #[cfg(test)]
 mod tests {
+
+    /// A busy token endpoint keeps its token first in the auth failure the
+    /// host carries, so the surfaces say the provider is busy, not "sign in
+    /// again" (decision 270); any other failure is named by its phase.
+    #[test]
+    fn a_busy_sign_in_keeps_its_token_first() {
+        let busy = adapter_google::GoogleError::Busy {
+            detail: plugin_sdk::cal_core::BusyDetail::TooManyRequests,
+            retry_after: None,
+        };
+        assert_eq!(
+            super::auth_failure("Google exchange", busy),
+            "provider-busy: http-429"
+        );
+        let other = adapter_google::GoogleError::Http {
+            status: 400,
+            message: "invalid_grant".into(),
+        };
+        assert!(super::auth_failure("Google exchange", other).starts_with("Google exchange: "),);
+    }
 
     /// The manifest ships beside this crate and is the ONLY thing that tells
     /// the host how to set up a Google account. Parsing it here means a typo
