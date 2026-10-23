@@ -516,11 +516,12 @@ Siehe DESIGN §4.2.
         zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
         prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
         ist; eine zum Teil gespeicherte Aufgabe schließt den Editor.
-      - ↻ **Wie drosselt iCloud?** (PR 7, Entscheidung 274): CalDAV liest 429
-        und beim Lesen 503 mit `Retry-After` als ausgelasteten Anbieter. Ob
-        iCloud so antwortet oder anders (etwa 403 oder 503 ohne Wartezeit),
-        ist ungemessen; eine Live-Runde mit vielen schnellen Anfragen klärt
-        es.
+      - ↻ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
+        274): CalDAV liest 429 und beim Lesen 503 mit `Retry-After` als
+        ausgelasteten Anbieter, Todoist und Vikunja 429. Ob iCloud so
+        antwortet oder anders (etwa 403 oder 503 ohne Wartezeit), ob Todoist
+        auch innerhalb von `sync_status` drosselt und wie Vikunja es tut, ist
+        ungemessen; je eine Live-Runde mit vielen schnellen Anfragen klärt es.
       - [ ] **CardDAV: Kontakt löschen trifft nur das erste Adressbuch**
         (gefunden in PR 7): `contacts::delete_contact` liest 404 als Erfolg,
         und der Lauf über alle Adressbücher in `lib.rs::delete_contact` endet

@@ -50,6 +50,21 @@ sent as a `Bearer` token. The base URL is fixed (REST v2:
 - Sync API replies `200` even on per-command failure — the outcome is in
   `sync_status`, which the adapter inspects.
 
+## A busy server
+
+HTTP 429 is a busy provider (`busy_detail`, decision 270): the request did
+nothing. A failed Sync command (`sync_status`, a plan limit such as
+`MAX_ITEMS_LIMIT_REACHED` among them) is no throttle and never reads so;
+whether Todoist throttles inside `sync_status` is not measured. An update
+writes the fields, then moves the task to its section through the Sync API
+where the section changed, then closes or reopens it where the update's
+answer says the server holds another completion state than the one asked for
+(sent on every save, a throttled one made a title edit "only partly saved").
+Once the fields landed, a failed move or status call leaves the save in part
+(`TodoistError::PartlySaved`, 277); so does a failed close after a task
+created as completed. A busy server is no answer about a project's members:
+the share list fails instead of coming back empty.
+
 ## Testing
 
 `mockito` with canned REST v2 *and* Sync `/sync` JSON. Tests cover the
