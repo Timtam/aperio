@@ -51,8 +51,8 @@ use cal_core::{
 };
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::cache::{
-    event_self_warm_needed, has_snapshot, is_stale, refresh_contacts, refresh_events,
-    refresh_sections, refresh_tasks, spawn_item_refresh, spawn_refresh, CacheObserver,
+    event_self_warm, has_snapshot, is_stale, refresh_contacts, refresh_events, refresh_sections,
+    refresh_tasks, spawn_item_refresh, spawn_read_refresh, spawn_refresh, CacheObserver,
     CacheRefresher, CacheStore, CacheUpdatedPayload, RefreshCoordinator, SyncScope, SWR_TTL_SECS,
 };
 use host_core::conflicts::{
@@ -3139,7 +3139,7 @@ impl Host {
             // trying to first-paint. Whether to self-warm (stale, OR a
             // coverage miss outside the brief cooldown that prevents the
             // cold-cache refresh -> re-read feedback loop) is the SHARED
-            // `event_self_warm_needed`, identical to the desktop get_events.
+            // `event_self_warm`, identical to the desktop get_events.
             Some(ext) => {
                 let account = self
                     .registry
@@ -3194,12 +3194,12 @@ impl Host {
                     (range.start, range.end),
                 );
                 apply_color_to_events(&overrides, &mut events);
-                if event_self_warm_needed(&state, range) {
+                if let Some(why) = event_self_warm(&state, range) {
                     let cache_bg = Arc::clone(&self.cache);
                     let ext_bg = Arc::clone(&ext);
                     let acc = account.clone();
                     let cal = req.calendar_id.clone();
-                    spawn_item_refresh(
+                    spawn_read_refresh(
                         self.runtime.handle(),
                         self.observer(),
                         Arc::clone(&self.cache),
@@ -3207,6 +3207,7 @@ impl Host {
                         SyncScope::Events,
                         account,
                         req.calendar_id.clone(),
+                        why,
                         move || async move {
                             refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range).await
                         },
@@ -13483,7 +13484,13 @@ mod tests {
         let host = open_named(&dir, "restored");
         let account = with_device_account(&host);
         host.cache
-            .mark_failure(&account, SyncScope::Events, "device-cal", &withheld, false)
+            .mark_failure(
+                &account,
+                SyncScope::Events,
+                "device-cal",
+                &withheld,
+                host_core::cache::Attempt::Background { generation: 0 },
+            )
             .unwrap();
 
         host.set_device_event_store(Arc::new(AccessBridge(
@@ -13555,7 +13562,13 @@ mod tests {
         let host = open_named(&dir, "settled");
         let account = with_device_account(&host);
         host.cache
-            .mark_failure(&account, SyncScope::TaskLists, "", &withheld, false)
+            .mark_failure(
+                &account,
+                SyncScope::TaskLists,
+                "",
+                &withheld,
+                host_core::cache::Attempt::Background { generation: 0 },
+            )
             .unwrap();
         host.set_device_event_store(Arc::new(AccessBridge(
             r#"{"events":"full_access","reminders":"not_determined","granted_this_run":{"events":true,"reminders":true}}"#,

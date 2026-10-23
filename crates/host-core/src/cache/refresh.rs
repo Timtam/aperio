@@ -37,8 +37,8 @@ use tracing::{debug, info, warn};
 use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
 
 use super::{
-    swr, CacheObserver, CacheRefreshStatus, CacheStore, CacheUpdatedPayload, FailingAccount,
-    PassOutcome, RefreshCoordinator, SyncScope,
+    swr, Attempt, CacheObserver, CacheRefreshStatus, CacheStore, CacheUpdatedPayload,
+    FailingAccount, PassOutcome, RefreshCoordinator, SyncScope,
 };
 use crate::db::SharedConn;
 use crate::registry::AdapterRegistry;
@@ -462,7 +462,10 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    self.failed(&account, SyncScope::Calendars, "", &err);
+                    let generation =
+                        self.cache
+                            .refresh_generation(&account, SyncScope::Calendars, "");
+                    self.failed(&account, SyncScope::Calendars, "", &err, generation);
                 }
             }
         }
@@ -500,7 +503,10 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    self.failed(&account, SyncScope::TaskLists, "", &err);
+                    let generation =
+                        self.cache
+                            .refresh_generation(&account, SyncScope::TaskLists, "");
+                    self.failed(&account, SyncScope::TaskLists, "", &err, generation);
                 }
             }
         }
@@ -530,7 +536,10 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    self.failed(&account, SyncScope::ContactLists, "", &err);
+                    let generation =
+                        self.cache
+                            .refresh_generation(&account, SyncScope::ContactLists, "");
+                    self.failed(&account, SyncScope::ContactLists, "", &err, generation);
                 }
             }
         }
@@ -567,7 +576,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        self.failed(&account, SyncScope::Events, &cal_id, &err);
+                        self.failed(&account, SyncScope::Events, &cal_id, &err, generation);
                     }
                 }
                 self.coord.release(&key);
@@ -594,7 +603,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        self.failed(&account, SyncScope::Tasks, &list_id, &err);
+                        self.failed(&account, SyncScope::Tasks, &list_id, &err, generation);
                     }
                 }
                 self.coord.release(&key);
@@ -622,7 +631,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        self.failed(&account, SyncScope::Sections, &list_id, &err);
+                        self.failed(&account, SyncScope::Sections, &list_id, &err, generation);
                     }
                 }
                 self.coord.release(&key);
@@ -662,7 +671,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        self.failed(&account, SyncScope::Contacts, &list_id, &err);
+                        self.failed(&account, SyncScope::Contacts, &list_id, &err, generation);
                     }
                 }
                 self.coord.release(&key);
@@ -673,11 +682,25 @@ impl CacheRefresher {
     /// Record a failed attempt of this pass, and log it when it is news:
     /// the container was not failing, or fails differently now. An account
     /// that keeps failing the same way says so once, not on every pass.
-    fn failed(&self, account: &str, scope: SyncScope, container: &str, err: &cal_core::Error) {
-        let forced = self.pass_forced.load(Ordering::Relaxed);
+    ///
+    /// `generation` is the one the attempt was claimed at; a listing, which
+    /// is not claimed, gives its generation as it failed.
+    fn failed(
+        &self,
+        account: &str,
+        scope: SyncScope,
+        container: &str,
+        err: &cal_core::Error,
+        generation: u64,
+    ) {
+        let attempt = if self.pass_forced.load(Ordering::Relaxed) {
+            Attempt::Forced { generation }
+        } else {
+            Attempt::Background { generation }
+        };
         let news = self
             .cache
-            .mark_failure(account, scope, container, err, forced)
+            .mark_failure(account, scope, container, err, attempt)
             .unwrap_or(true);
         if news {
             tracing::warn!(

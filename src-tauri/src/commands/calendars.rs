@@ -410,7 +410,7 @@ pub async fn get_events(
     // Refreshing on a coverage miss — not just staleness — stops events "going
     // missing" when the view moves to a date the cached window never reached
     // (issue #1). The whole decision, INCLUDING the cold-cache feedback-loop
-    // cooldown, lives in the shared `cache_swr::event_self_warm_needed` so the
+    // cooldown, lives in the shared `cache_swr::event_self_warm` so the
     // desktop command and the mobile cal-ffi host self-warm identically; see its
     // doc for the loop rationale. `covers`/`stale` here only feed the diagnostic
     // log below.
@@ -473,13 +473,13 @@ pub async fn get_events(
         stale,
         "get_events served from cache",
     );
-    if cache_swr::event_self_warm_needed(&state, range) {
+    if let Some(why) = cache_swr::event_self_warm(&state, range) {
         let ext_bg = Arc::clone(&ext);
         let cache_bg = Arc::clone(&cache);
         let acc = account.clone();
         let cal = request.calendar_id.clone();
         let rt = tauri::async_runtime::handle();
-        cache_swr::spawn_item_refresh(
+        cache_swr::spawn_read_refresh(
             rt.inner(),
             Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
             Arc::clone(&cache),
@@ -487,6 +487,7 @@ pub async fn get_events(
             SyncScope::Events,
             account.clone(),
             request.calendar_id.clone(),
+            why,
             move || async move {
                 cache_swr::refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range).await
             },

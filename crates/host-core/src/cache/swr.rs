@@ -11,8 +11,8 @@ use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc};
 use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
 
 use super::{
-    unbounded_window, CacheObserver, CacheStore, CacheUpdatedPayload, Delta, RefreshCoordinator,
-    SyncScope, SyncState,
+    unbounded_window, Attempt, CacheObserver, CacheStore, CacheUpdatedPayload, Delta,
+    RefreshCoordinator, SyncScope, SyncState,
 };
 
 /// Freshness window before a cached snapshot triggers a background
@@ -36,7 +36,7 @@ pub fn is_stale(state: &Option<SyncState>, ttl_secs: i64) -> bool {
 }
 
 /// Cooldown (seconds) suppressing a coverage-miss event self-warm for a
-/// calendar refreshed this recently — see [`event_self_warm_needed`].
+/// calendar refreshed this recently — see [`event_self_warm`].
 const COVERAGE_REFRESH_COOLDOWN_SECS: i64 = 5;
 
 /// Whether a cached event read should kick a background self-warm. Shared by
@@ -55,16 +55,13 @@ const COVERAGE_REFRESH_COOLDOWN_SECS: i64 = 5;
 /// was just written, so an immediate re-fetch can't change coverage; skip it
 /// briefly. `stale` still refreshes on its own cadence, and a genuine range
 /// navigation refreshes once the cooldown lapses.
-pub fn event_self_warm_needed(state: &Option<SyncState>, range: DateRange) -> bool {
-    if is_stale(state, SWR_TTL_SECS) {
-        return true;
-    }
+pub fn event_self_warm(state: &Option<SyncState>, range: DateRange) -> Option<ReadRefresh> {
     let covers = matches!(
         state.as_ref().map(|s| (s.window_start, s.window_end)),
         Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
     );
     if covers {
-        return false;
+        return is_stale(state, SWR_TTL_SECS).then_some(ReadRefresh::Stale);
     }
     let recently_refreshed = state
         .as_ref()
@@ -73,7 +70,22 @@ pub fn event_self_warm_needed(state: &Option<SyncState>, range: DateRange) -> bo
             Utc::now().signed_duration_since(t)
                 < chrono::Duration::seconds(COVERAGE_REFRESH_COOLDOWN_SECS)
         });
-    !recently_refreshed
+    if !recently_refreshed {
+        return Some(ReadRefresh::Uncovered);
+    }
+    is_stale(state, SWR_TTL_SECS).then_some(ReadRefresh::Stale)
+}
+
+/// Why a read refreshes its container in the background.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadRefresh {
+    /// The snapshot is old. Paused while the provider is busy (decision
+    /// 271): the snapshot is there to show.
+    Stale,
+    /// The snapshot does not reach what is asked for — a week or month never
+    /// loaded. Asked even while the provider is busy (Toni, 2026-10-23):
+    /// otherwise the view shows empty days with nothing to say why.
+    Uncovered,
 }
 
 /// Spawn a deduplicated, fire-and-forget background refresh: `fetch`
@@ -102,8 +114,9 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
 {
     // Not while the OS withholds this family: the attempt would fail the same
     // way at once, on every read (bursts of dozens a second after a phone
-    // move). The warm pass still asks, and a grant lifts this.
-    if cache.access_withheld(&account, scope) {
+    // move). The warm pass still asks, and a grant lifts this. Nor while the
+    // provider is busy for this container (decision 271).
+    if cache.access_withheld(&account, scope) || cache.busy_paused(&account, scope, &container) {
         return;
     }
     let key = format!("{}:{}:{}", scope.as_str(), account, container);
@@ -129,7 +142,7 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
             Err(err) => {
                 // Logged when it is news, not on every identical retry.
                 let news = cache
-                    .mark_failure(&account, scope, &container, &err, false)
+                    .mark_failure(&account, scope, &container, &err, Attempt::Read { generation })
                     .unwrap_or(true);
                 if news {
                     tracing::warn!(
@@ -147,11 +160,9 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
     });
 }
 
-/// Spawn a deduplicated background refresh whose body already writes the
-/// cache (the delta-aware `refresh_*` helpers below). Notifies the
-/// observer only when the refresh reports changed content (no-op
-/// refreshes stay UI-silent); on a genuine provider failure records
-/// `mark_error`.
+/// [`spawn_read_refresh`] for a read whose snapshot is old
+/// ([`ReadRefresh::Stale`]): tasks, sections, contacts.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_item_refresh<F, Fut>(
     rt: &tokio::runtime::Handle,
     observer: Arc<dyn CacheObserver>,
@@ -165,8 +176,44 @@ pub fn spawn_item_refresh<F, Fut>(
     F: FnOnce() -> Fut + Send + 'static,
     Fut: Future<Output = cal_core::Result<bool>> + Send + 'static,
 {
-    // See spawn_refresh: not while the OS withholds this family.
-    if cache.access_withheld(&account, scope) {
+    spawn_read_refresh(
+        rt,
+        observer,
+        cache,
+        coord,
+        scope,
+        account,
+        container,
+        ReadRefresh::Stale,
+        refresh,
+    );
+}
+
+/// Spawn a deduplicated background refresh whose body already writes the
+/// cache (the delta-aware `refresh_*` helpers below). Notifies the
+/// observer only when the refresh reports changed content (no-op
+/// refreshes stay UI-silent); on a genuine provider failure records
+/// `mark_error`.
+pub fn spawn_read_refresh<F, Fut>(
+    rt: &tokio::runtime::Handle,
+    observer: Arc<dyn CacheObserver>,
+    cache: Arc<CacheStore>,
+    coord: Arc<RefreshCoordinator>,
+    scope: SyncScope,
+    account: String,
+    container: String,
+    why: ReadRefresh,
+    refresh: F,
+) where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = cal_core::Result<bool>> + Send + 'static,
+{
+    // See spawn_refresh: not while the OS withholds this family, nor, for an
+    // old snapshot, while the provider is busy for this container. What was
+    // never loaded is asked anyway (Toni, 2026-10-23).
+    if cache.access_withheld(&account, scope)
+        || (why == ReadRefresh::Stale && cache.busy_paused(&account, scope, &container))
+    {
         return;
     }
     let key = format!("{}:{}:{}", scope.as_str(), account, container);
@@ -201,7 +248,13 @@ pub fn spawn_item_refresh<F, Fut>(
             Err(err) => {
                 // Logged when it is news, not on every identical retry.
                 let news = cache
-                    .mark_failure(&account, scope, &container, &err, false)
+                    .mark_failure(
+                        &account,
+                        scope,
+                        &container,
+                        &err,
+                        Attempt::Read { generation },
+                    )
                     .unwrap_or(true);
                 if news {
                     tracing::warn!(
@@ -711,7 +764,13 @@ mod tests {
         .unwrap();
         let cache = Arc::new(CacheStore::new(db));
         cache
-            .mark_failure("acc-1", SyncScope::Events, "cal-1", &failure, false)
+            .mark_failure(
+                "acc-1",
+                SyncScope::Events,
+                "cal-1",
+                &failure,
+                Attempt::Read { generation: 0 },
+            )
             .unwrap();
         let fetched = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&fetched);
@@ -763,6 +822,125 @@ mod tests {
             let down = cal_core::Error::Network("down".into());
             assert_eq!(fetches_with(down, item).await, 1, "item: {item}");
         }
+    }
+
+    /// A store with the account the cache rows hang on.
+    fn store_with_account() -> Arc<CacheStore> {
+        let db = DbHandle::open_in_memory().unwrap();
+        db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'caldav', 'Work', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+        })
+        .unwrap();
+        Arc::new(CacheStore::new(db))
+    }
+
+    fn busy() -> cal_core::Error {
+        cal_core::Error::provider_busy(cal_core::BusyDetail::TooManyRequests)
+    }
+
+    /// How many times a read of cal-1 refreshed for `why`. The refresh runs
+    /// `during` first, then fails with `fails` or succeeds.
+    async fn read_fetches(
+        cache: &Arc<CacheStore>,
+        why: ReadRefresh,
+        fails: Option<cal_core::Error>,
+        during: impl FnOnce(&CacheStore) + Send + 'static,
+    ) -> usize {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let fetched = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&fetched);
+        let inner = Arc::clone(cache);
+        spawn_read_refresh(
+            &tokio::runtime::Handle::current(),
+            Arc::new(RecordingObserver::default()) as Arc<dyn CacheObserver>,
+            Arc::clone(cache),
+            Arc::new(RefreshCoordinator::new()),
+            SyncScope::Events,
+            "acc-1".to_string(),
+            "cal-1".to_string(),
+            why,
+            move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                during(&inner);
+                async move {
+                    match fails {
+                        Some(err) => Err(err),
+                        None => Ok(false),
+                    }
+                }
+            },
+        );
+        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        fetched.load(Ordering::SeqCst)
+    }
+
+    /// A container the provider was busy for is not asked again by the reads
+    /// of an old snapshot (decision 271), on either path; a week never loaded
+    /// is asked anyway (Toni, 2026-10-23).
+    #[tokio::test]
+    async fn a_busy_container_pauses_its_reads_but_not_what_was_never_loaded() {
+        for item in [false, true] {
+            assert_eq!(fetches_with(busy(), item).await, 0, "item: {item}");
+        }
+        let cache = store_with_account();
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Stale, Some(busy()), |_| {}).await,
+            1
+        );
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Stale, None, |_| {}).await,
+            0
+        );
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Uncovered, None, |_| {}).await,
+            1
+        );
+    }
+
+    /// Aperio's own write lets one read through; busy again, it pauses at the
+    /// new generation.
+    #[tokio::test]
+    async fn an_own_write_lets_one_read_through() {
+        let cache = store_with_account();
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Stale, Some(busy()), |_| {}).await,
+            1
+        );
+        cache
+            .invalidate("acc-1", SyncScope::Events, "cal-1")
+            .unwrap();
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Stale, Some(busy()), |_| {}).await,
+            1
+        );
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Stale, None, |_| {}).await,
+            0
+        );
+    }
+
+    /// A write that lands while a busy read is in flight is not paused by
+    /// that read: the pause belongs to the generation the read was claimed
+    /// at, not the one current when it failed.
+    #[tokio::test]
+    async fn a_write_during_a_busy_fetch_is_not_paused_again() {
+        let cache = store_with_account();
+        let fetched = read_fetches(&cache, ReadRefresh::Stale, Some(busy()), |store| {
+            store
+                .invalidate("acc-1", SyncScope::Events, "cal-1")
+                .unwrap();
+        })
+        .await;
+        assert_eq!(fetched, 1);
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Stale, None, |_| {}).await,
+            1
+        );
     }
 
     #[tokio::test]
@@ -898,32 +1076,41 @@ mod tests {
     #[test]
     fn cold_state_warms() {
         // No snapshot at all → stale → warm (the genuine first cold load).
-        assert!(event_self_warm_needed(&None, range()));
+        assert_eq!(
+            event_self_warm(&None, range()),
+            Some(ReadRefresh::Uncovered)
+        );
     }
 
     #[test]
     fn fresh_and_covered_does_not_warm() {
         // Refreshed 1s ago, window -1..+2 days covers the 0..+1 view.
-        assert!(!event_self_warm_needed(&state(1, Some((-1, 2))), range()));
+        assert_eq!(event_self_warm(&state(1, Some((-1, 2))), range()), None);
     }
 
     #[test]
     fn fresh_uncovered_within_cooldown_does_not_warm() {
         // Refreshed 1s ago (inside the cooldown), window +10..+20 days misses the
         // view — this is the cold-cache loop case the cooldown suppresses.
-        assert!(!event_self_warm_needed(&state(1, Some((10, 20))), range()));
+        assert_eq!(event_self_warm(&state(1, Some((10, 20))), range()), None);
     }
 
     #[test]
     fn fresh_uncovered_past_cooldown_warms() {
         // Refreshed 10s ago (past the 5s cooldown, still < 60s TTL), uncovered →
         // a genuine navigation to an out-of-window range refreshes.
-        assert!(event_self_warm_needed(&state(10, Some((10, 20))), range()));
+        assert_eq!(
+            event_self_warm(&state(10, Some((10, 20))), range()),
+            Some(ReadRefresh::Uncovered)
+        );
     }
 
     #[test]
     fn stale_warms_even_if_covered() {
         // Refreshed 120s ago (> 60s TTL) → stale regardless of coverage.
-        assert!(event_self_warm_needed(&state(120, Some((-1, 2))), range()));
+        assert_eq!(
+            event_self_warm(&state(120, Some((-1, 2))), range()),
+            Some(ReadRefresh::Stale)
+        );
     }
 }
