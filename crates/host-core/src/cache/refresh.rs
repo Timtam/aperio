@@ -98,6 +98,11 @@ pub struct CacheRefresher {
     /// Single-flight makes this stable for a pass's duration; the
     /// concurrent per-read SWR path never touches it.
     pass_forced: Arc<AtomicBool>,
+    /// The (account, listing family) pairs a busy provider turned away in the
+    /// CURRENT pass (decision 271): the pass asks none of that family's
+    /// remaining containers, and records nothing for them. Reset as each pass
+    /// begins, so the next one asks again.
+    busy_families: Arc<Mutex<std::collections::HashSet<(String, &'static str)>>>,
     /// Whether the running pass read anything successfully: a listing, or a
     /// container. Reset at the start of every pass; "nothing could be
     /// updated" is said only when it stayed false, not because every account
@@ -172,6 +177,7 @@ impl CacheRefresher {
             notify: Arc::new(Notify::new()),
             in_flight: Arc::new(Mutex::new(false)),
             pass_forced: Arc::new(AtomicBool::new(false)),
+            busy_families: Arc::new(Mutex::new(std::collections::HashSet::new())),
             pass_succeeded: Arc::new(AtomicBool::new(false)),
             follow_up: Arc::new(Mutex::new(None)),
             // Unset until a user `trigger` latches it.
@@ -375,6 +381,10 @@ impl CacheRefresher {
         // path passes its own (false) flag to mark_error directly.
         self.pass_forced.store(forced, Ordering::Relaxed);
         self.pass_succeeded.store(false, Ordering::Relaxed);
+        self.busy_families
+            .lock()
+            .expect("busy families poisoned")
+            .clear();
         let last = self.status().last_refreshed_at;
         // Spinner on immediately; the target total isn't known until the cheap
         // enumeration below completes.
@@ -549,6 +559,12 @@ impl CacheRefresher {
     /// the shared coordinator. A claim miss means a per-read refresh is already
     /// handling it — skip without releasing (we never claimed).
     async fn refresh_one(&self, target: RefreshTarget, window: DateRange) {
+        // A busy provider turned this family of the account away earlier in
+        // the pass: asking its other containers now would only be turned away
+        // too (decision 271).
+        if self.family_busy(&target) {
+            return;
+        }
         match target {
             RefreshTarget::Events {
                 account,
@@ -679,6 +695,21 @@ impl CacheRefresher {
         }
     }
 
+    /// Whether a busy provider turned this target's family of its account
+    /// away earlier in the pass.
+    fn family_busy(&self, target: &RefreshTarget) -> bool {
+        let (account, scope) = match target {
+            RefreshTarget::Events { account, .. } => (account, SyncScope::Events),
+            RefreshTarget::Tasks { account, .. } => (account, SyncScope::Tasks),
+            RefreshTarget::Sections { account, .. } => (account, SyncScope::Sections),
+            RefreshTarget::Contacts { account, .. } => (account, SyncScope::Contacts),
+        };
+        self.busy_families
+            .lock()
+            .expect("busy families poisoned")
+            .contains(&(account.clone(), super::listing_of(scope).as_str()))
+    }
+
     /// Record a failed attempt of this pass, and log it when it is news:
     /// the container was not failing, or fails differently now. An account
     /// that keeps failing the same way says so once, not on every pass.
@@ -698,6 +729,12 @@ impl CacheRefresher {
         } else {
             Attempt::Background { generation }
         };
+        if err.is_provider_busy() {
+            self.busy_families
+                .lock()
+                .expect("busy families poisoned")
+                .insert((account.to_string(), super::listing_of(scope).as_str()));
+        }
         let news = self
             .cache
             .mark_failure(account, scope, container, err, attempt)
@@ -1076,6 +1113,147 @@ mod tests {
         fn calendar_color(&self, _: &str) -> Option<cal_core::ContainerColor> {
             None
         }
+    }
+
+    /// An account whose ten calendars all answer that the provider is busy,
+    /// and whose one task list answers; it counts what was asked.
+    struct Throttled {
+        events_asked: AtomicU32,
+        tasks_asked: AtomicU32,
+    }
+
+    #[async_trait]
+    impl Adapter for Throttled {
+        async fn authenticate(&self, _: Credentials) -> cal_core::Result<AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait]
+    impl CalendarFeature for Throttled {
+        async fn list_calendars(&self) -> cal_core::Result<Vec<Calendar>> {
+            Ok((0..10)
+                .map(|n| Calendar {
+                    color_label: None,
+                    supports_scheduling: false,
+                    supports_event_color: false,
+                    always_notifies_attendees: false,
+                    invitations_reply_only: false,
+                    stores_occurrence_exceptions: false,
+                    notifier_name: None,
+                    id: format!("cal-{n}"),
+                    name: format!("Calendar {n}"),
+                    color: None,
+                    read_only: false,
+                    default_sound: None,
+                })
+                .collect())
+        }
+        async fn get_events(&self, _: &str, _: DateRange) -> cal_core::Result<Vec<Event>> {
+            self.events_asked.fetch_add(1, Ordering::SeqCst);
+            Err(cal_core::Error::provider_busy(
+                cal_core::BusyDetail::TooManyRequests,
+            ))
+        }
+        async fn create_event(&self, _: &str, _: NewEvent) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn update_event(&self, _: Event) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn delete_event(&self, _: &str, _: bool) -> cal_core::Result<()> {
+            unreachable!()
+        }
+        async fn get_free_busy(&self, _: &[&str], _: DateRange) -> cal_core::Result<Vec<FreeBusy>> {
+            unreachable!()
+        }
+        fn calendar_color(&self, _: &str) -> Option<cal_core::ContainerColor> {
+            None
+        }
+    }
+
+    #[async_trait]
+    impl TasksFeature for Throttled {
+        async fn list_task_lists(&self) -> cal_core::Result<Vec<cal_core::TaskList>> {
+            Ok(vec![cal_core::TaskList {
+                id: "list-1".into(),
+                name: "Inbox".into(),
+                color: None,
+                read_only: false,
+                parent_id: None,
+                color_label: None,
+                default_sound: None,
+                embedded_in_calendar: None,
+            }])
+        }
+        async fn get_tasks(&self, _: &str) -> cal_core::Result<Vec<cal_core::Task>> {
+            self.tasks_asked.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+        async fn create_task(
+            &self,
+            _: &str,
+            _: cal_core::NewTask,
+        ) -> cal_core::Result<cal_core::Task> {
+            unreachable!()
+        }
+        async fn update_task(&self, _: cal_core::Task) -> cal_core::Result<cal_core::Task> {
+            unreachable!()
+        }
+        async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
+            unreachable!()
+        }
+    }
+
+    /// Once a calendar of an account answers busy, the pass asks none of the
+    /// account's other calendars (decision 271), records nothing for them,
+    /// and still asks its task lists; the next pass, forced or not, asks
+    /// again.
+    #[tokio::test]
+    async fn a_busy_answer_spares_the_rest_of_its_family_in_that_pass() {
+        let (refresher, _gated, _statuses) = refresher();
+        let throttled = Arc::new(Throttled {
+            events_asked: AtomicU32::new(0),
+            tasks_asked: AtomicU32::new(0),
+        });
+        refresher.registry.register_host_adapter(
+            "acc-1",
+            Some(Arc::clone(&throttled) as Arc<dyn CalendarFeature>),
+            Some(Arc::clone(&throttled) as Arc<dyn TasksFeature>),
+        );
+        let failing_rows = |refresher: &CacheRefresher| -> u32 {
+            refresher
+                .db
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM cache_sync_state
+                     WHERE account_id = 'acc-1' AND scope = 'events' AND last_error IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        refresher.warm_all(false).await;
+        let asked = throttled.events_asked.load(Ordering::SeqCst);
+        assert!((1..10).contains(&asked), "asked {asked} of 10 calendars");
+        assert_eq!(
+            failing_rows(&refresher),
+            asked,
+            "the spared calendars record nothing"
+        );
+        assert_eq!(throttled.tasks_asked.load(Ordering::SeqCst), 1);
+        // The next pass asks again, a forced one too.
+        refresher.warm_all(true).await;
+        let again = throttled.events_asked.load(Ordering::SeqCst) - asked;
+        assert!(
+            (1..10).contains(&again),
+            "asked {again} of 10 calendars again"
+        );
+        assert_eq!(throttled.tasks_asked.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
