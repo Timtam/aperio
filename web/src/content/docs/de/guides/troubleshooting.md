@@ -366,6 +366,17 @@ Was du tun kannst: Öffne den Kalender, in Aperio oder in der App des
 Kalenders (Outlook, Google Kalender), und lösche die Serie, die doppelt da
 ist.
 
+## Der Anbieter ist gerade ausgelastet
+
+Kommen in kurzer Zeit viele Anfragen, weisen manche Anbieter weitere eine
+Weile ab. Aperio sagt dann „Der Anbieter ist gerade ausgelastet“: beim
+Speichern mit „Es wurde nichts geändert“, beim Laden, bei der Verfügbarkeit
+und bei Meetings ohne. In einem Editor bleibt deine Eingabe stehen; die
+Ansichten zeigen, was zuletzt geladen wurde. Wie lange der
+Anbieter warten lässt, sagt Aperio nicht, es steht im Protokoll.
+
+Was du tun kannst: Warte einen Moment und versuche es noch einmal.
+
 ## Eine Änderung wurde nur zum Teil gespeichert
 
 Manche Anbieter speichern eine Aufgabe, einen Termin oder einen Kontakt in

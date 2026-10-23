@@ -339,6 +339,17 @@ series. If invitations may have gone out, the message says that too.
 What you can do: open the calendar, in Aperio or in the calendar's own app
 (Outlook, Google Calendar), and delete the series that is there twice.
 
+## The provider is busy right now
+
+When many requests come in a short time, some providers turn further ones
+away for a while. Aperio then says "The provider is busy right now": with
+"Nothing was changed" when saving, without it when loading, checking
+availability and for meetings. In an editor, what you entered stays; the
+views show what was loaded last. Aperio does not say how long the
+provider asks to wait; the log does.
+
+What you can do: wait a moment and try again.
+
 ## A change was only partly saved
 
 Some providers save a task, an appointment or a contact in several steps:

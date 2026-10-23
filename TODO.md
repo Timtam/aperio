@@ -511,9 +511,8 @@ Siehe DESIGN §4.2.
         `CloseOnlyNotice`, Handy dasselbe); Entwürfe bleiben am angelegten
         Elternteil; „ohne Foto angelegt“ über `has_photo`; ein beim
         Verschieben stehengebliebenes Original wird mit seiner Liste oder
-        seinem Kalender benannt (277). Exchange und Graph sind gebaut; offen:
-        Vikunja und Todoist über `after_landed` (Adapter-Schritte von PR 7). Am Handy ohne Testläufer
-        zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
+        seinem Kalender benannt (277). Exchange, Graph, Vikunja und Todoist
+        sind gebaut. Am Handy ohne Testläufer zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
         prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
         ist; eine zum Teil gespeicherte Aufgabe schließt den Editor.
       - ↻ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
@@ -522,6 +521,8 @@ Siehe DESIGN §4.2.
         antwortet oder anders (etwa 403 oder 503 ohne Wartezeit), ob Todoist
         auch innerhalb von `sync_status` drosselt und wie Vikunja es tut, ist
         ungemessen; je eine Live-Runde mit vielen schnellen Anfragen klärt es.
+        Ebenso ungemessen: ob Googles Token-Endpunkt mit 429 drosselt und ob
+        ein Anmeldecode einen gedrosselten Austausch übersteht.
       - [ ] **CardDAV: Kontakt löschen trifft nur das erste Adressbuch**
         (gefunden in PR 7): `contacts::delete_contact` liest 404 als Erfolg,
         und der Lauf über alle Adressbücher in `lib.rs::delete_contact` endet
@@ -1643,16 +1644,81 @@ Vorschläge sind nicht aufgenommen.
       Geräte). Jeder andere Fehler (Netz, Rechte, ein Anbieter ohne
       Frei/Belegt) gibt weiter eine leere Antwort, und der Editor sagt „Alle
       Teilnehmer sind zu dieser Zeit frei.“ Zu entscheiden: welche Fehler
-      einen Satz bekommen (ein Anbieter ohne Frei/Belegt ist keiner). Aus
-      der Planung von PR 7 (2026-10-23).
+      einen Satz bekommen (ein Anbieter ohne Frei/Belegt ist keiner). Google
+      meldet Fehler auch je Kalender in der Antwort (`calendars.<id>.errors`);
+      die liest Aperio nicht, so dass eine unbekannte Adresse als frei
+      erscheint. Aus der Planung von PR 7 (2026-10-23).
 - [ ] **Google: eine Unteraufgabe lösen erreicht Google nicht.**
       `tasks::update_task` schickt `/move` nur mit einer neuen übergeordneten
       Aufgabe. Ist `parent_id` leer, die Aufgabe bei Google aber noch
       eingehängt, geht kein `/move` (ohne `parent`, also nach oben) hinaus;
       die Antwort des PATCH zeigt sie weiter eingehängt, und die Änderung
       verfällt stumm. Zuerst prüfen, ob eine Oberfläche das Lösen anbietet.
-      Gefunden beim Umbau der mehrstufigen Speicherungen in PR 7
-      (2026-10-19), älter.
+      Dazu: Das `/move` beim Einhängen schickt kein `previous`; laut Google
+      steht die Aufgabe dann an erster Stelle ihrer Geschwister, der
+      Kommentar in `update_task` sagt „ans Ende“. Gefunden beim Umbau der
+      mehrstufigen Speicherungen in PR 7 (2026-10-19), älter.
+- [ ] **Ein späterer Schritt, der aus anderem Grund scheitert, sagt nicht,
+      dass ein Teil steht.** Scheitert ein späterer Schritt eines Speicherns
+      an etwas anderem als Auslastung (Netz, Rechte, eine Ablehnung),
+      nachdem ein früherer angekommen ist, macht `Error::after_landed` daraus
+      einen Netzwerkfehler mit dem Namen des Schritts davor; die Oberflächen
+      zeigen dessen Text. Zu entscheiden: ob `partly-saved:` für jede Ursache
+      gilt oder ein eigener Satz kommt. Aus der Planung von PR 7
+      (2026-10-23).
+- [ ] **Ein Lesen vor dem Ersetzen, das nicht an Auslastung scheitert, kann
+      Daten verlieren.** Manche Speicherungen lesen zuerst, was sie nicht
+      selbst kennen, und schreiben dann das Ganze. Ist der Anbieter dabei
+      ausgelastet, bricht das Speichern seit PR 7 ab. Jeder andere
+      Lesefehler wird weiter übergangen, und das Schreiben löscht, was nicht
+      gelesen wurde: bei Google die weiteren Daten eines Kontakts
+      (`update_person`, `other_events`), bei CardDAV das Foto eines
+      Kontakts, bei Graph die HTML-Beschreibung eines Termins
+      (`update_event`). Abhilfe: bei jedem Lesefehler abbrechen oder nur
+      ändern, was bekannt ist. Aus der Planung von PR 7 (2026-10-23).
+- [ ] **Zusagen fehlt, wenn die eigene Adresse ausgelastet ist.** Die
+      Zu-/Absage im Termin (`EventRsvp`, beide Geräte) fragt zuerst die
+      eigene Adresse des Kontos ab (`resolveCalendarUserEmail`). Scheitert
+      das, auch an einem ausgelasteten Anbieter, verschwinden die Knöpfe
+      ohne Wort. Besser: einen Satz zeigen und später neu fragen. Aus der
+      Planung von PR 7 (2026-10-23).
+- [ ] **Desktop: Lesen am Zwischenspeicher vorbei.** Abschnitte
+      (`get_sections`), Mitglieder einer Liste und die eigene Person einer
+      Aufgabenliste liest der Desktop direkt beim Anbieter, nicht über den
+      Zwischenspeicher. Ein ausgelasteter Anbieter hält diese Lesevorgänge
+      daher nicht an und zählt sie nicht; nur ihr Satz sagt es. Am Handy
+      laufen sie über den Zwischenspeicher. Angleichen. Aus der Planung von
+      PR 7 (2026-10-23).
+- [ ] **Gleichzeitige Schreibvorgänge drosseln den Anbieter selbst.** Die
+      Sammelknöpfe des Tagesstarts (`writeAll`), sein automatischer Übertrag
+      (`DayStartReviewChecker`) und das Anheften fälliger Fristen
+      (`DeadlinePinChecker`, beide `Promise.all`) schreiben viele Aufgaben
+      auf einmal. Bei einem Konto mit vielen Aufgaben kann das allein die
+      Drosselung auslösen. Abhilfe: nacheinander oder in kleinen Gruppen
+      schreiben (`writeAll` mit `oneAtATime`). Aus der Planung von PR 7
+      (2026-10-23).
+- [ ] **Die Wartezeit des Anbieters bleibt ungenutzt.** Nennt ein
+      ausgelasteter Anbieter, wie lange zu warten ist (`Retry-After`), steht
+      das nur im Protokoll. Die Aktualisierung im Hintergrund hält an, bis
+      ein eigenes Schreiben sie freigibt, und die Runden fragen im üblichen
+      Takt neu. Sie könnten bis zur genannten Zeit warten. Aus der Planung
+      von PR 7 (2026-10-23).
+- [ ] ↻ **iPhone: verliert Expo den Fehlercode?** Expo 56 scheint auf iOS bei
+      jeder abgewiesenen `AsyncFunction` `error.code` fallen zu lassen. Dann
+      sind die Zweige, die nach dem Code fragen, auf dem iPhone tot:
+      `useSyncErrorMessage`, `EventGroupModal`, `client_secret_required` im
+      `AccountsScreen`, `SyncTargetSchemaForm`. PR 7 verlässt sich nur auf
+      die Marke im Text. Am iPhone prüfen; wenn ja, die Zweige auf den Text
+      umstellen oder den Code in den Text legen. Aus der Planung von PR 7
+      (2026-10-23).
+- [ ] **Plugins: Abgleich liest „verboten“ als Anmeldung.** Der Abgleich
+      eines Plugins (`plugin-core/src/shim/sync.rs`, `status_to_sync_error`)
+      macht aus `FORBIDDEN` einen Anmeldefehler, auch wenn die Meldung eine
+      Marke wie `provider-busy:` trägt; Kalender, Aufgaben und Kontakte
+      behalten sie. Ebenso kommt „Zugriff nicht erteilt“ eines Plugins als
+      `forbidden` mit der Marke an, und `host_core::cache::failure_kind`
+      erkennt den Zugriff nur am Fehlertyp, nicht an der Marke. Aus der
+      Planung von PR 7 (2026-10-23).
 - [ ] **Ein Schnell-Hinzufügen-Test wackelt unter Last.** Der erste Test in
       `src/components/quickAddOfferCalendar.test.tsx` lief in einem vollen
       vitest-Lauf in seine 15 s, die übrigen neun scheiterten als Folge (die

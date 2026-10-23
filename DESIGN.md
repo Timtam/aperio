@@ -1407,7 +1407,7 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     `reply-only-invitation:`, `server-refused:`, `identity-unknown:`,
     `occurrence-not-writable:`, `unsafe-to-write:`, `access-not-granted:`,
     `day-zone-unreadable:`, `copy-unreadable:`, `exceptions-would-be-lost:`,
-    `deletions-not-kept:`), und beide Oberflächen sagen daraus einen Satz in
+    `deletions-not-kept:`, `provider-busy:`), und beide Oberflächen sagen daraus einen Satz in
     der Sprache des Nutzers (`shared/eventWriteError.ts`, am Handy bei jedem
     Schreiben über `writeErrorMessage`). `access-not-granted` kommt vom
     Gerätekonto ohne vollen Zugriff (`cal_core::Error::AccessNotGranted`) und
@@ -1423,7 +1423,7 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     damit eine gespeicherte Kalenderliste ohne das Merkmal
     `invitations_reply_only` neu gelesen wird.
   - Das Gegenteil einer Ablehnung ist ein Rest (`cal_core::WriteLeftover`:
-    `created-may-stand:`): Es wurde etwas geschrieben, das sich nicht
+    `created-may-stand:`, `partly-saved:`): Es wurde etwas geschrieben, das sich nicht
     zurücknehmen ließ, und steht möglicherweise. Er reist immer als
     `network`, nie als ablehnender Code, und `writeNeverLanded` ist für ihn
     falsch, welcher Code ihn auch trägt: Ein Teilen nähme sonst seinen neuen
@@ -1434,6 +1434,54 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     schreibt, sagt sein Manifest (`recurrence.deletions_in_steps`); es wird
     beim Lesen der Kalenderliste gestempelt und braucht keinen neuen
     `CACHE_GENERATION`.
+  - **Ein ausgelasteter Anbieter (270-278, PR 7).** Weist ein Anbieter eine
+    Anfrage ab, weil in kurzer Zeit zu viele kamen (429, Googles
+    `rateLimitExceeded`, Exchanges `ErrorServerBusy`, ein 503 mit
+    `Retry-After` bei einer Anfrage, die nichts schreibt), ist das die Marke
+    `provider-busy:` mit einem Wort aus `cal_core::BusyDetail` dahinter, als
+    `forbidden` (`Error::provider_busy`, 270). Es wurde nichts getan:
+    `never_landed` gilt, ein Teilen nimmt seinen neuen Teil zurück. Ein
+    Schreiben, dessen Antwort verloren ging und das noch einmal gesendet
+    wurde, ist nie ausgelastet, sondern unsicher (CalDAVs
+    `WriteAnswer::settled`); ein Kontingent, das für Stunden aufgebraucht
+    ist, ist keine Auslastung (275). Die Sätze sagen „Der Anbieter ist
+    gerade ausgelastet. Versuche es später noch einmal.“, beim Schreiben mit
+    „Es wurde nichts geändert“, beim Lesen nie, und nie, wie lange (272,
+    278); die Wartezeit des Anbieters steht nur im Protokoll.
+  - Das Aktualisieren zählt Auslastung wie andere Fehler, nur anders
+    (271): Die Hintergrund-Aktualisierung eines Lesevorgangs zählt sie
+    nicht und hält die weiteren Lesevorgänge des Behälters an, bis ein
+    eigenes Schreiben die Generation weiterzählt (`busy_paused`); ein nie
+    geladener Bereich wird trotzdem gefragt (`ReadRefresh::Uncovered`).
+    Automatische Runden zählen, aber weniger als eine Minute auseinander nur
+    einmal (`ROUND_SPAN`); eine Runde, die jemand startet, zeigt ihr
+    Ergebnis sofort, und eine Kontoänderung erzwingt nur dieses Konto
+    (`Forcing`). Ein Durchlauf fragt eine Familie, die ausgelastet war,
+    nicht weiter. Die Zeile sagt „Der Anbieter ist ausgelastet.“, mit Rang
+    zwischen „anderes“ und „Anmeldung“ (`RefreshCause::Busy`).
+  - Schritte, die zu lange dauerten, und Schritte, die der Anbieter immer
+    wieder warten ließ, sagen verschiedene Gründe: `time` und `busy`
+    (`out_of_time_reason`, 276). Wer warten ließ, war ausgelastet, nicht zu
+    langsam.
+  - Speichert ein Adapter in mehreren Anfragen und scheitert eine spätere,
+    nachdem eine frühere angekommen ist, liest der Kern den Fehler über
+    `Error::after_landed` (277): Ausgelastet wird zum Rest `partly-saved:`
+    (die Änderung steht zum Teil), ein Netzwerkfehler, der angekommen sein
+    kann, bleibt, alles andere wird ein Netzwerkfehler mit dem Schritt
+    davor — nie eine Ablehnung, die „Es wurde nichts geändert“ sagte. Die
+    Oberflächen tun dasselbe für Speichern in mehreren Aufrufen
+    (`afterLanded`, `writeAfterLanded`, `writeAll`), an denselben Zeilen von
+    `writeOutcome.json` festgemacht. Ein Editor, dessen Speichern zum Teil
+    steht, zeigt den Satz in einem Hinweis, der sich nur schließen lässt
+    (`CloseOnlyNotice`), und lädt neu; die Entwürfe von Unteraufgaben, die
+    nicht folgten, bleiben am angelegten Elternteil. Ein Verschieben, dessen
+    Original der Anbieter wegen Auslastung nicht löschen konnte, steht und
+    nennt die Liste oder den Kalender des Originals (`original_left_in`).
+  - Jede Oberfläche liest Fehler nur über die geteilten Helfer (273):
+    `writeErrorMessage` und `eventWriteErrorMessage` beim Schreiben,
+    `readErrorMessage` und `readFailureSentence` beim Lesen,
+    `meetingFailureSentence` bei Meetings. Am Handy reicht `hostCoded` jeden
+    Fehler des Rust-Hosts mit dem Code des Desktops weiter.
 
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit
 prüfen" — sichtbar bei scheduling-fähigem Kalender und vorhandenen
@@ -1443,7 +1491,8 @@ Benachrichtigen-Schalter verlangt zusätzlich, dass das Konto organisiert
 Teilnehmer im aktuell eingegebenen Zeitfenster. Pro Teilnehmer wird frei/belegt
 angezeigt plus eine Zusammenfassung; das Ergebnis wird über die Live-Region
 angekündigt. Best-Effort: Ein Anbieter, der nicht antworten darf (fehlende
-Berechtigung, kein Outbox), liefert leere Slots ⇒ „frei/unbekannt" statt Fehler.
+Berechtigung, kein Outbox), liefert leere Slots ⇒ „frei/unbekannt" statt Fehler;
+ein ausgelasteter Anbieter wird gesagt, nie als „alle frei“ gelesen (270).
 Die Abfrage läuft über `CalendarFeature::get_free_busy(emails, range)` und den
 Host-Befehl `query_free_busy`.
 
