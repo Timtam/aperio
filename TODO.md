@@ -500,8 +500,10 @@ Siehe DESIGN §4.2.
         Google-Foto: weiter verschluckt, der Editor sagt „ohne Foto
         gespeichert“. Unteraufgaben-Entwürfe: der Editor bleibt auf der
         angelegten Aufgabe mit den übrigen Entwürfen. Vikunja (Zuständige),
-        Todoist (Abschließen), Graph (Foto, Erweiterung) laufen über
-        `Error::after_landed` denselben Weg. Der volle Wunsch („Editor
+        Todoist (Abschließen), Graph (Erweiterung) und Exchange
+        (Herauslösen, Kontaktfoto ersetzen) laufen über
+        `Error::after_landed` denselben Weg; das Foto eines neuen Kontakts
+        bleibt bei Graph und Exchange wie bei Google verschluckt. Der volle Wunsch („Editor
         bleibt auf dem Angelegten“ überall) kommt mit O1 des Bogens unten.
         ↻ Die Oberflächen beider Seiten sind gebaut: Aufgaben-Editor,
         Schnell-Anlegen, Einplanen, Verschieben/Kopieren und Kontakt-Editor
@@ -509,8 +511,8 @@ Siehe DESIGN §4.2.
         `CloseOnlyNotice`, Handy dasselbe); Entwürfe bleiben am angelegten
         Elternteil; „ohne Foto angelegt“ über `has_photo`; ein beim
         Verschieben stehengebliebenes Original wird mit seiner Liste oder
-        seinem Kalender benannt (277). Offen: Vikunja, Todoist und Graph über
-        `after_landed` (Adapter-Schritte von PR 7). Am Handy ohne Testläufer
+        seinem Kalender benannt (277). Exchange und Graph sind gebaut; offen:
+        Vikunja und Todoist über `after_landed` (Adapter-Schritte von PR 7). Am Handy ohne Testläufer
         zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
         prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
         ist; eine zum Teil gespeicherte Aufgabe schließt den Editor.

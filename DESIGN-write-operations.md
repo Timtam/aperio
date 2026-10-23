@@ -140,7 +140,7 @@ PR 7 bleibt, wie gebaut: `Error::provider_busy`, `Error::never_landed`, `Error::
 - Google-Gruppe, deren Mitglieder nicht ankamen: Der Editor schließt mit einem Hinweis, der sich nur schließen lässt („Die Gruppe wurde angelegt, aber ihre Mitglieder nicht hinzugefügt …“), und die Daten laden neu. Kein zweites Anlegen.
 - Google-Foto: wird weiter verschluckt; der Editor vergleicht `has_photo` der zurückgegebenen Zeile mit dem gesendeten Foto und sagt „ohne Foto gespeichert“.
 - Unteraufgaben-Entwürfe: Der Editor bleibt auf der angelegten Aufgabe, behält die noch nicht angelegten Entwürfe, und Speichern legt nur diese an (Tonis ursprünglicher Wunsch, ohne Kern-Umbau).
-- Vikunja (Zuständige), Todoist (Abschließen), Graph (Foto, Erweiterung): Diese Folgeschritte laufen über `Error::after_landed` und nehmen denselben Weg wie die Google-Gruppe.
+- Vikunja (Zuständige), Todoist (Abschließen), Graph (Erweiterung), Exchange (Herauslösen, Kontaktfoto ersetzen): Diese Folgeschritte laufen über `Error::after_landed` und nehmen denselben Weg wie die Google-Gruppe. Das Foto eines neuen Kontakts bleibt bei Graph und Exchange wie bei Google verschluckt; der Editor sagt „ohne Foto angelegt“.
 
 ## 7. Risiken
 
