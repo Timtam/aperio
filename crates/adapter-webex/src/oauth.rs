@@ -415,9 +415,11 @@ async fn parse_token_response(
                 "Webex refused the token request ({posture}): {detail}"
             )),
             403 => VcError::Forbidden(format!("Webex refused the token request: {detail}")),
-            429 => VcError::Network(format!(
-                "Webex is rate-limiting the token endpoint: {detail}"
-            )),
+            // A busy token endpoint: the token, never the wait (270, 278).
+            429 => {
+                tracing::debug!(%detail, "webex is rate-limiting the token endpoint");
+                crate::api::busy()
+            }
             // The server having a bad day, not a response we failed to
             // understand. `Network` is what the UI treats as transient and
             // offers a retry for; `Protocol` reads as "this adapter is broken"

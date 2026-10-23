@@ -438,16 +438,26 @@ fn next_link(header: &str) -> Option<String> {
 }
 
 fn rate_limited(body: &str, retry_after: Option<&str>) -> VcError {
-    let detail = describe(body);
     // Deliberately NOT slept through. A vtable call has no cancellation, so a
-    // silent multi-minute sleep inside one is indistinguishable from a hang;
-    // the wait belongs to whoever can show it and let the user abandon it.
-    match retry_after.and_then(|v| v.trim().parse::<u64>().ok()) {
-        Some(secs) => VcError::Network(format!(
-            "Webex is rate-limiting this account; it asks to wait {secs} seconds. {detail}"
-        )),
-        None => VcError::Network(format!("Webex is rate-limiting this account. {detail}")),
-    }
+    // silent multi-minute sleep inside one is indistinguishable from a hang.
+    // The wait Webex asks for goes to the log only: the surfaces say the
+    // provider is busy and to try again later, never for how long (decision
+    // 278), where this read out an English sentence with the seconds in it
+    // (critique P18).
+    tracing::debug!(
+        retry_after,
+        detail = %describe(body),
+        "webex is rate-limiting this account",
+    );
+    busy()
+}
+
+/// The refusal a busy provider is said as (decision 270), with the token the
+/// surfaces translate: nothing was done, and trying later may work.
+pub(crate) fn busy() -> VcError {
+    VcError::Forbidden(
+        cal_core::WriteRefusal::ProviderBusy.message(cal_core::BusyDetail::TooManyRequests.word()),
+    )
 }
 
 /// Human-readable summary of a Webex error body, keeping the tracking id.
@@ -619,16 +629,18 @@ mod tests {
         assert!(err.to_string().contains("MEETING-abc123"), "got {err}");
     }
 
+    /// A rate limit is a busy provider, said by its token and never with the
+    /// wait Webex asks for (decisions 270, 278); it is not slept through.
     #[test]
-    fn a_rate_limit_reports_the_wait_instead_of_sleeping_through_it() {
-        let err = rate_limited(r#"{"message":"slow down"}"#, Some("42"));
-        let text = err.to_string();
-        assert!(text.contains("42 seconds"), "got {text}");
-        assert!(text.contains("slow down"), "got {text}");
-        // No Retry-After is still a rate limit, just without a number.
-        assert!(rate_limited("{}", None)
-            .to_string()
-            .contains("rate-limiting"));
+    fn a_rate_limit_is_a_busy_provider_without_its_wait() {
+        for retry_after in [Some("42"), None] {
+            match rate_limited(r#"{"message":"slow down"}"#, retry_after) {
+                VcError::Forbidden(message) => {
+                    assert_eq!(message, "provider-busy: http-429");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
     }
 
     #[tokio::test]
@@ -831,7 +843,11 @@ mod tests {
             .get_json::<serde_json::Value>("/thing")
             .await
             .expect_err("must fail");
-        assert!(err.to_string().contains("30 seconds"), "got {err}");
+        // A busy provider, never the wait (decisions 270, 278).
+        assert!(
+            matches!(&err, VcError::Forbidden(m) if m == "provider-busy: http-429"),
+            "got {err}"
+        );
         m.assert_async().await;
     }
 

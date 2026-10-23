@@ -9639,6 +9639,9 @@ fn meetings_err(err: host_core::meetings::MeetingsError) -> StoreError {
     }
 }
 
+/// A meeting adapter's error under the code the desktop gives it
+/// (`CommandError`'s `From<VcError>`), so both shells read a refusal token
+/// and a lost answer alike.
 fn vc_err(err: vc_core::VcError) -> StoreError {
     match err {
         vc_core::VcError::Authentication(detail) => StoreError::Auth { detail },
@@ -9648,9 +9651,10 @@ fn vc_err(err: vc_core::VcError) -> StoreError {
             field: "meeting".to_string(),
             detail,
         },
-        other => StoreError::Storage {
-            detail: other.to_string(),
-        },
+        vc_core::VcError::Network(detail) => StoreError::Network { detail },
+        vc_core::VcError::Protocol(detail) => StoreError::Protocol { detail },
+        vc_core::VcError::Unsupported(detail) => StoreError::Unsupported { detail },
+        vc_core::VcError::Internal(detail) => StoreError::Storage { detail },
     }
 }
 
@@ -10687,6 +10691,21 @@ mod tests {
             left.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
             ["t-old"]
         );
+    }
+
+    /// A meeting adapter's errors keep the desktop's code on the phone: a
+    /// busy Webex keeps its token for the surfaces to translate, a lost answer
+    /// is a network error, never "internal" (decisions 270, 273).
+    #[test]
+    fn a_meeting_error_keeps_its_code() {
+        assert!(matches!(
+            vc_err(vc_core::VcError::Forbidden("provider-busy: http-429".into())),
+            StoreError::Forbidden { detail } if detail == "provider-busy: http-429"
+        ));
+        assert!(matches!(
+            vc_err(vc_core::VcError::Network("reset".into())),
+            StoreError::Network { .. }
+        ));
     }
 
     /// A provider whose task writes land without a follow-up step.
