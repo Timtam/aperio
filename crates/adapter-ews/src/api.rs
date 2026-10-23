@@ -1987,6 +1987,7 @@ pub(crate) fn build_event_from_new(
     let now = Utc::now();
     let aperio_id = encode_event_id(kind, item_id, change_key.as_deref());
     Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
@@ -2504,6 +2505,7 @@ mod tests {
             .create_async()
             .await;
         let starting = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -2987,6 +2989,7 @@ mod tests {
             .await;
 
         let starting = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3112,6 +3115,7 @@ mod tests {
         let override_id =
             crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start);
         let edit = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3299,6 +3303,7 @@ mod tests {
             crate::mapping::local_midnight_in(d.parse().unwrap(), &chrono::Local).unwrap()
         };
         let edit = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3436,6 +3441,7 @@ mod tests {
             Some(&crate::mapping::DayZone::Tz(auckland)),
         );
         let edit = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3588,6 +3594,7 @@ mod tests {
     fn exception_moved_to_thursday() -> Event {
         let original_start: chrono::DateTime<chrono::Utc> = "2026-10-20T08:00:00Z".parse().unwrap();
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3778,6 +3785,7 @@ mod tests {
     /// [`server_copy`] holds.
     fn saved_single() -> Event {
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

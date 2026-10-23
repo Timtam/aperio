@@ -3551,7 +3551,7 @@ impl Host {
             cal_core::attendee::invitees_of_moved_copy(&mut new_payload);
             let target_calendar_id = event.calendar_id.clone();
             let source_event_id = event.id.clone();
-            let created = self.runtime.block_on(async {
+            let (created, kept) = self.runtime.block_on(async {
                 let created = match self.route(&target_calendar_id)? {
                     None => self
                         .adapter
@@ -3583,17 +3583,16 @@ impl Host {
                 // create → a spurious failure + a duplicate on retry + skipped
                 // sync-log appends). cal-ffi has no logger, so a delete error is
                 // swallowed too; the user resolves any duplicate manually.
-                match self.route(&previous) {
-                    Ok(None) => {
-                        let _ = self.adapter.delete_event(&source_event_id, false).await;
-                    }
-                    Ok(Some(ext)) => {
-                        let _ = ext.delete_event(&source_event_id, false).await;
-                    }
+                let deleted = match self.route(&previous) {
+                    Ok(None) => self.adapter.delete_event(&source_event_id, false).await,
+                    Ok(Some(ext)) => ext.delete_event(&source_event_id, false).await,
                     // Source account gone — nothing to clean up; the move stands.
-                    Err(_) => {}
-                }
-                Ok::<_, StoreError>(created)
+                    Err(_) => Ok(()),
+                };
+                // A busy provider kept the original: the move stands, and the
+                // surfaces say to delete it (decision 277). Said on the row
+                // returned below, never in the sync event.
+                Ok::<_, StoreError>((created, host_core::moves::original_kept(&deleted)))
             })?;
 
             // Carry the grouping over to the copy at the target: a
@@ -3636,6 +3635,10 @@ impl Host {
             // invalidate).
             self.invalidate_events_cache(&previous);
             self.invalidate_events_cache(&target_calendar_id);
+            let mut created = created;
+            if kept {
+                created.original_left_in = Some(previous.clone());
+            }
             return to_json(&created);
         }
 
@@ -4230,18 +4233,18 @@ impl Host {
             // `?` (an erroring `?` here would return Err after a successful create
             // → a spurious failure + a duplicate on retry + skipped sync-log
             // appends). cal-ffi has no logger, so a delete error is swallowed too.
-            match self.route_task_list(&previous) {
-                Ok(None) => {
-                    let _ = self.adapter.delete_task_sync(&source_task_id);
-                }
-                Ok(Some(ext)) => {
-                    let _ = self
-                        .runtime
-                        .block_on(async { ext.delete_task(&source_task_id).await });
-                }
+            let deleted = match self.route_task_list(&previous) {
+                Ok(None) => self.adapter.delete_task_sync(&source_task_id),
+                Ok(Some(ext)) => self
+                    .runtime
+                    .block_on(async { ext.delete_task(&source_task_id).await }),
                 // Source account gone — nothing to clean up; the move stands.
-                Err(_) => {}
-            }
+                Err(_) => Ok(()),
+            };
+            // A busy provider kept the original: the move stands, and the
+            // surfaces say to delete it (decision 277). Said on the row
+            // returned below, never in the sync event.
+            let kept = host_core::moves::original_kept(&deleted);
 
             // Each LOCAL side emits its own event-log entry; external sides stay
             // silent (the provider's own sync mesh propagates the change).
@@ -4265,12 +4268,18 @@ impl Host {
             // `{href}|{uid}` — so a write-through would plant a duplicate);
             // the moved task surfaces on the next refresh. Local sides are
             // invalidate-only regardless (the local store isn't cached).
-            if source_local {
+            if source_local || kept {
+                // A kept original still stands: read the list again, never
+                // remove a row the provider still has.
                 self.invalidate_tasks_cache(&previous);
             } else {
                 self.write_through_task_removal(&previous, &source_task_id);
             }
             self.invalidate_tasks_cache(&target_list_id);
+            let mut created = created;
+            if kept {
+                created.original_left_in = Some(previous.clone());
+            }
             return to_json(&created);
         }
 
@@ -10516,6 +10525,148 @@ mod tests {
         }
     }
 
+    /// A task account whose lists L1 and L2 take a create, and whose delete
+    /// the provider turns away busy.
+    struct BusyDeletes;
+
+    #[async_trait::async_trait]
+    impl cal_core::Adapter for BusyDeletes {
+        async fn authenticate(
+            &self,
+            _: cal_core::Credentials,
+        ) -> cal_core::Result<cal_core::AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[cal_core::Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl cal_core::TasksFeature for BusyDeletes {
+        async fn list_task_lists(&self) -> cal_core::Result<Vec<cal_core::TaskList>> {
+            Ok(Vec::new())
+        }
+        async fn get_tasks(&self, _: &str) -> cal_core::Result<Vec<cal_core::Task>> {
+            Ok(Vec::new())
+        }
+        async fn create_task(
+            &self,
+            list_id: &str,
+            new: cal_core::NewTask,
+        ) -> cal_core::Result<cal_core::Task> {
+            let now = chrono::Utc::now();
+            Ok(cal_core::Task {
+                original_left_in: None,
+                assignees: Vec::new(),
+                id: "t-new".into(),
+                list_id: list_id.into(),
+                title: new.title,
+                description: None,
+                status: cal_core::TaskStatus::Open,
+                priority: cal_core::TaskPriority::Medium,
+                effort: cal_core::TaskEffort::Medium,
+                deadline_reminder_days: None,
+                scheduled_date: None,
+                scheduled_time: None,
+                scheduled_end_time: None,
+                deadline_date: None,
+                deadline_time: None,
+                recurrence: None,
+                resurface_date: None,
+                series_id: None,
+                parent_id: None,
+                section_id: None,
+                color_label: None,
+                reminders: Vec::new(),
+                sound: None,
+                created_at: now,
+                updated_at: now,
+                completed_at: None,
+                etag: None,
+            })
+        }
+        async fn update_task(&self, _: cal_core::Task) -> cal_core::Result<cal_core::Task> {
+            unreachable!()
+        }
+        async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
+            Err(cal_core::Error::provider_busy(
+                cal_core::BusyDetail::TooManyRequests,
+            ))
+        }
+    }
+
+    /// A move whose source delete a busy provider turned away stands, and
+    /// names the list the original stayed in (decision 277; Toni,
+    /// 2026-10-23): never an error, which would invite moving again. The
+    /// source list is read again rather than the original removed from it.
+    #[test]
+    fn a_move_whose_source_delete_is_busy_names_the_list_the_original_stayed_in() {
+        let (_dir, host, _) = open_host();
+        host.registry.register_host_adapter(
+            "acc-x",
+            None,
+            Some(Arc::new(BusyDeletes) as Arc<dyn cal_core::TasksFeature>),
+        );
+        host.registry.note_task_list_route("L1", "acc-x");
+        host.registry.note_task_list_route("L2", "acc-x");
+        // The original, cached in L1 under an account the cache rows hang on.
+        host.db
+            .with_conn(|c| {
+                c.execute(
+                    "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                     VALUES ('acc-x', 'caldav', 'Work', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+            })
+            .unwrap();
+        let original: cal_core::Task = serde_json::from_value(serde_json::json!({
+            "id": "t-old", "list_id": "L1", "title": "Einkaufen", "description": null,
+            "status": "open", "priority": "medium", "scheduled_date": null,
+            "scheduled_time": null, "scheduled_end_time": null, "deadline_date": null,
+            "deadline_time": null, "recurrence": null, "resurface_date": null,
+            "series_id": null, "parent_id": null, "section_id": null, "color_label": null,
+            "reminders": [], "sound": null, "deadline_reminder_days": null,
+            "created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z",
+            "completed_at": null, "etag": null
+        }))
+        .unwrap();
+        host.cache
+            .replace_list_tasks("acc-x", "L1", &[original])
+            .unwrap();
+        let before = host
+            .cache
+            .refresh_generation("acc-x", SyncScope::Tasks, "L1");
+        let task = serde_json::json!({
+            "id": "t-old", "list_id": "L2", "title": "Einkaufen", "description": null,
+            "status": "open", "priority": "medium", "scheduled_date": null,
+            "scheduled_time": null, "scheduled_end_time": null, "deadline_date": null,
+            "deadline_time": null, "recurrence": null, "resurface_date": null,
+            "series_id": null, "parent_id": null, "section_id": null, "color_label": null,
+            "reminders": [], "sound": null, "deadline_reminder_days": null,
+            "created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z",
+            "completed_at": null, "etag": null
+        });
+        let moved = host
+            .update_task_json(task.to_string(), Some("L1".into()))
+            .expect("the move stands");
+        let moved: serde_json::Value = serde_json::from_str(&moved).unwrap();
+        assert_eq!(moved["id"], "t-new");
+        assert_eq!(moved["original_left_in"], "L1");
+        assert!(
+            host.cache
+                .refresh_generation("acc-x", SyncScope::Tasks, "L1")
+                > before,
+            "the source list is read again"
+        );
+        // The original still stands at the provider: its row is not removed.
+        let left = host.cache.read_tasks("acc-x", "L1").unwrap();
+        assert_eq!(
+            left.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["t-old"]
+        );
+    }
+
     /// Decisions 203 and 210 on the phone: a create that failed may still have
     /// written at the provider — a series taken back, one that may stand — so
     /// its calendar's cache is invalidated on the way out, as after a create
@@ -10819,6 +10970,7 @@ mod tests {
                 .unwrap()
                 .with_timezone(&chrono::Utc);
             Event {
+                original_left_in: None,
                 keep_attendees: false,
                 keep_fields: Vec::new(),
                 clear_attendees: false,

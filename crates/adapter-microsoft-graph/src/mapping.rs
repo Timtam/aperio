@@ -609,6 +609,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
     );
 
     Ok(Some(Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
@@ -1358,6 +1359,7 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
     let composite_id = format!("{}|{}", list_id, entry.id);
 
     Ok(Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id: composite_id,
         list_id: list_id.to_string(),
@@ -2640,6 +2642,7 @@ mod tests {
     fn task_to_body_emits_due_date_and_recurrence() {
         use cal_core::{RecurrenceEnd, RecurrenceFrequency, TaskRecurrence, Weekday};
         let task = Task {
+            original_left_in: None,
             assignees: Vec::new(),
             id: "L|T".into(),
             list_id: "L".into(),

@@ -32,6 +32,7 @@ pub mod event_write;
 pub mod free_busy;
 pub mod logging;
 pub mod meetings;
+pub mod moves;
 pub mod overrides;
 pub mod paths;
 pub mod plugin_channel;

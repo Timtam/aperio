@@ -824,6 +824,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     });
 
     Task {
+        original_left_in: None,
         assignees: extract_assignees(entry.assignee_id),
         id: entry.id,
         list_id: list_id.to_string(),
@@ -1589,6 +1590,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            original_left_in: None,
             scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
@@ -1649,6 +1651,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            original_left_in: None,
             scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
@@ -1711,6 +1714,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            original_left_in: None,
             scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
@@ -1763,6 +1767,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            original_left_in: None,
             scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
@@ -2035,6 +2040,7 @@ mod tests {
         // Unassigned ⇒ assignee_id present as null so the update
         // unassigns rather than leaving a stale assignee.
         let task = Task {
+            original_left_in: None,
             scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),

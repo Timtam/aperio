@@ -51,6 +51,7 @@ fn wide() -> DateRange {
 
 fn event(id: &str, start_h: u32, end_h: u32) -> Event {
     Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
@@ -85,6 +86,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
 
 fn task(id: &str) -> Task {
     Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id: id.into(),
         list_id: LIST.into(),

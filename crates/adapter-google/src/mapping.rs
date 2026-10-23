@@ -698,6 +698,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
     }
 
     Ok(Some(Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
@@ -1321,6 +1322,7 @@ mod tests {
         // A zoned recurring master writes its IANA zone so Google expands it
         // DST-correctly on its side (parity with the read path).
         let ev = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -1366,6 +1368,7 @@ mod tests {
     fn event_to_body_sends_no_zone_for_an_all_day_series() {
         let midnight = Local.with_ymd_and_hms(2026, 10, 19, 0, 0, 0).unwrap();
         let ev = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -1662,6 +1665,7 @@ mod tests {
     #[test]
     fn event_to_body_serialises_recurrence_with_exdates() {
         let ev = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

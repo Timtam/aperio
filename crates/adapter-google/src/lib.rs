@@ -897,6 +897,7 @@ mod delta_tests {
     /// A series head, cut short: what splitting a series writes.
     fn truncated_master() -> Event {
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

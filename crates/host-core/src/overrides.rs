@@ -901,6 +901,7 @@ mod tests {
         start: chrono::DateTime<chrono::Utc>,
     ) -> cal_core::Event {
         cal_core::Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -954,6 +955,7 @@ mod tests {
         assert_eq!(all[0].color_label_id, "label-3");
 
         let mk = |id: &str| cal_core::Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -1245,6 +1247,7 @@ mod tests {
         repo.set_event_color_label("dav:evt", "lbl-old").unwrap();
 
         let mut events = vec![cal_core::Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

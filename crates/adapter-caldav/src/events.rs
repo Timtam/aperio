@@ -197,6 +197,7 @@ pub async fn create_event(
     let now = Utc::now();
 
     Ok(Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
@@ -2226,6 +2227,7 @@ END:VCALENDAR\r
     /// already (so it carries an ETag), with no reminders of its own.
     fn sample_existing_event(cal_url: &Url) -> Event {
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3224,6 +3226,7 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 
         // The truncated master, serialised the same way update_event would.
         let master = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

@@ -3186,6 +3186,7 @@ mod server_zone_tests {
         let adapter = EwsAdapter::new(server.url(), alice());
         let stamp: chrono::DateTime<chrono::Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
         let series = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3278,6 +3279,7 @@ mod server_zone_tests {
             crate::mapping::local_midnight_in(d.parse().unwrap(), &chrono::Local).unwrap()
         };
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

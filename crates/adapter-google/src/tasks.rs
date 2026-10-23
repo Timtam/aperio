@@ -314,6 +314,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     }
 
     Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id: entry.id,
         list_id: list_id.to_string(),

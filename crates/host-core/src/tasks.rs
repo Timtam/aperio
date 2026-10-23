@@ -213,6 +213,7 @@ mod tests {
 
     fn base_task(id: &str) -> Task {
         Task {
+            original_left_in: None,
             id: id.into(),
             list_id: LIST.into(),
             title: "Bins out".into(),

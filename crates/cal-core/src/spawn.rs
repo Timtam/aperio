@@ -412,6 +412,7 @@ mod tests {
 
     fn template(recurrence: TaskRecurrence, completed: NaiveDate) -> Task {
         Task {
+            original_left_in: None,
             assignees: Vec::new(),
             id: "t".into(),
             list_id: "L".into(),

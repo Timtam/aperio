@@ -385,6 +385,7 @@ pub async fn create_task(
     let etag = expect_write(&response)?;
     let now = Utc::now();
     Ok(Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id: uid,
         list_id: list_url.to_string(),
@@ -762,6 +763,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>, raw: Option<&str>) -
     }
 
     Some(Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id: uid,
         list_id: list_id.to_string(),

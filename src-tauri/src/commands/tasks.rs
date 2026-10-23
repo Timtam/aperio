@@ -947,7 +947,7 @@ pub async fn update_task(
             sound: task.sound.clone(),
         };
 
-        let created = if target_account == LOCAL_ID {
+        let mut created = if target_account == LOCAL_ID {
             adapter.create_task(&task.list_id, new_payload).await?
         } else {
             let Some(ext) = registry.task_adapter(&target_account) else {
@@ -965,25 +965,25 @@ pub async fn update_task(
         // the duplicate. A leftover row in the source list is
         // the lesser evil.
         let delete_result = if source_account == LOCAL_ID {
-            adapter
-                .delete_task(&task.id)
-                .await
-                .map_err(CommandError::from)
+            adapter.delete_task(&task.id).await
         } else if let Some(ext) = registry.task_adapter(&source_account) {
-            ext.delete_task(&task.id).await.map_err(CommandError::from)
+            ext.delete_task(&task.id).await
         } else {
             Ok(())
         };
-        if let Err(err) = delete_result {
+        if let Err(err) = &delete_result {
             tracing::warn!(
                 task_id = %task.id,
                 source = %previous,
                 target = %task.list_id,
-                code = %err.code,
-                message = %err.message,
+                %err,
                 "delete from source task list failed after move; duplicate may exist",
             );
         }
+        // A busy provider kept the original: the move stands, and the
+        // surfaces say to delete it (decision 277). Said on the row returned
+        // below, never in the sync event.
+        let kept = host_core::moves::original_kept(&delete_result);
 
         // Sync-event emission: same shape as the event move —
         // each LOCAL side emits its own event, external sides
@@ -1010,10 +1010,19 @@ pub async fn update_task(
             let _ = cache.invalidate(&target_account, SyncScope::Tasks, &task.list_id);
         }
         if source_account != LOCAL_ID {
-            let _ = cache.write_through_task_removal(&source_account, &previous, &task.id);
+            if kept {
+                // The original still stands: read the list again, never
+                // remove a row the provider still has.
+                let _ = cache.invalidate(&source_account, SyncScope::Tasks, &previous);
+            } else {
+                let _ = cache.write_through_task_removal(&source_account, &previous, &task.id);
+            }
         }
 
         scheduler.invalidate();
+        if kept {
+            created.original_left_in = Some(previous.clone());
+        }
         return Ok(created);
     }
 

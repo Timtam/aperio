@@ -782,6 +782,7 @@ mod tests {
     fn fake_event(id: &str, calendar_id: &str) -> Event {
         let now = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -817,6 +818,7 @@ mod tests {
     fn fake_task(id: &str, list_id: &str) -> Task {
         let now = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
         Task {
+            original_left_in: None,
             assignees: Vec::new(),
             id: id.into(),
             list_id: list_id.into(),

@@ -755,7 +755,7 @@ pub async fn update_event(
             new_payload.color_hex = resolve_color_hex(&adapter, new_payload.color_label.as_ref())?;
         }
 
-        let created = if target_account == LOCAL_ID {
+        let mut created = if target_account == LOCAL_ID {
             adapter
                 .create_event(&event.calendar_id, new_payload)
                 .await?
@@ -813,27 +813,27 @@ pub async fn update_event(
                 // still exists at the target, so never email attendees here.
                 .delete_event(&event.id, false)
                 .await
-                .map_err(CommandError::from)
         } else if let Some(ext) = registry.calendar_adapter(&source_account) {
-            ext.delete_event(&event.id, false)
-                .await
-                .map_err(CommandError::from)
+            ext.delete_event(&event.id, false).await
         } else {
             // Source isn't routable (account was removed between
             // the dialog opening and save). Treat as a "no
             // cleanup needed" — the create on the target stands.
             Ok(())
         };
-        if let Err(err) = delete_result {
+        if let Err(err) = &delete_result {
             tracing::warn!(
                 event_id = %event.id,
                 source = %previous,
                 target = %event.calendar_id,
-                code = %err.code,
-                message = %err.message,
+                %err,
                 "delete from source calendar failed after move; duplicate may exist",
             );
         }
+        // A busy provider kept the original: the move stands, and the
+        // surfaces say to delete it (decision 277). Said on the row returned
+        // below, never in the sync event.
+        let kept = host_core::moves::original_kept(&delete_result);
 
         // Sync-event emission for cross-adapter moves. A move is
         // create-on-target + delete-from-source under the hood,
@@ -864,6 +864,9 @@ pub async fn update_event(
         }
 
         scheduler.invalidate();
+        if kept {
+            created.original_left_in = Some(previous.clone());
+        }
         return Ok(created);
     }
 

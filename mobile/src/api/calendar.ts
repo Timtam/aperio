@@ -85,6 +85,10 @@ export interface CalendarEvent {
   /** Transient result of an update: deleted occurrences of the series that
    *  came back and could not be deleted again (decision 253), as instants. */
   deletions_not_restored?: string[];
+  /** Transient result of a move to another calendar: the calendar the
+   *  original stayed in, because a busy provider turned its delete away
+   *  (decision 277). Set only on the row a move returns. */
+  original_left_in?: string;
   created_at: string;
   updated_at: string;
   etag: string | null;

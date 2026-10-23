@@ -1590,6 +1590,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     }
 
     Task {
+        original_left_in: None,
         assignees: entry
             .assignees
             .unwrap_or_default()
@@ -2906,6 +2907,7 @@ mod tests {
 
     fn task_fixture(id: &str, list_id: &str, section_id: Option<&str>) -> Task {
         Task {
+            original_left_in: None,
             assignees: Vec::new(),
             id: id.into(),
             list_id: list_id.into(),
