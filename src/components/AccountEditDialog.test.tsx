@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import type { Account } from '../api/types';
 
@@ -101,5 +101,32 @@ describe('AccountEditDialog', () => {
       'account_form_spec',
       expect.objectContaining({ adapterKind: 'caldav', lang: 'de' }),
     );
+  });
+
+  it('says a busy provider when the probe is turned away, never "[object Object]"', async () => {
+    // A Tauri command rejects with a plain {code, message} object, which the
+    // dialog used to print as "[object Object]" (decision 273).
+    const normal = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === 'test_account'
+        ? Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' })
+        : normal(cmd),
+    );
+    try {
+      render(
+        <AccountEditDialog isOpen account={ACCOUNT} onClose={() => {}} onSaved={() => {}} />,
+      );
+      await waitFor(() => expect(screen.getByLabelText('Server-URL')).toBeTruthy());
+      fireEvent.change(screen.getByLabelText('Passwort'), { target: { value: 'geheim' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Verbindung prüfen' }));
+      // A probe is a read: never "Nothing was changed".
+      await screen.findByText(
+        'Der Anbieter ist gerade ausgelastet. Versuche es später noch einmal.',
+      );
+      expect(document.body.textContent).not.toContain('[object Object]');
+      expect(document.body.textContent).not.toContain('Es wurde nichts geändert');
+    } finally {
+      invokeMock.mockImplementation(normal);
+    }
   });
 });

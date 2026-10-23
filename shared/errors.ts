@@ -2,6 +2,7 @@ import {
   codedError,
   errorMessageText,
   eventWriteErrorMessage,
+  eventWriteFailureReason,
   eventWriteLeftover,
   eventWriteRefusal,
   exceptionsLossOf,
@@ -101,4 +102,21 @@ export function writeErrorMessage(err: unknown, t: Translate): string {
   const refusal = eventWriteRefusal(err);
   if (refusal?.refusal === 'deletions-not-kept') return eventWriteErrorMessage(err, t);
   return refusal ? t(refusal.key, { detail: refusal.detail }) : errorMessage(err);
+}
+
+/**
+ * The sentence for a meeting that could not be created, removed or taken over
+ * (decision 273). Where part of it landed — the meeting exists, the event does
+ * not carry it — the leftover's own sentence says what stands; anything else
+ * is its reason in the meeting's frame, and a busy provider adds "Try again
+ * later." (decision 272).
+ */
+export function meetingFailureSentence(err: unknown, t: Translate): string {
+  if (eventWriteLeftover(err)) return eventWriteErrorMessage(err, t);
+  const sentence = t('conferencing.meetingFailed', {
+    message: eventWriteFailureReason(err, t),
+  }).trim();
+  if (!isProviderBusy(err)) return sentence;
+  const ended = /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
+  return `${ended} ${t('common.tryAgainLater')}`;
 }

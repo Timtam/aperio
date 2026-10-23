@@ -592,6 +592,7 @@
       "save": "Speichern",
       "create": "Anlegen",
       "created": "Kontakt {{name}} angelegt.",
+      "createdWithoutPhoto": "Kontakt {{name}} angelegt, aber ohne Foto: Das Foto ließ sich nicht speichern. Füge es später noch einmal hinzu.",
       "updated": "Kontakt {{name}} gespeichert.",
       "deleted": "Kontakt {{name}} gelöscht.",
       "deleteTitle": "Kontakt löschen?",
@@ -2540,7 +2541,8 @@
       "refreshing": "Wird aktualisiert …",
       "refreshAria": "Kontakte jetzt abgleichen",
       "lastSynced": "Letzter Abgleich: {{time}}",
-      "neverSynced": "Noch kein Abgleich durchgeführt."
+      "neverSynced": "Noch kein Abgleich durchgeführt.",
+      "syncFailed": "Der Abgleich der Kontakte ließ sich nicht starten: {{reason}}"
     }
   },
   "widgets": {

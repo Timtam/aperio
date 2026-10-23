@@ -8007,17 +8007,17 @@ impl Host {
     ) -> Result<String, StoreError> {
         let new: cal_core::NewContact = from_json("contact", &contact_json)?;
         let route = self.route_contact_list(&list_id)?;
-        let contact = self
-            .runtime
-            .block_on(async {
-                match route {
-                    None => self.adapter.create_contact(&list_id, new).await,
-                    Some(ext) => ext.create_contact(&list_id, new).await,
-                }
-            })
-            .map_err(map_store_err)?;
-        self.invalidate_contacts_cache(&contact.list_id);
-        to_json(&contact)
+        let created = self.runtime.block_on(async {
+            match route {
+                None => self.adapter.create_contact(&list_id, new).await,
+                Some(ext) => ext.create_contact(&list_id, new).await,
+            }
+        });
+        // After a failure too: a contact or group may stand without one of its
+        // steps (decision 273), and the next read shows what the provider
+        // holds.
+        self.invalidate_contacts_cache(&list_id);
+        to_json(&created.map_err(map_store_err)?)
     }
 
     /// Update a contact from a JSON `cal_core::Contact`; returns the updated
@@ -8025,20 +8025,19 @@ impl Host {
     pub fn update_contact_json(&self, contact_json: String) -> Result<String, StoreError> {
         let contact: cal_core::Contact = from_json("contact", &contact_json)?;
         let route = self.route_contact_list(&contact.list_id)?;
-        let updated = self
-            .runtime
-            .block_on(async {
-                match route {
-                    None => self.adapter.update_contact(contact).await,
-                    Some(ext) => ext.update_contact(contact).await,
-                }
-            })
-            .map_err(map_store_err)?;
+        let list_id = contact.list_id.clone();
+        let updated = self.runtime.block_on(async {
+            match route {
+                None => self.adapter.update_contact(contact).await,
+                Some(ext) => ext.update_contact(contact).await,
+            }
+        });
         // The update API carries no previous list (a contact can't move between
         // books in one call here, unlike a task/event move), so only the
-        // contact's own list needs invalidating.
-        self.invalidate_contacts_cache(&updated.list_id);
-        to_json(&updated)
+        // contact's own list needs invalidating — after a failure too, as a
+        // save may have landed in part (decision 273).
+        self.invalidate_contacts_cache(&list_id);
+        to_json(&updated.map_err(map_store_err)?)
     }
 
     /// Delete a contact, routed by the optional `list_id` (omit → local). Callers

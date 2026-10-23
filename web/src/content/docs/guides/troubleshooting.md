@@ -348,6 +348,9 @@ not everything about it. Aperio then says the change was only partly saved,
 and the message only closes: saving again would create the item a second
 time. The view reloads and shows what the provider holds.
 
+When the provider does not take a new contact's photo, the contact stands
+without it, and Aperio says so.
+
 When you create a task with subtasks and one of the subtasks fails, the
 editor stays on the created task: the subtasks not yet created stay in its
 list, and saving creates only those.

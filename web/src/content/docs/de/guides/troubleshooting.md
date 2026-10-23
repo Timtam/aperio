@@ -376,6 +376,9 @@ dann, dass die Änderung nur zum Teil gespeichert ist, und die Meldung lässt
 sich nur schließen: Erneutes Speichern legte das Element ein zweites Mal an.
 Die Ansicht lädt neu und zeigt, was beim Anbieter steht.
 
+Nimmt der Anbieter das Foto eines neuen Kontakts nicht an, steht der Kontakt
+ohne Foto, und Aperio sagt das.
+
 Legst du eine Aufgabe mit Unteraufgaben an und scheitert eine Unteraufgabe,
 bleibt der Editor auf der angelegten Aufgabe: Die noch nicht angelegten
 Unteraufgaben stehen weiter in seiner Liste, und Speichern legt nur diese an.

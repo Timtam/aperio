@@ -16,16 +16,17 @@ import {
   deleteContact as apiDeleteContact,
   deleteContactPhoto as apiDeleteContactPhoto,
   getContactPhoto as apiGetContactPhoto,
-  isCommandError,
   setContactPhoto as apiSetContactPhoto,
   updateContact as apiUpdateContact,
 } from '../api/client';
 import {
   CONTACT_LABELS,
   deriveDisplayName,
+  eventWriteLeftover,
   fromContactValues,
   knownLabel,
   toContactValues,
+  writeErrorMessage,
   type ContactValue,
   type KnownContactLabel,
 } from '@aperio/shared';
@@ -34,6 +35,8 @@ import type { Contact, ContactAddress, ContactPhoto } from '../api/types';
 import { getContactListDisplayName } from '../intl/contactList';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
 
@@ -267,6 +270,9 @@ export function ContactDialog({
   const announce = useAnnouncer();
   const { contactLists } = useCalendarStore();
   const { invalidateData } = useDialogState();
+  // What the editor says in place of the form once a save landed in part:
+  // saving again would create the contact or group twice (273).
+  const { notice, showNotice } = useCloseOnlyNotice();
 
   const isEdit = contact !== null;
   const titleId = useId();
@@ -588,11 +594,23 @@ export function ContactDialog({
           // lets the adapter write the avatar in the same logical
           // operation (one local INSERT, one EWS CreateItem +
           // CreateAttachment, one CardDAV PUT with PHOTO embedded).
-          await apiCreateContact({
+          const created = await apiCreateContact({
             list_id: form.listId,
             ...payload,
             photo: photo,
           });
+          // A provider that stores the photo in a step of its own (Google)
+          // keeps the contact when that step fails, and says so by the row
+          // it returns: said, and only closed (273).
+          if (photo && !created.has_photo) {
+            invalidateData();
+            showNotice(
+              t('dialogs.contact.createdWithoutPhoto', {
+                name: payload.display_name,
+              }),
+            );
+            return;
+          }
           announce(
             t('dialogs.contact.created', { name: payload.display_name }),
           );
@@ -600,11 +618,15 @@ export function ContactDialog({
         invalidateData();
         onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          setError(String(err));
+        // A contact or group that stands without one of its steps — a
+        // group's members (273): said in place of the form, which only
+        // closes, and the data reloads.
+        if (eventWriteLeftover(err)) {
+          invalidateData();
+          showNotice(writeErrorMessage(err, t));
+          return;
         }
+        setError(writeErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
@@ -618,6 +640,7 @@ export function ContactDialog({
       announce,
       invalidateData,
       onClose,
+      showNotice,
     ],
   );
 
@@ -633,28 +656,37 @@ export function ContactDialog({
       invalidateData();
       onClose();
     } catch (err) {
-      if (isCommandError(err)) {
-        setError(`${err.code}: ${err.message}`);
-      } else {
-        setError(String(err));
-      }
+      setError(writeErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }
   }, [contact, t, announce, invalidateData, onClose]);
+
+  const dialogTitle = t(
+    viewOnly
+      ? 'dialogs.contact.viewTitle'
+      : isEdit
+        ? 'dialogs.contact.editTitle'
+        : 'dialogs.contact.createTitle',
+  );
+
+  if (notice) {
+    return (
+      <CloseOnlyNotice
+        title={dialogTitle}
+        sentence={notice}
+        onClose={onClose}
+        className="modal--form modal--contact"
+      />
+    );
+  }
 
   return (
     <>
       <Modal
         isOpen={isOpen}
         onClose={onClose}
-        title={t(
-          viewOnly
-            ? 'dialogs.contact.viewTitle'
-            : isEdit
-              ? 'dialogs.contact.editTitle'
-              : 'dialogs.contact.createTitle',
-        )}
+        title={dialogTitle}
         className="modal--form modal--contact"
         dismissOnBackdrop={false}
       >

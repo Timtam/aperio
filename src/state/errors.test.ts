@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   errorMessage,
+  meetingFailureSentence,
   readErrorMessage,
   readFailureReason,
   readFailureSentence,
@@ -78,6 +79,30 @@ describe('a read that failed', () => {
     expect(
       readFailureSentence('dialogs.event.availability.failed', new Error('kaputt'), t),
     ).toBe('Die Verfügbarkeit ließ sich nicht prüfen: kaputt.');
+  });
+});
+
+describe('meetingFailureSentence', () => {
+  it('says a busy provider in the meeting frame, and to try again later', () => {
+    for (const err of carriers('forbidden', 'provider-busy: http-429')) {
+      expect(meetingFailureSentence(err, t)).toBe(
+        'Das Meeting konnte nicht bearbeitet werden: der Anbieter ist gerade ausgelastet. Versuche es später noch einmal.',
+      );
+    }
+  });
+
+  it('says what stands in full when part of it landed', () => {
+    for (const err of carriers('network', 'partly-saved: event')) {
+      expect(meetingFailureSentence(err, t)).toBe(
+        'Die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist. Prüfe sie und versuche den Rest später noch einmal.',
+      );
+    }
+  });
+
+  it('keeps what the host said for anything else', () => {
+    expect(meetingFailureSentence({ code: 'network', message: 'offline' }, t)).toBe(
+      'Das Meeting konnte nicht bearbeitet werden: network: offline',
+    );
   });
 });
 

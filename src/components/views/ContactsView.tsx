@@ -10,12 +10,11 @@ import { useTranslation } from 'react-i18next';
 
 import {
   deleteContact as apiDeleteContact,
-  isCommandError,
   searchContacts as apiSearchContacts,
   showContextMenu,
   type ContextMenuItemRequest,
 } from '../../api/client';
-import { primaryChannelValue } from '@aperio/shared';
+import { primaryChannelValue, writeErrorMessage } from '@aperio/shared';
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
@@ -204,7 +203,7 @@ export function ContactsView() {
       invalidateData();
       setSearchNonce((n) => n + 1);
     } catch (err) {
-      announce(isCommandError(err) ? `${err.code}: ${err.message}` : String(err));
+      announce(writeErrorMessage(err, t));
     }
     // The confirmation took focus out of the list; the list is where the user
     // was and where the next row now sits. `focusIndex` is clamped by the

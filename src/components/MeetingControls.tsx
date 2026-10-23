@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { meetingFailureSentence } from '@aperio/shared';
 
 import { FocusableNote } from '../a11y/FocusableNote';
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -8,7 +9,6 @@ import {
   attachMeeting,
   detachMeeting,
   inspectEventMeeting,
-  isCommandError,
   listAccounts,
   type EventMeetingInspection,
 } from '../api/client';
@@ -132,9 +132,9 @@ export function MeetingControls({
       onEventChanged(attached.event);
       announce(t('conferencing.meetingCreated'));
     } catch (err) {
-      const message = isCommandError(err) ? err.message : String(err);
-      setError(message);
-      announce(t('conferencing.meetingFailed', { message }));
+      const sentence = meetingFailureSentence(err, t);
+      setError(sentence);
+      announce(sentence);
     } finally {
       setBusy(false);
     }
@@ -155,9 +155,9 @@ export function MeetingControls({
       if (saved) onEventChanged(saved);
       announce(t('conferencing.meetingRemoved'));
     } catch (err) {
-      const message = isCommandError(err) ? err.message : String(err);
-      setError(message);
-      announce(t('conferencing.meetingFailed', { message }));
+      const sentence = meetingFailureSentence(err, t);
+      setError(sentence);
+      announce(sentence);
     } finally {
       setBusy(false);
     }
@@ -179,9 +179,9 @@ export function MeetingControls({
       setFound({ ...found, binding });
       announce(t('conferencing.meetingAdopted'));
     } catch (err) {
-      const message = isCommandError(err) ? err.message : String(err);
-      setError(message);
-      announce(t('conferencing.meetingFailed', { message }));
+      const sentence = meetingFailureSentence(err, t);
+      setError(sentence);
+      announce(sentence);
     } finally {
       setBusy(false);
     }

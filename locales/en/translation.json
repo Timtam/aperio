@@ -592,6 +592,7 @@
       "save": "Save",
       "create": "Create",
       "created": "Contact {{name}} created.",
+      "createdWithoutPhoto": "Contact {{name}} created, but without its photo: the photo could not be saved. Add it again later.",
       "updated": "Contact {{name}} saved.",
       "deleted": "Contact {{name}} deleted.",
       "deleteTitle": "Delete contact?",
@@ -2540,7 +2541,8 @@
       "refreshing": "Refreshing …",
       "refreshAria": "Sync contacts now",
       "lastSynced": "Last synced: {{time}}",
-      "neverSynced": "No sync run yet."
+      "neverSynced": "No sync run yet.",
+      "syncFailed": "The contact sync could not be started: {{reason}}"
     }
   },
   "widgets": {

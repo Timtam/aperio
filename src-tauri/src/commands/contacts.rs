@@ -262,11 +262,11 @@ pub async fn create_contact(
             message: format!("contact list '{}' is not routable", request.list_id),
         });
     };
-    let created = ext
-        .create_contact(&request.list_id, request.contact)
-        .await?;
+    let created = ext.create_contact(&request.list_id, request.contact).await;
+    // After a failure too: a contact or group may stand without one of its
+    // steps (decision 273), and the next read shows what the provider holds.
     let _ = cache.invalidate(&account, SyncScope::Contacts, &request.list_id);
-    Ok(created)
+    Ok(created?)
 }
 
 #[tauri::command]
@@ -289,9 +289,10 @@ pub async fn update_contact(
         });
     };
     let list_id = contact.list_id.clone();
-    let updated = ext.update_contact(contact).await?;
+    let updated = ext.update_contact(contact).await;
+    // After a failure too: a save may have landed in part (decision 273).
     let _ = cache.invalidate(&account, SyncScope::Contacts, &list_id);
-    Ok(updated)
+    Ok(updated?)
 }
 
 /// Delete a contact by id.
