@@ -933,7 +933,14 @@ impl CaldavAdapter {
 /// (decision 144) — must be told that nothing was written.
 fn to_update_error(err: CaldavError) -> CoreError {
     match err {
-        CaldavError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
+        // A busy server answers as itself (decision 270), never as the server
+        // refusing the change: `turned_down_by_status` says which comes first.
+        CaldavError::Http { status, message }
+            if matches!(
+                cal_core::WriteRefusal::turned_down_by_status(status),
+                Some(cal_core::WriteRefusal::ServerRefused)
+            ) =>
+        {
             tracing::warn!(status, %message, "the server refused the update");
             CoreError::Forbidden(
                 cal_core::WriteRefusal::ServerRefused.message(&format!("HTTP {status}")),
@@ -943,9 +950,32 @@ fn to_update_error(err: CaldavError) -> CoreError {
     }
 }
 
+/// Whether the server turned a request away because it is busy, and how
+/// (decision 270): HTTP 429, which did nothing. A replay's 429 never gets
+/// here: it may be about a first attempt that landed, and reads as unsure
+/// (`http::WriteAnswer::settled`).
+pub(crate) fn busy_detail(err: &CaldavError) -> Option<cal_core::BusyDetail> {
+    match err {
+        CaldavError::Http { status, .. }
+            if matches!(
+                cal_core::WriteRefusal::turned_down_by_status(*status),
+                Some(cal_core::WriteRefusal::ProviderBusy)
+            ) =>
+        {
+            Some(cal_core::BusyDetail::TooManyRequests)
+        }
+        _ => None,
+    }
+}
+
 /// Translate a CalDAV-specific error into the shared `cal_core::Error`
 /// shape so the rest of the app can pattern-match it uniformly.
 fn to_core_error(err: CaldavError) -> CoreError {
+    // Throttling: nothing was done, try later (decision 270).
+    if let Some(detail) = busy_detail(&err) {
+        tracing::debug!(detail = detail.word(), %err, "the server is busy");
+        return CoreError::provider_busy(detail);
+    }
     match err {
         CaldavError::Network(msg) => CoreError::Network(msg),
         CaldavError::Http { status, message } => match status {
@@ -1162,6 +1192,9 @@ impl CalendarFeature for CaldavAdapter {
             .await
             {
                 Ok(()) => return Ok(()),
+                // A busy server ends the walk (decision 270): asking the next
+                // calendar now meets the same throttle, and nothing was done.
+                Err(err) if busy_detail(&err).is_some() => return Err(to_core_error(err)),
                 Err(err) => {
                     // 404 just means "this event lives in a different
                     // calendar" — keep walking. Anything else we
@@ -1237,7 +1270,7 @@ impl CalendarFeature for CaldavAdapter {
             let outcome =
                 events::delete_event(&self.http, &cal_url, event_id, None, &self.credentials).await;
             if walk.step(outcome) {
-                return Ok(());
+                break;
             }
         }
         walk.finish(format!("event '{event_id}' not found in any calendar"))
@@ -1444,7 +1477,7 @@ impl TasksFeature for CaldavAdapter {
             let outcome =
                 tasks::delete_task(&self.http, &url, task_id, None, &self.credentials).await;
             if walk.step(outcome) {
-                return Ok(());
+                break;
             }
         }
         walk.finish(format!("task '{task_id}' not found in any list"))
@@ -1617,6 +1650,8 @@ impl ContactsFeature for CaldavAdapter {
                 .await
             {
                 Ok(()) => return Ok(()),
+                // A busy server ends the walk (decision 270).
+                Err(err) if busy_detail(&err).is_some() => return Err(to_core_error(err)),
                 Err(err) => {
                     if matches!(err, CaldavError::Http { status: 404, .. }) {
                         continue;
@@ -1715,11 +1750,19 @@ mod update_refusal_tests {
     use super::*;
 
     /// A status with which the server turned the update down whole is a
-    /// refusal (decision 144); a server failure and the named statuses keep
-    /// their error.
+    /// refusal (decision 144), a 429 a busy provider (270); a server failure
+    /// and the named statuses keep their error.
     #[test]
     fn an_update_the_server_turned_down_is_a_refusal() {
-        for status in [400, 413, 415, 422, 429, 507] {
+        assert_eq!(
+            to_update_error(CaldavError::Http {
+                status: 429,
+                message: "slow down".into(),
+            })
+            .message(),
+            "provider-busy: http-429"
+        );
+        for status in [400, 413, 415, 422, 507] {
             match to_update_error(CaldavError::Http {
                 status,
                 message: "no".into(),

@@ -204,7 +204,9 @@ pub async fn proppatch_displayname(
         .request(method, collection_url.clone())
         .headers(headers)
         .body(body)
-        .send_retrying()
+        .send_write()
+        .await?
+        .settled(collection_url.as_str())
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {

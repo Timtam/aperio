@@ -516,6 +516,12 @@ Siehe DESIGN §4.2.
         zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
         prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
         ist; eine zum Teil gespeicherte Aufgabe schließt den Editor.
+      - [ ] **CardDAV: Kontakt löschen trifft nur das erste Adressbuch**
+        (gefunden in PR 7): `contacts::delete_contact` liest 404 als Erfolg,
+        und der Lauf über alle Adressbücher in `lib.rs::delete_contact` endet
+        beim ersten `Ok`. Liegt der Kontakt im zweiten Adressbuch, sagt
+        Aperio „gelöscht“ und löscht nichts. Wie bei Terminen und Aufgaben
+        sollte das Löschen ein `DeleteOutcome` liefern und der Lauf weitergehen.
       - [ ] **Automatische Schreibvorgänge sagen ihr Scheitern nicht**
         (gefunden in PR 7, Entscheidung 273): Was eine Person auslöst, sagt
         jetzt jeden Fehlschlag (Tagesstart-Knöpfe, Strg+D, Ziehen, Rückgängig

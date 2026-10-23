@@ -175,13 +175,19 @@ pub async fn create_contact(
     // resource already lives at this UID the server answers 412
     // and we don't accidentally overwrite somebody else's row.
     headers.insert(IF_NONE_MATCH, HeaderValue::from_static("*"));
-    let response = client
+    let answer = client
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send_retrying()
+        .send_write()
         .await?;
-    let etag = expect_write(&response)?;
+    // A replay answered 412 under `If-None-Match: *`: the resource exists,
+    // made by the first attempt. Its ETag is unknown until the next read.
+    let etag = if answer.replayed && answer.response.status() == StatusCode::PRECONDITION_FAILED {
+        None
+    } else {
+        expect_write(&answer.settled(resource.as_str()).await?)?
+    };
     let now = chrono::Utc::now();
     // Mint the composite id so subsequent updates / deletes find
     // the same resource path the server stored under. We use the
@@ -245,6 +251,10 @@ pub async fn update_contact(
     let preserved_photo = if contact.has_photo {
         match fetch_vcard_body(client, &resource, credentials).await {
             Ok(body) => parse_vcard_photo(&body),
+            // A busy server does nothing now, so nothing is sent: written
+            // without the photo, the PUT would wipe the avatar for a
+            // throttled read (decision 270).
+            Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
             Err(err) => {
                 // Don't fail the whole update on a transient
                 // photo-fetch hiccup; log and proceed without
@@ -275,7 +285,9 @@ pub async fn update_contact(
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send_retrying()
+        .send_write()
+        .await?
+        .settled(resource.as_str())
         .await?;
     let new_etag = expect_write(&response)?;
     Ok(Contact {
@@ -432,7 +444,9 @@ async fn put_vcard(
         .put(resource.clone())
         .headers(headers)
         .body(body.to_string())
-        .send_retrying()
+        .send_write()
+        .await?
+        .settled(resource.as_str())
         .await?;
     expect_write(&response)?;
     Ok(())
@@ -451,13 +465,19 @@ pub async fn delete_contact(
         let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
-    let response = client
+    let what = resource.to_string();
+    let answer = client
         .delete(resource)
         .headers(headers)
-        .send_retrying()
+        .send_write()
         .await?;
+    // A 404 is gone, a replay's too.
+    if answer.response.status() == StatusCode::NOT_FOUND {
+        return Ok(());
+    }
+    let response = answer.settled(&what).await?;
     let status = response.status();
-    if !status.is_success() && status != StatusCode::NOT_FOUND {
+    if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         return Err(CaldavError::Http {
             status: status.as_u16(),
@@ -863,5 +883,60 @@ END:VCARD&#13;
         )
         .await
         .unwrap();
+    }
+
+    /// A replayed contact PUT answered 429 is unsure, as every write's
+    /// replay is (P24).
+    #[tokio::test]
+    async fn a_429_to_a_replayed_contact_put_is_unsure() {
+        let base = crate::http::first_attempt_lost_then(
+            b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let resource = Url::parse(&format!("{base}/addressbooks/alice/a.vcf")).unwrap();
+        let err = put_vcard(
+            &client(),
+            &resource,
+            "BEGIN:VCARD\r\nEND:VCARD\r\n",
+            None,
+            &creds(&base),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
+    }
+
+    /// The photo is read before a contact's PUT, which replaces the whole
+    /// resource. Read while the server is busy, nothing is sent: written
+    /// without the photo, the PUT would wipe the avatar (decision 270).
+    #[tokio::test]
+    async fn a_busy_photo_read_sends_no_put() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", mockito::Matcher::Any)
+            .with_status(429)
+            .create_async()
+            .await;
+        let put = server
+            .mock("PUT", mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+        let contact: Contact = serde_json::from_value(serde_json::json!({
+            "id": "/addressbooks/alice/c1.vcf|c1@aperio",
+            "list_id": format!("{}/addressbooks/alice/", server.url()),
+            "display_name": "Anna", "given_name": "Anna", "family_name": null,
+            "organization": null, "emails": [], "phone_numbers": [], "urls": [],
+            "birthday": null, "anniversary": null, "notes": null, "addresses": [],
+            "members": null, "has_photo": true,
+            "created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z",
+            "etag": null
+        }))
+        .unwrap();
+        let err = update_contact(&client(), contact, &creds(&server.url()))
+            .await
+            .unwrap_err();
+        assert!(crate::busy_detail(&err).is_some(), "{err:?}");
+        put.assert_async().await;
     }
 }

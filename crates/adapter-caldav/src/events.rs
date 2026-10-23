@@ -807,35 +807,16 @@ async fn put_resource(
         let value = HeaderValue::from_str(tag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
-    let (response, first_may_have_landed) = client
+    // Any refusal of a replay whose first attempt may have landed is unsure
+    // (`WriteAnswer::settled`): the answer may be about that attempt.
+    let response = client
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send_retrying_marked()
+        .send_write()
+        .await?
+        .settled(resource.as_str())
         .await?;
-    // Any refusal of a replay whose first attempt may have landed: the
-    // connection died after the first PUT went out, and the answer may be
-    // about that one — a 412 because its new ETag refuses the replay, a 429 or
-    // a 507 because it was taken. Read as a refusal, a caller would undo
-    // around a write that went through: splitting a series deleted its new
-    // part while the old part was already cut short (decision 144). So it is
-    // what it is, unsure.
-    if first_may_have_landed && !response.status().is_success() {
-        // The answer itself is kept for the log: it may be the first
-        // attempt's, or a refusal the replay met on its own.
-        let status = response.status().as_u16();
-        let body = response.text().await.unwrap_or_default();
-        tracing::warn!(
-            %resource,
-            status,
-            body = %body.chars().take(200).collect::<String>(),
-            "a replayed PUT was answered with a failure; the first attempt may have been saved",
-        );
-        return Err(CaldavError::Network(format!(
-            "the connection to '{resource}' broke after the change was sent \
-             (the replay was answered HTTP {status}); it may have been saved"
-        )));
-    }
     check_write(response).await
 }
 
@@ -1118,18 +1099,28 @@ pub enum DeleteOutcome {
 /// DELETE: the rule both home-set walkers in `lib.rs` follow.
 #[derive(Debug, Default)]
 pub(crate) struct DeleteWalk {
+    deleted: bool,
     gone_on_replay: bool,
+    busy: Option<CaldavError>,
     last_err: Option<CaldavError>,
 }
 
 impl DeleteWalk {
-    /// Take one calendar's outcome. `true` when the walk is done: the event
-    /// was removed there.
+    /// Take one calendar's outcome. `true` when the walk is over: the event
+    /// was removed there, or a busy server turned the delete away (decision
+    /// 270) — asking the next calendar now would meet the same throttle.
     pub(crate) fn step(&mut self, outcome: CaldavResult<DeleteOutcome>) -> bool {
         match outcome {
-            Ok(DeleteOutcome::Deleted) => return true,
+            Ok(DeleteOutcome::Deleted) => {
+                self.deleted = true;
+                return true;
+            }
             Ok(DeleteOutcome::NotFound) => {}
             Ok(DeleteOutcome::GoneOnReplay) => self.gone_on_replay = true,
+            Err(err) if crate::busy_detail(&err).is_some() => {
+                self.busy = Some(err);
+                return true;
+            }
             // Non-404 errors might be transient (auth hiccup, server
             // hiccup). Remember the last one in case nothing else works,
             // but keep walking — the resource might still live in another
@@ -1139,10 +1130,26 @@ impl DeleteWalk {
         false
     }
 
-    /// The walk found no calendar that removed it. A replayed 404 counts as
-    /// gone when no calendar failed: the first DELETE may have removed it,
-    /// and none of the others holds it. `missing` names it otherwise.
+    /// Where the walk ended. Removed somewhere, it is done. Stopped by a busy
+    /// server, calendars were left unasked (critique P9): with a replayed 404
+    /// before it the event may be gone already or still in one of them —
+    /// unsure, never done —, without one it is the busy answer. Otherwise a
+    /// replayed 404 counts as gone when no calendar failed: the first DELETE
+    /// may have removed it, and none of the others holds it. `missing` names
+    /// it otherwise.
     pub(crate) fn finish(self, missing: String) -> Result<(), CaldavError> {
+        if self.deleted {
+            return Ok(());
+        }
+        if let Some(busy) = self.busy {
+            return Err(if self.gone_on_replay {
+                CaldavError::Network(format!(
+                    "{missing}: a replayed delete may have removed it before the server was busy"
+                ))
+            } else {
+                busy
+            });
+        }
         match self.last_err {
             Some(err) => Err(err),
             None if self.gone_on_replay => Ok(()),
@@ -1177,12 +1184,13 @@ pub async fn delete_event(
         let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
-    let (response, first_may_have_landed) = client
+    let answer = client
         .delete(resource.clone())
         .headers(headers)
-        .send_retrying_marked()
+        .send_write()
         .await?;
-    if response.status() == StatusCode::NOT_FOUND {
+    let first_may_have_landed = answer.replayed;
+    if answer.response.status() == StatusCode::NOT_FOUND {
         // On a replay, the first DELETE may have removed it before the
         // connection broke. Read as "not here", every calendar answered 404
         // and the event was reported found nowhere: undoing a split's new
@@ -1194,7 +1202,7 @@ pub async fn delete_event(
             DeleteOutcome::NotFound
         });
     }
-    check_write(response).await?;
+    check_write(answer.settled(resource.as_str()).await?).await?;
     Ok(DeleteOutcome::Deleted)
 }
 
@@ -1345,15 +1353,15 @@ async fn delete_resource(
             headers.insert(IF_MATCH, v);
         }
     }
-    let response = client
+    let answer = client
         .delete(resource.clone())
         .headers(headers)
-        .send_retrying()
+        .send_write()
         .await?;
-    if response.status() == StatusCode::NOT_FOUND {
+    if answer.response.status() == StatusCode::NOT_FOUND {
         return Ok(());
     }
-    check_write(response).await?;
+    check_write(answer.settled(resource.as_str()).await?).await?;
     Ok(())
 }
 
@@ -1438,11 +1446,14 @@ pub async fn respond_to_event(
             HeaderValue::from_static("F"),
         );
     }
+    let what = resource.to_string();
     let put = client
         .put(resource)
         .headers(put_headers)
         .body(new_body)
-        .send_retrying()
+        .send_write()
+        .await?
+        .settled(&what)
         .await?;
     check_write(put).await?;
     Ok(())
@@ -1833,36 +1844,13 @@ END:VCALENDAR</c:calendar-data>
         assert_eq!(seen[0], seen[1], "the replay must reuse the SAME UID");
     }
 
-    /// A server whose first connection reads the request and dies without an
-    /// answer, and whose second answers the replay with `reply`. Returns its
-    /// base URL.
-    async fn first_attempt_lost_then(reply: &'static [u8]) -> String {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(async move {
-            if let Ok((mut sock, _)) = listener.accept().await {
-                let mut buf = [0u8; 4096];
-                let _ = sock.read(&mut buf).await;
-                drop(sock);
-            }
-            if let Ok((mut sock, _)) = listener.accept().await {
-                let mut buf = [0u8; 4096];
-                let _ = sock.read(&mut buf).await;
-                let _ = sock.write_all(reply).await;
-                let _ = sock.shutdown().await;
-            }
-        });
-        base
-    }
-
     /// A guarded PUT whose first attempt may have landed: the replay's 412 is
     /// that attempt's new ETag, not someone else's change. Reported as a
     /// conflict, a split deleted its new part around a truncate that went
     /// through (decision 144).
     #[tokio::test]
     async fn a_412_on_the_replay_of_a_guarded_put_is_unsure() {
-        let base = first_attempt_lost_then(
+        let base = crate::http::first_attempt_lost_then(
             b"HTTP/1.1 412 Precondition Failed\r\ncontent-length: 0\r\n\r\n",
         )
         .await;
@@ -1883,9 +1871,10 @@ END:VCALENDAR</c:calendar-data>
     /// throttling a second copy of what it already stored.
     #[tokio::test]
     async fn any_refusal_of_a_replayed_put_is_unsure() {
-        let base =
-            first_attempt_lost_then(b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n")
-                .await;
+        let base = crate::http::first_attempt_lost_then(
+            b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
         let resource = Url::parse(&format!("{base}/calendars/alice/work/abc.ics")).unwrap();
         let err = put_resource(
             &client(),
@@ -1933,8 +1922,10 @@ END:VCALENDAR</c:calendar-data>
     /// 404 says it is gone — or never was at this URL.
     #[tokio::test]
     async fn a_404_on_the_replay_of_a_delete_is_gone_on_replay() {
-        let base =
-            first_attempt_lost_then(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n").await;
+        let base = crate::http::first_attempt_lost_then(
+            b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
         let cal_url = Url::parse(&format!("{base}/calendars/alice/work/")).unwrap();
         let outcome = delete_event(&client(), &cal_url, "abc", None, &creds(&base))
             .await
@@ -3798,5 +3789,37 @@ Buenos_Aires:20260615T090000\r\nSUMMARY:x\r\nEND:VEVENT\r\n";
             CaldavError::Http { status, .. } => assert_eq!(status, 403),
             other => panic!("expected 403, got {other:?}"),
         }
+    }
+
+    /// A busy server ends the walk (decision 270): asking the next calendar
+    /// would meet the same throttle. With nothing removed and no replayed 404
+    /// before it, the walk says busy; with one, unsure, never done (P9).
+    #[test]
+    fn a_busy_answer_ends_the_walk() {
+        let busy = || {
+            Err(CaldavError::Http {
+                status: 429,
+                message: "slow down".into(),
+            })
+        };
+        let mut walk = DeleteWalk::default();
+        assert!(!walk.step(Ok(DeleteOutcome::NotFound)));
+        assert!(walk.step(busy()), "the walk stops");
+        assert!(matches!(
+            walk.finish("gone".into()),
+            Err(CaldavError::Http { status: 429, .. })
+        ));
+
+        let mut walk = DeleteWalk::default();
+        assert!(!walk.step(Ok(DeleteOutcome::GoneOnReplay)));
+        assert!(walk.step(busy()));
+        assert!(matches!(
+            walk.finish("gone".into()),
+            Err(CaldavError::Network(_))
+        ));
+
+        let mut walk = DeleteWalk::default();
+        assert!(walk.step(Ok(DeleteOutcome::Deleted)));
+        assert!(walk.finish("gone".into()).is_ok());
     }
 }
