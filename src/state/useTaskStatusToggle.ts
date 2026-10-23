@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { errorMessage, selfAssignOnStatusChange } from '@aperio/shared';
+import { selfAssignOnStatusChange, writeErrorMessage } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { todayIsoKey } from '../intl/taskDay';
@@ -104,7 +104,7 @@ export function useTaskStatusActions(): TaskStatusActions {
         announce(
           t('views.tasks.statusChangeFailed', {
             title: task.title,
-            message: errorMessage(rootFailure.err),
+            message: writeErrorMessage(rootFailure.err, t),
           }),
         );
         return;

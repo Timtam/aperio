@@ -210,6 +210,9 @@
     "duplicatedSeries": "Die ganze Serie „{{title}}“ wurde dupliziert.",
     "copyMayStand": "„{{title}}“ steht möglicherweise doppelt im Kalender: Die neue Kopie ließ sich weder fertigstellen noch wieder entfernen. Bitte prüfe den Kalender und wiederhole es nicht.",
     "moveMayStand": "„{{title}}“ steht möglicherweise im Zielkalender und noch in seinem eigenen: Die verschobene Serie ließ sich dort weder fertigstellen noch wieder entfernen. Bitte prüfe beide Kalender und wiederhole es nicht.",
+    "originalKept": "„{{title}}“ wurde verschoben, aber das Original in „{{source}}“ ließ sich nicht entfernen, weil der Anbieter gerade ausgelastet ist. Lösche es dort selbst; verschiebe es nicht noch einmal.",
+    "originalsKept": "Verschoben, aber diese Originale in „{{source}}“ ließen sich nicht entfernen, weil der Anbieter gerade ausgelastet ist: {{titles}}. Lösche sie dort selbst; verschiebe sie nicht noch einmal.",
+    "quotedTitle": "„{{title}}“",
     "duplicateFailed": "„{{title}}“ konnte nicht dupliziert werden: {{reason}}."
   },
   "toast": {
@@ -1889,7 +1892,11 @@
         "listAria": "Unteraufgaben. Pfeiltasten zur Navigation, Leertaste zum Umschalten, Umschalt+F10 für Aktionen.",
         "rowLabel": "{{title}}, {{state}}{{priority}}",
         "removeAria": "Unteraufgabe „{{title}}\" entfernen",
-        "listNoSubtasks": "Die gewählte Liste unterstützt keine Unteraufgaben. Entferne die Entwürfe oder wähle eine andere Liste."
+        "listNoSubtasks": "Die gewählte Liste unterstützt keine Unteraufgaben. Entferne die Entwürfe oder wähle eine andere Liste.",
+        "draftsFailed_one": "„{{title}}“ wurde angelegt, die Unteraufgabe aber nicht: {{reason}}. Speichern legt nur sie an.",
+        "draftsFailed_other": "„{{title}}“ wurde angelegt, {{count}} Unteraufgaben aber nicht: {{reason}}. Speichern legt nur diese an.",
+        "draftsNotCreated_one": "Die Unteraufgabe {{titles}} wurde nicht angelegt.",
+        "draftsNotCreated_other": "Diese {{count}} Unteraufgaben wurden nicht angelegt: {{titles}}."
       },
       "status": {
         "open": "Offen",

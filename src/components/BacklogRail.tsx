@@ -12,10 +12,10 @@ import {
   backlogWeeks,
   compareMachineStrings,
   splitDeadlinesByWeek,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import { isCommandError } from '../api/client';
 import type { Task } from '../api/types';
 import { duplicateTask } from './duplicateActions';
 import { useDateFormat } from '../intl/dateFormat';
@@ -268,9 +268,7 @@ export function BacklogRail() {
       invalidateData();
       announce(t('views.backlog.movedToBacklog', { title: task.title }));
     } catch (err) {
-      announce(
-        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-      );
+      announce(writeErrorMessage(err, t));
     }
   };
 

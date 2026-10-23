@@ -94,6 +94,7 @@ import {
 import {
   createsInSteps,
   eventWriteLeftover,
+  originalKeptSentence,
   seriesTailMayStand,
   seriesTailRemoved,
 } from '@aperio/shared';
@@ -2065,14 +2066,25 @@ export function EventDialog({
             i18n.language,
             t,
           );
-          if (back) {
+          // A move to another calendar whose original the provider was too
+          // busy to delete (277): the move stands, and so does the original,
+          // which is said the same way.
+          const kept = saved
+            ? originalKeptSentence(
+                [saved],
+                (id) => calendars.find((c) => c.id === id)?.name,
+                t,
+              )
+            : null;
+          const left = [back, kept].filter(Boolean).join(' ');
+          if (left) {
             if (!shownRef.current) {
-              announce(back);
+              announce(left);
               return;
             }
             leavingNotice.current = false;
             setSplitNotice({
-              sentence: back,
+              sentence: left,
               proceed: async () => {
                 if (!(await carry())) onClose();
               },

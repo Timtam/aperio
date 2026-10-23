@@ -829,7 +829,15 @@ pub async fn create_task(
         {
             new.series_id = Some(uuid::Uuid::new_v4().to_string());
         }
-        ext.create_task(&request.list_id, new).await?
+        let created = ext.create_task(&request.list_id, new).await;
+        if created.is_err() {
+            // A create that failed may still have written: a task that stands
+            // without one of its follow-up steps (decision 273). The next read
+            // must show what the provider holds.
+            let _ = cache.invalidate(&account, SyncScope::Tasks, &request.list_id);
+            scheduler.invalidate();
+        }
+        created?
     };
     if is_local {
         if let Ok(fields) = serde_json::to_value(&task) {
@@ -956,7 +964,14 @@ pub async fn update_task(
                     message: format!("target task list '{}' is not routable", task.list_id,),
                 });
             };
-            ext.create_task(&task.list_id, new_payload).await?
+            let created = ext.create_task(&task.list_id, new_payload).await;
+            if created.is_err() {
+                // The copy at the target may stand without one of its steps
+                // (decision 273): the next read shows what the provider holds.
+                let _ = cache.invalidate(&target_account, SyncScope::Tasks, &task.list_id);
+                scheduler.invalidate();
+            }
+            created?
         };
 
         // Delete from source. Warn-but-continue on failure: the
@@ -1061,7 +1076,17 @@ pub async fn update_task(
         // Capture the completion intent before the value is moved into the
         // provider write — the Aperio-side spawn needs it.
         let completed = task.clone();
-        let updated = ext.update_task(task).await?;
+        let list_id = task.list_id.clone();
+        let updated = match ext.update_task(task).await {
+            Ok(updated) => updated,
+            Err(err) => {
+                // A save that failed may have landed in part (decision 273):
+                // the next read shows what the provider holds.
+                let _ = cache.invalidate(&target_account, SyncScope::Tasks, &list_id);
+                scheduler.invalidate();
+                return Err(err.into());
+            }
+        };
         // DESIGN §9.12: reconcile the provider's recurrence with Aperio's model
         // — spawn the next instance for on-demand/backlog rules, or leave a
         // completion record for a native rule the provider only advances.

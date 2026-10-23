@@ -1,13 +1,13 @@
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
+import { writeErrorMessage } from '@aperio/shared';
 
 // Through the shim, not straight from the package: on the desktop this comes
 // from `cal-core` via WebAssembly. See `src/intl/taskStatus.ts`.
 import { isImportantPriority } from '../intl/taskStatus';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import { isCommandError } from '../api/client';
 import type { Task, TaskPriority } from '../api/types';
 import { useDialogState } from './dialogStateContext';
 import { useTaskCascadeEnabled } from './taskCascadeContext';
@@ -61,11 +61,7 @@ export function useTaskPriorityAction(): (
         );
         invalidateData();
       } catch (err) {
-        if (isCommandError(err)) {
-          announce(`${err.code}: ${err.message}`);
-        } else {
-          announce(String(err));
-        }
+        announce(writeErrorMessage(err, t));
       }
     },
     [t, announce, invalidateData, priorityScale],

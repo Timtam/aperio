@@ -115,6 +115,10 @@ export async function moveTaskToSection(
  * create-on-target + delete-from-source, which changes the parent id), and
  * re-thread each child onto the returned parent id so the family stays
  * connected.
+ *
+ * Returns the rows as the host returned them, the task first, then each
+ * child: one whose original could not be deleted carries `original_left_in`
+ * (decision 277), for the surface to say.
  */
 export async function moveTaskToList(
   task: Task,
@@ -130,13 +134,14 @@ export async function moveTaskToList(
    * asks the user and passes what they chose.
    */
   sectionId: string | null,
-): Promise<Task> {
+): Promise<Task[]> {
   const movedParent = await invoke<Task>('update_task', {
     task: { ...task, list_id: targetListId, section_id: sectionId },
     previousListId: task.list_id,
   });
+  const moved = [movedParent];
   for (const child of children) {
-    await invoke<Task>('update_task', {
+    const movedChild = await invoke<Task>('update_task', {
       task: {
         ...child,
         list_id: targetListId,
@@ -146,8 +151,9 @@ export async function moveTaskToList(
       },
       previousListId: child.list_id,
     });
+    moved.push(movedChild);
   }
-  return movedParent;
+  return moved;
 }
 
 /**
@@ -265,16 +271,19 @@ export async function moveTaskToBacklog(task: Task): Promise<Task> {
  * Written as the series it moved the series start to that occurrence, and could
  * drop the rule, so the master is loaded and moved as it is, with its real
  * deletions only (`newSeriesRowOf`).
+ *
+ * Returns the moved row: where its original could not be deleted, it carries
+ * `original_left_in` (decision 277), for the surface to say.
  */
 export async function moveEventToCalendar(
   event: CalendarEvent,
   targetCalendarId: string,
   steps: StepWriteOptions = {},
-): Promise<void> {
+): Promise<CalendarEvent> {
   const series = await newSeriesRowOf(event);
   // The other calendar creates the series anew: in steps where it writes its
   // deletions so (decisions 227, 265).
-  await (steps.wait ?? writeWithoutWaiting)(
+  return (steps.wait ?? writeWithoutWaiting)(
     createsInSteps(steps.target, series.recurrence),
     () => apiUpdateEvent({ ...series, calendar_id: targetCalendarId }, series.calendar_id),
   );
@@ -332,6 +341,9 @@ export type MoveCopyScope = 'occurrence' | 'series';
  * plain master row falls back to whole-series behaviour. The whole series is
  * moved or copied as the series: from a row of a series the master is loaded
  * (see `moveEventToCalendar`), so a copy starts where the series starts.
+ *
+ * Returns the moved row of a whole-series move, the one write that deletes an
+ * original (see `moveEventToCalendar`); `null` for everything else.
  */
 export async function moveOrCopyEvent(
   event: CalendarEvent,
@@ -339,15 +351,14 @@ export async function moveOrCopyEvent(
   mode: MoveCopyMode,
   scope: MoveCopyScope = 'series',
   steps: StepWriteOptions = {},
-): Promise<void> {
+): Promise<CalendarEvent | null> {
   const asOccurrence = scope === 'occurrence' && isSeriesOccurrence(event);
 
   // Whole-series move is the only path that updates the existing row in place
   // (and lets external adapters reroute via the move hint). Everything else
   // creates a row on the target.
   if (mode === 'move' && !asOccurrence) {
-    await moveEventToCalendar(event, targetCalendarId, steps);
-    return;
+    return moveEventToCalendar(event, targetCalendarId, steps);
   }
 
   const source = asOccurrence ? event : await newSeriesRowOf(event);
@@ -383,6 +394,7 @@ export async function moveOrCopyEvent(
       await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
     }
   }
+  return null;
 }
 
 /**

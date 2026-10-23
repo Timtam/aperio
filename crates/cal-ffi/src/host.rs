@@ -4095,10 +4095,16 @@ impl Host {
                 to_json(&task)
             }
             Some(ext) => {
-                let task = self
+                let created = self
                     .runtime
-                    .block_on(async { ext.create_task(&list_id, new).await })
-                    .map_err(map_store_err)?;
+                    .block_on(async { ext.create_task(&list_id, new).await });
+                if created.is_err() {
+                    // A create that failed may still have written: a task that
+                    // stands without one of its follow-up steps (decision 273).
+                    // The next read shows what the provider holds.
+                    self.invalidate_tasks_cache(&list_id);
+                }
+                let task = created.map_err(map_store_err)?;
                 // Invalidate-only, NOT write-through: a created row's id may
                 // not match the read path's later id for the same task
                 // (CalDAV create → bare uid, reads → `{href}|{uid}`), so
@@ -4219,10 +4225,17 @@ impl Host {
                     .adapter
                     .create_task_sync(&target_list_id, new_payload)
                     .map_err(map_store_err)?,
-                Some(ext) => self
-                    .runtime
-                    .block_on(async { ext.create_task(&target_list_id, new_payload).await })
-                    .map_err(map_store_err)?,
+                Some(ext) => {
+                    let created = self
+                        .runtime
+                        .block_on(async { ext.create_task(&target_list_id, new_payload).await });
+                    if created.is_err() {
+                        // The copy at the target may stand without one of its
+                        // steps (decision 273): the next read shows it.
+                        self.invalidate_tasks_cache(&target_list_id);
+                    }
+                    created.map_err(map_store_err)?
+                }
             };
 
             // Delete from the source. Best-effort: the create already succeeded,
@@ -4317,8 +4330,18 @@ impl Host {
                 // update — an external on-demand/backlog recurring task that just
                 // completed needs Aperio to spawn its next instance (§9.12).
                 let completed = task.clone();
+                let list_id = task.list_id.clone();
                 let updated = self.runtime.block_on(async {
-                    let updated = ext.update_task(task).await.map_err(map_store_err)?;
+                    let updated = match ext.update_task(task).await {
+                        Ok(updated) => updated,
+                        Err(err) => {
+                            // A save that failed may have landed in part
+                            // (decision 273): the next read shows what the
+                            // provider holds.
+                            self.invalidate_tasks_cache(&list_id);
+                            return Err(map_store_err(err));
+                        }
+                    };
                     let account = self
                         .registry
                         .account_for_task_list(&completed.list_id)
@@ -10665,6 +10688,93 @@ mod tests {
             left.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
             ["t-old"]
         );
+    }
+
+    /// A provider whose task writes land without a follow-up step.
+    struct PartlySavedTasks;
+
+    #[async_trait::async_trait]
+    impl cal_core::Adapter for PartlySavedTasks {
+        async fn authenticate(
+            &self,
+            _: cal_core::Credentials,
+        ) -> cal_core::Result<cal_core::AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[cal_core::Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl cal_core::TasksFeature for PartlySavedTasks {
+        async fn list_task_lists(&self) -> cal_core::Result<Vec<cal_core::TaskList>> {
+            Ok(Vec::new())
+        }
+        async fn get_tasks(&self, _: &str) -> cal_core::Result<Vec<cal_core::Task>> {
+            Ok(Vec::new())
+        }
+        async fn create_task(
+            &self,
+            _: &str,
+            _: cal_core::NewTask,
+        ) -> cal_core::Result<cal_core::Task> {
+            Err(cal_core::Error::partly_saved("assignees"))
+        }
+        async fn update_task(&self, _: cal_core::Task) -> cal_core::Result<cal_core::Task> {
+            Err(cal_core::Error::partly_saved("assignees"))
+        }
+        async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
+            unreachable!()
+        }
+    }
+
+    /// Decision 273 on the phone: a task create or save that failed may have
+    /// landed in part — the task stands without its assignees — so its list
+    /// is read again, and a refresh in flight drops its write.
+    #[test]
+    fn a_failed_external_task_write_still_invalidates_its_list() {
+        let (_dir, host, _) = open_host();
+        host.registry.register_host_adapter(
+            "acc-x",
+            None,
+            Some(Arc::new(PartlySavedTasks) as Arc<dyn cal_core::TasksFeature>),
+        );
+        host.registry.note_task_list_route("L1", "acc-x");
+        let generation = || {
+            host.cache
+                .refresh_generation("acc-x", SyncScope::Tasks, "L1")
+        };
+
+        let before = generation();
+        let new = serde_json::json!({
+            "title": "Einkaufen", "description": null, "status": "open",
+            "priority": "medium", "scheduled_date": null, "scheduled_time": null,
+            "deadline_date": null, "deadline_time": null, "recurrence": null,
+            "parent_id": null, "section_id": null, "color_label": null, "reminders": []
+        });
+        let err = host
+            .create_task_json("L1".into(), new.to_string())
+            .expect_err("the create failed");
+        assert!(err.to_string().contains("partly-saved"), "{err}");
+        assert!(
+            generation() > before,
+            "a failed create reads the list again"
+        );
+
+        let before = generation();
+        let task = serde_json::json!({
+            "id": "t-1", "list_id": "L1", "title": "Einkaufen", "description": null,
+            "status": "open", "priority": "medium", "scheduled_date": null,
+            "scheduled_time": null, "scheduled_end_time": null, "deadline_date": null,
+            "deadline_time": null, "recurrence": null, "resurface_date": null,
+            "series_id": null, "parent_id": null, "section_id": null, "color_label": null,
+            "reminders": [], "sound": null, "deadline_reminder_days": null,
+            "created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z",
+            "completed_at": null, "etag": null
+        });
+        assert!(host.update_task_json(task.to_string(), None).is_err());
+        assert!(generation() > before, "a failed save reads the list again");
     }
 
     /// Decisions 203 and 210 on the phone: a create that failed may still have

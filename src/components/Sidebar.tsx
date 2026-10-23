@@ -21,7 +21,6 @@ import {
   deleteCalendar,
   deleteContactList,
   deleteTaskList,
-  isCommandError,
   listAdapterKinds,
   renameAccount,
   renameContactList,
@@ -68,7 +67,13 @@ import { useViewState } from '../state/viewStateContext';
 import { fetchAccountsNeedingConnect } from './accountsNeedingConnect';
 import { refreshErrorRowKey } from '../intl/refreshErrorKeys';
 import { useRefreshErrors } from '../state/useRefreshErrors';
-import { eventWriteErrorMessage, eventWriteLeftover, shownInNotice } from '@aperio/shared';
+import {
+  eventWriteErrorMessage,
+  eventWriteLeftover,
+  originalKeptSentence,
+  shownInNotice,
+  writeErrorMessage,
+} from '@aperio/shared';
 import type { AccountRefreshErrors } from '../api/types';
 
 /** Pointer drag-and-drop reparent state, threaded to the task-list
@@ -407,11 +412,7 @@ export function Sidebar({
           }
         }
       } catch (err) {
-        if (isCommandError(err)) {
-          announce(`${err.code}: ${err.message}`);
-        } else {
-          announce(String(err));
-        }
+        announce(writeErrorMessage(err, t));
       } finally {
         setEditing(null);
         setDraft('');
@@ -469,8 +470,7 @@ export function Sidebar({
         await refreshCalendars();
         announce(t('sidebar.calendarDeleted', { name }));
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('delete_calendar failed', err);
+        announce(writeErrorMessage(err, t));
       }
     },
     [refreshCalendars, announce, t],
@@ -483,8 +483,7 @@ export function Sidebar({
         await refreshTaskLists();
         announce(t('sidebar.taskListDeleted', { name }));
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('delete_task_list failed', err);
+        announce(writeErrorMessage(err, t));
       }
     },
     [refreshTaskLists, announce, t],
@@ -636,8 +635,7 @@ export function Sidebar({
           announce(t('sidebar.contactListCreated', { name: list.name }));
         }
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('create list failed', err);
+        announce(writeErrorMessage(err, t));
       }
     },
     [
@@ -657,12 +655,7 @@ export function Sidebar({
         await refreshContactLists();
         announce(t('sidebar.contactListDeleted', { name }));
       } catch (err) {
-        if (isCommandError(err)) {
-          announce(`${err.code}: ${err.message}`);
-        } else {
-          // eslint-disable-next-line no-console
-          console.warn('delete_contact_list failed', err);
-        }
+        announce(writeErrorMessage(err, t));
       }
     },
     [refreshContactLists, announce, t],
@@ -1941,7 +1934,7 @@ function LeafRow({
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const { invalidateData, stepWriteWait } = useDialogState();
-  const { calendars } = useCalendarStore();
+  const { calendars, taskLists } = useCalendarStore();
   const [dropActive, setDropActive] = useState(false);
   // A drop on its way: a second one while it reads or writes would move it
   // twice.
@@ -1955,16 +1948,24 @@ function LeafRow({
       try {
         // No section: a drop onto a LIST names no place inside it, and
         // the section the task came from belongs to the list it left.
-        await moveTaskToList(payload.task, listId, payload.children, null);
+        const moved = await moveTaskToList(payload.task, listId, payload.children, null);
         invalidateData();
-        announce(t('sidebar.dnd.taskMoved', { title: payload.task.title }));
-      } catch (err) {
+        // An original the provider was too busy to delete is said (277).
         announce(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+          originalKeptSentence(
+            moved,
+            (id) => taskLists.find((l) => l.id === id)?.name,
+            t,
+          ) ?? t('sidebar.dnd.taskMoved', { title: payload.task.title }),
         );
+      } catch (err) {
+        // A failed move may have written at the target: it shows on the next
+        // read.
+        invalidateData();
+        announce(writeErrorMessage(err, t));
       }
     },
-    [invalidateData, announce, t],
+    [invalidateData, announce, t, taskLists],
   );
   const handleEventDrop = useCallback(
     async (event: CalendarEvent, calendarId: string) => {
@@ -1980,12 +1981,19 @@ function LeafRow({
             ? t('actions.moveMayStand', { title: event.title })
             : eventWriteErrorMessage(err, t);
       try {
-        await moveEventToCalendar(event, calendarId, {
+        const moved = await moveEventToCalendar(event, calendarId, {
           wait: stepWriteWait(failure),
           target: calendars.find((c) => c.id === calendarId),
         });
         invalidateData();
-        announce(t('sidebar.dnd.eventMoved', { title: event.title }));
+        // An original the provider was too busy to delete is said (277).
+        announce(
+          originalKeptSentence(
+            [moved],
+            (id) => calendars.find((c) => c.id === id)?.name,
+            t,
+          ) ?? t('sidebar.dnd.eventMoved', { title: event.title }),
+        );
       } catch (err) {
         // A failure may have written at the target: it shows on the next read.
         invalidateData();

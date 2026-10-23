@@ -21,7 +21,6 @@ import {
   createSection,
   createTask as apiCreateTask,
   deleteSection,
-  isCommandError,
   setSectionColor,
   showContextMenu,
   taskCurrentUser,
@@ -39,11 +38,18 @@ import {
   assigneeField,
   assigneePoolErrorMessage,
   clampAssignees,
+  eventWriteFailureReason,
+  eventWriteLeftover,
+  joinNames,
+  originalKeptSentence,
   selfAssignOnStatusChange,
   taskAssignmentMode,
   taskPrefillFrom,
+  writeErrorMessage,
   type AssigneePool,
 } from '@aperio/shared';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import { todayIsoKey } from '../intl/taskDay';
 import {
   effortSuffix,
@@ -418,6 +424,13 @@ export function TaskDialog({
   // parent has no id yet, so children can't be written until it exists —
   // we collect titles here and create them right after the parent on Save.
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
+  // The task a save created whose staged subtasks did not all follow: it
+  // stands, so the next Save creates only the drafts still left under it
+  // (273).
+  const createdParentRef = useRef<Task | null>(null);
+  // What the editor says in place of the form once a save landed in part:
+  // saving again would write twice what stands (273, 277).
+  const { notice, showNotice } = useCloseOnlyNotice();
   // Date inputs for the two optional slots. The "clear" buttons move
   // focus here after wiping the slot (the button itself unmounts once
   // the date is empty, so focus would otherwise fall to <body>).
@@ -783,8 +796,7 @@ export function TaskDialog({
       setSectionMode(null);
       setSectionDraft('');
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('section mutation failed', err);
+      setError(writeErrorMessage(err, t));
     } finally {
       setSectionBusy(false);
     }
@@ -815,8 +827,7 @@ export function TaskDialog({
         t('dialogs.task.section.deleted', { name: current?.name ?? '' }),
       );
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('delete_section failed', err);
+      setError(writeErrorMessage(err, t));
     } finally {
       setSectionBusy(false);
       // The delete button unmounts once form.sectionId clears (the manage
@@ -965,9 +976,7 @@ export function TaskDialog({
       announce(t('dialogs.task.subtasks.added', { title: trimmed }));
     } catch (err) {
       // Show inline rather than steal the parent form's error slot.
-      announce(
-        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-      );
+      announce(writeErrorMessage(err, t));
     } finally {
       setSubtaskBusy(false);
       // Return focus to the (cleared) input so the user keeps typing the next
@@ -1037,9 +1046,7 @@ export function TaskDialog({
         invalidateData();
         announce(t('dialogs.task.deleted', { title: subtask.title }));
       } catch (err) {
-        announce(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-        );
+        announce(writeErrorMessage(err, t));
       }
     },
     [invalidateData, announce, t, tasks, cascadeEnabled, autoDate],
@@ -1319,10 +1326,13 @@ export function TaskDialog({
           // resource URL and iCloud-shaped servers reject the
           // precondition with 412 / Conflict — same root cause
           // the event-side `previousCalendarId` hint addresses.
-          await invoke<Task>('update_task', {
+          const saved = await invoke<Task>('update_task', {
             task: updated,
             previousListId: task.list_id,
           });
+          // The rows a list change moved: one whose original the provider
+          // was too busy to delete says so (decision 277).
+          const moved = [saved];
           // List-cohabitation: if a parent's list changed, every
           // descendant follows along so the family stays together.
           // Otherwise a subsequent reload would surface a parent in
@@ -1338,10 +1348,12 @@ export function TaskDialog({
               // already lives (task.list_id, captured before the
               // parent's move); the post-move target is the new
               // form.listId.
-              await invoke<Task>('update_task', {
-                task: { ...child, list_id: form.listId },
-                previousListId: child.list_id,
-              });
+              moved.push(
+                await invoke<Task>('update_task', {
+                  task: { ...child, list_id: form.listId },
+                  previousListId: child.list_id,
+                }),
+              );
             }
           }
           // Status cascade: if the user changed the Status dropdown
@@ -1366,9 +1378,24 @@ export function TaskDialog({
             ).filter((w) => w.taskId !== task.id);
             await applyAncestorWrites(cascadeWrites, snapshot);
           }
+          const kept =
+            form.listId !== task.list_id
+              ? originalKeptSentence(
+                  moved,
+                  (id) => taskLists.find((l) => l.id === id)?.name,
+                  t,
+                )
+              : null;
+          if (kept) {
+            invalidateData();
+            showNotice(kept);
+            return;
+          }
           announce(t('dialogs.task.updated', { title: trimmedTitle }));
         } else {
-          const created = await apiCreateTask({
+          // A parent an earlier save created stands: only the drafts left
+          // are created under it (273).
+          const created = createdParentRef.current ?? await apiCreateTask({
             list_id: form.listId,
             title: trimmedTitle,
             description: form.description.trim() || null,
@@ -1393,6 +1420,8 @@ export function TaskDialog({
             assignees: form.assignees,
             sound: null,
           });
+          // Remember for next time — only on create, not edit.
+          writeLastUsedTaskList(created.list_id);
           // Create the subtasks staged on the form now that the parent
           // has an id. They inherit the parent's section so they group
           // with it, and default to open/medium like the inline add — but a
@@ -1401,43 +1430,82 @@ export function TaskDialog({
           // the parent right back to open on the next recompute).
           if (createSupportsSubtasks) {
             const draftStatus =
-              form.status === 'completed' || form.status === 'cancelled'
-                ? form.status
+              created.status === 'completed' || created.status === 'cancelled'
+                ? created.status
                 : 'open';
-            for (const subtaskTitle of draftSubtasks) {
-              await apiCreateTask({
-                list_id: form.listId,
-                title: subtaskTitle,
-                description: null,
-                status: draftStatus,
-                priority: 'medium',
-                effort: 'medium',
-                scheduled_date: null,
-                scheduled_time: null,
-                deadline_date: null,
-                deadline_time: null,
-                deadline_reminder_days: null,
-                recurrence: null,
-                parent_id: created.id,
-                section_id: form.sectionId || null,
-                color_label: null,
-                reminders: [],
-                assignees: [],
-                sound: null,
-              });
+            const left = [...draftSubtasks];
+            while (left.length > 0) {
+              try {
+                await apiCreateTask({
+                  list_id: created.list_id,
+                  title: left[0],
+                  description: null,
+                  status: draftStatus,
+                  priority: 'medium',
+                  effort: 'medium',
+                  scheduled_date: null,
+                  scheduled_time: null,
+                  deadline_date: null,
+                  deadline_time: null,
+                  deadline_reminder_days: null,
+                  recurrence: null,
+                  parent_id: created.id,
+                  section_id: created.section_id,
+                  color_label: null,
+                  reminders: [],
+                  assignees: [],
+                  sound: null,
+                });
+              } catch (err) {
+                // The parent stands. The editor stays on it with the drafts
+                // not yet made, and the next Save creates only those (273);
+                // a subtask that stands without a step of its own is made.
+                invalidateData();
+                if (eventWriteLeftover(err)) left.shift();
+                if (left.length === 0) {
+                  showNotice(writeErrorMessage(err, t));
+                  return;
+                }
+                createdParentRef.current = created;
+                setDraftSubtasks(left);
+                setError(
+                  t('dialogs.task.subtasks.draftsFailed', {
+                    title: created.title,
+                    count: left.length,
+                    reason: eventWriteFailureReason(err, t),
+                  }),
+                );
+                return;
+              }
+              left.shift();
             }
           }
-          // Remember for next time — only on create, not edit.
-          writeLastUsedTaskList(form.listId);
           announce(t('dialogs.task.created', { title: trimmedTitle }));
         }
         onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          setError(String(err));
+        // Something stands that saving again would write twice: a task saved
+        // without one of its follow-up steps (273). Said in place of the
+        // form, which only closes, and the data reloads. A new task's staged
+        // subtasks were never made, and are named so nothing goes unsaid.
+        if (eventWriteLeftover(err)) {
+          invalidateData();
+          const unmade = isEdit ? [] : draftSubtasks;
+          const sentence = writeErrorMessage(err, t);
+          showNotice(
+            unmade.length > 0
+              ? `${sentence} ${t('dialogs.task.subtasks.draftsNotCreated', {
+                  count: unmade.length,
+                  titles: joinNames(
+                    unmade.map((title) => t('actions.quotedTitle', { title })),
+                    t,
+                  ),
+                })}`
+              : sentence,
+          );
+          return;
         }
+        setError(writeErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
@@ -1457,6 +1525,9 @@ export function TaskDialog({
       autoSelfAssign,
       draftSubtasks,
       createSupportsSubtasks,
+      invalidateData,
+      showNotice,
+      taskLists,
     ],
   );
 
@@ -1473,11 +1544,7 @@ export function TaskDialog({
       announce(t('dialogs.task.deleted', { title: task.title }));
       onClose();
     } catch (err) {
-      if (isCommandError(err)) {
-        setError(`${err.code}: ${err.message}`);
-      } else {
-        setError(String(err));
-      }
+      setError(writeErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }
@@ -1486,6 +1553,10 @@ export function TaskDialog({
   const title = isEdit
     ? t('dialogs.task.editTitle')
     : t('dialogs.task.newTitle');
+
+  if (notice) {
+    return <CloseOnlyNotice title={title} sentence={notice} onClose={onClose} />;
+  }
 
   return (
     <Modal

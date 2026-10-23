@@ -4,9 +4,11 @@ import { invoke } from '@tauri-apps/api/core';
 
 import {
   detectConference,
+  eventWriteErrorMessage,
   invitationLocked,
   isRecurringProjection,
   parseDefaultDate,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 // Through the shim, not straight from the package: on the desktop these two
@@ -310,11 +312,7 @@ export function useChipContextMenu(
           );
           invalidateData();
         } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
+          announce(eventWriteErrorMessage(err, t));
         }
       } else if (selected?.startsWith('color:')) {
         const raw = selected.slice('color:'.length);
@@ -338,11 +336,7 @@ export function useChipContextMenu(
           announce(t('chipMenu.colorSet', { title: event.title }));
           invalidateData();
         } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
+          announce(eventWriteErrorMessage(err, t));
         }
       }
       onAfter?.();
@@ -464,11 +458,7 @@ export function useChipContextMenu(
           announce(t('actions.duplicated', { title: task.title }));
           invalidateData();
         } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
+          announce(writeErrorMessage(err, t));
         }
       } else if (selected === 'move') {
         openMoveCopy({ kind: 'task', task, defaultMode: 'move' });
@@ -493,11 +483,7 @@ export function useChipContextMenu(
           announce(t('chipMenu.broughtToBacklog', { title: task.title }));
           invalidateData();
         } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
+          announce(writeErrorMessage(err, t));
         }
       } else if (selected === 'delete') {
         // Tasks don't have a recurring-occurrence concept on the
@@ -511,11 +497,7 @@ export function useChipContextMenu(
           announce(t('dialogs.task.deleted', { title: task.title }));
           invalidateData();
         } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
+          announce(writeErrorMessage(err, t));
         }
       }
       onAfter?.();

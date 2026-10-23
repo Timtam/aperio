@@ -8,6 +8,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { invoke } from '@tauri-apps/api/core';
+import { originalKeptSentence, writeErrorMessage } from '@aperio/shared';
 
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
@@ -49,7 +50,6 @@ import { ConfirmDialog } from '../ConfirmDialog';
 import { ColorPickerModal } from '../ColorPickerModal';
 import {
   deleteSection,
-  isCommandError,
   setSectionColor as setSectionColorCmd,
   showContextMenu,
   type ContextMenuItemRequest,
@@ -333,11 +333,7 @@ export function TaskView() {
           announce(t('dialogs.task.section.deleted', { name: section.name }));
           invalidateData();
         } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
+          announce(writeErrorMessage(err, t));
         }
       } else if (selected === 'color:__other__') {
         setSectionColorTarget(section);
@@ -374,11 +370,7 @@ export function TaskView() {
         // run through DialogState — bump explicitly.
         invalidateData();
       } catch (err) {
-        if (isCommandError(err)) {
-          announce(`${err.code}: ${err.message}`);
-        } else {
-          announce(String(err));
-        }
+        announce(writeErrorMessage(err, t));
       }
     },
     [announce, t, invalidateData],
@@ -402,22 +394,31 @@ export function TaskView() {
         return; // already there
       }
       try {
+        let kept: string | null = null;
         if (task.list_id === sectionListId) {
           await moveTaskToSection(task, sectionId);
         } else {
           // The drop target IS a section, so the move files there
           // directly — no intermediate state where the task sits in the
           // new list under the old list's section id.
-          await moveTaskToList(task, sectionListId, children, sectionId);
+          const moved = await moveTaskToList(task, sectionListId, children, sectionId);
+          // An original the provider was too busy to delete is said (277).
+          kept = originalKeptSentence(
+            moved,
+            (id) => taskListById.get(id)?.name,
+            t,
+          );
         }
         invalidateData();
-        announce(t('views.tasks.movedToSection', { title: task.title }));
+        announce(kept ?? t('views.tasks.movedToSection', { title: task.title }));
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('drop task on section failed', err);
+        // A failed move may have written at the target: it shows on the next
+        // read.
+        invalidateData();
+        announce(writeErrorMessage(err, t));
       }
     },
-    [invalidateData, announce, t],
+    [invalidateData, announce, t, taskListById],
   );
 
   // Shared toggle: WeekView and DayView use the same hook so the

@@ -366,6 +366,34 @@ Was du tun kannst: Öffne den Kalender, in Aperio oder in der App des
 Kalenders (Outlook, Google Kalender), und lösche die Serie, die doppelt da
 ist.
 
+## Eine Änderung wurde nur zum Teil gespeichert
+
+Manche Anbieter speichern eine Aufgabe, einen Termin oder einen Kontakt in
+mehreren Schritten: erst das Element, dann zum Beispiel die Zuständigen, das
+Foto oder die Mitglieder einer Gruppe. Ist der Anbieter nach dem ersten
+Schritt ausgelastet, steht das Element, aber nicht alles daran. Aperio sagt
+dann, dass die Änderung nur zum Teil gespeichert ist, und die Meldung lässt
+sich nur schließen: Erneutes Speichern legte das Element ein zweites Mal an.
+Die Ansicht lädt neu und zeigt, was beim Anbieter steht.
+
+Legst du eine Aufgabe mit Unteraufgaben an und scheitert eine Unteraufgabe,
+bleibt der Editor auf der angelegten Aufgabe: Die noch nicht angelegten
+Unteraufgaben stehen weiter in seiner Liste, und Speichern legt nur diese an.
+
+Was du tun kannst: Öffne das Element später noch einmal und ergänze, was
+fehlt.
+
+## Nach dem Verschieben steht das Original noch da
+
+Verschiebst du eine Aufgabe oder einen Termin in eine Liste oder einen
+Kalender eines anderen Kontos, legt Aperio dort eine Kopie an und löscht dann
+das Original. Ist der Anbieter beim Löschen ausgelastet, steht das
+Verschobene am Ziel, und das Original bleibt, wo es war. Aperio nennt die
+Liste oder den Kalender, in dem es noch steht.
+
+Was du tun kannst: Lösche das Original dort selbst. Verschiebe es nicht noch
+einmal, denn das legte am Ziel eine zweite Kopie an.
+
 ## Einen Fehler melden
 
 1. Stelle in Einstellungen → Protokolle die Stufe auf **Debug**.

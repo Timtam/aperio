@@ -503,6 +503,13 @@ Siehe DESIGN §4.2.
         Todoist (Abschließen), Graph (Foto, Erweiterung) laufen über
         `Error::after_landed` denselben Weg. Der volle Wunsch („Editor
         bleibt auf dem Angelegten“ überall) kommt mit O1 des Bogens unten.
+      - [ ] **Listenwechsel im Editor fädelt Unteraufgaben nicht neu ein**
+        (gefunden in PR 7): Wechselt eine Elternaufgabe im Editor in eine
+        Liste eines anderen Kontos, bekommt sie dort eine neue Kennung; ihre
+        Unteraufgaben ziehen mit, behalten aber die alte Eltern-Kennung
+        (Desktop `TaskDialog`, Handy `TaskEditorModal`). `moveTaskToList`
+        fädelt sie auf die neue Kennung ein; die Editoren sollten denselben
+        Weg nehmen, Enkel eingeschlossen.
     - [ ] 🚩 **Vorgänge mit Schritten, Rücknahme und Weitermachen** (Toni,
       2026-10-19): Statt dass der Nutzer alles neu machen muss, wenn ein
       Schreiben hängen bleibt (Drosselung, Internetausfall, halb

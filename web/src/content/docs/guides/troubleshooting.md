@@ -339,6 +339,31 @@ series. If invitations may have gone out, the message says that too.
 What you can do: open the calendar, in Aperio or in the calendar's own app
 (Outlook, Google Calendar), and delete the series that is there twice.
 
+## A change was only partly saved
+
+Some providers save a task, an appointment or a contact in several steps:
+first the item, then, for example, its assignees, its photo or a group's
+members. When the provider is busy after the first step, the item stands, but
+not everything about it. Aperio then says the change was only partly saved,
+and the message only closes: saving again would create the item a second
+time. The view reloads and shows what the provider holds.
+
+When you create a task with subtasks and one of the subtasks fails, the
+editor stays on the created task: the subtasks not yet created stay in its
+list, and saving creates only those.
+
+What you can do: open the item again later and add what is missing.
+
+## After a move, the original is still there
+
+When you move a task or an appointment into a list or calendar of another
+account, Aperio creates a copy there and then deletes the original. When the
+provider is busy for the delete, the moved item stands at the target, and the
+original stays where it was. Aperio names the list or calendar it is still in.
+
+What you can do: delete the original there yourself. Do not move it again,
+because that would create a second copy at the target.
+
 ## Reporting a bug
 
 1. In Settings → Logs, set the level to **Debug**.

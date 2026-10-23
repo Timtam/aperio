@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { writeErrorMessage } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
   createSection,
-  isCommandError,
   setSectionColor,
   updateSection,
 } from '../api/client';
@@ -94,11 +94,7 @@ export function SectionDialog({
       setColorDraft(section?.color_label ?? null);
       onClose();
     } catch (err) {
-      if (isCommandError(err)) {
-        setError(`${err.code}: ${err.message}`);
-      } else {
-        setError(String(err));
-      }
+      setError(writeErrorMessage(err, t));
     } finally {
       setBusy(false);
     }

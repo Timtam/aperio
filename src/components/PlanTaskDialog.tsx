@@ -3,14 +3,17 @@ import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import { isCommandError } from '../api/client';
 import type { Task } from '../api/types';
 import {
+  eventWriteLeftover,
   formatIsoDate,
   isoNextMonday,
   isoToday,
   isoTomorrow,
+  writeErrorMessage,
 } from '@aperio/shared';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import { Modal } from './Modal';
 
 /**
@@ -63,6 +66,7 @@ export function PlanTaskDialog({
   const [customDate, setCustomDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { notice, showNotice } = useCloseOnlyNotice();
 
   // Reset on open: preload the custom input with the task's current
   // scheduled date (if any) so editing-after-planning is one keypress
@@ -116,16 +120,19 @@ export function PlanTaskDialog({
         onPlanned();
         onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          setError(String(err));
+        // The plan landed without one of its follow-up steps (273): said in
+        // place of the form, which only closes, and the data reloads.
+        if (eventWriteLeftover(err)) {
+          onPlanned();
+          showNotice(writeErrorMessage(err, t));
+          return;
         }
+        setError(writeErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
     },
-    [task, t, announce, onPlanned, onClose],
+    [task, t, announce, onPlanned, onClose, showNotice],
   );
 
   if (!task) return null;
@@ -133,6 +140,16 @@ export function PlanTaskDialog({
   const todayIso = isoToday();
   const tomorrowIso = isoTomorrow();
   const nextWeekIso = isoNextMonday();
+
+  if (notice) {
+    return (
+      <CloseOnlyNotice
+        title={t('dialogs.plan.title', { title: task.title })}
+        sentence={notice}
+        onClose={onClose}
+      />
+    );
+  }
 
   return (
     <Modal

@@ -31,6 +31,7 @@ import {
   exceptionsLossOf,
   deletionsNotRestoredSentence,
   withDeletionsNotRestored,
+  writeErrorMessage,
 } from '@aperio/shared';
 import { useDateFormat } from '../../intl/dateFormat';
 import {
@@ -82,7 +83,6 @@ import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
   addEventExdate,
   deleteEventById,
-  isCommandError,
 } from '../../api/client';
 import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 import {
@@ -618,9 +618,7 @@ export function MonthView() {
           }),
         );
       } catch (err) {
-        announce(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-        );
+        announce(writeErrorMessage(err, t));
       }
     },
     [invalidateData, announce, t, fmt, performEventDrop, refuseLockedDrag],
