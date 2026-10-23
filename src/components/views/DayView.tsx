@@ -93,27 +93,28 @@ import type {
   TaskList,
 } from '../../api/types';
 import {
-  invitationLocked,
+  collapseEventGroups,
+  compactDaySummary,
+  type DayLog,
+  deletionsNotRestoredSentence,
   dropMinuteInWindow,
   eventBlockFactor,
-  eventSpanForDay,
-  layoutDayColumn,
-  collapseEventGroups,
-  groupBadge,
   eventInstanceKey,
+  eventSpanForDay,
+  eventWriteErrorMessage,
+  exceptionsLossOf,
+  groupBadge,
+  invitationLocked,
+  layoutDayColumn,
   MINUTES_PER_DAY,
   minutesFromMidnight,
   type PositionedSpan,
   type PriorityScale,
-  type TimedSpan,
-  compactDaySummary,
-  spokenDaySummary,
-  type DayLog,
-  eventWriteErrorMessage,
   shownInNotice,
-  exceptionsLossOf,
-  deletionsNotRestoredSentence,
+  spokenDaySummary,
+  type TimedSpan,
   withDeletionsNotRestored,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event row gets at `eventBlockFactor === 1`
@@ -956,8 +957,9 @@ export function DayView() {
         );
         invalidateData();
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('drop scheduleTaskAtTime failed', err);
+        // The person dropped it: said, never only logged (decision 273).
+        invalidateData();
+        announce(writeErrorMessage(err, t));
       }
     })();
   };

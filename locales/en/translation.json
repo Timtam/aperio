@@ -219,6 +219,7 @@
     "regionLabel": "Notifications",
     "undoLabel": "Undo",
     "undoInFlight": "Undoing…",
+    "undoFailed": "That could not be undone: {{reason}}",
     "dismissLabel": "Dismiss"
   },
   "birthdays": {

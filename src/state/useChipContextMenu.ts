@@ -34,7 +34,7 @@ import type {
   TaskStatus,
 } from '../api/types';
 import { cancellationNotice } from '@aperio/shared';
-import { duplicateTask } from '../components/duplicateActions';
+import { duplicateTaskAndSay } from '../components/duplicateActions';
 import { seriesIdOf } from '../intl/recurrence';
 import { useCalendarStore } from './calendarStoreContext';
 import { useDialogState } from './dialogStateContext';
@@ -453,13 +453,7 @@ export function useChipContextMenu(
       } else if (selected === 'duplicate') {
         // Same primitive as the Ctrl+D shortcut and the mobile menu — a flat,
         // in-place copy in the same list (no subtree, parent_id reset).
-        try {
-          await duplicateTask(task);
-          announce(t('actions.duplicated', { title: task.title }));
-          invalidateData();
-        } catch (err) {
-          announce(writeErrorMessage(err, t));
-        }
+        await duplicateTaskAndSay(task, { announce, invalidateData, t });
       } else if (selected === 'move') {
         openMoveCopy({ kind: 'task', task, defaultMode: 'move' });
       } else if (selected === 'copy') {

@@ -8,6 +8,9 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { eventWriteFailureReason } from '@aperio/shared';
+
+import { useAnnouncer } from '../a11y/announcerContext';
 
 import {
   ToastContext,
@@ -186,6 +189,7 @@ function ToastRow({
   setUndoInFlight: (id: ToastId, value: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const announce = useAnnouncer();
   const messageId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   // Track hover + focus separately so we can resume the auto-dismiss
@@ -237,12 +241,12 @@ function ToastRow({
     } catch (err) {
       // Don't dismiss on failure — leave the toast up so the user
       // can try again. Reset the in-flight flag so the button is
-      // clickable again.
+      // clickable again. And say why: the person pressed Undo, and
+      // silence would read as done (decision 273).
       setUndoInFlight(toast.id, false);
-      // eslint-disable-next-line no-console
-      console.warn('toast undo action failed', err);
+      announce(t('toast.undoFailed', { reason: eventWriteFailureReason(err, t) }));
     }
-  }, [toast.id, toast.undo, toast.undoInFlight, setUndoInFlight, onDismiss]);
+  }, [toast.id, toast.undo, toast.undoInFlight, setUndoInFlight, onDismiss, announce, t]);
 
   return (
     <div

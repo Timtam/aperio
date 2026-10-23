@@ -119,3 +119,31 @@ export async function duplicateTask(task: Task): Promise<void> {
     sound: task.sound,
   });
 }
+
+/**
+ * Ctrl+D and the context menu's Duplicate on a task: a flat copy in the same
+ * list, said either way — a failure in words, never an unhandled rejection or
+ * the console alone (decision 273). The list reads again both ways: the copy
+ * shows at once, and one that may stand shows on the next read.
+ */
+export async function duplicateTaskAndSay(
+  task: Task,
+  {
+    announce,
+    invalidateData,
+    t,
+  }: {
+    announce: (message: string) => void;
+    invalidateData: () => void;
+    t: (key: string, values?: Record<string, unknown>) => string;
+  },
+): Promise<void> {
+  try {
+    await duplicateTask(task);
+    invalidateData();
+    announce(t('actions.duplicated', { title: task.title }));
+  } catch (err) {
+    invalidateData();
+    announce(duplicateFailedSentence(err, task.title, t));
+  }
+}

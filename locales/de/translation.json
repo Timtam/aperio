@@ -219,6 +219,7 @@
     "regionLabel": "Benachrichtigungen",
     "undoLabel": "Rückgängig",
     "undoInFlight": "Wird rückgängig gemacht …",
+    "undoFailed": "Das ließ sich nicht rückgängig machen: {{reason}}",
     "dismissLabel": "Schließen"
   },
   "birthdays": {

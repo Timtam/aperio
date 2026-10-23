@@ -36,7 +36,7 @@ import { useDialogState } from '../../state/dialogStateContext';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
 import type { Section, Task } from '../../api/types';
-import { duplicateTask } from '../duplicateActions';
+import { duplicateTaskAndSay } from '../duplicateActions';
 import {
   buildEntries,
   CANCELLED_GROUP_ID,
@@ -473,13 +473,10 @@ export function TaskView() {
           e.preventDefault();
           const task = flatTasks[focusIndex];
           if (task) {
-            void duplicateTask(task).then(() => {
-              // The duplicate lands in task.list_id — the list currently in
-              // view — so it must show without waiting for an unrelated bump.
-              // (No dialog closes here to do it for us; mobile bumps too.)
-              invalidateData();
-              announce(t('actions.duplicated', { title: task.title }));
-            });
+            // The duplicate lands in task.list_id — the list currently in
+            // view — so it must show without waiting for an unrelated bump.
+            // (No dialog closes here to do it for us; mobile bumps too.)
+            void duplicateTaskAndSay(task, { announce, invalidateData, t });
           }
         }
         return;

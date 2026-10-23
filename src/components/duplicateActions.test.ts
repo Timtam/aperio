@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { CalendarEvent } from '../api/types';
+import type { CalendarEvent, Task } from '../api/types';
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
-import { duplicateEvent, duplicatedSentence, duplicateFailedSentence } from './duplicateActions';
+import {
+  duplicateEvent,
+  duplicatedSentence,
+  duplicateFailedSentence,
+  duplicateTaskAndSay,
+} from './duplicateActions';
 import { SeriesNotLoadedError } from '../state/moveActions';
 
 /**
@@ -136,5 +141,31 @@ describe('duplicateEvent', () => {
     expect(duplicateFailedSentence(inPart, 'Standup', t)).toMatch(
       /^dialogs\.event\.writeError\.partlySaved/,
     );
+  });
+});
+
+describe('duplicateTaskAndSay (Ctrl+D on a task)', () => {
+  const t = (key: string, values?: Record<string, unknown>) => `${key} ${JSON.stringify(values)}`;
+  const TASK = { id: 't1', list_id: 'L1', title: 'Einkaufen', assignees: [] } as unknown as Task;
+
+  it('says a busy provider in words, and reads the list again (273)', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockRejectedValue({ code: 'forbidden', message: 'provider-busy: http-429' });
+    const announce = vi.fn();
+    const invalidateData = vi.fn();
+    // Resolves: a failure is said, never an unhandled rejection.
+    await expect(duplicateTaskAndSay(TASK, { announce, invalidateData, t })).resolves.toBeUndefined();
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce.mock.calls[0][0]).toMatch(/^actions\.duplicateFailed /);
+    expect(announce.mock.calls[0][0]).toContain('dialogs.event.writeError.reason.providerBusy');
+    expect(invalidateData).toHaveBeenCalled();
+  });
+
+  it('says the copy when it lands', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({ ...TASK, id: 't2' });
+    const announce = vi.fn();
+    await duplicateTaskAndSay(TASK, { announce, invalidateData: () => {}, t });
+    expect(announce.mock.calls[0][0]).toMatch(/^actions\.duplicated /);
   });
 });

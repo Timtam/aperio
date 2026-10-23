@@ -514,6 +514,15 @@ Siehe DESIGN §4.2.
         zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
         prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
         ist; eine zum Teil gespeicherte Aufgabe schließt den Editor.
+      - [ ] **Automatische Schreibvorgänge sagen ihr Scheitern nicht**
+        (gefunden in PR 7, Entscheidung 273): Was eine Person auslöst, sagt
+        jetzt jeden Fehlschlag (Tagesstart-Knöpfe, Strg+D, Ziehen, Rückgängig
+        im Hinweis). Still bleiben die Vorgänge ohne Knopfdruck: der
+        automatische Übertrag des Tagesstarts (`DayStartReviewChecker`), das
+        Anheften einer fälligen Frist (`DeadlinePinChecker`) und die
+        Aktionen aus Widget und Siri in der Warteschlange. Sie schreiben nur
+        ins Protokoll; offen ist, wo ein solcher Fehlschlag gesagt wird (beim
+        nächsten Öffnen, als Benachrichtigung, im Konto-Hinweis).
       - [ ] **Listenwechsel im Editor fädelt Unteraufgaben nicht neu ein**
         (gefunden in PR 7): Wechselt eine Elternaufgabe im Editor in eine
         Liste eines anderen Kontos, bekommt sie dort eine neue Kennung; ihre

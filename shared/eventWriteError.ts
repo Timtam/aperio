@@ -278,6 +278,40 @@ export async function writeAfterLanded<T>(step: string, write: () => Promise<T>)
   }
 }
 
+/**
+ * The writes one action makes together (the day-start review's "all to
+ * today"): every one is attempted, side by side or, with `oneAtATime`, one
+ * after the other. What landed comes back, and the first failure reads as
+ * {@link afterLanded} says where another write landed — never "nothing was
+ * changed" — or as itself where none did. `null` when every write landed.
+ */
+export async function writeAll<T>(
+  step: string,
+  items: readonly T[],
+  write: (item: T) => Promise<unknown>,
+  { oneAtATime = false }: { oneAtATime?: boolean } = {},
+): Promise<{ landed: T[]; failure: unknown }> {
+  let results: PromiseSettledResult<unknown>[];
+  if (oneAtATime) {
+    results = [];
+    for (const item of items) {
+      const [result] = await Promise.allSettled([write(item)]);
+      results.push(result);
+    }
+  } else {
+    results = await Promise.allSettled(items.map((item) => write(item)));
+  }
+  const landed = items.filter((_, i) => results[i].status === 'fulfilled');
+  const failed = results.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  if (failed === undefined) return { landed, failure: null };
+  return {
+    landed,
+    failure: landed.length > 0 ? afterLanded(failed.reason, step) : failed.reason,
+  };
+}
+
 type Translate = (key: string, values?: Record<string, unknown>) => string;
 
 /**

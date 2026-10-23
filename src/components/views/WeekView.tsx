@@ -88,24 +88,25 @@ import {
 } from '../../api/client';
 import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 import {
-  invitationLocked,
+  type CollapsedRow,
   collapseEventGroups,
-  groupBadge,
+  deletionsNotRestoredSentence,
   dropMinuteInWindow,
   eventBlockFactor,
-  eventSpanForDay,
   eventInstanceKey,
+  eventSpanForDay,
+  eventWriteErrorMessage,
+  exceptionsLossOf,
+  groupBadge,
+  invitationLocked,
   layoutDayColumn,
   MINUTES_PER_DAY,
   minutesFromMidnight,
-  type CollapsedRow,
   type PositionedSpan,
   type PriorityScale,
   type TimedSpan,
-  eventWriteErrorMessage,
-  exceptionsLossOf,
-  deletionsNotRestoredSentence,
   withDeletionsNotRestored,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
@@ -835,8 +836,9 @@ export function WeekView() {
         );
         invalidateData();
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('reschedule update_task failed', err);
+        // The person dropped it: said, never only logged (decision 273).
+        invalidateData();
+        announce(writeErrorMessage(err, t));
       }
     },
     [tasks, announce, t, fmt, invalidateData],
@@ -911,8 +913,9 @@ export function WeekView() {
           );
           invalidateData();
         } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn('drop scheduleTaskAtTime failed', err);
+          // The person dropped it: said, never only logged (decision 273).
+          invalidateData();
+          announce(writeErrorMessage(err, t));
         }
       })();
     },

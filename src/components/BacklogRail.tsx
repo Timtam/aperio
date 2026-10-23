@@ -17,7 +17,7 @@ import {
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
-import { duplicateTask } from './duplicateActions';
+import { duplicateTaskAndSay } from './duplicateActions';
 import { useDateFormat } from '../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../intl/eventColor';
 import {
@@ -455,10 +455,7 @@ function BacklogList({
         } else if (e.ctrlKey || e.metaKey) {
           // Ctrl+D duplicates in place, matching TaskView.
           e.preventDefault();
-          void duplicateTask(task).then(() => {
-            invalidateData();
-            announce(t('actions.duplicated', { title: task.title }));
-          });
+          void duplicateTaskAndSay(task, { announce, invalidateData, t });
         }
         return;
       case 'ContextMenu':

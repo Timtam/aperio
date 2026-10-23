@@ -21,12 +21,15 @@ import {
   daysUntilDeadline,
   filterCarriedOver,
   filterOverdue,
+  movedToToday,
   occurrenceMoveTarget,
   priorityMarker,
   prioritySuffix,
   reminderCount,
-  movedToToday,
   todayIsoKey,
+  writeAfterLanded,
+  writeAll,
+  writeErrorMessage,
 } from '@aperio/shared';
 import type { Task } from '@aperio/shared';
 
@@ -278,6 +281,18 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     [orderedIds],
   );
 
+  /** A button's write that failed: said, never an unhandled rejection
+   *  (decision 273). The rows it would have removed stay, so the focus queued
+   *  for after them is dropped, and what may have landed reads again. */
+  const failed = useCallback(
+    (err: unknown) => {
+      pendingFocusId.current = null;
+      invalidateData();
+      announce(writeErrorMessage(err, t));
+    },
+    [announce, invalidateData, t],
+  );
+
   // Close + snooze when the user has cleared everything mid-session. The
   // defensive empty-on-open (checker + modal raced) closes WITHOUT snoozing —
   // there's no reason to suppress a real future trigger. Both wait for the
@@ -354,11 +369,13 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
           extra > 0 ? `${base} ${t('views.tasks.cascadeSuffix', { count: extra })}` : base,
         );
         invalidateData();
+      } catch (err) {
+        failed(err);
       } finally {
         setBusy(false);
       }
     },
-    [announce, invalidateData, queueFocusAfter, t, tasks, taskListById],
+    [announce, failed, invalidateData, queueFocusAfter, t, tasks, taskListById],
   );
 
   /**
@@ -398,11 +415,13 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
           ),
         );
         invalidateData();
+      } catch (err) {
+        failed(err);
       } finally {
         setBusy(false);
       }
     },
-    [announce, invalidateData, queueFocusAfter, t],
+    [announce, failed, invalidateData, queueFocusAfter, t],
   );
 
   const backToBacklog = useCallback(
@@ -423,11 +442,13 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
           t('dialogs.dayStartReview.deadlines.announceBackToBacklog', { title: task.title }),
         );
         invalidateData();
+      } catch (err) {
+        failed(err);
       } finally {
         setBusy(false);
       }
     },
-    [announce, invalidateData, queueFocusAfter, t],
+    [announce, failed, invalidateData, queueFocusAfter, t],
   );
 
   const completeAllOverdue = useCallback(async () => {
@@ -439,28 +460,36 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       const now = new Date().toISOString();
       // Bulk = a plain status flip (no cascade) — mirrors the desktop's
       // completeAllOverdue, which intentionally skips the per-row cascade here.
-      for (const task of remainingOverdue) {
-        await updateTask({
-          ...task,
-          status: 'completed',
-          completed_at: task.completed_at ?? now,
-        });
-      }
+      // Every write is attempted; what landed leaves the review.
+      const { landed, failure } = await writeAll(
+        'batch',
+        remainingOverdue,
+        (task) =>
+          updateTask({
+            ...task,
+            status: 'completed',
+            completed_at: task.completed_at ?? now,
+          }),
+        { oneAtATime: true },
+      );
       setResolvedIds((s) => {
         const next = new Set(s);
-        ids.forEach((id) => next.add(id));
+        landed.forEach((task) => next.add(task.id));
         return next;
       });
+      if (failure !== null) throw failure;
       announce(
         t('dialogs.dayStartReview.deadlines.announceAllCompleted', {
           count: remainingOverdue.length,
         }),
       );
       invalidateData();
+    } catch (err) {
+      failed(err);
     } finally {
       setBusy(false);
     }
-  }, [announce, invalidateData, queueFocusAfter, remainingOverdue, t]);
+  }, [announce, failed, invalidateData, queueFocusAfter, remainingOverdue, t]);
 
   // ── Carry-over section actions ──────────────────────────────────────────────
 
@@ -491,7 +520,10 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
               ?.reschedule_single_occurrence ?? true,
           );
           if (move.advanced) advanced = true;
-          await updateTask({ ...target, scheduled_date: move.date });
+          const write = () => updateTask({ ...target, scheduled_date: move.date });
+          // Once the row itself moved, a subtask's failure never reads as
+          // "nothing was changed" (decision 277). Mirrors the desktop.
+          await (target === root ? write() : writeAfterLanded('subtasks', write));
         }
         setResolvedIds((s) => {
           const next = new Set(s);
@@ -510,11 +542,13 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
             : base,
         );
         invalidateData();
+      } catch (err) {
+        failed(err);
       } finally {
         setBusy(false);
       }
     },
-    [announce, cascadeFor, invalidateData, queueFocusAfter, t, taskListById, tasks],
+    [announce, cascadeFor, failed, invalidateData, queueFocusAfter, t, taskListById, tasks],
   );
 
   const carryToToday = useCallback(
@@ -563,21 +597,35 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       const ids = targets.map((task) => task.id);
       queueFocusAfter(ids);
       try {
-        for (const task of targets) {
-          await updateTask({ ...task, scheduled_date: newDate });
-        }
+        const { landed, failure } = await writeAll(
+          'batch',
+          targets,
+          (task) => updateTask({ ...task, scheduled_date: newDate }),
+          { oneAtATime: true },
+        );
         setResolvedIds((s) => {
           const next = new Set(s);
-          ids.forEach((id) => next.add(id));
+          landed.forEach((task) => next.add(task.id));
           return next;
         });
+        if (failure !== null) throw failure;
         announce(t(announcementKey, { count: remainingSlipped.length }));
         invalidateData();
+      } catch (err) {
+        failed(err);
       } finally {
         setBusy(false);
       }
     },
-    [announce, collectBulkCarryTargets, invalidateData, queueFocusAfter, remainingSlipped, t],
+    [
+      announce,
+      collectBulkCarryTargets,
+      failed,
+      invalidateData,
+      queueFocusAfter,
+      remainingSlipped,
+      t,
+    ],
   );
 
   const allCarryToToday = useCallback(
@@ -618,6 +666,8 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
                       t('dialogs.dayStartReview.announceDeleted', { title: task.title }),
                     );
                     invalidateData();
+                  } catch (err) {
+                    failed(err);
                   } finally {
                     setBusy(false);
                   }
@@ -651,7 +701,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
         () => setBusy(true),
       );
     },
-    [announce, invalidateData, queueFocusAfter, t, taskListById],
+    [announce, failed, invalidateData, queueFocusAfter, t, taskListById],
   );
 
   // ── Snooze ───────────────────────────────────────────────────────────────────
