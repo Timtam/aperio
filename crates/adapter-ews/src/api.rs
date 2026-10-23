@@ -843,7 +843,7 @@ pub async fn update_event(
             %why,
             "a series is not written without its current copy; nothing is written",
         );
-        if let Some(err) = read_error.take_if(|err| crate::names_sign_in_or_gone(err)) {
+        if let Some(err) = read_error.take_if(|err| keeps_its_own_error(err)) {
             return Err(err);
         }
         return Err(EwsError::Protocol(
@@ -891,7 +891,7 @@ pub async fn update_event(
                 %why,
                 "an all-day day is not written without the current copy; nothing is written",
             );
-            if let Some(err) = read_error.take_if(|err| crate::names_sign_in_or_gone(err)) {
+            if let Some(err) = read_error.take_if(|err| keeps_its_own_error(err)) {
                 return Err(err);
             }
             return Err(EwsError::Protocol(
@@ -1363,7 +1363,8 @@ async fn current_change_key(client: &EwsClient, item_id: &str) -> EwsResult<Opti
 /// Created first, so a failure halfway leaves a duplicate rather than a gap.
 /// The delete sends no cancellation: the appointment still exists, it only
 /// moved. A delete that fails is logged and the move stands, as for a move to
-/// another calendar; the event that comes back is the new single.
+/// another calendar; the event that comes back is the new single. One turned
+/// away by a busy server is said: the change stands in part (decision 277).
 async fn detach_exception(
     client: &EwsClient,
     event: &Event,
@@ -1399,6 +1400,12 @@ async fn detach_exception(
             %err,
             "the exception was detached as a single but stays in its series; a duplicate may exist",
         );
+        // A busy server kept the exception: the single stands beside it, and
+        // the change is saved in part (decision 277). Saving again would
+        // detach another single.
+        if crate::busy_detail(&err).is_some() {
+            return Err(err.after_landed("delete"));
+        }
     }
     Ok(created)
 }
@@ -1831,6 +1838,14 @@ struct SeriesShape {
 }
 
 /// Whether a message is the refusal for a day in an unknown zone.
+/// Whether a failed read of the copy a write needs is said as itself, not as
+/// `copy-unreadable`: a failed sign-in or a vanished item, which "try again"
+/// would not mend, and a busy server, which it would (decision 270). All three
+/// already count as nothing written.
+fn keeps_its_own_error(err: &EwsError) -> bool {
+    crate::names_sign_in_or_gone(err) || crate::busy_detail(err).is_some()
+}
+
 fn day_zone_unreadable(message: &str) -> bool {
     matches!(
         cal_core::WriteRefusal::parse(message),
@@ -3494,6 +3509,16 @@ mod tests {
         server: &mut Server,
         update_code: &'static str,
     ) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        refuse_exception_update_and_delete(server, update_code, "NoError").await
+    }
+
+    /// [`refuse_exception_update`], with the `DeleteItem` of the exception
+    /// answered `delete_code`.
+    async fn refuse_exception_update_and_delete(
+        server: &mut Server,
+        update_code: &'static str,
+        delete_code: &'static str,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
         use std::sync::{Arc, Mutex};
         let envelope = |inner: String| {
             format!(
@@ -3539,14 +3564,18 @@ mod tests {
   </m:ResponseMessages></m:CreateItemResponse>"#
                 .to_string(),
         );
-        let deleted = envelope(
+        let class = if delete_code == "NoError" {
+            "Success"
+        } else {
+            "Error"
+        };
+        let deleted = envelope(format!(
             r#"<m:DeleteItemResponse><m:ResponseMessages>
-    <m:DeleteItemResponseMessage ResponseClass="Success">
-      <m:ResponseCode>NoError</m:ResponseCode>
+    <m:DeleteItemResponseMessage ResponseClass="{class}">
+      <m:ResponseCode>{delete_code}</m:ResponseCode>
     </m:DeleteItemResponseMessage>
   </m:ResponseMessages></m:DeleteItemResponse>"#
-                .to_string(),
-        );
+        ));
         // What the exception owns, for `read_before`: its own subject at its
         // own time, so the refused update carries the fields the edit changed.
         let occurrence = envelope(
@@ -3670,6 +3699,34 @@ mod tests {
             updated.id,
             encode_event_id(EventIdKind::Single, "NEW-ID", Some("NCK")),
             "the event that comes back is the new single"
+        );
+    }
+
+    /// The single stands, and a busy server kept the exception beside it: the
+    /// change is saved in part (decision 277), never "nothing was changed",
+    /// which would invite detaching another single.
+    #[tokio::test]
+    async fn a_detached_exception_whose_delete_is_busy_is_partly_saved() {
+        let mut server = Server::new_async().await;
+        let requests = refuse_exception_update_and_delete(
+            &mut server,
+            "ErrorOccurrenceCrossingBoundary",
+            "ErrorServerBusy",
+        )
+        .await;
+
+        let err = update_event(&client_for(&server), &exception_moved_to_thursday(), None)
+            .await
+            .unwrap_err();
+
+        let core = crate::to_core_error_for_tests(err);
+        assert!(core.is_partly_saved(), "{core:?}");
+        assert!(!core.never_landed(), "{core:?}");
+        let requests = requests.lock().unwrap();
+        assert!(requests[3].contains("CreateItem"), "the single was created");
+        assert!(
+            requests[4].contains("DeleteItem"),
+            "and the exception's delete sent"
         );
     }
 

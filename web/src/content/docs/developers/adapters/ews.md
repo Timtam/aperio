@@ -24,6 +24,18 @@ The endpoint is discovered or user-supplied.
 
 ## Quirks
 
+- **A busy server.** `ErrorServerBusy`, as a response code or as a fault sent
+  with HTTP 500, and HTTP 429 are a busy provider (`busy_detail`, decision
+  270): the request did nothing, and `cal_core::Error::provider_busy` says so
+  on every path, reads included, where it was a refusal (`server-refused`) on
+  a write and a protocol error on a read. A read of the copy a write needs
+  that is busy says busy, never `copy-unreadable`. Where a later request of a
+  save is turned away after an earlier one landed, the change stands in part
+  (`EwsError::PartlySaved`, 277): an exception detached as a single whose
+  delete is busy, and a contact photo whose old picture was deleted before
+  the upload failed. A new contact whose photo upload fails is still
+  returned, with `has_photo` false, and the editor says so. The GAL walk ends
+  at the first busy prefix with that error, so the GAL cached before stays.
 - **Folder-complete events.** EWS keeps a per-folder in-memory view of
   *every* item it has seen, so its event read is **folder-complete**: it
   emits the full set with `ChangeSet.complete = true`, and the host stores
@@ -174,8 +186,9 @@ The endpoint is discovered or user-supplied.
     the invitation's iCalendar carries the deletions as `EXDATE`, and the
     invitee gets exactly one invitation; 60 deletions took 10.7 s in 123
     requests.
-  - `ErrorServerBusy`, as a response code or an HTTP 500 fault, is waited out
-    by its `BackOffMilliseconds` while it fits (`cal_core::may_send` counts the
+  - `ErrorServerBusy`, as a response code or an HTTP 500 fault, and HTTP 429
+    are waited out by the `BackOffMilliseconds` the answer names (429 names
+    none, so the step backs off on its own clock) while it fits (`cal_core::may_send` counts the
     slowest request so far). A step that no longer fits right after such a
     wait, or once the waits took half the time to settle or more, fails as
     `busy`, not `time` (`cal_core::out_of_time_reason`, 276), and a series
