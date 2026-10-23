@@ -329,6 +329,12 @@ export const refreshExternalCache = (): Promise<void> =>
 export const refreshAccountCache = (accountId: string): Promise<void> =>
   CalFfi.refreshAccountCache(accountId);
 
+/** The OS background round's warm pass: automatic, so un-forced — a busy
+ *  provider or a blip needs a second round before it warns (decision 271) —
+ *  and queued, so it is not lost while another pass runs. */
+export const refreshExternalCacheInBackground = (): Promise<void> =>
+  CalFfi.refreshExternalCacheInBackground();
+
 /** The external-cache warm status — drives a "refreshing…" spinner + a "last
  *  updated" line. */
 export const cacheRefreshStatus = async (): Promise<CacheRefreshStatus> =>

@@ -6228,6 +6228,18 @@ impl Host {
         });
     }
 
+    /// The OS background round's warm pass (BGTaskScheduler, WorkManager):
+    /// automatic, so UN-forced — a busy provider or a blip needs a second
+    /// round before it shows, as on the desktop (decision 271) — but queued
+    /// like [`Self::refresh_external_cache`], because the round was woken for
+    /// data a running pass may already have read past.
+    pub fn refresh_external_cache_in_background(&self) {
+        let refresher = Arc::clone(&self.cache_refresher);
+        self.runtime.handle().spawn(async move {
+            refresher.warm_all_queued(false).await;
+        });
+    }
+
     /// [`Self::refresh_external_cache`] after a change of ONE account
     /// (added, edited, a sign-in or password stored again, a reset): the pass
     /// runs forced for that account only, and counts as an automatic round

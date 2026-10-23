@@ -1088,6 +1088,10 @@ class CalFfiModule : Module() {
       host.refreshAccountCache(accountId)
     }
 
+    AsyncFunction("refreshExternalCacheInBackground") {
+      host.refreshExternalCacheInBackground()
+    }
+
     AsyncFunction("getCacheRefreshStatusJson") {
       host.getCacheRefreshStatusJson()
     }

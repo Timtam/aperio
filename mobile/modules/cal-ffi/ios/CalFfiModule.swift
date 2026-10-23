@@ -714,6 +714,10 @@ public class CalFfiModule: Module {
       self.host.refreshAccountCache(accountId: accountId)
     }
 
+    AsyncFunction("refreshExternalCacheInBackground") {
+      self.host.refreshExternalCacheInBackground()
+    }
+
     AsyncFunction("getCacheRefreshStatusJson") { () -> String in
       try self.host.getCacheRefreshStatusJson()
     }

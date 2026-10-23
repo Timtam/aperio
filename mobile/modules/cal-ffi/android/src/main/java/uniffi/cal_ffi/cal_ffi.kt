@@ -1152,6 +1152,8 @@ external fun uniffi_cal_ffi_checksum_method_host_refresh_event_local_reminder_si
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_external_cache(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_refresh_external_cache_in_background(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_rename_account_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_rename_container(
@@ -1557,6 +1559,8 @@ external fun uniffi_cal_ffi_fn_method_host_refresh_errors_json(`ptr`: Long,uniff
 external fun uniffi_cal_ffi_fn_method_host_refresh_event_local_reminder_signature(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`startsAt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_refresh_external_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_refresh_external_cache_in_background(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_rename_account_json(`ptr`: Long,`id`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -2393,6 +2397,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_external_cache() != 5904.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_refresh_external_cache_in_background() != 50536.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_rename_account_json() != 49761.toShort()) {
@@ -5480,6 +5487,15 @@ public interface HostInterface {
     fun `refreshExternalCache`()
     
     /**
+     * The OS background round's warm pass (BGTaskScheduler, WorkManager):
+     * automatic, so UN-forced — a busy provider or a blip needs a second
+     * round before it shows, as on the desktop (decision 271) — but queued
+     * like [`Self::refresh_external_cache`], because the round was woken for
+     * data a running pass may already have read past.
+     */
+    fun `refreshExternalCacheInBackground`()
+    
+    /**
      * Rename an account's display name. Persists the row + syncs the change
      * (non-secret metadata only). Mirrors the desktop `rename_account`.
      */
@@ -8279,6 +8295,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_refresh_external_cache(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
+     * The OS background round's warm pass (BGTaskScheduler, WorkManager):
+     * automatic, so UN-forced — a busy provider or a blip needs a second
+     * round before it shows, as on the desktop (decision 271) — but queued
+     * like [`Self::refresh_external_cache`], because the round was woken for
+     * data a running pass may already have read past.
+     */override fun `refreshExternalCacheInBackground`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_refresh_external_cache_in_background(
         it,
         _status)
 }
