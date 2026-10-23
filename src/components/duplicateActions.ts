@@ -1,5 +1,6 @@
 import {
   createsInSteps,
+  eventWriteErrorMessage,
   eventWriteFailureReason,
   eventWriteLeftover,
   organizerOf,
@@ -86,7 +87,10 @@ export function duplicateFailedSentence(
     return t('dialogs.event.seriesLoadFailed', { title });
   }
   // A new series that may stand: said so, and not to be done again (210).
-  if (eventWriteLeftover(err)) return t('actions.copyMayStand', { title });
+  // Any other leftover says its own sentence.
+  const leftover = eventWriteLeftover(err);
+  if (leftover?.leftover === 'created-may-stand') return t('actions.copyMayStand', { title });
+  if (leftover) return eventWriteErrorMessage(err, t);
   return t('actions.duplicateFailed', { title, reason: eventWriteFailureReason(err, t) });
 }
 

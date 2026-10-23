@@ -127,4 +127,14 @@ describe('duplicateEvent', () => {
     expect(said).toMatch(/^actions\.duplicateFailed/);
     expect(said).toMatch(/Der Server antwortet nicht/);
   });
+
+  it('says a copy that may stand only for a new series that may stand', () => {
+    const t = (key: string, values?: Record<string, unknown>) => `${key} ${JSON.stringify(values)}`;
+    const mayStand = { code: 'network', message: 'created-may-stand: time' };
+    expect(duplicateFailedSentence(mayStand, 'Standup', t)).toMatch(/^actions\.copyMayStand/);
+    const inPart = { code: 'network', message: 'partly-saved: children' };
+    expect(duplicateFailedSentence(inPart, 'Standup', t)).toMatch(
+      /^dialogs\.event\.writeError\.partlySaved/,
+    );
+  });
 });

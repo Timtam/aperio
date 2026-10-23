@@ -1,26 +1,83 @@
 import {
+  codedError,
+  errorMessageText,
   eventWriteErrorMessage,
   eventWriteLeftover,
   eventWriteRefusal,
   exceptionsLossOf,
+  isProviderBusy,
 } from './eventWriteError';
 
 /**
  * The message to put in front of a person when something failed.
  *
- * A rejected Tauri command or FFI bridge call arrives as an `Error`; a rejected
- * promise can carry anything at all. Both have to end up as a string, because
- * the string is what the screen reader says — and saying nothing is the one
- * outcome that must never happen.
+ * A rejected FFI bridge call arrives as an `Error`, whose message Expo starts
+ * with an English sentence of its own; only what follows it is the host's. A
+ * rejected Tauri command arrives as a plain `{code, message}` object, which
+ * read "[object Object]" before; it reads `code: message`, as the desktop's
+ * own copies did. A rejected promise can carry anything at all. All of them
+ * have to end up as a string, because the string is what the screen reader
+ * says — and saying nothing is the one outcome that must never happen.
  *
  * Four copies of this existed (three on mobile, one about to be written on the
  * desktop) before it was one.
  */
 export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  if (err instanceof Error) return errorMessageText(err);
+  const known = codedError(err);
+  if (known) return `${known.code}: ${errorMessageText(err)}`;
+  return String(err);
 }
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
+
+/**
+ * The sentence for a READ that failed — a load, a probe, a search, a check of
+ * availability. A busy provider and a device without access say so in words
+ * that never claim a change was undone: a read changes nothing, and "Nothing
+ * was changed" would only confuse (decision 273). Anything else reads as
+ * {@link errorMessage}.
+ */
+export function readErrorMessage(err: unknown, t: Translate): string {
+  const refusal = eventWriteRefusal(err);
+  if (refusal?.refusal === 'provider-busy') return t('common.providerBusy');
+  if (refusal?.refusal === 'access-not-granted') return t('common.accessNotGranted');
+  return errorMessage(err);
+}
+
+/**
+ * Why a read failed, as a clause for a frame of the caller's ("… could not be
+ * loaded: {reason}"): the provider is busy, the device has no access, or what
+ * the host said.
+ */
+export function readFailureReason(err: unknown, t: Translate): string {
+  const refusal = eventWriteRefusal(err);
+  if (refusal?.refusal === 'provider-busy') {
+    return t('dialogs.event.writeError.reason.providerBusy');
+  }
+  if (refusal?.refusal === 'access-not-granted') {
+    return t('dialogs.event.writeError.reason.accessNotGranted');
+  }
+  return errorMessage(err);
+}
+
+/**
+ * A read failure said in the frame `key`, with its reason in the frame's
+ * `slot`. A busy provider adds "Try again later." — never how long (decisions
+ * 272, 278).
+ */
+export function readFailureSentence(
+  key: string,
+  err: unknown,
+  t: Translate,
+  slot = 'reason',
+  values: Record<string, unknown> = {},
+): string {
+  const sentence = t(key, { ...values, [slot]: readFailureReason(err, t) }).trim();
+  if (!isProviderBusy(err)) return sentence;
+  const ended = /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
+  return `${ended} ${t('common.tryAgainLater')}`;
+}
 
 /**
  * {@link errorMessage} for a failed write: a refusal reads as its sentence, and

@@ -440,7 +440,7 @@ describe('a provider that is busy (decisions 270, 276, 277)', () => {
       );
       expect(writeNeverLanded(err)).toBe(false);
       expect(eventWriteFailureReason(err, t)).toBe(
-        'sie ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist',
+        'die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist',
       );
     }
   });
@@ -457,6 +457,17 @@ describe('a provider that is busy (decisions 270, 276, 277)', () => {
     // "Took too long" stays for a slow provider.
     expect(eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: time'), t)).toMatch(
       /hat zu lange gedauert/,
+    );
+  });
+
+  it('says a save made in part without "invited", and its clause fits any frame', () => {
+    const inPart = eventWriteLeftover(command('network', 'partly-saved: invited x'));
+    expect(inPart?.invited).toBe(false);
+    expect(eventWriteLeftover(command('network', 'created-may-stand: invited time'))?.invited).toBe(
+      true,
+    );
+    expect(eventWriteFailureReason(command('network', 'partly-saved: members'), t)).toBe(
+      'die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist',
     );
   });
 

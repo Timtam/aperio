@@ -166,10 +166,21 @@ export function eventWriteLeftover(
       leftover,
       key: LEFTOVER_KEYS[leftover],
       detail,
-      invited: stepDetail(detail).invited,
+      // Only a series that may stand can stand in the invitees' calendars
+      // (228); a save made in part names its step, never "invited".
+      invited: leftover === 'created-may-stand' && stepDetail(detail).invited,
     };
   }
   return null;
+}
+
+/**
+ * Whether the provider turned the request away because it is busy (decision
+ * 270), whichever error carries the token: nothing was written, and trying
+ * again later may work.
+ */
+export function isProviderBusy(err: unknown): boolean {
+  return eventWriteRefusal(err)?.refusal === 'provider-busy';
 }
 
 /**

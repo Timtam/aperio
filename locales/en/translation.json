@@ -152,7 +152,10 @@
   "common": {
     "colorComposer": {
       "invalidHex": "Please enter a valid hex value, e.g. #e53935."
-    }
+    },
+    "providerBusy": "The provider is busy right now. Try again later.",
+    "tryAgainLater": "Try again later.",
+    "accessNotGranted": "Aperio has no access to this device's calendars and reminders. Allow it for Aperio in the Settings app."
   },
   "descriptionLinks": {
     "label": "Links in this description",
@@ -1617,7 +1620,8 @@
         "someBusy_one": "{{count}} attendee is busy at this time.",
         "someBusy_other": "{{count}} attendees are busy at this time.",
         "busy": "Busy",
-        "free": "Free"
+        "free": "Free",
+        "failed": "Availability could not be checked: {{reason}}."
       },
       "rsvp": {
         "yourResponseLabel": "Your response",
@@ -1749,7 +1753,7 @@
         "invitationsMayHaveGone": "The invitees may have received an invitation.",
         "providerBusy": "The provider is busy right now. Nothing was changed. Try again later.",
         "deletionsNotKeptBusy": "The provider was busy, so Aperio could not finish the new series in time and removed it again. Nothing was changed. Try again later.",
-        "partlySaved": "The change was only partly saved, because the provider is busy right now. Check it, and try the rest again later.",
+        "partlySaved": "The change was only partly saved because the provider is busy right now. Check it and try the rest again later.",
         "reason": {
           "replyOnly": "only the organizer can change this meeting",
           "serverRefused": "the calendar server refused it ({{detail}})",
@@ -1767,7 +1771,7 @@
           "createdMayStand": "a new series was created but could neither be completed nor removed again",
           "providerBusy": "the provider is busy right now",
           "deletionsNotKeptBusy": "the provider was busy, so the new series could not be finished in time",
-          "partlySaved": "it was only partly saved, because the provider is busy right now"
+          "partlySaved": "the change was only partly saved because the provider is busy right now"
         }
       },
       "deleteAndDecline": "Delete and decline"

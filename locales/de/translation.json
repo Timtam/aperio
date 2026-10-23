@@ -152,7 +152,10 @@
   "common": {
     "colorComposer": {
       "invalidHex": "Bitte einen gültigen Hex-Wert eingeben, z. B. #e53935."
-    }
+    },
+    "providerBusy": "Der Anbieter ist gerade ausgelastet. Versuche es später noch einmal.",
+    "tryAgainLater": "Versuche es später noch einmal.",
+    "accessNotGranted": "Aperio hat keinen Zugriff auf die Kalender und Erinnerungen dieses Geräts. Erlaube ihn in der App „Einstellungen“ bei Aperio."
   },
   "descriptionLinks": {
     "label": "Links in dieser Beschreibung",
@@ -1617,7 +1620,8 @@
         "someBusy_one": "{{count}} Teilnehmer ist zu dieser Zeit beschäftigt.",
         "someBusy_other": "{{count}} Teilnehmer sind zu dieser Zeit beschäftigt.",
         "busy": "Beschäftigt",
-        "free": "Frei"
+        "free": "Frei",
+        "failed": "Die Verfügbarkeit ließ sich nicht prüfen: {{reason}}."
       },
       "rsvp": {
         "yourResponseLabel": "Deine Antwort",
@@ -1767,7 +1771,7 @@
           "createdMayStand": "eine neue Serie wurde angelegt, ließ sich aber weder fertigstellen noch wieder entfernen",
           "providerBusy": "der Anbieter ist gerade ausgelastet",
           "deletionsNotKeptBusy": "der Anbieter war ausgelastet, deshalb ließ sich die neue Serie nicht rechtzeitig fertigstellen",
-          "partlySaved": "sie ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist"
+          "partlySaved": "die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist"
         }
       },
       "deleteAndDecline": "Löschen und absagen"
