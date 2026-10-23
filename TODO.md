@@ -493,30 +493,27 @@ Siehe DESIGN §4.2.
         und löscht am Ursprung.
       - [ ] **Gemeinsamer getakteter Sender**, sobald Microsoft 365 (140)
         dasselbe braucht: EWS und Google haben je ihre eigene Sende-Schleife.
-      - [ ] **Anlegen mit Folgeschritt** (aus 270-278, 2026-10-19): Steht
-        ein Anlegen schon, aber ein Folgeschritt scheitert am ausgelasteten
-        Anbieter (Google: Gruppenmitglieder, Foto; Vikunja: Zuständige;
-        Todoist: Abschließen; Graph: Foto; Unteraufgaben-Entwürfe), soll
-        der Editor auf dem Angelegten bleiben, die Entwürfe behalten, und
-        erneutes Speichern ändert statt anzulegen (Toni). Zurückgestellt,
-        bis die Recherche zu Vorgängen mit Schritten (unten) entschieden
-        ist. Bis dahin verschluckt Google ein abgewiesenes Foto wie früher
-        (der Kontakt steht ohne Foto); eine neue Gruppe, deren Mitglieder
-        nicht ankamen, meldet `partly-saved: members`, und die Editoren
-        bieten das Anlegen noch einmal an (älter).
-    - [ ] **Vorgänge mit Schritten, Rücknahme und Weitermachen** (Toni,
+      - [ ] **Anlegen mit Folgeschritt, ehrlich abgeschlossen** (in PR 7,
+        Toni 2026-10-23): Steht ein Anlegen, aber ein Folgeschritt scheitert,
+        bietet kein Editor das Anlegen erneut an. Google-Gruppe ohne
+        Mitglieder: Hinweis, der sich nur schließen lässt, Daten laden neu.
+        Google-Foto: weiter verschluckt, der Editor sagt „ohne Foto
+        gespeichert“. Unteraufgaben-Entwürfe: der Editor bleibt auf der
+        angelegten Aufgabe mit den übrigen Entwürfen. Vikunja (Zuständige),
+        Todoist (Abschließen), Graph (Foto, Erweiterung) laufen über
+        `Error::after_landed` denselben Weg. Der volle Wunsch („Editor
+        bleibt auf dem Angelegten“ überall) kommt mit O1 des Bogens unten.
+    - [ ] 🚩 **Vorgänge mit Schritten, Rücknahme und Weitermachen** (Toni,
       2026-10-19): Statt dass der Nutzer alles neu machen muss, wenn ein
       Schreiben hängen bleibt (Drosselung, Internetausfall, halb
-      gespeichert), melden Adapter Vorgänge beim Kern an: Schritte, die je
-      Erfolg oder Misserfolg zurückmelden, eine Rücknahme, ein speicherbarer
-      Zustand, damit der Kern später von selbst weitermacht (beim nächsten
-      Aktualisieren, nach einer Zeit, beim Aufwecken im Hintergrund). Jeder
-      Vorgang trägt das Element im Zielzustand mit: Die Oberfläche warnt,
-      dass die angezeigten Werte noch nicht beim Anbieter stehen, und eine
-      weitere Änderung hängt sich hinter den laufenden Vorgang. Vorbild:
-      die Schrittläufe neuer Serien bei Google und Exchange. Keine
-      Abwärtskompatibilität nötig (vor dem Release, alle Plugins im Repo).
-      Recherche und Planung laufen (2026-10-19).
+      gespeichert), melden Adapter Vorgänge beim Kern an: Schritte mit
+      Erfolg oder Misserfolg, eine Rücknahme, ein speicherbarer Zustand,
+      damit der Kern später von selbst weitermacht. Jeder Vorgang trägt das
+      Element im Zielzustand; die Oberfläche warnt, und weitere Änderungen
+      hängen sich dahinter. Recherchiert 2026-10-19: machbar, etwa 25 bis 30
+      PRs (Bogen O1-O13), Grenzen und 28 Korrekturen aus der Kritik in
+      `DESIGN-write-operations.md`. Toni 2026-10-23: als eigener Bogen nach
+      PR 7, 9 und 10. Zu Beginn die 15 offenen Fragen aus §8 stellen.
     - ↻ **Eine neue Exchange-Serie behält ihre gelöschten Termine** (PR 8,
       Entscheidungen 202-213, 223-230, 263-266): Exchange nimmt eine Serie
       ohne ihre Löschungen an (140). Der Adapter legt sie still an, löscht
