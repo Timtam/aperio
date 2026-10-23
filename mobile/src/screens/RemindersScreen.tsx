@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { isBirthdayEventId } from '@aperio/shared';
+import { isBirthdayEventId, readErrorMessage } from '@aperio/shared';
 
 import { upcomingReminders, UpcomingReminder } from '../api/reminders';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -24,10 +24,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
  *  the external reminder scan still covers the whole window. */
 const HORIZON_MINUTES = 90 * 24 * 60;
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 export default function RemindersScreen({
   navigation,
 }: RootStackScreenProps<'Reminders'>) {
@@ -44,11 +40,11 @@ export default function RemindersScreen({
     try {
       setReminders(await upcomingReminders(HORIZON_MINUTES));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(readErrorMessage(err, t));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // Refresh on every focus so a just-created event/task's reminder shows up.
   useFocusEffect(

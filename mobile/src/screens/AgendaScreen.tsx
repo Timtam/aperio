@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { writeErrorMessage } from '@aperio/shared';
+import { readErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -272,7 +272,8 @@ export default function AgendaScreen({
       hasLoadedRef.current = true;
     } catch (err) {
       if (reqToken.current !== token) return;
-      const message = writeErrorMessage(err, t);
+      // A load: a busy provider says so, never that nothing was changed.
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {

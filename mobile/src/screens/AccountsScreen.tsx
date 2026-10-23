@@ -50,13 +50,15 @@ import {
 } from '../state/deviceAccessGate';
 import { useRefreshErrors } from '../state/useRefreshErrors';
 import {
+  type AccountFormSpec,
   collectValues,
+  errorMessage,
   firstMissingField,
   missingStores,
+  type OsAccessReport,
+  readErrorMessage,
   restrictedStores,
   settingsStores,
-  type AccountFormSpec,
-  type OsAccessReport,
 } from '@aperio/shared';
 
 import { AccountSchemaForm } from '../components/AccountSchemaForm';
@@ -154,10 +156,6 @@ const CONTACTS_CAPABLE_KINDS: ReadonlySet<AdapterKind> = new Set<AdapterKind>([
 
 /** Frontend-only flag: once acknowledged, the privacy notice never re-appears. */
 const PREF_PRIVACY_NOTICE_ACK = 'contacts.privacyNoticeAcknowledged';
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function AccountsScreen() {
   const { t, i18n } = useTranslation();
@@ -310,7 +308,7 @@ export default function AccountsScreen() {
       setAccounts(accs);
       setMissingIds(new Set(missing.map((a) => a.id)));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -397,7 +395,7 @@ export default function AccountsScreen() {
           }
         })
         .catch((err) => {
-          setError(errorMessage(err));
+          setError(readErrorMessage(err, t));
         });
     },
     [i18n.language, t],
@@ -474,7 +472,7 @@ export default function AccountsScreen() {
           setMode('schema');
         })
         .catch((err) => {
-          if (editRequest.current === token) setError(errorMessage(err));
+          if (editRequest.current === token) setError(readErrorMessage(err, t));
         });
     },
     [i18n.language, t],
@@ -511,7 +509,7 @@ export default function AccountsScreen() {
           announce(action.success);
         }
       } catch (err) {
-        const message = errorMessage(err);
+        const message = readErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {
@@ -537,7 +535,7 @@ export default function AccountsScreen() {
       setTestMessage(ok);
       announce(ok);
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -623,7 +621,7 @@ export default function AccountsScreen() {
       // token itself.
       const raw = errorMessage(err);
       const message =
-        raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : raw;
+        raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -701,7 +699,7 @@ export default function AccountsScreen() {
       // announce as new.
       void refreshDeviceAccessReport();
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -727,7 +725,7 @@ export default function AccountsScreen() {
         setAccessDialogOpen(true);
       }
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -835,7 +833,7 @@ export default function AccountsScreen() {
                   await load();
                   announce(t('mobile.deleted', { title: account.display_name }));
                 } catch (err) {
-                  const message = errorMessage(err);
+                  const message = readErrorMessage(err, t);
                   setError(message);
                   announce(t('mobile.error', { message }));
                 }
@@ -874,7 +872,7 @@ export default function AccountsScreen() {
         await load();
         announce(t('dialogs.accounts.renamed', { name }));
       } catch (err) {
-        const message = errorMessage(err);
+        const message = readErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       }
@@ -934,7 +932,7 @@ export default function AccountsScreen() {
         }
         const raw = errorMessage(err);
         const message =
-          raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : raw;
+          raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : readErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       }
@@ -956,7 +954,7 @@ export default function AccountsScreen() {
           t('dialogs.accounts.resyncStarted', { name: account.display_name }),
         );
       } catch (err) {
-        const message = errorMessage(err);
+        const message = readErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       }
@@ -988,7 +986,7 @@ export default function AccountsScreen() {
       } catch (err) {
         // The secret stays in place on a registration failure — let the user
         // retry without re-typing (the field is still open).
-        const message = errorMessage(err);
+        const message = readErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       }

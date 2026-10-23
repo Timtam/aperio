@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { readErrorMessage, writeErrorMessage } from '@aperio/shared';
 import {
   AccessibilityInfo,
   Pressable,
@@ -37,10 +38,6 @@ function normaliseHex(input: string): string | null {
   return /^#[0-9a-fA-F]{6}$/.test(withHash) ? withHash.toLowerCase() : null;
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 export default function ColorLabelsScreen() {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -64,9 +61,9 @@ export default function ColorLabelsScreen() {
       // Hide ad-hoc one-off colours — they're composed inline, not managed here.
       setLabels((await listColorLabels()).filter((l) => !l.ad_hoc));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(readErrorMessage(err, t));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -98,7 +95,7 @@ export default function ColorLabelsScreen() {
       await load();
       announce(t('dialogs.colorLabels.created', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -128,7 +125,7 @@ export default function ColorLabelsScreen() {
       await load();
       announce(t('dialogs.colorLabels.updated', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -147,7 +144,7 @@ export default function ColorLabelsScreen() {
         await load();
         announce(t('dialogs.colorLabels.deleted', { name: label.name }));
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {

@@ -23,7 +23,7 @@ import {
   listContactLists,
   searchContacts,
 } from '../api/contacts';
-import { primaryChannelValue } from '@aperio/shared';
+import { primaryChannelValue, readErrorMessage, writeErrorMessage } from '@aperio/shared';
 
 import { expandedA11y } from '../a11y/roles';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -43,10 +43,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // NOT on the sync event log.
 
 const SEARCH_DEBOUNCE_MS = 250;
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** A contact paired with its owning list, for grouped rendering. */
 interface Group {
@@ -176,7 +172,7 @@ export default function ContactsScreen({
       );
       setGroups(withContacts);
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -271,7 +267,7 @@ export default function ContactsScreen({
                   // overlay (load() only refreshes the browse groups).
                   setRefreshNonce((n) => n + 1);
                 } catch (err) {
-                  const message = errorMessage(err);
+                  const message = writeErrorMessage(err, t);
                   setError(message);
                   announce(t('mobile.error', { message }));
                 }

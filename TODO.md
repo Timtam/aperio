@@ -503,6 +503,17 @@ Siehe DESIGN §4.2.
         Todoist (Abschließen), Graph (Foto, Erweiterung) laufen über
         `Error::after_landed` denselben Weg. Der volle Wunsch („Editor
         bleibt auf dem Angelegten“ überall) kommt mit O1 des Bogens unten.
+        ↻ Die Oberflächen beider Seiten sind gebaut: Aufgaben-Editor,
+        Schnell-Anlegen, Einplanen, Verschieben/Kopieren und Kontakt-Editor
+        zeigen den Hinweis, der sich nur schließen lässt (Desktop
+        `CloseOnlyNotice`, Handy dasselbe); Entwürfe bleiben am angelegten
+        Elternteil; „ohne Foto angelegt“ über `has_photo`; ein beim
+        Verschieben stehengebliebenes Original wird mit seiner Liste oder
+        seinem Kalender benannt (277). Offen: Vikunja, Todoist und Graph über
+        `after_landed` (Adapter-Schritte von PR 7). Am Handy ohne Testläufer
+        zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
+        prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
+        ist; eine zum Teil gespeicherte Aufgabe schließt den Editor.
       - [ ] **Listenwechsel im Editor fädelt Unteraufgaben nicht neu ein**
         (gefunden in PR 7): Wechselt eine Elternaufgabe im Editor in eine
         Liste eines anderen Kontos, bekommt sie dort eine neue Kennung; ihre

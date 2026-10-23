@@ -19,10 +19,10 @@ import type {
 } from '@aperio/shared';
 import {
   effortSuffix,
-  errorMessage,
   isImportantPriority,
   normalPriority,
   prioritySuffix,
+  readErrorMessage,
   statusI18nKey,
   statusMarker,
   writeErrorMessage,
@@ -114,10 +114,10 @@ export function SubtaskSection({
       const freshParent = snap.find((tk) => tk.id === parentTask.id);
       if (freshParent) onParentSync?.(freshParent);
     } catch (err) {
-      // A read: nothing here was refused.
-      setError(errorMessage(err));
+      // A read: a busy provider says so, never that nothing was changed.
+      setError(readErrorMessage(err, t));
     }
-  }, [parentTask.list_id, parentTask.id, onParentSync]);
+  }, [parentTask.list_id, parentTask.id, onParentSync, t]);
 
   useEffect(() => {
     void reload();

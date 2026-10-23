@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { meetingFailureSentence } from '@aperio/shared';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { listAccounts, type Account } from '../api/accounts';
@@ -116,9 +117,9 @@ export function MeetingControls({
       onEventChanged(attached.event);
       announce(t('conferencing.meetingCreated'));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-      announce(t('conferencing.meetingFailed', { message }));
+      const sentence = meetingFailureSentence(err, t);
+      setError(sentence);
+      announce(sentence);
     } finally {
       setBusy(false);
     }
@@ -139,9 +140,9 @@ export function MeetingControls({
       if (saved) onEventChanged(saved);
       announce(t('conferencing.meetingRemoved'));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-      announce(t('conferencing.meetingFailed', { message }));
+      const sentence = meetingFailureSentence(err, t);
+      setError(sentence);
+      announce(sentence);
     } finally {
       setBusy(false);
     }
@@ -162,9 +163,9 @@ export function MeetingControls({
       setFound({ ...found, binding });
       announce(t('conferencing.meetingAdopted'));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-      announce(t('conferencing.meetingFailed', { message }));
+      const sentence = meetingFailureSentence(err, t);
+      setError(sentence);
+      announce(sentence);
     } finally {
       setBusy(false);
     }

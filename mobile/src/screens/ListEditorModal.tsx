@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { readErrorMessage, writeErrorMessage } from '@aperio/shared';
 import {
   AccessibilityInfo,
   Alert,
@@ -75,10 +76,6 @@ const fromTri = (s: TriState): boolean | undefined =>
 
 const TOP_LEVEL = '__top__';
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 export default function ListEditorModal({
   route,
   navigation,
@@ -143,8 +140,8 @@ export default function ListEditorModal({
 
   // Load (refresh) this list's sections into the shared store on open.
   useEffect(() => {
-    void loadSections(listId).catch((err) => setError(errorMessage(err)));
-  }, [listId, loadSections]);
+    void loadSections(listId).catch((err) => setError(readErrorMessage(err, t)));
+  }, [listId, loadSections, t]);
 
   // Load the per-list task-behaviour override map on open.
   useEffect(() => {
@@ -225,7 +222,7 @@ export default function ListEditorModal({
             : t('sidebar.menu.reparentedTopAnnouncement', { name }),
         );
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {
@@ -256,7 +253,7 @@ export default function ListEditorModal({
             : t('sidebar.menu.colorClearedAnnouncement', { name }),
         );
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {
@@ -279,7 +276,7 @@ export default function ListEditorModal({
       invalidateData();
       announce(t('mobile.listRenamed', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -316,7 +313,7 @@ export default function ListEditorModal({
       invalidateData();
       announce(t('dialogs.task.section.created', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -354,7 +351,7 @@ export default function ListEditorModal({
       invalidateData();
       announce(t('dialogs.task.section.renamed', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -392,7 +389,7 @@ export default function ListEditorModal({
         invalidateData();
         announce(t('dialogs.task.section.deleted', { name: sectionName }));
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {
@@ -423,7 +420,7 @@ export default function ListEditorModal({
                 announce(t('mobile.deleted', { title: list.name }));
                 navigation.goBack();
               } catch (err) {
-                const message = errorMessage(err);
+                const message = writeErrorMessage(err, t);
                 setError(message);
                 announce(t('mobile.error', { message }));
                 setBusy(false);

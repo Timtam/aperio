@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { readErrorMessage, writeErrorMessage } from '@aperio/shared';
 import {
   AccessibilityInfo,
   Alert,
@@ -42,10 +43,6 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 // Edit and Delete as rotor actions. The buttons stay on screen for sighted
 // users and are hidden from the reader — one element for the reader, an
 // unchanged surface for everyone else.
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function ContactListsScreen({
   navigation,
@@ -96,7 +93,7 @@ export default function ContactListsScreen({
       setLists(books);
       setColorLabels(labels);
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -153,7 +150,7 @@ export default function ContactListsScreen({
       announce(t('sidebar.contactListCreated', { name }));
       await load();
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     }
@@ -199,7 +196,7 @@ export default function ContactListsScreen({
         if (renaming) announce(t('sidebar.contactListRenamed', { name: wantName }));
         await load();
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       }
@@ -224,7 +221,7 @@ export default function ContactListsScreen({
                   announce(t('sidebar.contactListDeleted', { name: book.name }));
                   await load();
                 } catch (err) {
-                  const message = errorMessage(err);
+                  const message = writeErrorMessage(err, t);
                   setError(message);
                   announce(t('mobile.error', { message }));
                 }

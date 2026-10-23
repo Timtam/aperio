@@ -19,56 +19,58 @@ import type {
 } from '@aperio/shared';
 import {
   allDayFormEndDate,
-  applySignature,
-  madeNoReminderChoice,
-  attendeeNotice,
-  notifierSentence,
-  silentSentence,
-  type AttendeeNotice,
-  sendsInvitations as sendsInvitationsFor,
-  organizerOf,
-  signatureIn,
-  eventPrefillFrom,
-  findOffer,
-  offerOptions,
-  offerUsable,
-  prefillTarget,
   allDayWireEnd,
-  describeRecurrence,
-  deletionsNotRestoredSentence,
-  eventWriteErrorMessage,
-  eventWriteFailureReason,
-  exceptionsLossOf,
-  exceptionsLossQuestion,
-  invitationLocked,
-  lastOccurrenceDayKey,
-  pickerMisreadsRule,
-  recurrenceSummaryText,
-  seriesDayKey,
   applyDateTimeChange,
+  applySignature,
+  asNewSeries,
+  attendeeNotice,
+  type AttendeeNotice,
+  cutoffDay,
   dateInput,
   defaultNewEventTimes,
-  isBirthdayEventId,
-  planSeriesSplit,
-  asNewSeries,
-  newSeriesRecurrence,
-  recurrenceStartDate,
-  selectableEventCalendars,
-  writeSeriesSplit,
-  timeInput,
-  toIso,
+  deletionsNotRestoredSentence,
+  describeRecurrence,
   editedRecurrence,
+  eventPrefillFrom,
+  eventWriteErrorMessage,
+  eventWriteFailureReason,
   exceptionsAtSeriesTime,
+  exceptionsLossOf,
+  exceptionsLossQuestion,
+  findOffer,
+  invitationLocked,
+  isBirthdayEventId,
+  lastOccurrenceDayKey,
+  madeNoReminderChoice,
+  movedTailRule,
+  newSeriesRecurrence,
+  notifierSentence,
+  offerOptions,
+  offerUsable,
+  organizerOf,
+  originalKeptSentence,
+  pickerMisreadsRule,
+  planSeriesSplit,
+  prefillTarget,
+  readErrorMessage,
   readSeriesRows,
+  recurrenceStartDate,
+  recurrenceSummaryText,
+  selectableEventCalendars,
+  sendsInvitations as sendsInvitationsFor,
+  seriesDayKey,
   seriesFromCut,
   seriesMaybeShownTwice,
-  cutoffDay,
   seriesTimesFromOccurrenceEdit,
-  tailRecurrenceFor,
-  movedTailRule,
-  TailShiftRefusedError,
   type ShiftRefusal,
+  signatureIn,
+  silentSentence,
+  tailRecurrenceFor,
+  TailShiftRefusedError,
+  timeInput,
+  toIso,
   type WholeSeriesPlan,
+  writeSeriesSplit,
 } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
@@ -773,7 +775,8 @@ function EventEditorScreen({
           if (initialTitle) setTitle(initialTitle);
         }
       } catch (err) {
-        const message = eventWriteErrorMessage(err, t);
+        // A load: a busy provider says so, never that nothing was changed.
+        const message = readErrorMessage(err, t);
         setError(message);
         AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
       } finally {
@@ -1762,13 +1765,22 @@ function EventEditorScreen({
           i18n.language,
           t,
         );
-        if (back != null) {
+        // A move to another calendar whose original the provider was too busy
+        // to delete (277): the move stands, and so does the original, which
+        // is said the same way. Mirrors the desktop.
+        const kept = originalKeptSentence(
+          [updated],
+          (id) => calendars.find((c) => c.id === id)?.name,
+          t,
+        );
+        const left = [back, kept].filter((part) => part != null).join(' ');
+        if (left !== '') {
           if (!shown.current) {
-            AccessibilityInfo.announceForAccessibility(back);
+            AccessibilityInfo.announceForAccessibility(left);
             return;
           }
           setSplitNotice({
-            sentence: back,
+            sentence: left,
             proceed: async () => {
               if (!(await carry())) navigation.goBack();
             },

@@ -1,5 +1,5 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { writeErrorMessage } from '@aperio/shared';
+import { readErrorMessage, writeErrorMessage } from '@aperio/shared';
 import {
   useCallback,
   useEffect,
@@ -861,7 +861,8 @@ export function CalendarDayList({
       });
     } catch (err) {
       if (reqToken.current !== token) return;
-      const message = writeErrorMessage(err, t);
+      // A load: a busy provider says so, never that nothing was changed.
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {

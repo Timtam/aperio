@@ -26,12 +26,16 @@ import {
   updateContact,
 } from '../api/contacts';
 import {
-  deriveDisplayName,
-  fromContactValues,
-  toContactValues,
   type ContactValue,
+  deriveDisplayName,
+  eventWriteLeftover,
+  fromContactValues,
+  readErrorMessage,
+  toContactValues,
+  writeErrorMessage,
 } from '@aperio/shared';
 
+import { CloseOnlyNotice } from '../components/CloseOnlyNotice';
 import { ContactLabelButton } from '../components/ContactLabelButton';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
@@ -39,6 +43,7 @@ import { SelectFieldButton } from '../components/SelectFieldButton';
 import { formatLocalDate } from '../intl/dateTimeField';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Create / edit a contact OR a distribution list (group). Screen-reader-first:
@@ -59,10 +64,6 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
  *  ALLOWED_PHOTO_TYPES). */
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** One member of a distribution list (the cal_core GroupMember shape). */
 interface GroupMember {
@@ -232,6 +233,10 @@ export default function ContactEditorModal({
   const [original, setOriginal] = useState<Contact | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // What the editor says in place of the form once a save landed in part:
+  // saving again would create the contact or group twice (273).
+  const { notice, showNotice } = useCloseOnlyNotice();
+  const closeNotice = useCallback(() => navigation.goBack(), [navigation]);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -287,7 +292,7 @@ export default function ContactEditorModal({
           }
         }
       } catch (err) {
-        if (!cancelled) setError(errorMessage(err));
+        if (!cancelled) setError(readErrorMessage(err, t));
       }
     })();
     return () => {
@@ -369,7 +374,7 @@ export default function ContactEditorModal({
           members,
         });
       } else {
-        await createContact(selectedListId, {
+        const created = await createContact(selectedListId, {
           display_name: name,
           given_name: personGiven,
           family_name: personFamily,
@@ -390,11 +395,24 @@ export default function ContactEditorModal({
           // distribution list has no avatar).
           photo: isGroup ? null : photo,
         });
+        // A provider that stores the photo in a step of its own (Google)
+        // keeps the contact when that step fails, and says so by the row it
+        // returns: said, and only closed (273). Mirrors the desktop.
+        if (!isGroup && photo != null && !created.has_photo) {
+          showNotice(t('dialogs.contact.createdWithoutPhoto', { name }));
+          return;
+        }
       }
       announce(t('mobile.saved', { title: name }));
       navigation.goBack();
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
+      // A contact or group that stands without one of its steps — a group's
+      // members (273): said in place of the form, which only closes.
+      if (eventWriteLeftover(err)) {
+        showNotice(message);
+        return;
+      }
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -423,6 +441,7 @@ export default function ContactEditorModal({
     phones,
     photo,
     selectedListId,
+    showNotice,
     t,
     urls,
   ]);
@@ -441,7 +460,7 @@ export default function ContactEditorModal({
       setOriginal({ ...original, has_photo: false });
       announce(t('dialogs.contact.photoRemoved', { name: original.display_name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -495,7 +514,7 @@ export default function ContactEditorModal({
         setOriginal({ ...original, has_photo: true });
         announce(t('dialogs.contact.photoUpdated', { name: original.display_name }));
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {
@@ -530,6 +549,10 @@ export default function ContactEditorModal({
     },
     [],
   );
+
+  if (notice != null) {
+    return <CloseOnlyNotice sentence={notice} onClose={closeNotice} />;
+  }
 
   return (
     <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
