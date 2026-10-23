@@ -107,11 +107,10 @@ describe('AccountEditDialog', () => {
     // A Tauri command rejects with a plain {code, message} object, which the
     // dialog used to print as "[object Object]" (decision 273).
     const normal = invokeMock.getMockImplementation()!;
-    invokeMock.mockImplementation((cmd: string) =>
+    invokeMock.mockImplementation(((cmd: string) =>
       cmd === 'test_account'
         ? Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' })
-        : normal(cmd),
-    );
+        : normal(cmd)) as typeof normal);
     try {
       render(
         <AccountEditDialog isOpen account={ACCOUNT} onClose={() => {}} onSaved={() => {}} />,

@@ -21,14 +21,15 @@ import {
 } from '../api/client';
 import {
   CONTACT_LABELS,
+  type ContactValue,
   deriveDisplayName,
   eventWriteLeftover,
   fromContactValues,
+  type KnownContactLabel,
   knownLabel,
   toContactValues,
+  writeAfterLanded,
   writeErrorMessage,
-  type ContactValue,
-  type KnownContactLabel,
 } from '@aperio/shared';
 
 import type { Contact, ContactAddress, ContactPhoto } from '../api/types';
@@ -569,16 +570,22 @@ export function ContactDialog({
           // moved. The non-photo `update_contact` path explicitly
           // does NOT touch photo storage, so untouched photos
           // survive the field update without us doing anything.
+          // The contact itself was saved: a photo the provider turned away
+          // never reads as "nothing was changed" (decision 277).
           if (photoDirty) {
             if (photo) {
-              await apiSetContactPhoto(contact.id, photo, form.listId);
+              await writeAfterLanded('photo', () =>
+                apiSetContactPhoto(contact.id, photo, form.listId),
+              );
               announce(
                 t('dialogs.contact.photoUpdated', {
                   name: payload.display_name,
                 }),
               );
             } else {
-              await apiDeleteContactPhoto(contact.id, form.listId);
+              await writeAfterLanded('photo', () =>
+                apiDeleteContactPhoto(contact.id, form.listId),
+              );
               announce(
                 t('dialogs.contact.photoRemoved', {
                   name: payload.display_name,

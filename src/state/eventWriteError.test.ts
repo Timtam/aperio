@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  afterLanded,
   eventWriteErrorMessage,
   eventWriteFailureReason,
   eventWriteLeftover,
@@ -329,6 +330,21 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
         row.never_landed,
       );
     }
+  });
+
+  it('reads what a later request of a landed save leaves as the core does (277)', () => {
+    expect(outcome.after_landed.length).toBeGreaterThanOrEqual(14);
+    for (const row of outcome.after_landed) {
+      const after = afterLanded(command(row.code, row.message), row.step);
+      expect(after, `${row.code}: ${row.message}`).toEqual(row.after);
+      // Never "nothing was changed": something of the save stands.
+      expect(writeNeverLanded(after), `${row.code}: ${row.message}`).toBe(false);
+    }
+    // Busy after a landed request reads as the partly-saved sentence.
+    expect(writeErrorMessage(afterLanded(command('forbidden', 'provider-busy: http-429'), 'subtasks'), t)).toBe(
+      'Die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist. ' +
+        'Prüfe sie und versuche den Rest später noch einmal.',
+    );
   });
 
   it('says a series taken back in words, with the cancellation where invitees were invited', () => {

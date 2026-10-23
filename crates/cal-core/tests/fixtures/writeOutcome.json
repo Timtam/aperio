@@ -187,5 +187,143 @@
       "message": "no",
       "never_landed": true
     }
+  ],
+  "_doc_after_landed": "What an error becomes when it met a later request of a save after an earlier one had landed (cal_core::Error::after_landed, shared/eventWriteError.ts afterLanded): a busy provider leaves the change partly saved; a network error that may have landed stays; anything else becomes a network error with the step and the error's text in front.",
+  "after_landed": [
+    {
+      "code": "forbidden",
+      "message": "provider-busy: http-429",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "partly-saved: subtasks"
+      }
+    },
+    {
+      "code": "network",
+      "message": "provider-busy: http-429",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "partly-saved: subtasks"
+      }
+    },
+    {
+      "code": "network",
+      "message": "connection reset",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "connection reset"
+      }
+    },
+    {
+      "code": "network",
+      "message": "partly-saved: members",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "partly-saved: members"
+      }
+    },
+    {
+      "code": "network",
+      "message": "created-may-stand: time",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "created-may-stand: time"
+      }
+    },
+    {
+      "code": "forbidden",
+      "message": "server-refused: HTTP 400: bad",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "subtasks: access denied: server-refused: HTTP 400: bad"
+      }
+    },
+    {
+      "code": "network",
+      "message": "identity-unknown: you",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "subtasks: network error: identity-unknown: you"
+      }
+    },
+    {
+      "code": "forbidden",
+      "message": "no access",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "subtasks: access denied: no access"
+      }
+    },
+    {
+      "code": "auth",
+      "message": "token refused",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "subtasks: authentication failed: token refused"
+      }
+    },
+    {
+      "code": "not_found",
+      "message": "gone",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "subtasks: resource not found: gone"
+      }
+    },
+    {
+      "code": "conflict",
+      "message": "etag",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "subtasks: conflict (ETag / precondition failed): etag"
+      }
+    },
+    {
+      "code": "protocol",
+      "message": "unreadable answer",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "subtasks: protocol error: unreadable answer"
+      }
+    },
+    {
+      "code": "internal",
+      "message": "oops",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "subtasks: internal error: oops"
+      }
+    },
+    {
+      "code": "invalid_input",
+      "message": "bad",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "subtasks: invalid input: bad"
+      }
+    },
+    {
+      "code": "unsupported",
+      "message": "no",
+      "step": "subtasks",
+      "after": {
+        "code": "network",
+        "message": "subtasks: operation not supported by adapter: no"
+      }
+    }
   ]
 }

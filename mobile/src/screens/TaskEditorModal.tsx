@@ -12,6 +12,7 @@ import {
   joinNames,
   originalKeptSentence,
   readErrorMessage,
+  writeAfterLanded,
   writeErrorMessage,
 } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
@@ -888,6 +889,9 @@ export default function TaskEditorModal({
     const dead = toStored(form.deadlineDate, form.deadlineTime);
     const description = form.description.trim() || null;
     setError(null);
+    // The staged subtasks not made yet, as the save goes: what a leftover
+    // names as never created.
+    let unmade: string[] = taskId == null ? [...draftSubtasks] : [];
     try {
       if (taskId == null) {
         // A parent an earlier save created stands: only the drafts left are
@@ -933,6 +937,7 @@ export default function TaskEditorModal({
               ? created.status
               : 'open';
           const left = [...draftSubtasks];
+          unmade = left;
           while (left.length > 0) {
             try {
               await createTask({
@@ -977,13 +982,17 @@ export default function TaskEditorModal({
             }
             left.shift();
           }
-          await recomputeAncestors(created.id, await getTasks(created.list_id));
+          await writeAfterLanded('cascade', async () =>
+            recomputeAncestors(created.id, await getTasks(created.list_id)),
+          );
         }
         // Adding a subtask can change the parent's derived status (e.g. an open
         // child re-opens a completed parent). Recompute ancestors against the
         // owning list's post-create snapshot, honouring the coupling knob.
         if (parentId != null) {
-          await recomputeAncestors(parentId, await getTasks(created.list_id));
+          await writeAfterLanded('cascade', async () =>
+            recomputeAncestors(parentId, await getTasks(created.list_id)),
+          );
         }
         AccessibilityInfo.announceForAccessibility(
           t('mobile.added', { title }),
@@ -1068,8 +1077,12 @@ export default function TaskEditorModal({
         const movedRows = [saved];
         if (listChanged) {
           for (const child of collectDescendants(loaded.id, familyTasks)) {
+            // The task itself was saved: a later write's failure never reads
+            // as "nothing was changed" (decision 277). Mirrors the desktop.
             movedRows.push(
-              await updateTask({ ...child, list_id: form.listId }, child.list_id),
+              await writeAfterLanded('subtasks', () =>
+                updateTask({ ...child, list_id: form.listId }, child.list_id),
+              ),
             );
           }
         }
@@ -1089,12 +1102,14 @@ export default function TaskEditorModal({
                 ? { ...row, list_id: form.listId }
                 : row,
           );
-          await cascadeEditorStatus(
-            loaded.id,
-            form.status,
-            form.listId,
-            taskLists.find((l) => l.id === form.listId),
-            cascadeSnapshot,
+          await writeAfterLanded('cascade', () =>
+            cascadeEditorStatus(
+              loaded.id,
+              form.status,
+              form.listId,
+              taskLists.find((l) => l.id === form.listId),
+              cascadeSnapshot,
+            ),
           );
         }
         const kept = listChanged
@@ -1121,7 +1136,6 @@ export default function TaskEditorModal({
       // which only closes. A new task's staged subtasks were never made, and
       // are named so nothing goes unsaid.
       if (eventWriteLeftover(err)) {
-        const unmade = taskId == null ? draftSubtasks : [];
         const sentence = writeErrorMessage(err, t);
         showNotice(
           unmade.length > 0

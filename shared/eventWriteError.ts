@@ -227,6 +227,57 @@ export function writeNeverLanded(err: unknown): boolean {
   return code != null && REFUSED_CODES.has(code);
 }
 
+/** How the core writes each kind of error it hands over under a code
+ *  (`cal_core::Error`'s display): `afterLanded` keeps it behind the step, as
+ *  the core does. */
+const KIND_TEXT: Record<string, string> = {
+  auth: 'authentication failed',
+  forbidden: 'access denied',
+  not_found: 'resource not found',
+  conflict: 'conflict (ETag / precondition failed)',
+  network: 'network error',
+  protocol: 'protocol error',
+  invalid_input: 'invalid input',
+  unsupported: 'operation not supported by adapter',
+  internal: 'internal error',
+};
+
+/**
+ * What a failed request of a save becomes when an earlier request of the same
+ * save had landed (decision 277): never an error a surface reads as "nothing
+ * was changed". A busy provider leaves the change partly saved; a network
+ * error that may have landed stays as it is; anything else — a refusal above
+ * all — becomes a network error that keeps its text behind `step`, a word for
+ * the log. The same rule as `cal_core::Error::after_landed`, for the saves a
+ * surface sends as several calls (a move's subtasks after their parent, a
+ * cascade); both read the `after_landed` rows of `writeOutcome.json`. An
+ * error without a code (one a surface threw itself) keeps its text the same
+ * way.
+ */
+export function afterLanded(err: unknown, step: string): CodedError {
+  if (isProviderBusy(err)) return { code: 'network', message: `partly-saved: ${step}` };
+  const code = codedError(err)?.code;
+  const message = errorMessageText(err);
+  if (code === 'network' && !writeNeverLanded(err)) return { code, message };
+  const kind = code == null ? null : (KIND_TEXT[code] ?? code);
+  return {
+    code: 'network',
+    message: kind == null ? `${step}: ${message}` : `${step}: ${kind}: ${message}`,
+  };
+}
+
+/**
+ * A write that follows one of the same save that landed: its failure reads as
+ * {@link afterLanded} says, never as "nothing was changed".
+ */
+export async function writeAfterLanded<T>(step: string, write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    throw afterLanded(err, step);
+  }
+}
+
 type Translate = (key: string, values?: Record<string, unknown>) => string;
 
 /**

@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { differenceInCalendarDays } from 'date-fns';
 
 import {
+  afterLanded,
   invitationLocked,
   moveSeriesInstant,
   movedSeriesUntil,
@@ -140,18 +141,24 @@ export async function moveTaskToList(
     previousListId: task.list_id,
   });
   const moved = [movedParent];
-  for (const child of children) {
-    const movedChild = await invoke<Task>('update_task', {
-      task: {
-        ...child,
-        list_id: targetListId,
-        parent_id: movedParent.id,
-        // A family in two sections is the same surprise as one in two lists.
-        section_id: sectionId,
-      },
-      previousListId: child.list_id,
-    });
-    moved.push(movedChild);
+  try {
+    for (const child of children) {
+      const movedChild = await invoke<Task>('update_task', {
+        task: {
+          ...child,
+          list_id: targetListId,
+          parent_id: movedParent.id,
+          // A family in two sections is the same surprise as one in two lists.
+          section_id: sectionId,
+        },
+        previousListId: child.list_id,
+      });
+      moved.push(movedChild);
+    }
+  } catch (err) {
+    // The task itself moved: a subtask's failure never reads as "nothing
+    // was changed" (decision 277).
+    throw afterLanded(err, 'subtasks');
   }
   return moved;
 }

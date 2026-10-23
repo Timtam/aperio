@@ -30,23 +30,24 @@ import {
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  selectableTaskLists,
-  findOffer,
-  offerOptions,
-  offerUsable,
-  prefillTarget,
   assigneeField,
+  type AssigneePool,
   assigneePoolErrorMessage,
   clampAssignees,
   eventWriteFailureReason,
   eventWriteLeftover,
+  findOffer,
   joinNames,
+  offerOptions,
+  offerUsable,
   originalKeptSentence,
+  prefillTarget,
+  selectableTaskLists,
   selfAssignOnStatusChange,
   taskAssignmentMode,
   taskPrefillFrom,
+  writeAfterLanded,
   writeErrorMessage,
-  type AssigneePool,
 } from '@aperio/shared';
 import { CloseOnlyNotice } from './CloseOnlyNotice';
 import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
@@ -1348,11 +1349,15 @@ export function TaskDialog({
               // already lives (task.list_id, captured before the
               // parent's move); the post-move target is the new
               // form.listId.
+              // The task itself was saved: a later write's failure never
+              // reads as "nothing was changed" (decision 277).
               moved.push(
-                await invoke<Task>('update_task', {
-                  task: { ...child, list_id: form.listId },
-                  previousListId: child.list_id,
-                }),
+                await writeAfterLanded('subtasks', () =>
+                  invoke<Task>('update_task', {
+                    task: { ...child, list_id: form.listId },
+                    previousListId: child.list_id,
+                  }),
+                ),
               );
             }
           }
@@ -1376,7 +1381,9 @@ export function TaskDialog({
                 ...(autoDate ? { todayKey: todayIsoKey() } : {}),
               },
             ).filter((w) => w.taskId !== task.id);
-            await applyAncestorWrites(cascadeWrites, snapshot);
+            await writeAfterLanded('cascade', () =>
+              applyAncestorWrites(cascadeWrites, snapshot),
+            );
           }
           const kept =
             form.listId !== task.list_id

@@ -300,6 +300,51 @@ mod tests {
         }
     }
 
+    /// The error a host hands a shell as `code` and `message`, as this core
+    /// holds it.
+    fn from_code(code: &str, message: String) -> Error {
+        match code {
+            "auth" => Error::Authentication(message),
+            "forbidden" => Error::Forbidden(message),
+            "not_found" => Error::NotFound(message),
+            "conflict" => Error::Conflict(message),
+            "network" => Error::Network(message),
+            "protocol" => Error::Protocol(message),
+            "invalid_input" => Error::InvalidInput(message),
+            "unsupported" => Error::Unsupported(message),
+            "internal" => Error::Internal(message),
+            other => panic!("unknown code {other}"),
+        }
+    }
+
+    /// What a later request's error becomes after an earlier one of the save
+    /// landed (decision 277), as both shells read the same rows
+    /// (`writeOutcome.json`; `afterLanded` in `shared/eventWriteError.ts`).
+    #[test]
+    fn the_shared_rows_say_what_a_landed_save_leaves() {
+        let rows: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/writeOutcome.json"
+        )))
+        .unwrap();
+        let rows = rows["after_landed"].as_array().unwrap();
+        assert!(rows.len() >= 14, "the fixture lost its rows");
+        for row in rows {
+            let code = row["code"].as_str().unwrap();
+            let message = row["message"].as_str().unwrap();
+            let after = from_code(code, message.into()).after_landed(row["step"].as_str().unwrap());
+            assert_eq!(
+                (after.code(), after.message()),
+                (
+                    row["after"]["code"].as_str().unwrap(),
+                    row["after"]["message"].as_str().unwrap()
+                ),
+                "{code}: {message}"
+            );
+            assert!(!after.never_landed(), "{code}: {message}");
+        }
+    }
+
     /// The rows both surfaces decide "never landed" by (`writeOutcome.json`;
     /// `src/state/eventWriteError.test.ts` reads them too), each carried
     /// under the code a host gives it.
@@ -315,18 +360,7 @@ mod tests {
         for row in rows {
             let code = row["code"].as_str().unwrap();
             let message = row["message"].as_str().unwrap().to_string();
-            let err = match code {
-                "auth" => Error::Authentication(message.clone()),
-                "forbidden" => Error::Forbidden(message.clone()),
-                "not_found" => Error::NotFound(message.clone()),
-                "conflict" => Error::Conflict(message.clone()),
-                "network" => Error::Network(message.clone()),
-                "protocol" => Error::Protocol(message.clone()),
-                "invalid_input" => Error::InvalidInput(message.clone()),
-                "unsupported" => Error::Unsupported(message.clone()),
-                "internal" => Error::Internal(message.clone()),
-                other => panic!("unknown code {other}"),
-            };
+            let err = from_code(code, message.clone());
             assert_eq!(err.code(), code);
             assert_eq!(
                 err.never_landed(),

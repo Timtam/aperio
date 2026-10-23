@@ -1,4 +1,5 @@
 import {
+  afterLanded,
   planAncestorRecompute,
   planStatusCascade,
   selfAssignOnStatusChange,
@@ -36,8 +37,10 @@ export async function applyStatusWrites(
   // arbitrary prefix applied and the rest not — and which prefix depended on
   // nothing the user could see. Every write is attempted; the first error is
   // kept and thrown at the end, so each caller's existing `catch` still
-  // announces exactly as before.
+  // announces exactly as before — but where another write landed, it never
+  // says "nothing was changed" (decision 277). Mirrors the desktop.
   let firstError: unknown;
+  let landed = false;
   for (const w of writes) {
     const target = byId.get(w.taskId);
     if (target == null) continue;
@@ -59,11 +62,12 @@ export async function applyStatusWrites(
         scheduled_date:
           w.scheduledDate !== undefined ? w.scheduledDate : target.scheduled_date,
       });
+      landed = true;
     } catch (err) {
       firstError ??= err;
     }
   }
-  if (firstError !== undefined) throw firstError;
+  if (firstError !== undefined) throw landed ? afterLanded(firstError, 'cascade') : firstError;
 }
 
 /**

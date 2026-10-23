@@ -4,15 +4,16 @@
 
 import type { Task } from '@aperio/shared';
 import {
+  afterLanded,
+  createsInSteps,
   isSeriesOccurrence,
   newSeriesRecurrence,
   occurrenceIsoOf,
   organizerOf,
   readSeriesRows,
   seriesIdOf,
-  createsInSteps,
-  writeWithoutWaiting,
   type StepWriteOptions,
+  writeWithoutWaiting,
 } from '@aperio/shared';
 
 import {
@@ -65,18 +66,24 @@ export async function moveTaskToList(
     task.list_id,
   );
   const moved = [movedParent];
-  for (const child of children) {
-    const movedChild = await updateTask(
-      {
-        ...child,
-        list_id: targetListId,
-        parent_id: movedParent.id,
-        // A family in two sections is the same surprise as one in two lists.
-        section_id: sectionId,
-      },
-      child.list_id,
-    );
-    moved.push(movedChild);
+  try {
+    for (const child of children) {
+      const movedChild = await updateTask(
+        {
+          ...child,
+          list_id: targetListId,
+          parent_id: movedParent.id,
+          // A family in two sections is the same surprise as one in two lists.
+          section_id: sectionId,
+        },
+        child.list_id,
+      );
+      moved.push(movedChild);
+    }
+  } catch (err) {
+    // The task itself moved: a subtask's failure never reads as "nothing
+    // was changed" (decision 277).
+    throw afterLanded(err, 'subtasks');
   }
   return moved;
 }
@@ -121,27 +128,33 @@ export async function moveOrCopyTask(
     assignees: [],
     sound: task.sound,
   });
-  for (const child of children) {
-    await createTask({
-      list_id: targetListId,
-      title: child.title,
-      description: child.description,
-      status: child.status,
-      priority: child.priority,
-      effort: child.effort,
-      scheduled_date: child.scheduled_date,
-      scheduled_time: child.scheduled_time,
-      deadline_date: child.deadline_date,
-      deadline_time: child.deadline_time,
-      deadline_reminder_days: child.deadline_reminder_days,
-      recurrence: child.recurrence,
-      parent_id: newParent.id,
-      section_id: sectionId,
-      color_label: child.color_label,
-      reminders: child.reminders,
-      assignees: [],
-      sound: child.sound,
-    });
+  // The copy of the task itself stands: a subtask's failure never reads as
+  // "nothing was changed" (decision 277).
+  try {
+    for (const child of children) {
+      await createTask({
+        list_id: targetListId,
+        title: child.title,
+        description: child.description,
+        status: child.status,
+        priority: child.priority,
+        effort: child.effort,
+        scheduled_date: child.scheduled_date,
+        scheduled_time: child.scheduled_time,
+        deadline_date: child.deadline_date,
+        deadline_time: child.deadline_time,
+        deadline_reminder_days: child.deadline_reminder_days,
+        recurrence: child.recurrence,
+        parent_id: newParent.id,
+        section_id: sectionId,
+        color_label: child.color_label,
+        reminders: child.reminders,
+        assignees: [],
+        sound: child.sound,
+      });
+    }
+  } catch (err) {
+    throw afterLanded(err, 'subtasks');
   }
   return [];
 }

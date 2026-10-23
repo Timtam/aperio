@@ -133,7 +133,7 @@ Verschieben über Kalender und Listen (heute doppelt in Desktop und Handy, mit s
 
 ## 6. Was PR 7 schon tut und was es bis zum Bogen tut
 
-PR 7 bleibt, wie gebaut: `Error::provider_busy`, `Error::never_landed`, `Error::after_landed`, `WriteRefusal` und `WriteLeftover` (sie werden in O1 zu Teilen von `WriteError`; Sätze und Schlüssel bleiben), Googles Drossel-Erkennung, Durchläufe, die bei Auslastung stoppen, die Taktung der Aktualisierung und die Sätze auf allen Oberflächen. Neue Oberflächen lesen Fehler nur über die geteilten Helfer (`writeNeverLanded`, `eventWriteFailureReason`, `writeErrorMessage`), nie über eigene Marken-Erkennung; dann tauscht O1 eine Stelle.
+PR 7 bleibt, wie gebaut: `Error::provider_busy`, `Error::never_landed`, `Error::after_landed`, `WriteRefusal` und `WriteLeftover` (sie werden in O1 zu Teilen von `WriteError`; Sätze und Schlüssel bleiben), Googles Drossel-Erkennung, Durchläufe, die bei Auslastung stoppen, die Taktung der Aktualisierung und die Sätze auf allen Oberflächen. Neue Oberflächen lesen Fehler nur über die geteilten Helfer (`writeNeverLanded`, `eventWriteFailureReason`, `writeErrorMessage`), nie über eigene Marken-Erkennung; dann tauscht O1 eine Stelle. Speichert eine Oberfläche in mehreren Aufrufen (Unteraufgaben nach dem Elternteil, Kaskaden, das Kontaktfoto nach dem Kontakt), liest sie den Fehler eines späteren Aufrufs über `afterLanded` / `writeAfterLanded`: dieselbe Regel wie `Error::after_landed`, an denselben Zeilen von `writeOutcome.json` festgemacht. O1 zieht sie mit `writeNeverLanded` in den Kern, über die Bindungen beider Seiten.
 
 **Anlegen mit gescheitertem Folgeschritt, bis der Bogen kommt (Toni, 2026-10-23: „ehrlicher Abschluss“):**
 

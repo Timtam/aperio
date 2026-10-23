@@ -152,6 +152,22 @@ describe('useTaskStatusActions — what the user is told', () => {
     expect(said).not.toContain('provider-busy');
   });
 
+  it('never says nothing was changed when the root fails after its family changed (277)', async () => {
+    // The root is turned away by a busy provider; the child's write, made
+    // anyway, lands.
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'forbidden', message: 'provider-busy: http-429' })
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useTaskStatusActions());
+    await act(async () => {
+      await result.current.set(TASKS[0], 'completed');
+    });
+    const said = announce.mock.calls[0][0] as string;
+    expect(said).toContain('statusChangeFailed');
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).not.toContain('dialogs.event.writeError.providerBusy');
+  });
+
   it('reports how much of the cascade landed when only part of it failed', async () => {
     // Root succeeds, the child does not.
     vi.mocked(invoke)
