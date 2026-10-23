@@ -781,10 +781,10 @@ Siehe DESIGN §4.2.
       „weg oder nie hier“, die Suche über die Kalender geht weiter und zählt
       es nur als gelöscht, wenn kein anderer Kalender den Termin hat
       (`DeleteWalk`). Nach einem gescheiterten Verbindungsaufbau gilt nichts
-      davon: da ging nichts hinaus. Am Handy kommen nur `forbidden`,
-      `conflict` und `network` mit Code an (B9); eine Ablehnung mit Marke
-      (`server-refused`, `unsafe-to-write`) reist aber als `forbidden` und
-      wird erkannt, jede andere gilt dort vorsichtig als unklar. Handy ohne
+      davon: da ging nichts hinaus. Am Handy kommen seit PR 7 alle
+      Fehler mit dem Code des Desktops an (B9); eine Ablehnung mit Marke
+      (`server-refused`, `unsafe-to-write`) reist als `forbidden` und wird
+      erkannt. Handy ohne
       Testläufer — ↻ im Test.
     - 🚩 CalDAV `create_task_list`: MKCALENDAR läuft über `send_retrying`.
       Kam der erste Versuch an und brach dann die Verbindung ab, antwortet die
@@ -1335,12 +1335,13 @@ auch für die Schreib-Ablehnungen) und lädt Personen und „ich“ getrennt. De
 Fokus bleibt nach „Erneut versuchen“ im Feld (Desktop), am Handy geht er auf die
 Beschriftung und das Ergebnis wird angesagt. ↻ im Test (Handy ohne Testläufer).
 
-🚩 **Offen:** Am Handy tragen nur `forbidden`, `conflict` und `network` ihren
-Code nach JS (`eventCoded` in `CalFfiModule.swift`/`.kt`). Andere Fehler (502,
-404, …) kommen als technischer Name der nativen Ausnahme an, etwa
-„StoreException$Protocol: detail=…“. Braucht die übrigen Varianten im
-nativen Code, mit den Codes des Desktops; das lässt sich nur in einem
-Handy-Build prüfen.
+↻ **Erledigt in PR 7 (2026-10-23):** Jeder Aufruf des Rust-Hosts aus der
+Handy-Brücke läuft jetzt durch `hostCoded` (`CalFfiModule.swift`/`.kt`), das
+jede Variante mit dem Code des Desktops nach JS gibt (`auth`, `forbidden`,
+`not_found`, `conflict`, `network`, `protocol`, `invalid_input`,
+`unsupported`, `internal`, beim Abgleich dessen eigener Code);
+`check-ffi-bridges.mjs` lässt keine unumhüllte Registrierung durch. Kotlin
+lokal gebaut; Swift baut erst der iOS-Bau — ↻ im Test.
 
 ### B10 · iOS: VoiceOver tippte durch die Tab-Leiste (159) `[~]`
 
