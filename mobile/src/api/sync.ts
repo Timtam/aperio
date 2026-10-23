@@ -323,6 +323,12 @@ import type { CacheRefreshStatus, AccountRefreshErrors } from '@aperio/shared';
 export const refreshExternalCache = (): Promise<void> =>
   CalFfi.refreshExternalCache();
 
+/** {@link refreshExternalCache} after a change of one account (added, edited,
+ *  signed in again): forced for that account only, an automatic round for the
+ *  others (decision 271). */
+export const refreshAccountCache = (accountId: string): Promise<void> =>
+  CalFfi.refreshAccountCache(accountId);
+
 /** The external-cache warm status — drives a "refreshing…" spinner + a "last
  *  updated" line. */
 export const cacheRefreshStatus = async (): Promise<CacheRefreshStatus> =>

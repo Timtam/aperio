@@ -6228,6 +6228,20 @@ impl Host {
         });
     }
 
+    /// [`Self::refresh_external_cache`] after a change of ONE account
+    /// (added, edited, a sign-in or password stored again, a reset): the pass
+    /// runs forced for that account only, and counts as an automatic round
+    /// for the others (decision 271). Mirrors the desktop
+    /// `refresh_account_cache`.
+    pub fn refresh_account_cache(&self, account_id: String) {
+        let refresher = Arc::clone(&self.cache_refresher);
+        self.runtime.handle().spawn(async move {
+            refresher
+                .warm_all_queued(host_core::cache::Forcing::account(&account_id))
+                .await;
+        });
+    }
+
     /// Write one line into the app's own rolling log — the file the Logs
     /// screen shows and the support bundle exports.
     ///
@@ -6308,7 +6322,7 @@ impl Host {
             .map_err(|e| StoreError::Storage {
                 detail: e.to_string(),
             })?;
-        self.refresh_external_cache();
+        self.refresh_account_cache(account_id);
         Ok(())
     }
 

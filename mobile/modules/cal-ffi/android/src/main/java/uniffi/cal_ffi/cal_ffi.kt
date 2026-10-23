@@ -1144,6 +1144,8 @@ external fun uniffi_cal_ffi_checksum_method_host_push_now(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_query_free_busy_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_refresh_account_cache(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_errors_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_event_local_reminder_signature(
@@ -1548,6 +1550,8 @@ external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,`trigger`: RustB
 ): Int
 external fun uniffi_cal_ffi_fn_method_host_query_free_busy_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_refresh_account_cache(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_refresh_errors_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_refresh_event_local_reminder_signature(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`startsAt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -2377,6 +2381,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_query_free_busy_json() != 44096.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_refresh_account_cache() != 20722.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_errors_json() != 55989.toShort()) {
@@ -5441,6 +5448,15 @@ public interface HostInterface {
     fun `queryFreeBusyJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
+     * [`Self::refresh_external_cache`] after a change of ONE account
+     * (added, edited, a sign-in or password stored again, a reset): the pass
+     * runs forced for that account only, and counts as an automatic round
+     * for the others (decision 271). Mirrors the desktop
+     * `refresh_account_cache`.
+     */
+    fun `refreshAccountCache`(`accountId`: kotlin.String)
+    
+    /**
      * Every account's currently-failing containers as a JSON
      * `AccountRefreshErrors[]` — the per-account error surface, so a
      * revoked/wrong provider password shows up as a warning instead of
@@ -8193,6 +8209,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * [`Self::refresh_external_cache`] after a change of ONE account
+     * (added, edited, a sign-in or password stored again, a reset): the pass
+     * runs forced for that account only, and counts as an automatic round
+     * for the others (decision 271). Mirrors the desktop
+     * `refresh_account_cache`.
+     */override fun `refreshAccountCache`(`accountId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_refresh_account_cache(
+        it,
+        FfiConverterString.lower(`accountId`),_status)
+}
+    }
+    
     
 
     

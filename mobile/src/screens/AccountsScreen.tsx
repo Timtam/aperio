@@ -38,7 +38,7 @@ import {
   connectSchemaAccount,
   reconnectOAuthAccount,
 } from '../api/oauth';
-import { refreshExternalCache } from '../api/sync';
+import { refreshAccountCache } from '../api/sync';
 import { whenAppLockReleased, whileOsSheetOpen } from '../state/appLock';
 import {
   openDeviceAccessSettings,
@@ -591,7 +591,7 @@ export default function AccountsScreen() {
         await load();
         pendingFocusId.current = updated.id;
         announce(t('dialogs.accounts.editSaved', { name }));
-        void refreshExternalCache().catch(() => undefined);
+        void refreshAccountCache(updated.id).catch(() => undefined);
         return;
       }
       // A browser sign-in hands the screen to a native auth session, which is a
@@ -615,7 +615,7 @@ export default function AccountsScreen() {
       await load();
       pendingFocusId.current = result.account.id;
       announce(t('dialogs.accounts.created', { name }));
-      void refreshExternalCache().catch(() => undefined);
+      void refreshAccountCache(result.account.id).catch(() => undefined);
       await maybeShowPrivacyNotice(schemaKind);
     } catch (err) {
       // OAUTH_NO_CODE is a typed sentinel, not a sentence — the deleted form
@@ -696,7 +696,7 @@ export default function AccountsScreen() {
       pendingFocusId.current = created.id;
       announce(t('dialogs.accounts.created', { name: created.display_name }));
       // Warm the device calendar's events into the cache now (see `add`).
-      void refreshExternalCache().catch(() => undefined);
+      void refreshAccountCache(created.id).catch(() => undefined);
       // This grant is the screen's own, not one the next look should
       // announce as new.
       void refreshDeviceAccessReport();
@@ -922,7 +922,7 @@ export default function AccountsScreen() {
         // Retry the failing containers right away — storing the grant alone
         // never contacts the provider, so the refresh-error warning would
         // otherwise outlive the repair until the next scheduled pass.
-        void refreshExternalCache().catch(() => undefined);
+        void refreshAccountCache(account.id).catch(() => undefined);
       } catch (err) {
         if ((err as { code?: string })?.code === 'client_secret_required') {
           // Not a dead end: reveal the field and say what is needed.
@@ -984,7 +984,7 @@ export default function AccountsScreen() {
         );
         // Same rationale as reconnectOauth: retry now so the error surface
         // reflects the repair (or a still-wrong password) promptly.
-        void refreshExternalCache().catch(() => undefined);
+        void refreshAccountCache(account.id).catch(() => undefined);
       } catch (err) {
         // The secret stays in place on a registration failure — let the user
         // retry without re-typing (the field is still open).

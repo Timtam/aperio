@@ -928,7 +928,8 @@ pub async fn connect_google_account(
     );
     // The boot warm pass may already have run; kick a warm so the new account's
     // calendars/lists load now instead of only after the next pass / restart.
-    refresher.trigger();
+    // Forced for this account only (decision 271).
+    refresher.trigger_account(&created.id);
     Ok(created)
 }
 
@@ -1049,7 +1050,8 @@ pub async fn connect_microsoft_account(
     );
     // The boot warm pass may already have run; kick a warm so the new account's
     // calendars/lists load now instead of only after the next pass / restart.
-    refresher.trigger();
+    // Forced for this account only (decision 271).
+    refresher.trigger_account(&created.id);
     Ok(created)
 }
 
@@ -1488,7 +1490,7 @@ pub async fn connect_account(
     // blocking cold path.
     let owns_containers = plugin.manifest.has_data_family();
     if owns_containers {
-        refresher.trigger();
+        refresher.trigger_account(&created.id);
     }
     Ok(created)
 }
@@ -1881,7 +1883,7 @@ pub async fn update_account(
         message: err.to_string(),
     })?;
     // New endpoint, new data: refresh so the views reflect the edited account
-    // without waiting for the periodic loop.
-    refresher.trigger();
+    // without waiting for the periodic loop. Forced for this account only.
+    refresher.trigger_account(&request.account_id);
     Ok(())
 }

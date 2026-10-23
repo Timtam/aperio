@@ -89,15 +89,17 @@ pub struct CacheRefresher {
     /// a single pass — hence a latch that only `trigger` SETS and the pass
     /// CONSUMES, never a value the later caller overwrites. Collapsing
     /// therefore resolves in the user's favour (forced), and forced-ness
-    /// can never leak into a later, unrelated wake.
-    next_trigger_forced: Arc<AtomicBool>,
-    /// Whether the CURRENT pass was user-forced (manual refresh). Set at
-    /// the start of every pass, a queued follow-up included; read by the
-    /// enumerate/refresh failure paths
-    /// so a forced failure surfaces at once (see `CacheStore::mark_error`).
-    /// Single-flight makes this stable for a pass's duration; the
-    /// concurrent per-read SWR path never touches it.
-    pass_forced: Arc<AtomicBool>,
+    /// can never leak into a later, unrelated wake. Which accounts it
+    /// forces ([`Forcing`]): collapsed requests force every account either
+    /// forced.
+    next_trigger: Arc<Mutex<Forcing>>,
+    /// The accounts the CURRENT pass runs forced for (a manual refresh: all;
+    /// an account change: that account). Set at the start of every pass, a
+    /// queued follow-up included; read by the enumerate/refresh failure
+    /// paths so a forced failure surfaces at once (see
+    /// `CacheStore::mark_failure`). Single-flight makes this stable for a
+    /// pass's duration; the concurrent per-read SWR path never touches it.
+    pass_forcing: Arc<Mutex<Forcing>>,
     /// The (account, listing family) pairs a busy provider turned away in the
     /// CURRENT pass (decision 271): the pass asks none of that family's
     /// remaining containers, and records nothing for them. Reset as each pass
@@ -109,12 +111,63 @@ pub struct CacheRefresher {
     /// has SOME failing container.
     pass_succeeded: Arc<AtomicBool>,
     /// A pass asked for through [`Self::warm_all_queued`] while another ran:
-    /// `Some(forced)` runs once more when the running pass ends. Bounded to
+    /// `Some(forcing)` runs once more when the running pass ends. Bounded to
     /// one: any number of requests during a pass collapse into a single
-    /// follow-up, forced if any of them was.
-    follow_up: Arc<Mutex<Option<bool>>>,
+    /// follow-up, forced for every account any of them forced.
+    follow_up: Arc<Mutex<Option<Forcing>>>,
     /// Last successful pass, kept in memory + mirrored to prefs.
     last_refreshed: Arc<Mutex<Option<DateTime<Utc>>>>,
+}
+
+/// Which accounts a warm pass runs forced for: a failure there shows at once
+/// instead of waiting for a confirming second round (decision 271). A manual
+/// refresh forces every account; a change of one account forces only that
+/// one (Toni, 2026-10-23); the rest count as an automatic round.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Forcing {
+    #[default]
+    None,
+    All,
+    Accounts(std::collections::BTreeSet<String>),
+}
+
+impl Forcing {
+    /// Forced for one account.
+    pub fn account(id: &str) -> Self {
+        Self::Accounts(std::collections::BTreeSet::from([id.to_string()]))
+    }
+
+    /// Two requests collapsed into one pass: forced for every account
+    /// either forced.
+    pub fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::All, _) | (_, Self::All) => Self::All,
+            (Self::None, other) | (other, Self::None) => other,
+            (Self::Accounts(mut one), Self::Accounts(two)) => {
+                one.extend(two);
+                Self::Accounts(one)
+            }
+        }
+    }
+
+    /// Whether a failure of `account` shows at once.
+    pub fn covers(&self, account: &str) -> bool {
+        match self {
+            Self::None => false,
+            Self::All => true,
+            Self::Accounts(accounts) => accounts.contains(account),
+        }
+    }
+}
+
+impl From<bool> for Forcing {
+    fn from(forced: bool) -> Self {
+        if forced {
+            Self::All
+        } else {
+            Self::None
+        }
+    }
 }
 
 /// One container queued for an items refresh in a warm pass. Collected during a
@@ -176,12 +229,12 @@ impl CacheRefresher {
             observer,
             notify: Arc::new(Notify::new()),
             in_flight: Arc::new(Mutex::new(false)),
-            pass_forced: Arc::new(AtomicBool::new(false)),
+            pass_forcing: Arc::new(Mutex::new(Forcing::None)),
             busy_families: Arc::new(Mutex::new(std::collections::HashSet::new())),
             pass_succeeded: Arc::new(AtomicBool::new(false)),
             follow_up: Arc::new(Mutex::new(None)),
             // Unset until a user `trigger` latches it.
-            next_trigger_forced: Arc::new(AtomicBool::new(false)),
+            next_trigger: Arc::new(Mutex::new(Forcing::None)),
             last_refreshed: Arc::new(Mutex::new(initial_last)),
         })
     }
@@ -212,8 +265,8 @@ impl CacheRefresher {
             // cannot force an unrelated later pass. Automatic wakes
             // (`trigger_background`, the cache-generation reset at launch)
             // never set it.
-            let forced = worker.next_trigger_forced.swap(false, Ordering::Relaxed);
-            worker.warm_all(forced).await;
+            let forcing = worker.take_trigger();
+            worker.warm_all(forcing).await;
 
             loop {
                 let minutes = worker.read_interval_minutes();
@@ -231,9 +284,9 @@ impl CacheRefresher {
                         // CONSUME the latch: a collapsed forced+background
                         // pair resolves as forced, and the flag can't leak
                         // into the next automatic wake.
-                        let forced = worker.next_trigger_forced.swap(false, Ordering::Relaxed);
-                        debug!(target: "aperio::cache", forced, "cache warm trigger");
-                        worker.warm_all(forced).await;
+                        let forcing = worker.take_trigger();
+                        debug!(target: "aperio::cache", ?forcing, "cache warm trigger");
+                        worker.warm_all(forcing).await;
                     }
                 }
             }
@@ -245,8 +298,29 @@ impl CacheRefresher {
     /// already running. The pass runs FORCED, so its failures surface at
     /// once instead of waiting for a confirming second attempt.
     pub fn trigger(&self) {
-        self.next_trigger_forced.store(true, Ordering::Relaxed);
+        self.latch(Forcing::All);
         self.notify.notify_one();
+    }
+
+    /// [`Self::trigger`] for a change of ONE account (added, edited,
+    /// reconnected, reset): the pass runs forced for that account only, and
+    /// counts as an automatic round for the others (Toni, 2026-10-23), so an
+    /// unchanged account the provider is busy for does not warn after one
+    /// round (decision 271).
+    pub fn trigger_account(&self, account_id: &str) {
+        self.latch(Forcing::account(account_id));
+        self.notify.notify_one();
+    }
+
+    fn latch(&self, forcing: Forcing) {
+        let mut next = self.next_trigger.lock().expect("cache refresher poisoned");
+        let before = std::mem::take(&mut *next);
+        *next = before.merge(forcing);
+    }
+
+    /// CONSUME the latch, so it cannot force an unrelated later pass.
+    fn take_trigger(&self) -> Forcing {
+        std::mem::take(&mut *self.next_trigger.lock().expect("cache refresher poisoned"))
     }
 
     /// Wake the worker for an immediate pass that is NOT a user action —
@@ -297,7 +371,8 @@ impl CacheRefresher {
     /// app-start / periodic schedule. A forced pass's failures surface on
     /// the error screen at once instead of waiting for a confirming second
     /// attempt (see `CacheStore::mark_error`).
-    pub async fn warm_all(self: &Arc<Self>, forced: bool) {
+    pub async fn warm_all(self: &Arc<Self>, forcing: impl Into<Forcing>) {
+        let forcing = forcing.into();
         // Single-flight: a periodic tick that lands while a manual pass
         // is still running just bails.
         {
@@ -307,7 +382,7 @@ impl CacheRefresher {
             }
             *guard = true;
         }
-        self.run_passes(forced).await;
+        self.run_passes(forcing).await;
     }
 
     /// [`Self::warm_all`] for a request that must not be lost.
@@ -319,24 +394,25 @@ impl CacheRefresher {
     /// worker, so a manual refresh, an account reset or a fresh OS grant
     /// that landed during the launch pass simply never happened. Here the
     /// request waits, and the running pass runs once more when it ends.
-    pub async fn warm_all_queued(self: &Arc<Self>, forced: bool) {
+    pub async fn warm_all_queued(self: &Arc<Self>, forcing: impl Into<Forcing>) {
+        let forcing = forcing.into();
         {
             let mut guard = self.in_flight.lock().expect("cache refresher poisoned");
             if *guard {
                 let mut follow_up = self.follow_up.lock().expect("cache refresher poisoned");
-                *follow_up = Some(follow_up.unwrap_or(false) || forced);
+                *follow_up = Some(follow_up.take().unwrap_or_default().merge(forcing));
                 return;
             }
             *guard = true;
         }
-        self.run_passes(forced).await;
+        self.run_passes(forcing).await;
     }
 
     /// Run passes while one is queued behind the current one. `in_flight`
     /// stays set across them, and the indicator hears "finished" once.
-    async fn run_passes(self: &Arc<Self>, mut forced: bool) {
+    async fn run_passes(self: &Arc<Self>, mut forcing: Forcing) {
         loop {
-            let (completed, total) = self.pass(forced).await;
+            let (completed, total) = self.pass(forcing).await;
             // Before the lock below: a read here must not widen the gap
             // between clearing `in_flight` and saying "finished".
             let outcome = self.pass_outcome();
@@ -356,8 +432,8 @@ impl CacheRefresher {
             };
             match next {
                 Some(queued) => {
-                    debug!(target: "aperio::cache", forced = queued, "a queued cache warm pass follows");
-                    forced = queued;
+                    debug!(target: "aperio::cache", forcing = ?queued, "a queued cache warm pass follows");
+                    forcing = queued;
                 }
                 None => {
                     self.emit_status(
@@ -375,11 +451,11 @@ impl CacheRefresher {
     }
 
     /// One pass; the caller holds `in_flight`.
-    async fn pass(self: &Arc<Self>, forced: bool) -> (DateTime<Utc>, u32) {
+    async fn pass(self: &Arc<Self>, forcing: Forcing) -> (DateTime<Utc>, u32) {
         // Record the pass's forced-ness for the failure paths. Safe under
         // single-flight: only this pass writes it, and the concurrent SWR
         // path passes its own (false) flag to mark_error directly.
-        self.pass_forced.store(forced, Ordering::Relaxed);
+        *self.pass_forcing.lock().expect("cache refresher poisoned") = forcing;
         self.pass_succeeded.store(false, Ordering::Relaxed);
         self.busy_families
             .lock()
@@ -724,7 +800,12 @@ impl CacheRefresher {
         err: &cal_core::Error,
         generation: u64,
     ) {
-        let attempt = if self.pass_forced.load(Ordering::Relaxed) {
+        let forced = self
+            .pass_forcing
+            .lock()
+            .expect("cache refresher poisoned")
+            .covers(account);
+        let attempt = if forced {
             Attempt::Forced { generation }
         } else {
             Attempt::Background { generation }
@@ -1389,6 +1470,76 @@ mod tests {
         assert!(outcome.all_failed);
     }
 
+    /// A change of one account forces only that account (Toni, 2026-10-23):
+    /// an unchanged account that fails in the same pass counts as an
+    /// automatic round and is not named after one.
+    #[tokio::test]
+    async fn an_account_change_forces_only_that_account() {
+        let (refresher, _gated, statuses) = refresher();
+        refresher
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-2', 'caldav', 'Home', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        for account in ["acc-1", "acc-2"] {
+            refresher.registry.register_host_adapter(
+                account,
+                Some(Arc::new(Down) as Arc<dyn CalendarFeature>),
+                None,
+            );
+        }
+        refresher.warm_all(Forcing::account("acc-1")).await;
+        let outcome = statuses.last_outcome();
+        assert_eq!(
+            outcome
+                .failing
+                .iter()
+                .map(|f| f.account_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["acc-1"]
+        );
+    }
+
+    /// Requests collapsed into one pass force every account either forced.
+    #[test]
+    fn forcing_merges_and_covers() {
+        let one = Forcing::account("a").merge(Forcing::account("b"));
+        assert!(one.covers("a") && one.covers("b") && !one.covers("c"));
+        assert_eq!(
+            Forcing::None.merge(Forcing::account("a")),
+            Forcing::account("a")
+        );
+        assert_eq!(Forcing::account("a").merge(Forcing::All), Forcing::All);
+        assert!(!Forcing::None.covers("a"));
+        assert!(Forcing::All.covers("a"));
+        assert_eq!(Forcing::from(true), Forcing::All);
+        assert_eq!(Forcing::from(false), Forcing::None);
+    }
+
+    /// A queued request for one account and one for another run as one
+    /// follow-up, forced for both.
+    #[tokio::test]
+    async fn queued_account_changes_collapse_into_one_follow_up() {
+        let (refresher, gated, _statuses) = refresher();
+        let running = tokio::spawn({
+            let refresher = Arc::clone(&refresher);
+            async move { refresher.warm_all(false).await }
+        });
+        gated.entered.notified().await;
+        refresher.warm_all_queued(Forcing::account("acc-1")).await;
+        refresher.warm_all_queued(Forcing::account("acc-2")).await;
+        gated.release.notify_one();
+        running.await.unwrap();
+        let ran = refresher.pass_forcing.lock().unwrap().clone();
+        assert!(ran.covers("acc-1") && ran.covers("acc-2"), "{ran:?}");
+        assert!(!ran.covers("acc-3"), "{ran:?}");
+    }
+
     /// The first pass of the desktop worker, woken by `wake` before the
     /// start delay ran out, against an account whose listing is down.
     async fn first_pass_woken_by(wake: fn(&CacheRefresher)) -> PassOutcome {
@@ -1450,8 +1601,9 @@ mod tests {
             2,
             "the follow-up listed again"
         );
-        assert!(
-            refresher.pass_forced.load(Ordering::Relaxed),
+        assert_eq!(
+            *refresher.pass_forcing.lock().unwrap(),
+            Forcing::All,
             "the follow-up ran forced"
         );
         let finished = statuses

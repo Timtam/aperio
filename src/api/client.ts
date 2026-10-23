@@ -1482,6 +1482,11 @@ export type CacheRefreshStatusPayload = CacheRefreshStatus;
 export const refreshExternalCache = () =>
   invoke<void>('refresh_external_cache');
 
+/** {@link refreshExternalCache} after a change of one account: forced for that
+ *  account only, an automatic round for the others (decision 271). */
+export const refreshAccountCache = (accountId: string) =>
+  invoke<void>('refresh_account_cache', { accountId });
+
 /** Current refresher status — seeds the toolbar indicator on mount. */
 export const getCacheRefreshStatus = () =>
   invoke<CacheRefreshStatus>('get_cache_refresh_status');
