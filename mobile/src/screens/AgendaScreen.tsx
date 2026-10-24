@@ -119,8 +119,9 @@ export default function AgendaScreen({
   const showLoading = useDeferredLoading(loading);
   const [error, setError] = useState<string | null>(null);
   // A failed write's line, apart from a load's: a load clears only its own,
-  // so a refresh after the write leaves it. It goes with the next delete or
-  // another window. Mirrors CalendarDayList.
+  // so a refresh after the write leaves it. It goes with the next delete,
+  // another window, or the screen's return from elsewhere (the editor), where
+  // the person acted again. Mirrors CalendarDayList.
   const [writeError, setWriteError] = useState<string | null>(null);
   // First load blanks; later reloads (focus return, delete/edit, cache refresh)
   // keep the current list on screen and refresh in place — the view stays open
@@ -292,7 +293,10 @@ export default function AgendaScreen({
 
   // Reload when the window changes or the screen regains focus (after the editor).
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => void load());
+    const unsubscribe = navigation.addListener('focus', () => {
+      setWriteError(null);
+      void load();
+    });
     void load();
     return unsubscribe;
   }, [navigation, load]);

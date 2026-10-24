@@ -416,8 +416,9 @@ export function CalendarDayList({
   const [loading, setLoading] = useState(seed == null);
   const [error, setError] = useState<string | null>(null);
   // A failed write's line, apart from a load's: a load clears only its own,
-  // so a refresh after the write leaves it. It goes with the next delete or
-  // another period.
+  // so a refresh after the write leaves it. It goes with the list's next
+  // write that works, another period, or the screen's return from elsewhere
+  // (the editor), where the person acted again.
   const [writeError, setWriteError] = useState<string | null>(null);
   // "Loading …" only when the wait is long enough to notice (the desktop's
   // useDeferredLoading, ported): a warm host-cache round trip stays silent
@@ -912,7 +913,10 @@ export function CalendarDayList({
   // so rapid paging collapses into one reload on the period the user settles on.
   const didFirstLoadRef = useRef(false);
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => scheduleLoad());
+    const unsubscribe = navigation.addListener('focus', () => {
+      setWriteError(null);
+      scheduleLoad();
+    });
     if (!didFirstLoadRef.current) {
       didFirstLoadRef.current = true;
       void load();
@@ -1268,6 +1272,7 @@ export function CalendarDayList({
       try {
         const next = await applyTaskToggle(task, listsById.get(task.list_id), tasks);
         if (next == null) return;
+        setWriteError(null);
         announce(statusAnnounce(t, next, task.title));
         await load();
       } catch (err) {
@@ -1295,6 +1300,7 @@ export function CalendarDayList({
                 void (async () => {
                   try {
                     await apiDeleteTask(task.id, task.list_id);
+                    setWriteError(null);
                     announce(t('mobile.deleted', { title: task.title }));
                     await load();
                   } catch (err) {
@@ -1316,6 +1322,7 @@ export function CalendarDayList({
         taskLists,
         t,
         (message) => {
+          setWriteError(null);
           announce(message);
           void load();
         },

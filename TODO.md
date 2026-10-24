@@ -521,7 +521,9 @@ Siehe DESIGN §4.2.
         Zeilenknopf, dessen Unteraufgabe scheiterte, gibt ihn an die nächste
         Zeile, wenn seine Zeile geht; die Fehlerzeile eines
         gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
-        neu geladen wird; Erinnerungen und Suche sagen einen Ladefehler an.
+        neu geladen wird, und geht, sobald etwas anderes gelingt oder du aus
+        dem Editor zurückkommst; Erinnerungen und Suche sagen einen Ladefehler
+        an.
       - ↻ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
         274): CalDAV liest 429 und beim Lesen 503 mit `Retry-After` als
         ausgelasteten Anbieter, Todoist und Vikunja 429. Ob iCloud so
