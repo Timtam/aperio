@@ -252,8 +252,9 @@ limit, a lost or unreadable answer, a cancel that did nothing, someone
 else's cancel, a listing that lags or comes back empty). One test runs every
 fault at each request of a plain run, a second every fault at the requests
 only another fault sends (the read-back after a lost create, the read of a
-cancel whose answer was lost, the take-back and its read), and both check
-that each outcome says what stands.
+cancel whose answer was lost, the take-back and its read), at their first
+turn and at the second one a failed first turn sends, and both check that
+each outcome says what stands.
 
 None of that was run against Google: there is no live test of it. The model
 pins Aperio's reading of Google's documentation where Google promises
