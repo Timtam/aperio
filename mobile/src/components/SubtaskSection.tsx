@@ -109,15 +109,19 @@ export function SubtaskSection({
 
   const announce = (message: string) => AccessibilityInfo.announceForAccessibility(message);
 
-  const reload = useCallback(async () => {
+  /** Read the list's tasks again; the rows read, or `null` when the read
+   *  failed (said in the line). */
+  const reload = useCallback(async (): Promise<Task[] | null> => {
     try {
       const snap = await getTasks(parentTask.list_id);
       setAll(snap);
       const freshParent = snap.find((tk) => tk.id === parentTask.id);
       if (freshParent) onParentSync?.(freshParent);
+      return snap;
     } catch (err) {
       // A read: a busy provider says so, never that nothing was changed.
       setError(readErrorMessage(err, t));
+      return null;
     }
   }, [parentTask.list_id, parentTask.id, onParentSync, t]);
 
@@ -276,9 +280,11 @@ export function SubtaskSection({
         announce(t('dialogs.task.deleted', { title: sub.title }));
       } catch (err) {
         // What landed shows (decision 277); a subtask that is gone moves
-        // focus on as a delete that worked does.
+        // focus on as a delete that worked does — also one whose delete
+        // failed but which the read again no longer shows.
         if (deleted) onRemove(index);
-        void reload();
+        const snap = await reload();
+        if (!deleted && snap != null && !snap.some((tk) => tk.id === sub.id)) onRemove(index);
         onChanged();
         announce(writeErrorMessage(err, t));
       }

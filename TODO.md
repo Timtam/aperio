@@ -521,7 +521,10 @@ Siehe DESIGN §4.2.
         wenn der Aufgaben-Reiter offen ist und seine Zeilen zuerst noch einmal
         aus dem Zwischenspeicher kommen), und ein
         Zeilenknopf, dessen Unteraufgabe scheiterte, gibt ihn an die nächste
-        Zeile, wenn seine Zeile geht; die Fehlerzeile eines
+        Zeile, wenn seine Zeile geht; ein Löschen in der Aufgabenliste, dessen
+        Antwort verloren ging, das aber angekommen ist, gibt den Fokus an die
+        nächste Zeile, sobald die Aktualisierung die Zeile nimmt (15 s
+        Beobachtung); die Fehlerzeile eines
         gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
         neu geladen wird, und geht, sobald etwas anderes gelingt oder du aus
         dem Editor zurückkommst; Erinnerungen und Suche sagen einen Ladefehler

@@ -50,6 +50,11 @@ import { useCurrentUserByList } from '../state/currentUser';
 import { useTaskStore } from '../state/taskStoreContext';
 import { surfaceTaskNow } from '../state/moveActions';
 import { priorityScaleFor, readTaskBehaviour } from '../state/taskBehaviour';
+import {
+  FAILED_FOCUS_WATCH_MS,
+  focusAfterFailedAction,
+  type FailedAction,
+} from '../state/reviewFocus';
 import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
 import { MagicTapView } from '../components/MagicTapView';
@@ -78,7 +83,7 @@ export default function TasksScreen({
 }: RootStackScreenProps<'Tasks'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const { tasks, loading, taskListById } = useTasks();
+  const { tasks, loading, taskListById, fetchedVersion } = useTasks();
   const {
     selectedTaskListIds,
     taskLists,
@@ -86,6 +91,7 @@ export default function TasksScreen({
     loadSections,
     colorLabels,
     invalidateData,
+    dataVersion,
   } = useTaskStore();
   // Native pull-to-refresh — manual sync + external-cache warm; the list reloads
   // off the resulting cache-update / dataVersion bump.
@@ -218,6 +224,15 @@ export default function TasksScreen({
   // a check-off that landed in part may or may not have moved it.
   const pendingFocusFallback = useRef<string | null>(null);
   const pendingEmptyFocus = useRef(false);
+  // A delete that failed: its row is watched for a moment, as in the
+  // day-start review (`focusAfterFailedAction`) — the refresh after the
+  // re-read may still take it away, its delete having landed after all.
+  const failedFocus = useRef<FailedAction | null>(null);
+  // The data version last rendered: a failure's re-read reads at the next.
+  const versionShown = useRef(dataVersion);
+  useEffect(() => {
+    versionShown.current = dataVersion;
+  }, [dataVersion]);
 
   // Long-press action menu — the sighted twin of the rows' SR custom actions
   // (one shared action list feeds both).
@@ -291,6 +306,21 @@ export default function TasksScreen({
 
   // Restore focus to a sibling row after a mutation refetch remounts the list.
   useEffect(() => {
+    const gone = failedFocus.current;
+    if (gone != null) {
+      const shown = entries.filter((e) => !e.hidden && !e.group).map((e) => e.task.id);
+      const step = focusAfterFailedAction(gone, shown, fetchedVersion, Date.now());
+      if (step.kind === 'wait') return;
+      failedFocus.current = null;
+      if (step.kind === 'move') {
+        const tag =
+          step.id === EMPTY_FOCUS
+            ? findNodeHandle(emptyRef.current)
+            : (rowTags.current[step.id] ?? null);
+        if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+      }
+      return;
+    }
     if (pendingFocusId.current != null) {
       const id = pendingFocusId.current;
       const fallback = pendingFocusFallback.current;
@@ -311,7 +341,7 @@ export default function TasksScreen({
       const tag = findNodeHandle(emptyRef.current);
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
     }
-  }, [entries]);
+  }, [entries, fetchedVersion]);
 
   const targetListId = [...selectedTaskListIds][0] ?? taskLists[0]?.id ?? null;
 
@@ -422,6 +452,7 @@ export default function TasksScreen({
         // Land focus on a surviving sibling (excluding the deleted task's own
         // subtree, which cascades away with it), or the empty-state message.
         const siblingId = focusTargetAfterRemoving(entries, task.id);
+        failedFocus.current = null;
         if (siblingId) {
           pendingFocusId.current = siblingId;
         } else {
@@ -448,10 +479,18 @@ export default function TasksScreen({
           announce(t('mobile.deleted', { title: task.title }));
         } catch (err) {
           // What landed shows (decision 277). A task that is gone leaves focus
-          // to the sibling chosen above; one that stays keeps it.
+          // to the sibling chosen above; one whose delete failed keeps it
+          // while its row shows, and hands it on if a read in the next
+          // moments takes the row away after all.
           if (!deleted) {
-            pendingFocusId.current = task.id;
+            pendingFocusId.current = null;
             pendingEmptyFocus.current = false;
+            failedFocus.current = {
+              acted: [task.id],
+              fallback: siblingId ?? EMPTY_FOCUS,
+              version: versionShown.current + 1,
+              until: Date.now() + FAILED_FOCUS_WATCH_MS,
+            };
           }
           invalidateData();
           announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
@@ -914,6 +953,10 @@ export default function TasksScreen({
   );
 }
 
+
+/** The focus target meaning the empty-state message, where no row is left:
+ *  no task has an empty id. */
+const EMPTY_FOCUS = '';
 
 /**
  * The id of the next (or previous) VISIBLE task row to land screen-reader focus

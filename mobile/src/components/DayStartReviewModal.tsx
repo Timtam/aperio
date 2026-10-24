@@ -38,7 +38,11 @@ import { navigateNested } from '../navigation/navigationRef';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
 import { confirmDeleteTask } from '../state/taskDeleteScope';
-import { focusAfterFailedAction, type FailedAction } from '../state/reviewFocus';
+import {
+  FAILED_FOCUS_WATCH_MS,
+  focusAfterFailedAction,
+  type FailedAction,
+} from '../state/reviewFocus';
 import {
   effectiveForList,
   priorityScaleFor,
@@ -278,7 +282,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     const gone = focusIfGone.current;
     if (gone != null) {
       // As on the desktop, a still-shown button keeps focus.
-      const step = focusAfterFailedAction(gone, orderedIds, fetchedVersion);
+      const step = focusAfterFailedAction(gone, orderedIds, fetchedVersion, Date.now());
       if (step.kind === 'wait') return;
       focusIfGone.current = null;
       if (step.kind === 'move') {
@@ -310,15 +314,20 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   );
 
   /** A button's write that failed: said, never an unhandled rejection
-   *  (decision 273), and what may have landed reads again. Once the re-read
-   *  came, focus stays on the pressed button while it shows, and goes to the
-   *  row queued for after it only where the re-read took it away. */
+   *  (decision 273), and what may have landed reads again. Focus stays on the
+   *  pressed button while it shows, and goes to the row queued for after it
+   *  where a read in the next moments takes it away (`focusAfterFailedAction`). */
   const failed = useCallback(
     (err: unknown) => {
       const acted = actedIds.current;
       focusIfGone.current =
         acted.length > 0
-          ? { acted, fallback: pendingFocusId.current, version: versionShown.current + 1 }
+          ? {
+              acted,
+              fallback: pendingFocusId.current,
+              version: versionShown.current + 1,
+              until: Date.now() + FAILED_FOCUS_WATCH_MS,
+            }
           : null;
       pendingFocusId.current = null;
       invalidateData();
