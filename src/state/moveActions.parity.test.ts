@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('../../mobile/src/api/calendar', () => phone);
 vi.mock('../../mobile/src/api/client', () => ({ createTask: vi.fn(), updateTask: vi.fn() }));
 
-import { moveOrCopyEvent as desktopMoveOrCopy } from './moveActions';
+import { moveEventToDay, moveOrCopyEvent as desktopMoveOrCopy } from './moveActions';
 
 /**
  * The phone's module, loaded through a path the type checker does not follow,
@@ -162,4 +162,48 @@ describe('a whole series moved or copied, on the desktop and the phone alike', (
       }
     }
   }
+});
+
+/**
+ * One occurrence moved to another calendar, on both surfaces, and one dragged
+ * to another day where its calendar keeps no exceptions (decision 277): the
+ * copy lands first, so a busy answer to the cancel of the original leaves the
+ * move partly saved, never "nothing was changed" — moving again would make a
+ * second copy.
+ */
+describe('an occurrence moved: a busy cancel after its copy landed is partly saved', () => {
+  const busy = { code: 'forbidden', message: 'provider-busy: http-429' };
+  const occurrence = FROM.occurrence(SHAPES.google);
+
+  it('desktop', async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === 'add_event_exdate' ? Promise.reject(busy) : Promise.resolve({}),
+    );
+    await expect(desktopMoveOrCopy(occurrence, 'c2', 'move', 'occurrence')).rejects.toEqual({
+      code: 'network',
+      message: 'partly-saved: source-delete',
+    });
+    expect(invokeMock.mock.calls.map((c) => c[0])).toEqual(['create_event', 'add_event_exdate']);
+  });
+
+  it('phone', async () => {
+    phone.createEvent.mockResolvedValue({});
+    phone.addEventExdate.mockRejectedValue(busy);
+    await expect(phoneMoveOrCopy(occurrence, 'c2', 'move', 'occurrence')).rejects.toEqual({
+      code: 'network',
+      message: 'partly-saved: source-delete',
+    });
+    expect(phone.createEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('desktop, dragged to another day', async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === 'add_event_exdate' ? Promise.reject(busy) : Promise.resolve({}),
+    );
+    await expect(moveEventToDay(occurrence, '2026-06-10', 'occurrence', null)).rejects.toEqual({
+      code: 'network',
+      message: 'partly-saved: skip',
+    });
+    expect(invokeMock.mock.calls.map((c) => c[0])).toEqual(['create_event', 'add_event_exdate']);
+  });
 });

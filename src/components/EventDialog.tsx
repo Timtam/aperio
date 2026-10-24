@@ -90,6 +90,7 @@ import {
   type CarryableFields,
   type CarryScope,
   type ExceptionsLoss,
+  writeAfterLanded,
 } from '@aperio/shared';
 import {
   createsInSteps,
@@ -1544,7 +1545,11 @@ export function EventDialog({
                 send_invitations: sendInvitations,
                 ...organizerOf(event ?? {}),
               });
-              await addEventExdate(seriesId, occIso, event.calendar_id);
+              // The standalone event stands: the skip after it is a later
+              // step, never "nothing was changed" (277).
+              await writeAfterLanded('skip', () =>
+                addEventExdate(seriesId, occIso, event.calendar_id),
+              );
               // The series lives on without this slot: it keeps its key.
               await savePrivate(created, { oldKeyLivesOn: true });
               if (!storesColorNatively) {

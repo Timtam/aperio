@@ -27,6 +27,7 @@ const savedEvent = vi.hoisted(() => ({ current: null as unknown }));
 const seriesMaster = vi.hoisted(() => ({ current: null as unknown }));
 /** Set to make `create_event` fail, as an offline account would. */
 const createFails = vi.hoisted(() => ({ current: false }));
+const exdateBusy = vi.hoisted(() => ({ current: false }));
 const invokeMock = vi.hoisted(() =>
   vi.fn((command: string, payload?: unknown) => {
     void payload;
@@ -42,6 +43,9 @@ const invokeMock = vi.hoisted(() =>
     }
     // A carve-out creates the standalone copy; the dialog keys its private
     // reminders by what came back.
+    if (command === 'add_event_exdate' && exdateBusy.current) {
+      return Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' });
+    }
     if (command === 'create_event') {
       if (createFails.current) return Promise.reject(new Error('offline'));
       const request = (payload as { request: { calendar_id: string } }).request;
@@ -144,6 +148,7 @@ afterEach(() => {
   savedEvent.current = null;
   seriesMaster.current = null;
   createFails.current = false;
+  exdateBusy.current = false;
   (CALENDARS[0] as { stores_occurrence_exceptions?: boolean }).stores_occurrence_exceptions =
     undefined;
 });
@@ -531,6 +536,20 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     expect(privateWrites()).toEqual([
       expect.objectContaining({ calendar_id: 'cal-work', event_id: 'created-1', reminders: STORED }),
     ]);
+  });
+
+  it('says a carve-out whose skip met a busy provider is partly saved, and only closes', async () => {
+    // The standalone copy stands once it is created: "nothing was changed"
+    // would invite a second save and a second copy (decision 277).
+    exdateBusy.current = true;
+    privateRows.current = [storedRow('series-1')];
+    await openEditor([], { event: OCCURRENCE, initialScope: 'occurrence' });
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+
+    screen.getByRole('button', { name: /speichern|save/i }).click();
+    expect(await screen.findByText(/nur zum Teil gespeichert/i)).toBeTruthy();
+    expect(screen.queryByText(/nichts geändert/i)).toBeNull();
+    expect(invokeMock.mock.calls.filter((call) => call[0] === 'create_event')).toHaveLength(1);
   });
 
   it('carves an occurrence out of its series when the save moves it to another calendar', async () => {

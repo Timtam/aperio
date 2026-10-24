@@ -139,6 +139,7 @@ import {
   eventWriteLeftover,
   seriesTailMayStand,
   seriesTailRemoved,
+  writeAfterLanded,
 } from '@aperio/shared';
 import { eventGroupsForEvents } from '../api/eventGroups';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -1288,10 +1289,14 @@ function EventEditorScreen({
           // standalone copy (decision 72a).
           ...organizerOf(original),
         });
-        await addEventExdate(
-          occurrenceWriteKind.seriesId,
-          occurrenceWriteKind.occurrence,
-          original.calendar_id,
+        // The standalone event stands: the skip after it is a later step,
+        // never "nothing was changed" (277). Mirrors the desktop.
+        await writeAfterLanded('skip', () =>
+          addEventExdate(
+            occurrenceWriteKind.seriesId,
+            occurrenceWriteKind.occurrence,
+            original.calendar_id,
+          ),
         );
         // The series lives on without this slot: it keeps its key.
         await savePrivate(created, { oldKeyLivesOn: true });

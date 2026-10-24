@@ -20,6 +20,7 @@ import {
   type NoticeCalendar,
   type ShiftRefusal,
   createsInSteps,
+  writeAfterLanded,
   writeWithoutWaiting,
   type StepWriteOptions,
 } from '@aperio/shared';
@@ -398,7 +399,12 @@ export async function moveOrCopyEvent(
   if (mode === 'move' && asOccurrence) {
     const occIso = occurrenceIsoOf(event);
     if (occIso) {
-      await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
+      // The copy stands: a cancel of the original that fails never reads as
+      // "nothing was changed", and moving again would make a second copy
+      // (decision 277).
+      await writeAfterLanded('source-delete', () =>
+        addEventExdate(seriesIdOf(event), occIso, event.calendar_id),
+      );
     }
   }
   return null;
@@ -559,7 +565,10 @@ export async function moveEventToSlot(
       attendees: event.attendees,
       ...organizerOf(event),
     });
-    await addEventExdate(write.seriesId, write.occurrence, event.calendar_id);
+    // The standalone copy stands: the skip after it is a later step (277).
+    await writeAfterLanded('skip', () =>
+      addEventExdate(write.seriesId, write.occurrence, event.calendar_id),
+    );
     return true;
   }
 

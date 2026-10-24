@@ -13,6 +13,7 @@ import {
   readSeriesRows,
   seriesIdOf,
   type StepWriteOptions,
+  writeAfterLanded,
   writeWithoutWaiting,
 } from '@aperio/shared';
 
@@ -228,7 +229,12 @@ export async function moveOrCopyEvent(
   if (mode === 'move' && asOccurrence) {
     const occIso = occurrenceIsoOf(event);
     if (occIso) {
-      await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
+      // The copy stands: a cancel of the original that fails never reads as
+      // "nothing was changed", and moving again would make a second copy
+      // (decision 277). Mirrors the desktop.
+      await writeAfterLanded('source-delete', () =>
+        addEventExdate(seriesIdOf(event), occIso, event.calendar_id),
+      );
     }
   }
   return null;
