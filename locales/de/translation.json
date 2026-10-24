@@ -1899,6 +1899,8 @@
         "draftsFailed_one": "„{{title}}“ wurde angelegt, die Unteraufgabe {{titles}} aber nicht: {{reason}}. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an.",
         "draftsFailed_other": "„{{title}}“ wurde angelegt, die Unteraufgaben {{titles}} aber nicht: {{reason}}. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt diese Unteraufgaben mit an.",
         "draftsLeftHeading": "Noch nicht angelegte Unteraufgaben",
+        "draftPartlyThenRest_one": "„{{title}}“ wurde angelegt, die Unteraufgabe {{draft}} aber nur zum Teil, weil der Anbieter gerade ausgelastet ist; prüfe sie. Die Unteraufgabe {{titles}} wurde danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an. Versuche es später noch einmal.",
+        "draftPartlyThenRest_other": "„{{title}}“ wurde angelegt, die Unteraufgabe {{draft}} aber nur zum Teil, weil der Anbieter gerade ausgelastet ist; prüfe sie. Die Unteraufgaben {{titles}} wurden danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt diese Unteraufgaben mit an. Versuche es später noch einmal.",
         "draftsNotCreated_one": "Die Unteraufgabe {{titles}} wurde nicht angelegt.",
         "draftsNotCreated_other": "Diese {{count}} Unteraufgaben wurden nicht angelegt: {{titles}}."
       },

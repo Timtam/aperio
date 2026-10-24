@@ -1329,7 +1329,10 @@ export function TaskDialog({
             });
           } catch (err) {
             invalidateData();
-            if (eventWriteLeftover(err)) left.shift();
+            // A draft that stands without a step of its own is made, and is
+            // named by itself: the drafts after it were not sent (Toni,
+            // 2026-10-24).
+            const partly = eventWriteLeftover(err) ? left.shift() : undefined;
             if (left.length === 0) {
               showNotice(writeErrorMessage(err, t));
               return false;
@@ -1351,20 +1354,28 @@ export function TaskDialog({
             statusTouched.current = false;
             setCreatedTask(parent);
             setDraftSubtasks(left);
+            const titles = joinNames(
+              left.map((title) => t('actions.quotedTitle', { title })),
+              t,
+            );
             setError(
-              withLaterForBusy(
-                t('dialogs.task.subtasks.draftsFailed', {
-                  title: parent.title,
-                  count: left.length,
-                  titles: joinNames(
-                    left.map((title) => t('actions.quotedTitle', { title })),
+              partly != null
+                ? t('dialogs.task.subtasks.draftPartlyThenRest', {
+                    title: parent.title,
+                    draft: t('actions.quotedTitle', { title: partly }),
+                    count: left.length,
+                    titles,
+                  })
+                : withLaterForBusy(
+                    t('dialogs.task.subtasks.draftsFailed', {
+                      title: parent.title,
+                      count: left.length,
+                      titles,
+                      reason: eventWriteFailureReason(err, t),
+                    }),
+                    err,
                     t,
                   ),
-                  reason: eventWriteFailureReason(err, t),
-                }),
-                err,
-                t,
-              ),
             );
             return false;
           }

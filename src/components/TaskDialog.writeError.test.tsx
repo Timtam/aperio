@@ -181,6 +181,26 @@ describe('TaskDialog → a save that failed', () => {
     expect(createCalls()).toHaveLength(1);
   });
 
+  it('names a draft that stands in part by itself, then the drafts not sent after it', async () => {
+    // Vikunja: the draft is made, its parent link is turned away busy.
+    answers.create_task = [
+      () => Promise.resolve(created('t-1', 'Einkaufen')),
+      () => Promise.reject({ code: 'network', message: 'partly-saved: parent' }),
+    ];
+    await openNew(vi.fn());
+    addDraft('Milch');
+    addDraft('Brot');
+    create();
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(
+      '„Einkaufen“ wurde angelegt, die Unteraufgabe „Milch“ aber nur zum Teil, weil der Anbieter gerade ausgelastet ist; prüfe sie. Die Unteraufgabe „Brot“ wurde danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an. Versuche es später noch einmal.',
+    );
+    expect(createCalls()).toHaveLength(2);
+    // The draft that stands is gone from the drafts; the one not sent stays.
+    expect(screen.queryByText('Milch')).toBeNull();
+    expect(screen.getByText('Brot')).toBeTruthy();
+  });
+
   it('edits a created task whose subtasks did not all follow, and saves its changes with them', async () => {
     answers.create_task = [
       // Stored with a day its create derived (started → pinned to today).

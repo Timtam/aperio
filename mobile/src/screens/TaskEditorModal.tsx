@@ -942,7 +942,10 @@ export default function TaskEditorModal({
             sound: null,
           });
         } catch (err) {
-          if (eventWriteLeftover(err)) left.shift();
+          // A draft that stands without a step of its own is made, and is
+          // named by itself: the drafts after it were not sent. Mirrors the
+          // desktop.
+          const partly = eventWriteLeftover(err) ? left.shift() : undefined;
           if (left.length === 0) {
             showNotice(writeErrorMessage(err, t));
             return false;
@@ -954,19 +957,28 @@ export default function TaskEditorModal({
           setCreatedTask(parent);
           setLoaded(parent);
           setDraftSubtasks(left);
-          const message = withLaterForBusy(
-            t('dialogs.task.subtasks.draftsFailed', {
-              title: parent.title,
-              count: left.length,
-              titles: joinNames(
-                left.map((name) => t('actions.quotedTitle', { title: name })),
-                t,
-              ),
-              reason: eventWriteFailureReason(err, t),
-            }),
-            err,
+          const titles = joinNames(
+            left.map((name) => t('actions.quotedTitle', { title: name })),
             t,
           );
+          const message =
+            partly != null
+              ? t('dialogs.task.subtasks.draftPartlyThenRest', {
+                  title: parent.title,
+                  draft: t('actions.quotedTitle', { title: partly }),
+                  count: left.length,
+                  titles,
+                })
+              : withLaterForBusy(
+                  t('dialogs.task.subtasks.draftsFailed', {
+                    title: parent.title,
+                    count: left.length,
+                    titles,
+                    reason: eventWriteFailureReason(err, t),
+                  }),
+                  err,
+                  t,
+                );
           setError(message);
           AccessibilityInfo.announceForAccessibility(message);
           return false;

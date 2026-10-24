@@ -1899,6 +1899,8 @@
         "draftsFailed_one": "\"{{title}}\" was created, but its subtask {{titles}} was not: {{reason}}. You are now editing the created task; saving also creates the subtask.",
         "draftsFailed_other": "\"{{title}}\" was created, but its subtasks {{titles}} were not: {{reason}}. You are now editing the created task; saving also creates them.",
         "draftsLeftHeading": "Subtasks not yet created",
+        "draftPartlyThenRest_one": "\"{{title}}\" was created, but its subtask {{draft}} only in part, because the provider is busy right now; check it. The subtask {{titles}} was not created after it. You are now editing the created task; saving also creates the subtask. Try again later.",
+        "draftPartlyThenRest_other": "\"{{title}}\" was created, but its subtask {{draft}} only in part, because the provider is busy right now; check it. The subtasks {{titles}} were not created after it. You are now editing the created task; saving also creates them. Try again later.",
         "draftsNotCreated_one": "The subtask {{titles}} was not created.",
         "draftsNotCreated_other": "These {{count}} subtasks were not created: {{titles}}."
       },
