@@ -382,10 +382,12 @@ async fn probe_well_known(
         // Common case — many servers don't bother. Try the next probe.
         return Ok(None);
     }
-    // A busy server says so (decision 270): treated as soft, the base-URL
-    // fallback ran discovery somewhere the server never pointed to.
-    if status == StatusCode::TOO_MANY_REQUESTS {
-        return Err(crate::http::read_failure(response).await);
+    // A busy server says so (decision 270) — a 429, or a 503 with
+    // Retry-After, as `read_failure` reads every read: treated as soft, the
+    // base-URL fallback ran discovery somewhere the server never pointed to.
+    let failure = crate::http::read_failure(response).await;
+    if crate::busy_detail(&failure).is_some() {
+        return Err(failure);
     }
     // Anything else (5xx, 401) we treat as soft — let the next probe or
     // the base-URL fallback surface a real error downstream.

@@ -66,8 +66,10 @@ Apple's well-known endpoints.
   by a busy server is asked again, never cached as "does not schedule", and a
   write that needs it while the server is still busy stops as busy rather than
   dropping a meeting's invitees. A free/busy query says busy instead of
-  "availability unknown", which read as every attendee free. Well-known
-  discovery reads a 429 as busy, not as a missing well-known, and a busy
+  "availability unknown", which read as every attendee free. An answer to
+  an invitation whose read is busy sent nothing and says busy. Well-known
+  discovery reads a 429, or a 503 with `Retry-After`, as busy, not as a
+  missing well-known, and a busy
   home-set probe fails discovery rather than caching the account without
   calendars or contacts. How iCloud throttles is not measured.
 - **Both homes are best-effort.** Discovery probes `calendar-home-set`

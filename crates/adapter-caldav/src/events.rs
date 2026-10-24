@@ -1425,17 +1425,10 @@ pub async fn respond_to_event(
         .headers(get_headers)
         .send_retrying()
         .await?;
-    let status_code = response.status();
-    if !status_code.is_success() {
-        let text = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status_code.as_u16(),
-            message: if text.is_empty() {
-                status_code.canonical_reason().unwrap_or("").to_string()
-            } else {
-                text.chars().take(200).collect()
-            },
-        });
+    if !response.status().is_success() {
+        // A read: a 503 with Retry-After is a busy server, as on every other
+        // read (decision 270), and nothing was sent.
+        return Err(crate::http::read_failure(response).await);
     }
     let etag = extract_etag(&response);
     let body = response.text().await?;
@@ -2930,6 +2923,38 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let sent = seen.lock().unwrap()[0].clone();
         assert!(sent.contains("EXDATE;VALUE=DATE:20261116"), "{sent}");
         assert!(!sent.contains("EXDATE:20261116T000000Z"), "{sent}");
+    }
+
+    /// An answer whose read a busy server turned away (503 with Retry-After)
+    /// sent nothing: busy, never "may have been saved" (decision 270).
+    #[tokio::test]
+    async fn an_answer_whose_read_is_busy_is_busy_and_sends_nothing() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/calendars/alice/work/series.ics")
+            .with_status(503)
+            .with_header("retry-after", "30")
+            .create_async()
+            .await;
+        let put = server
+            .mock("PUT", "/calendars/alice/work/series.ics")
+            .expect(0)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let err = respond_to_event(
+            &client(),
+            &cal_url,
+            "/calendars/alice/work/series.ics|9C1F6A4E-0B77-4E1E-9F6E-51D2A0C9B7A1",
+            "toni@example.org",
+            AttendeeStatus::Accepted,
+            true,
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap_err();
+        assert!(crate::busy_detail(&err).is_some(), "{err:?}");
+        put.assert_async().await;
     }
 
     /// Answering touches the event's own row and nothing else: an e-mail

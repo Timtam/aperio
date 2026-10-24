@@ -1921,6 +1921,28 @@ mod tests {
         assert!(adapter.cached_calendar_home().is_some());
     }
 
+    /// A well-known probe a busy server turned away — 429, or 503 with
+    /// Retry-After — ends discovery as busy: the base-URL fallback would run
+    /// discovery somewhere the server never pointed to (decision 270).
+    #[tokio::test]
+    async fn a_busy_well_known_probe_starts_no_fallback() {
+        for (status, wait) in [(429, None), (503, Some("30"))] {
+            let mut server = Server::new_async().await;
+            let mut probe = server
+                .mock("GET", "/.well-known/caldav")
+                .with_status(status);
+            if let Some(wait) = wait {
+                probe = probe.with_header("retry-after", wait);
+            }
+            probe.create_async().await;
+            let fallback = server.mock("PROPFIND", "/").expect(0).create_async().await;
+            let adapter = build_adapter(&server);
+            let err = adapter.discover().await.unwrap_err();
+            assert!(busy_detail(&err).is_some(), "{status}: {err:?}");
+            fallback.assert_async().await;
+        }
+    }
+
     /// A scheduling probe a busy server turned away is no answer about the
     /// server: never cached as "does not schedule", it is asked again, and
     /// says busy (decision 270).
