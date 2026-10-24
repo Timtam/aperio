@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 
 // Mock the Tauri invoke entrypoint. The api/client module re-exports
 // thin wrappers, so this is the only place we have to intercept.
@@ -338,14 +338,22 @@ describe('loadSections after a section write', () => {
       </CalendarStoreProvider>,
     );
     await waitFor(() => expect(seen.store).not.toBeNull());
+    // The fallback says in the log what it did.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const section = { id: 's1', list_id: 'L1', name: 'Einkauf', position: 0, color_label: null };
     await expect(seen.store!.loadSections('L1')).rejects.toEqual(busy);
-    const shown = await seen.store!.loadSections('L1', {
-      upsert: section as unknown as Section,
+    let shown: Section[] = [];
+    await act(async () => {
+      shown = await seen.store!.loadSections('L1', { upsert: section as unknown as Section });
     });
     expect(shown.map((s) => s.id)).toEqual(['s1']);
-    await waitFor(() => expect(screen.getByTestId('sections').textContent).toBe('Einkauf'));
-    const after = await seen.store!.loadSections('L1', { remove: 's1' });
+    expect(screen.getByTestId('sections').textContent).toBe('Einkauf');
+    let after: Section[] = [{} as Section];
+    await act(async () => {
+      after = await seen.store!.loadSections('L1', { remove: 's1' });
+    });
     expect(after).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });
