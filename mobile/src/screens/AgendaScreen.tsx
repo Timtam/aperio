@@ -118,6 +118,10 @@ export default function AgendaScreen({
   // "Loading …" only when the wait is long enough to notice (desktop parity).
   const showLoading = useDeferredLoading(loading);
   const [error, setError] = useState<string | null>(null);
+  // A failed write's line, apart from a load's: a load clears only its own,
+  // so a refresh after the write leaves it. It goes with the next delete or
+  // another window. Mirrors CalendarDayList.
+  const [writeError, setWriteError] = useState<string | null>(null);
   // First load blanks; later reloads (focus return, delete/edit, cache refresh)
   // keep the current list on screen and refresh in place — the view stays open
   // instead of flashing the loading screen.
@@ -157,6 +161,9 @@ export default function AgendaScreen({
     end.setHours(23, 59, 59, 999);
     return { start, end };
   }, [anchor]);
+  useEffect(() => {
+    setWriteError(null);
+  }, [range]);
 
   const fmtFullDate = useCallback(
     (d: Date) =>
@@ -440,16 +447,17 @@ export default function AgendaScreen({
         ev,
         t,
         (message) => {
+          setWriteError(null);
           announce(message);
           void load();
         },
         (message) => {
           // A delete that failed may have landed in part — a series cut
           // short — so the list reads again, as the desktop grid does (277).
-          // Started first: its own start clears the error shown, which must
-          // then be this one.
+          // Its line is a write's: neither this re-read nor a refresh it
+          // starts clears it.
+          setWriteError(message);
           void load();
-          setError(message);
           announce(t('mobile.error', { message }));
         },
         {
@@ -557,7 +565,12 @@ export default function AgendaScreen({
         <CalendarActions navigation={navigation} anchorDay={anchor} />
       </View>
 
-      {error != null && (
+      {writeError != null && (
+        <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
+          {writeError}
+        </Text>
+      )}
+      {error != null && error !== writeError && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
         </Text>

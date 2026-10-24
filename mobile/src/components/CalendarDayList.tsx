@@ -415,6 +415,10 @@ export function CalendarDayList({
   const [sections, setSections] = useState<Section[]>(() => seed?.sections ?? []);
   const [loading, setLoading] = useState(seed == null);
   const [error, setError] = useState<string | null>(null);
+  // A failed write's line, apart from a load's: a load clears only its own,
+  // so a refresh after the write leaves it. It goes with the next delete or
+  // another period.
+  const [writeError, setWriteError] = useState<string | null>(null);
   // "Loading …" only when the wait is long enough to notice (the desktop's
   // useDeferredLoading, ported): a warm host-cache round trip stays silent
   // instead of flashing the text for a frame or two.
@@ -659,6 +663,9 @@ export function CalendarDayList({
   // to avoid. The catalogs (calendars, labels, lists) are window-independent
   // and stay.
   const windowKey = `${range.start.toISOString()}|${range.end.toISOString()}`;
+  useEffect(() => {
+    setWriteError(null);
+  }, [windowKey]);
   const seededWindowKeyRef = useRef(windowKey);
   useLayoutEffect(() => {
     if (seededWindowKeyRef.current === windowKey) return;
@@ -1163,16 +1170,17 @@ export function CalendarDayList({
         ev,
         t,
         (message) => {
+          setWriteError(null);
           announce(message);
           void load();
         },
         (message) => {
           // A delete that failed may have landed in part — a series cut
           // short — so the list reads again, as the desktop grid does (277).
-          // Started first: its own start clears the error shown, which must
-          // then be this one.
+          // Its line is a write's: neither this re-read nor a refresh it
+          // starts clears it.
+          setWriteError(message);
           void load();
-          setError(message);
           announce(t('mobile.error', { message }));
         },
         {
@@ -2074,7 +2082,12 @@ export function CalendarDayList({
   // a reload after a mutation fails but stale data remains).
   return (
     <>
-      {error != null && (
+      {writeError != null && (
+        <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
+          {writeError}
+        </Text>
+      )}
+      {error != null && error !== writeError && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
         </Text>

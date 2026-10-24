@@ -515,7 +515,11 @@ Siehe DESIGN §4.2.
         seinem Kalender benannt (277). Exchange, Graph, Vikunja und Todoist
         sind gebaut. Am Handy ohne Testläufer zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
         prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
-        ist; eine zum Teil gespeicherte Aufgabe schließt den Editor.
+        ist (VoiceOver sagt den Satz an); eine zum Teil gespeicherte Aufgabe
+        schließt den Editor; im Tagesstart behält ein Sammelknopf den Fokus,
+        solange eine Zeile seines Stapels bleibt; die Fehlerzeile eines
+        gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
+        neu geladen wird.
       - ↻ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
         274): CalDAV liest 429 und beim Lesen 503 mit `Retry-After` als
         ausgelasteten Anbieter, Todoist und Vikunja 429. Ob iCloud so
