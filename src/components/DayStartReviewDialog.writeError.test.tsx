@@ -76,7 +76,7 @@ const CASCADE = {
   deadlineCountdownDays: 3,
 };
 vi.mock('../state/taskCascadeContext', () => ({ useTaskCascadeEnabled: () => CASCADE }));
-const STATUS = { set: async () => {} };
+const STATUS = { set: async (_task: Task, _status: string) => true };
 vi.mock('../state/useTaskStatusToggle', () => ({ useTaskStatusActions: () => STATUS }));
 const NOBODY = {};
 vi.mock('../state/currentUser', () => ({ useCurrentUserByList: () => NOBODY }));
@@ -109,6 +109,19 @@ describe('DayStartReviewDialog → a write that failed', () => {
     expect(invalidateData).toHaveBeenCalled();
     // The row stays: nothing of it moved.
     expect(screen.getByRole('button', { name: 'Heute' })).toBeTruthy();
+  });
+
+  it('keeps a row whose completion was turned away', async () => {
+    // The shared action said the failure; the row stays to be tried again,
+    // and the review does not close as handled.
+    STATUS.set = async () => false;
+    await open([slipped('t1', 'Einkaufen')]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Erledigt' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Erledigt' })).toBeTruthy());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByRole('button', { name: 'Erledigt' })).toBeTruthy();
+    expect(announce).not.toHaveBeenCalledWith('Alle Einträge bearbeitet.');
+    STATUS.set = async () => true;
   });
 
   it('says a batch that landed in part as partly saved', async () => {

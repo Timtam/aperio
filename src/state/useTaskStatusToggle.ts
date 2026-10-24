@@ -38,7 +38,10 @@ import type { Task, TaskStatus } from '../api/types';
 
 export interface TaskStatusActions {
   toggle: (task: Task) => Promise<void>;
-  set: (task: Task, status: TaskStatus) => Promise<void>;
+  /** `true` when the task holds `status` afterwards; `false` when its own
+   *  write was turned away (said already), so a surface does not treat it as
+   *  done. */
+  set: (task: Task, status: TaskStatus) => Promise<boolean>;
 }
 
 export function useTaskStatusActions(): TaskStatusActions {
@@ -67,8 +70,8 @@ export function useTaskStatusActions(): TaskStatusActions {
     useTaskCascadeEnabled();
 
   const set = useCallback(
-    async (task: Task, nextStatus: TaskStatus): Promise<void> => {
-      if (task.status === nextStatus) return;
+    async (task: Task, nextStatus: TaskStatus): Promise<boolean> => {
+      if (task.status === nextStatus) return true;
       const { cascade, autoDate } = effectiveForList(task.list_id);
       // Skip the auto-pin when the owning provider can't store
       // in_progress (e.g. Google Tasks / Todoist): the status reverts to
@@ -88,7 +91,7 @@ export function useTaskStatusActions(): TaskStatusActions {
         // scheduledDate field.
         ...(autoDate && inProgressSticks ? { todayKey: todayIsoKey() } : {}),
       });
-      if (writes.length === 0) return;
+      if (writes.length === 0) return false;
       const outcome = await applyCascade(writes, tasks, autoSelfAssign);
       // ALWAYS, even on a failure: whatever landed before it is real, and a
       // view still showing the old state is a view that disagrees with the
@@ -113,7 +116,7 @@ export function useTaskStatusActions(): TaskStatusActions {
             message: writeErrorMessage(err, t),
           }),
         );
-        return;
+        return false;
       }
 
       // Announce: focused task gets the usual status message; if additional
@@ -136,6 +139,7 @@ export function useTaskStatusActions(): TaskStatusActions {
       } else {
         announce(base);
       }
+      return true;
     },
     [
       announce,

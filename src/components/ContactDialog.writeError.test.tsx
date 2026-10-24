@@ -47,7 +47,11 @@ afterEach(() => {
   onFile.hasPhoto = true;
 });
 
-async function createContact(onClose: () => void, withPhoto = false) {
+async function createContact(
+  onClose: () => void,
+  withPhoto = false,
+  beforeCreate: () => void = () => {},
+) {
   const { ContactDialog } = await import('./ContactDialog');
   render(<ContactDialog isOpen onClose={onClose} contact={null} defaultListId="book-1" />);
   fireEvent.change(screen.getByLabelText('Vorname'), { target: { value: 'Anna' } });
@@ -59,6 +63,7 @@ async function createContact(onClose: () => void, withPhoto = false) {
     fireEvent.change(input, { target: { files: [file] } });
     await screen.findByRole('button', { name: 'Foto ersetzen' });
   }
+  beforeCreate();
   fireEvent.click(screen.getByRole('button', { name: 'Anlegen' }));
 }
 
@@ -85,6 +90,20 @@ describe('ContactDialog → a create that landed in part', () => {
     await waitFor(() => expect(document.activeElement).toBe(note));
     expect(onClose).not.toHaveBeenCalled();
     expect(invalidateData).toHaveBeenCalled();
+  });
+
+  it('creates a group without a photo, and closes as created', async () => {
+    // A group keeps no photo (Google stores none on a group): one picked
+    // before the box was ticked is not sent, and no "without its photo"
+    // notice says a false failure. Mirrors the phone.
+    onFile.hasPhoto = false;
+    const onClose = vi.fn();
+    await createContact(onClose, true, () =>
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Verteilerliste (Gruppe)' })),
+    );
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    const sent = invokeMock.mock.calls.find((c) => c[0] === 'create_contact');
+    expect((sent?.[1] as { request: { photo: unknown } }).request.photo).toBeNull();
   });
 
   it('closes as before when the photo stands too', async () => {

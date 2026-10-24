@@ -604,12 +604,13 @@ export function ContactDialog({
           const created = await apiCreateContact({
             list_id: form.listId,
             ...payload,
-            photo: photo,
+            // A person only — a group keeps no photo. Mirrors the phone.
+            photo: form.isGroup ? null : photo,
           });
           // A provider that stores the photo in a step of its own (Google)
           // keeps the contact when that step fails, and says so by the row
           // it returns: said, and only closed (273).
-          if (photo && !created.has_photo) {
+          if (!form.isGroup && photo && !created.has_photo) {
             invalidateData();
             showNotice(
               t('dialogs.contact.createdWithoutPhoto', {

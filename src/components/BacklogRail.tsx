@@ -268,6 +268,10 @@ export function BacklogRail() {
       invalidateData();
       announce(t('views.backlog.movedToBacklog', { title: task.title }));
     } catch (err) {
+      // A drop that failed may have landed in part — the date cleared, the
+      // reopen turned away — so the views read again, as every other task
+      // drop does (decision 277).
+      invalidateData();
       announce(writeErrorMessage(err, t));
     }
   };

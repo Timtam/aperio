@@ -311,9 +311,12 @@ export function DayStartReviewDialog({
         // Delegate to the shared status action — it runs the same
         // cascade rules as the rest of the app, applies the
         // completed_at + auto-date dance, and fires its own
-        // announcement. We just need to hide the dialog row.
-        await setTaskStatus(task, 'completed');
-        setResolvedIds((s) => new Set(s).add(task.id));
+        // announcement, a failure's included. We just need to hide the
+        // dialog row — only once the task is done: a row whose completion
+        // was turned away stays, to be tried again (decision 273).
+        if (await setTaskStatus(task, 'completed')) {
+          setResolvedIds((s) => new Set(s).add(task.id));
+        }
       } finally {
         setBusy(false);
       }
