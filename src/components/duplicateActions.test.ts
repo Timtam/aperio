@@ -133,6 +133,18 @@ describe('duplicateEvent', () => {
     expect(said).toMatch(/Der Server antwortet nicht/);
   });
 
+  it('says to try later for a copy taken back because the provider was busy (276)', () => {
+    const t = (key: string, values?: Record<string, unknown>) => `${key} ${JSON.stringify(values)}`;
+    const takenBack = { code: 'forbidden', message: 'deletions-not-kept: busy' };
+    const said = duplicateFailedSentence(takenBack, 'Standup', t);
+    expect(said).toMatch(/^actions\.duplicateFailed/);
+    expect(said).toContain('dialogs.event.writeError.reason.deletionsNotKeptBusy');
+    expect(said).toMatch(/ common\.tryAgainLater /);
+    // Taken back for another reason: nothing to wait for.
+    const late = { code: 'forbidden', message: 'deletions-not-kept: time' };
+    expect(duplicateFailedSentence(late, 'Standup', t)).not.toContain('common.tryAgainLater');
+  });
+
   it('says a copy that may stand only for a new series that may stand', () => {
     const t = (key: string, values?: Record<string, unknown>) => `${key} ${JSON.stringify(values)}`;
     const mayStand = { code: 'network', message: 'created-may-stand: time' };

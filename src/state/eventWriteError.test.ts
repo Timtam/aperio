@@ -391,12 +391,12 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
     expect(message).not.toMatch(/deletions|invited|time\b/);
     expect(writeNeverLanded(command('forbidden', 'deletions-not-kept: x'))).toBe(true);
     expect(eventWriteFailureReason(command('forbidden', 'deletions-not-kept: x'), t)).toBe(
-      'der Kalender hat ihre gelöschten Termine nicht übernommen',
+      'der Kalender hat die gelöschten Termine der neuen Serie nicht übernommen',
     );
     // Out of time, the reason alone says so too (Ctrl+D's sentence uses it).
     expect(
       eventWriteFailureReason(command('forbidden', 'deletions-not-kept: invited time'), t),
-    ).toBe('ihre gelöschten Termine einzeln wieder zu löschen, hat zu lange gedauert');
+    ).toBe('die gelöschten Termine der neuen Serie einzeln wieder zu löschen, hat zu lange gedauert');
   });
 
   it('says a series that may stand, behind the wrapper too, and never as nothing written', () => {
@@ -590,6 +590,9 @@ describe('the reasons a frame about anything embeds (decision 273)', () => {
   // frame never named ("sie" for a series, "ihn" for an event).
   const de = i18n.getFixedT('de');
   const reasons = [
+    'deletionsNotKept',
+    'deletionsNotKeptTime',
+    'deletionsNotKeptBusy',
     'changedOnServer',
     'unsafeToWrite',
     'copyUnreadable',
@@ -605,8 +608,8 @@ describe('the reasons a frame about anything embeds (decision 273)', () => {
     for (const key of reasons) {
       const reason = de(`dialogs.event.writeError.reason.${key}`, { detail: '403' }) as string;
       expect(reason, key).not.toMatch(/(^| )(sie|ihn|ihm|ihr|ihre|ihren|ihrer)( |,|$)/i);
-      for (const frame of ['toast.undoFailed', 'conferencing.meetingFailed']) {
-        const sentence = de(frame, { reason, message: reason }) as string;
+      for (const frame of ['toast.undoFailed', 'conferencing.meetingFailed', 'actions.duplicateFailed']) {
+        const sentence = de(frame, { reason, message: reason, title: 'Standup' }) as string;
         expect(sentence, `${frame} ${key}`).toContain(reason);
       }
     }

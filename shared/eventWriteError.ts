@@ -199,6 +199,20 @@ export function isProviderBusy(err: unknown): boolean {
 }
 
 /**
+ * Whether the sentence for `err` says the provider is busy: a busy provider
+ * ({@link isProviderBusy}), or a new series taken back because it was busy
+ * (`deletions-not-kept: busy`, decision 276). Such a sentence ends with "try
+ * again later" (decisions 272, 278).
+ */
+export function saysBusy(err: unknown): boolean {
+  if (isProviderBusy(err)) return true;
+  const refusal = eventWriteRefusal(err);
+  return (
+    refusal?.refusal === 'deletions-not-kept' && stepDetail(refusal.detail).why === PROVIDER_BUSY
+  );
+}
+
+/**
  * The loss a refused save asks about (decisions 243-253): what it would
  * rewrite and how many occurrences it would lose; `null` for any other error.
  */

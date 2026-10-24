@@ -7,6 +7,7 @@ import {
   eventWriteRefusal,
   exceptionsLossOf,
   isProviderBusy,
+  saysBusy,
 } from './eventWriteError';
 
 /**
@@ -123,11 +124,12 @@ export function writeFailureSentence(
 }
 
 /**
- * `sentence` with "Try again later." after it where `err` is a busy provider
- * (decisions 272, 278): a frame that embeds the reason alone does not say it.
+ * `sentence` with "Try again later." after it where `err` says the provider
+ * is busy ({@link saysBusy}; decisions 272, 278): a frame that embeds the
+ * reason alone does not say it.
  */
 export function withLaterForBusy(sentence: string, err: unknown, t: Translate): string {
-  if (!isProviderBusy(err)) return sentence;
+  if (!saysBusy(err)) return sentence;
   const ended = /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
   return `${ended} ${t('common.tryAgainLater')}`;
 }
