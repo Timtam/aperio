@@ -12,6 +12,7 @@ import {
   writeAll,
   writeErrorMessage,
   writeNeverLanded,
+  writeStatusLanded,
 } from '@aperio/shared';
 import outcome from '../../crates/cal-core/tests/fixtures/writeOutcome.json';
 import i18n from '../i18n';
@@ -330,6 +331,15 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
     for (const row of outcome.landed) {
       expect(writeNeverLanded(command(row.code, row.message)), `${row.code}: ${row.message}`).toBe(
         row.never_landed,
+      );
+    }
+  });
+
+  it('reads when a task save completed its status as the core does (277)', () => {
+    expect(outcome.status_landed.length).toBeGreaterThanOrEqual(7);
+    for (const row of outcome.status_landed) {
+      expect(writeStatusLanded(command(row.code, row.message)), `${row.code}: ${row.message}`).toBe(
+        row.status_landed,
       );
     }
   });

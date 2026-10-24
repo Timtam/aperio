@@ -364,6 +364,32 @@ mod tests {
         }
     }
 
+    /// Whether a failed task save completed its status anyway, as both shells
+    /// read the same rows (`writeOutcome.json`; `writeStatusLanded` in
+    /// `shared/eventWriteError.ts`).
+    #[test]
+    fn the_shared_rows_say_when_a_status_landed() {
+        let rows: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/writeOutcome.json"
+        )))
+        .unwrap();
+        let rows = rows["status_landed"].as_array().unwrap();
+        assert!(rows.len() >= 7, "the fixture lost its rows");
+        for row in rows {
+            let code = row["code"].as_str().unwrap();
+            let message = row["message"].as_str().unwrap();
+            assert_eq!(
+                from_code(code, message.into()).status_landed(),
+                row["status_landed"].as_bool().unwrap(),
+                "{code}: {message}"
+            );
+        }
+        assert!(rows
+            .iter()
+            .any(|row| row["message"] == format!("partly-saved: {STATUS_STEP}")));
+    }
+
     /// The rows both surfaces decide "never landed" by (`writeOutcome.json`;
     /// `src/state/eventWriteError.test.ts` reads them too), each carried
     /// under the code a host gives it.

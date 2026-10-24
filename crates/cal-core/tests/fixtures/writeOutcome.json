@@ -325,5 +325,43 @@
         "message": "subtasks: operation not supported by adapter: no"
       }
     }
+  ],
+  "_doc_status_landed": "Whether a task save that failed still completed its status change (cal_core::Error::status_landed, shared/eventWriteError.ts writeStatusLanded): it stands in part at a step other than cal_core::STATUS_STEP.",
+  "status_landed": [
+    {
+      "code": "network",
+      "message": "partly-saved: assignees",
+      "status_landed": true
+    },
+    {
+      "code": "network",
+      "message": "partly-saved: extension",
+      "status_landed": true
+    },
+    {
+      "code": "forbidden",
+      "message": "partly-saved: subtasks",
+      "status_landed": true
+    },
+    {
+      "code": "network",
+      "message": "partly-saved: status",
+      "status_landed": false
+    },
+    {
+      "code": "forbidden",
+      "message": "provider-busy: http-429",
+      "status_landed": false
+    },
+    {
+      "code": "network",
+      "message": "connection reset",
+      "status_landed": false
+    },
+    {
+      "code": "network",
+      "message": "created-may-stand: time",
+      "status_landed": false
+    }
   ]
 }

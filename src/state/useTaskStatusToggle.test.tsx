@@ -184,6 +184,36 @@ describe('useTaskStatusActions — what the user is told', () => {
     expect(said).not.toContain('dialogs.event.writeError.providerBusy');
   });
 
+  it('says a root saved in part with its status as changed, never "could not change" (277)', async () => {
+    // Vikunja: the task's fields and its done went out, then the assignees
+    // were turned away busy; the child's write lands.
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useTaskStatusActions());
+    let changed: boolean | undefined;
+    await act(async () => {
+      changed = await result.current.set(TASKS[0], 'completed');
+    });
+    expect(changed).toBe(true);
+    const said = announce.mock.calls[0][0] as string;
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).not.toContain('statusChangeFailed');
+  });
+
+  it('still says "could not change" where the status itself was turned away', async () => {
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: status' })
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useTaskStatusActions());
+    let changed: boolean | undefined;
+    await act(async () => {
+      changed = await result.current.set(TASKS[0], 'completed');
+    });
+    expect(changed).toBe(false);
+    expect(announce.mock.calls[0][0] as string).toContain('statusChangeFailed');
+  });
+
   it('reports how much of the cascade landed when only part of it failed', async () => {
     // Root succeeds, the child does not.
     vi.mocked(invoke)

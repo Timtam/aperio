@@ -174,6 +174,21 @@ export function eventWriteLeftover(
   return null;
 }
 
+/** The step a task's status request goes under (`cal_core::STATUS_STEP`). */
+const STATUS_STEP = 'status';
+
+/**
+ * Whether a task save that failed still completed its status change: it
+ * stands in part at a step other than the status request
+ * (`cal_core::Error::status_landed`, decision 277) — Vikunja's assignees or
+ * Graph's extension after the fields went. Pinned to the `status_landed`
+ * rows of `writeOutcome.json`.
+ */
+export function writeStatusLanded(err: unknown): boolean {
+  const leftover = eventWriteLeftover(err);
+  return leftover?.leftover === 'partly-saved' && leftover.detail !== STATUS_STEP;
+}
+
 /**
  * Whether the provider turned the request away because it is busy (decision
  * 270), whichever error carries the token: nothing was written, and trying
