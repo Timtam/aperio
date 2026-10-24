@@ -229,7 +229,8 @@ pub fn is_auth_shaped(error: &str) -> bool {
 }
 
 /// The step a task save names when its status change is a request of its own
-/// after the fields (Todoist's close and reopen): partly saved at this step,
+/// after the fields (Todoist's close and reopen), and for any request before
+/// it that fails while that change is still due: partly saved at this step,
 /// the status did not change; at any other step it went out with the fields
 /// ([`Error::status_landed`]).
 pub const STATUS_STEP: &str = "status";

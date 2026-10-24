@@ -4092,7 +4092,12 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
     nichts mehr findet, gilt als erledigt (die Absage verschiebt das
     Ereignis nach „Gelöschte Elemente“, mit neuer Id). Nicht hier: Anlegen
     und Löschen melden solche Ablehnungen weiter als `protocol` (für das
-    Teilen zählt nur das Kürzen).
+    Teilen zählt nur das Kürzen). Seit PR 7 (270) sind HTTP 429 und
+    Exchanges `ErrorServerBusy` keine Ablehnung mehr, sondern ein
+    ausgelasteter Anbieter (`provider-busy`, über
+    `WriteRefusal::turned_down_by_status` vor jeder Ablehnung geprüft);
+    `server-refused` bleibt für 400, 413, 415, 422, 507 und die übrigen
+    Prüfcodes von Exchange.
   - ✅ Die Editoren nutzten `seriesLeftTruncated` nicht: scheiterte beim
     Teilen auch das Zurücksetzen, hörte man nur den ersten Fehler. Das
     Zurücksetzen gibt es nicht mehr (136); scheitert das Zurücknehmen der
