@@ -312,6 +312,10 @@ export function useChipContextMenu(
           );
           invalidateData();
         } catch (err) {
+          // A delete that failed may have landed in part — a calendar walk
+          // that lost an answer, a meeting cancelled before its DELETE
+          // failed — so the view reads again, as its Delete key does (277).
+          invalidateData();
           announce(eventWriteErrorMessage(err, t));
         }
       } else if (selected?.startsWith('color:')) {
@@ -336,6 +340,7 @@ export function useChipContextMenu(
           announce(t('chipMenu.colorSet', { title: event.title }));
           invalidateData();
         } catch (err) {
+          invalidateData();
           announce(eventWriteErrorMessage(err, t));
         }
       }
@@ -477,6 +482,7 @@ export function useChipContextMenu(
           announce(t('chipMenu.broughtToBacklog', { title: task.title }));
           invalidateData();
         } catch (err) {
+          invalidateData();
           announce(writeErrorMessage(err, t));
         }
       } else if (selected === 'delete') {
@@ -491,6 +497,9 @@ export function useChipContextMenu(
           announce(t('dialogs.task.deleted', { title: task.title }));
           invalidateData();
         } catch (err) {
+          // A delete whose answer was lost may have landed: the view reads
+          // again.
+          invalidateData();
           announce(writeErrorMessage(err, t));
         }
       }

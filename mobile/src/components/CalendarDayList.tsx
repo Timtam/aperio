@@ -1298,6 +1298,9 @@ export function CalendarDayList({
                     announce(t('mobile.deleted', { title: task.title }));
                     await load();
                   } catch (err) {
+                    // A delete whose answer was lost may have landed: the day
+                    // reads again, as the desktop's menu does (277).
+                    void load();
                     announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
                   }
                 })();
@@ -1316,7 +1319,10 @@ export function CalendarDayList({
           announce(message);
           void load();
         },
-        (message) => announce(t('mobile.error', { message })),
+        (message) => {
+          void load();
+          announce(t('mobile.error', { message }));
+        },
         plainConfirm,
       );
     },
