@@ -28,6 +28,7 @@ import {
   statusMarker,
   subtaskProgressSuffix,
   type TaskGroupBy,
+  writeAfterLanded,
   writeErrorMessage,
 } from '@aperio/shared';
 
@@ -414,10 +415,14 @@ export default function TasksScreen({
           // A subtask's removal can change the parent's derived status (e.g. the
           // last open child gone → parent completes). Recompute ancestors against
           // the post-deletion snapshot, honouring the coupling knob.
-          if (task.parent_id != null) {
-            await recomputeAncestors(
-              task.parent_id,
-              tasks.filter((t) => t.id !== task.id),
+          // The task is gone by then: a failure there is a later step (277).
+          const parentId = task.parent_id;
+          if (parentId != null) {
+            await writeAfterLanded('cascade', () =>
+              recomputeAncestors(
+                parentId,
+                tasks.filter((t) => t.id !== task.id),
+              ),
             );
           }
           invalidateData();
@@ -425,6 +430,8 @@ export default function TasksScreen({
         } catch (err) {
           pendingFocusId.current = null;
           pendingEmptyFocus.current = false;
+          // What landed shows (decision 277).
+          invalidateData();
           announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
         }
       };

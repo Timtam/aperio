@@ -25,6 +25,7 @@ import {
   readErrorMessage,
   statusI18nKey,
   statusMarker,
+  writeAfterLanded,
   writeErrorMessage,
 } from '@aperio/shared';
 
@@ -128,6 +129,7 @@ export function SubtaskSection({
     if (!title || busy) return;
     setBusy(true);
     setError(null);
+    let made = false;
     try {
       await createTask({
         list_id: parentTask.list_id,
@@ -151,15 +153,24 @@ export function SubtaskSection({
         assignees: [],
         sound: null,
       });
+      made = true;
       // A new open child can re-derive the parent (e.g. completed → in_progress)
       // — recompute ancestors against the post-create snapshot (coupling knob).
-      await recomputeAncestors(parentTask.id, await getTasks(parentTask.list_id));
+      // The subtask stands by then: a failure there is a later step (277).
+      await writeAfterLanded('cascade', async () =>
+        recomputeAncestors(parentTask.id, await getTasks(parentTask.list_id)),
+      );
       setNewTitle('');
       onAdd();
       await reload();
       onChanged();
       announce(t('dialogs.task.subtasks.added', { title }));
     } catch (err) {
+      // A subtask that stands leaves the field, so adding again does not make
+      // it twice, and the list reads again (decision 277).
+      if (made) setNewTitle('');
+      void reload();
+      onChanged();
       setError(writeErrorMessage(err, t));
       announce(writeErrorMessage(err, t));
     } finally {
@@ -246,13 +257,19 @@ export function SubtaskSection({
       try {
         await deleteTask(sub.id, sub.list_id);
         // Removing the last open child can mark the parent completed — recompute
-        // ancestors against the post-deletion snapshot.
-        await recomputeAncestors(parentTask.id, await getTasks(parentTask.list_id));
+        // ancestors against the post-deletion snapshot. The subtask is gone by
+        // then: a failure there is a later step (277).
+        await writeAfterLanded('cascade', async () =>
+          recomputeAncestors(parentTask.id, await getTasks(parentTask.list_id)),
+        );
         onRemove(index);
         await reload();
         onChanged();
         announce(t('dialogs.task.deleted', { title: sub.title }));
       } catch (err) {
+        // What landed shows (decision 277).
+        void reload();
+        onChanged();
         announce(writeErrorMessage(err, t));
       }
     },

@@ -934,6 +934,7 @@ export function TaskDialog({
     // where I left it" from "the user tabbed away during the round-trip".
     const focusAtStart = document.activeElement;
     setSubtaskBusy(true);
+    let made = false;
     try {
       const created = await apiCreateTask({
         list_id: task.list_id,
@@ -957,17 +958,21 @@ export function TaskDialog({
         assignees: [],
         sound: null,
       });
+      made = true;
       // Cascade-up: if the parent was completed before this new
       // open child appeared, the parent should re-derive to
       // in_progress (or open if no other progress exists). The
       // snapshot we hand the planner has to *include* the freshly
-      // created row, since `tasks` is the pre-mutation cache.
-      await applyAncestorWrites(
-        planAncestorRecompute(task.id, [...tasks, created], {
-          cascadeEnabled,
-          ...(autoDate ? { todayKey: todayIsoKey() } : {}),
-        }),
-        [...tasks, created],
+      // created row, since `tasks` is the pre-mutation cache. The
+      // subtask stands by then: a failure here is a later step (277).
+      await writeAfterLanded('cascade', () =>
+        applyAncestorWrites(
+          planAncestorRecompute(task.id, [...tasks, created], {
+            cascadeEnabled,
+            ...(autoDate ? { todayKey: todayIsoKey() } : {}),
+          }),
+          [...tasks, created],
+        ),
       );
       // Clear only if the field still holds what we submitted. The input stays
       // enabled during the round-trip (so the Enter path never blurs to <body>),
@@ -976,6 +981,10 @@ export function TaskDialog({
       invalidateData();
       announce(t('dialogs.task.subtasks.added', { title: trimmed }));
     } catch (err) {
+      // A subtask that stands leaves the field, so adding again does not make
+      // it twice, and the rows read again (decision 277).
+      if (made) setNewSubtaskTitle((prev) => (prev.trim() === trimmed ? '' : prev));
+      invalidateData();
       // Show inline rather than steal the parent form's error slot.
       announce(writeErrorMessage(err, t));
     } finally {
@@ -1033,20 +1042,25 @@ export function TaskDialog({
         // Recompute ancestors against the post-deletion snapshot:
         // removing the last open child should mark the parent
         // completed (or whatever its other children imply).
+        // The subtask is gone by then: a failure there is a later step (277).
         const parentId = subtask.parent_id;
         if (parentId) {
           const snapshot = tasks.filter((row) => row.id !== subtask.id);
-          await applyAncestorWrites(
-            planAncestorRecompute(parentId, snapshot, {
-              cascadeEnabled,
-              ...(autoDate ? { todayKey: todayIsoKey() } : {}),
-            }),
-            snapshot,
+          await writeAfterLanded('cascade', () =>
+            applyAncestorWrites(
+              planAncestorRecompute(parentId, snapshot, {
+                cascadeEnabled,
+                ...(autoDate ? { todayKey: todayIsoKey() } : {}),
+              }),
+              snapshot,
+            ),
           );
         }
         invalidateData();
         announce(t('dialogs.task.deleted', { title: subtask.title }));
       } catch (err) {
+        // What landed shows (decision 277).
+        invalidateData();
         announce(writeErrorMessage(err, t));
       }
     },

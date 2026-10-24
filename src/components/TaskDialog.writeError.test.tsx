@@ -62,14 +62,16 @@ const CASCADE = {
   priorityScale: 'three',
 };
 const invalidateData = vi.fn();
+const announce = vi.fn();
+const TASKS: { current: Task[] } = { current: [] };
 
 vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
 vi.mock('../state/viewStateContext', () => ({ useViewState: () => VIEW_STATE }));
 vi.mock('../state/dialogStateContext', () => ({
   useDialogState: () => ({ invalidateData }),
 }));
-vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => () => {} }));
-vi.mock('../state/useTasks', () => ({ useTasks: () => ({ tasks: [] }) }));
+vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => announce }));
+vi.mock('../state/useTasks', () => ({ useTasks: () => ({ tasks: TASKS.current }) }));
 vi.mock('../state/useTaskStatusToggle', () => ({
   useTaskStatusActions: () => ({ toggle: () => {}, set: () => {} }),
 }));
@@ -90,6 +92,9 @@ afterEach(() => {
   document.body.innerHTML = '';
   invokeMock.mockClear();
   invalidateData.mockClear();
+  announce.mockClear();
+  TASKS.current = [];
+  CASCADE.enabled = false;
   resetAnswers();
 });
 
@@ -196,5 +201,36 @@ describe('TaskDialog → a save that failed', () => {
       ['Brot', 't-1'],
       ['Brot', 't-1'],
     ]);
+  });
+});
+
+/**
+ * A subtask added to a task that stands, whose parent the cascade then
+ * re-opens (decision 277): the subtask is made, so a busy answer to the
+ * parent's update says the change is partly saved, the field empties so
+ * adding again does not make it twice, and the rows read again.
+ */
+describe('TaskDialog: a subtask added before its parent met a busy provider', () => {
+  it('says partly saved, empties the field and reads again', async () => {
+    CASCADE.enabled = true;
+    const full = (task: Task) =>
+      ({ ...task, priority: 'medium', effort: 'medium', assignees: [], reminders: [] }) as Task;
+    const parent = full({ ...created('p1', 'Einkaufen'), status: 'completed' } as Task);
+    TASKS.current = [parent];
+    answers.create_task = [() => Promise.resolve(full(created('c1', 'Milch', 'p1')))];
+    answers.update_task = [
+      () => Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' }),
+    ];
+    const { TaskDialog } = await import('./TaskDialog');
+    render(<TaskDialog isOpen onClose={() => {}} task={parent} />);
+    addDraft('Milch');
+    await waitFor(() =>
+      expect(announce).toHaveBeenCalledWith(expect.stringMatching(/nur zum Teil gespeichert/)),
+    );
+    expect(
+      (screen.getByLabelText('Titel der neuen Unteraufgabe') as HTMLInputElement).value,
+    ).toBe('');
+    expect(invalidateData).toHaveBeenCalled();
+    expect(invokeMock.mock.calls.filter((c) => c[0] === 'create_task')).toHaveLength(1);
   });
 });
