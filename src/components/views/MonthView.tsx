@@ -465,6 +465,9 @@ export function MonthView() {
         // so the dataVersion bump has to be explicit here.
         invalidateData();
       } catch (err) {
+        // A delete that failed may have landed in part — a series cut short
+        // — so the grid reads again (decision 277).
+        invalidateData();
         // In words, as the editors say it: a provider's refusal included, such
         // as a cut on a clock Aperio cannot read (decision 256).
         announce(eventWriteErrorMessage(err, t));
@@ -579,6 +582,9 @@ export function MonthView() {
         ) {
           return;
         }
+        // A move that failed may have landed in part — a carved-out copy
+        // stands — so the grid reads again (decision 277).
+        invalidateData();
         // In words, a provider's refusal included (decisions 243-253: a move
         // that would drop occurrences of the series says what and how many).
         announce(eventWriteErrorMessage(err, t));
