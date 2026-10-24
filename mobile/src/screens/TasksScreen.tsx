@@ -308,8 +308,10 @@ export default function TasksScreen({
   useEffect(() => {
     const gone = failedFocus.current;
     if (gone != null) {
-      const shown = entries.filter((e) => !e.hidden && !e.group).map((e) => e.task.id);
-      const step = focusAfterFailedAction(gone, shown, fetchedVersion, Date.now());
+      // By the rows the data holds, not the ones showing: a row the person
+      // folded away under its parent or its group is still there.
+      const held = tasks.map((task) => task.id);
+      const step = focusAfterFailedAction(gone, held, fetchedVersion, Date.now());
       if (step.kind === 'wait') return;
       failedFocus.current = null;
       if (step.kind === 'move') {
@@ -318,8 +320,8 @@ export default function TasksScreen({
             ? findNodeHandle(emptyRef.current)
             : (rowTags.current[step.id] ?? null);
         if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+        return;
       }
-      return;
     }
     if (pendingFocusId.current != null) {
       const id = pendingFocusId.current;
@@ -341,7 +343,7 @@ export default function TasksScreen({
       const tag = findNodeHandle(emptyRef.current);
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
     }
-  }, [entries, fetchedVersion]);
+  }, [entries, fetchedVersion, tasks]);
 
   const targetListId = [...selectedTaskListIds][0] ?? taskLists[0]?.id ?? null;
 
@@ -417,6 +419,7 @@ export default function TasksScreen({
       // The check-off honours the synced task-behaviour knobs (mode, status
       // coupling, auto-date) via the shared toggle path; it returns the new
       // status (or null if nothing changed).
+      failedFocus.current = null;
       try {
         const next = await applyTaskToggle(task, taskListById.get(task.list_id), tasks);
         if (next == null) return;
@@ -522,6 +525,7 @@ export default function TasksScreen({
           // Restore SR focus like the plain delete does: a removed task lands on
           // a surviving sibling / the empty state; a skipped one still exists
           // (moved to the next date) so re-focus it directly.
+          failedFocus.current = null;
           if (outcome === 'skipped') {
             pendingFocusId.current = task.id;
           } else {
@@ -546,6 +550,7 @@ export default function TasksScreen({
   // once the refetch remounts the list.
   const duplicate = useCallback(
     async (task: Task) => {
+      failedFocus.current = null;
       try {
         const created = await duplicateTask(task);
         pendingFocusId.current = created.id;

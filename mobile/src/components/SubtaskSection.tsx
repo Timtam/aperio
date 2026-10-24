@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -32,6 +32,8 @@ import {
 
 import { createTask, deleteTask, getTasks, updateTask } from '../api/client';
 import { useListFocusManager } from '../a11y/useListFocusManager';
+import { useCacheReload } from '../state/cacheObserver';
+import { FAILED_FOCUS_WATCH_MS } from '../state/reviewFocus';
 import { canStoreInProgress } from '../state/taskBehaviour';
 import {
   applyTaskToggle,
@@ -109,14 +111,36 @@ export function SubtaskSection({
 
   const announce = (message: string) => AccessibilityInfo.announceForAccessibility(message);
 
+  // A subtask whose delete failed: watched for a moment, as on the task list
+  // (`FAILED_FOCUS_WATCH_MS`) — the re-read is served from the host's cache
+  // first, and the refresh it starts may still show the delete landed.
+  const goneWatch = useRef<{ id: string; index: number; until: number } | null>(null);
+  // `onRemove` changes with the row count; read through a ref, so reading
+  // again does not depend on it.
+  const removed = useRef(onRemove);
+  useEffect(() => {
+    removed.current = onRemove;
+  }, [onRemove]);
+
   /** Read the list's tasks again; the rows read, or `null` when the read
-   *  failed (said in the line). */
+   *  failed (said in the line). A subtask watched after its failed delete
+   *  that the rows no longer hold moves focus on, as a delete that worked
+   *  does. */
   const reload = useCallback(async (): Promise<Task[] | null> => {
     try {
       const snap = await getTasks(parentTask.list_id);
       setAll(snap);
       const freshParent = snap.find((tk) => tk.id === parentTask.id);
       if (freshParent) onParentSync?.(freshParent);
+      const watch = goneWatch.current;
+      if (watch != null) {
+        if (Date.now() >= watch.until) {
+          goneWatch.current = null;
+        } else if (!snap.some((tk) => tk.id === watch.id)) {
+          goneWatch.current = null;
+          removed.current(watch.index);
+        }
+      }
       return snap;
     } catch (err) {
       // A read: a busy provider says so, never that nothing was changed.
@@ -128,6 +152,13 @@ export function SubtaskSection({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // The host's background refresh of the list reaches the editor too: a write
+  // that failed but landed shows once the provider says so, as on the desktop.
+  const reloadFromCache = useCallback(() => {
+    void reload();
+  }, [reload]);
+  useCacheReload('tasks', reloadFromCache);
 
   const add = useCallback(async () => {
     const title = newTitle.trim();
@@ -281,10 +312,10 @@ export function SubtaskSection({
       } catch (err) {
         // What landed shows (decision 277); a subtask that is gone moves
         // focus on as a delete that worked does — also one whose delete
-        // failed but which the read again no longer shows.
+        // failed but which a read in the next moments no longer holds.
         if (deleted) onRemove(index);
-        const snap = await reload();
-        if (!deleted && snap != null && !snap.some((tk) => tk.id === sub.id)) onRemove(index);
+        else goneWatch.current = { id: sub.id, index, until: Date.now() + FAILED_FOCUS_WATCH_MS };
+        await reload();
         onChanged();
         announce(writeErrorMessage(err, t));
       }
