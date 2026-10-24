@@ -2446,8 +2446,9 @@ mod tests {
 
     /// The requests only another fault sends — the read-back after a lost
     /// create, the read of a cancel whose answer was lost, and the take-back
-    /// after a step that failed — each get every fault, at each of their
-    /// turns, and each outcome still says what stands. A 404 is left out:
+    /// after a step that failed — each get every fault, at their first turn
+    /// and at the second one a failed first turn sends, and each outcome
+    /// still says what stands. A 404 is left out:
     /// the fake's does nothing, while Google answers 404 only for an event it
     /// does not hold, which the take-back reads as gone.
     #[tokio::test]
@@ -2466,24 +2467,54 @@ mod tests {
                 Fault::RefreshRefused,
             ]
         };
-        // What opens each path, and the request on it that gets every fault.
+        // What opens each path at the request that gets every fault: at its
+        // first turn, and at its second, which only a first turn that failed
+        // sends.
         let openers = || {
             vec![
-                (vec![(Insert, 0, Fault::LostAfter)], GetSeries),
-                (vec![(Cancel, 0, Fault::LostAfter)], GetOccurrence),
-                (vec![(Cancel, 0, Fault::Http(400))], Delete),
-                // The take-back's read, after a delete the server failed.
+                // The read-back after a lost create; read twice.
+                (
+                    vec![(Insert, 0, Fault::LostAfter)],
+                    vec![
+                        (Insert, 0, Fault::LostAfter),
+                        (GetSeries, 0, Fault::Http(500)),
+                    ],
+                    GetSeries,
+                ),
+                // The read of a cancel whose answer was lost; a cancel lost
+                // before it landed is sent again, and read again.
+                (
+                    vec![(Cancel, 0, Fault::LostAfter)],
+                    vec![
+                        (Cancel, 0, Fault::LostBefore),
+                        (Cancel, 1, Fault::LostAfter),
+                    ],
+                    GetOccurrence,
+                ),
+                // The take-back's delete; a series still there after a delete
+                // the server failed is deleted once more.
+                (
+                    vec![(Cancel, 0, Fault::Http(400))],
+                    vec![(Cancel, 0, Fault::Http(400)), (Delete, 0, Fault::Http(500))],
+                    Delete,
+                ),
+                // The take-back's read, after a delete the server failed; read
+                // again after the second delete failed too.
                 (
                     vec![(Cancel, 0, Fault::Http(400)), (Delete, 0, Fault::Http(500))],
+                    vec![
+                        (Cancel, 0, Fault::Http(400)),
+                        (Delete, 0, Fault::Http(500)),
+                        (Delete, 1, Fault::Http(500)),
+                    ],
                     GetSeries,
                 ),
             ]
         };
         let shape = mondays();
         let deleted = vec![slot_at(&shape, 1), slot_at(&shape, 3)];
-        let mut fired = std::collections::HashSet::new();
-        for (path, (opening, kind)) in openers().into_iter().enumerate() {
-            for nth in 0..2 {
+        for (first, second, kind) in openers() {
+            for (nth, opening) in [first, second].into_iter().enumerate() {
                 for fault in faults() {
                     for notify in [false, true] {
                         let mut injected = opening.clone();
@@ -2491,9 +2522,9 @@ mod tests {
                         let fake = Fake::new(shape.clone(), injected);
                         let result = run(&fake, series(deleted.clone(), notify)).await;
                         let case = format!("{opening:?}, {kind:?} {nth} {fault:?} {notify}");
-                        if fake.requests(kind).len() > nth {
-                            fired.insert((path, nth));
-                        }
+                        // Each case reaches its fault: none passes by never
+                        // getting there.
+                        assert!(fake.requests(kind).len() > nth, "{case}: never sent");
                         let inserted = !fake.requests(Insert).is_empty();
                         match result {
                             Ok(created) => {
@@ -2523,14 +2554,6 @@ mod tests {
                     }
                 }
             }
-        }
-        // Every request on a path was reached at its first turn: none of the
-        // cases passes by never getting there.
-        for (path, (opening, kind)) in openers().into_iter().enumerate() {
-            assert!(
-                fired.contains(&(path, 0)),
-                "{opening:?} then {kind:?} never ran"
-            );
         }
     }
 }
