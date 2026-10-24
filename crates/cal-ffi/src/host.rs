@@ -3643,6 +3643,7 @@ impl Host {
         }
 
         // Plain in-place update — no calendar change.
+        let calendar_id = event.calendar_id.clone();
         let updated = self.runtime.block_on(async {
             match self.route(&event.calendar_id)? {
                 None => self
@@ -3652,7 +3653,17 @@ impl Host {
                     .map_err(map_store_err),
                 Some(ext) => ext.update_event(event).await.map_err(map_store_err),
             }
-        })?;
+        });
+        let updated = match updated {
+            Ok(updated) => updated,
+            Err(err) => {
+                // A failed update may have landed in part — an occurrence
+                // detached into a single whose old exception stayed (decision
+                // 277): the next read shows what the provider holds.
+                self.invalidate_events_cache(&calendar_id);
+                return Err(err);
+            }
+        };
         if self.is_local_calendar(&updated.calendar_id) {
             if let Ok(fields) = serde_json::to_value(&updated) {
                 self.writer.append(SyncEvent::EventUpdated(EventPayload {
@@ -10534,7 +10545,7 @@ mod tests {
             Err((self.0)())
         }
         async fn update_event(&self, _event: Event) -> cal_core::Result<Event> {
-            unreachable!("no update")
+            Err((self.0)())
         }
         async fn delete_event(&self, _event_id: &str, _send: bool) -> cal_core::Result<()> {
             Ok(())
@@ -10827,6 +10838,41 @@ mod tests {
                 fail()
             );
         }
+    }
+
+    /// Decision 277 on the phone: an update that failed after part of it
+    /// landed — a detached occurrence's new single, its old exception kept by
+    /// a busy server — reads its calendar again, as a create does.
+    #[test]
+    fn a_failed_external_update_still_invalidates_its_calendar() {
+        let (_dir, host, _) = open_host();
+        let local = make_calendar(&host);
+        let created = host
+            .create_event_json(new_event_json(&local, "Weekly"))
+            .unwrap();
+        host.registry.register_host_adapter(
+            "acc-x",
+            Some(Arc::new(FailingCreates(|| {
+                cal_core::Error::Network("partly-saved: delete".into())
+            }))),
+            None,
+        );
+        host.registry.note_calendar_route("cal-x", "acc-x");
+        let mut event: serde_json::Value = serde_json::from_str(&created).unwrap();
+        event["calendar_id"] = serde_json::json!("cal-x");
+        let before = host
+            .cache
+            .refresh_generation("acc-x", SyncScope::Events, "cal-x");
+        let err = host
+            .update_event_json(event.to_string(), None)
+            .expect_err("the update failed");
+        assert!(err.to_string().contains("partly-saved"), "{err}");
+        assert!(
+            host.cache
+                .refresh_generation("acc-x", SyncScope::Events, "cal-x")
+                > before,
+            "a failed update reads the calendar again"
+        );
     }
 
     /// A minimal valid `CreateEventRequest` JSON (NewEvent flattened). Omits

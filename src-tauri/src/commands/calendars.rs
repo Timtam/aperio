@@ -889,7 +889,18 @@ pub async fn update_event(
             // adapter writes (or clears) the native RFC 7986 COLOR.
             event.color_hex = resolve_color_hex(&adapter, event.color_label.as_ref())?;
         }
-        let updated = ext.update_event(event).await?;
+        let calendar_id = event.calendar_id.clone();
+        let updated = match ext.update_event(event).await {
+            Ok(updated) => updated,
+            Err(err) => {
+                // A failed update may have landed in part — an occurrence
+                // detached into a single whose old exception stayed (decision
+                // 277): the next read shows what the provider holds.
+                let _ = cache.invalidate(&target_account, SyncScope::Events, &calendar_id);
+                scheduler.invalidate();
+                return Err(err.into());
+            }
+        };
         if capable {
             // The provider's COLOR is now authoritative — drop any host-local
             // override left over from Stage 1 (when this calendar was treated
