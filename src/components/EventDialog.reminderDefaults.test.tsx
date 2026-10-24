@@ -546,8 +546,12 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     await openEditor([], { event: OCCURRENCE, initialScope: 'occurrence' });
     await waitFor(() => expect(reminderRows()).toHaveLength(1));
 
-    screen.getByRole('button', { name: /speichern|save/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
     expect(await screen.findByText(/nur zum Teil gespeichert/i)).toBeTruthy();
+    // The save has settled: no update lands after the test.
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /speichern|save/i })).toBeNull(),
+    );
     expect(screen.queryByText(/nichts geändert/i)).toBeNull();
     expect(invokeMock.mock.calls.filter((call) => call[0] === 'create_event')).toHaveLength(1);
   });
