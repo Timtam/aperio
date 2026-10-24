@@ -38,7 +38,7 @@ import { navigateNested } from '../navigation/navigationRef';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
 import { confirmDeleteTask } from '../state/taskDeleteScope';
-import { focusAfterFailedAction } from '../state/reviewFocus';
+import { focusAfterFailedAction, type FailedAction } from '../state/reviewFocus';
 import {
   effectiveForList,
   priorityScaleFor,
@@ -251,13 +251,16 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const titleRef = useRef<Text>(null);
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
-  // After a failed write: the rows it worked on, and the row to take focus if
-  // the re-read takes them all away (the write landed for each). While one
-  // of them stays, focus stays where the person left it, on the pressed
-  // button.
-  const focusIfGone = useRef<{ acted: string[]; fallback: string | null } | null>(null);
-  // The rows the last action worked on, for a failure to keep focus on.
+  // After a failed write: what its focus waits on until the re-read comes
+  // (`focusAfterFailedAction`).
+  const focusIfGone = useRef<FailedAction | null>(null);
+  // The rows whose showing means the last action's button still shows.
   const actedIds = useRef<string[]>([]);
+  // The task rows last rendered: a failure waits until others come.
+  const rowsShown = useRef(tasks);
+  useEffect(() => {
+    rowsShown.current = tasks;
+  }, [tasks]);
 
   const focusTitle = useCallback(() => {
     const tag = findNodeHandle(titleRef.current);
@@ -274,11 +277,12 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   useEffect(() => {
     const gone = focusIfGone.current;
     if (gone != null) {
-      focusIfGone.current = null;
       // As on the desktop, a still-shown button keeps focus.
-      const next = focusAfterFailedAction(gone, orderedIds);
-      if (next != null) {
-        const tag = rowTags.current[next];
+      const step = focusAfterFailedAction(gone, orderedIds, tasks);
+      if (step.kind === 'wait') return;
+      focusIfGone.current = null;
+      if (step.kind === 'move') {
+        const tag = rowTags.current[step.id];
         if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
       }
       return;
@@ -288,29 +292,34 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     pendingFocusId.current = null;
     const tag = rowTags.current[id];
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-  }, [orderedIds]);
+  }, [orderedIds, tasks]);
 
-  /** Queue focus on the row that should take over once `removedIds` leave. */
+  /** Queue focus on the row that should take over once `removedIds` leave.
+   *  `pressed` are the rows whose showing means the pressed button still
+   *  shows: the pressed row for a row button (its subtasks are written too,
+   *  but its buttons go with it), the whole batch for a bulk one. */
   const queueFocusAfter = useCallback(
-    (removedIds: string[]) => {
+    (removedIds: string[], pressed: string[] = removedIds) => {
       const removed = new Set(removedIds);
       const survivor = orderedIds.find((id) => !removed.has(id));
-      actedIds.current = removedIds;
+      actedIds.current = pressed;
+      focusIfGone.current = null;
       pendingFocusId.current = survivor ?? null;
     },
     [orderedIds],
   );
 
   /** A button's write that failed: said, never an unhandled rejection
-   *  (decision 273), and what may have landed reads again. Focus stays on the
-   *  pressed button while a row it worked on shows, and goes to the row
-   *  queued for after it only where the re-read took every one of them away
-   *  (the write landed for each). */
+   *  (decision 273), and what may have landed reads again. Once the re-read
+   *  came, focus stays on the pressed button while it shows, and goes to the
+   *  row queued for after it only where the re-read took it away. */
   const failed = useCallback(
     (err: unknown) => {
       const acted = actedIds.current;
       focusIfGone.current =
-        acted.length > 0 ? { acted, fallback: pendingFocusId.current } : null;
+        acted.length > 0
+          ? { acted, fallback: pendingFocusId.current, rows: rowsShown.current }
+          : null;
       pendingFocusId.current = null;
       invalidateData();
       announce(writeErrorMessage(err, t));
@@ -527,7 +536,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       const followers = cascadeFor(root.list_id) ? actionableDescendants(root.id, tasks) : [];
       const targets: Task[] = [root, ...followers];
       const ids = targets.map((task) => task.id);
-      queueFocusAfter(ids);
+      queueFocusAfter(ids, [root.id]);
       try {
         // Sequential so a first-row failure surfaces without a half-applied family.
         let advanced = false;

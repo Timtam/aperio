@@ -517,7 +517,9 @@ Siehe DESIGN §4.2.
         prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
         ist (VoiceOver sagt den Satz an); eine zum Teil gespeicherte Aufgabe
         schließt den Editor; im Tagesstart behält ein Sammelknopf den Fokus,
-        solange eine Zeile seines Stapels bleibt; die Fehlerzeile eines
+        solange nach dem Neu-Lesen eine Zeile seines Stapels bleibt, und ein
+        Zeilenknopf, dessen Unteraufgabe scheiterte, gibt ihn an die nächste
+        Zeile, wenn seine Zeile geht; die Fehlerzeile eines
         gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
         neu geladen wird; Erinnerungen und Suche sagen einen Ladefehler an.
       - ↻ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
