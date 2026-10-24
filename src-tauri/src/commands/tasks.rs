@@ -1080,6 +1080,16 @@ pub async fn update_task(
         let updated = match ext.update_task(task).await {
             Ok(updated) => updated,
             Err(err) => {
+                // A completion that went out with the fields still recurs
+                // (decision 277), against the snapshot from before the save.
+                host_core::tasks::after_failed_external_update(
+                    ext.as_ref(),
+                    &cache,
+                    &target_account,
+                    &completed,
+                    &err,
+                )
+                .await;
                 // A save that failed may have landed in part (decision 273):
                 // the next read shows what the provider holds.
                 let _ = cache.invalidate(&target_account, SyncScope::Tasks, &list_id);

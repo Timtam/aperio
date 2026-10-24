@@ -4342,10 +4342,28 @@ impl Host {
                 // completed needs Aperio to spawn its next instance (§9.12).
                 let completed = task.clone();
                 let list_id = task.list_id.clone();
+                let account = self
+                    .registry
+                    .account_for_task_list(&completed.list_id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
                 let updated = self.runtime.block_on(async {
                     let updated = match ext.update_task(task).await {
                         Ok(updated) => updated,
                         Err(err) => {
+                            // A completion that went out with the fields
+                            // still recurs (decision 277), against the
+                            // snapshot from before the save; a device
+                            // reminder recurs by itself (see below).
+                            if !self.is_device_account(&account) {
+                                host_core::tasks::after_failed_external_update(
+                                    ext.as_ref(),
+                                    &self.cache,
+                                    &account,
+                                    &completed,
+                                    &err,
+                                )
+                                .await;
+                            }
                             // A save that failed may have landed in part
                             // (decision 273): the next read shows what the
                             // provider holds.
@@ -4353,10 +4371,6 @@ impl Host {
                             return Err(map_store_err(err));
                         }
                     };
-                    let account = self
-                        .registry
-                        .account_for_task_list(&completed.list_id)
-                        .unwrap_or_else(|| LOCAL_ID.to_string());
                     // A DEVICE reminder (iOS/Android) owns its own recurrence
                     // lifecycle: the OS spawns the next turn and keeps the
                     // completed history itself. Recording Aperio's terminal

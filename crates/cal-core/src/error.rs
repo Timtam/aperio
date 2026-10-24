@@ -107,6 +107,18 @@ impl Error {
         Self::Network(crate::WriteLeftover::PartlySaved.message(step))
     }
 
+    /// Whether a task's save stands in part WITH its status: partly saved
+    /// (decision 277) at a step after the fields other than [`STATUS_STEP`].
+    /// A check-off that ends so completed the task at the provider, and what
+    /// follows a completion — the next turn of a recurring task — still has to
+    /// happen.
+    pub fn status_landed(&self) -> bool {
+        matches!(
+            crate::WriteLeftover::parse(self.message()),
+            Some((crate::WriteLeftover::PartlySaved, step)) if step != STATUS_STEP
+        )
+    }
+
     /// Whether this error says a save stands in part (decision 277),
     /// whichever error carries the token.
     pub fn is_partly_saved(&self) -> bool {
@@ -215,6 +227,12 @@ pub fn is_auth_shaped(error: &str) -> bool {
     .iter()
     .any(|needle| lower.contains(needle))
 }
+
+/// The step a task save names when its status change is a request of its own
+/// after the fields (Todoist's close and reopen): partly saved at this step,
+/// the status did not change; at any other step it went out with the fields
+/// ([`Error::status_landed`]).
+pub const STATUS_STEP: &str = "status";
 
 #[cfg(test)]
 mod tests {
@@ -391,5 +409,17 @@ mod tests {
         assert!(err.is_partly_saved());
         assert!(!err.is_provider_busy());
         assert!(!Error::Network("created-may-stand: x".into()).is_partly_saved());
+    }
+
+    /// A check-off partly saved after its fields completed the task; one
+    /// whose own status request was turned away did not, and nothing else
+    /// says either (§9.12, decision 277).
+    #[test]
+    fn a_status_lands_with_the_fields_unless_it_is_the_step_left() {
+        assert!(Error::partly_saved("parent").status_landed());
+        assert!(Error::partly_saved("assignees").status_landed());
+        assert!(!Error::partly_saved(STATUS_STEP).status_landed());
+        assert!(!Error::provider_busy(crate::BusyDetail::TooManyRequests).status_landed());
+        assert!(!Error::Network("reset".into()).status_landed());
     }
 }

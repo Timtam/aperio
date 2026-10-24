@@ -239,7 +239,7 @@ pub async fn update_task(client: &TodoistClient, task: &Task) -> TodoistResult<T
         client
             .post_empty(&status_path)
             .await
-            .map_err(|err| err.after_landed("status"))?;
+            .map_err(|err| err.after_landed(cal_core::STATUS_STEP))?;
     }
     let mut result = map_task(entry, &task.list_id);
     // The update response shows the pre-close `is_completed`

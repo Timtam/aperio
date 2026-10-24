@@ -245,7 +245,11 @@ them through `cal_core` and never writes the token text itself.
   anything else becomes a network error with the step in front. Never return
   a refusal there: the surfaces read it as "nothing was changed" and invite
   the user to save again, creating a second item. Send a follow-up request
-  only where it changes something.
+  only where it changes something. Name the step after the request that was
+  turned away; a task's status change sent as a request of its own is
+  `cal_core::STATUS_STEP`, because the hosts read any other step as a status
+  that went out with the fields (a completed recurring task still gets its
+  next turn).
 - **A walk or a fallback** stops at a busy answer: asking the next calendar,
   or falling back to a full read, meets the same throttle, and a read that
   gives up on part of the data must not be cached as the whole.
