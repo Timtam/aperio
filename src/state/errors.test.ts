@@ -7,6 +7,7 @@ import {
   readFailureReason,
   readFailureSentence,
   writeErrorMessage,
+  writeFailureSentence,
 } from '@aperio/shared';
 
 import i18n from '../i18n';
@@ -79,6 +80,24 @@ describe('a read that failed', () => {
     expect(
       readFailureSentence('dialogs.event.availability.failed', new Error('kaputt'), t),
     ).toBe('Die Verfügbarkeit ließ sich nicht prüfen: kaputt.');
+  });
+});
+
+describe('writeFailureSentence', () => {
+  it('says a busy provider in the caller\'s frame, and to try again later', () => {
+    for (const err of carriers('forbidden', 'provider-busy: http-429')) {
+      expect(writeFailureSentence('toast.undoFailed', err, t)).toBe(
+        'Das ließ sich nicht rückgängig machen: der Anbieter ist gerade ausgelastet. Versuche es später noch einmal.',
+      );
+    }
+  });
+
+  it('says what stands in full when part of it landed', () => {
+    for (const err of carriers('network', 'partly-saved: undo')) {
+      expect(writeFailureSentence('toast.undoFailed', err, t)).toBe(
+        'Die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist. Prüfe sie und versuche den Rest später noch einmal.',
+      );
+    }
   });
 });
 

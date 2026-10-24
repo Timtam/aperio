@@ -1482,7 +1482,8 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   - Jede Oberfläche liest Fehler nur über die geteilten Helfer (273):
     `writeErrorMessage` und `eventWriteErrorMessage` beim Schreiben,
     `readErrorMessage` und `readFailureSentence` beim Lesen,
-    `meetingFailureSentence` bei Meetings. Am Handy reicht `hostCoded` jeden
+    `writeFailureSentence` für ein Schreiben im Rahmen des Aufrufers (das
+    Rückgängig im Hinweis, Meetings über `meetingFailureSentence`). Am Handy reicht `hostCoded` jeden
     Fehler des Rust-Hosts mit dem Code des Desktops weiter.
 
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit

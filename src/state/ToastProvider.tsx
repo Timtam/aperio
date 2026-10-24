@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { eventWriteFailureReason } from '@aperio/shared';
+import { writeFailureSentence } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 
@@ -244,7 +244,8 @@ function ToastRow({
       // clickable again. And say why: the person pressed Undo, and
       // silence would read as done (decision 273).
       setUndoInFlight(toast.id, false);
-      announce(t('toast.undoFailed', { reason: eventWriteFailureReason(err, t) }));
+      // An undo that landed in part says what stands (277).
+      announce(writeFailureSentence('toast.undoFailed', err, t));
     }
   }, [toast.id, toast.undo, toast.undoInFlight, setUndoInFlight, onDismiss, announce, t]);
 

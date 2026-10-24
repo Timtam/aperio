@@ -91,8 +91,9 @@ describe('ToastProvider', () => {
     expect(screen.getByText('Moved')).toBeInTheDocument();
     // Button re-enabled — `aria-disabled` cleared after the rejection.
     expect(button).not.toHaveAttribute('aria-disabled', 'true');
-    // And said: the person pressed Undo, and silence would read as done.
-    expect(announce).toHaveBeenCalledWith('toast.undoFailed');
+    // And said: the person pressed Undo, and silence would read as done. A
+    // busy provider adds to try again later.
+    expect(announce).toHaveBeenCalledWith('toast.undoFailed. common.tryAgainLater');
   });
 
   it('auto-dismisses after the supplied duration', async () => {

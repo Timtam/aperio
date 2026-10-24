@@ -105,18 +105,30 @@ export function writeErrorMessage(err: unknown, t: Translate): string {
 }
 
 /**
- * The sentence for a meeting that could not be created, removed or taken over
- * (decision 273). Where part of it landed — the meeting exists, the event does
- * not carry it — the leftover's own sentence says what stands; anything else
- * is its reason in the meeting's frame, and a busy provider adds "Try again
- * later." (decision 272).
+ * The sentence for a write that failed, in a frame of the caller's ("That
+ * could not be undone: {reason}"; decision 273). Where part of it landed, the
+ * leftover's own sentence says what stands (277); anything else is its reason
+ * in the frame, and a busy provider adds "Try again later." (272).
  */
-export function meetingFailureSentence(err: unknown, t: Translate): string {
+export function writeFailureSentence(
+  key: string,
+  err: unknown,
+  t: Translate,
+  slot = 'reason',
+): string {
   if (eventWriteLeftover(err)) return eventWriteErrorMessage(err, t);
-  const sentence = t('conferencing.meetingFailed', {
-    message: eventWriteFailureReason(err, t),
-  }).trim();
+  const sentence = t(key, { [slot]: eventWriteFailureReason(err, t) }).trim();
   if (!isProviderBusy(err)) return sentence;
   const ended = /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
   return `${ended} ${t('common.tryAgainLater')}`;
+}
+
+/**
+ * The sentence for a meeting that could not be created, removed or taken over
+ * (decision 273): {@link writeFailureSentence} in the meeting's frame. Where
+ * part of it landed — the meeting exists, the event does not carry it — the
+ * leftover's own sentence says what stands.
+ */
+export function meetingFailureSentence(err: unknown, t: Translate): string {
+  return writeFailureSentence('conferencing.meetingFailed', err, t, 'message');
 }
