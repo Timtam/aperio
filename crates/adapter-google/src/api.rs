@@ -593,6 +593,7 @@ pub(crate) async fn get_absolute_bytes(
         if let Some(turned_away) =
             throttled(status.as_u16(), retry_after_of(response.headers()), "")
         {
+            warn!(%turned_away, "google turned the photo fetch away");
             return Err(turned_away);
         }
         return Err(GoogleError::Http {
@@ -1483,6 +1484,12 @@ mod tests {
             )
         };
         let wait = Some(std::time::Duration::from_secs(7));
+        // The wait reaches the log lines that show the error, never a
+        // sentence (decision 278).
+        let shown = throttled(429, wait, "").unwrap().to_string();
+        assert!(shown.ends_with("it asks to wait 7 s"), "{shown}");
+        let shown = throttled(429, None, "").unwrap().to_string();
+        assert!(!shown.contains("wait"), "{shown}");
         assert!(matches!(
             throttled(429, wait, ""),
             Some(GoogleError::Busy { detail: BusyDetail::TooManyRequests, retry_after }) if retry_after == wait

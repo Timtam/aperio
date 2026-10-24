@@ -17,9 +17,10 @@
 //!
 //! **Rate limits.** Regular users may create 100 meetings per 24 hours and the
 //! whole API is throttled around 300 requests per minute. A 429 carries
-//! `Retry-After` in seconds; it is surfaced in the message rather than slept
-//! through, because a plugin call has no cancellation and a silent multi-minute
-//! sleep inside one is indistinguishable from a hang.
+//! `Retry-After` in seconds; it goes to the log and the call says the provider
+//! is busy, rather than sleeping through it, because a plugin call has no
+//! cancellation and a silent multi-minute sleep inside one is
+//! indistinguishable from a hang.
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -444,7 +445,7 @@ fn rate_limited(body: &str, retry_after: Option<&str>) -> VcError {
     // provider is busy and to try again later, never for how long (decision
     // 278), where this read out an English sentence with the seconds in it
     // (critique P18).
-    tracing::debug!(
+    tracing::info!(
         retry_after,
         detail = %describe(body),
         "webex is rate-limiting this account",

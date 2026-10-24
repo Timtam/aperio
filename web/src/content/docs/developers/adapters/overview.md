@@ -232,7 +232,8 @@ them through `cal_core` and never writes the token text itself.
   have been carried out, and a replayed write's answer may be about its first
   attempt: both stay unsure (a network error). A quota used up for hours is no
   throttle. The wait the provider names goes to the log, never into the
-  message.
+  message: one line at `info` per busy answer, with the `Retry-After` (or the
+  provider's own back-off) where it sends one.
 - **A status the server turned a write down with** is read through
   `WriteRefusal::turned_down_by_status`: `ProviderBusy` for 429,
   `ServerRefused` for 400, 413, 415, 422 and 507, `None` otherwise. Check it

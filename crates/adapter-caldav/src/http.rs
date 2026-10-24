@@ -113,7 +113,7 @@ impl SendRetrying for RequestBuilder {
         // request carries a string/no body. A non-clonable request just
         // skips the retry and surfaces the original error.
         let retry = self.try_clone();
-        match self.send().await {
+        let sent = match self.send().await {
             Err(err) if is_transient_send_error(&err) => match retry {
                 Some(builder) => {
                     let landed = first_attempt_may_have_landed(&err);
@@ -122,13 +122,37 @@ impl SendRetrying for RequestBuilder {
                 None => Err(err),
             },
             other => other.map(|response| (response, false)),
+        };
+        if let Ok((response, _)) = &sent {
+            log_busy_answer(response);
         }
+        sent
     }
 
     async fn send_write(self) -> reqwest::Result<WriteAnswer> {
         self.send_retrying_marked()
             .await
             .map(|(response, replayed)| WriteAnswer { response, replayed })
+    }
+}
+
+/// One line in the normal log for an answer that asks to slow down — 429, or
+/// 503 with `Retry-After` — with the wait the server names: the sentences
+/// never say how long (decision 278), the log does.
+fn log_busy_answer(response: &Response) {
+    let status = response.status();
+    let retry_after = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok());
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || (status == reqwest::StatusCode::SERVICE_UNAVAILABLE && retry_after.is_some())
+    {
+        tracing::info!(
+            status = status.as_u16(),
+            retry_after,
+            "the CalDAV server asks to slow down"
+        );
     }
 }
 

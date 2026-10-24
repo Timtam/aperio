@@ -28,7 +28,7 @@ pub enum GoogleError {
     /// Google turned the request away for throttling and did nothing: 429,
     /// or 403 for a rate limit (decision 270). `retry_after` is what it asked
     /// to wait, where it said.
-    #[error("google is busy ({})", detail.word())]
+    #[error("google is busy ({}){}", detail.word(), wait_note(retry_after))]
     Busy {
         detail: cal_core::BusyDetail,
         retry_after: Option<std::time::Duration>,
@@ -124,5 +124,14 @@ impl From<std::io::Error> for GoogleError {
 impl From<serde_json::Error> for GoogleError {
     fn from(err: serde_json::Error) -> Self {
         GoogleError::Protocol(format!("json: {err}"))
+    }
+}
+
+/// What a busy answer asked to wait, for the log lines that show its error:
+/// the sentences never say how long (decision 278), the log does.
+fn wait_note(wait: &Option<std::time::Duration>) -> String {
+    match wait {
+        Some(wait) => format!("; it asks to wait {} s", wait.as_secs()),
+        None => String::new(),
     }
 }

@@ -353,6 +353,14 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
                     _ => break self.read_back(own.as_deref()).await?,
                 }
             }
+            if rate_limited(&answer) {
+                tracing::info!(
+                    target: "adapter_google::write",
+                    step = "create",
+                    retry_after = ?answer.retry_after,
+                    "google asks to slow down"
+                );
+            }
             if rate_limited(&answer) && busy + 1 < CREATE_BUSY_TRIES {
                 let wait = answer.retry_after.unwrap_or_else(|| self.back_off(busy));
                 // A longer wait is not slept through: the create made
@@ -771,6 +779,14 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
                 return Ok(answer);
             }
             let asked = answer.as_ref().ok().and_then(|a| a.retry_after);
+            if throttled {
+                tracing::info!(
+                    target: "adapter_google::write",
+                    step,
+                    retry_after = ?asked,
+                    "google asks to slow down"
+                );
+            }
             let wait = asked.unwrap_or_else(|| self.back_off(attempt));
             attempt += 1;
             let remaining = until.saturating_duration_since(Instant::now());

@@ -115,6 +115,11 @@ impl EwsClient {
 
         let res = req.send().await?;
         let status = res.status();
+        let retry_after = res
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         let text = res.text().await.unwrap_or_default();
         tracing::debug!(
             target: "adapter_ews::soap",
@@ -122,6 +127,7 @@ impl EwsClient {
             response = %truncate_for_log(&text),
             "EWS response",
         );
+        log_busy_answer(status.as_u16(), retry_after.as_deref(), &text);
         if !status.is_success() {
             return Err(EwsError::Http {
                 status: status.as_u16(),
@@ -134,6 +140,35 @@ impl EwsClient {
         }
         Ok(text)
     }
+}
+
+/// One line in the normal log for an answer that asks to slow down — HTTP
+/// 429, or `ErrorServerBusy` with the back-off Exchange names — so the wait
+/// the sentences never say (decision 278) is in the log.
+fn log_busy_answer(status: u16, retry_after: Option<&str>, body: &str) {
+    let busy = status == 429
+        || body.contains("ResponseCode>ErrorServerBusy<")
+        || body.contains(":ErrorServerBusy<");
+    if !busy {
+        return;
+    }
+    tracing::info!(
+        target: "adapter_ews::soap",
+        status,
+        retry_after,
+        back_off_ms = back_off_ms(body),
+        "Exchange asks to slow down"
+    );
+}
+
+/// The `BackOffMilliseconds` an `ErrorServerBusy` names in its
+/// `MessageXml`, where it does.
+fn back_off_ms(body: &str) -> Option<u64> {
+    let at = body.find("\"BackOffMilliseconds\"")?;
+    let rest = &body[at..];
+    let start = rest.find('>')? + 1;
+    let end = rest[start..].find('<')?;
+    rest[start..start + end].trim().parse().ok()
 }
 
 /// Enumerate every calendar folder reachable from the user's
@@ -2040,6 +2075,17 @@ pub(crate) fn build_event_from_new(
 
 #[cfg(test)]
 mod tests {
+    /// The back-off an `ErrorServerBusy` names, for the log (decision 278).
+    #[test]
+    fn a_busy_server_names_its_back_off() {
+        let body = r#"<m:ResponseCode>ErrorServerBusy</m:ResponseCode><m:MessageXml><t:Value Name="BackOffMilliseconds">29845</t:Value></m:MessageXml>"#;
+        assert_eq!(super::back_off_ms(body), Some(29845));
+        assert_eq!(
+            super::back_off_ms("<m:ResponseCode>ErrorServerBusy</m:ResponseCode>"),
+            None
+        );
+    }
+
     use super::*;
     use mockito::Server;
 

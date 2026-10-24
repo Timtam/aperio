@@ -136,6 +136,7 @@ impl TodoistClient {
             .form(params)
             .send()
             .await?;
+        log_busy_answer(&response);
         decode_json(response).await
     }
 
@@ -167,8 +168,26 @@ impl TodoistClient {
         if let Some(b) = body {
             builder = builder.json(b);
         }
-        Ok(builder.send().await?)
+        let response = builder.send().await?;
+        log_busy_answer(&response);
+        Ok(response)
     }
+}
+
+/// One line in the normal log for an answer that asks to slow down (429),
+/// with the wait Todoist names: the sentences never say how long (decision
+/// 278), the log does.
+fn log_busy_answer(response: &Response) {
+    if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return;
+    }
+    tracing::info!(
+        retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok()),
+        "todoist asks to slow down"
+    );
 }
 
 /// Decode a 2xx JSON body or surface a non-2xx as

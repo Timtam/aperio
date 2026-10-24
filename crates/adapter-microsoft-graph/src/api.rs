@@ -324,10 +324,19 @@ pub(crate) fn answer_error(
         _ => None,
     };
     match detail {
-        Some(detail) => GraphError::Busy {
-            detail,
-            retry_after,
-        },
+        Some(detail) => {
+            // The wait goes to the normal log, never into a sentence (278).
+            tracing::info!(
+                status,
+                detail = detail.word(),
+                ?retry_after,
+                "graph asks to slow down"
+            );
+            GraphError::Busy {
+                detail,
+                retry_after,
+            }
+        }
         None => GraphError::Http {
             status,
             message: text.chars().take(300).collect(),

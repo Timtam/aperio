@@ -439,6 +439,7 @@ async fn parse_token_response(
     if !status.is_success() {
         // The token endpoint throttles too; nothing was granted.
         if let Some(turned_away) = crate::api::throttled(status.as_u16(), retry_after, &text) {
+            warn!(%turned_away, "google's token endpoint turned the request away");
             return Err(turned_away);
         }
         return Err(GoogleError::Http {
