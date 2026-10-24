@@ -12,6 +12,7 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   buildReminderGroups,
   daysUntilDeadline,
+  FAILED_WRITE_WATCH_MS,
   occurrenceMoveTarget,
   writeAfterLanded,
   writeAll,
@@ -241,14 +242,16 @@ export function DayStartReviewDialog({
   // "All handled" would speak over it and the dialog close with it unseen.
   // It then stays on screen with Close instead (Toni, 2026-10-24), as any save
   // that landed in part does. Every action starts without one.
-  const lastFailure = useRef<string | null>(null);
+  const lastFailure = useRef<{ sentence: string; until: number } | null>(null);
   // Whether this opening said a failure: the empty-state guard below must not
   // close over one before the effect shows it.
   const [failureSaid, setFailureSaid] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const sayFailure = useCallback(
     (sentence: string) => {
-      lastFailure.current = sentence;
+      // Kept only while its re-read and the refresh after it may still clear
+      // the rows: a later emptying, by another device say, is not its doing.
+      lastFailure.current = { sentence, until: Date.now() + FAILED_WRITE_WATCH_MS };
       setFailureSaid(true);
       announce(sentence);
     },
@@ -269,13 +272,18 @@ export function DayStartReviewDialog({
     if (hasReminders) return;
     // Also where the action resolved no row and only its re-read took the
     // last ones away — a write that failed but landed. Mirrors the phone.
-    const failure = lastFailure.current;
-    if (failure != null) {
-      lastFailure.current = null;
-      setNotice(`${failure} ${t('dialogs.dayStartReview.allHandled')}`);
+    const kept = lastFailure.current;
+    lastFailure.current = null;
+    if (kept != null && Date.now() < kept.until) {
+      setNotice(`${kept.sentence} ${t('dialogs.dayStartReview.allHandled')}`);
       return;
     }
-    if (resolvedIds.size === 0) return;
+    if (resolvedIds.size === 0) {
+      // Emptied by a read, not by this opening's actions: closed quietly, as
+      // the empty-state guard below does where no failure was said.
+      if (!tasksLoading) onClose();
+      return;
+    }
     snoozeDayStartReview(4);
     announce(t('dialogs.dayStartReview.allHandled'));
     onClose();
@@ -284,6 +292,7 @@ export function DayStartReviewDialog({
     totalRemaining,
     resolvedIds.size,
     hasReminders,
+    tasksLoading,
     announce,
     t,
     onClose,
@@ -308,8 +317,9 @@ export function DayStartReviewDialog({
       // The action that cleared the last rows failed in part: its sentence
       // first, in the same announcement — the live region keeps only the
       // last of two in a frame. The reminders keep the dialog up.
-      const failure = lastFailure.current;
+      const kept = lastFailure.current;
       lastFailure.current = null;
+      const failure = kept != null && Date.now() < kept.until ? kept.sentence : null;
       announce(
         failure != null
           ? `${failure} ${t('dialogs.dayStartReview.allHandled')}`

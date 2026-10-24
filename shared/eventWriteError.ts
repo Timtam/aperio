@@ -78,6 +78,14 @@ const OUT_OF_TIME = 'time';
 const PROVIDER_BUSY = 'busy';
 
 /**
+ * How long after a write that failed a surface watches what its re-read, and
+ * the refresh that read starts, bring (decision 271): the host serves its
+ * cache first, and the provider's state comes a moment later. A failure older
+ * than this is not what changed the rows.
+ */
+export const FAILED_WRITE_WATCH_MS = 15_000;
+
+/**
  * The detail of a write that settles in steps (`cal_core::step_detail`): its
  * reason, a machine word for the log, and whether the invitees may have heard
  * of it — an invitation went out, so a take-back sent its cancellation too

@@ -1,7 +1,9 @@
+import { FAILED_WRITE_WATCH_MS } from '@aperio/shared';
+
 /** How long after a failed action focus keeps watching its rows: the re-read
  *  first serves what the host cached, and the background refresh it starts
  *  brings what the provider holds a moment later (decision 271). */
-export const FAILED_FOCUS_WATCH_MS = 15_000;
+export const FAILED_FOCUS_WATCH_MS = FAILED_WRITE_WATCH_MS;
 
 /** An action that failed, as its focus watches the rows read again: the rows
  *  whose showing means the pressed button still shows (the pressed row for a

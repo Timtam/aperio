@@ -215,6 +215,29 @@ describe('DayStartReviewDialog → a write that failed', () => {
     STATUS.set = async () => true;
   });
 
+  it('closes quietly where the rows go long after a failure that changed nothing', async () => {
+    // "Heute" was turned away busy and the row stayed. A minute later another
+    // device checked it off, and a refresh drops it: the old sentence is not
+    // what cleared the review.
+    invokeMock.mockRejectedValue(BUSY);
+    const onClose = vi.fn();
+    TASKS.rows = [slipped('t1', 'Einkaufen')];
+    const { DayStartReviewDialog } = await import('./DayStartReviewDialog');
+    const view = render(<DayStartReviewDialog isOpen onClose={onClose} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Heute' }));
+    await waitFor(() =>
+      expect(announce).toHaveBeenCalledWith(
+        'Der Anbieter ist gerade ausgelastet. Es wurde nichts geändert. Versuche es später noch einmal.',
+      ),
+    );
+    const later = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);
+    TASKS.rows = [];
+    view.rerender(<DayStartReviewDialog isOpen onClose={onClose} />);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/Alle Einträge bearbeitet/)).toBeNull();
+    later.mockRestore();
+  });
+
   it('closes as handled where the action that cleared the last row worked', async () => {
     const onClose = vi.fn();
     await open([slipped('t1', 'Einkaufen')], onClose);

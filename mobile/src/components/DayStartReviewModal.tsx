@@ -265,7 +265,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   // handled" would speak over it and the review close with it unseen. It
   // then stays on screen with Close instead (Toni, 2026-10-24), as any save
   // that landed in part does. Mirrors the desktop.
-  const lastFailure = useRef<string | null>(null);
+  const lastFailure = useRef<{ sentence: string; until: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // The review stays mounted all session: a new opening starts with nothing
   // said, watched or acted on, as the desktop's dialog does by mounting anew.
@@ -349,7 +349,9 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       pendingFocusId.current = null;
       invalidateData();
       const message = writeErrorMessage(err, t);
-      lastFailure.current = message;
+      // Kept only while its re-read and the refresh after it may still clear
+      // the rows: a later emptying, by another device say, is not its doing.
+      lastFailure.current = { sentence: message, until: Date.now() + FAILED_FOCUS_WATCH_MS };
       announce(message);
     },
     [announce, invalidateData, t],
@@ -370,10 +372,10 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     if (hasReminders) return;
     // The action before failed — in part, as its re-read shows: its sentence
     // stays on screen with Close.
-    const failure = lastFailure.current;
-    if (failure != null) {
-      lastFailure.current = null;
-      setNotice(`${failure} ${t('dialogs.dayStartReview.allHandled')}`);
+    const kept = lastFailure.current;
+    lastFailure.current = null;
+    if (kept != null && Date.now() < kept.until) {
+      setNotice(`${kept.sentence} ${t('dialogs.dayStartReview.allHandled')}`);
       return;
     }
     if (resolvedIds.size > 0) {
@@ -410,8 +412,9 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     if (remindersOnly && !wasRemindersOnly.current) {
       // The action before failed in part: its sentence first, in the same
       // announcement. The reminders keep the review up.
-      const failure = lastFailure.current;
+      const kept = lastFailure.current;
       lastFailure.current = null;
+      const failure = kept != null && Date.now() < kept.until ? kept.sentence : null;
       announce(
         failure != null
           ? `${failure} ${t('dialogs.dayStartReview.allHandled')}`
