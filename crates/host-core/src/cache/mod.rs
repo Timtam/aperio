@@ -190,6 +190,15 @@ pub struct CacheStore {
     busy_generations: std::sync::Arc<
         std::sync::Mutex<std::collections::HashMap<(String, &'static str, String), u64>>,
     >,
+    /// Per container, the busy pause's generation and the ranges its
+    /// snapshot did not reach that a read asked for during it and met the
+    /// busy provider again ([`Self::ask_uncovered`]): each is asked once per
+    /// pause. A new pause starts empty. In memory, like the pause.
+    uncovered_asks: std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<(String, &'static str, String), (u64, Vec<DateRange>)>,
+        >,
+    >,
     /// When each container's last COUNTED automatic round failed: rounds
     /// less than [`ROUND_SPAN`] apart count as one (Toni, 2026-10-23). In
     /// memory; a restart starts afresh.
@@ -387,6 +396,10 @@ const FAILURE_AUTH: &str = "auth";
 /// The provider was busy (decision 270): it heals by itself.
 const FAILURE_BUSY: &str = "busy";
 
+/// How many asked ranges [`CacheStore::ask_uncovered`] keeps per container
+/// and generation: one forgotten is asked once more, nothing worse.
+const UNCOVERED_ASKS_KEPT: usize = 32;
+
 /// The listing a container scope belongs to: an access failure blocks the
 /// whole family, and the family's listing row is where that is recorded.
 fn listing_of(scope: SyncScope) -> SyncScope {
@@ -493,6 +506,9 @@ impl CacheStore {
                 std::collections::HashMap::new(),
             )),
             busy_generations: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            uncovered_asks: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
             counted_rounds: std::sync::Arc::new(std::sync::Mutex::new(
@@ -1829,6 +1845,8 @@ impl CacheStore {
         let access = kind == Some(FAILURE_ACCESS);
         let busy = kind == Some(FAILURE_BUSY);
         let key = (account.to_string(), scope.as_str(), container.to_string());
+        // Whether this failure starts a pause, or meets the one already on.
+        let pausing_again = busy && self.busy_paused(account, scope, container);
         let counts = match attempt {
             Attempt::Read { .. } => !busy,
             Attempt::Forced { .. } => true,
@@ -1849,10 +1867,15 @@ impl CacheStore {
                 .busy_generations
                 .lock()
                 .expect("busy generations poisoned");
+            let mut asks = self.uncovered_asks.lock().expect("uncovered asks poisoned");
             if busy {
-                generations.insert(key, attempt.generation());
+                generations.insert(key.clone(), attempt.generation());
+                if !pausing_again {
+                    asks.insert(key, (attempt.generation(), Vec::new()));
+                }
             } else {
                 generations.remove(&key);
+                asks.remove(&key);
             }
         }
         let forced = matches!(attempt, Attempt::Forced { .. });
@@ -1907,6 +1930,61 @@ impl CacheStore {
             .copied()
             .unwrap_or(0);
         claimed == self.refresh_generation(account, scope, container)
+    }
+
+    /// Whether a read of a range the container's snapshot does not reach may
+    /// ask the provider (decision 271). Outside a busy pause it always may.
+    /// During one, each range is asked once (Toni, 2026-10-23): a failed ask
+    /// writes no window, so without [`Self::note_uncovered_busy`] every read
+    /// of that week asked the busy provider again — also after Aperio's own
+    /// write, which clears the window and lets one read through.
+    pub fn ask_uncovered(
+        &self,
+        account: &str,
+        scope: SyncScope,
+        container: &str,
+        range: DateRange,
+    ) -> bool {
+        if !self.busy_paused(account, scope, container) {
+            return true;
+        }
+        let generation = self.refresh_generation(account, scope, container);
+        let asks = self.uncovered_asks.lock().expect("uncovered asks poisoned");
+        !asks
+            .get(&(account.to_string(), scope.as_str(), container.to_string()))
+            .is_some_and(|(at, ranges)| {
+                *at == generation
+                    && ranges
+                        .iter()
+                        .any(|asked| asked.start <= range.start && asked.end >= range.end)
+            })
+    }
+
+    /// Note that a read of `range`, claimed at `generation`, met the busy
+    /// provider: during that pause it is not asked again
+    /// ([`Self::ask_uncovered`]). Called after [`Self::mark_failure`], which
+    /// starts the pause.
+    pub fn note_uncovered_busy(
+        &self,
+        account: &str,
+        scope: SyncScope,
+        container: &str,
+        generation: u64,
+        range: DateRange,
+    ) {
+        let mut asks = self.uncovered_asks.lock().expect("uncovered asks poisoned");
+        let Some((at, ranges)) =
+            asks.get_mut(&(account.to_string(), scope.as_str(), container.to_string()))
+        else {
+            return;
+        };
+        if *at != generation {
+            return;
+        }
+        if ranges.len() >= UNCOVERED_ASKS_KEPT {
+            ranges.remove(0);
+        }
+        ranges.push(range);
     }
 
     /// Lets the tests age a container's last counted round past

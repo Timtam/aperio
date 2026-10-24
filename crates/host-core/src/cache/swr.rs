@@ -71,7 +71,7 @@ pub fn event_self_warm(state: &Option<SyncState>, range: DateRange) -> Option<Re
                 < chrono::Duration::seconds(COVERAGE_REFRESH_COOLDOWN_SECS)
         });
     if !recently_refreshed {
-        return Some(ReadRefresh::Uncovered);
+        return Some(ReadRefresh::Uncovered(range));
     }
     is_stale(state, SWR_TTL_SECS).then_some(ReadRefresh::Stale)
 }
@@ -82,10 +82,11 @@ pub enum ReadRefresh {
     /// The snapshot is old. Paused while the provider is busy (decision
     /// 271): the snapshot is there to show.
     Stale,
-    /// The snapshot does not reach what is asked for — a week or month never
-    /// loaded. Asked even while the provider is busy (Toni, 2026-10-23):
-    /// otherwise the view shows empty days with nothing to say why.
-    Uncovered,
+    /// The snapshot does not reach this range — a week or month never
+    /// loaded. Asked once even while the provider is busy (Toni,
+    /// 2026-10-23): otherwise the view shows empty days with nothing to say
+    /// why ([`CacheStore::ask_uncovered`]).
+    Uncovered(DateRange),
 }
 
 /// Spawn a deduplicated, fire-and-forget background refresh: `fetch`
@@ -210,10 +211,15 @@ pub fn spawn_read_refresh<F, Fut>(
 {
     // See spawn_refresh: not while the OS withholds this family, nor, for an
     // old snapshot, while the provider is busy for this container. What was
-    // never loaded is asked anyway (Toni, 2026-10-23).
-    if cache.access_withheld(&account, scope)
-        || (why == ReadRefresh::Stale && cache.busy_paused(&account, scope, &container))
-    {
+    // never loaded is asked once anyway (Toni, 2026-10-23).
+    if cache.access_withheld(&account, scope) {
+        return;
+    }
+    let paused = match why {
+        ReadRefresh::Stale => cache.busy_paused(&account, scope, &container),
+        ReadRefresh::Uncovered(range) => !cache.ask_uncovered(&account, scope, &container, range),
+    };
+    if paused {
         return;
     }
     let key = format!("{}:{}:{}", scope.as_str(), account, container);
@@ -256,6 +262,9 @@ pub fn spawn_read_refresh<F, Fut>(
                         Attempt::Read { generation },
                     )
                     .unwrap_or(true);
+                if let (ReadRefresh::Uncovered(range), true) = (why, err.is_provider_busy()) {
+                    cache.note_uncovered_busy(&account, scope, &container, generation, range);
+                }
                 if news {
                     tracing::warn!(
                         target: "aperio::cache",
@@ -897,7 +906,81 @@ mod tests {
             0
         );
         assert_eq!(
-            read_fetches(&cache, ReadRefresh::Uncovered, None, |_| {}).await,
+            read_fetches(&cache, ReadRefresh::Uncovered(range()), None, |_| {}).await,
+            1
+        );
+    }
+
+    /// A range never loaded is asked once during a busy pause, then paused
+    /// like an old snapshot: a failed ask writes no window, so every read of
+    /// it would ask again. So after Aperio's own write, which clears the
+    /// window: the read the hosts compute lets one ask through, then pauses
+    /// at the new generation (decision 271).
+    #[tokio::test]
+    async fn a_range_never_loaded_is_asked_once_while_busy() {
+        let cache = store_with_account();
+        let week = range();
+        let next = DateRange::new(week.end, week.end + Duration::days(7));
+        // Outside a pause, a range is asked whenever it is read.
+        let lost = || cal_core::Error::Network("connection reset".into());
+        for _ in 0..2 {
+            assert_eq!(
+                read_fetches(&cache, ReadRefresh::Uncovered(week), Some(lost()), |_| {}).await,
+                1
+            );
+        }
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Stale, Some(busy()), |_| {}).await,
+            1
+        );
+        let uncovered = ReadRefresh::Uncovered(week);
+        assert_eq!(
+            read_fetches(&cache, uncovered, Some(busy()), |_| {}).await,
+            1
+        );
+        assert_eq!(
+            read_fetches(&cache, uncovered, Some(busy()), |_| {}).await,
+            0
+        );
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Uncovered(next), Some(busy()), |_| {}).await,
+            1
+        );
+        // What was asked stays asked while the pause holds.
+        assert_eq!(
+            read_fetches(&cache, uncovered, Some(busy()), |_| {}).await,
+            0
+        );
+
+        cache
+            .invalidate("acc-1", SyncScope::Events, "cal-1")
+            .unwrap();
+        // Busy again at the new generation: what was asked before is asked
+        // once more.
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Stale, Some(busy()), |_| {}).await,
+            1
+        );
+        assert_eq!(
+            read_fetches(&cache, ReadRefresh::Uncovered(next), Some(busy()), |_| {}).await,
+            1
+        );
+        let why = || {
+            let state = cache
+                .get_sync_state("acc-1", SyncScope::Events, "cal-1")
+                .unwrap();
+            event_self_warm(&state, week).expect("the cleared window refreshes")
+        };
+        assert_eq!(why(), ReadRefresh::Uncovered(week));
+        assert_eq!(read_fetches(&cache, why(), Some(busy()), |_| {}).await, 1);
+        assert_eq!(read_fetches(&cache, why(), Some(busy()), |_| {}).await, 0);
+
+        // A success lifts the pause: what it noted is asked again.
+        cache
+            .set_token("acc-1", SyncScope::Events, "cal-1", None)
+            .unwrap();
+        assert_eq!(
+            read_fetches(&cache, uncovered, Some(lost()), |_| {}).await,
             1
         );
     }
@@ -1076,9 +1159,10 @@ mod tests {
     #[test]
     fn cold_state_warms() {
         // No snapshot at all → stale → warm (the genuine first cold load).
+        let range = range();
         assert_eq!(
-            event_self_warm(&None, range()),
-            Some(ReadRefresh::Uncovered)
+            event_self_warm(&None, range),
+            Some(ReadRefresh::Uncovered(range))
         );
     }
 
@@ -1099,9 +1183,10 @@ mod tests {
     fn fresh_uncovered_past_cooldown_warms() {
         // Refreshed 10s ago (past the 5s cooldown, still < 60s TTL), uncovered →
         // a genuine navigation to an out-of-window range refreshes.
+        let range = range();
         assert_eq!(
-            event_self_warm(&state(10, Some((10, 20))), range()),
-            Some(ReadRefresh::Uncovered)
+            event_self_warm(&state(10, Some((10, 20))), range),
+            Some(ReadRefresh::Uncovered(range))
         );
     }
 

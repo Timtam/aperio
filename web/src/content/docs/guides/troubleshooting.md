@@ -76,14 +76,16 @@ short time — the warning says so, and that you need do nothing: on the
 desktop Aperio tries again by itself, on the phone the next time it updates,
 for instance when you open the app again. Its rows say "The provider is
 busy." While it is busy, the views stop asking the provider for what they
-already show; a week or month that was never loaded is still asked for.
+already show; a week or month that was never loaded is still asked for,
+once.
 
 A brief, one-off connection hiccup does not raise the warning: a network
 failure or a busy provider is only shown once it recurs in a second automatic
 update at least a minute after the first, so a cold start on a not-yet-ready
 network never flashes a false alarm, and the two or three updates that
-opening the phone starts count once. What the views ask for on their own does
-not count. A login problem — which never fixes itself — shows straight away,
+opening the phone starts count once. A busy provider the views meet when they
+ask on their own does not count; any other failure of theirs counts each time
+it happens. A login problem — which never fixes itself — shows straight away,
 and a refresh you start, or the change of an account, reports its result at
 once for the accounts concerned, also in the first seconds after the app
 starts. The warning clears by itself as soon as an update succeeds again.

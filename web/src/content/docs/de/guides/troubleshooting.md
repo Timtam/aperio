@@ -84,15 +84,16 @@ versucht Aperio es von selbst erneut, am Handy beim nächsten Aktualisieren,
 zum Beispiel wenn du die App wieder öffnest. Seine Zeilen sagen „Der Anbieter
 ist ausgelastet.“ Solange er ausgelastet ist, fragen die Ansichten ihn nicht
 nach dem, was sie schon zeigen; eine Woche oder ein Monat, die noch nie
-geladen wurden, werden trotzdem angefragt.
+geladen wurden, werden trotzdem einmal angefragt.
 
 Ein kurzer, einmaliger Verbindungsaussetzer löst die Warnung nicht aus: Ein
 Netzwerkfehler oder ein ausgelasteter Anbieter wird erst gezeigt, wenn er bei
 einer zweiten automatischen Aktualisierung mindestens eine Minute nach der
 ersten wieder auftritt — ein Kaltstart mit noch nicht bereitem Netz erzeugt
 so keinen Fehlalarm, und die zwei oder drei Aktualisierungen beim Öffnen des
-Handys zählen einmal. Was die Ansichten von sich aus anfragen, zählt nicht.
-Ein Anmeldeproblem, das sich nie von selbst behebt, erscheint sofort, und
+Handys zählen einmal. Trifft eine Ansicht, die von sich aus anfragt, auf einen
+ausgelasteten Anbieter, zählt das nicht; jeder andere Fehler dabei zählt jedes
+Mal. Ein Anmeldeproblem, das sich nie von selbst behebt, erscheint sofort, und
 eine Aktualisierung, die du startest, oder die Änderung eines Kontos meldet
 ihr Ergebnis für die betroffenen Konten unmittelbar, auch in den ersten
 Sekunden nach dem Start. Die Warnung verschwindet von selbst, sobald eine

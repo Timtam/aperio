@@ -1452,8 +1452,10 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     (271): Die Hintergrund-Aktualisierung eines Lesevorgangs zählt sie
     nicht und hält die weiteren Lesevorgänge des Behälters an, bis ein
     eigenes Schreiben die Generation weiterzählt (`busy_paused`); ein nie
-    geladener Bereich wird trotzdem gefragt (`ReadRefresh::Uncovered`).
-    Automatische Runden zählen, aber weniger als eine Minute auseinander nur
+    geladener Bereich wird je Pause einmal gefragt (`ReadRefresh::Uncovered`,
+    `CacheStore::ask_uncovered`). Weil ein gescheitertes Fragen kein
+    Fenster schreibt, fragte sonst jedes Lesen erneut, auch nach einem
+    eigenen Schreiben, das das Fenster leert. Automatische Runden zählen, aber weniger als eine Minute auseinander nur
     einmal (`ROUND_SPAN`); eine Runde, die jemand startet, zeigt ihr
     Ergebnis sofort, und eine Kontoänderung erzwingt nur dieses Konto
     (`Forcing`). Ein Durchlauf fragt eine Familie, die ausgelastet war,
