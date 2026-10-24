@@ -1514,7 +1514,9 @@ pub(crate) fn turned_down_whole(err: &EwsError) -> bool {
 }
 
 /// The SOAP codes with which Exchange turns an `UpdateItem` down before it
-/// saves anything: the request does not validate, or the server throttles.
+/// saves anything: the request does not validate, or the server is busy
+/// (`ErrorServerBusy`, which [`busy_detail`] reads first: a busy provider,
+/// decision 270).
 /// A `CreateItem` too ([`to_create_error`]), where `ErrorInvalidChangeKey`
 /// names the folder's key. See [`to_update_error`]. The update is sent with `AlwaysOverwrite`, so no
 /// ChangeKey is checked before the save, and a conflict code

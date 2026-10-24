@@ -217,11 +217,12 @@ impl WriteRefusal {
     /// 412 — carry their own error; a 5xx may come after a part was written
     /// and says nothing either way.
     ///
-    /// Where a write is refused this way, an adapter reports
-    /// [`Self::ServerRefused`] rather than a protocol error, so that a caller
-    /// deciding whether the write may have landed (splitting a series undoes
-    /// its new part only when the cut certainly did not, decision 144) is told
-    /// the truth.
+    /// Where a write is refused this way, an adapter reports the refusal
+    /// [`Self::turned_down_by_status`] names — a busy provider for 429,
+    /// [`Self::ServerRefused`] for the rest — rather than a protocol error, so
+    /// that a caller deciding whether the write may have landed (splitting a
+    /// series undoes its new part only when the cut certainly did not,
+    /// decision 144) is told the truth.
     pub const fn refused_status(status: u16) -> bool {
         Self::turned_down_by_status(status).is_some()
     }

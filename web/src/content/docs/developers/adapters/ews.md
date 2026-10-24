@@ -214,10 +214,11 @@ The endpoint is discovered or user-supplied.
   - The manifest declares it (`recurrence.deletions_in_steps`), and the
     surfaces show a "please wait" dialog while such a series is created.
 - **A create turned down whole is a refusal.** `create_event` maps through
-  `to_create_error`: a refused HTTP status or a code of
-  `REFUSED_UPDATE_CODES` (also in an HTTP 500 fault) is `server-refused`, as
-  for an update. Plain creates too: a create refused while Exchange throttles
-  said a protocol error before.
+  `to_create_error`, as an update does: a busy server first
+  (`ErrorServerBusy`, also in an HTTP 500 fault, and HTTP 429) is
+  `provider-busy` (decision 270); any other code of `REFUSED_UPDATE_CODES`
+  and the refused statuses 400, 413, 415, 422 and 507 are `server-refused`.
+  Plain creates too: such a create said a protocol error before.
 - **The organizer is listed as an attendee.** Exchange puts the organizer
   into `RequiredAttendees` with `ResponseType` "Organizer"; for an appointment
   made in Outlook it is the only row. The adapter drops that row by its flag
