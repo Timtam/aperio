@@ -75,8 +75,8 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
-  const { tasks, loading, taskListById } = useTasks();
-  const { invalidateData } = useTaskStore();
+  const { tasks, loading, taskListById, fetchedVersion } = useTasks();
+  const { invalidateData, dataVersion } = useTaskStore();
 
   const tr = useCallback(
     (key: string, vars?: Record<string, unknown>): string => t(key, vars) as string,
@@ -256,11 +256,11 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const focusIfGone = useRef<FailedAction | null>(null);
   // The rows whose showing means the last action's button still shows.
   const actedIds = useRef<string[]>([]);
-  // The task rows last rendered: a failure waits until others come.
-  const rowsShown = useRef(tasks);
+  // The data version last rendered: a failure's re-read reads at the next.
+  const versionShown = useRef(dataVersion);
   useEffect(() => {
-    rowsShown.current = tasks;
-  }, [tasks]);
+    versionShown.current = dataVersion;
+  }, [dataVersion]);
 
   const focusTitle = useCallback(() => {
     const tag = findNodeHandle(titleRef.current);
@@ -278,7 +278,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     const gone = focusIfGone.current;
     if (gone != null) {
       // As on the desktop, a still-shown button keeps focus.
-      const step = focusAfterFailedAction(gone, orderedIds, tasks);
+      const step = focusAfterFailedAction(gone, orderedIds, fetchedVersion);
       if (step.kind === 'wait') return;
       focusIfGone.current = null;
       if (step.kind === 'move') {
@@ -292,7 +292,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     pendingFocusId.current = null;
     const tag = rowTags.current[id];
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-  }, [orderedIds, tasks]);
+  }, [orderedIds, fetchedVersion]);
 
   /** Queue focus on the row that should take over once `removedIds` leave.
    *  `pressed` are the rows whose showing means the pressed button still
@@ -318,7 +318,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       const acted = actedIds.current;
       focusIfGone.current =
         acted.length > 0
-          ? { acted, fallback: pendingFocusId.current, rows: rowsShown.current }
+          ? { acted, fallback: pendingFocusId.current, version: versionShown.current + 1 }
           : null;
       pendingFocusId.current = null;
       invalidateData();

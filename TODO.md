@@ -517,7 +517,9 @@ Siehe DESIGN §4.2.
         prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
         ist (VoiceOver sagt den Satz an); eine zum Teil gespeicherte Aufgabe
         schließt den Editor; im Tagesstart behält ein Sammelknopf den Fokus,
-        solange nach dem Neu-Lesen eine Zeile seines Stapels bleibt, und ein
+        solange nach dem Neu-Lesen eine Zeile seines Stapels bleibt (auch
+        wenn der Aufgaben-Reiter offen ist und seine Zeilen zuerst noch einmal
+        aus dem Zwischenspeicher kommen), und ein
         Zeilenknopf, dessen Unteraufgabe scheiterte, gibt ihn an die nächste
         Zeile, wenn seine Zeile geht; die Fehlerzeile eines
         gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
