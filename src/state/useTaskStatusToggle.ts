@@ -149,12 +149,21 @@ export function useTaskStatusActions(): TaskStatusActions {
       const othersFailed = outcome.failed.length;
       const base = announceFor(t, nextStatus, task.title);
       if (othersFailed > 0) {
+        // The task itself changed; why the others did not is said too — a
+        // busy provider with its "try again later", as the phone's cascade
+        // says it (decisions 272, 277).
+        const why = failureOfWrites(
+          'cascade',
+          outcome.failed.map((f) => f.err),
+          true,
+        );
         sayFailure(
           `${base} ${t('views.tasks.cascadePartial', {
+            count: othersFailed,
             applied: others - othersFailed,
             total: others,
             failed: othersFailed,
-          })}`,
+          })} ${writeErrorMessage(why, t)}`,
         );
       } else if (others > 0) {
         announce(`${base} ${t('views.tasks.cascadeSuffix', { count: others })}`);
