@@ -228,6 +228,10 @@ export default function TasksScreen({
   // day-start review (`focusAfterFailedAction`) — the refresh after the
   // re-read may still take it away, its delete having landed after all.
   const failedFocus = useRef<FailedAction | null>(null);
+  // What the watch reads a row's leaving by: a delete by the rows the data
+  // holds (a folded-away row is still there), a check-off by the rows showing
+  // (one that landed slips into the folded Done group).
+  const failedFocusBy = useRef<'data' | 'shown'>('data');
   // The data version last rendered: a failure's re-read reads at the next.
   const versionShown = useRef(dataVersion);
   useEffect(() => {
@@ -308,9 +312,13 @@ export default function TasksScreen({
   useEffect(() => {
     const gone = failedFocus.current;
     if (gone != null) {
-      // By the rows the data holds, not the ones showing: a row the person
-      // folded away under its parent or its group is still there.
-      const held = tasks.map((task) => task.id);
+      // By the rows the data holds for a delete, not the ones showing: a row
+      // the person folded away under its parent or its group is still there.
+      // By the rows showing for a check-off, whose row folds into Done.
+      const held =
+        failedFocusBy.current === 'data'
+          ? tasks.map((task) => task.id)
+          : entries.filter((e) => !e.hidden && !e.group).map((e) => e.task.id);
       const step = focusAfterFailedAction(gone, held, fetchedVersion, Date.now());
       if (step.kind === 'wait') return;
       failedFocus.current = null;
@@ -318,7 +326,7 @@ export default function TasksScreen({
         const tag =
           step.id === EMPTY_FOCUS
             ? findNodeHandle(emptyRef.current)
-            : (rowTags.current[step.id] ?? null);
+            : (rowTags.current[step.id] ?? headerTags.current[step.id] ?? null);
         if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
         return;
       }
@@ -437,11 +445,16 @@ export default function TasksScreen({
       } catch (err) {
         // A check-off that landed in part — the task, not its parent — is
         // real: the rows read again, as on the desktop (decision 277). Focus
-        // stays on the row where it still shows, and goes where a check-off
-        // that worked puts it where the row moved into the Done group.
-        pendingFocusId.current = task.id;
-        pendingFocusFallback.current =
-          focusTargetAfterRemoving(entries, task.id) ?? DONE_GROUP_ID;
+        // stays on the row while it shows — never set on it again, which on
+        // iOS would speak it over the failure — and goes where a check-off
+        // that worked puts it once a read moves the row into Done.
+        failedFocusBy.current = 'shown';
+        failedFocus.current = {
+          acted: [task.id],
+          fallback: focusTargetAfterRemoving(entries, task.id) ?? DONE_GROUP_ID,
+          version: versionShown.current + 1,
+          until: Date.now() + FAILED_FOCUS_WATCH_MS,
+        };
         invalidateData();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
@@ -488,6 +501,7 @@ export default function TasksScreen({
           if (!deleted) {
             pendingFocusId.current = null;
             pendingEmptyFocus.current = false;
+            failedFocusBy.current = 'data';
             failedFocus.current = {
               acted: [task.id],
               fallback: siblingId ?? EMPTY_FOCUS,
@@ -558,8 +572,9 @@ export default function TasksScreen({
         announce(t('actions.duplicated', { title: task.title }));
       } catch (err) {
         // A copy that stands in part — without its assignees, say — shows,
-        // as on the desktop (decision 277); focus stays on the original.
-        pendingFocusId.current = task.id;
+        // as on the desktop (decision 277); focus stays on the original,
+        // which does not move: it is not set again, which on iOS would speak
+        // the row over the failure.
         invalidateData();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
@@ -570,6 +585,8 @@ export default function TasksScreen({
   // Toggle a group header (sentinel/synthetic id) or a subtask parent (task id).
   const toggleCollapsed = useCallback(
     (id: string, title: string) => {
+      // Folding is the person's own act: the watch after a failure ends.
+      failedFocus.current = null;
       const willExpand = collapsed.has(id);
       setCollapsed((prev) => {
         const next = new Set(prev);

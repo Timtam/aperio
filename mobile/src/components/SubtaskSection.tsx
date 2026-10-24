@@ -163,6 +163,8 @@ export function SubtaskSection({
   const add = useCallback(async () => {
     const title = newTitle.trim();
     if (!title || busy) return;
+    // Every action ends the watch after a failed delete, as on the task list.
+    goneWatch.current = null;
     setBusy(true);
     setError(null);
     let made = false;
@@ -218,6 +220,7 @@ export function SubtaskSection({
 
   const toggle = useCallback(
     async (sub: Task) => {
+      goneWatch.current = null;
       try {
         const next = await applyTaskToggle(sub, list, all);
         await reload();
@@ -236,6 +239,7 @@ export function SubtaskSection({
 
   const setStatus = useCallback(
     async (sub: Task, status: TaskStatus) => {
+      goneWatch.current = null;
       try {
         await setTaskStatusTo(sub, status, list, all);
         await reload();
@@ -261,6 +265,7 @@ export function SubtaskSection({
   // lands on `medium`, because what the task was before is not recorded.
   const cyclePriority = useCallback(
     async (sub: Task) => {
+      goneWatch.current = null;
       const twoLevel = priorityScale === 'two';
       const next = twoLevel
         ? isImportantPriority(sub.priority)
@@ -295,6 +300,7 @@ export function SubtaskSection({
 
   const remove = useCallback(
     async (sub: Task, index: number) => {
+      goneWatch.current = null;
       let deleted = false;
       try {
         await deleteTask(sub.id, sub.list_id);
