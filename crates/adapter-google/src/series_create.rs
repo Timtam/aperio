@@ -310,6 +310,7 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
         let body = serde_json::to_value(bare_series_body(self.event, None))?;
         self.requests += 1;
         let answer = self.cal.send(Method::POST, path, Some(body)).await?;
+        log_if_busy("create", &answer);
         if !is_success(answer.status) {
             return Err(answer_error(&answer));
         }
@@ -353,14 +354,7 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
                     _ => break self.read_back(own.as_deref()).await?,
                 }
             }
-            if rate_limited(&answer) {
-                tracing::info!(
-                    target: "adapter_google::write",
-                    step = "create",
-                    retry_after = ?answer.retry_after,
-                    "google asks to slow down"
-                );
-            }
+            log_if_busy("create", &answer);
             if rate_limited(&answer) && busy + 1 < CREATE_BUSY_TRIES {
                 let wait = answer.retry_after.unwrap_or_else(|| self.back_off(busy));
                 // A longer wait is not slept through: the create made
@@ -431,6 +425,7 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
                 let Ok(answer) = self.cal.send(Method::GET, path.clone(), None).await else {
                     continue;
                 };
+                log_if_busy("read-back", &answer);
                 if !is_success(answer.status) {
                     continue;
                 }
@@ -779,13 +774,8 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
                 return Ok(answer);
             }
             let asked = answer.as_ref().ok().and_then(|a| a.retry_after);
-            if throttled {
-                tracing::info!(
-                    target: "adapter_google::write",
-                    step,
-                    retry_after = ?asked,
-                    "google asks to slow down"
-                );
+            if let Ok(answer) = &answer {
+                log_if_busy(step, answer);
             }
             let wait = asked.unwrap_or_else(|| self.back_off(attempt));
             attempt += 1;
@@ -1101,6 +1091,19 @@ fn is_success(status: u16) -> bool {
 
 /// Whether Google asked to slow down ([`crate::api::throttled`]): not a
 /// quota used up for a while, which waiting seconds does not help.
+/// One line in the normal log for an answer that asks to slow down, with the
+/// wait Google names: the sentences never say how long (decision 278).
+fn log_if_busy(step: &str, answer: &Answer) {
+    if rate_limited(answer) {
+        tracing::info!(
+            target: "adapter_google::write",
+            step,
+            retry_after = ?answer.retry_after,
+            "google asks to slow down"
+        );
+    }
+}
+
 fn rate_limited(answer: &Answer) -> bool {
     matches!(
         crate::api::throttled(answer.status, answer.retry_after, &answer.body),

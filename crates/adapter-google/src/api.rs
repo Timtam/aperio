@@ -1087,9 +1087,10 @@ pub async fn respond_to_event(
             .await
         {
             Ok(e) => e,
-            // A busy provider stops the walk (decision 270): a later "not
-            // found" would hide why.
-            Err(e @ GoogleError::Busy { .. }) => return Err(e),
+            // A busy provider or a used-up limit holds for the whole account
+            // and stops the walk (decisions 270, 275): a later "not found"
+            // would hide why.
+            Err(e @ (GoogleError::Busy { .. } | GoogleError::UsageLimit { .. })) => return Err(e),
             Err(e) => {
                 last_err = Some(e);
                 continue;

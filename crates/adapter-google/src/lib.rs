@@ -1129,6 +1129,46 @@ mod delta_tests {
         answer.assert_async().await;
     }
 
+    /// A used-up limit holds for the whole account too: the answer to an
+    /// invitation asks no other calendar, whose "not found" would hide why
+    /// (decision 275).
+    #[tokio::test]
+    async fn the_answer_to_an_invitation_stops_at_a_used_up_limit() {
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock("GET", "/users/me/calendarList")
+            .with_status(200)
+            .with_body(
+                r##"{"items":[{"id":"work","summary":"Work","accessRole":"owner"},
+                              {"id":"home","summary":"Home","accessRole":"owner"}]}"##,
+            )
+            .create_async()
+            .await;
+        let _primary = server
+            .mock("GET", "/calendars/primary")
+            .with_status(200)
+            .with_body(r#"{"id":"me@example.com"}"#)
+            .create_async()
+            .await;
+        let _read = server
+            .mock("GET", "/calendars/work/events/ev3")
+            .with_status(403)
+            .with_body(r#"{"error":{"code":403,"errors":[{"reason":"dailyLimitExceeded"}]}}"#)
+            .create_async()
+            .await;
+        let further = server
+            .mock("GET", Matcher::Regex(r"^/calendars/home/events/".into()))
+            .expect(0)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .respond_to_event("ev3", AttendeeStatus::Accepted, false)
+            .await
+            .unwrap_err();
+        assert!(!matches!(err, CoreError::NotFound(_)), "{err:?}");
+        further.assert_async().await;
+    }
+
     /// A single write turned down for a used-up limit was refused by the
     /// server, with the reason, never a sign-in failure (decision 275).
     #[tokio::test]
