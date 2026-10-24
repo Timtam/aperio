@@ -318,17 +318,19 @@ describe('buildTaskListForest', () => {
  * failed. A plain read that fails still fails.
  */
 describe('loadSections after a section write', () => {
-  it('shows what was written when the read after it fails', async () => {
-    const busy = { code: 'forbidden', message: 'provider-busy: http-429' };
-    invokeMock.mockImplementation((cmd: string) =>
-      cmd === 'get_sections' ? Promise.reject(busy) : Promise.resolve([]),
-    );
+  const busy = { code: 'forbidden', message: 'provider-busy: http-429' };
+  const errands = { id: 's0', list_id: 'L1', name: 'Besorgungen', position: 0, color_label: null };
+  const section = { id: 's1', list_id: 'L1', name: 'Einkauf', position: 1, color_label: null };
+
+  function capture() {
     const seen: { store: ReturnType<typeof useCalendarStore> | null } = { store: null };
     function Capture() {
       seen.store = useCalendarStore();
       return (
         <span data-testid="sections">
-          {(seen.store.sectionsByList.L1 ?? []).map((s) => s.name).join(',')}
+          {seen.store.sectionsByList.L1 === undefined
+            ? 'unread'
+            : seen.store.sectionsByList.L1.map((s) => s.name).join(',')}
         </span>
       );
     }
@@ -337,23 +339,54 @@ describe('loadSections after a section write', () => {
         <Capture />
       </CalendarStoreProvider>,
     );
+    return seen;
+  }
+
+  it('shows what was written when the read after it fails', async () => {
+    // The list was read once; the read after the write meets a busy provider.
+    let reads = 0;
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd !== 'get_sections') return Promise.resolve([]);
+      reads += 1;
+      return reads === 1 ? Promise.resolve([errands]) : Promise.reject(busy);
+    });
+    const seen = capture();
     await waitFor(() => expect(seen.store).not.toBeNull());
+    await act(async () => {
+      await seen.store!.loadSections('L1');
+    });
     // The fallback says in the log what it did.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const section = { id: 's1', list_id: 'L1', name: 'Einkauf', position: 0, color_label: null };
     await expect(seen.store!.loadSections('L1')).rejects.toEqual(busy);
     let shown: Section[] = [];
     await act(async () => {
       shown = await seen.store!.loadSections('L1', { upsert: section as unknown as Section });
     });
-    expect(shown.map((s) => s.id)).toEqual(['s1']);
-    expect(screen.getByTestId('sections').textContent).toBe('Einkauf');
-    let after: Section[] = [{} as Section];
+    expect(shown.map((s) => s.id)).toEqual(['s0', 's1']);
+    expect(screen.getByTestId('sections').textContent).toBe('Besorgungen,Einkauf');
+    let after: Section[] = [];
     await act(async () => {
       after = await seen.store!.loadSections('L1', { remove: 's1' });
     });
-    expect(after).toEqual([]);
+    expect(after.map((s) => s.id)).toEqual(['s0']);
     expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
+
+  it('stores nothing for a list never read, so the next read asks', async () => {
+    // Its first read met the busy provider: the written section alone must
+    // not stand as the whole list — its other sections would never be read.
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === 'get_sections' ? Promise.reject(busy) : Promise.resolve([]),
+    );
+    const seen = capture();
+    await waitFor(() => expect(seen.store).not.toBeNull());
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(seen.store!.loadSections('L1')).rejects.toEqual(busy);
+    await act(async () => {
+      await seen.store!.loadSections('L1', { upsert: section as unknown as Section });
+    });
+    expect(screen.getByTestId('sections').textContent).toBe('unread');
     warn.mockRestore();
   });
 });

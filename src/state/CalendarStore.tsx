@@ -325,7 +325,14 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       // corrects it.
       // eslint-disable-next-line no-console
       console.warn('reading the sections after a write failed; showing what was written', err);
-      const kept = (sectionsRef.current[listId] ?? []).filter(
+      const known = sectionsRef.current[listId];
+      if (known === undefined) {
+        // Never read: the written section alone would stand as the whole
+        // list, and no reader would ask again, its guard seeing the list
+        // read. So nothing is stored, and the next read asks.
+        return [];
+      }
+      const kept = known.filter(
         (s) => s.id !== afterWrite.upsert?.id && s.id !== afterWrite.remove,
       );
       secs = sortSections(afterWrite.upsert ? [...kept, afterWrite.upsert] : kept);
