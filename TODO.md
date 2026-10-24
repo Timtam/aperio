@@ -1788,6 +1788,12 @@ Vorschläge sind nicht aufgenommen.
       vitest-Lauf in seine 15 s, die übrigen neun scheiterten als Folge (die
       Ansicht des ersten blieb stehen); allein und beim nächsten vollen Lauf
       grün. Gesehen in der ersten Prüfrunde von #127 (2026-10-18), älter.
+      Wieder in der sechsten Prüfrunde von #128 (2026-10-24), als `cargo test
+      --workspace` gleichzeitig lief; dazu lief „says a busy provider in
+      words“ in `TaskDialog.writeError.test.tsx` in seine 20 s, und der
+      nächste Test fand zwei Titelfelder. Ohne Last beide grün. Abhilfe:
+      eine Ansicht, die ein abgebrochener Test stehen lässt, vor dem nächsten
+      abräumen, oder die Zeitgrenze an der Last ausrichten.
 - [ ] **Anlegen und Ändern halten die Handy-Warteschlange.** `createEventJson`
       und `updateEventJson` laufen auf beiden Plattformen auf Expos einer
       Standard-Warteschlange (`CalFfiModule.swift`, `CalFfiModule.kt`, kein
