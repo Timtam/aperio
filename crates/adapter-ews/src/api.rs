@@ -669,6 +669,12 @@ async fn enrich_occurrence_details(
         // content, silently. Name it — the code and the ids it hit — and go on
         // to the next batch; the per-item tolerance above is untouched.
         if let Err(err) = crate::soap::check_for_fault(&xml) {
+            // A busy server is no answer about these occurrences (decision
+            // 270): the drain fails without persisting, and the cache keeps
+            // what it had rather than the series' content in their place.
+            if crate::busy_detail(&err).is_some() {
+                return Err(err);
+            }
             tracing::warn!(
                 target: "adapter_ews::sync",
                 error = %err,
@@ -1514,6 +1520,11 @@ async fn occurrence_start(
     let xml = client
         .post_soap_raw(get_occurrence_item(master_id, change_key, index))
         .await?;
+    // A busy server says nothing about this index (decision 270): never
+    // "past the series' end".
+    if let Some(busy) = busy_answer(&xml) {
+        return Err(busy);
+    }
     let items = crate::mapping::parse_get_calendar_items_response(&xml)?;
     // Without the OriginalStart, an exception moved more than the tolerance
     // away from its slot never matched: the delete aborted, and a move that had
@@ -1980,7 +1991,23 @@ pub async fn query_free_busy(
     }
     let envelope = get_user_availability(emails, range.start, range.end);
     let xml = client.post_soap_raw(envelope).await?;
+    // A busy server is no answer about anyone's day (decision 270): read as
+    // empty slots, every attendee would be free.
+    if let Some(busy) = busy_answer(&xml) {
+        return Err(busy);
+    }
     parse_get_user_availability(&xml, emails)
+}
+
+/// The error a raw answer (one taken without the fault check) is when its own
+/// response code says the server is busy — the error every other path reads
+/// as a busy provider (decision 270); `None` for anything else, which the
+/// caller tolerates as before.
+fn busy_answer(xml: &str) -> Option<EwsError> {
+    match crate::soap::check_for_fault(xml) {
+        Err(err) if crate::busy_detail(&err).is_some() => Some(err),
+        _ => None,
+    }
 }
 
 /// Resolve the current ChangeKey for `folder_id` via FindFolder. The
@@ -4534,6 +4561,63 @@ mod tests {
             .await
             .unwrap();
         del.assert_async().await;
+    }
+
+    /// Probes a busy server answered say nothing about the occurrence: the
+    /// delete says the provider is busy, never "could not confirm" (270).
+    #[tokio::test]
+    async fn busy_probes_make_the_occurrence_delete_busy() {
+        let mut server = Server::new_async().await;
+        let _master = mock_master(&mut server).await;
+        let _probes = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("m:GetItem".into()),
+                mockito::Matcher::Regex("InstanceIndex=".into()),
+            ]))
+            .with_status(200)
+            .with_body(read_fault("ErrorServerBusy"))
+            .create_async()
+            .await;
+        let target = "2026-07-20T09:00:00Z".parse().unwrap();
+        let err =
+            delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), target, false)
+                .await
+                .unwrap_err();
+        assert!(crate::busy_detail(&err).is_some(), "{err:?}");
+    }
+
+    /// An availability answer a busy server gave is no answer about anyone:
+    /// busy, never every attendee free (270).
+    #[tokio::test]
+    async fn a_busy_availability_answer_is_busy() {
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body><m:GetUserAvailabilityResponse><m:FreeBusyResponseArray>
+    <m:FreeBusyResponse>
+      <m:ResponseMessage ResponseClass="Error">
+        <m:MessageText>busy</m:MessageText>
+        <m:ResponseCode>ErrorServerBusy</m:ResponseCode>
+      </m:ResponseMessage>
+    </m:FreeBusyResponse>
+  </m:FreeBusyResponseArray></m:GetUserAvailabilityResponse></s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        let range = DateRange::new(
+            "2026-06-01T00:00:00Z".parse().unwrap(),
+            "2026-06-02T00:00:00Z".parse().unwrap(),
+        );
+        let err = query_free_busy(&client_for(&server), &["bob@example.com"], range)
+            .await
+            .unwrap_err();
+        assert!(crate::busy_detail(&err).is_some(), "{err:?}");
     }
 
     #[tokio::test]

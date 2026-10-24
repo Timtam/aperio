@@ -59,10 +59,12 @@ whether Todoist throttles inside `sync_status` is not measured. An update
 writes the fields, then moves the task to its section through the Sync API
 where the section changed, then closes or reopens it where the update's
 answer says the server holds another completion state than the one asked for
-(sent on every save, a throttled one made a title edit "only partly saved").
-Once the fields landed, a failed move or status call leaves the save in part
-(`TodoistError::PartlySaved`, 277); so does a failed close after a task
-created as completed. A busy server is no answer about a project's members:
+(before PR 7 it was sent on every save, so a throttled one made a plain title
+edit "only partly saved"). Once the fields landed, a failed move or status
+call leaves the save in part (`TodoistError::PartlySaved`, 277); so does a
+failed close after a task created as completed. A move that fails while a
+status change is still due names `cal_core::STATUS_STEP`, because the status
+was not sent either: the hosts then do not count a check-off as done. A busy server is no answer about a project's members:
 the share list fails instead of coming back empty.
 
 ## Testing

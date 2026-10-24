@@ -213,6 +213,11 @@ pub async fn update_task(client: &TodoistClient, task: &Task) -> TodoistResult<T
     // reorders the task within its section.
     let current_section = entry.section_id.clone().filter(|s| !s.is_empty());
     let desired_section = task.section_id.clone().filter(|s| !s.is_empty());
+    // The status request comes after the move: a move that fails while one is
+    // still due leaves the status unchanged too, and says so with the status
+    // step — read as any other, a check-off would count as done (277).
+    let completed = matches!(task.status, TaskStatus::Completed);
+    let status_due = entry.is_completed != completed;
     if current_section != desired_section {
         let args = match &desired_section {
             Some(section_id) => {
@@ -222,15 +227,19 @@ pub async fn update_task(client: &TodoistClient, task: &Task) -> TodoistResult<T
             // detaches it from any section while keeping it in the list.
             None => serde_json::json!({ "id": task.id, "project_id": task.list_id }),
         };
+        let step = if status_due {
+            cal_core::STATUS_STEP
+        } else {
+            "move"
+        };
         sync_command(client, "item_move", args)
             .await
-            .map_err(|err| err.after_landed("move"))?;
+            .map_err(|err| err.after_landed(step))?;
     }
     // The update body never carries status — drive it via the dedicated
     // endpoints, where the update's answer says the server holds another
     // completion state than the one asked for.
-    let completed = matches!(task.status, TaskStatus::Completed);
-    if entry.is_completed != completed {
+    if status_due {
         let status_path = if completed {
             format!("/tasks/{encoded}/close")
         } else {
@@ -2519,5 +2528,40 @@ mod tests {
             .await
             .unwrap_err();
         assert!(crate::to_core_error_for_tests(err).is_provider_busy());
+    }
+
+    /// A check-off whose section move met a busy Sync API never sent its
+    /// close: the save stands in part WITHOUT its status, so no host counts
+    /// the task as done and spawns its next turn (277).
+    #[tokio::test]
+    async fn a_busy_move_before_the_close_leaves_the_status_unsaved() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/tasks/T1")
+            .with_status(200)
+            .with_body(FIELDS_LANDED)
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/sync")
+            .with_status(429)
+            .create_async()
+            .await;
+        let close = server
+            .mock("POST", "/tasks/T1/close")
+            .expect(0)
+            .create_async()
+            .await;
+        let mut task = open_task();
+        task.status = TaskStatus::Completed;
+        task.section_id = Some("S2".into());
+        let err = crate::to_core_error_for_tests(
+            update_task(&fixture_client(&server.url()), &task)
+                .await
+                .unwrap_err(),
+        );
+        assert!(err.is_partly_saved(), "{err:?}");
+        assert!(!err.status_landed(), "{err:?}");
+        close.assert_async().await;
     }
 }
