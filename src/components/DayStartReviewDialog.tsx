@@ -242,10 +242,14 @@ export function DayStartReviewDialog({
   // It then stays on screen with Close instead (Toni, 2026-10-24), as any save
   // that landed in part does. Every action starts without one.
   const lastFailure = useRef<string | null>(null);
+  // Whether this opening said a failure: the empty-state guard below must not
+  // close over one before the effect shows it.
+  const [failureSaid, setFailureSaid] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const sayFailure = useCallback(
     (sentence: string) => {
       lastFailure.current = sentence;
+      setFailureSaid(true);
       announce(sentence);
     },
     [announce],
@@ -261,14 +265,17 @@ export function DayStartReviewDialog({
   // instead (the announce + focus repark below carry the transition).
   useEffect(() => {
     if (!isOpen) return;
-    if (totalRemaining > 0 || resolvedIds.size === 0) return;
+    if (totalRemaining > 0) return;
     if (hasReminders) return;
+    // Also where the action resolved no row and only its re-read took the
+    // last ones away — a write that failed but landed. Mirrors the phone.
     const failure = lastFailure.current;
     if (failure != null) {
       lastFailure.current = null;
       setNotice(`${failure} ${t('dialogs.dayStartReview.allHandled')}`);
       return;
     }
+    if (resolvedIds.size === 0) return;
     snoozeDayStartReview(4);
     announce(t('dialogs.dayStartReview.allHandled'));
     onClose();
@@ -301,12 +308,14 @@ export function DayStartReviewDialog({
       // The action that cleared the last rows failed in part: its sentence
       // first, in the same announcement — the live region keeps only the
       // last of two in a frame. The reminders keep the dialog up.
-      const failure = resolvedIds.size > 0 ? lastFailure.current : null;
+      const failure = lastFailure.current;
       lastFailure.current = null;
       announce(
-        resolvedIds.size > 0
-          ? `${failure == null ? '' : `${failure} `}${t('dialogs.dayStartReview.allHandled')}`
-          : t('dialogs.dayStartReview.hintRemindersOnly'),
+        failure != null
+          ? `${failure} ${t('dialogs.dayStartReview.allHandled')}`
+          : resolvedIds.size > 0
+            ? t('dialogs.dayStartReview.allHandled')
+            : t('dialogs.dayStartReview.hintRemindersOnly'),
       );
     }
     wasRemindersOnly.current = remindersOnly;
@@ -787,7 +796,10 @@ export function DayStartReviewDialog({
     !tasksLoading &&
     totalRemaining === 0 &&
     resolvedIds.size === 0 &&
-    !hasReminders
+    !hasReminders &&
+    // A failure whose re-read took the last rows away is shown by the
+    // effect above, not closed over here.
+    !failureSaid
   ) {
     onClose();
     return null;

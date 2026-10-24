@@ -198,6 +198,23 @@ describe('DayStartReviewDialog → a write that failed', () => {
     CASCADE.effectiveForList = () => ({ cascade: false, autoDate: false });
   });
 
+  it('keeps a failure on screen when only its re-read took the last row away', async () => {
+    // The completion landed, a later step did not, and set() reports no
+    // success: no row is resolved, the re-read no longer lists the task.
+    // The phone shows the same notice.
+    STATUS.set = async (_task, _status, say) => {
+      say?.(PARTLY);
+      TASKS.rows = [];
+      return false;
+    };
+    const onClose = vi.fn();
+    await open([slipped('t1', 'Einkaufen')], onClose);
+    fireEvent.click(await screen.findByRole('button', { name: 'Erledigt' }));
+    expect(await screen.findByText(`${PARTLY} Alle Einträge bearbeitet.`)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    STATUS.set = async () => true;
+  });
+
   it('closes as handled where the action that cleared the last row worked', async () => {
     const onClose = vi.fn();
     await open([slipped('t1', 'Einkaufen')], onClose);
