@@ -38,6 +38,7 @@ import { navigateNested } from '../navigation/navigationRef';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
 import { confirmDeleteTask } from '../state/taskDeleteScope';
+import { focusAfterFailedAction } from '../state/reviewFocus';
 import {
   effectiveForList,
   priorityScaleFor,
@@ -250,10 +251,11 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const titleRef = useRef<Text>(null);
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
-  // After a failed write: the row it worked on, and the row to take focus if
-  // the re-read takes that one away (part of the write landed). While the
-  // row stays, focus stays where the person left it, on the pressed button.
-  const focusIfGone = useRef<{ acted: string; fallback: string | null } | null>(null);
+  // After a failed write: the rows it worked on, and the row to take focus if
+  // the re-read takes them all away (the write landed for each). While one
+  // of them stays, focus stays where the person left it, on the pressed
+  // button.
+  const focusIfGone = useRef<{ acted: string[]; fallback: string | null } | null>(null);
   // The rows the last action worked on, for a failure to keep focus on.
   const actedIds = useRef<string[]>([]);
 
@@ -273,8 +275,10 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     const gone = focusIfGone.current;
     if (gone != null) {
       focusIfGone.current = null;
-      if (!orderedIds.includes(gone.acted) && gone.fallback != null) {
-        const tag = rowTags.current[gone.fallback];
+      // As on the desktop, a still-shown button keeps focus.
+      const next = focusAfterFailedAction(gone, orderedIds);
+      if (next != null) {
+        const tag = rowTags.current[next];
         if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
       }
       return;
@@ -299,13 +303,14 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
 
   /** A button's write that failed: said, never an unhandled rejection
    *  (decision 273), and what may have landed reads again. Focus stays on the
-   *  pressed button while its row shows, and goes to the row queued for after
-   *  it only where the re-read took the row away (part of the write landed). */
+   *  pressed button while a row it worked on shows, and goes to the row
+   *  queued for after it only where the re-read took every one of them away
+   *  (the write landed for each). */
   const failed = useCallback(
     (err: unknown) => {
-      const acted = actedIds.current[0];
+      const acted = actedIds.current;
       focusIfGone.current =
-        acted != null ? { acted, fallback: pendingFocusId.current } : null;
+        acted.length > 0 ? { acted, fallback: pendingFocusId.current } : null;
       pendingFocusId.current = null;
       invalidateData();
       announce(writeErrorMessage(err, t));
