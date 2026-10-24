@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import type { Task } from '../api/types';
 
@@ -236,6 +236,38 @@ describe('DayStartReviewDialog → a write that failed', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(/Alle Einträge bearbeitet/)).toBeNull();
     later.mockRestore();
+  });
+
+  it('closes once where a refresh empties an opening nobody acted in', async () => {
+    // Another device handled the only row. The host unmounts the dialog on
+    // close, as DialogHost does; each close pops the dialog stack and
+    // restores focus, so a second one would move it away again.
+    const closes = vi.fn();
+    TASKS.rows = [slipped('t1', 'Einkaufen')];
+    const { DayStartReviewDialog } = await import('./DayStartReviewDialog');
+    const { useState } = await import('react');
+    let refresh: () => void = () => {};
+    function Host() {
+      const [open, setOpen] = useState(true);
+      const [, setTick] = useState(0);
+      refresh = () => setTick((n) => n + 1);
+      return open ? (
+        <DayStartReviewDialog
+          isOpen
+          onClose={() => {
+            closes();
+            setOpen(false);
+          }}
+        />
+      ) : null;
+    }
+    render(<Host />);
+    await screen.findByRole('button', { name: 'Heute' });
+    TASKS.rows = [];
+    act(() => refresh());
+    await waitFor(() => expect(closes).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(closes).toHaveBeenCalledTimes(1);
   });
 
   it('closes as handled where the action that cleared the last row worked', async () => {

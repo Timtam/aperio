@@ -279,8 +279,9 @@ export function DayStartReviewDialog({
       return;
     }
     if (resolvedIds.size === 0) {
-      // Emptied by a read, not by this opening's actions: closed quietly, as
-      // the empty-state guard below does where no failure was said.
+      // Emptied by a read, not by this opening's actions, or opened with
+      // nothing to show: closed quietly, here alone (the empty-state guard
+      // below only draws nothing).
       if (!tasksLoading) onClose();
       return;
     }
@@ -790,8 +791,10 @@ export function DayStartReviewDialog({
   }, [t, announce, onClose]);
 
   // Defensive empty-state: caller opened us with nothing to show
-  // (race between the checker and a refetch). Close quietly without
-  // snoozing — there's no reason to suppress a real future trigger.
+  // (race between the checker and a refetch). Nothing is drawn, and the close
+  // effect above closes quietly without snoozing — there's no reason to
+  // suppress a real future trigger. Closing here, during render, updated the
+  // dialog host while this rendered, and the effect closed a second time.
   // Reminders are a valid reason to stay open even with no actionable
   // rows, so a reminders-only review isn't dismissed here.
   //
@@ -808,10 +811,9 @@ export function DayStartReviewDialog({
     resolvedIds.size === 0 &&
     !hasReminders &&
     // A failure whose re-read took the last rows away is shown by the
-    // effect above, not closed over here.
+    // effect above, not hidden here.
     !failureSaid
   ) {
-    onClose();
     return null;
   }
 
