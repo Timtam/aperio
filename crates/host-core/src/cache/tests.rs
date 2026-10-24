@@ -2863,6 +2863,49 @@ fn a_forced_busy_round_shows_at_once() {
     assert_eq!(store.refresh_errors().unwrap().len(), 1);
 }
 
+/// A read claimed before Aperio's own write whose busy answer comes after a
+/// newer read's never lifts the newer pause, nor forgets what it noted
+/// (decision 271).
+#[test]
+fn an_older_reads_busy_answer_keeps_the_newer_pause() {
+    let store = setup();
+    let week = DateRange::new(
+        chrono::Utc.with_ymd_and_hms(2026, 6, 15, 0, 0, 0).unwrap(),
+        chrono::Utc.with_ymd_and_hms(2026, 6, 22, 0, 0, 0).unwrap(),
+    );
+    // Aperio's own write moves the calendar to generation 1.
+    store.invalidate(ACC, SyncScope::Events, "cal-1").unwrap();
+    let now = store.refresh_generation(ACC, SyncScope::Events, "cal-1");
+    assert!(now > 0);
+    // The newer read, claimed at it, meets the busy provider for a week.
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            "cal-1",
+            &busy(),
+            Attempt::Read { generation: now },
+        )
+        .unwrap();
+    store.note_uncovered_busy(ACC, SyncScope::Events, "cal-1", now, week);
+    assert!(store.busy_paused(ACC, SyncScope::Events, "cal-1"));
+    assert!(!store.ask_uncovered(ACC, SyncScope::Events, "cal-1", week));
+    // The older read's busy answer comes last.
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            "cal-1",
+            &busy(),
+            Attempt::Read {
+                generation: now - 1,
+            },
+        )
+        .unwrap();
+    assert!(store.busy_paused(ACC, SyncScope::Events, "cal-1"));
+    assert!(!store.ask_uncovered(ACC, SyncScope::Events, "cal-1", week));
+}
+
 /// The busy pause ends on a success, on another kind of failure and on
 /// Aperio's own write, and outlives a restart.
 #[test]

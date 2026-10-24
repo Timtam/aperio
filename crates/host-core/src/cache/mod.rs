@@ -1869,15 +1869,26 @@ impl CacheStore {
                 .expect("busy generations poisoned");
             let mut asks = self.uncovered_asks.lock().expect("uncovered asks poisoned");
             if busy {
-                generations.insert(key.clone(), attempt.generation());
-                // A new pause starts with nothing asked. So does one this
-                // process has no note of: a pause stored before a restart
-                // outlives it, and its never-loaded ranges are asked once too.
-                let noted = asks
+                // An older attempt's busy answer never moves a newer pause
+                // back: two reads of a container can be in flight across one
+                // of Aperio's writes, and their answers come in either order.
+                // The pause, and what it noted, stay at the newest generation
+                // an attempt was claimed at (decision 271).
+                let newer = generations
                     .get(&key)
-                    .is_some_and(|(at, _)| *at == attempt.generation());
-                if !pausing_again || !noted {
-                    asks.insert(key, (attempt.generation(), Vec::new()));
+                    .is_some_and(|stored| *stored > attempt.generation());
+                if !newer {
+                    generations.insert(key.clone(), attempt.generation());
+                    // A new pause starts with nothing asked. So does one this
+                    // process has no note of: a pause stored before a restart
+                    // outlives it, and its never-loaded ranges are asked once
+                    // too.
+                    let noted = asks
+                        .get(&key)
+                        .is_some_and(|(at, _)| *at == attempt.generation());
+                    if !pausing_again || !noted {
+                        asks.insert(key, (attempt.generation(), Vec::new()));
+                    }
                 }
             } else {
                 generations.remove(&key);
