@@ -525,7 +525,9 @@ Siehe DESIGN §4.2.
         Antwort verloren ging, das aber angekommen ist, gibt den Fokus an die
         nächste Zeile, sobald die Aktualisierung die Zeile nimmt (15 s
         Beobachtung; die nächste Aktion beendet sie, Einklappen zählt nicht
-        als Löschen; dasselbe für eine Unteraufgabe im Editor); räumt im
+        als Löschen; dasselbe für eine Unteraufgabe im Editor; ein
+        gescheitertes Abhaken oder Duplizieren spricht die Zeile nicht über
+        den Fehlersatz); räumt im
         Tagesstart die letzte Aktion die letzten Zeilen ab und stand nur zum
         Teil, bleibt der Satz mit „Alle Einträge bearbeitet“ und Schließen
         stehen; die Fehlerzeile eines
