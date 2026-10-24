@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { meetingFailureSentence } from '@aperio/shared';
+import { eventWriteLeftover, meetingFailureSentence } from '@aperio/shared';
 
 import { FocusableNote } from '../a11y/FocusableNote';
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -155,6 +155,10 @@ export function MeetingControls({
       if (saved) onEventChanged(saved);
       announce(t('conferencing.meetingRemoved'));
     } catch (err) {
+      // Removed in part: the meeting is gone, the event still carries its
+      // link (decision 277). Removing it again would say it was removed and
+      // leave the link, so it is no longer offered.
+      if (eventWriteLeftover(err)) setFound(null);
       const sentence = meetingFailureSentence(err, t);
       setError(sentence);
       announce(sentence);

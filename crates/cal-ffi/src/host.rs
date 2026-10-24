@@ -424,7 +424,7 @@ fn append_account_event(
     true
 }
 
-use crate::{from_json, map_store_err, to_json, StoreError};
+use crate::{from_json, map_store_err, store_after_landed, to_json, StoreError};
 
 /// Errors the foreign keychain implementation can raise. Mirrors
 /// [`sync_engine::SecretError`] so the `NotFound` distinction the
@@ -8430,6 +8430,9 @@ impl Host {
                         ?cleanup,
                         "could not roll back a meeting after the event failed to save"
                     );
+                    // The meeting stands without the event carrying it: never
+                    // "nothing was changed" (decision 277).
+                    return Err(store_after_landed(err, "event"));
                 }
                 return Err(err);
             }
@@ -8504,7 +8507,12 @@ impl Host {
             .unbind(&req.event_id)
             .map_err(meetings_err)?;
 
-        let Some(event) = self.read_event_for_meeting(&req.event_id, &req.calendar_id)? else {
+        // The meeting is gone by then: what fails now is a later step, never
+        // "nothing was changed" (decision 277). Mirrors the desktop.
+        let Some(event) = self
+            .read_event_for_meeting(&req.event_id, &req.calendar_id)
+            .map_err(|err| store_after_landed(err, "event"))?
+        else {
             return Ok("null".to_string());
         };
         let mut updated = event.clone();
@@ -8520,7 +8528,9 @@ impl Host {
         // announces, it has to announce that the link is gone too. Otherwise
         // the attendees keep a join URL that now leads nowhere.
         updated.send_invitations = can_invite && !attendee_addresses(&updated.attendees).is_empty();
-        let saved = self.save_event_for_meeting(updated)?;
+        let saved = self
+            .save_event_for_meeting(updated)
+            .map_err(|err| store_after_landed(err, "event"))?;
         to_json(&saved)
     }
 
