@@ -23,7 +23,6 @@ import {
   DONE_GROUP_ID,
   effortSizeModifier,
   effortSuffix,
-  eventWriteLeftover,
   prioritySuffix,
   statusI18nKey,
   statusMarker,
@@ -215,6 +214,9 @@ export default function TasksScreen({
   const headerTags = useRef<Record<string, number | null>>({});
   const emptyRef = useRef<Text>(null);
   const pendingFocusId = useRef<string | null>(null);
+  // Where focus goes when the pending row no longer shows after the refetch:
+  // a check-off that landed in part may or may not have moved it.
+  const pendingFocusFallback = useRef<string | null>(null);
   const pendingEmptyFocus = useRef(false);
 
   // Long-press action menu — the sighted twin of the rows' SR custom actions
@@ -291,9 +293,16 @@ export default function TasksScreen({
   useEffect(() => {
     if (pendingFocusId.current != null) {
       const id = pendingFocusId.current;
+      const fallback = pendingFocusFallback.current;
       pendingFocusId.current = null;
+      pendingFocusFallback.current = null;
       pendingEmptyFocus.current = false;
-      const tag = rowTags.current[id] ?? headerTags.current[id];
+      const tag =
+        rowTags.current[id] ??
+        headerTags.current[id] ??
+        (fallback != null
+          ? (rowTags.current[fallback] ?? headerTags.current[fallback])
+          : null);
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
       return;
     }
@@ -391,13 +400,12 @@ export default function TasksScreen({
         announce(statusAnnounce(t, next, task.title));
       } catch (err) {
         // A check-off that landed in part — the task, not its parent — is
-        // real: the rows read again, as on the desktop (decision 277), and
-        // focus lands where a check-off that worked puts it. One that changed
-        // nothing keeps focus on the row.
-        pendingFocusId.current =
-          eventWriteLeftover(err) && task.status !== 'completed'
-            ? (focusTargetAfterRemoving(entries, task.id) ?? DONE_GROUP_ID)
-            : task.id;
+        // real: the rows read again, as on the desktop (decision 277). Focus
+        // stays on the row where it still shows, and goes where a check-off
+        // that worked puts it where the row moved into the Done group.
+        pendingFocusId.current = task.id;
+        pendingFocusFallback.current =
+          focusTargetAfterRemoving(entries, task.id) ?? DONE_GROUP_ID;
         invalidateData();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }

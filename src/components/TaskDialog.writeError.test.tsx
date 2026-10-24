@@ -200,7 +200,7 @@ describe('TaskDialog → a save that failed', () => {
     create();
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe(
-      '„Einkaufen“ wurde angelegt, die Unteraufgabe „Brot“ aber nicht: der Anbieter ist gerade ausgelastet. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt sie mit an.',
+      '„Einkaufen“ wurde angelegt, die Unteraufgabe „Brot“ aber nicht: der Anbieter ist gerade ausgelastet. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an.',
     );
     expect(onClose).not.toHaveBeenCalled();
     // The editor edits the task that stands; the draft that was made is

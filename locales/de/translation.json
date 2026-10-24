@@ -1896,8 +1896,8 @@
         "rowLabel": "{{title}}, {{state}}{{priority}}",
         "removeAria": "Unteraufgabe „{{title}}\" entfernen",
         "listNoSubtasks": "Die gewählte Liste unterstützt keine Unteraufgaben. Entferne die Entwürfe oder wähle eine andere Liste.",
-        "draftsFailed_one": "„{{title}}“ wurde angelegt, die Unteraufgabe {{titles}} aber nicht: {{reason}}. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt sie mit an.",
-        "draftsFailed_other": "„{{title}}“ wurde angelegt, die Unteraufgaben {{titles}} aber nicht: {{reason}}. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt sie mit an.",
+        "draftsFailed_one": "„{{title}}“ wurde angelegt, die Unteraufgabe {{titles}} aber nicht: {{reason}}. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an.",
+        "draftsFailed_other": "„{{title}}“ wurde angelegt, die Unteraufgaben {{titles}} aber nicht: {{reason}}. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt diese Unteraufgaben mit an.",
         "draftsLeftHeading": "Noch nicht angelegte Unteraufgaben",
         "draftsNotCreated_one": "Die Unteraufgabe {{titles}} wurde nicht angelegt.",
         "draftsNotCreated_other": "Diese {{count}} Unteraufgaben wurden nicht angelegt: {{titles}}."

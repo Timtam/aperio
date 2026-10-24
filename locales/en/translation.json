@@ -1896,7 +1896,7 @@
         "rowLabel": "{{title}}, {{state}}{{priority}}",
         "removeAria": "Remove subtask \"{{title}}\"",
         "listNoSubtasks": "The selected list doesn't support subtasks. Remove the drafts or pick another list.",
-        "draftsFailed_one": "\"{{title}}\" was created, but its subtask {{titles}} was not: {{reason}}. You are now editing the created task; saving also creates it.",
+        "draftsFailed_one": "\"{{title}}\" was created, but its subtask {{titles}} was not: {{reason}}. You are now editing the created task; saving also creates the subtask.",
         "draftsFailed_other": "\"{{title}}\" was created, but its subtasks {{titles}} were not: {{reason}}. You are now editing the created task; saving also creates them.",
         "draftsLeftHeading": "Subtasks not yet created",
         "draftsNotCreated_one": "The subtask {{titles}} was not created.",
