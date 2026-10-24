@@ -1475,8 +1475,10 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     (`afterLanded`, `writeAfterLanded`, `writeAll`), an denselben Zeilen von
     `writeOutcome.json` festgemacht. Ein Editor, dessen Speichern zum Teil
     steht, zeigt den Satz in einem Hinweis, der sich nur schließen lässt
-    (`CloseOnlyNotice`), und lädt neu; die Entwürfe von Unteraufgaben, die
-    nicht folgten, bleiben am angelegten Elternteil. Ein Verschieben, dessen
+    (`CloseOnlyNotice`), und lädt neu; scheitern Entwürfe von
+    Unteraufgaben, bearbeitet der Editor die angelegte Aufgabe weiter, und
+    Speichern schreibt ihre Felder und legt die übrigen Entwürfe an (Toni,
+    2026-10-24). Ein Verschieben, dessen
     Original der Anbieter wegen Auslastung nicht löschen konnte, steht und
     nennt die Liste oder den Kalender des Originals (`original_left_in`).
   - Jede Oberfläche liest Fehler nur über die geteilten Helfer (273):

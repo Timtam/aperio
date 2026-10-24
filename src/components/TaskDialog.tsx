@@ -183,7 +183,7 @@ interface FormState {
 export function TaskDialog({
   isOpen,
   onClose,
-  task,
+  task: taskProp,
   defaultListId,
   defaultDate,
   defaultTitle,
@@ -198,6 +198,15 @@ export function TaskDialog({
   const { showHiddenTaskListTargets, timeStepMinutes } = useViewState();
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
+  // The task a save created whose staged subtasks did not all follow: it
+  // stands, so the editor edits it from then on — its fields go out as an
+  // update, and the next Save makes the drafts still left under it (273;
+  // Toni, 2026-10-24). Creating it again would make two.
+  const [createdTask, setCreatedTask] = useState<Task | null>(null);
+  const task = taskProp ?? createdTask;
+  useEffect(() => {
+    if (!isOpen) setCreatedTask(null);
+  }, [isOpen]);
   // Shared status actions — they own the parent/subtask cascade
   // (taskCascade.ts) and the SR announce. Used both for the listbox
   // Space-toggle and the per-row context menu.
@@ -425,10 +434,6 @@ export function TaskDialog({
   // parent has no id yet, so children can't be written until it exists —
   // we collect titles here and create them right after the parent on Save.
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
-  // The task a save created whose staged subtasks did not all follow: it
-  // stands, so the next Save creates only the drafts still left under it
-  // (273).
-  const createdParentRef = useRef<Task | null>(null);
   // What the editor says in place of the form once a save landed in part:
   // saving again would write twice what stands (273, 277).
   const { notice, showNotice } = useCloseOnlyNotice();
@@ -1271,6 +1276,65 @@ export function TaskDialog({
             )
           : undefined) ?? scheduled_date;
 
+      // The subtasks staged on the form, made under `parent` once it stands.
+      // They inherit its section so they group with it, and default to
+      // open/medium like the inline add — but a parent in a terminal state
+      // passes it down (cascade-down semantics: open children under a
+      // completed parent would derive the parent right back to open on the
+      // next recompute). One that fails leaves the editor on the parent, as
+      // its edit, with the drafts not yet made (273); a subtask that stands
+      // without a step of its own is made. `true` when all were made.
+      const makeDrafts = async (parent: Task): Promise<boolean> => {
+        const draftStatus =
+          parent.status === 'completed' || parent.status === 'cancelled'
+            ? parent.status
+            : 'open';
+        const left = [...draftSubtasks];
+        while (left.length > 0) {
+          try {
+            await apiCreateTask({
+              list_id: parent.list_id,
+              title: left[0],
+              description: null,
+              status: draftStatus,
+              priority: 'medium',
+              effort: 'medium',
+              scheduled_date: null,
+              scheduled_time: null,
+              deadline_date: null,
+              deadline_time: null,
+              deadline_reminder_days: null,
+              recurrence: null,
+              parent_id: parent.id,
+              section_id: parent.section_id,
+              color_label: null,
+              reminders: [],
+              assignees: [],
+              sound: null,
+            });
+          } catch (err) {
+            invalidateData();
+            if (eventWriteLeftover(err)) left.shift();
+            if (left.length === 0) {
+              showNotice(writeErrorMessage(err, t));
+              return false;
+            }
+            setCreatedTask(parent);
+            setDraftSubtasks(left);
+            setError(
+              t('dialogs.task.subtasks.draftsFailed', {
+                title: parent.title,
+                count: left.length,
+                reason: eventWriteFailureReason(err, t),
+              }),
+            );
+            return false;
+          }
+          left.shift();
+        }
+        return true;
+      };
+
       setSubmitting(true);
       try {
         if (isEdit && task) {
@@ -1399,6 +1463,9 @@ export function TaskDialog({
               applyAncestorWrites(cascadeWrites, snapshot),
             );
           }
+          // A task this editor created whose subtasks did not all follow:
+          // the drafts left are made under it now.
+          if (draftSubtasks.length > 0 && !(await makeDrafts(saved))) return;
           const kept =
             form.listId !== task.list_id
               ? originalKeptSentence(
@@ -1414,9 +1481,7 @@ export function TaskDialog({
           }
           announce(t('dialogs.task.updated', { title: trimmedTitle }));
         } else {
-          // A parent an earlier save created stands: only the drafts left
-          // are created under it (273).
-          const created = createdParentRef.current ?? await apiCreateTask({
+          const created = await apiCreateTask({
             list_id: form.listId,
             title: trimmedTitle,
             description: form.description.trim() || null,
@@ -1443,64 +1508,7 @@ export function TaskDialog({
           });
           // Remember for next time — only on create, not edit.
           writeLastUsedTaskList(created.list_id);
-          // Create the subtasks staged on the form now that the parent
-          // has an id. They inherit the parent's section so they group
-          // with it, and default to open/medium like the inline add — but a
-          // parent CREATED in a terminal state passes it down (cascade-down
-          // semantics: open children under a completed parent would derive
-          // the parent right back to open on the next recompute).
-          if (createSupportsSubtasks) {
-            const draftStatus =
-              created.status === 'completed' || created.status === 'cancelled'
-                ? created.status
-                : 'open';
-            const left = [...draftSubtasks];
-            while (left.length > 0) {
-              try {
-                await apiCreateTask({
-                  list_id: created.list_id,
-                  title: left[0],
-                  description: null,
-                  status: draftStatus,
-                  priority: 'medium',
-                  effort: 'medium',
-                  scheduled_date: null,
-                  scheduled_time: null,
-                  deadline_date: null,
-                  deadline_time: null,
-                  deadline_reminder_days: null,
-                  recurrence: null,
-                  parent_id: created.id,
-                  section_id: created.section_id,
-                  color_label: null,
-                  reminders: [],
-                  assignees: [],
-                  sound: null,
-                });
-              } catch (err) {
-                // The parent stands. The editor stays on it with the drafts
-                // not yet made, and the next Save creates only those (273);
-                // a subtask that stands without a step of its own is made.
-                invalidateData();
-                if (eventWriteLeftover(err)) left.shift();
-                if (left.length === 0) {
-                  showNotice(writeErrorMessage(err, t));
-                  return;
-                }
-                createdParentRef.current = created;
-                setDraftSubtasks(left);
-                setError(
-                  t('dialogs.task.subtasks.draftsFailed', {
-                    title: created.title,
-                    count: left.length,
-                    reason: eventWriteFailureReason(err, t),
-                  }),
-                );
-                return;
-              }
-              left.shift();
-            }
-          }
+          if (createSupportsSubtasks && !(await makeDrafts(created))) return;
           announce(t('dialogs.task.created', { title: trimmedTitle }));
         }
         onClose();
@@ -1511,7 +1519,8 @@ export function TaskDialog({
         // subtasks were never made, and are named so nothing goes unsaid.
         if (eventWriteLeftover(err)) {
           invalidateData();
-          const unmade = isEdit ? [] : draftSubtasks;
+          // Drafts exist only for a task this editor creates, or created.
+          const unmade = draftSubtasks;
           const sentence = writeErrorMessage(err, t);
           showNotice(
             unmade.length > 0
@@ -2333,10 +2342,14 @@ export function TaskDialog({
           </fieldset>
         )}
 
-        {!isEdit && (createSupportsSubtasks || draftSubtasks.length > 0) && (
+        {(isEdit
+          ? draftSubtasks.length > 0
+          : createSupportsSubtasks || draftSubtasks.length > 0) && (
           <fieldset className="form__field form__field--subtasks">
             <legend className="form__label">
-              {t('dialogs.task.subtasks.heading')}
+              {isEdit
+                ? t('dialogs.task.subtasks.draftsLeftHeading')
+                : t('dialogs.task.subtasks.heading')}
             </legend>
             {/* Create mode: subtasks are staged as titles here and
                 written right after the parent on Save (the parent has
@@ -2349,7 +2362,11 @@ export function TaskDialog({
             ) : (
               <ul
                 className="subtasks__list"
-                aria-label={t('dialogs.task.subtasks.listAria')}
+                aria-label={
+                  isEdit
+                    ? t('dialogs.task.subtasks.draftsLeftHeading')
+                    : t('dialogs.task.subtasks.listAria')
+                }
               >
                 {draftSubtasks.map((title, i) => (
                   <li
@@ -2373,7 +2390,7 @@ export function TaskDialog({
                 ))}
               </ul>
             )}
-            {createSupportsSubtasks ? (
+            {isEdit ? null : createSupportsSubtasks ? (
               <div className="subtasks__add">
                 <input
                   type="text"

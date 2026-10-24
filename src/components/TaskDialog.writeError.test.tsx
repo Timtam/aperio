@@ -104,6 +104,10 @@ const created = (id: string, title: string, parent: string | null = null): Task 
     list_id: 'L1',
     title,
     status: 'open',
+    priority: 'medium',
+    effort: 'medium',
+    assignees: [],
+    reminders: [],
     parent_id: parent,
     section_id: null,
   }) as unknown as Task;
@@ -167,12 +171,15 @@ describe('TaskDialog → a save that failed', () => {
     expect(createCalls()).toHaveLength(1);
   });
 
-  it('stays on a created task whose subtasks did not all follow, and saves only those', async () => {
+  it('edits a created task whose subtasks did not all follow, and saves its changes with them', async () => {
     answers.create_task = [
       () => Promise.resolve(created('t-1', 'Einkaufen')),
       () => Promise.resolve(created('t-2', 'Milch', 't-1')),
       () => Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' }),
       () => Promise.resolve(created('t-3', 'Brot', 't-1')),
+    ];
+    answers.update_task = [
+      (args) => Promise.resolve((args as { task: Task }).task),
     ];
     const onClose = vi.fn();
     await openNew(onClose);
@@ -181,16 +188,27 @@ describe('TaskDialog → a save that failed', () => {
     create();
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe(
-      '„Einkaufen“ wurde angelegt, die Unteraufgabe aber nicht: der Anbieter ist gerade ausgelastet. Speichern legt nur sie an.',
+      '„Einkaufen“ wurde angelegt, die Unteraufgabe aber nicht: der Anbieter ist gerade ausgelastet. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an.',
     );
     expect(onClose).not.toHaveBeenCalled();
-    // The draft that was made is gone from the form; the one that was not
-    // stays.
+    // The editor edits the task that stands; the draft that was made is
+    // gone, the one that was not stays, under a heading of its own.
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Anlegen' })).toBeNull();
     expect(screen.queryByText('Milch')).toBeNull();
+    expect(screen.getByRole('list', { name: 'Noch nicht angelegte Unteraufgaben' })).toBeTruthy();
     expect(screen.getByText('Brot')).toBeTruthy();
 
-    create();
+    // A change to the task after that is saved, not dropped.
+    fireEvent.change(screen.getByRole('combobox', { name: /^titel$/i }), {
+      target: { value: 'Einkaufen Samstag' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    const updates = invokeMock.mock.calls
+      .filter((call) => call[0] === 'update_task')
+      .map((call) => (call[1] as { task: Task }).task);
+    expect(updates.map((u) => [u.id, u.title])).toEqual([['t-1', 'Einkaufen Samstag']]);
     // The parent was not created again: only the draft left, under it.
     const sent = createCalls().map(
       (call) => (call[1] as { request: { title: string; parent_id: string | null } }).request,
@@ -201,6 +219,7 @@ describe('TaskDialog → a save that failed', () => {
       ['Brot', 't-1'],
       ['Brot', 't-1'],
     ]);
+    expect(announce).toHaveBeenCalledWith(expect.stringContaining('Einkaufen Samstag'));
   });
 });
 

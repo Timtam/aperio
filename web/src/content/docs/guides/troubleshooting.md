@@ -365,8 +365,9 @@ When the provider does not take a new contact's photo, the contact stands
 without it, and Aperio says so.
 
 When you create a task with subtasks and one of the subtasks fails, the
-editor stays on the created task: the subtasks not yet created stay in its
-list, and saving creates only those.
+editor now edits the created task: the subtasks not yet created stay listed
+under their own heading, and saving keeps your changes to the task and
+creates them.
 
 What you can do: open the item again later and add what is missing.
 

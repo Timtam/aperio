@@ -250,7 +250,7 @@ export default function TaskEditorModal({
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const {
-    taskId,
+    taskId: taskIdParam,
     listId,
     parentId,
     initialTitle,
@@ -275,7 +275,13 @@ export default function TaskEditorModal({
     }),
   );
   const [loaded, setLoaded] = useState<Task | null>(null);
-  const [loading, setLoading] = useState(taskId != null);
+  // The task a save created whose staged subtasks did not all follow: it
+  // stands, so the editor edits it from then on — its fields go out as an
+  // update, and the next Save makes the drafts still left under it (273;
+  // Toni, 2026-10-24). Creating it again would make two. Mirrors the desktop.
+  const [createdTask, setCreatedTask] = useState<Task | null>(null);
+  const taskId = taskIdParam ?? createdTask?.id;
+  const [loading, setLoading] = useState(taskIdParam != null);
   const [error, setError] = useState<string | null>(null);
   // The selected list's assignable member pool + the connected account's own id
   // ("me"), for the assignee picker. Both empty/null for local lists and
@@ -293,10 +299,6 @@ export default function TaskEditorModal({
   // parent on Save (the parent has no id to reference yet). Edit mode manages
   // real subtasks live via SubtaskSection instead.
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
-  // The task a save created whose staged subtasks did not all follow: it
-  // stands, so the next Save creates only the drafts still left under it
-  // (273). Mirrors the desktop.
-  const createdParentRef = useRef<Task | null>(null);
   // What the editor says in place of the form once a save landed in part:
   // saving again would write twice what stands (273, 277).
   const { notice, showNotice } = useCloseOnlyNotice();
@@ -363,13 +365,14 @@ export default function TaskEditorModal({
     return () => invalidateData();
   }, [invalidateData]);
 
-  // Edit mode: load the task and prefill. Create mode starts blank.
+  // Edit mode: load the task and prefill. Create mode starts blank, and a task
+  // it created is already loaded: read again, it would reset what was typed.
   useEffect(() => {
-    if (taskId == null) return;
+    if (taskIdParam == null) return;
     let cancelled = false;
     void (async () => {
       try {
-        const task = await getTaskById(taskId, listId);
+        const task = await getTaskById(taskIdParam, listId);
         if (cancelled) return;
         if (task == null) {
           setError(t('mobile.taskMissing'));
@@ -387,7 +390,7 @@ export default function TaskEditorModal({
     return () => {
       cancelled = true;
     };
-  }, [taskId, listId, t]);
+  }, [taskIdParam, listId, t]);
 
   // Move SR focus into the title field once content is ready (a modal must
   // drive focus explicitly or TalkBack lingers on the trigger row).
@@ -396,9 +399,11 @@ export default function TaskEditorModal({
     const tag = findNodeHandle(titleRef.current);
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
     // New task: also open the keyboard on the title so the user can start
-    // typing immediately (the desktop autofocuses the title).
-    if (taskId == null) titleRef.current?.focus();
-  }, [loading, taskId]);
+    // typing immediately (the desktop autofocuses the title). Keyed on the
+    // route's task: turning into the edit of a task it created must not pull
+    // focus away from what the editor says about it.
+    if (taskIdParam == null) titleRef.current?.focus();
+  }, [loading, taskIdParam]);
 
   // Make sure the selected list's sections are loaded so the section picker can
   // offer them (lazy + sticky in the store).
@@ -748,8 +753,12 @@ export default function TaskEditorModal({
     taskId != null &&
     loaded != null &&
     (loadedList?.task_capabilities?.subtasks ?? true);
+  // The drafts a created task's subtasks left stay in its edit, without an
+  // input of their own: the edit's subtask manager adds directly.
   const showDraftSubtasks =
-    taskId == null && (caps?.subtasks ?? true) && parentId == null;
+    (taskId == null || draftSubtasks.length > 0) &&
+    (caps?.subtasks ?? true) &&
+    parentId == null;
 
   const addDraftSubtask = useCallback(() => {
     const trimmed = newSubtaskTitle.trim();
@@ -890,13 +899,74 @@ export default function TaskEditorModal({
     const description = form.description.trim() || null;
     setError(null);
     // The staged subtasks not made yet, as the save goes: what a leftover
-    // names as never created.
-    let unmade: string[] = taskId == null ? [...draftSubtasks] : [];
+    // names as never created. Drafts exist only for a task this editor
+    // creates, or created.
+    let unmade: string[] = [...draftSubtasks];
+    // The staged subtasks, made under `parent` once it stands (they default
+    // to open/medium and inherit its section, matching the edit-mode add),
+    // then the parent's derived status recomputed. A parent in a terminal
+    // state passes it down (cascade-down semantics) — otherwise the
+    // recompute would derive a completed parent right back to open from its
+    // open children. One that fails leaves the editor on the parent, as its
+    // edit, with the drafts not yet made (273); a subtask that stands without
+    // a step of its own is made. `true` when all were made.
+    const makeDrafts = async (parent: Task): Promise<boolean> => {
+      const draftStatus =
+        parent.status === 'completed' || parent.status === 'cancelled'
+          ? parent.status
+          : 'open';
+      const left = [...draftSubtasks];
+      unmade = left;
+      while (left.length > 0) {
+        try {
+          await createTask({
+            list_id: parent.list_id,
+            title: left[0],
+            description: null,
+            status: draftStatus,
+            priority: 'medium',
+            effort: 'medium',
+            scheduled_date: null,
+            scheduled_time: null,
+            deadline_date: null,
+            deadline_time: null,
+            deadline_reminder_days: null,
+            recurrence: null,
+            parent_id: parent.id,
+            section_id: parent.section_id,
+            color_label: null,
+            reminders: [],
+            assignees: [],
+            sound: null,
+          });
+        } catch (err) {
+          if (eventWriteLeftover(err)) left.shift();
+          if (left.length === 0) {
+            showNotice(writeErrorMessage(err, t));
+            return false;
+          }
+          setCreatedTask(parent);
+          setLoaded(parent);
+          setDraftSubtasks(left);
+          const message = t('dialogs.task.subtasks.draftsFailed', {
+            title: parent.title,
+            count: left.length,
+            reason: eventWriteFailureReason(err, t),
+          });
+          setError(message);
+          AccessibilityInfo.announceForAccessibility(message);
+          return false;
+        }
+        left.shift();
+      }
+      await writeAfterLanded('cascade', async () =>
+        recomputeAncestors(parent.id, await getTasks(parent.list_id)),
+      );
+      return true;
+    };
     try {
       if (taskId == null) {
-        // A parent an earlier save created stands: only the drafts left are
-        // created under it (273).
-        const created = createdParentRef.current ?? await createTask({
+        const created = await createTask({
           list_id: form.listId,
           title,
           description,
@@ -931,60 +1001,12 @@ export default function TaskEditorModal({
         // Remember the chosen list so the next quick-add / new-task defaults to
         // it (a top-level create; a subtask's list is locked to its parent's).
         if (parentId == null) await writeLastUsedTaskList(created.list_id);
-        if (draftSubtasks.length > 0 && (caps?.subtasks ?? true)) {
-          const draftStatus =
-            created.status === 'completed' || created.status === 'cancelled'
-              ? created.status
-              : 'open';
-          const left = [...draftSubtasks];
-          unmade = left;
-          while (left.length > 0) {
-            try {
-              await createTask({
-                list_id: created.list_id,
-                title: left[0],
-                description: null,
-                status: draftStatus,
-                priority: 'medium',
-                effort: 'medium',
-                scheduled_date: null,
-                scheduled_time: null,
-                deadline_date: null,
-                deadline_time: null,
-                deadline_reminder_days: null,
-                recurrence: null,
-                parent_id: created.id,
-                section_id: created.section_id,
-                color_label: null,
-                reminders: [],
-                assignees: [],
-                sound: null,
-              });
-            } catch (err) {
-              // The parent stands. The editor stays on it with the drafts not
-              // yet made, and the next Save creates only those (273); a
-              // subtask that stands without a step of its own is made.
-              if (eventWriteLeftover(err)) left.shift();
-              if (left.length === 0) {
-                showNotice(writeErrorMessage(err, t));
-                return;
-              }
-              createdParentRef.current = created;
-              setDraftSubtasks(left);
-              const message = t('dialogs.task.subtasks.draftsFailed', {
-                title: created.title,
-                count: left.length,
-                reason: eventWriteFailureReason(err, t),
-              });
-              setError(message);
-              AccessibilityInfo.announceForAccessibility(message);
-              return;
-            }
-            left.shift();
-          }
-          await writeAfterLanded('cascade', async () =>
-            recomputeAncestors(created.id, await getTasks(created.list_id)),
-          );
+        if (
+          draftSubtasks.length > 0 &&
+          (caps?.subtasks ?? true) &&
+          !(await makeDrafts(created))
+        ) {
+          return;
         }
         // Adding a subtask can change the parent's derived status (e.g. an open
         // child re-opens a completed parent). Recompute ancestors against the
@@ -1112,6 +1134,9 @@ export default function TaskEditorModal({
             ),
           );
         }
+        // A task this editor created whose subtasks did not all follow: the
+        // drafts left are made under it now.
+        if (draftSubtasks.length > 0 && !(await makeDrafts(saved))) return;
         const kept = listChanged
           ? originalKeptSentence(
               movedRows,
@@ -1483,7 +1508,9 @@ export default function TaskEditorModal({
       {showDraftSubtasks && (
         <View style={styles.field}>
           <Text style={styles.legend} accessibilityRole="header">
-            {t('dialogs.task.subtasks.heading')}
+            {taskId == null
+              ? t('dialogs.task.subtasks.heading')
+              : t('dialogs.task.subtasks.draftsLeftHeading')}
           </Text>
           {draftSubtasks.length === 0 ? (
             <Text style={styles.hint} accessibilityRole="text">
@@ -1492,7 +1519,11 @@ export default function TaskEditorModal({
           ) : (
             <View
               accessibilityRole="list"
-              accessibilityLabel={t('dialogs.task.subtasks.heading')}
+              accessibilityLabel={
+                taskId == null
+                  ? t('dialogs.task.subtasks.heading')
+                  : t('dialogs.task.subtasks.draftsLeftHeading')
+              }
               style={styles.draftList}
             >
               {draftSubtasks.map((title, i) => (
@@ -1517,27 +1548,29 @@ export default function TaskEditorModal({
               ))}
             </View>
           )}
-          <View style={styles.subtaskAddRow}>
-            <TextInput
-              style={[styles.input, styles.subtaskInput]}
-              value={newSubtaskTitle}
-              onChangeText={setNewSubtaskTitle}
-              placeholder={t('dialogs.task.subtasks.placeholder')}
-              accessibilityLabel={t('dialogs.task.subtasks.newAria')}
-              returnKeyType="done"
-              onSubmitEditing={addDraftSubtask}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('dialogs.task.subtasks.addButton')}
-              accessibilityState={{ disabled: newSubtaskTitle.trim() === '' }}
-              disabled={newSubtaskTitle.trim() === ''}
-              onPress={addDraftSubtask}
-              style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
-            >
-              <Text style={styles.ghostButtonText}>{t('dialogs.task.subtasks.addButton')}</Text>
-            </Pressable>
-          </View>
+          {taskId == null && (
+            <View style={styles.subtaskAddRow}>
+              <TextInput
+                style={[styles.input, styles.subtaskInput]}
+                value={newSubtaskTitle}
+                onChangeText={setNewSubtaskTitle}
+                placeholder={t('dialogs.task.subtasks.placeholder')}
+                accessibilityLabel={t('dialogs.task.subtasks.newAria')}
+                returnKeyType="done"
+                onSubmitEditing={addDraftSubtask}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('dialogs.task.subtasks.addButton')}
+                accessibilityState={{ disabled: newSubtaskTitle.trim() === '' }}
+                disabled={newSubtaskTitle.trim() === ''}
+                onPress={addDraftSubtask}
+                style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+              >
+                <Text style={styles.ghostButtonText}>{t('dialogs.task.subtasks.addButton')}</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       )}
 

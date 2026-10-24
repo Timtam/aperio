@@ -392,8 +392,9 @@ Nimmt der Anbieter das Foto eines neuen Kontakts nicht an, steht der Kontakt
 ohne Foto, und Aperio sagt das.
 
 Legst du eine Aufgabe mit Unteraufgaben an und scheitert eine Unteraufgabe,
-bleibt der Editor auf der angelegten Aufgabe: Die noch nicht angelegten
-Unteraufgaben stehen weiter in seiner Liste, und Speichern legt nur diese an.
+bearbeitet der Editor danach die angelegte Aufgabe: Die noch nicht angelegten
+Unteraufgaben stehen unter einer eigenen Überschrift, und Speichern übernimmt
+deine Änderungen an der Aufgabe und legt sie an.
 
 Was du tun kannst: Öffne das Element später noch einmal und ergänze, was
 fehlt.

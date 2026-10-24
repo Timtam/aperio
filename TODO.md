@@ -498,8 +498,9 @@ Siehe DESIGN §4.2.
         bietet kein Editor das Anlegen erneut an. Google-Gruppe ohne
         Mitglieder: Hinweis, der sich nur schließen lässt, Daten laden neu.
         Google-Foto: weiter verschluckt, der Editor sagt „ohne Foto
-        gespeichert“. Unteraufgaben-Entwürfe: der Editor bleibt auf der
-        angelegten Aufgabe mit den übrigen Entwürfen. Vikunja (Zuständige),
+        gespeichert“. Unteraufgaben-Entwürfe: der Editor bearbeitet danach
+        die angelegte Aufgabe, Speichern schreibt ihre Felder und legt die
+        übrigen Entwürfe an (Toni, 2026-10-24). Vikunja (Zuständige),
         Todoist (Abschließen), Graph (Erweiterung) und Exchange
         (Herauslösen, Kontaktfoto ersetzen) laufen über
         `Error::after_landed` denselben Weg; das Foto eines neuen Kontakts
@@ -508,8 +509,8 @@ Siehe DESIGN §4.2.
         ↻ Die Oberflächen beider Seiten sind gebaut: Aufgaben-Editor,
         Schnell-Anlegen, Einplanen, Verschieben/Kopieren und Kontakt-Editor
         zeigen den Hinweis, der sich nur schließen lässt (Desktop
-        `CloseOnlyNotice`, Handy dasselbe); Entwürfe bleiben am angelegten
-        Elternteil; „ohne Foto angelegt“ über `has_photo`; ein beim
+        `CloseOnlyNotice`, Handy dasselbe); der Editor bearbeitet nach
+        gescheiterten Entwürfen die angelegte Aufgabe; „ohne Foto angelegt“ über `has_photo`; ein beim
         Verschieben stehengebliebenes Original wird mit seiner Liste oder
         seinem Kalender benannt (277). Exchange, Graph, Vikunja und Todoist
         sind gebaut. Am Handy ohne Testläufer zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
