@@ -213,11 +213,11 @@ const REFUSED_CODES = new Set([
  *
  * A refusal token or a refusing code says so. Anything else may have reached
  * the provider before its answer was lost — a network failure above all, but
- * also a protocol error on an answer that could not be read, or an error that
- * arrived without a code (on the phone, every code but `forbidden`, `conflict`
- * and `network` does, see TODO B9). Those are never taken as "nothing
- * happened": a caller that undoes on the strength of it would undo half of a
- * write that went through.
+ * also a protocol error on an answer that could not be read, or an error
+ * without a code. Both hosts hand every error over with its code (the phone
+ * through `hostCoded`, TODO B9), so one without is an error a surface threw
+ * itself. Those are never taken as "nothing happened": a caller that undoes
+ * on the strength of it would undo half of a write that went through.
  */
 export function writeNeverLanded(err: unknown): boolean {
   // Something stands that could not be taken back, whatever code carried it.
@@ -300,11 +300,29 @@ export async function removeOriginalAfterCopy(
 }
 
 /**
+ * What one action of several writes says when some of them failed
+ * (decision 277): the first failure, read as {@link afterLanded} says where
+ * another write landed or may have — one whose failure is not a certain
+ * "never landed", as a lost answer — and as itself where every write
+ * certainly changed nothing. The Rust walks keep an answer that may have
+ * landed over a later busy one for the same reason.
+ */
+export function failureOfWrites(
+  step: string,
+  failures: readonly unknown[],
+  landed: boolean,
+): unknown {
+  const [first] = failures;
+  const mayStand = landed || failures.some((err) => !writeNeverLanded(err));
+  return mayStand ? afterLanded(first, step) : first;
+}
+
+/**
  * The writes one action makes together (the day-start review's "all to
  * today"): every one is attempted, side by side or, with `oneAtATime`, one
- * after the other. What landed comes back, and the first failure reads as
- * {@link afterLanded} says where another write landed — never "nothing was
- * changed" — or as itself where none did. `null` when every write landed.
+ * after the other. What landed comes back, and the failure reads as
+ * {@link failureOfWrites} says — never "nothing was changed" while another
+ * write landed or may have. `null` when every write landed.
  */
 export async function writeAll<T>(
   step: string,
@@ -323,14 +341,11 @@ export async function writeAll<T>(
     results = await Promise.allSettled(items.map((item) => write(item)));
   }
   const landed = items.filter((_, i) => results[i].status === 'fulfilled');
-  const failed = results.find(
-    (result): result is PromiseRejectedResult => result.status === 'rejected',
-  );
-  if (failed === undefined) return { landed, failure: null };
-  return {
-    landed,
-    failure: landed.length > 0 ? afterLanded(failed.reason, step) : failed.reason,
-  };
+  const failures = results
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map((result) => result.reason as unknown);
+  if (failures.length === 0) return { landed, failure: null };
+  return { landed, failure: failureOfWrites(step, failures, landed.length > 0) };
 }
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;

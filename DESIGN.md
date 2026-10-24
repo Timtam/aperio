@@ -1473,7 +1473,11 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     davor — nie eine Ablehnung, die „Es wurde nichts geändert“ sagte. Die
     Oberflächen tun dasselbe für Speichern in mehreren Aufrufen
     (`afterLanded`, `writeAfterLanded`, `writeAll`), an denselben Zeilen von
-    `writeOutcome.json` festgemacht. Ein Editor, dessen Speichern zum Teil
+    `writeOutcome.json` festgemacht. Mehrere Schreibvorgänge einer Aktion
+    (Sammelknöpfe, Kaskaden) lesen ihren ersten Fehler so, sobald einer
+    angekommen ist oder angekommen sein kann (`failureOfWrites`), wie die
+    Gänge im Kern eine Antwort behalten, die angekommen sein kann. Ein
+    Editor, dessen Speichern zum Teil
     steht, zeigt den Satz in einem Hinweis, der sich nur schließen lässt
     (`CloseOnlyNotice`), und lädt neu; scheitern Entwürfe von
     Unteraufgaben, bearbeitet der Editor die angelegte Aufgabe weiter, und

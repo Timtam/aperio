@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { afterLanded, selfAssignOnStatusChange, writeErrorMessage } from '@aperio/shared';
+import { failureOfWrites, selfAssignOnStatusChange, writeErrorMessage } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { todayIsoKey } from '../intl/taskDay';
@@ -104,12 +104,15 @@ export function useTaskStatusActions(): TaskStatusActions {
       // all while the family changed underneath.
       const rootFailure = outcome.failed.find((f) => f.taskId === task.id);
       if (rootFailure) {
-        // Every write is attempted: where others of the family landed, its
-        // failure never says "nothing was changed" (decision 277).
-        const err =
-          outcome.applied.length > 0
-            ? afterLanded(rootFailure.err, 'cascade')
-            : rootFailure.err;
+        // Every write is attempted: where others of the family landed or
+        // may have, its failure never says "nothing was changed" (decision
+        // 277).
+        const rest = outcome.failed.filter((f) => f !== rootFailure);
+        const err = failureOfWrites(
+          'cascade',
+          [rootFailure.err, ...rest.map((f) => f.err)],
+          outcome.applied.length > 0,
+        );
         announce(
           t('views.tasks.statusChangeFailed', {
             title: task.title,

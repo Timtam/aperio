@@ -5,8 +5,8 @@ import type { StatusWrite, Task } from '@aperio/shared';
 /**
  * The phone's status cascade (`applyStatusWrites`, the twin of the desktop's
  * `applyCascade`): every write is attempted, and where another write of the
- * cascade landed, the failure it throws never says "nothing was changed"
- * (decision 277). The phone has no test runner of its own, so its module runs
+ * cascade landed or may have, the failure it throws never says "nothing was
+ * changed" (decision 277). The phone has no test runner of its own, so its module runs
  * here.
  */
 
@@ -64,5 +64,16 @@ describe('the phone status cascade (277)', () => {
   it('keeps the busy refusal when nothing landed', async () => {
     updateTask.mockRejectedValue(BUSY);
     await expect(applyStatusWrites(WRITES, SNAPSHOT, false)).rejects.toEqual(BUSY);
+  });
+
+  it('reads a busy write as partly saved when another write may have landed', async () => {
+    // The second write's answer is lost: it may stand.
+    updateTask
+      .mockRejectedValueOnce(BUSY)
+      .mockRejectedValueOnce({ code: 'network', message: 'connection reset' });
+    await expect(applyStatusWrites(WRITES, SNAPSHOT, false)).rejects.toEqual({
+      code: 'network',
+      message: 'partly-saved: cascade',
+    });
   });
 });

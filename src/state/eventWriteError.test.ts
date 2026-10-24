@@ -8,6 +8,7 @@ import {
   eventWriteRefusal,
   exceptionsLossOf,
   stepDetail,
+  writeAll,
   writeErrorMessage,
   writeNeverLanded,
 } from '@aperio/shared';
@@ -500,5 +501,40 @@ describe('a provider that is busy (decisions 270, 276, 277)', () => {
       expect(i18n.exists(key, { lng: 'en' }), key).toBe(true);
       expect(de(key), key).not.toBe(en(key));
     }
+  });
+});
+
+describe('the writes of one action (decision 277)', () => {
+  const busy = command('forbidden', 'provider-busy: http-429');
+  const lost = command('network', 'connection reset');
+  const run = (answers: unknown[], oneAtATime = false) =>
+    writeAll(
+      'cascade',
+      answers.map((_, i) => i),
+      (i) => (answers[i] === 'ok' ? Promise.resolve() : Promise.reject(answers[i])),
+      { oneAtATime },
+    );
+
+  it('says a busy refusal as nothing written when every write was turned away', async () => {
+    const { landed, failure } = await run([busy, busy]);
+    expect(landed).toEqual([]);
+    expect(failure).toBe(busy);
+    expect(writeNeverLanded(failure)).toBe(true);
+  });
+
+  it('never says nothing was changed while another write may have landed', async () => {
+    for (const oneAtATime of [false, true]) {
+      // The busy refusal comes first; the lost answer after it may stand.
+      const { landed, failure } = await run([busy, lost], oneAtATime);
+      expect(landed).toEqual([]);
+      expect(writeNeverLanded(failure)).toBe(false);
+      expect(eventWriteErrorMessage(failure, t)).not.toMatch(/Es wurde nichts geändert/);
+    }
+  });
+
+  it('says the rest as partly saved where another write landed', async () => {
+    const { landed, failure } = await run(['ok', busy]);
+    expect(landed).toEqual([0]);
+    expect(eventWriteLeftover(failure)?.leftover).toBe('partly-saved');
   });
 });
