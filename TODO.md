@@ -1747,6 +1747,21 @@ Vorschläge sind nicht aufgenommen.
       ansagt; am besten ein gemeinsamer Baustein (Zeile + iOS-Ansage), den
       jede Fehlerzeile nimmt. Gefunden in der sechsten Prüfrunde von #128
       (2026-10-24), älter als #128.
+- [ ] **Handy: eine Berechtigung erzwingt alle Konten.** Erlaubt man Aperio
+      den Zugriff auf die Kalender des Geräts, ruft `reloadAndSay`
+      (mobile/src/state/deviceAccessGate.ts) `refreshExternalCache()` auf,
+      also eine erzwungene Runde über alle Konten (`warm_all_queued(true)`,
+      `Forcing::All`): beim Start-Check, beim Vordergrund-Check und bei
+      „Zugriff erlauben …“ am Gerätekonto. Seit PR 7 erzwingt eine
+      Kontoänderung nur ihr eigenes Konto (Toni, 2026-10-23); eine
+      Berechtigung zählt dort nicht dazu. Folge: Ist ein anderes Konto
+      gerade ausgelastet, steht seine Meldung nach dieser einen Öffnung
+      schon da (ein erzwungener Fehler zählt sofort), statt erst nach einer
+      zweiten automatischen Runde. Abhilfe: nur die Gerätekonten erzwingen
+      (`refreshAccountCache(id)` je Gerätekonto; `OsAccessReport` trägt
+      bisher nur Namen, also Ids ergänzen oder über `listAccounts` mit
+      `adapter_kind` `device_calendar` suchen). Älter als PR 7, gefunden in
+      der neunten Prüfrunde von #128 (2026-10-24); auf Tonis Wunsch hier.
 - [ ] **Ein Lesen vor dem Ersetzen, das nicht an Auslastung scheitert, kann
       Daten verlieren.** Manche Speicherungen lesen zuerst, was sie nicht
       selbst kennen, und schreiben dann das Ganze. Ist der Anbieter dabei
