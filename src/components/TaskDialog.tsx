@@ -70,6 +70,7 @@ import type {
   TaskUser,
 } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import type { SectionWrite } from '../state/CalendarStore';
 import { currentUserForList } from '../state/currentUser';
 import { useViewState } from '../state/viewStateContext';
 import { timeInputStep } from '../state/timeStep';
@@ -765,6 +766,9 @@ export function TaskDialog({
     const name = sectionDraft.trim();
     if (!name || sectionBusy) return;
     setSectionBusy(true);
+    // What was written, for the read after it: a read that fails then shows
+    // it rather than saying the write failed (decision 277).
+    let written: SectionWrite | undefined;
     try {
       if (sectionMode === 'rename' && form.sectionId) {
         const current = sectionsForList.find((s) => s.id === form.sectionId);
@@ -776,6 +780,7 @@ export function TaskDialog({
           if (sectionColorDraft !== (current.color_label ?? null)) {
             await setSectionColor(current.id, form.listId, sectionColorDraft);
           }
+          written = { upsert: { ...current, name, color_label: sectionColorDraft } };
           announce(t('dialogs.task.section.renamed', { name }));
         }
       } else {
@@ -789,8 +794,11 @@ export function TaskDialog({
         }
         // Reload BEFORE selecting the new section so the
         // "section gone from list" reset effect sees it as valid and
-        // doesn't race-clear the fresh selection.
-        await loadSections(form.listId);
+        // doesn't race-clear the fresh selection. The section stands: a
+        // read that fails shows it anyway, and the editor closes.
+        await loadSections(form.listId, {
+          upsert: { ...created, color_label: sectionColorDraft ?? created.color_label },
+        });
         setForm((prev) => ({ ...prev, sectionId: created.id }));
         announce(t('dialogs.task.section.created', { name }));
         setSectionMode(null);
@@ -798,7 +806,7 @@ export function TaskDialog({
         setSectionColorDraft(null);
         return;
       }
-      await loadSections(form.listId);
+      await loadSections(form.listId, written);
       setSectionMode(null);
       setSectionDraft('');
     } catch (err) {
@@ -826,9 +834,11 @@ export function TaskDialog({
     try {
       // Deleting a section only ungroups its tasks (ON DELETE SET NULL),
       // so there's no destructive-confirm — the tasks survive.
-      await deleteSection(form.sectionId, form.listId);
+      const removed = form.sectionId;
+      await deleteSection(removed, form.listId);
       setForm((prev) => ({ ...prev, sectionId: '' }));
-      await loadSections(form.listId);
+      // The section is gone: a read that fails shows that anyway (277).
+      await loadSections(form.listId, { remove: removed });
       announce(
         t('dialogs.task.section.deleted', { name: current?.name ?? '' }),
       );

@@ -216,7 +216,8 @@ export function MoveCopyDialog({
         name,
         position: 0,
       });
-      await loadSections(targetContainerId);
+      // The section stands: a read that fails shows it anyway (277).
+      await loadSections(targetContainerId, { upsert: created });
       setTargetSectionId(created.id);
       announce(t('dialogs.task.section.created', { name: created.name }));
       setSectionDraft(null);

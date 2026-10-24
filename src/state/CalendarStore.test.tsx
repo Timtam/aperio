@@ -11,7 +11,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { CalendarStoreProvider } from './CalendarStore';
 import { useCalendarStore } from './calendarStoreContext';
 import { buildTaskListForest } from './taskListForest';
-import type { TaskList } from '../api/types';
+import type { Section, TaskList } from '../api/types';
 import { DEFAULT_TASK_CAPABILITIES } from '@aperio/shared';
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
@@ -309,5 +309,43 @@ describe('buildTaskListForest', () => {
     ]);
     expect(ids).toContain('a');
     expect(ids).toContain('b');
+  });
+});
+
+/**
+ * A section write that landed, and the read after it met a busy provider
+ * (decision 277): what was written shows, and the write is not said as
+ * failed. A plain read that fails still fails.
+ */
+describe('loadSections after a section write', () => {
+  it('shows what was written when the read after it fails', async () => {
+    const busy = { code: 'forbidden', message: 'provider-busy: http-429' };
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === 'get_sections' ? Promise.reject(busy) : Promise.resolve([]),
+    );
+    const seen: { store: ReturnType<typeof useCalendarStore> | null } = { store: null };
+    function Capture() {
+      seen.store = useCalendarStore();
+      return (
+        <span data-testid="sections">
+          {(seen.store.sectionsByList.L1 ?? []).map((s) => s.name).join(',')}
+        </span>
+      );
+    }
+    render(
+      <CalendarStoreProvider>
+        <Capture />
+      </CalendarStoreProvider>,
+    );
+    await waitFor(() => expect(seen.store).not.toBeNull());
+    const section = { id: 's1', list_id: 'L1', name: 'Einkauf', position: 0, color_label: null };
+    await expect(seen.store!.loadSections('L1')).rejects.toEqual(busy);
+    const shown = await seen.store!.loadSections('L1', {
+      upsert: section as unknown as Section,
+    });
+    expect(shown.map((s) => s.id)).toEqual(['s1']);
+    await waitFor(() => expect(screen.getByTestId('sections').textContent).toBe('Einkauf'));
+    const after = await seen.store!.loadSections('L1', { remove: 's1' });
+    expect(after).toEqual([]);
   });
 });

@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -94,6 +95,14 @@ interface PersistedSelection {
   contactListOrigins?: Record<string, string>;
 }
 
+/** A section write that landed, for the read after it
+ *  (`loadSections`' `afterWrite`): the section as written, or the one
+ *  removed. */
+export interface SectionWrite {
+  upsert?: Section;
+  remove?: string;
+}
+
 export interface CalendarStoreState {
   calendars: Calendar[];
   selectedCalendarIds: Set<string>;
@@ -111,8 +120,10 @@ export interface CalendarStoreState {
    *  an empty array, so a present-but-empty entry means "fetched, none".*/
   sectionsByList: Record<string, Section[]>;
   /** Fetch (and cache) the sections of one list. Returns them so a
-   *  caller can use the result without waiting for the state update. */
-  loadSections: (listId: string) => Promise<Section[]>;
+   *  caller can use the result without waiting for the state update.
+   *  After a section write that landed, `afterWrite` names it: a read that
+   *  fails then shows what was written instead of failing (decision 277). */
+  loadSections: (listId: string, afterWrite?: SectionWrite) => Promise<Section[]>;
   /** Each section's resolved *live* color hex, keyed by section id — the
    *  middle level of the task-color chain (task → section → list). A
    *  section with no bound label is absent. Re-derives when sections or
@@ -296,12 +307,29 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     setAccounts(list);
   }, [i18n.language]);
 
-  const loadSections = useCallback(async (listId: string) => {
+  const sectionsRef = useRef(sectionsByList);
+  sectionsRef.current = sectionsByList;
+  const loadSections = useCallback(async (listId: string, afterWrite?: SectionWrite) => {
     // Sorted HERE, once, rather than at each of the half-dozen places that
     // render `sectionsByList` — the task view, the backlog rail, the day and
     // month grids, the task editor, the section editor. A comparator repeated
     // per consumer is a comparator that ends up applied in five of six.
-    const secs = sortSections(await getSections(listId));
+    let secs: Section[];
+    try {
+      secs = sortSections(await getSections(listId));
+    } catch (err) {
+      if (!afterWrite) throw err;
+      // The write landed; only the read after it failed — a busy provider,
+      // say. That is no reason to say the write failed, nor to show the list
+      // as it was (decision 277): what was written shows, and the next read
+      // corrects it.
+      // eslint-disable-next-line no-console
+      console.warn('reading the sections after a write failed; showing what was written', err);
+      const kept = (sectionsRef.current[listId] ?? []).filter(
+        (s) => s.id !== afterWrite.upsert?.id && s.id !== afterWrite.remove,
+      );
+      secs = sortSections(afterWrite.upsert ? [...kept, afterWrite.upsert] : kept);
+    }
     setSectionsByList((prev) => ({ ...prev, [listId]: secs }));
     return secs;
   }, []);

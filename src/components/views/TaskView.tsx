@@ -247,7 +247,10 @@ export function TaskView() {
     async (section: Section, labelId: string | null, colorName?: string) => {
       try {
         await setSectionColorCmd(section.id, section.list_id, labelId);
-        await loadSections(section.list_id);
+        // The colour stands: a read that fails shows it anyway (277).
+        await loadSections(section.list_id, {
+          upsert: { ...section, color_label: labelId },
+        });
         announce(
           colorName
             ? t('views.tasks.sectionColorSet', {
@@ -329,7 +332,8 @@ export function TaskView() {
         // the tasks survive.
         try {
           await deleteSection(section.id, section.list_id);
-          await loadSections(section.list_id);
+          // The section is gone: a read that fails shows that anyway (277).
+          await loadSections(section.list_id, { remove: section.id });
           announce(t('dialogs.task.section.deleted', { name: section.name }));
           invalidateData();
         } catch (err) {
