@@ -12,6 +12,7 @@ import {
   joinNames,
   originalKeptSentence,
   readErrorMessage,
+  withLaterForBusy,
   writeAfterLanded,
   writeErrorMessage,
 } from '@aperio/shared';
@@ -953,15 +954,19 @@ export default function TaskEditorModal({
           setCreatedTask(parent);
           setLoaded(parent);
           setDraftSubtasks(left);
-          const message = t('dialogs.task.subtasks.draftsFailed', {
-            title: parent.title,
-            count: left.length,
-            titles: joinNames(
-              left.map((name) => t('actions.quotedTitle', { title: name })),
-              t,
-            ),
-            reason: eventWriteFailureReason(err, t),
-          });
+          const message = withLaterForBusy(
+            t('dialogs.task.subtasks.draftsFailed', {
+              title: parent.title,
+              count: left.length,
+              titles: joinNames(
+                left.map((name) => t('actions.quotedTitle', { title: name })),
+                t,
+              ),
+              reason: eventWriteFailureReason(err, t),
+            }),
+            err,
+            t,
+          );
           setError(message);
           AccessibilityInfo.announceForAccessibility(message);
           return false;

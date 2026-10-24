@@ -46,6 +46,7 @@ import {
   selfAssignOnStatusChange,
   taskAssignmentMode,
   taskPrefillFrom,
+  withLaterForBusy,
   writeAfterLanded,
   writeErrorMessage,
 } from '@aperio/shared';
@@ -1351,15 +1352,19 @@ export function TaskDialog({
             setCreatedTask(parent);
             setDraftSubtasks(left);
             setError(
-              t('dialogs.task.subtasks.draftsFailed', {
-                title: parent.title,
-                count: left.length,
-                titles: joinNames(
-                  left.map((title) => t('actions.quotedTitle', { title })),
-                  t,
-                ),
-                reason: eventWriteFailureReason(err, t),
-              }),
+              withLaterForBusy(
+                t('dialogs.task.subtasks.draftsFailed', {
+                  title: parent.title,
+                  count: left.length,
+                  titles: joinNames(
+                    left.map((title) => t('actions.quotedTitle', { title })),
+                    t,
+                  ),
+                  reason: eventWriteFailureReason(err, t),
+                }),
+                err,
+                t,
+              ),
             );
             return false;
           }

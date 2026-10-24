@@ -1,9 +1,9 @@
 import {
   createsInSteps,
   eventWriteErrorMessage,
-  eventWriteFailureReason,
   eventWriteLeftover,
   organizerOf,
+  writeFailureSentence,
   writeWithoutWaiting,
   type StepWriteOptions,
 } from '@aperio/shared';
@@ -91,7 +91,7 @@ export function duplicateFailedSentence(
   const leftover = eventWriteLeftover(err);
   if (leftover?.leftover === 'created-may-stand') return t('actions.copyMayStand', { title });
   if (leftover) return eventWriteErrorMessage(err, t);
-  return t('actions.duplicateFailed', { title, reason: eventWriteFailureReason(err, t) });
+  return writeFailureSentence('actions.duplicateFailed', err, t, 'reason', { title });
 }
 
 export async function duplicateTask(task: Task): Promise<void> {

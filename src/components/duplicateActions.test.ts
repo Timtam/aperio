@@ -158,6 +158,8 @@ describe('duplicateTaskAndSay (Ctrl+D on a task)', () => {
     expect(announce).toHaveBeenCalledTimes(1);
     expect(announce.mock.calls[0][0]).toMatch(/^actions\.duplicateFailed /);
     expect(announce.mock.calls[0][0]).toContain('dialogs.event.writeError.reason.providerBusy');
+    // A busy sentence always says to try later (decisions 272, 278).
+    expect(announce.mock.calls[0][0]).toMatch(/ common\.tryAgainLater /);
     expect(invalidateData).toHaveBeenCalled();
   });
 

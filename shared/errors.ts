@@ -115,9 +115,18 @@ export function writeFailureSentence(
   err: unknown,
   t: Translate,
   slot = 'reason',
+  values: Record<string, unknown> = {},
 ): string {
   if (eventWriteLeftover(err)) return eventWriteErrorMessage(err, t);
-  const sentence = t(key, { [slot]: eventWriteFailureReason(err, t) }).trim();
+  const sentence = t(key, { ...values, [slot]: eventWriteFailureReason(err, t) }).trim();
+  return withLaterForBusy(sentence, err, t);
+}
+
+/**
+ * `sentence` with "Try again later." after it where `err` is a busy provider
+ * (decisions 272, 278): a frame that embeds the reason alone does not say it.
+ */
+export function withLaterForBusy(sentence: string, err: unknown, t: Translate): string {
   if (!isProviderBusy(err)) return sentence;
   const ended = /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
   return `${ended} ${t('common.tryAgainLater')}`;
