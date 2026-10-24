@@ -155,7 +155,7 @@ describe('eventWriteFailureReason', () => {
       expect(reason, err.message).not.toBe('');
     }
     expect(eventWriteFailureReason(command('conflict', 'etag mismatch'), t)).toMatch(
-      /auf dem Server geändert/,
+      /Stand auf dem Server hat sich inzwischen geändert/,
     );
     expect(eventWriteFailureReason(command('forbidden', 'read-only calendar'), t)).toMatch(
       /read-only calendar/,
@@ -280,7 +280,7 @@ describe('a write that needs the current copy, when it cannot be read', () => {
       expect(eventWriteErrorMessage(err, t)).not.toMatch(/503|network/);
     }
     expect(eventWriteFailureReason(desktop, t)).toBe(
-      'Aperio konnte ihren aktuellen Stand nicht vom Server lesen',
+      'Aperio konnte den aktuellen Stand nicht vom Server lesen',
     );
     expect(writeNeverLanded(desktop)).toBe(true);
   });
@@ -569,5 +569,34 @@ describe('removing the original after its copy landed (decision 277)', () => {
     );
     expect(writeNeverLanded(failure)).toBe(false);
     expect(eventWriteErrorMessage(failure, t)).not.toMatch(/nichts geändert/);
+  });
+});
+
+describe('the reasons a frame about anything embeds (decision 273)', () => {
+  // The frames that say a meeting, an undo, a duplicate or a draft could not
+  // be done take the reason of any write: none may point back at a noun the
+  // frame never named ("sie" for a series, "ihn" for an event).
+  const de = i18n.getFixedT('de');
+  const reasons = [
+    'changedOnServer',
+    'unsafeToWrite',
+    'copyUnreadable',
+    'forbidden',
+    'serverRefused',
+    'providerBusy',
+    'replyOnly',
+    'identityUnknown',
+    'accessNotGranted',
+  ];
+
+  it('names nothing the frame does not', () => {
+    for (const key of reasons) {
+      const reason = de(`dialogs.event.writeError.reason.${key}`, { detail: '403' }) as string;
+      expect(reason, key).not.toMatch(/(^| )(sie|ihn|ihm|ihr|ihre|ihren|ihrer)( |,|$)/i);
+      for (const frame of ['toast.undoFailed', 'conferencing.meetingFailed']) {
+        const sentence = de(frame, { reason, message: reason }) as string;
+        expect(sentence, `${frame} ${key}`).toContain(reason);
+      }
+    }
   });
 });
