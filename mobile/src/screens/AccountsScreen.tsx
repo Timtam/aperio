@@ -818,8 +818,8 @@ export default function AccountsScreen() {
       // containers from view — confirm first (destructive, irreversible bar a
       // re-add). The swipe action + the row's Delete button both route here.
       Alert.alert(
-        t('dialogs.accounts.deleteConfirmTitle', { name: account.display_name }),
-        t('dialogs.accounts.deleteConfirmMessage'),
+        t('dialogs.accounts.deleteTitle'),
+        t('dialogs.accounts.deleteMessage', { name: account.display_name }),
         [
           { text: t('mobile.cancel'), style: 'cancel' },
           {

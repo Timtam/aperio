@@ -355,29 +355,38 @@ export default function TasksScreen({
 
   const targetListId = [...selectedTaskListIds][0] ?? taskLists[0]?.id ?? null;
 
+  // Every act of the person's ends the watch after a failure, opening
+  // another screen over the list included: its fallback must never pull
+  // focus away from where they went on.
   const openEditor = useCallback(
-    (task: Task) =>
-      navigation.navigate('TaskEditor', { taskId: task.id, listId: task.list_id }),
+    (task: Task) => {
+      failedFocus.current = null;
+      navigation.navigate('TaskEditor', { taskId: task.id, listId: task.list_id });
+    },
     [navigation],
   );
 
   // Plan-from-backlog quick scheduler (Today / Tomorrow / Next Monday / custom /
   // back-to-backlog) — the desktop's Shift+D affordance as a row action.
   const openPlan = useCallback(
-    (task: Task) =>
-      navigation.navigate('PlanTask', { taskId: task.id, listId: task.list_id }),
+    (task: Task) => {
+      failedFocus.current = null;
+      navigation.navigate('PlanTask', { taskId: task.id, listId: task.list_id });
+    },
     [navigation],
   );
 
   // Move / copy the task (and its subtasks) to another list — the desktop's
   // Shift+M affordance as a row action.
   const openMoveCopy = useCallback(
-    (task: Task) =>
+    (task: Task) => {
+      failedFocus.current = null;
       navigation.navigate('MoveCopy', {
         kind: 'task',
         taskId: task.id,
         listId: task.list_id,
-      }),
+      });
+    },
     [navigation],
   );
 
@@ -385,6 +394,7 @@ export default function TasksScreen({
   // resurface date) — the desktop's "Ins Backlog holen" chip action.
   const surfaceNow = useCallback(
     async (task: Task) => {
+      failedFocus.current = null;
       try {
         await surfaceTaskNow(task);
         invalidateData();
@@ -403,6 +413,7 @@ export default function TasksScreen({
     // No list at all → send the user to create one first. Otherwise open the
     // quick-add (it resolves its own default list — last-used, else first
     // writable — and offers "More details …" for the full editor).
+    failedFocus.current = null;
     if (targetListId == null) {
       navigation.navigate('Lists');
       return;
@@ -413,12 +424,14 @@ export default function TasksScreen({
   // Create a child task under `task` (same list, locked). buildEntries nests it
   // by parent_id, which round-trips through create.
   const addSubtask = useCallback(
-    (task: Task) =>
+    (task: Task) => {
+      failedFocus.current = null;
       navigation.navigate('TaskEditor', {
         taskId: null,
         listId: task.list_id,
         parentId: task.id,
-      }),
+      });
+    },
     [navigation],
   );
 
