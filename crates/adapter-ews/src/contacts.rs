@@ -499,10 +499,20 @@ pub async fn delete_contact_photo(client: &EwsClient, contact_id: &str) -> EwsRe
     let envelope = get_item_attachments_envelope(&item_id, change_key.as_deref());
     let response = client.post_soap(envelope).await?;
     let attachments = parse_attachment_index(&response)?;
+    // Once one picture is gone, a later failure leaves the change standing in
+    // part (decision 277), never "nothing changed", as in `set_contact_photo`.
+    let mut landed = false;
     for attachment in attachments {
         if attachment.is_contact_photo {
             let envelope = delete_attachment_envelope(&attachment.attachment_id);
-            client.post_soap(envelope).await?;
+            client.post_soap(envelope).await.map_err(|err| {
+                if landed {
+                    err.after_landed("photo")
+                } else {
+                    err
+                }
+            })?;
+            landed = true;
         }
     }
     Ok(())
@@ -3374,6 +3384,103 @@ mod busy_tests {
         let seen = seen.lock().unwrap();
         assert!(seen.iter().any(|b| b.contains("DeleteAttachment")));
         assert!(seen.iter().any(|b| b.contains("CreateAttachment")));
+    }
+
+    /// Removing a photo whose second picture a busy server keeps, after the
+    /// first went: the change stands in part, never "nothing changed" (277).
+    #[tokio::test]
+    async fn a_busy_second_photo_delete_is_partly_saved() {
+        let mut server = Server::new_async().await;
+        let attachments = envelope(
+            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:Contact><t:ItemId Id="C1" ChangeKey="CK"/>
+        <t:Attachments>
+          <t:FileAttachment><t:AttachmentId Id="OLD-1"/><t:IsContactPhoto>true</t:IsContactPhoto></t:FileAttachment>
+          <t:FileAttachment><t:AttachmentId Id="OLD-2"/><t:IsContactPhoto>true</t:IsContactPhoto></t:FileAttachment>
+        </t:Attachments>
+      </t:Contact></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#,
+        );
+        let answer = |class: &str, code: &str| {
+            envelope(&format!(
+                r#"<m:DeleteAttachmentResponse><m:ResponseMessages>
+    <m:DeleteAttachmentResponseMessage ResponseClass="{class}">
+      <m:ResponseCode>{code}</m:ResponseCode>
+    </m:DeleteAttachmentResponseMessage>
+  </m:ResponseMessages></m:DeleteAttachmentResponse>"#
+            ))
+        };
+        let deleted = answer("Success", "NoError");
+        let busy = answer("Error", "ErrorServerBusy");
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let reply = if body.contains("OLD-1") {
+                    deleted.clone()
+                } else if body.contains("OLD-2") {
+                    busy.clone()
+                } else {
+                    attachments.clone()
+                };
+                reply.into_bytes()
+            })
+            .create_async()
+            .await;
+        let err = delete_contact_photo(&client_for(&server), "C1|CK")
+            .await
+            .unwrap_err();
+        let core = crate::to_core_error_for_tests(err);
+        assert!(core.is_partly_saved(), "{core:?}");
+    }
+
+    /// Removing a photo whose only picture a busy server keeps changed
+    /// nothing: that is the busy answer itself.
+    #[tokio::test]
+    async fn a_busy_first_photo_delete_is_busy() {
+        let mut server = Server::new_async().await;
+        let attachments = envelope(
+            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:Contact><t:ItemId Id="C1" ChangeKey="CK"/>
+        <t:Attachments>
+          <t:FileAttachment><t:AttachmentId Id="OLD-1"/><t:IsContactPhoto>true</t:IsContactPhoto></t:FileAttachment>
+        </t:Attachments>
+      </t:Contact></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#,
+        );
+        let busy = envelope(
+            r#"<m:DeleteAttachmentResponse><m:ResponseMessages>
+    <m:DeleteAttachmentResponseMessage ResponseClass="Error">
+      <m:ResponseCode>ErrorServerBusy</m:ResponseCode>
+    </m:DeleteAttachmentResponseMessage>
+  </m:ResponseMessages></m:DeleteAttachmentResponse>"#,
+        );
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let reply = if body.contains("DeleteAttachment") {
+                    busy.clone()
+                } else {
+                    attachments.clone()
+                };
+                reply.into_bytes()
+            })
+            .create_async()
+            .await;
+        let err = delete_contact_photo(&client_for(&server), "C1|CK")
+            .await
+            .unwrap_err();
+        let core = crate::to_core_error_for_tests(err);
+        assert!(core.is_provider_busy(), "{core:?}");
     }
 
     /// A busy server under the GAL walk ends it with that error, so the
