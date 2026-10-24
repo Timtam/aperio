@@ -344,8 +344,9 @@ export interface FreeBusy {
 
 /** Attendee availability for `emails` over `[rangeStart, rangeEnd]` (RFC-3339)
  *  through the account that owns `calendarId`. Best-effort: returns `[]` for a
- *  local calendar or a provider that can't answer (no error), which the UI reads
- *  as "free/unknown". */
+ *  local calendar or a provider that can't answer; a busy provider rejects
+ *  (decision 270), and the editor says the check could not be made, never
+ *  "all free". */
 export const queryFreeBusy = async (
   calendarId: string,
   emails: string[],

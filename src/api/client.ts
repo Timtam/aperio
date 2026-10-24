@@ -193,7 +193,8 @@ export const getEventById = (id: string, calendarId?: string) =>
 
 /** Look up attendee availability through the account that owns `calendarId`.
  *  Best-effort: returns `[]` for local calendars or when the provider can't
- *  answer (no error). `rangeStart`/`rangeEnd` are ISO 8601 strings. */
+ *  answer; a busy provider rejects (decision 270), and the editor says the
+ *  check could not be made. `rangeStart`/`rangeEnd` are ISO 8601 strings. */
 export const queryFreeBusy = (
   calendarId: string,
   emails: string[],

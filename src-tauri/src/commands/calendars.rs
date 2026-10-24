@@ -1005,9 +1005,10 @@ pub struct FreeBusyRequest {
 }
 
 /// Query attendee availability through the account that owns `calendar_id`.
-/// Best-effort: local/iCal calendars and any provider error or missing
-/// permission degrade to an empty result (the UI reads that as "couldn't
-/// determine", never an error) so the dialog never blocks on it.
+/// Best-effort: local/iCal calendars and any failure other than a busy
+/// provider degrade to an empty result, so the dialog never blocks on it. A
+/// busy provider is an error (`host_core::free_busy`, decision 270): the
+/// editor says the check could not be made, never "all free".
 #[tauri::command]
 pub async fn query_free_busy(
     registry: State<'_, Arc<AdapterRegistry>>,
