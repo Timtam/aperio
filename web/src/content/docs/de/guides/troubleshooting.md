@@ -84,7 +84,8 @@ versucht Aperio es von selbst erneut, am Handy beim nächsten Aktualisieren,
 zum Beispiel wenn du die App wieder öffnest. Seine Zeilen sagen „Der Anbieter
 ist ausgelastet.“ Solange er ausgelastet ist, fragen die Ansichten ihn nicht
 nach dem, was sie schon zeigen; eine Woche oder ein Monat, die noch nie
-geladen wurden, werden trotzdem einmal angefragt.
+geladen wurden, oder eine Liste, die noch nie geladen wurde, werden trotzdem
+einmal angefragt.
 
 Ein kurzer, einmaliger Verbindungsaussetzer löst die Warnung nicht aus: Ein
 Netzwerkfehler oder ein ausgelasteter Anbieter wird erst gezeigt, wenn er bei

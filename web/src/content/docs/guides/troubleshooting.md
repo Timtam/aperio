@@ -76,8 +76,8 @@ short time — the warning says so, and that you need do nothing: on the
 desktop Aperio tries again by itself, on the phone the next time it updates,
 for instance when you open the app again. Its rows say "The provider is
 busy." While it is busy, the views stop asking the provider for what they
-already show; a week or month that was never loaded is still asked for,
-once.
+already show; a week or month that was never loaded, or a list that never
+loaded, is still asked for, once.
 
 A brief, one-off connection hiccup does not raise the warning: a network
 failure or a busy provider is only shown once it recurs in a second automatic

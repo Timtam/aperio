@@ -83,10 +83,31 @@ pub enum ReadRefresh {
     /// 271): the snapshot is there to show.
     Stale,
     /// The snapshot does not reach this range — a week or month never
-    /// loaded. Asked once even while the provider is busy (Toni,
-    /// 2026-10-23): otherwise the view shows empty days with nothing to say
-    /// why ([`CacheStore::ask_uncovered`]).
+    /// loaded, or a container with no snapshot at all (its whole range).
+    /// Asked once even while the provider is busy (Toni, 2026-10-23):
+    /// otherwise the view shows empty days or an empty list with nothing to
+    /// say why ([`CacheStore::ask_uncovered`]).
     Uncovered(DateRange),
+}
+
+/// Why a read of a whole container refreshes it: an old snapshot, or none at
+/// all — then it is asked once while the provider is busy, as a range never
+/// loaded is (Toni, 2026-10-23).
+fn container_refresh(
+    cache: &CacheStore,
+    account: &str,
+    scope: SyncScope,
+    container: &str,
+) -> ReadRefresh {
+    let state = cache
+        .get_sync_state(account, scope, container)
+        .ok()
+        .flatten();
+    if has_snapshot(&state) {
+        ReadRefresh::Stale
+    } else {
+        ReadRefresh::Uncovered(super::unbounded_window())
+    }
 }
 
 /// Spawn a deduplicated, fire-and-forget background refresh: `fetch`
@@ -115,9 +136,18 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
 {
     // Not while the OS withholds this family: the attempt would fail the same
     // way at once, on every read (bursts of dozens a second after a phone
-    // move). The warm pass still asks, and a grant lifts this. Nor while the
-    // provider is busy for this container (decision 271).
-    if cache.access_withheld(&account, scope) || cache.busy_paused(&account, scope, &container) {
+    // move). The warm pass still asks, and a grant lifts this. Nor, for an
+    // old snapshot, while the provider is busy for this container (decision
+    // 271); a listing never loaded is asked once anyway.
+    if cache.access_withheld(&account, scope) {
+        return;
+    }
+    let why = container_refresh(&cache, &account, scope, &container);
+    let paused = match why {
+        ReadRefresh::Stale => cache.busy_paused(&account, scope, &container),
+        ReadRefresh::Uncovered(range) => !cache.ask_uncovered(&account, scope, &container, range),
+    };
+    if paused {
         return;
     }
     let key = format!("{}:{}:{}", scope.as_str(), account, container);
@@ -145,6 +175,9 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
                 let news = cache
                     .mark_failure(&account, scope, &container, &err, Attempt::Read { generation })
                     .unwrap_or(true);
+                if let (ReadRefresh::Uncovered(range), true) = (why, err.is_provider_busy()) {
+                    cache.note_uncovered_busy(&account, scope, &container, generation, range);
+                }
                 if news {
                     tracing::warn!(
                         target: "aperio::cache",
@@ -161,8 +194,9 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
     });
 }
 
-/// [`spawn_read_refresh`] for a read whose snapshot is old
-/// ([`ReadRefresh::Stale`]): tasks, sections, contacts.
+/// [`spawn_read_refresh`] for a read of a whole container — tasks,
+/// sections, contacts: an old snapshot ([`ReadRefresh::Stale`]), or none at
+/// all, asked once while the provider is busy.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_item_refresh<F, Fut>(
     rt: &tokio::runtime::Handle,
@@ -177,16 +211,9 @@ pub fn spawn_item_refresh<F, Fut>(
     F: FnOnce() -> Fut + Send + 'static,
     Fut: Future<Output = cal_core::Result<bool>> + Send + 'static,
 {
+    let why = container_refresh(&cache, &account, scope, &container);
     spawn_read_refresh(
-        rt,
-        observer,
-        cache,
-        coord,
-        scope,
-        account,
-        container,
-        ReadRefresh::Stale,
-        refresh,
+        rt, observer, cache, coord, scope, account, container, why, refresh,
     );
 }
 
@@ -771,7 +798,7 @@ mod tests {
             )
         })
         .unwrap();
-        let cache = Arc::new(CacheStore::new(db));
+        let cache = Arc::new(CacheStore::new(db.clone()));
         cache
             .mark_failure(
                 "acc-1",
@@ -781,6 +808,16 @@ mod tests {
                 Attempt::Read { generation: 0 },
             )
             .unwrap();
+        // An old snapshot: the container was loaded once (one never loaded
+        // is asked once anyway, see below).
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE cache_sync_state SET last_refreshed_at = '2026-01-01T00:00:00+00:00'
+                  WHERE account_id = 'acc-1' AND scope = 'events' AND container_id = 'cal-1'",
+                [],
+            )
+        })
+        .unwrap();
         let fetched = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&fetched);
         let observer = Arc::new(RecordingObserver::default()) as Arc<dyn CacheObserver>;
@@ -909,6 +946,66 @@ mod tests {
             read_fetches(&cache, ReadRefresh::Uncovered(range()), None, |_| {}).await,
             1
         );
+    }
+
+    /// A container never loaded — a list whose first read met the busy
+    /// provider — is asked once during the pause, on either path, then
+    /// paused: with no snapshot to show, it would stay empty with nothing to
+    /// say why (Toni, 2026-10-23).
+    #[tokio::test]
+    async fn a_container_never_loaded_is_asked_once_while_busy() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for item in [false, true] {
+            let cache = store_with_account();
+            cache
+                .mark_failure(
+                    "acc-1",
+                    SyncScope::Tasks,
+                    "L1",
+                    &busy(),
+                    Attempt::Background { generation: 0 },
+                )
+                .unwrap();
+            assert!(cache.busy_paused("acc-1", SyncScope::Tasks, "L1"));
+            let fetched = Arc::new(AtomicUsize::new(0));
+            for _ in 0..2 {
+                let counter = Arc::clone(&fetched);
+                let observer = Arc::new(RecordingObserver::default()) as Arc<dyn CacheObserver>;
+                if item {
+                    spawn_item_refresh(
+                        &tokio::runtime::Handle::current(),
+                        observer,
+                        Arc::clone(&cache),
+                        Arc::new(RefreshCoordinator::new()),
+                        SyncScope::Tasks,
+                        "acc-1".to_string(),
+                        "L1".to_string(),
+                        move || {
+                            counter.fetch_add(1, Ordering::SeqCst);
+                            async { Err(busy()) }
+                        },
+                    );
+                } else {
+                    spawn_refresh::<cal_core::Task, _, _, _>(
+                        &tokio::runtime::Handle::current(),
+                        observer,
+                        Arc::clone(&cache),
+                        Arc::new(RefreshCoordinator::new()),
+                        SyncScope::Tasks,
+                        "acc-1".to_string(),
+                        "L1".to_string(),
+                        move || {
+                            counter.fetch_add(1, Ordering::SeqCst);
+                            async { Err(busy()) }
+                        },
+                        |_, _| Ok(false),
+                    );
+                }
+                tokio::task::yield_now().await;
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            assert_eq!(fetched.load(Ordering::SeqCst), 1, "item: {item}");
+        }
     }
 
     /// A pause stored before a restart outlives it, and the ranges never
