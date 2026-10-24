@@ -126,7 +126,8 @@ through `series_create` (decisions 202-213, 263-269):
   invitation with the series (204, 267). A create Google turns down whole
   is that error. One asked to slow down (429, or 403 `rateLimitExceeded` or
   `userRateLimitExceeded`) made nothing and is sent again, a few times, and
-  then says the provider is busy; one refused with 400 is sent once more
+  then says the provider is busy; asked to wait longer than 4 s, it says so
+  at once. One refused with 400 is sent once more
   without Aperio's id. A create whose
   answer was lost — none came, a 5xx, one no reader takes — is read back by
   its id and never sent again, as Google does not promise to catch the
@@ -134,7 +135,8 @@ through `series_create` (decisions 202-213, 263-269):
   create-answer-lost`).
 - The series Google stored must carry its one rule and no deletion line of
   its own.
-- From the confirmed create there are 15 s (`cal_core::SERIES_WITH_DELETIONS`).
+- From the confirmed create there are 15 s (`cal_core::SERIES_WITH_DELETIONS`),
+  however long the create took.
   The occurrences in the deletions' window are listed
   (`events/{id}/instances?showDeleted=true`, every page), and each deletion
   is matched to the occurrence starting there, else to one at most an hour

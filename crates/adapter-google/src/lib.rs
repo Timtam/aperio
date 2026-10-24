@@ -386,9 +386,12 @@ impl CalendarFeature for GoogleAdapter {
         // "not on this calendar" (keep walking); a 410 = "already gone" anywhere =
         // success (idempotent). Any OTHER error (403/412/5xx) on a calendar is a
         // real failure — remember it and surface it after the walk instead of
-        // masking it as the misleading "not found in any calendar".
+        // masking it as the misleading "not found in any calendar". An answer
+        // that may have landed — a lost one — is kept apart: a later
+        // calendar's refusal must not hide that the event may be gone.
         let cals = self.calendars().await.map_err(to_write_error)?;
-        let mut real_error: Option<GoogleError> = None;
+        let mut real_error: Option<CoreError> = None;
+        let mut unsure: Option<CoreError> = None;
         for cal in cals {
             match api::delete_event(&self.state, &cal.id, event_id, send_cancellations).await {
                 Ok(()) => return Ok(()),
@@ -398,13 +401,20 @@ impl CalendarFeature for GoogleAdapter {
                 // 270, 275): the other calendars would be asked while it
                 // holds, and a later answer would hide why.
                 Err(e @ (GoogleError::Busy { .. } | GoogleError::UsageLimit { .. })) => {
-                    return Err(stopped_walk(e, real_error.map(to_write_error)))
+                    return Err(stopped_walk(e, unsure))
                 }
-                Err(e) => real_error = Some(e),
+                Err(e) => {
+                    let e = to_write_error(e);
+                    if e.never_landed() {
+                        real_error = Some(e);
+                    } else if unsure.is_none() {
+                        unsure = Some(e);
+                    }
+                }
             }
         }
-        if let Some(e) = real_error {
-            return Err(to_write_error(e));
+        if let Some(e) = unsure.or(real_error) {
+            return Err(e);
         }
         Err(CoreError::NotFound(format!(
             "event '{event_id}' not found in any calendar"
@@ -1244,6 +1254,59 @@ mod delta_tests {
         match adapter.update_contact(contact).await.unwrap_err() {
             CoreError::Forbidden(m) => assert_eq!(m, "server-refused: HTTP 400: bad date"),
             other => panic!("{other:?}"),
+        }
+    }
+
+    /// A delete whose answer was lost on one calendar stays unsure, whatever
+    /// a later calendar answers: a refusal there (a read-only calendar's
+    /// 403) and a busy provider after it must not say "nothing changed"
+    /// while the event may be gone.
+    #[tokio::test]
+    async fn a_lost_delete_stays_unsure_past_a_later_refusal() {
+        for with_busy in [false, true] {
+            let calendars = if with_busy {
+                r#"{"items":[{"id":"work","summary":"Work"},{"id":"holidays","summary":"Holidays"},{"id":"home","summary":"Home"}]}"#
+            } else {
+                r#"{"items":[{"id":"work","summary":"Work"},{"id":"holidays","summary":"Holidays"}]}"#
+            };
+            let mut server = Server::new_async().await;
+            let _list = server
+                .mock("GET", Matcher::Regex(r"^/users/me/calendarList".into()))
+                .with_status(200)
+                .with_body(calendars)
+                .create_async()
+                .await;
+            let _work = server
+                .mock(
+                    "DELETE",
+                    Matcher::Regex(r"^/calendars/work/events/ev1".into()),
+                )
+                .with_status(500)
+                .create_async()
+                .await;
+            let _holidays = server
+                .mock(
+                    "DELETE",
+                    Matcher::Regex(r"^/calendars/holidays/events/ev1".into()),
+                )
+                .with_status(403)
+                .with_body(r#"{"error":{"code":403,"errors":[{"reason":"forbidden"}]}}"#)
+                .create_async()
+                .await;
+            let _home = server
+                .mock(
+                    "DELETE",
+                    Matcher::Regex(r"^/calendars/home/events/ev1".into()),
+                )
+                .with_status(429)
+                .with_body(r#"{"error":{"code":429}}"#)
+                .create_async()
+                .await;
+            let err = adapter_for(&server)
+                .delete_event("ev1", false)
+                .await
+                .unwrap_err();
+            assert!(!err.never_landed(), "with_busy={with_busy}: {err:?}");
         }
     }
 

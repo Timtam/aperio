@@ -93,7 +93,8 @@ impl Pacing {
 const MATCH_TOLERANCE: chrono::Duration = chrono::Duration::hours(1);
 
 /// How many times a create Google asked to slow down is sent again, after
-/// waits of [`Pacing::first_wait`] doubling: the create is not on the clock
+/// waits of [`Pacing::first_wait`] doubling, or what Google asks for while it
+/// is no longer than [`Pacing::max_wait`]: the create is not on the clock
 /// (226), and Google answering so means it made nothing.
 const CREATE_BUSY_TRIES: u32 = 3;
 
@@ -335,9 +336,9 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
         let entry = loop {
             let body = serde_json::to_value(bare_series_body(self.event, own.as_deref()))?;
             self.requests += 1;
-            let sent = Instant::now();
+            // The create's own time is not the steps' (226): only what they
+            // send counts as their slowest request.
             let answer = self.cal.send(Method::POST, path.clone(), Some(body)).await;
-            self.slowest = self.slowest.max(sent.elapsed());
             let answer = match answer {
                 Ok(answer) => answer,
                 // Sent, and its answer lost: it may have been made.
@@ -354,11 +355,16 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
             }
             if rate_limited(&answer) && busy + 1 < CREATE_BUSY_TRIES {
                 let wait = answer.retry_after.unwrap_or_else(|| self.back_off(busy));
-                busy += 1;
-                self.retries += 1;
-                self.waited += wait;
-                tokio::time::sleep(wait).await;
-                continue;
+                // A longer wait is not slept through: the create made
+                // nothing, so the save says the provider is busy at once
+                // (270) instead of holding its wait dialog for minutes.
+                if wait <= self.pacing.max_wait {
+                    busy += 1;
+                    self.retries += 1;
+                    self.waited += wait;
+                    tokio::time::sleep(wait).await;
+                    continue;
+                }
             }
             if answer.status == 400 && own.is_some() {
                 // Google refusing the id Aperio chose: once more under its own.
@@ -1989,7 +1995,14 @@ mod tests {
             shape.clone(),
             vec![(Cancel, 0, Fault::Busy429(Some(Duration::from_secs(30))))],
         );
+        let started = std::time::Instant::now();
         let (undone, detail) = not_kept(run(&fake, series(vec![slot_at(&shape, 2)], true)).await);
+        // The 30 s asked for are not waited: the run ends within its budget.
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
         assert!(undone);
         // The provider was busy, not the run slow (276).
         assert_eq!(detail, "invited busy");
@@ -2120,6 +2133,48 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, GoogleError::Busy { .. }), "{err:?}");
         assert_eq!(fake.requests(Insert).len(), 3);
+    }
+
+    /// A create Google asks to wait longer than the steps ever do is the
+    /// busy provider at once: it made nothing, and the save is not held for
+    /// the wait (270).
+    #[tokio::test]
+    async fn a_create_asked_to_wait_long_is_busy_at_once() {
+        let shape = mondays();
+        let fake = Fake::new(
+            shape.clone(),
+            vec![(Insert, 0, Fault::Busy429(Some(Duration::from_secs(30))))],
+        );
+        let started = std::time::Instant::now();
+        let err = run(&fake, series(vec![slot_at(&shape, 2)], false))
+            .await
+            .unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(matches!(err, GoogleError::Busy { .. }), "{err:?}");
+        assert_eq!(fake.requests(Insert).len(), 1);
+    }
+
+    /// A create that takes longer than the steps' budget leaves them their
+    /// whole time from its confirmation (226): its own time is no step's.
+    #[tokio::test]
+    async fn a_slow_create_leaves_the_steps_their_time() {
+        let shape = mondays();
+        let fake = Fake::new(
+            shape.clone(),
+            vec![(
+                Insert,
+                0,
+                Fault::Slow(budget().settle + Duration::from_millis(100)),
+            )],
+        );
+        run(&fake, series(vec![slot_at(&shape, 2)], false))
+            .await
+            .unwrap();
+        assert_eq!(fake.cancelled_slots(), [shape[2]]);
     }
 
     #[tokio::test]
