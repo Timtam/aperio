@@ -1476,8 +1476,8 @@ fn to_update_error(err: EwsError) -> CoreError {
 /// caller undoes the rest of a write whose new part stands. A `CreateItem`
 /// Exchange turned down whole is a refusal as for an update
 /// ([`to_update_error`]): it saved nothing. This changes plain creates too —
-/// a create refused while Exchange throttles says the server refused it,
-/// where it said a protocol error.
+/// a create Exchange throttles says the provider is busy, any other refusal
+/// that the server refused it, where both said a protocol error.
 fn to_create_error(err: EwsError) -> CoreError {
     match err {
         EwsError::Protocol(message)
@@ -1879,7 +1879,7 @@ mod update_refusal_tests {
     /// fault, it is a busy provider, on an update, a create, a read and a
     /// delete alike (decision 270); any other 500 stays unsure.
     #[test]
-    fn a_throttling_fault_sent_as_500_is_a_refusal() {
+    fn a_throttling_fault_sent_as_500_is_a_busy_provider() {
         for core in [
             to_update_error(fault_500("ErrorServerBusy")),
             to_create_error(fault_500("ErrorServerBusy")),
