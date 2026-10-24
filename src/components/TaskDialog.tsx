@@ -1000,8 +1000,12 @@ export function TaskDialog({
       announce(t('dialogs.task.subtasks.added', { title: trimmed }));
     } catch (err) {
       // A subtask that stands leaves the field, so adding again does not make
-      // it twice, and the rows read again (decision 277).
-      if (made) setNewSubtaskTitle((prev) => (prev.trim() === trimmed ? '' : prev));
+      // it twice, and the rows read again (decision 277) — also one whose own
+      // create stands in part (a leftover: Vikunja's bucket move or parent
+      // link turned away), as the drafts count it.
+      if (made || eventWriteLeftover(err)) {
+        setNewSubtaskTitle((prev) => (prev.trim() === trimmed ? '' : prev));
+      }
       invalidateData();
       // Show inline rather than steal the parent form's error slot.
       announce(writeErrorMessage(err, t));

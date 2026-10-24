@@ -291,4 +291,26 @@ describe('TaskDialog: a subtask added before its parent met a busy provider', ()
     expect(invalidateData).toHaveBeenCalled();
     expect(invokeMock.mock.calls.filter((c) => c[0] === 'create_task')).toHaveLength(1);
   });
+
+  it('empties the field when the subtask itself stands in part', async () => {
+    // Vikunja: the task is made, then its parent link is turned away busy.
+    const full = (task: Task) =>
+      ({ ...task, priority: 'medium', effort: 'medium', assignees: [], reminders: [] }) as Task;
+    const parent = full(created('p1', 'Einkaufen'));
+    TASKS.current = [parent];
+    answers.create_task = [
+      () => Promise.reject({ code: 'network', message: 'partly-saved: parent' }),
+    ];
+    const { TaskDialog } = await import('./TaskDialog');
+    render(<TaskDialog isOpen onClose={() => {}} task={parent} />);
+    addDraft('Milch');
+    await waitFor(() =>
+      expect(announce).toHaveBeenCalledWith(expect.stringMatching(/nur zum Teil gespeichert/)),
+    );
+    // Adding again would make it twice.
+    expect(
+      (screen.getByLabelText('Titel der neuen Unteraufgabe') as HTMLInputElement).value,
+    ).toBe('');
+    expect(invalidateData).toHaveBeenCalled();
+  });
 });

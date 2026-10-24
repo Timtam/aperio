@@ -25,6 +25,7 @@ import {
   readErrorMessage,
   statusI18nKey,
   statusMarker,
+  eventWriteLeftover,
   writeAfterLanded,
   writeErrorMessage,
 } from '@aperio/shared';
@@ -167,8 +168,10 @@ export function SubtaskSection({
       announce(t('dialogs.task.subtasks.added', { title }));
     } catch (err) {
       // A subtask that stands leaves the field, so adding again does not make
-      // it twice, and the list reads again (decision 277).
-      if (made) setNewTitle('');
+      // it twice, and the list reads again (decision 277) — also one whose
+      // own create stands in part (a leftover), as the editor's drafts count
+      // it. Mirrors the desktop.
+      if (made || eventWriteLeftover(err)) setNewTitle('');
       void reload();
       onChanged();
       setError(writeErrorMessage(err, t));
