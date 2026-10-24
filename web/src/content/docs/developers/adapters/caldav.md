@@ -63,9 +63,12 @@ Apple's well-known endpoints.
   again one resource at a time, and a bootstrap that cannot read its token
   fails rather than storing a snapshot without one. The scheduling probe met
   by a busy server is asked again, never cached as "does not schedule", and a
-  free/busy query says busy instead of "availability unknown", which read as
-  every attendee free. Well-known discovery reads a 429 as busy, not as a
-  missing well-known. How iCloud throttles is not measured.
+  write that needs it while the server is still busy stops as busy rather than
+  dropping a meeting's invitees. A free/busy query says busy instead of
+  "availability unknown", which read as every attendee free. Well-known
+  discovery reads a 429 as busy, not as a missing well-known, and a busy
+  home-set probe fails discovery rather than caching the account without
+  calendars or contacts. How iCloud throttles is not measured.
 - **Both homes are best-effort.** Discovery probes `calendar-home-set`
   AND `addressbook-home-set` independently and fails only when **neither**
   is found. A CalDAV-only server (no address books) and a CardDAV-only

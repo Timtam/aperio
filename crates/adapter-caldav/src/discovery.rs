@@ -132,9 +132,12 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
     // doesn't surface that side"; the trait methods then return empty
     // listings for it. We only tear discovery down when NEITHER home is
     // present (below), which is the real "wrong URL / not a DAV server"
-    // signal.
+    // signal. A busy server is no answer about either side (decision 270):
+    // read as "not surfaced", it would be cached as an account without
+    // calendars or contacts.
     let calendar_home_url = match find_calendar_home(client, &principal_url, credentials).await {
         Ok(url) => Some(url),
+        Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
         Err(err) => {
             debug!(?err, "calendar-home-set discovery skipped");
             None
@@ -143,6 +146,7 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
     let addressbook_home_url =
         match find_addressbook_home(client, &principal_url, credentials).await {
             Ok(url) => Some(url),
+            Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
             Err(err) => {
                 debug!(?err, "addressbook-home-set discovery skipped");
                 None

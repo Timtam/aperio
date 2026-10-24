@@ -888,12 +888,15 @@ impl CaldavAdapter {
     /// What a write needs to know about the account on this server. The
     /// account's addresses are left unknown when the scheduling probe keeps
     /// failing; a write that needs them (one that touches a meeting) is then
-    /// refused by [`scheduling::plan_block`], and a plain one goes ahead.
+    /// refused by [`scheduling::plan_block`], and a plain one goes ahead. A
+    /// busy server stops the write instead (decision 270): written without
+    /// the account's addresses, a new meeting would lose its invitees.
     async fn write_ctx(&self) -> CoreResult<WriteCtx> {
         let discovery = self.discover().await.map_err(to_core_error)?;
         let discovery = if discovery.scheduling_probe_failed {
             match self.discovery_with_scheduling().await {
                 Ok(fresh) => fresh,
+                Err(err) if err.is_provider_busy() => return Err(err),
                 Err(_) => {
                     return Ok(WriteCtx {
                         identity: None,
@@ -1954,6 +1957,85 @@ mod tests {
         let err = adapter.own_identity().await.unwrap_err();
         assert!(err.is_provider_busy(), "{err:?}");
         busy.assert_async().await;
+    }
+
+    /// A busy answer to a home-set probe is no answer about that side: never
+    /// cached as an account without calendars, the listing says busy
+    /// (decision 270).
+    #[tokio::test]
+    async fn a_busy_home_set_probe_is_no_empty_account() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("calendar-home-set".into()))
+            .with_status(429)
+            .create_async()
+            .await;
+        let adapter = build_adapter(&server);
+        let err = adapter.list_calendars().await.unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        assert!(adapter.cached_calendar_home().is_none());
+    }
+
+    /// A new event needs the account's addresses to keep its invitees: a
+    /// scheduling probe the server is still too busy to answer stops the
+    /// save as busy, and nothing is written (decision 270).
+    #[tokio::test]
+    async fn a_busy_scheduling_probe_stops_a_write() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("calendar-home-set".into()))
+            .with_status(207)
+            .with_body(HOME_SET_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("schedule-outbox-URL".into()))
+            .with_status(429)
+            .create_async()
+            .await;
+        let put = server
+            .mock("PUT", mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+        let adapter = build_adapter(&server);
+        let event: NewEvent = serde_json::from_value(serde_json::json!({
+            "title": "Planning", "description": null, "location": null,
+            "start": "2026-06-20T09:00:00Z", "end": "2026-06-20T09:30:00Z",
+            "all_day": false, "recurrence": null, "color_label": null,
+            "reminders": [], "sound": null,
+            "attendees": ["bob@example.com"]
+        }))
+        .unwrap();
+        let calendar = format!("{}/calendars/alice/work/", server.url());
+        let err = adapter.create_event(&calendar, event).await.unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        put.assert_async().await;
     }
 
     /// A delta a busy server turned away starts no full read: the bootstrap
