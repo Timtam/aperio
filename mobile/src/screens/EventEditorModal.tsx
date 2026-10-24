@@ -139,7 +139,7 @@ import {
   eventWriteLeftover,
   seriesTailMayStand,
   seriesTailRemoved,
-  writeAfterLanded,
+  removeOriginalAfterCopy,
 } from '@aperio/shared';
 import { eventGroupsForEvents } from '../api/eventGroups';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -1289,15 +1289,26 @@ function EventEditorScreen({
           // standalone copy (decision 72a).
           ...organizerOf(original),
         });
-        // The standalone event stands: the skip after it is a later step,
-        // never "nothing was changed" (277). Mirrors the desktop.
-        await writeAfterLanded('skip', () =>
+        // The standalone event stands: a busy provider that kept the
+        // occurrence in its series is said as a move whose original stayed,
+        // and the editor only closes; any other failure never reads as
+        // "nothing was changed" (277). Mirrors the desktop.
+        const removed = await removeOriginalAfterCopy('skip', () =>
           addEventExdate(
             occurrenceWriteKind.seriesId,
             occurrenceWriteKind.occurrence,
             original.calendar_id,
           ),
         );
+        if (!removed) {
+          throw new CloseOnlyNotice(
+            originalKeptSentence(
+              [{ title: created.title, original_left_in: original.calendar_id }],
+              (id) => calendars.find((c) => c.id === id)?.name,
+              t,
+            ) ?? '',
+          );
+        }
         // The series lives on without this slot: it keeps its key.
         await savePrivate(created, { oldKeyLivesOn: true });
         if (!isLocalCal) {

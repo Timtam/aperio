@@ -90,7 +90,7 @@ import {
   type CarryableFields,
   type CarryScope,
   type ExceptionsLoss,
-  writeAfterLanded,
+  removeOriginalAfterCopy,
 } from '@aperio/shared';
 import {
   createsInSteps,
@@ -1545,11 +1545,22 @@ export function EventDialog({
                 send_invitations: sendInvitations,
                 ...organizerOf(event ?? {}),
               });
-              // The standalone event stands: the skip after it is a later
-              // step, never "nothing was changed" (277).
-              await writeAfterLanded('skip', () =>
+              // The standalone event stands: a busy provider that kept the
+              // occurrence in its series is said as a move whose original
+              // stayed, and the editor only closes; any other failure never
+              // reads as "nothing was changed" (277).
+              const removed = await removeOriginalAfterCopy('skip', () =>
                 addEventExdate(seriesId, occIso, event.calendar_id),
               );
+              if (!removed) {
+                throw new CloseOnlyNotice(
+                  originalKeptSentence(
+                    [{ title: created.title, original_left_in: event.calendar_id }],
+                    (id) => calendars.find((c) => c.id === id)?.name,
+                    t,
+                  ) ?? '',
+                );
+              }
               // The series lives on without this slot: it keeps its key.
               await savePrivate(created, { oldKeyLivesOn: true });
               if (!storesColorNatively) {

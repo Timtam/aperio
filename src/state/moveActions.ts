@@ -20,6 +20,7 @@ import {
   type NoticeCalendar,
   type ShiftRefusal,
   createsInSteps,
+  removeOriginalAfterCopy,
   writeAfterLanded,
   writeWithoutWaiting,
   type StepWriteOptions,
@@ -370,7 +371,7 @@ export async function moveOrCopyEvent(
   }
 
   const source = asOccurrence ? event : await newSeriesRowOf(event);
-  await (steps.wait ?? writeWithoutWaiting)(
+  const created = await (steps.wait ?? writeWithoutWaiting)(
     !asOccurrence && createsInSteps(steps.target, source.recurrence),
     () =>
       apiCreateEvent(
@@ -399,12 +400,13 @@ export async function moveOrCopyEvent(
   if (mode === 'move' && asOccurrence) {
     const occIso = occurrenceIsoOf(event);
     if (occIso) {
-      // The copy stands: a cancel of the original that fails never reads as
-      // "nothing was changed", and moving again would make a second copy
-      // (decision 277).
-      await writeAfterLanded('source-delete', () =>
+      // The copy stands: a busy provider that kept the original is said as a
+      // move whose original stayed, naming its calendar; any other failure
+      // never reads as "nothing was changed" (decision 277).
+      const removed = await removeOriginalAfterCopy('source-delete', () =>
         addEventExdate(seriesIdOf(event), occIso, event.calendar_id),
       );
+      if (!removed) return { ...created, original_left_in: event.calendar_id };
     }
   }
   return null;

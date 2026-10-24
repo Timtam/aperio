@@ -31,12 +31,12 @@ type MoveOrCopy = (
   targetCalendarId: string,
   mode: 'move' | 'copy',
   scope: 'occurrence' | 'series',
-) => Promise<void>;
-async function phoneMoveOrCopy(...args: Parameters<MoveOrCopy>): Promise<void> {
+) => Promise<CalendarEvent | null>;
+async function phoneMoveOrCopy(...args: Parameters<MoveOrCopy>): Promise<CalendarEvent | null> {
   const phoneModule = (await import(/* @vite-ignore */ PHONE_MOVE_ACTIONS)) as {
     moveOrCopyEvent: MoveOrCopy;
   };
-  await phoneModule.moveOrCopyEvent(...args);
+  return phoneModule.moveOrCopyEvent(...args);
 }
 
 /**
@@ -171,29 +171,40 @@ describe('a whole series moved or copied, on the desktop and the phone alike', (
  * move partly saved, never "nothing was changed" — moving again would make a
  * second copy.
  */
-describe('an occurrence moved: a busy cancel after its copy landed is partly saved', () => {
+describe('an occurrence moved: a busy cancel after its copy landed keeps the original', () => {
   const busy = { code: 'forbidden', message: 'provider-busy: http-429' };
   const occurrence = FROM.occurrence(SHAPES.google);
 
-  it('desktop', async () => {
+  it('desktop: the copy names where the original stayed', async () => {
     invokeMock.mockImplementation((cmd: string) =>
-      cmd === 'add_event_exdate' ? Promise.reject(busy) : Promise.resolve({}),
+      cmd === 'add_event_exdate'
+        ? Promise.reject(busy)
+        : Promise.resolve({ id: 'copy', title: 'Standup', calendar_id: 'c2' }),
     );
-    await expect(desktopMoveOrCopy(occurrence, 'c2', 'move', 'occurrence')).rejects.toEqual({
-      code: 'network',
-      message: 'partly-saved: source-delete',
-    });
+    await expect(desktopMoveOrCopy(occurrence, 'c2', 'move', 'occurrence')).resolves.toEqual(
+      expect.objectContaining({ id: 'copy', original_left_in: 'c1' }),
+    );
     expect(invokeMock.mock.calls.map((c) => c[0])).toEqual(['create_event', 'add_event_exdate']);
   });
 
-  it('phone', async () => {
-    phone.createEvent.mockResolvedValue({});
+  it('phone: the copy names where the original stayed', async () => {
+    phone.createEvent.mockResolvedValue({ id: 'copy', title: 'Standup', calendar_id: 'c2' });
     phone.addEventExdate.mockRejectedValue(busy);
-    await expect(phoneMoveOrCopy(occurrence, 'c2', 'move', 'occurrence')).rejects.toEqual({
-      code: 'network',
-      message: 'partly-saved: source-delete',
-    });
+    await expect(phoneMoveOrCopy(occurrence, 'c2', 'move', 'occurrence')).resolves.toEqual(
+      expect.objectContaining({ id: 'copy', original_left_in: 'c1' }),
+    );
     expect(phone.createEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('desktop: any other failure of the cancel may have landed', async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === 'add_event_exdate'
+        ? Promise.reject({ code: 'not_found', message: 'gone' })
+        : Promise.resolve({}),
+    );
+    await expect(desktopMoveOrCopy(occurrence, 'c2', 'move', 'occurrence')).rejects.toEqual(
+      expect.objectContaining({ code: 'network' }),
+    );
   });
 
   it('desktop, dragged to another day', async () => {

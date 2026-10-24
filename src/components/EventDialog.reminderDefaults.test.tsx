@@ -538,16 +538,17 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     ]);
   });
 
-  it('says a carve-out whose skip met a busy provider is partly saved, and only closes', async () => {
+  it('says where the original of a carve-out stayed when its skip met a busy provider, and only closes', async () => {
     // The standalone copy stands once it is created: "nothing was changed"
-    // would invite a second save and a second copy (decision 277).
+    // would invite a second save and a second copy (decision 277); the
+    // sentence names the calendar the occurrence is still in.
     exdateBusy.current = true;
     privateRows.current = [storedRow('series-1')];
     await openEditor([], { event: OCCURRENCE, initialScope: 'occurrence' });
     await waitFor(() => expect(reminderRows()).toHaveLength(1));
 
     fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
-    expect(await screen.findByText(/nur zum Teil gespeichert/i)).toBeTruthy();
+    expect(await screen.findByText(/das Original in „Arbeit“ ließ sich nicht entfernen/)).toBeTruthy();
     // The save has settled: no update lands after the test.
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /speichern|save/i })).toBeNull(),

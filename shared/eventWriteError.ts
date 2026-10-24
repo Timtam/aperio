@@ -279,6 +279,27 @@ export async function writeAfterLanded<T>(step: string, write: () => Promise<T>)
 }
 
 /**
+ * The removal of an original after its copy landed — one occurrence moved to
+ * another calendar or carved out of its series (decision 277). `true` when it
+ * went; `false` when a busy provider kept the original: the copy stands, and
+ * the caller says where the original stayed, as any move whose original
+ * stayed does (`originalKeptSentence`) — doing it again would make a second
+ * copy. Any other failure is a later step's, never "nothing was changed".
+ */
+export async function removeOriginalAfterCopy(
+  step: string,
+  remove: () => Promise<unknown>,
+): Promise<boolean> {
+  try {
+    await remove();
+    return true;
+  } catch (err) {
+    if (isProviderBusy(err)) return false;
+    throw afterLanded(err, step);
+  }
+}
+
+/**
  * The writes one action makes together (the day-start review's "all to
  * today"): every one is attempted, side by side or, with `oneAtATime`, one
  * after the other. What landed comes back, and the first failure reads as
