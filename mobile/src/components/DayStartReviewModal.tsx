@@ -250,9 +250,10 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const titleRef = useRef<Text>(null);
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
-  // Where focus goes when the pending row no longer shows after a re-read: a
-  // write that failed may still have landed in part and taken its row away.
-  const pendingFocusFallback = useRef<string | null>(null);
+  // After a failed write: the row it worked on, and the row to take focus if
+  // the re-read takes that one away (part of the write landed). While the
+  // row stays, focus stays where the person left it, on the pressed button.
+  const focusIfGone = useRef<{ acted: string; fallback: string | null } | null>(null);
   // The rows the last action worked on, for a failure to keep focus on.
   const actedIds = useRef<string[]>([]);
 
@@ -269,12 +270,19 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
 
   // After a resolution remounts the rows, move focus to the queued next row.
   useEffect(() => {
+    const gone = focusIfGone.current;
+    if (gone != null) {
+      focusIfGone.current = null;
+      if (!orderedIds.includes(gone.acted) && gone.fallback != null) {
+        const tag = rowTags.current[gone.fallback];
+        if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+      }
+      return;
+    }
     if (pendingFocusId.current == null) return;
     const id = pendingFocusId.current;
-    const fallback = pendingFocusFallback.current;
     pendingFocusId.current = null;
-    pendingFocusFallback.current = null;
-    const tag = rowTags.current[id] ?? (fallback != null ? rowTags.current[fallback] : null);
+    const tag = rowTags.current[id];
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, [orderedIds]);
 
@@ -291,12 +299,14 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
 
   /** A button's write that failed: said, never an unhandled rejection
    *  (decision 273), and what may have landed reads again. Focus stays on the
-   *  row it worked on where that still shows, and goes to the row queued for
-   *  after it where the re-read took it away (part of the write landed). */
+   *  pressed button while its row shows, and goes to the row queued for after
+   *  it only where the re-read took the row away (part of the write landed). */
   const failed = useCallback(
     (err: unknown) => {
-      pendingFocusFallback.current = pendingFocusId.current;
-      pendingFocusId.current = actedIds.current[0] ?? null;
+      const acted = actedIds.current[0];
+      focusIfGone.current =
+        acted != null ? { acted, fallback: pendingFocusId.current } : null;
+      pendingFocusId.current = null;
       invalidateData();
       announce(writeErrorMessage(err, t));
     },

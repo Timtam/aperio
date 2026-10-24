@@ -444,11 +444,13 @@ export default function AgendaScreen({
           void load();
         },
         (message) => {
-          setError(message);
-          announce(t('mobile.error', { message }));
           // A delete that failed may have landed in part — a series cut
           // short — so the list reads again, as the desktop grid does (277).
+          // Started first: its own start clears the error shown, which must
+          // then be this one.
           void load();
+          setError(message);
+          announce(t('mobile.error', { message }));
         },
         {
           calendar: calendars.find((c) => c.id === ev.calendar_id),
