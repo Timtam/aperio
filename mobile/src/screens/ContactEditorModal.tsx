@@ -446,6 +446,20 @@ export default function ContactEditorModal({
     urls,
   ]);
 
+  // What the provider holds after a photo write that failed: one that stands
+  // in part (the old picture gone, the new one not taken) leaves the editor
+  // showing what is there, not what was (decision 277). The line already says
+  // the failure; a read that fails too leaves the editor as it is.
+  const rereadPhoto = useCallback(async (contact: Contact) => {
+    try {
+      const now = await getContactPhoto(contact.id, contact.list_id);
+      setPhoto(now);
+      setOriginal({ ...contact, has_photo: now != null });
+    } catch {
+      /* said by the failure before it */
+    }
+  }, []);
+
   const removePhoto = useCallback(async () => {
     // A new (unsaved) contact's picked photo lives only in state — just clear it.
     if (original == null) {
@@ -463,10 +477,11 @@ export default function ContactEditorModal({
       const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
+      void rereadPhoto(original);
     } finally {
       setBusy(false);
     }
-  }, [announce, original, t]);
+  }, [announce, original, rereadPhoto, t]);
 
   // Pick an image from the device library → validate type + size → set it. For
   // an existing contact it's pushed immediately (setContactPhoto); for a new one
@@ -517,6 +532,7 @@ export default function ContactEditorModal({
         const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
+        void rereadPhoto(original);
       } finally {
         setBusy(false);
       }
@@ -526,7 +542,7 @@ export default function ContactEditorModal({
       setError(null);
       announce(t('dialogs.contact.photoUpdated', { name: displayName.trim() }));
     }
-  }, [announce, displayName, original, t]);
+  }, [announce, displayName, original, rereadPhoto, t]);
 
   const addAddress = useCallback(() => {
     addressFocus.onAdd();

@@ -203,6 +203,10 @@ export function ContactsView() {
       invalidateData();
       setSearchNonce((n) => n + 1);
     } catch (err) {
+      // A delete whose answer was lost may have landed: the list and any
+      // search read again, as an event's or a task's delete does (277).
+      invalidateData();
+      setSearchNonce((n) => n + 1);
       announce(writeErrorMessage(err, t));
     }
     // The confirmation took focus out of the list; the list is where the user

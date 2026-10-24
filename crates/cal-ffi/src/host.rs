@@ -8097,18 +8097,22 @@ impl Host {
             Some(lid) => self.route_contact_list(lid)?,
             None => None,
         };
-        self.runtime
+        let deleted = self
+            .runtime
             .block_on(async {
                 match route {
                     None => self.adapter.delete_contact(&id).await,
                     Some(ext) => ext.delete_contact(&id).await,
                 }
             })
-            .map_err(map_store_err)?;
+            .map_err(map_store_err);
+        // Failed or not: a delete whose answer was lost may have landed
+        // (decision 277), so the next read asks the provider. Mirrors the
+        // desktop.
         if let Some(lid) = list_id.as_deref() {
             self.invalidate_contacts_cache(lid);
         }
-        Ok(())
+        deleted
     }
 
     /// A contact's avatar as JSON `Option<ContactPhoto>` — `{content_type,
@@ -8151,20 +8155,22 @@ impl Host {
             Some(lid) => self.route_contact_list(lid)?,
             None => None,
         };
-        self.runtime
+        let set = self
+            .runtime
             .block_on(async {
                 match route {
                     None => self.adapter.set_contact_photo(&id, photo).await,
                     Some(ext) => ext.set_contact_photo(&id, photo).await,
                 }
             })
-            .map_err(map_store_err)?;
+            .map_err(map_store_err);
         // A photo change alters the cached contact — invalidate so the next read
-        // re-fetches it.
+        // re-fetches it; one that failed may stand in part, the old picture
+        // gone (decision 277).
         if let Some(lid) = list_id.as_deref() {
             self.invalidate_contacts_cache(lid);
         }
-        Ok(())
+        set
     }
 
     /// Remove a contact's avatar (other fields untouched), routed by the
@@ -8178,20 +8184,21 @@ impl Host {
             Some(lid) => self.route_contact_list(lid)?,
             None => None,
         };
-        self.runtime
+        let deleted = self
+            .runtime
             .block_on(async {
                 match route {
                     None => self.adapter.delete_contact_photo(&id).await,
                     Some(ext) => ext.delete_contact_photo(&id).await,
                 }
             })
-            .map_err(map_store_err)?;
+            .map_err(map_store_err);
         // A photo change alters the cached contact — invalidate so the next read
-        // re-fetches it.
+        // re-fetches it; one that failed may stand in part (decision 277).
         if let Some(lid) = list_id.as_deref() {
             self.invalidate_contacts_cache(lid);
         }
-        Ok(())
+        deleted
     }
 
     /// Create a top-level LOCAL address book; returns it as a `ContactListRow`.
@@ -11027,6 +11034,102 @@ mod tests {
         assert!(
             generation() > before,
             "a failed skip reads the calendar again"
+        );
+    }
+
+    /// A contacts account whose deletes and photo writes lose their answer:
+    /// they may have landed.
+    struct LostContactWrites;
+
+    #[async_trait::async_trait]
+    impl cal_core::Adapter for LostContactWrites {
+        async fn authenticate(
+            &self,
+            _credentials: cal_core::Credentials,
+        ) -> cal_core::Result<cal_core::AuthToken> {
+            unreachable!("never signed in")
+        }
+        fn capabilities(&self) -> &[cal_core::Capability] {
+            &[cal_core::Capability::Contacts]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl cal_core::ContactsFeature for LostContactWrites {
+        async fn list_contact_lists(&self) -> cal_core::Result<Vec<cal_core::ContactList>> {
+            Ok(Vec::new())
+        }
+        async fn get_contacts(&self, _: &str) -> cal_core::Result<Vec<cal_core::Contact>> {
+            Ok(Vec::new())
+        }
+        async fn search_contacts(&self, _: &str) -> cal_core::Result<Vec<cal_core::Contact>> {
+            Ok(Vec::new())
+        }
+        async fn create_contact(
+            &self,
+            _: &str,
+            _: cal_core::NewContact,
+        ) -> cal_core::Result<cal_core::Contact> {
+            unreachable!("nothing is created")
+        }
+        async fn update_contact(
+            &self,
+            _: cal_core::Contact,
+        ) -> cal_core::Result<cal_core::Contact> {
+            unreachable!("nothing is updated")
+        }
+        async fn delete_contact(&self, _: &str) -> cal_core::Result<()> {
+            Err(cal_core::Error::Network("connection reset".into()))
+        }
+        async fn set_contact_photo(
+            &self,
+            _: &str,
+            _: cal_core::ContactPhoto,
+        ) -> cal_core::Result<()> {
+            Err(cal_core::Error::partly_saved("photo"))
+        }
+        async fn delete_contact_photo(&self, _: &str) -> cal_core::Result<()> {
+            Err(cal_core::Error::partly_saved("photo"))
+        }
+    }
+
+    /// Decision 277 on the phone: a contact delete whose answer was lost, or
+    /// a photo write that stands in part (the old picture gone), may have
+    /// landed, so its address book is read again.
+    #[test]
+    fn a_failed_external_contact_write_still_invalidates_its_list() {
+        let (_dir, host, _) = open_host();
+        host.registry
+            .register_host_contacts("acc-x", Arc::new(LostContactWrites));
+        host.registry.note_contact_list_route("AB1", "acc-x");
+        let generation = || {
+            host.cache
+                .refresh_generation("acc-x", SyncScope::Contacts, "AB1")
+        };
+        let before = generation();
+        assert!(host
+            .delete_contact("c-1".into(), Some("AB1".into()))
+            .is_err());
+        assert!(
+            generation() > before,
+            "a failed delete reads the list again"
+        );
+        let before = generation();
+        let photo = serde_json::json!({ "content_type": "image/jpeg", "data": "/9j/" });
+        assert!(host
+            .set_contact_photo_json("c-1".into(), Some("AB1".into()), photo.to_string())
+            .is_err());
+        assert!(
+            generation() > before,
+            "a failed photo write reads the list again"
+        );
+        let before = generation();
+        assert!(host
+            .delete_contact_photo("c-1".into(), Some("AB1".into()))
+            .is_err());
+        assert!(
+            generation() > before,
+            "a failed photo removal reads the list again"
         );
     }
 

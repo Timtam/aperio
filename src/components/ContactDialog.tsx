@@ -664,6 +664,9 @@ export function ContactDialog({
       invalidateData();
       onClose();
     } catch (err) {
+      // A delete whose answer was lost may have landed: the views read again
+      // (277); the dialog stays to say it.
+      invalidateData();
       setError(writeErrorMessage(err, t));
     } finally {
       setSubmitting(false);

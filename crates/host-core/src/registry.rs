@@ -551,6 +551,18 @@ impl AdapterRegistry {
         }
     }
 
+    /// Insert a host-constructed contacts surface under `account_id`, as
+    /// [`Self::register_host_adapter`] does for calendars and tasks: for a
+    /// host's own adapter, and for the hosts' tests of what a contact write
+    /// does to the cache. Re-registering an account id overwrites the prior
+    /// entry.
+    pub fn register_host_contacts(&self, account_id: &str, contacts: Arc<dyn ContactsFeature>) {
+        self.external_contacts
+            .write()
+            .expect("registry contacts poison")
+            .insert(account_id.to_string(), contacts);
+    }
+
     /// Drop the adapter for `account_id`. Called from
     /// `delete_account` so the registry doesn't hand out a stale
     /// reference after deletion.

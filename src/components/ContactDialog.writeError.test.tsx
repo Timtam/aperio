@@ -11,11 +11,15 @@ import type { ContactList } from '../api/types';
  */
 
 const { invokeMock, onFile, invalidateData } = vi.hoisted(() => {
-  const onFile: { createFails: unknown; hasPhoto: boolean } = {
+  const onFile: { createFails: unknown; hasPhoto: boolean; deleteFails: unknown } = {
     createFails: null,
     hasPhoto: true,
+    deleteFails: null,
   };
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
+    if (command === 'delete_contact' && onFile.deleteFails != null) {
+      return Promise.reject(onFile.deleteFails);
+    }
     if (command === 'create_contact') {
       if (onFile.createFails != null) return Promise.reject(onFile.createFails);
       const request = (payload as { request: Record<string, unknown> }).request;
@@ -45,6 +49,7 @@ afterEach(() => {
   invalidateData.mockClear();
   onFile.createFails = null;
   onFile.hasPhoto = true;
+  onFile.deleteFails = null;
 });
 
 async function createContact(
@@ -110,5 +115,49 @@ describe('ContactDialog → a create that landed in part', () => {
     const onClose = vi.fn();
     await createContact(onClose, true);
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+});
+
+/**
+ * A delete that failed may have landed — its answer was lost — so the views
+ * read again (decision 277), as an event's or a task's delete does; the
+ * dialog stays to say it.
+ */
+describe('ContactDialog → a delete that failed', () => {
+  it('says it and reads the views again', async () => {
+    onFile.deleteFails = { code: 'network', message: 'connection reset' };
+    const contact = {
+      id: 'c-1',
+      list_id: 'book-1',
+      display_name: 'Anna',
+      given_name: 'Anna',
+      family_name: null,
+      name_prefix: null,
+      name_suffix: null,
+      organization: null,
+      emails: [],
+      phone_numbers: [],
+      urls: [],
+      birthday: null,
+      anniversary: null,
+      job_title: null,
+      department: null,
+      notes: null,
+      members: null,
+      has_photo: false,
+      addresses: [],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      etag: null,
+    };
+    const onClose = vi.fn();
+    const { ContactDialog } = await import('./ContactDialog');
+    render(<ContactDialog isOpen onClose={onClose} contact={contact as never} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Löschen' }));
+    const confirm = await screen.findAllByRole('button', { name: 'Löschen' });
+    fireEvent.click(confirm[confirm.length - 1]);
+    await waitFor(() => expect(invalidateData).toHaveBeenCalledTimes(1));
+    expect(invokeMock.mock.calls.filter((c) => c[0] === 'delete_contact')).toHaveLength(1);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
