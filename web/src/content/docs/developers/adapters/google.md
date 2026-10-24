@@ -249,8 +249,11 @@ requests failing at each step. A new series written in steps
 runs against a scripted Google series instead: its occurrences, the
 requests in order, and faults injected by request kind and turn (a rate
 limit, a lost or unreadable answer, a cancel that did nothing, someone
-else's cancel, a listing that lags); one test runs every fault at every
-request and checks that each outcome says what stands.
+else's cancel, a listing that lags or comes back empty). One test runs every
+fault at each request of a plain run, a second every fault at the requests
+only another fault sends (the read-back after a lost create, the read of a
+cancel whose answer was lost, the take-back and its read), and both check
+that each outcome says what stands.
 
 None of that was run against Google: there is no live test of it. The model
 pins Aperio's reading of Google's documentation where Google promises

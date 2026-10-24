@@ -455,6 +455,9 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
         if before.is_empty() {
             self.pause(until, "list").await?;
             before = self.list(until, "list").await?;
+            if before.iter().any(|o| o.cancelled) {
+                return Err(Failure::new("list", "foreign-deletion"));
+            }
         }
         if before.is_empty() {
             // Nothing in the deletions' window: the series ended before them,
@@ -474,6 +477,13 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
             let again = self.list(until, "list").await?;
             if again.iter().any(|o| o.cancelled) {
                 return Err(Failure::new("list", "foreign-deletion"));
+            }
+            // A second listing that lost an occurrence the first one held
+            // says nothing reliable about the series: judged on it, a
+            // deletion matched before would be skipped without a word. The
+            // run stops, and the series is taken back.
+            if before.iter().any(|o| !again.iter().any(|a| a.id == o.id)) {
+                return Err(Failure::new("list", "control"));
             }
             before = again;
             matched = judge(self.wanted, &before);
@@ -860,6 +870,9 @@ impl<'a, C: Calendar + Sync> Run<'a, C> {
             };
             first_delete = false;
             if let Ok(answer) = &answer {
+                // Google answers 404 only for an event it does not hold, and
+                // 410 for one deleted before: after a create it confirmed,
+                // either says the series is gone.
                 if is_success(answer.status) || matches!(answer.status, 404 | 410) {
                     undone = true;
                     break;
@@ -1195,6 +1208,8 @@ mod tests {
         RefreshRefused,
         /// A listing that shows the occurrences as before the last cancel.
         StaleList,
+        /// A listing that answers with no occurrence at all.
+        EmptyList,
     }
 
     #[derive(Debug, Clone)]
@@ -1610,6 +1625,7 @@ mod tests {
                     self.state.lock().unwrap().stale = 1;
                     self.handle(kind, &path, body.as_ref())
                 }
+                Some(Fault::EmptyList) => answer(200, serde_json::json!({ "items": [] })),
                 Some(Fault::Garbled) => {
                     let _ = self.handle(kind, &path, body.as_ref());
                     answer(200, serde_json::json!("<<garbled")).map(|mut a| {
@@ -2224,6 +2240,22 @@ mod tests {
         );
     }
 
+    /// A second listing that lost an occurrence the first one held: the
+    /// deletion matched before is never skipped for it; the run takes the
+    /// series back (269).
+    #[tokio::test]
+    async fn a_second_listing_that_lost_an_occurrence_takes_back() {
+        let shape = mondays();
+        // One deletion on the rule, one on a Tuesday: the Tuesday sends a
+        // second listing, which answers with nothing.
+        let deleted = vec![slot_at(&shape, 1), at("2026-11-10T09:00:00Z")];
+        let fake = Fake::new(shape.clone(), vec![(List, 1, Fault::EmptyList)]);
+        let (undone, detail) = not_kept(run(&fake, series(deleted, false)).await);
+        assert!(undone);
+        assert!(detail.contains("control"), "{detail}");
+        assert!(fake.requests(Cancel).is_empty());
+    }
+
     #[tokio::test]
     async fn a_listing_that_lags_once_is_read_again() {
         let shape = mondays();
@@ -2409,6 +2441,96 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// The requests only another fault sends — the read-back after a lost
+    /// create, the read of a cancel whose answer was lost, and the take-back
+    /// after a step that failed — each get every fault, at each of their
+    /// turns, and each outcome still says what stands. A 404 is left out:
+    /// the fake's does nothing, while Google answers 404 only for an event it
+    /// does not hold, which the take-back reads as gone.
+    #[tokio::test]
+    async fn every_fault_after_an_opening_fault_ends_in_what_stands() {
+        let faults = || {
+            vec![
+                Fault::Busy429(None),
+                Fault::Busy403("rateLimitExceeded"),
+                Fault::Busy403("quotaExceeded"),
+                Fault::Http(400),
+                Fault::Http(500),
+                Fault::LostAfter,
+                Fault::LostBefore,
+                Fault::Unreached,
+                Fault::Garbled,
+                Fault::RefreshRefused,
+            ]
+        };
+        // What opens each path, and the request on it that gets every fault.
+        let openers = || {
+            vec![
+                (vec![(Insert, 0, Fault::LostAfter)], GetSeries),
+                (vec![(Cancel, 0, Fault::LostAfter)], GetOccurrence),
+                (vec![(Cancel, 0, Fault::Http(400))], Delete),
+                // The take-back's read, after a delete the server failed.
+                (
+                    vec![(Cancel, 0, Fault::Http(400)), (Delete, 0, Fault::Http(500))],
+                    GetSeries,
+                ),
+            ]
+        };
+        let shape = mondays();
+        let deleted = vec![slot_at(&shape, 1), slot_at(&shape, 3)];
+        let mut fired = std::collections::HashSet::new();
+        for (path, (opening, kind)) in openers().into_iter().enumerate() {
+            for nth in 0..2 {
+                for fault in faults() {
+                    for notify in [false, true] {
+                        let mut injected = opening.clone();
+                        injected.push((kind, nth, fault.clone()));
+                        let fake = Fake::new(shape.clone(), injected);
+                        let result = run(&fake, series(deleted.clone(), notify)).await;
+                        let case = format!("{opening:?}, {kind:?} {nth} {fault:?} {notify}");
+                        if fake.requests(kind).len() > nth {
+                            fired.insert((path, nth));
+                        }
+                        let inserted = !fake.requests(Insert).is_empty();
+                        match result {
+                            Ok(created) => {
+                                let standing = fake.standing().expect(&case);
+                                assert!(!standing.deleted, "{case}");
+                                assert_eq!(fake.cancelled_slots(), [shape[1], shape[3]], "{case}");
+                                assert_eq!(
+                                    created.recurrence.unwrap().exceptions,
+                                    deleted,
+                                    "{case}"
+                                );
+                            }
+                            Err(GoogleError::NotKept { undone, detail }) => {
+                                if undone {
+                                    assert!(fake.standing().is_none(), "{case}");
+                                }
+                                assert_eq!(
+                                    cal_core::step_detail_invited(&detail),
+                                    notify && inserted,
+                                    "{case}"
+                                );
+                            }
+                            Err(err) => {
+                                assert!(fake.standing().is_none(), "{case}: {err:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Every request on a path was reached at its first turn: none of the
+        // cases passes by never getting there.
+        for (path, (opening, kind)) in openers().into_iter().enumerate() {
+            assert!(
+                fired.contains(&(path, 0)),
+                "{opening:?} then {kind:?} never ran"
+            );
         }
     }
 }
