@@ -257,8 +257,8 @@ export function TaskView() {
             : t('views.tasks.sectionColorCleared', { name: section.name }),
         );
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('set section color failed', err);
+        // The person chose it: said, never only logged (decision 273).
+        announce(writeErrorMessage(err, t));
       }
     },
     [loadSections, announce, t],

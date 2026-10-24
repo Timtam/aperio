@@ -401,9 +401,9 @@ fehlt.
 
 ## Nach dem Verschieben steht das Original noch da
 
-Verschiebst du eine Aufgabe oder einen Termin in eine Liste oder einen
-Kalender eines anderen Kontos, legt Aperio dort eine Kopie an und löscht dann
-das Original. Ist der Anbieter beim Löschen ausgelastet, steht das
+Verschiebst du eine Aufgabe oder einen Termin in eine andere Liste oder einen
+anderen Kalender — außer zwischen zwei lokalen von Aperio, auch innerhalb
+eines Kontos —, legt Aperio dort eine Kopie an und löscht dann das Original. Ist der Anbieter beim Löschen ausgelastet, steht das
 Verschobene am Ziel, und das Original bleibt, wo es war. Aperio nennt die
 Liste oder den Kalender, in dem es noch steht.
 

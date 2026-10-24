@@ -313,8 +313,8 @@ export function Sidebar({
           t('sidebar.menu.colorSetAnnouncement', { name, color: label.name }),
         );
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('set container color failed', err);
+        // The person chose it: said, never only logged (decision 273).
+        announce(writeErrorMessage(err, t));
       }
     },
     [
@@ -519,8 +519,8 @@ export function Sidebar({
               }),
         );
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('reparent_task_list failed', err);
+        // The person chose it: said, never only logged (decision 273).
+        announce(writeErrorMessage(err, t));
       }
     },
     [taskLists, refreshTaskLists, announce, t],
@@ -913,8 +913,8 @@ export function Sidebar({
                 }),
           );
         } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn('set container color failed', err);
+          // The person chose it: said, never only logged (decision 273).
+          announce(writeErrorMessage(err, t));
         }
       } else if (selected === 'focus-open') {
         setRestoreFocusToTree(true);

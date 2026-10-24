@@ -373,8 +373,9 @@ What you can do: open the item again later and add what is missing.
 
 ## After a move, the original is still there
 
-When you move a task or an appointment into a list or calendar of another
-account, Aperio creates a copy there and then deletes the original. When the
+When you move a task or an appointment into another list or calendar — any
+move except one between two of Aperio's own local ones, also within one
+account — Aperio creates a copy there and then deletes the original. When the
 provider is busy for the delete, the moved item stands at the target, and the
 original stays where it was. Aperio names the list or calendar it is still in.
 

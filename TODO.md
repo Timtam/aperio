@@ -1798,19 +1798,15 @@ Vorschläge sind nicht aufgenommen.
       groupSyncConflicts) und Erfolg oder Fehler mit
       dialogs.syncConflicts.copied/copyFailed ansagen. Vorschlag vom
       2026-06-30, aus der Vorschlagsliste gefallen.
-- [ ] **Fehler beim Ändern von Aufgaben am Desktop ansagen.** Abhaken meldet
-      Fehler jetzt (1fd68102). Andere Aufgaben-Änderungen am Desktop schreiben
-      bei Fehlern aber weiterhin nur console.warn und sagen nichts an, teils
-      ohne die Ansicht neu zu laden. Betroffen:
-      src/components/DayStartReviewDialog.tsx (delete_task, update_task,
-      Sammel-Updates an 7 Stellen), DeadlinePinChecker.tsx:126,
-      views/DayView.tsx:923 (Ziehen auf eine Uhrzeit), TaskDialog.tsx:787/819
-      (Abschnitte), views/TaskView.tsx:261 (Abschnittsfarbe) und
-      Sidebar.tsx:486/523 (Liste löschen oder umhängen). Jede Stelle soll den
-      Fehler ansagen, wie es mobile tut (neuer Desktop-Fehlerschlüssel EN+DE),
-      und nach einem Teilerfolg neu laden. Optional die Teilzählung
-      (cascadePartial) auch mobil nachziehen. Vorschlag vom 2026-09-09, aus
-      der Vorschlagsliste gefallen; das Abhaken selbst ist erledigt.
+- [ ] **Teilzählung beim Abhaken auch am Handy.** Seit PR 7 sagen alle
+      Aufgaben-Änderungen am Desktop, die eine Person auslöst, ihr Scheitern
+      (Tagesstart, Ziehen, Abschnitte, Abschnitts- und Behälterfarbe, Liste
+      umhängen und löschen) und lesen nach einem Teilerfolg neu; das
+      automatische Anheften einer Frist (`DeadlinePinChecker`) steht unter
+      „Automatische Schreibvorgänge sagen ihr Scheitern nicht“. Offen ist
+      nur, die Teilzählung des Desktops beim Abhaken
+      (`views.tasks.cascadePartial`: „2 von 3 weiteren Aufgaben mit
+      aktualisiert“) auch mobil nachzuziehen. Vorschlag vom 2026-09-09.
 - [ ] **Schlüsselbund-Test gelegentlich rot (Ursache unklar).** Der Test
       secrets::tests::round_trip_when_keychain_is_reachable
       (src-tauri/src/secrets.rs:155-177) ist laut Meldung gelegentlich rot:
