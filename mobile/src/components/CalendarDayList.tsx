@@ -1169,6 +1169,9 @@ export function CalendarDayList({
         (message) => {
           setError(message);
           announce(t('mobile.error', { message }));
+          // A delete that failed may have landed in part — a series cut
+          // short — so the list reads again, as the desktop grid does (277).
+          void load();
         },
         {
           calendar: calendars.find((c) => c.id === ev.calendar_id),

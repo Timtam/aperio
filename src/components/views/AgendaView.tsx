@@ -213,6 +213,9 @@ export function AgendaView() {
         // so the dataVersion bump has to be explicit here.
         invalidateData();
       } catch (err) {
+        // A delete that failed may have landed in part — a series cut short —
+        // so the list reads again, as the grids do (decision 277).
+        invalidateData();
         // In words, as the editors say it: a provider's refusal included, such
         // as a cut on a clock Aperio cannot read (decision 256).
         announce(eventWriteErrorMessage(err, t));
