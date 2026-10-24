@@ -201,6 +201,20 @@ describe('useTaskStatusActions — what the user is told', () => {
     expect(said).not.toContain('statusChangeFailed');
   });
 
+  it('hands a failure to the surface that says where it shows', async () => {
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useTaskStatusActions());
+    const said: string[] = [];
+    await act(async () => {
+      await result.current.set(TASKS[0], 'completed', (sentence) => said.push(sentence));
+    });
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('dialogs.event.writeError.partlySaved');
+    expect(announce).not.toHaveBeenCalled();
+  });
+
   it('still says "could not change" where the status itself was turned away', async () => {
     vi.mocked(invoke)
       .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: status' })

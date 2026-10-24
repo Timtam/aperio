@@ -36,6 +36,7 @@ import {
   snoozeDayStartReview,
 } from './dayStartReview';
 import { Modal } from './Modal';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
 
 /**
  * Day-start review dialog (DESIGN.md § 9.5).
@@ -236,6 +237,20 @@ export function DayStartReviewDialog({
   // and the × close without burning a snooze, and the intro copy swaps.
   const remindersOnly = totalRemaining === 0 && hasReminders;
 
+  // The last action's failure, said: where that action cleared the last rows,
+  // "All handled" would speak over it and the dialog close with it unseen.
+  // It then stays on screen with Close instead (Toni, 2026-10-24), as any save
+  // that landed in part does. Every action starts without one.
+  const lastFailure = useRef<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const sayFailure = useCallback(
+    (sentence: string) => {
+      lastFailure.current = sentence;
+      announce(sentence);
+    },
+    [announce],
+  );
+
   // Close when the actionable list empties out mid-session — the user just
   // cleared everything, no point keeping the modal up.
   //
@@ -248,6 +263,12 @@ export function DayStartReviewDialog({
     if (!isOpen) return;
     if (totalRemaining > 0 || resolvedIds.size === 0) return;
     if (hasReminders) return;
+    const failure = lastFailure.current;
+    if (failure != null) {
+      lastFailure.current = null;
+      setNotice(`${failure} ${t('dialogs.dayStartReview.allHandled')}`);
+      return;
+    }
     snoozeDayStartReview(4);
     announce(t('dialogs.dayStartReview.allHandled'));
     onClose();
@@ -277,9 +298,14 @@ export function DayStartReviewDialog({
       return;
     }
     if (remindersOnly && !wasRemindersOnly.current) {
+      // The action that cleared the last rows failed in part: its sentence
+      // first, in the same announcement — the live region keeps only the
+      // last of two in a frame. The reminders keep the dialog up.
+      const failure = resolvedIds.size > 0 ? lastFailure.current : null;
+      lastFailure.current = null;
       announce(
         resolvedIds.size > 0
-          ? t('dialogs.dayStartReview.allHandled')
+          ? `${failure == null ? '' : `${failure} `}${t('dialogs.dayStartReview.allHandled')}`
           : t('dialogs.dayStartReview.hintRemindersOnly'),
       );
     }
@@ -319,6 +345,7 @@ export function DayStartReviewDialog({
     async (task: Task): Promise<void> => {
       // `busy` may never commit as true when the write answers at once.
       acted.current = true;
+      lastFailure.current = null;
       setBusy(true);
       try {
         // Delegate to the shared status action — it runs the same
@@ -327,14 +354,14 @@ export function DayStartReviewDialog({
         // announcement, a failure's included. We just need to hide the
         // dialog row — only once the task is done: a row whose completion
         // was turned away stays, to be tried again (decision 273).
-        if (await setTaskStatus(task, 'completed')) {
+        if (await setTaskStatus(task, 'completed', sayFailure)) {
           setResolvedIds((s) => new Set(s).add(task.id));
         }
       } finally {
         setBusy(false);
       }
     },
-    [setTaskStatus],
+    [setTaskStatus, sayFailure],
   );
 
   // Delete a task that's no longer relevant. The ONLY irreversible action in
@@ -349,6 +376,7 @@ export function DayStartReviewDialog({
       ) {
         return;
       }
+      lastFailure.current = null;
       setBusy(true);
       try {
         await invoke<void>('delete_task', { id: task.id, listId: task.list_id });
@@ -361,12 +389,12 @@ export function DayStartReviewDialog({
         // The person pressed it: said, never only logged (decision 273). A
         // failed write may still have landed, so the rows read again.
         invalidateData();
-        announce(writeErrorMessage(err, t));
+        sayFailure(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
       }
     },
-    [t, announce, invalidateData],
+    [t, announce, invalidateData, sayFailure],
   );
 
   // The row title + date were plain <span>s inside the role="application" Modal,
@@ -410,6 +438,7 @@ export function DayStartReviewDialog({
    */
   const deadlineToToday = useCallback(
     async (task: Task): Promise<void> => {
+      lastFailure.current = null;
       setBusy(true);
       try {
         const moved = movedToToday(task);
@@ -433,16 +462,17 @@ export function DayStartReviewDialog({
         // The person pressed it: said, never only logged (decision 273). A
         // failed write may still have landed, so the rows read again.
         invalidateData();
-        announce(writeErrorMessage(err, t));
+        sayFailure(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
       }
     },
-    [t, announce, invalidateData],
+    [t, announce, invalidateData, sayFailure],
   );
 
   const backToBacklog = useCallback(
     async (task: Task): Promise<void> => {
+      lastFailure.current = null;
       setBusy(true);
       try {
         const updated: Task = {
@@ -466,15 +496,16 @@ export function DayStartReviewDialog({
         // The person pressed it: said, never only logged (decision 273). A
         // failed write may still have landed, so the rows read again.
         invalidateData();
-        announce(writeErrorMessage(err, t));
+        sayFailure(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
       }
     },
-    [t, announce, invalidateData],
+    [t, announce, invalidateData, sayFailure],
   );
 
   const completeAllOverdue = useCallback(async () => {
+    lastFailure.current = null;
     setBusy(true);
     try {
       const now = new Date().toISOString();
@@ -503,11 +534,11 @@ export function DayStartReviewDialog({
     } catch (err) {
       // Said, never only logged (decision 273); the rows read again.
       invalidateData();
-      announce(writeErrorMessage(err, t));
+      sayFailure(writeErrorMessage(err, t));
     } finally {
       setBusy(false);
     }
-  }, [remainingOverdue, t, announce, invalidateData]);
+  }, [remainingOverdue, t, announce, invalidateData, sayFailure]);
 
   // ── Carry-over section actions ──────────────────────────────────────
 
@@ -524,6 +555,7 @@ export function DayStartReviewDialog({
       newDate: string | null,
       announcementKey: string,
     ): Promise<void> => {
+      lastFailure.current = null;
       setBusy(true);
       try {
         // Per-list cascade: descendants follow the action iff THIS
@@ -592,12 +624,12 @@ export function DayStartReviewDialog({
         // The person pressed it: said, never only logged (decision 273). A
         // failed write may still have landed, so the rows read again.
         invalidateData();
-        announce(writeErrorMessage(err, t));
+        sayFailure(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
       }
     },
-    [tasks, taskListById, effectiveForList, t, announce, invalidateData],
+    [tasks, taskListById, effectiveForList, t, announce, invalidateData, sayFailure],
   );
 
   const carryToToday = useCallback(
@@ -658,6 +690,7 @@ export function DayStartReviewDialog({
   }, [remainingSlipped, effectiveForList, meFor, tasks]);
 
   const allCarryToToday = useCallback(async () => {
+    lastFailure.current = null;
     setBusy(true);
     try {
       const now = new Date().toISOString();
@@ -687,13 +720,14 @@ export function DayStartReviewDialog({
     } catch (err) {
       // Said, never only logged (decision 273); the rows read again.
       invalidateData();
-      announce(writeErrorMessage(err, t));
+      sayFailure(writeErrorMessage(err, t));
     } finally {
       setBusy(false);
     }
-  }, [remainingSlipped, collectBulkCarryTargets, t, announce, invalidateData]);
+  }, [remainingSlipped, collectBulkCarryTargets, t, announce, invalidateData, sayFailure]);
 
   const allCarryToBacklog = useCallback(async () => {
+    lastFailure.current = null;
     setBusy(true);
     try {
       const now = new Date().toISOString();
@@ -722,11 +756,11 @@ export function DayStartReviewDialog({
     } catch (err) {
       // Said, never only logged (decision 273); the rows read again.
       invalidateData();
-      announce(writeErrorMessage(err, t));
+      sayFailure(writeErrorMessage(err, t));
     } finally {
       setBusy(false);
     }
-  }, [remainingSlipped, collectBulkCarryTargets, t, announce, invalidateData]);
+  }, [remainingSlipped, collectBulkCarryTargets, t, announce, invalidateData, sayFailure]);
 
   // ── Snooze + empty state ────────────────────────────────────────────
 
@@ -757,6 +791,20 @@ export function DayStartReviewDialog({
   ) {
     onClose();
     return null;
+  }
+
+  if (notice != null) {
+    return (
+      <CloseOnlyNotice
+        title={t('dialogs.dayStartReview.title')}
+        sentence={notice}
+        onClose={() => {
+          setNotice(null);
+          snoozeDayStartReview(4);
+          onClose();
+        }}
+      />
+    );
   }
 
   // The intro copy follows the same switch: the default hint promises per-row

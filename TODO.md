@@ -525,8 +525,10 @@ Siehe DESIGN §4.2.
         Antwort verloren ging, das aber angekommen ist, gibt den Fokus an die
         nächste Zeile, sobald die Aktualisierung die Zeile nimmt (15 s
         Beobachtung; die nächste Aktion beendet sie, Einklappen zählt nicht
-        als Löschen; dasselbe für eine Unteraufgabe im Editor); die
-        Fehlerzeile eines
+        als Löschen; dasselbe für eine Unteraufgabe im Editor); räumt im
+        Tagesstart die letzte Aktion die letzten Zeilen ab und stand nur zum
+        Teil, bleibt der Satz mit „Alle Einträge bearbeitet“ und Schließen
+        stehen; die Fehlerzeile eines
         gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
         neu geladen wird, und geht, sobald etwas anderes gelingt oder du aus
         dem Editor zurückkommst; Erinnerungen und Suche sagen einen Ladefehler

@@ -45,8 +45,9 @@ export interface TaskStatusActions {
   toggle: (task: Task) => Promise<void>;
   /** `true` when the task holds `status` afterwards; `false` when its own
    *  write was turned away (said already), so a surface does not treat it as
-   *  done. */
-  set: (task: Task, status: TaskStatus) => Promise<boolean>;
+   *  done. A failure's sentence goes to `say` where given (a surface that
+   *  decides where it shows), else it is announced. */
+  set: (task: Task, status: TaskStatus, say?: (sentence: string) => void) => Promise<boolean>;
 }
 
 export function useTaskStatusActions(): TaskStatusActions {
@@ -75,8 +76,13 @@ export function useTaskStatusActions(): TaskStatusActions {
     useTaskCascadeEnabled();
 
   const set = useCallback(
-    async (task: Task, nextStatus: TaskStatus): Promise<boolean> => {
+    async (
+      task: Task,
+      nextStatus: TaskStatus,
+      say?: (sentence: string) => void,
+    ): Promise<boolean> => {
       if (task.status === nextStatus) return true;
+      const sayFailure = say ?? announce;
       const { cascade, autoDate } = effectiveForList(task.list_id);
       // Skip the auto-pin when the owning provider can't store
       // in_progress (e.g. Google Tasks / Todoist): the status reverts to
@@ -113,7 +119,7 @@ export function useTaskStatusActions(): TaskStatusActions {
         // (Vikunja's assignees, Graph's extension) was turned away: the task
         // did change. Said as the leftover alone, never "could not change"
         // (decision 277), as `writeFailureSentence` does.
-        announce(writeErrorMessage(rootFailure.err, t));
+        sayFailure(writeErrorMessage(rootFailure.err, t));
         return true;
       }
       if (rootFailure) {
@@ -126,7 +132,7 @@ export function useTaskStatusActions(): TaskStatusActions {
           [rootFailure.err, ...rest.map((f) => f.err)],
           outcome.applied.length > 0,
         );
-        announce(
+        sayFailure(
           t('views.tasks.statusChangeFailed', {
             title: task.title,
             message: writeErrorMessage(err, t),
@@ -143,7 +149,7 @@ export function useTaskStatusActions(): TaskStatusActions {
       const othersFailed = outcome.failed.length;
       const base = announceFor(t, nextStatus, task.title);
       if (othersFailed > 0) {
-        announce(
+        sayFailure(
           `${base} ${t('views.tasks.cascadePartial', {
             applied: others - othersFailed,
             total: others,

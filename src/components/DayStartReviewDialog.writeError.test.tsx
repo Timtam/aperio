@@ -76,7 +76,9 @@ const CASCADE = {
   deadlineCountdownDays: 3,
 };
 vi.mock('../state/taskCascadeContext', () => ({ useTaskCascadeEnabled: () => CASCADE }));
-const STATUS = { set: async (_task: Task, _status: string) => true };
+const STATUS = {
+  set: async (_task: Task, _status: string, _say?: (sentence: string) => void) => true,
+};
 vi.mock('../state/useTaskStatusToggle', () => ({ useTaskStatusActions: () => STATUS }));
 const NOBODY = {};
 vi.mock('../state/currentUser', () => ({ useCurrentUserByList: () => NOBODY }));
@@ -90,11 +92,15 @@ afterEach(() => {
   invalidateData.mockClear();
 });
 
-async function open(rows: Task[]) {
+async function open(rows: Task[], onClose: () => void = () => {}) {
   TASKS.rows = rows;
   const { DayStartReviewDialog } = await import('./DayStartReviewDialog');
-  render(<DayStartReviewDialog isOpen onClose={() => {}} />);
+  render(<DayStartReviewDialog isOpen onClose={onClose} />);
 }
+
+const PARTLY =
+  'Die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist. ' +
+  'Prüfe sie und versuche den Rest später noch einmal.';
 
 describe('DayStartReviewDialog → a write that failed', () => {
   it('says a busy "carry to today" in words', async () => {
@@ -154,5 +160,49 @@ describe('DayStartReviewDialog → a write that failed', () => {
       ),
     );
     expect(invokeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a failure on screen when the action that cleared the last row stood in part', async () => {
+    // Done on the last row: the status landed, a later step of the save did
+    // not. "All handled" would speak over the sentence and close with it
+    // unseen; the dialog shows both with Close only (Toni, 2026-10-24).
+    STATUS.set = async (_task, _status, say) => {
+      say?.(PARTLY);
+      return true;
+    };
+    const onClose = vi.fn();
+    await open([slipped('t1', 'Einkaufen')], onClose);
+    fireEvent.click(await screen.findByRole('button', { name: 'Erledigt' }));
+    expect(await screen.findByText(`${PARTLY} Alle Einträge bearbeitet.`)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(announce).not.toHaveBeenCalledWith('Alle Einträge bearbeitet.');
+    fireEvent.click(screen.getByRole('button', { name: 'Schließen' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    STATUS.set = async () => true;
+  });
+
+  it('keeps a batch failure on screen when every row it showed landed', async () => {
+    // "All to today" with cascade: the row moved, its hidden subtask was
+    // turned away busy.
+    CASCADE.effectiveForList = () => ({ cascade: true, autoDate: false });
+    invokeMock.mockImplementation((_cmd: string, args: { task: Task }) =>
+      args.task.id === 'p1' ? Promise.resolve(args.task) : Promise.reject(BUSY),
+    );
+    const parent = slipped('p1', 'Umzug');
+    const child = { ...slipped('c1', 'Kartons'), parent_id: 'p1' } as Task;
+    const onClose = vi.fn();
+    await open([parent, child], onClose);
+    fireEvent.click(await screen.findByRole('button', { name: 'Alle auf heute' }));
+    expect(await screen.findByText(`${PARTLY} Alle Einträge bearbeitet.`)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    CASCADE.effectiveForList = () => ({ cascade: false, autoDate: false });
+  });
+
+  it('closes as handled where the action that cleared the last row worked', async () => {
+    const onClose = vi.fn();
+    await open([slipped('t1', 'Einkaufen')], onClose);
+    fireEvent.click(await screen.findByRole('button', { name: 'Erledigt' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(announce).toHaveBeenCalledWith('Alle Einträge bearbeitet.');
   });
 });

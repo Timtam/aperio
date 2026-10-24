@@ -34,6 +34,7 @@ import {
 import type { Task } from '@aperio/shared';
 
 import { deleteTask as apiDeleteTask, updateTask } from '../api/client';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
 import { navigateNested } from '../navigation/navigationRef';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
@@ -260,6 +261,12 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const focusIfGone = useRef<FailedAction | null>(null);
   // The rows whose showing means the last action's button still shows.
   const actedIds = useRef<string[]>([]);
+  // The last action's failure, said: where the rows run out after it, "All
+  // handled" would speak over it and the review close with it unseen. It
+  // then stays on screen with Close instead (Toni, 2026-10-24), as any save
+  // that landed in part does. Mirrors the desktop.
+  const lastFailure = useRef<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   // The data version last rendered: a failure's re-read reads at the next.
   const versionShown = useRef(dataVersion);
   useEffect(() => {
@@ -308,6 +315,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       const survivor = orderedIds.find((id) => !removed.has(id));
       actedIds.current = pressed;
       focusIfGone.current = null;
+      lastFailure.current = null;
       pendingFocusId.current = survivor ?? null;
     },
     [orderedIds],
@@ -331,7 +339,9 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
           : null;
       pendingFocusId.current = null;
       invalidateData();
-      announce(writeErrorMessage(err, t));
+      const message = writeErrorMessage(err, t);
+      lastFailure.current = message;
+      announce(message);
     },
     [announce, invalidateData, t],
   );
@@ -349,6 +359,14 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     if (!visible || behaviour == null || loading) return;
     if (totalRemaining > 0) return;
     if (hasReminders) return;
+    // The action before failed — in part, as its re-read shows: its sentence
+    // stays on screen with Close.
+    const failure = lastFailure.current;
+    if (failure != null) {
+      lastFailure.current = null;
+      setNotice(`${failure} ${t('dialogs.dayStartReview.allHandled')}`);
+      return;
+    }
     if (resolvedIds.size > 0) {
       announce(t('dialogs.dayStartReview.allHandled'));
       void snoozeDayStartReview(4);
@@ -381,10 +399,16 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       return;
     }
     if (remindersOnly && !wasRemindersOnly.current) {
+      // The action before failed in part: its sentence first, in the same
+      // announcement. The reminders keep the review up.
+      const failure = lastFailure.current;
+      lastFailure.current = null;
       announce(
-        resolvedIds.size > 0
-          ? t('dialogs.dayStartReview.allHandled')
-          : t('dialogs.dayStartReview.hintRemindersOnly'),
+        failure != null
+          ? `${failure} ${t('dialogs.dayStartReview.allHandled')}`
+          : resolvedIds.size > 0
+            ? t('dialogs.dayStartReview.allHandled')
+            : t('dialogs.dayStartReview.hintRemindersOnly'),
       );
     }
     wasRemindersOnly.current = remindersOnly;
@@ -852,6 +876,25 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       </View>
     );
   };
+
+  if (notice != null) {
+    const closeNotice = () => {
+      setNotice(null);
+      void snoozeDayStartReview(4);
+      refreshRemindersSoon();
+      onClose();
+    };
+    return (
+      <Modal visible={visible} animationType="slide" onRequestClose={closeNotice}>
+        <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
+          <Text accessibilityRole="header" style={styles.title}>
+            {t('dialogs.dayStartReview.title')}
+          </Text>
+          <CloseOnlyNotice sentence={notice} onClose={closeNotice} />
+        </View>
+      </Modal>
+    );
+  }
 
   return (
     <Modal
