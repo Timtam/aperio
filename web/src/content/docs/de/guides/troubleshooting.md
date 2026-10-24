@@ -394,7 +394,7 @@ ohne Foto, und Aperio sagt das.
 Legst du eine Aufgabe mit Unteraufgaben an und scheitert eine Unteraufgabe,
 bearbeitet der Editor danach die angelegte Aufgabe: Die noch nicht angelegten
 Unteraufgaben stehen unter einer eigenen Überschrift, und Speichern übernimmt
-deine Änderungen an der Aufgabe und legt sie an.
+deine Änderungen an der Aufgabe und legt die noch fehlenden Unteraufgaben an.
 
 Was du tun kannst: Öffne das Element später noch einmal und ergänze, was
 fehlt.

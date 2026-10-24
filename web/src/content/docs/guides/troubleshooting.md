@@ -367,7 +367,7 @@ without it, and Aperio says so.
 When you create a task with subtasks and one of the subtasks fails, the
 editor now edits the created task: the subtasks not yet created stay listed
 under their own heading, and saving keeps your changes to the task and
-creates them.
+creates the subtasks still missing.
 
 What you can do: open the item again later and add what is missing.
 
