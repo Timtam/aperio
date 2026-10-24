@@ -1141,7 +1141,15 @@ pub async fn delete_task(
                 message: format!("account '{account}' is not routable"),
             });
         };
-        ext.delete_task(&id).await?;
+        if let Err(err) = ext.delete_task(&id).await {
+            // A delete whose answer was lost may have landed (decision 277):
+            // the next read asks the provider what it holds.
+            if let Some(lid) = &list_id {
+                let _ = cache.invalidate(&account, SyncScope::Tasks, lid);
+            }
+            scheduler.invalidate();
+            return Err(err.into());
+        }
     }
     if is_local {
         event_log.append(SyncEvent::TaskDeleted(IdPayload { id: id.clone() }));

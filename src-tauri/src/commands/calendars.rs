@@ -961,9 +961,17 @@ pub async fn delete_event(
                 message: format!("account '{account}' is not routable"),
             });
         };
-        ext.delete_event(&id, send_cancellations).await?;
+        let deleted = ext.delete_event(&id, send_cancellations).await;
         if let Some(cid) = &calendar_id {
+            // Failed or not: a delete that failed may have landed in part — a
+            // calendar walk that lost an answer, a meeting cancelled before its
+            // DELETE failed (decision 277) — so the next read asks the provider
+            // what it holds.
             let _ = cache.invalidate(&account, SyncScope::Events, cid);
+        }
+        if let Err(err) = deleted {
+            scheduler.invalidate();
+            return Err(err.into());
         }
     }
     if is_local {
@@ -1199,9 +1207,15 @@ pub async fn add_event_exdate(
                 message: format!("account '{account}' is not routable"),
             });
         };
-        ext.add_event_exdate(&id, occurrence, notify).await?;
+        let skipped = ext.add_event_exdate(&id, occurrence, notify).await;
         if let Some(cid) = &calendar_id {
+            // A skip whose answer was lost may have landed (decision 277):
+            // failed or not, the next read asks the provider.
             let _ = cache.invalidate(&account, SyncScope::Events, cid);
+        }
+        if let Err(err) = skipped {
+            scheduler.invalidate();
+            return Err(err.into());
         }
     }
     // For local events the exdate mutation rewrote the master

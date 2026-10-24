@@ -3691,20 +3691,30 @@ impl Host {
         let is_local = calendar_id
             .as_deref()
             .is_none_or(|cid| self.is_local_calendar(cid));
-        self.runtime.block_on(async {
-            let route = match calendar_id.as_deref() {
-                Some(cid) => self.route(cid)?,
-                None => None,
-            };
-            match route {
-                None => self
-                    .adapter
-                    .delete_event(&id, false)
-                    .await
-                    .map_err(map_store_err),
-                Some(ext) => ext.delete_event(&id, send).await.map_err(map_store_err),
-            }
-        })?;
+        self.runtime
+            .block_on(async {
+                let route = match calendar_id.as_deref() {
+                    Some(cid) => self.route(cid)?,
+                    None => None,
+                };
+                match route {
+                    None => self
+                        .adapter
+                        .delete_event(&id, false)
+                        .await
+                        .map_err(map_store_err),
+                    Some(ext) => ext.delete_event(&id, send).await.map_err(map_store_err),
+                }
+            })
+            .inspect_err(|_| {
+                // A delete that failed may have landed in part — a calendar
+                // walk that lost an answer, a meeting cancelled before its
+                // DELETE failed (decision 277): the next read asks the
+                // provider what it holds. Mirrors the desktop.
+                if let Some(cid) = calendar_id.as_deref() {
+                    self.invalidate_events_cache(cid);
+                }
+            })?;
         if is_local {
             self.writer
                 .append(SyncEvent::EventDeleted(IdPayload { id: id.clone() }));
@@ -3766,7 +3776,14 @@ impl Host {
                 // occurrence + notify attendees" (vs a silent local skip).
                 self.runtime
                     .block_on(async { ext.add_event_exdate(&id, occ, send_cancellations).await })
-                    .map_err(map_store_err)?;
+                    .map_err(map_store_err)
+                    .inspect_err(|_| {
+                        // A skip whose answer was lost may have landed
+                        // (decision 277): the next read asks the provider.
+                        if let Some(cid) = calendar_id.as_deref() {
+                            self.invalidate_events_cache(cid);
+                        }
+                    })?;
             }
         }
         if let Some(cid) = calendar_id.as_deref() {
@@ -4432,7 +4449,14 @@ impl Host {
             Some(ext) => {
                 self.runtime
                     .block_on(async { ext.delete_task(&id).await })
-                    .map_err(map_store_err)?;
+                    .map_err(map_store_err)
+                    .inspect_err(|_| {
+                        // A delete whose answer was lost may have landed
+                        // (decision 277): the next read asks the provider.
+                        if let Some(lid) = list_id.as_deref() {
+                            self.invalidate_tasks_cache(lid);
+                        }
+                    })?;
                 if let Some(lid) = list_id.as_deref() {
                     // Write-through removal: the retained snapshot would
                     // otherwise resurrect the deleted row on the next read.
@@ -10778,13 +10802,14 @@ mod tests {
             Err(cal_core::Error::partly_saved("assignees"))
         }
         async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
-            unreachable!()
+            Err(cal_core::Error::Network("connection reset".into()))
         }
     }
 
     /// Decision 273 on the phone: a task create or save that failed may have
-    /// landed in part — the task stands without its assignees — so its list
-    /// is read again, and a refresh in flight drops its write.
+    /// landed in part — the task stands without its assignees — and a delete
+    /// whose answer was lost may have landed, so its list is read again, and a
+    /// refresh in flight drops its write.
     #[test]
     fn a_failed_external_task_write_still_invalidates_its_list() {
         let (_dir, host, _) = open_host();
@@ -10828,6 +10853,14 @@ mod tests {
         });
         assert!(host.update_task_json(task.to_string(), None).is_err());
         assert!(generation() > before, "a failed save reads the list again");
+
+        // A delete whose answer was lost may have landed (277).
+        let before = generation();
+        assert!(host.delete_task("t-1".into(), Some("L1".into())).is_err());
+        assert!(
+            generation() > before,
+            "a failed delete reads the list again"
+        );
     }
 
     /// Decisions 203 and 210 on the phone: a create that failed may still have
@@ -10896,6 +10929,104 @@ mod tests {
                 .refresh_generation("acc-x", SyncScope::Events, "cal-x")
                 > before,
             "a failed update reads the calendar again"
+        );
+    }
+
+    /// A calendar adapter whose deletes and skips lose their answer: they may
+    /// have landed.
+    struct LostDeletes;
+
+    #[async_trait::async_trait]
+    impl cal_core::Adapter for LostDeletes {
+        async fn authenticate(
+            &self,
+            _credentials: cal_core::Credentials,
+        ) -> cal_core::Result<cal_core::AuthToken> {
+            unreachable!("never signed in")
+        }
+        fn capabilities(&self) -> &[cal_core::Capability] {
+            &[cal_core::Capability::Calendar]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CalendarFeature for LostDeletes {
+        async fn list_calendars(&self) -> cal_core::Result<Vec<cal_core::Calendar>> {
+            Ok(Vec::new())
+        }
+        async fn get_events(
+            &self,
+            _calendar_id: &str,
+            _range: DateRange,
+        ) -> cal_core::Result<Vec<Event>> {
+            Ok(Vec::new())
+        }
+        async fn create_event(
+            &self,
+            _calendar_id: &str,
+            _event: NewEvent,
+        ) -> cal_core::Result<Event> {
+            unreachable!("nothing is created")
+        }
+        async fn update_event(&self, _event: Event) -> cal_core::Result<Event> {
+            unreachable!("nothing is updated")
+        }
+        async fn delete_event(&self, _event_id: &str, _send: bool) -> cal_core::Result<()> {
+            Err(cal_core::Error::Network("connection reset".into()))
+        }
+        async fn add_event_exdate(
+            &self,
+            _event_id: &str,
+            _occurrence: chrono::DateTime<chrono::Utc>,
+            _send_cancellations: bool,
+        ) -> cal_core::Result<()> {
+            Err(cal_core::Error::Network("connection reset".into()))
+        }
+        async fn get_free_busy(
+            &self,
+            _emails: &[&str],
+            _range: DateRange,
+        ) -> cal_core::Result<Vec<cal_core::FreeBusy>> {
+            Ok(Vec::new())
+        }
+        fn calendar_color(&self, _calendar_id: &str) -> Option<cal_core::ContainerColor> {
+            None
+        }
+    }
+
+    /// Decision 277 on the phone: a delete or a skip whose answer was lost may
+    /// have landed — a calendar walk, a meeting cancelled before its DELETE
+    /// failed — so its calendar is read again, as after a failed update.
+    #[test]
+    fn a_failed_external_delete_still_invalidates_its_calendar() {
+        let (_dir, host, _) = open_host();
+        host.registry
+            .register_host_adapter("acc-x", Some(Arc::new(LostDeletes)), None);
+        host.registry.note_calendar_route("cal-x", "acc-x");
+        let generation = || {
+            host.cache
+                .refresh_generation("acc-x", SyncScope::Events, "cal-x")
+        };
+        let before = generation();
+        assert!(host
+            .delete_event("ev-1".into(), Some("cal-x".into()), None)
+            .is_err());
+        assert!(
+            generation() > before,
+            "a failed delete reads the calendar again"
+        );
+        let before = generation();
+        assert!(host
+            .add_event_exdate_json(
+                "ev-1".into(),
+                "2026-06-15T08:00:00Z".into(),
+                Some("cal-x".into()),
+                false,
+            )
+            .is_err());
+        assert!(
+            generation() > before,
+            "a failed skip reads the calendar again"
         );
     }
 
