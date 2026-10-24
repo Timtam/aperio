@@ -403,6 +403,12 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Kick an immediate warm pass over every external account's containers +
    *  in-window events (the manual "refresh now"). Fire-and-forget. */
   refreshExternalCache(): Promise<void>;
+  /** The same after a change of ONE account: forced for that account only,
+   *  an automatic round for the others (decision 271). Fire-and-forget. */
+  refreshAccountCache(accountId: string): Promise<void>;
+  /** The OS background round's warm pass: un-forced (a failure needs a second
+   *  round before it shows, decision 271), queued so it is never lost. */
+  refreshExternalCacheInBackground(): Promise<void>;
   /** The external-cache warm-pass status as JSON `{refreshing, last_refreshed_at}`. */
   getCacheRefreshStatusJson(): Promise<string>;
   /** Per-account refresh-error surface as JSON `AccountRefreshErrors[]` —

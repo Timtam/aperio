@@ -12,12 +12,12 @@ import {
   backlogWeeks,
   compareMachineStrings,
   splitDeadlinesByWeek,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import { isCommandError } from '../api/client';
 import type { Task } from '../api/types';
-import { duplicateTask } from './duplicateActions';
+import { duplicateTaskAndSay } from './duplicateActions';
 import { useDateFormat } from '../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../intl/eventColor';
 import {
@@ -268,9 +268,11 @@ export function BacklogRail() {
       invalidateData();
       announce(t('views.backlog.movedToBacklog', { title: task.title }));
     } catch (err) {
-      announce(
-        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-      );
+      // A drop that failed may have landed in part — the date cleared, the
+      // reopen turned away — so the views read again, as every other task
+      // drop does (decision 277).
+      invalidateData();
+      announce(writeErrorMessage(err, t));
     }
   };
 
@@ -457,10 +459,7 @@ function BacklogList({
         } else if (e.ctrlKey || e.metaKey) {
           // Ctrl+D duplicates in place, matching TaskView.
           e.preventDefault();
-          void duplicateTask(task).then(() => {
-            invalidateData();
-            announce(t('actions.duplicated', { title: task.title }));
-          });
+          void duplicateTaskAndSay(task, { announce, invalidateData, t });
         }
         return;
       case 'ContextMenu':

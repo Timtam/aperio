@@ -85,6 +85,10 @@ export interface CalendarEvent {
   /** Transient result of an update: deleted occurrences of the series that
    *  came back and could not be deleted again (decision 253), as instants. */
   deletions_not_restored?: string[];
+  /** Transient result of a move to another calendar: the calendar the
+   *  original stayed in, because a busy provider turned its delete away
+   *  (decision 277). Set only on the row a move returns. */
+  original_left_in?: string;
   created_at: string;
   updated_at: string;
   etag: string | null;
@@ -340,8 +344,9 @@ export interface FreeBusy {
 
 /** Attendee availability for `emails` over `[rangeStart, rangeEnd]` (RFC-3339)
  *  through the account that owns `calendarId`. Best-effort: returns `[]` for a
- *  local calendar or a provider that can't answer (no error), which the UI reads
- *  as "free/unknown". */
+ *  local calendar or a provider that can't answer; a busy provider rejects
+ *  (decision 270), and the editor says the check could not be made, never
+ *  "all free". */
 export const queryFreeBusy = async (
   calendarId: string,
   emails: string[],

@@ -683,6 +683,27 @@ fn map_store_err(e: cal_core::Error) -> StoreError {
     }
 }
 
+/// What a host error becomes when it met a later step of a save whose earlier
+/// request landed (decision 277): the core's rule
+/// (`cal_core::Error::after_landed`), read back from the error it crossed as —
+/// a busy answer leaves the save partly saved, never "nothing was changed".
+/// Mirrors the desktop's `CommandError::after_landed`.
+fn store_after_landed(err: StoreError, step: &str) -> StoreError {
+    use cal_core::Error as E;
+    let core = match err {
+        StoreError::Auth { detail } => E::Authentication(detail),
+        StoreError::Forbidden { detail } => E::Forbidden(detail),
+        StoreError::NotFound => E::NotFound(String::new()),
+        StoreError::Conflict { detail } => E::Conflict(detail),
+        StoreError::Network { detail } => E::Network(detail),
+        StoreError::Protocol { detail } => E::Protocol(detail),
+        StoreError::Unsupported { detail } => E::Unsupported(detail),
+        StoreError::InvalidField { field, detail } => E::InvalidInput(format!("{field}: {detail}")),
+        other => E::Internal(other.to_string()),
+    };
+    map_store_err(core.after_landed(step))
+}
+
 // ── JSON boundary ───────────────────────────────────────────────────────────
 //
 // Values cross as the `cal_core` serde shape — the same payloads the desktop
@@ -706,6 +727,34 @@ fn from_json<T: serde::de::DeserializeOwned>(field: &str, json: &str) -> Result<
 
 #[cfg(test)]
 mod tests {
+    /// A host error met after an earlier request landed reads as the core
+    /// reads it: busy is partly saved, a lost answer stays, anything else may
+    /// have landed (decision 277). Mirrors the desktop.
+    #[test]
+    fn a_store_error_after_a_landed_step_never_reads_as_never_landed() {
+        let busy = super::store_after_landed(
+            super::StoreError::Forbidden {
+                detail: "provider-busy: http-429".into(),
+            },
+            "event",
+        );
+        assert!(
+            matches!(&busy, super::StoreError::Network { detail } if detail == "partly-saved: event"),
+            "{busy:?}"
+        );
+        let lost = super::store_after_landed(
+            super::StoreError::Network {
+                detail: "reset".into(),
+            },
+            "event",
+        );
+        assert!(matches!(&lost, super::StoreError::Network { detail } if detail == "reset"));
+        let gone = super::store_after_landed(super::StoreError::NotFound, "event");
+        assert!(
+            matches!(&gone, super::StoreError::Network { detail } if detail.starts_with("event: ")),
+            "{gone:?}"
+        );
+    }
     use super::*;
 
     #[test]

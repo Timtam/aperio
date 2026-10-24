@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { planDayStart } from '@aperio/shared';
+import { planDayStart, writeAll } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
@@ -362,10 +362,15 @@ async function runAutoCarryOverBatch(args: {
         action: async () => {
           // Replay the snapshot in parallel. We restore only the
           // single `scheduled_date` field; anything else the user
-          // may have edited in the meantime stays as-is.
+          // may have edited in the meantime stays as-is. Every write is
+          // tried; one that fails after others landed leaves the undo
+          // partly saved, never "nothing was changed" (277), and what
+          // landed shows either way.
           const undoNow = new Date().toISOString();
-          await Promise.all(
-            originalSchedules.map(({ task, previousScheduledDate }) =>
+          const { failure } = await writeAll(
+            'undo',
+            originalSchedules,
+            ({ task, previousScheduledDate }) =>
               invoke<Task>('update_task', {
                 task: {
                   ...task,
@@ -373,9 +378,9 @@ async function runAutoCarryOverBatch(args: {
                   updated_at: undoNow,
                 },
               }),
-            ),
           );
           args.invalidateData();
+          if (failure != null) throw failure;
           args.announce(
             args.t('dialogs.dayStartReview.carryOver.undoAnnounce', {
               count: roots,

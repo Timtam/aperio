@@ -58,7 +58,29 @@ impl ApiState {
         let response = self
             .send_with_refresh(|access| self.http.get(url.clone()).bearer_auth(access))
             .await?;
-        decode_json(response).await
+        decode_json(response, false).await
+    }
+
+    /// [`Self::post_json`] for a request that writes nothing (`getSchedule`):
+    /// a 503 with `Retry-After` reads as a busy Graph there (decision 270),
+    /// where a write answered so may have been carried out.
+    pub async fn post_query_json<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> GraphResult<T> {
+        let url = self.build_url(path)?;
+        let json = serde_json::to_string(body)?;
+        let response = self
+            .send_with_refresh(|access| {
+                self.http
+                    .post(url.clone())
+                    .bearer_auth(access)
+                    .header("content-type", "application/json")
+                    .body(json.clone())
+            })
+            .await?;
+        decode_json(response, false).await
     }
 
     pub async fn post_json<B: Serialize, T: DeserializeOwned>(
@@ -77,7 +99,7 @@ impl ApiState {
                     .body(json.clone())
             })
             .await?;
-        decode_json(response).await
+        decode_json(response, true).await
     }
 
     pub async fn patch_json<B: Serialize, T: DeserializeOwned>(
@@ -96,7 +118,30 @@ impl ApiState {
                     .body(json.clone())
             })
             .await?;
-        decode_json(response).await
+        decode_json(response, true).await
+    }
+
+    /// PATCH a JSON body and discard the response payload: an open
+    /// extension, whose answer Aperio does not read.
+    pub async fn patch_no_content<B: Serialize>(&self, path: &str, body: &B) -> GraphResult<()> {
+        let url = self.build_url(path)?;
+        let json = serde_json::to_string(body)?;
+        let response = self
+            .send_with_refresh(|access| {
+                self.http
+                    .patch(url.clone())
+                    .bearer_auth(access)
+                    .header("content-type", "application/json")
+                    .body(json.clone())
+            })
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let wait = retry_after(response.headers());
+        let text = response.text().await.unwrap_or_default();
+        Err(answer_error(status.as_u16(), wait, &text, true))
     }
 
     /// POST a JSON body and discard the response payload. The RSVP
@@ -120,11 +165,9 @@ impl ApiState {
         if status.is_success() {
             return Ok(());
         }
+        let wait = retry_after(response.headers());
         let text = response.text().await.unwrap_or_default();
-        Err(GraphError::Http {
-            status: status.as_u16(),
-            message: text.chars().take(300).collect(),
-        })
+        Err(answer_error(status.as_u16(), wait, &text, true))
     }
 
     pub async fn delete_request(&self, path: &str) -> GraphResult<()> {
@@ -136,11 +179,9 @@ impl ApiState {
         if status.is_success() {
             return Ok(());
         }
+        let wait = retry_after(response.headers());
         let text = response.text().await.unwrap_or_default();
-        Err(GraphError::Http {
-            status: status.as_u16(),
-            message: text.chars().take(300).collect(),
-        })
+        Err(answer_error(status.as_u16(), wait, &text, true))
     }
 
     /// GET a binary blob and return it together with the
@@ -158,13 +199,11 @@ impl ApiState {
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
+        let wait = retry_after(response.headers());
         let bytes = response.bytes().await.map_err(GraphError::from)?.to_vec();
         if !status.is_success() {
             let preview = String::from_utf8_lossy(&bytes[..bytes.len().min(300)]).to_string();
-            return Err(GraphError::Http {
-                status: status.as_u16(),
-                message: preview,
-            });
+            return Err(answer_error(status.as_u16(), wait, &preview, false));
         }
         Ok((bytes, content_type))
     }
@@ -192,11 +231,9 @@ impl ApiState {
         if status.is_success() {
             return Ok(());
         }
+        let wait = retry_after(response.headers());
         let text = response.text().await.unwrap_or_default();
-        Err(GraphError::Http {
-            status: status.as_u16(),
-            message: text.chars().take(300).collect(),
-        })
+        Err(answer_error(status.as_u16(), wait, &text, true))
     }
 
     fn build_url(&self, path_and_query: &str) -> GraphResult<Url> {
@@ -270,14 +307,64 @@ fn refresh_refused(err: GraphError) -> GraphError {
     }
 }
 
-async fn decode_json<T: DeserializeOwned>(response: reqwest::Response) -> GraphResult<T> {
+/// What a failed answer says (decision 270): a busy Graph for 429, which did
+/// nothing, and for a 503 with `Retry-After` on a request that `writes`
+/// nothing — a write answered 503 may have been carried out, so it stays
+/// unsure (critique P23). The status otherwise. The wait it names is only
+/// logged (decision 278).
+pub(crate) fn answer_error(
+    status: u16,
+    retry_after: Option<std::time::Duration>,
+    text: &str,
+    writes: bool,
+) -> GraphError {
+    let detail = match status {
+        429 => Some(cal_core::BusyDetail::TooManyRequests),
+        503 if !writes && retry_after.is_some() => Some(cal_core::BusyDetail::Unavailable),
+        _ => None,
+    };
+    match detail {
+        Some(detail) => {
+            // The wait goes to the normal log, never into a sentence (278).
+            tracing::info!(
+                status,
+                detail = detail.word(),
+                ?retry_after,
+                "graph asks to slow down"
+            );
+            GraphError::Busy {
+                detail,
+                retry_after,
+            }
+        }
+        None => GraphError::Http {
+            status,
+            message: text.chars().take(300).collect(),
+        },
+    }
+}
+
+/// The wait a `Retry-After` header names in seconds, where it does.
+pub(crate) fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<std::time::Duration> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(std::time::Duration::from_secs)
+}
+
+async fn decode_json<T: DeserializeOwned>(
+    response: reqwest::Response,
+    writes: bool,
+) -> GraphResult<T> {
     let status = response.status();
+    let wait = retry_after(response.headers());
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(GraphError::Http {
-            status: status.as_u16(),
-            message: text.chars().take(300).collect(),
-        });
+        return Err(answer_error(status.as_u16(), wait, &text, writes));
     }
     serde_json::from_str(&text).map_err(|e| GraphError::Protocol(format!("json: {e}: {text}")))
 }
@@ -482,6 +569,9 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GraphResult<Event> {
     // worse than a flattened description.
     let current = match state.get_json::<EventEntry>(&path).await {
         Ok(current) => Some(current),
+        // A busy Graph does nothing now: nothing is sent, and the save says so
+        // (decision 270), rather than flattening the description for it.
+        Err(err @ GraphError::Busy { .. }) => return Err(err),
         Err(err) => {
             tracing::warn!(
                 ?err,
@@ -634,7 +724,9 @@ pub async fn query_free_busy(
         },
         availability_view_interval: 30,
     };
-    let resp: GetScheduleResponse = state.post_json("/me/calendar/getSchedule", &body).await?;
+    let resp: GetScheduleResponse = state
+        .post_query_json("/me/calendar/getSchedule", &body)
+        .await?;
     let mut out = Vec::new();
     for info in resp.value {
         let mut slots = Vec::new();
@@ -836,8 +928,11 @@ pub async fn update_task(state: &ApiState, task: &Task) -> GraphResult<Task> {
     let body = task_to_body(task)?;
     let entry: TodoTaskEntry = state.patch_json(&path, &body).await?;
     // Graph ignores inline extensions on PATCH, so reconcile the
-    // Aperio-Extras open extension separately (DESIGN §9.12).
-    reconcile_task_extension(state, &list_enc, &task_enc, task).await?;
+    // Aperio-Extras open extension separately (DESIGN §9.12). The task's own
+    // fields landed: a failure here leaves it saved in part (decision 277).
+    reconcile_task_extension(state, &list_enc, &task_enc, task)
+        .await
+        .map_err(|err| err.after_landed("extension"))?;
     // The PATCH response doesn't expand extensions, so carry the
     // Aperio-only fields we just wrote into the echoed task.
     let mut result = map_task(entry, &list_id)?;
@@ -849,8 +944,11 @@ pub async fn update_task(state: &ApiState, task: &Task) -> GraphResult<Task> {
 
 /// DESIGN §9.12: bring a task's Aperio-Extras open extension in line with
 /// its current fields. Graph honours inline extensions only on create, so an
-/// update upserts (delete-then-create — idempotent, no 404/409 branching) or
-/// removes a now-stale extension. A missing extension on delete is fine.
+/// update writes the extension in place and creates it only where it is
+/// missing (404), or removes a now-stale one. A missing extension on delete
+/// is fine. In place, never delete-then-create (critique P11): a create that
+/// failed after the delete landed left the task without its extras — its
+/// recurrence above all — and the read after it put that loss into the cache.
 async fn reconcile_task_extension(
     state: &ApiState,
     list_enc: &str,
@@ -866,11 +964,13 @@ async fn reconcile_task_extension(
         task.effort,
         task.deadline_reminder_days,
     ) {
-        Some(ext) => {
-            ignore_not_found(state.delete_request(&ext_path).await)?;
-            let create_path = format!("/me/todo/lists/{list_enc}/tasks/{task_enc}/extensions");
-            state.post_no_content(&create_path, &ext).await?;
-        }
+        Some(ext) => match state.patch_no_content(&ext_path, &ext).await {
+            Err(GraphError::Http { status: 404, .. }) => {
+                let create_path = format!("/me/todo/lists/{list_enc}/tasks/{task_enc}/extensions");
+                state.post_no_content(&create_path, &ext).await?;
+            }
+            other => other?,
+        },
         // Nothing non-native now — drop a possibly-stale extension, but only
         // when the task carries fields that could have produced one (skip the
         // call for the common plain task that never had an extension).
@@ -1669,6 +1769,95 @@ mod tests {
         assert_eq!(tasks[0].id, "LIST-X|T1");
         assert_eq!(tasks[1].id, "LIST-X|T2");
         assert_eq!(tasks[1].status, cal_core::TaskStatus::Completed);
+    }
+
+    /// A task Aperio keeps extras for (a series id here), as an update sends it.
+    fn task_with_extras() -> cal_core::Task {
+        serde_json::from_value(serde_json::json!({
+            "id": "LIST-A|T1", "list_id": "LIST-A", "title": "Water plants",
+            "description": null, "status": "open", "priority": "medium",
+            "scheduled_date": null, "scheduled_time": null, "scheduled_end_time": null,
+            "deadline_date": null, "deadline_time": null, "recurrence": null,
+            "resurface_date": null, "series_id": "series-1", "parent_id": null,
+            "section_id": null, "color_label": null, "reminders": [], "sound": null,
+            "deadline_reminder_days": null, "created_at": "2026-05-01T00:00:00Z",
+            "updated_at": "2026-05-01T00:00:00Z", "completed_at": null, "etag": null
+        }))
+        .unwrap()
+    }
+
+    /// The extension is written in place (critique P11): a busy Graph for it
+    /// after the task's own PATCH leaves the change saved in part, and no
+    /// DELETE ever left the task without its extras.
+    #[tokio::test]
+    async fn a_busy_extension_write_is_partly_saved_and_deletes_nothing() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("PATCH", "/me/todo/lists/LIST-A/tasks/T1")
+            .with_status(200)
+            .with_body(
+                r#"{"id":"T1","title":"Water plants","importance":"normal","status":"notStarted"}"#,
+            )
+            .create_async()
+            .await;
+        let ext = server
+            .mock(
+                "PATCH",
+                mockito::Matcher::Regex("^/me/todo/lists/LIST-A/tasks/T1/extensions/.+$".into()),
+            )
+            .with_status(429)
+            .expect(1)
+            .create_async()
+            .await;
+        let deleted = server
+            .mock("DELETE", mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+        let created = server
+            .mock("POST", mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let err = update_task(&state, &task_with_extras()).await.unwrap_err();
+        let core = crate::core_error(err);
+        assert!(core.is_partly_saved(), "{core:?}");
+        ext.assert_async().await;
+        deleted.assert_async().await;
+        created.assert_async().await;
+    }
+
+    /// A task that never had the extension gets it created: the PATCH in
+    /// place answers 404.
+    #[tokio::test]
+    async fn a_missing_extension_is_created() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("PATCH", "/me/todo/lists/LIST-A/tasks/T1")
+            .with_status(200)
+            .with_body(
+                r#"{"id":"T1","title":"Water plants","importance":"normal","status":"notStarted"}"#,
+            )
+            .create_async()
+            .await;
+        server
+            .mock(
+                "PATCH",
+                mockito::Matcher::Regex("^/me/todo/lists/LIST-A/tasks/T1/extensions/.+$".into()),
+            )
+            .with_status(404)
+            .create_async()
+            .await;
+        let created = server
+            .mock("POST", "/me/todo/lists/LIST-A/tasks/T1/extensions")
+            .with_status(201)
+            .expect(1)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        update_task(&state, &task_with_extras()).await.unwrap();
+        created.assert_async().await;
     }
 
     #[tokio::test]

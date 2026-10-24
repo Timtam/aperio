@@ -288,10 +288,10 @@ pub(crate) fn probe_answer(xml: &str) -> Answer {
     }
 }
 
-/// Whether an answer says the server is busy (`ErrorServerBusy`), as a
-/// response code or a fault, and the back-off it names
-/// (`BackOffMilliseconds`), read from the raw body: a fault sent with HTTP 500
-/// keeps its body as the error's message.
+/// Whether an answer says the server is busy (`ErrorServerBusy` as a
+/// response code or a fault, or HTTP 429, [`crate::busy_detail`]), and the
+/// back-off it names (`BackOffMilliseconds`), read from the raw body: a fault
+/// sent with HTTP 500 keeps its body as the error's message.
 pub(crate) fn busy_of(answer: &EwsResult<String>) -> Option<Option<Duration>> {
     match answer {
         Ok(xml) => busy_in(xml),
@@ -299,8 +299,8 @@ pub(crate) fn busy_of(answer: &EwsResult<String>) -> Option<Option<Duration>> {
             status: 500,
             message,
         }) => busy_in(message),
-        Err(EwsError::Soap { code, .. }) if bare_code(code) == "ErrorServerBusy" => Some(None),
-        _ => None,
+        // HTTP 429 names no back-off: the step backs off on its own clock.
+        Err(err) => crate::busy_detail(err).map(|_| None),
     }
 }
 
@@ -361,6 +361,7 @@ fn why_of(err: &EwsError) -> String {
         EwsError::Protocol(_) => "unreadable".to_string(),
         EwsError::Config(_) | EwsError::DiscoveryFailed(_) => "config".to_string(),
         EwsError::NotKept { .. } => "not-kept".to_string(),
+        EwsError::PartlySaved { step, .. } => format!("partly-saved-{step}"),
     }
 }
 
@@ -439,6 +440,8 @@ struct Run<'a, M> {
     requests: usize,
     retries: usize,
     waited: Duration,
+    /// The part of `waited` spent on answers that asked to wait (276).
+    busy_waited: Duration,
     slowest: Duration,
     /// Whether an invitation may have gone out.
     invited: bool,
@@ -471,6 +474,7 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
             requests: 0,
             retries: 0,
             waited: Duration::ZERO,
+            busy_waited: Duration::ZERO,
             slowest: Duration::ZERO,
             invited: false,
         }
@@ -504,10 +508,10 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
             Ok(response) => response,
             // Nothing reached the server.
             Err(err @ EwsError::Unreached(_)) => return Err(err),
-            // Turned down whole, or the sign-in or the folder failed: nothing
-            // was saved.
+            // Turned down whole — a busy server or a refusal —, or the sign-in
+            // or the folder failed: nothing was saved.
             Err(err @ EwsError::Http { status, .. })
-                if cal_core::WriteRefusal::refused_status(status)
+                if cal_core::WriteRefusal::turned_down_by_status(status).is_some()
                     || matches!(status, 401 | 403 | 404) =>
             {
                 return Err(err)
@@ -669,7 +673,7 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
             };
             if !(first && must_send) && !cal_core::may_send(remaining, Duration::ZERO, self.slowest)
             {
-                return Err(Failure::new(step, cal_core::OUT_OF_TIME));
+                return Err(Failure::new(step, self.out_of_time(attempt > 0)));
             }
             first = false;
             let window = remaining.max(floor);
@@ -693,12 +697,20 @@ impl<'a, M: Mailbox + Sync> Run<'a, M> {
             attempt += 1;
             let remaining = until.saturating_duration_since(Instant::now());
             if !cal_core::may_send(remaining, wait, self.slowest) {
-                return Err(Failure::new(step, cal_core::OUT_OF_TIME));
+                return Err(Failure::new(step, cal_core::PROVIDER_BUSY));
             }
             self.retries += 1;
             self.waited += wait;
+            self.busy_waited += wait;
             tokio::time::sleep(wait).await;
         }
+    }
+
+    /// Why a step that cannot be sent in time stops: the provider kept asking
+    /// to wait — right before it, or for half the time to settle or more —,
+    /// or the run was slow (decision 276).
+    fn out_of_time(&self, after_busy: bool) -> &'static str {
+        cal_core::out_of_time_reason(after_busy, self.busy_waited, self.budget)
     }
 
     /// The master as Exchange holds it now.
@@ -2073,6 +2085,20 @@ mod tests {
         assert_eq!(fake.bodies(DeleteOccurrence).len(), 2);
     }
 
+    /// HTTP 429 is a busy server too (decision 270): the step waits it out
+    /// as it waits out `ErrorServerBusy`, and the run completes.
+    #[tokio::test]
+    async fn a_429_is_waited_out_as_a_busy_server() {
+        let shape = mondays();
+        let second = shape.slots[1];
+        let fake = Fake::new(shape, vec![(DeleteOccurrence, 0, Fault::Http(429))]);
+        run(&fake, series(vec![second], false)).await.unwrap();
+        assert_eq!(fake.deleted(), vec![2]);
+        assert_eq!(fake.bodies(DeleteOccurrence).len(), 2);
+        // Sent again after the wait: never read as a lost answer and probed.
+        assert_eq!(fake.bodies(Probe).len(), 1);
+    }
+
     #[tokio::test]
     async fn a_back_off_beyond_the_budget_takes_back_at_once_waiting_out_its_own() {
         let shape = mondays();
@@ -2087,7 +2113,8 @@ mod tests {
         );
         let (undone, detail) = not_kept(run(&fake, series(vec![second], false)).await);
         assert!(undone);
-        assert_eq!(detail, cal_core::OUT_OF_TIME);
+        // The provider was busy, not the run slow (276).
+        assert_eq!(detail, cal_core::PROVIDER_BUSY);
         assert_eq!(fake.bodies(DeleteSeries).len(), 2);
         assert!(!fake.exists());
     }
@@ -2364,6 +2391,14 @@ mod tests {
             Some(None)
         );
         assert_eq!(busy_of(&Err(EwsError::Network("reset".into()))), None);
+        // HTTP 429 names no back-off.
+        assert_eq!(
+            busy_of(&Err(EwsError::Http {
+                status: 429,
+                message: String::new(),
+            })),
+            Some(None)
+        );
         // A subject that names the code is no busy answer.
         let named = success(
             "GetItemResponse",

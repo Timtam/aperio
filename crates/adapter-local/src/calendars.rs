@@ -569,6 +569,7 @@ fn persist_new_event(
         .map_err(map_sql_err)?;
 
     Ok(Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
@@ -629,6 +630,7 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
     let recurrence = combine_recurrence(rrule, exceptions, rrule_tzid)?;
 
     Ok(Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,

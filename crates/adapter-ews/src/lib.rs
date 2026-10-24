@@ -1415,6 +1415,11 @@ impl ContactsFeature for EwsAdapter {
 /// shape of `ErrorServerBusy`. The codes [`to_core_error`] already names
 /// (sign-in, not found) keep their error.
 fn to_update_error(err: EwsError) -> CoreError {
+    // A busy server wrote nothing either, and says so as itself (decision
+    // 270): trying later helps, where the server's refusal would not.
+    if busy_detail(&err).is_some() {
+        return to_core_error(err);
+    }
     match err {
         EwsError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
             tracing::warn!(status, %message, "Exchange refused the update");
@@ -1471,8 +1476,8 @@ fn to_update_error(err: EwsError) -> CoreError {
 /// caller undoes the rest of a write whose new part stands. A `CreateItem`
 /// Exchange turned down whole is a refusal as for an update
 /// ([`to_update_error`]): it saved nothing. This changes plain creates too —
-/// a create refused while Exchange throttles says the server refused it,
-/// where it said a protocol error.
+/// a create Exchange throttles says the provider is busy, any other refusal
+/// that the server refused it, where both said a protocol error.
 fn to_create_error(err: EwsError) -> CoreError {
     match err {
         EwsError::Protocol(message)
@@ -1509,7 +1514,9 @@ pub(crate) fn turned_down_whole(err: &EwsError) -> bool {
 }
 
 /// The SOAP codes with which Exchange turns an `UpdateItem` down before it
-/// saves anything: the request does not validate, or the server throttles.
+/// saves anything: the request does not validate, or the server is busy
+/// (`ErrorServerBusy`, which [`busy_detail`] reads first: a busy provider,
+/// decision 270).
 /// A `CreateItem` too ([`to_create_error`]), where `ErrorInvalidChangeKey`
 /// names the folder's key. See [`to_update_error`]. The update is sent with `AlwaysOverwrite`, so no
 /// ChangeKey is checked before the save, and a conflict code
@@ -1564,13 +1571,59 @@ pub(crate) fn names_sign_in_or_gone(err: &EwsError) -> bool {
         | EwsError::Unreached(_)
         | EwsError::Protocol(_)
         | EwsError::Config(_)
-        | EwsError::NotKept { .. } => false,
+        | EwsError::NotKept { .. }
+        | EwsError::PartlySaved { .. } => false,
     }
+}
+
+/// Whether Exchange turned a request away because it is busy, and how
+/// (decision 270): `ErrorServerBusy` as a response code or as a fault sent
+/// with HTTP 500, or HTTP 429. Read from the answer's own code, never from
+/// text somebody wrote. Nothing was done, and trying later may work.
+pub(crate) fn busy_detail(err: &EwsError) -> Option<cal_core::BusyDetail> {
+    let server_busy = |code: &str| code.rsplit(':').next() == Some("ErrorServerBusy");
+    match err {
+        EwsError::Http { status, .. }
+            if matches!(
+                cal_core::WriteRefusal::turned_down_by_status(*status),
+                Some(cal_core::WriteRefusal::ProviderBusy)
+            ) =>
+        {
+            Some(cal_core::BusyDetail::TooManyRequests)
+        }
+        EwsError::Http {
+            status: 500,
+            message,
+        } => matches!(
+            soap::check_for_fault(message),
+            Err(EwsError::Soap { code, .. }) if server_busy(&code)
+        )
+        .then_some(cal_core::BusyDetail::ServerBusy),
+        EwsError::Soap { code, .. } if server_busy(code) => Some(cal_core::BusyDetail::ServerBusy),
+        _ => None,
+    }
+}
+
+/// [`to_core_error`], for the tests of the request helpers.
+#[cfg(test)]
+pub(crate) fn to_core_error_for_tests(err: EwsError) -> CoreError {
+    to_core_error(err)
 }
 
 fn to_core_error(err: EwsError) -> CoreError {
     use EwsError::*;
+    // Throttling: nothing was done, try later (decision 270).
+    if let Some(detail) = busy_detail(&err) {
+        tracing::debug!(detail = detail.word(), %err, "Exchange is busy");
+        return CoreError::provider_busy(detail);
+    }
     match err {
+        // A later step failed after an earlier one landed (decision 277):
+        // never a refusal, by the core's rule.
+        PartlySaved { step, cause } => {
+            tracing::debug!(step, %cause, "Exchange saved the change in part");
+            to_core_error(*cause).after_landed(step)
+        }
         Network(m) | Unreached(m) => CoreError::Network(m),
         // Taken back, nothing stands: a refusal (203). Not taken back, the
         // series may stand: a network error naming the leftover, which no
@@ -1668,30 +1721,39 @@ mod create_error_tests {
 
     /// A create Exchange turned down whole saved nothing: a refusal, as for
     /// an update — plain creates too, which said a protocol error before.
+    /// A busy server says so as itself (decision 270).
     #[test]
     fn a_create_turned_down_whole_is_a_server_refusal() {
-        for err in [
-            soap("ErrorServerBusy"),
-            soap("ErrorCalendarInvalidRecurrence"),
-            EwsError::Http {
-                status: 429,
-                message: "slow down".into(),
-            },
-            EwsError::Http {
-                status: 500,
-                message: r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultcode xmlns:a="http://schemas.microsoft.com/exchange/services/2006/types">a:ErrorServerBusy</faultcode><faultstring>busy</faultstring></s:Fault></s:Body></s:Envelope>"#.into(),
-            },
+        match to_create_error(soap("ErrorCalendarInvalidRecurrence")) {
+            CoreError::Forbidden(msg) => assert_eq!(
+                cal_core::WriteRefusal::parse(&msg),
+                Some((
+                    cal_core::WriteRefusal::ServerRefused,
+                    "ErrorCalendarInvalidRecurrence"
+                ))
+            ),
+            other => panic!("{other:?}"),
+        }
+        for (err, word) in [
+            (soap("ErrorServerBusy"), "server-busy"),
+            (
+                EwsError::Http {
+                    status: 429,
+                    message: "slow down".into(),
+                },
+                "http-429",
+            ),
+            (
+                EwsError::Http {
+                    status: 500,
+                    message: r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultcode xmlns:a="http://schemas.microsoft.com/exchange/services/2006/types">a:ErrorServerBusy</faultcode><faultstring>busy</faultstring></s:Fault></s:Body></s:Envelope>"#.into(),
+                },
+                "server-busy",
+            ),
         ] {
-            match to_create_error(err) {
-                CoreError::Forbidden(msg) => assert!(
-                    matches!(
-                        cal_core::WriteRefusal::parse(&msg),
-                        Some((cal_core::WriteRefusal::ServerRefused, _))
-                    ),
-                    "{msg}"
-                ),
-                other => panic!("{other:?}"),
-            }
+            let core = to_create_error(err);
+            assert!(core.is_provider_busy(), "{core:?}");
+            assert_eq!(core.message(), format!("provider-busy: {word}"));
         }
         // Never sent: a plain network error, nothing that may stand.
         match to_create_error(EwsError::Unreached("refused".into())) {
@@ -1723,25 +1785,34 @@ mod update_refusal_tests {
         }
     }
 
-    /// Exchange turned the update down while checking or throttling it:
-    /// nothing was saved, and it is a refusal (decision 144).
+    /// Exchange turned the update down while checking it: nothing was saved,
+    /// and it is a refusal (decision 144). Throttled, it is a busy provider,
+    /// which trying later helps (decision 270).
     #[test]
     fn a_soap_error_answer_to_an_update_is_a_refusal() {
-        for code in [
-            "ErrorServerBusy",
-            "ErrorInvalidPropertySet",
-            "ErrorCalendarInvalidRecurrence",
-        ] {
+        for code in ["ErrorInvalidPropertySet", "ErrorCalendarInvalidRecurrence"] {
             match to_update_error(soap(code)) {
                 CoreError::Forbidden(msg) => assert_eq!(msg, format!("server-refused: {code}")),
                 other => panic!("{code}: {other:?}"),
             }
         }
+        assert_eq!(
+            to_update_error(soap("ErrorServerBusy")).message(),
+            "provider-busy: server-busy"
+        );
+        assert_eq!(
+            to_update_error(EwsError::Http {
+                status: 429,
+                message: "slow down".into(),
+            })
+            .message(),
+            "provider-busy: http-429"
+        );
         match to_update_error(EwsError::Http {
-            status: 429,
-            message: "slow down".into(),
+            status: 400,
+            message: "bad".into(),
         }) {
-            CoreError::Forbidden(msg) => assert_eq!(msg, "server-refused: HTTP 429"),
+            CoreError::Forbidden(msg) => assert_eq!(msg, "server-refused: HTTP 400"),
             other => panic!("{other:?}"),
         }
     }
@@ -1805,12 +1876,17 @@ mod update_refusal_tests {
     }
 
     /// Exchange throttles with a SOAP fault sent as HTTP 500: read from the
-    /// fault, it is the refusal it names; any other 500 stays unsure.
+    /// fault, it is a busy provider, on an update, a create, a read and a
+    /// delete alike (decision 270); any other 500 stays unsure.
     #[test]
-    fn a_throttling_fault_sent_as_500_is_a_refusal() {
-        match to_update_error(fault_500("ErrorServerBusy")) {
-            CoreError::Forbidden(msg) => assert_eq!(msg, "server-refused: ErrorServerBusy"),
-            other => panic!("{other:?}"),
+    fn a_throttling_fault_sent_as_500_is_a_busy_provider() {
+        for core in [
+            to_update_error(fault_500("ErrorServerBusy")),
+            to_create_error(fault_500("ErrorServerBusy")),
+            to_core_error(fault_500("ErrorServerBusy")),
+        ] {
+            assert!(matches!(core, CoreError::Forbidden(_)), "{core:?}");
+            assert_eq!(core.message(), "provider-busy: server-busy");
         }
         assert!(matches!(
             to_update_error(fault_500("ErrorInternalServerError")),
@@ -3186,6 +3262,7 @@ mod server_zone_tests {
         let adapter = EwsAdapter::new(server.url(), alice());
         let stamp: chrono::DateTime<chrono::Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
         let series = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3278,6 +3355,7 @@ mod server_zone_tests {
             crate::mapping::local_midnight_in(d.parse().unwrap(), &chrono::Local).unwrap()
         };
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -4431,6 +4509,43 @@ mod server_zone_tests {
                 .any(|b| b.contains("UpdateItem")),
             "nothing is sent"
         );
+    }
+
+    /// A copy a busy server would not hand out is said as busy, where a series
+    /// head and an all-day day read it (decision 270): trying later helps,
+    /// which `copy-unreadable` does not say. Nothing is sent.
+    #[tokio::test]
+    async fn a_busy_copy_read_is_said_as_busy() {
+        let series = opened_and_edited(&stored_with_occurrences(false, false), |e| {
+            e.title = "Renamed".into();
+        });
+        for edit in [moved_to_tuesday(), series] {
+            let mut server = Server::new_async().await;
+            let seen = Arc::new(StdMutex::new(Vec::<String>::new()));
+            let log = Arc::clone(&seen);
+            server
+                .mock("POST", "/")
+                .with_status(429)
+                .with_body_from_request(move |request| {
+                    log.lock()
+                        .unwrap()
+                        .push(request.utf8_lossy_body().unwrap().into_owned());
+                    b"Too Many Requests".to_vec()
+                })
+                .create_async()
+                .await;
+            let adapter = EwsAdapter::new(server.url(), alice());
+            let err = adapter.update_event(edit).await.unwrap_err();
+            assert_eq!(err.message(), "provider-busy: http-429", "{err:?}");
+            assert!(
+                !seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|b| b.contains("UpdateItem")),
+                "nothing is sent"
+            );
+        }
     }
 
     /// A failed sign-in or an item that is gone keeps its own error when the

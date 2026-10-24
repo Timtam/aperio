@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { readErrorMessage, writeErrorMessage } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
-  isCommandError,
   taskAddMember,
   taskListShares,
   taskRemoveMember,
@@ -70,11 +70,12 @@ export function TaskMembersDialog({
       setShares(await taskListShares(listId));
       setError(null);
     } catch (err) {
-      setError(formatErr(err));
+      // A read: a busy provider says so, never that nothing was changed.
+      setError(readErrorMessage(err, t));
     } finally {
       setLoading(false);
     }
-  }, [listId]);
+  }, [listId, t]);
 
   useEffect(() => {
     if (isOpen) {
@@ -107,7 +108,7 @@ export function TaskMembersDialog({
         .catch((err) => {
           if (cancelled) return;
           setResults([]);
-          setSearchError(formatErr(err));
+          setSearchError(readErrorMessage(err, t));
           setSearchState('error');
         });
     }, 250);
@@ -115,7 +116,7 @@ export function TaskMembersDialog({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [isOpen, listId, query, addByEmail]);
+  }, [isOpen, listId, query, addByEmail, t]);
 
   const run = useCallback(
     async (fn: () => Promise<void>) => {
@@ -124,7 +125,8 @@ export function TaskMembersDialog({
         await fn();
         await reload();
       } catch (err) {
-        setError(formatErr(err));
+        // Only the write can land here: `reload` says its own failure.
+        setError(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
         // Remove/Add/Invite disable then unmount the clicked control (the row or
@@ -136,7 +138,7 @@ export function TaskMembersDialog({
         }
       }
     },
-    [reload],
+    [reload, t],
   );
 
   const add = (user: TaskUser) =>
@@ -188,7 +190,7 @@ export function TaskMembersDialog({
             r.user.id === share.user.id ? { ...r, right: prev } : r,
           ),
         );
-        setError(formatErr(err));
+        setError(writeErrorMessage(err, t));
       });
   };
 
@@ -362,9 +364,4 @@ export function TaskMembersDialog({
       </div>
     </Modal>
   );
-}
-
-function formatErr(err: unknown): string {
-  if (isCommandError(err)) return `${err.code}: ${err.message}`;
-  return String(err);
 }

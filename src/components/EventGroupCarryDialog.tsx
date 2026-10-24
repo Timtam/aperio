@@ -26,6 +26,8 @@ import {
   exceptionsLossOf,
   exceptionsLossSentences,
   type ExceptionsLoss,
+  carvedOccurrenceKeptSentence,
+  removeOriginalAfterCopy,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -300,6 +302,9 @@ export function EventGroupCarryDialog({
         // Where this copy's series is split, once it is: a failure after that
         // names the day.
         let splitAt: string | null = null;
+        // Whether part of this copy's carry stands already (its standalone):
+        // a failure after that is never "not changed".
+        let landed = false;
         try {
           const current = await getEventById(target.event_id, target.calendar_id);
           if (current == null) {
@@ -340,7 +345,9 @@ export function EventGroupCarryDialog({
               failed.push(target);
               continue;
             }
-            await addEventExdate(target.event_id, occurrence, target.calendar_id);
+            // The standalone first, then the skip, as the move and the
+            // editors do: a create that fails leaves the copy whole, and a skip
+            // that fails after it is a later step (decision 277).
             const standalone = await createEvent({
               calendar_id: target.calendar_id,
               title: row.title,
@@ -364,6 +371,25 @@ export function EventGroupCarryDialog({
               title: standalone.title,
               starts_at: standalone.start,
             });
+            landed = true;
+            const removed = await removeOriginalAfterCopy('skip', () =>
+              addEventExdate(target.event_id, occurrence, target.calendar_id),
+            );
+            if (!removed) {
+              // A busy provider kept the copy's occurrence in its series: said,
+              // and counted as written — its standalone stands and joins the
+              // new rows — so it is not offered again, which would make a
+              // second standalone.
+              unsure.push(
+                carvedOccurrenceKeptSentence(
+                  standalone.title,
+                  target.calendar_id,
+                  target.calendar_id,
+                  calendarName,
+                  t,
+                ),
+              );
+            }
           } else if (scope === 'future' && occurrence) {
             // What the edit did to the anchor: its series was cut in two at the
             // occurrence, and a new one took over from there. Each copy has a
@@ -629,6 +655,15 @@ export function EventGroupCarryDialog({
                 calendar: calendarName(target.calendar_id),
                 date: cutoffDay(splitAt, i18n.language),
               }),
+            );
+            continue;
+          }
+          if (landed) {
+            // Its standalone stands and joins the new rows: written, with the
+            // failure after it said, and not offered again.
+            done += 1;
+            unsure.push(
+              `${calendarName(target.calendar_id)}: ${eventWriteErrorMessage(err, t)}`,
             );
             continue;
           }

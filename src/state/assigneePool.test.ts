@@ -81,3 +81,16 @@ describe('assigneePoolErrorMessage', () => {
     expect(readRefusal({ code: 'forbidden', message: 'token-refusedx' })).toBeNull();
   });
 });
+
+describe('a busy provider while the people load', () => {
+  it('says it in words and that trying later may work, never as a token', () => {
+    const said = assigneePoolErrorMessage(
+      { code: 'forbidden', message: 'provider-busy: http-429' },
+      t,
+    );
+    expect(said).toMatch(/^dialogs\.task\.assignees\.loadFailed/);
+    expect(said).toMatch(/dialogs\.event\.writeError\.reason\.providerBusy/);
+    expect(said).toMatch(/common\.tryAgainLater$/);
+    expect(said).not.toMatch(/forbidden|provider-busy/);
+  });
+});

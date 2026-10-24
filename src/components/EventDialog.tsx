@@ -84,15 +84,19 @@ import {
   planCarry,
   recurrenceSummaryText,
   privateReminderWrites,
+  readFailureSentence,
   seriesDayKey,
   worthCarrying,
   type CarryableFields,
   type CarryScope,
   type ExceptionsLoss,
+  removeOriginalAfterCopy,
+  carvedOccurrenceKeptSentence,
 } from '@aperio/shared';
 import {
   createsInSteps,
   eventWriteLeftover,
+  originalKeptSentence,
   seriesTailMayStand,
   seriesTailRemoved,
 } from '@aperio/shared';
@@ -1206,8 +1210,12 @@ export function EventDialog({
           : t('dialogs.event.availability.someBusy', { count: busyCount }),
       );
     } catch (err) {
+      // A check that failed says why, and the previous answer goes: "All
+      // attendees are free" must never stand beside it (decision 273).
+      setAvailability(null);
+      setAvailabilityWindow(null);
       setAvailabilityError(
-        eventWriteErrorMessage(err, t),
+        readFailureSentence('dialogs.event.availability.failed', err, t),
       );
     } finally {
       setCheckingAvailability(false);
@@ -1538,14 +1546,32 @@ export function EventDialog({
                 send_invitations: sendInvitations,
                 ...organizerOf(event ?? {}),
               });
-              await addEventExdate(seriesId, occIso, event.calendar_id);
-              // The series lives on without this slot: it keeps its key.
+              // The standalone event stands: a busy provider that kept the
+              // occurrence in its series is said, and the editor only closes;
+              // any other failure never reads as "nothing was changed" (277).
+              const removed = await removeOriginalAfterCopy('skip', () =>
+                addEventExdate(seriesId, occIso, event.calendar_id),
+              );
+              // The series lives on without this slot, or with it while the
+              // provider is busy: it keeps its key, and the event that stands
+              // gets what Aperio keeps for it either way.
               await savePrivate(created, { oldKeyLivesOn: true });
               if (!storesColorNatively) {
                 await setEventColor(
                   created.id,
                   created.calendar_id,
                   form.colorLabel,
+                );
+              }
+              if (!removed) {
+                throw new CloseOnlyNotice(
+                  carvedOccurrenceKeptSentence(
+                    created.title,
+                    event.calendar_id,
+                    created.calendar_id,
+                    (id) => calendars.find((c) => c.id === id)?.name,
+                    t,
+                  ),
                 );
               }
               announce(
@@ -2060,14 +2086,25 @@ export function EventDialog({
             i18n.language,
             t,
           );
-          if (back) {
+          // A move to another calendar whose original the provider was too
+          // busy to delete (277): the move stands, and so does the original,
+          // which is said the same way.
+          const kept = saved
+            ? originalKeptSentence(
+                [saved],
+                (id) => calendars.find((c) => c.id === id)?.name,
+                t,
+              )
+            : null;
+          const left = [back, kept].filter(Boolean).join(' ');
+          if (left) {
             if (!shownRef.current) {
-              announce(back);
+              announce(left);
               return;
             }
             leavingNotice.current = false;
             setSplitNotice({
-              sentence: back,
+              sentence: left,
               proceed: async () => {
                 if (!(await carry())) onClose();
               },

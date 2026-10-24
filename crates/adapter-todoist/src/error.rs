@@ -26,9 +26,29 @@ pub enum TodoistError {
 
     #[error("invalid configuration: {0}")]
     Config(String),
+
+    /// A save of several requests failed after an earlier one had landed
+    /// (decision 277): the change stands in part. `step` names the request
+    /// that failed, a word for the log; `cause` is why. Mapped through
+    /// [`cal_core::Error::after_landed`], never to a refusal.
+    #[error("the change was saved in part, the {step} step failed: {cause}")]
+    PartlySaved {
+        step: &'static str,
+        cause: Box<TodoistError>,
+    },
 }
 
 pub type TodoistResult<T> = std::result::Result<T, TodoistError>;
+
+impl TodoistError {
+    /// This error, met by the `step` of a save after an earlier step landed.
+    pub(crate) fn after_landed(self, step: &'static str) -> Self {
+        TodoistError::PartlySaved {
+            step,
+            cause: Box::new(self),
+        }
+    }
+}
 
 impl From<reqwest::Error> for TodoistError {
     fn from(err: reqwest::Error) -> Self {

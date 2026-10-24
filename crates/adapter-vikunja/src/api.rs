@@ -149,6 +149,7 @@ impl VikunjaClient {
             .headers(self.auth_headers()?)
             .send()
             .await?;
+        log_busy_answer(&response);
         let status = response.status().as_u16();
         if matches!(status, 404 | 405) {
             return Ok(ApiVersion::V1);
@@ -335,8 +336,25 @@ impl VikunjaClient {
         if let Some(b) = body {
             builder = builder.body(serde_json::to_vec(b)?);
         }
-        Ok(builder.send().await?)
+        let response = builder.send().await?;
+        log_busy_answer(&response);
+        Ok(response)
     }
+}
+
+/// One line in the normal log for an answer that asks to slow down (429),
+/// with the wait Vikunja names — `Retry-After`, or when its rate limit
+/// resets: the sentences never say how long (decision 278), the log does.
+fn log_busy_answer(response: &Response) {
+    if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return;
+    }
+    let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok());
+    tracing::info!(
+        retry_after = header("retry-after"),
+        rate_limit_reset = header("x-ratelimit-reset"),
+        "vikunja asks to slow down"
+    );
 }
 
 /// Decode a 2xx JSON body or surface a non-2xx as

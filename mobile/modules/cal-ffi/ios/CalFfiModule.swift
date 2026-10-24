@@ -138,28 +138,53 @@ public class CalFfiModule: Module {
     override var reason: String { writeDetail }
   }
 
-  /// Re-throw a refused event write — or a refused read, whose message starts
-  /// with a `cal_core::ReadRefusal` token — with its code intact. Everything
-  /// else falls through untouched.
-  private func eventCoded<T>(_ block: () throws -> T) throws -> T {
+  /// Re-throw any failure of the Rust host with the desktop's code and its
+  /// own message (decision 273; TODO B9). An unmapped Swift error reaches JS
+  /// as its description, and the shared translator matched nothing: a refusal
+  /// or a leftover token was read out in English, and a sync failure showed
+  /// the engine's text. The codes are the desktop's (`CommandError`), so one
+  /// translator serves both surfaces; a sync failure keeps the engine's own.
+  /// Every registration that calls the host goes through it or `groupCoded`
+  /// (check-ffi-bridges.mjs fails one that does not). Expo 56 rejects an
+  /// AsyncFunction's promise on iOS with the message only, so JS reads the
+  /// token first in it, not the code (TODO "iPhone: verliert Expo den
+  /// Fehlercode?").
+  private func hostCoded<T>(_ block: () throws -> T) throws -> T {
     do {
       return try block()
-    } catch let StoreError.Forbidden(detail) {
-      throw EventCodedError(code: "forbidden", detail: detail)
-    } catch let StoreError.Conflict(detail) {
-      throw EventCodedError(code: "conflict", detail: detail)
-    } catch let StoreError.Network(detail) {
-      throw EventCodedError(code: "network", detail: detail)
+    } catch let error as StoreError {
+      switch error {
+      case let .Sync(code, detail):
+        throw SyncCodedError(code: code, detail: detail)
+      case let .Auth(detail):
+        throw EventCodedError(code: "auth", detail: detail)
+      case let .Forbidden(detail):
+        throw EventCodedError(code: "forbidden", detail: detail)
+      case .NotFound:
+        throw EventCodedError(code: "not_found", detail: "not found")
+      case let .Conflict(detail):
+        throw EventCodedError(code: "conflict", detail: detail)
+      case let .Network(detail):
+        throw EventCodedError(code: "network", detail: detail)
+      case let .Protocol(detail):
+        throw EventCodedError(code: "protocol", detail: detail)
+      case let .InvalidField(field, detail):
+        throw EventCodedError(code: "invalid_input", detail: "\(field): \(detail)")
+      case let .Unsupported(detail):
+        throw EventCodedError(code: "unsupported", detail: detail)
+      case let .Open(detail), let .Storage(detail):
+        throw EventCodedError(code: "internal", detail: detail)
+      }
     }
   }
 
   /// Run an event write as an iOS background task (decision 229): a new
-  /// Exchange series deletes its deleted occurrences again one by one and can
-  /// take up to half a minute, and a write the system suspends halfway leaves
-  /// a series that may stand. iOS grants about half a minute after the app
-  /// leaves the foreground, and does not promise it; the task ends with the
-  /// write, or when the grant runs out. Both may come from different threads,
-  /// so the identifier is ended once, under a lock.
+  /// series removes its deleted occurrences again one by one (Exchange,
+  /// Google) and can take up to half a minute, and a write the system
+  /// suspends halfway leaves a series that may stand. iOS grants about half a
+  /// minute after the app leaves the foreground, and does not promise it; the
+  /// task ends with the write, or when the grant runs out. Both may come from
+  /// different threads, so the identifier is ended once, under a lock.
   private func inBackgroundTask<T>(_ name: String, _ block: () throws -> T) throws -> T {
     let lock = NSLock()
     var task = UIBackgroundTaskIdentifier.invalid
@@ -178,39 +203,16 @@ public class CalFfiModule: Module {
     return try block()
   }
 
-  /// Re-throw a refused task write with its code — only a refusal: unlike an
-  /// event write, a task write's conflict or network failure has no sentence
-  /// of its own on the task screens, and keeps today's message.
-  private func refusalCoded<T>(_ block: () throws -> T) throws -> T {
-    do {
-      return try block()
-    } catch let StoreError.Forbidden(detail) {
-      throw EventCodedError(code: "forbidden", detail: detail)
-    }
-  }
-
-  /// Re-throw the ONE refusal a grouping request can meet with a code.
-  ///
-  /// `Conflict` is generic across the store, but at THIS call site it can only
-  /// be one thing: both named events are already in different groups. The
-  /// frontend has to say that sentence — "take one of them out first" — and it
-  /// cannot, if all that arrives is a Swift error description. Same mechanism
-  /// as `coded` below, narrowed to the one call that needs it.
+  /// `hostCoded` for a grouping request, whose one conflict can only mean that
+  /// both named events are already in different groups: a sentence of its own
+  /// ("take one of them out first").
   private func groupCoded<T>(_ block: () throws -> T) throws -> T {
-    do {
-      return try block()
-    } catch let StoreError.Conflict(detail) {
-      throw SyncCodedError(code: "event_group_conflict", detail: detail)
-    }
-  }
-
-  /// Re-throw a sync failure with its code intact. Everything else falls
-  /// through untouched — a `StoreError.NotFound` was never the problem.
-  private func coded<T>(_ block: () throws -> T) throws -> T {
-    do {
-      return try block()
-    } catch let StoreError.Sync(code, detail) {
-      throw SyncCodedError(code: code, detail: detail)
+    try hostCoded {
+      do {
+        return try block()
+      } catch let StoreError.Conflict(detail) {
+        throw SyncCodedError(code: "event_group_conflict", detail: detail)
+      }
     }
   }
 
@@ -483,60 +485,80 @@ public class CalFfiModule: Module {
     // SyncEvent. Mirrors the Android module.
 
     AsyncFunction("taskListsJson") { () -> String in
-      try self.host.taskListsJson()
+      try self.hostCoded {
+        try self.host.taskListsJson()
+      }
     }
 
     AsyncFunction("createTaskListJson") { (name: String) -> String in
-      try self.host.createTaskListJson(name: name)
+      try self.hostCoded {
+        try self.host.createTaskListJson(name: name)
+      }
     }
 
     AsyncFunction("reparentTaskList") { (id: String, parentId: String?) in
-      try self.host.reparentTaskList(id: id, parentId: parentId)
+      try self.hostCoded {
+        try self.host.reparentTaskList(id: id, parentId: parentId)
+      }
     }
 
     AsyncFunction("deleteTaskList") { (id: String) in
-      try self.host.deleteTaskList(id: id)
+      try self.hostCoded {
+        try self.host.deleteTaskList(id: id)
+      }
     }
 
     AsyncFunction("tasksJson") { (listId: String) -> String in
-      try self.host.tasksJson(listId: listId)
+      try self.hostCoded {
+        try self.host.tasksJson(listId: listId)
+      }
     }
 
     AsyncFunction("taskJson") { (id: String) -> String in
-      try self.host.taskJson(id: id)
+      try self.hostCoded {
+        try self.host.taskJson(id: id)
+      }
     }
 
     AsyncFunction("createTaskJson") { (listId: String, newTaskJson: String) -> String in
-      try self.refusalCoded {
+      try self.hostCoded {
         try self.host.createTaskJson(listId: listId, newTaskJson: newTaskJson)
       }
     }
 
     AsyncFunction("updateTaskJson") { (taskJson: String, previousListId: String?) -> String in
-      try self.refusalCoded {
+      try self.hostCoded {
         try self.host.updateTaskJson(taskJson: taskJson, previousListId: previousListId)
       }
     }
 
     AsyncFunction("deleteTask") { (taskId: String, listId: String?) in
-      try self.refusalCoded { try self.host.deleteTask(id: taskId, listId: listId) }
+      try self.hostCoded { try self.host.deleteTask(id: taskId, listId: listId) }
     }
 
     AsyncFunction("sectionsJson") { (listId: String) -> String in
-      try self.host.sectionsJson(listId: listId)
+      try self.hostCoded {
+        try self.host.sectionsJson(listId: listId)
+      }
     }
 
     AsyncFunction("createSectionJson") { (listId: String, name: String, position: Int, colorLabel: String?) -> String in
-      try self.host.createSectionJson(
-        listId: listId, name: name, position: UInt32(position), colorLabel: colorLabel)
+      try self.hostCoded {
+        try self.host.createSectionJson(
+          listId: listId, name: name, position: UInt32(position), colorLabel: colorLabel)
+      }
     }
 
     AsyncFunction("updateSectionJson") { (sectionJson: String) -> String in
-      try self.host.updateSectionJson(sectionJson: sectionJson)
+      try self.hostCoded {
+        try self.host.updateSectionJson(sectionJson: sectionJson)
+      }
     }
 
     AsyncFunction("deleteSection") { (id: String, listId: String?) in
-      try self.host.deleteSection(id: id, listId: listId)
+      try self.hostCoded {
+        try self.host.deleteSection(id: id, listId: listId)
+      }
     }
 
     // ─── Accounts (the full engine: external adapters + secrets) ───
@@ -544,31 +566,45 @@ public class CalFfiModule: Module {
     // rejects the JS promise. Mirrors the Android module.
 
     AsyncFunction("accountsJson") { (lang: String?) -> String in
-      try self.host.accountsJson(lang: lang)
+      try self.hostCoded {
+        try self.host.accountsJson(lang: lang)
+      }
     }
 
     AsyncFunction("createAccountJson") { (requestJson: String) -> String in
-      try self.host.createAccountJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.createAccountJson(requestJson: requestJson)
+      }
     }
 
     AsyncFunction("testAccountJson") { (requestJson: String) in
-      try self.host.testAccountJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.testAccountJson(requestJson: requestJson)
+      }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("testAccountValuesJson") { (requestJson: String) in
-      try self.host.testAccountValuesJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.testAccountValuesJson(requestJson: requestJson)
+      }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("runAccountActionJson") { (requestJson: String) -> String in
-      try self.host.runAccountActionJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.runAccountActionJson(requestJson: requestJson)
+      }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("deleteAccount") { (accountId: String) in
-      try self.host.deleteAccount(accountId: accountId)
+      try self.hostCoded {
+        try self.host.deleteAccount(accountId: accountId)
+      }
     }
 
     AsyncFunction("renameAccountJson") { (id: String, newName: String) -> String in
-      try self.host.renameAccountJson(id: id, newName: newName)
+      try self.hostCoded {
+        try self.host.renameAccountJson(id: id, newName: newName)
+      }
     }
 
     // Run the OS calendar/reminders permission prompt: the add-account "grant
@@ -576,13 +612,17 @@ public class CalFfiModule: Module {
     // `true` ⇒ every requested entity was granted. On its own queue (see
     // accessQueue): it blocks until the user answers.
     AsyncFunction("requestDeviceCalendarAccess") { (events: Bool, reminders: Bool) -> Bool in
-      try self.host.requestDeviceCalendarAccess(events: events, reminders: reminders)
+      try self.hostCoded {
+        try self.host.requestDeviceCalendarAccess(events: events, reminders: reminders)
+      }
     }.runOnQueue(accessQueue)
 
     // What the OS allows for the device calendars and reminders, and whether to
     // ask now (decision 166). Asks nobody.
     AsyncFunction("deviceCalendarAccessJson") { () -> String in
-      try self.host.deviceCalendarAccessJson()
+      try self.hostCoded {
+        try self.host.deviceCalendarAccessJson()
+      }
     }
 
     // Android's record of having asked (decision 172). iOS says "never asked"
@@ -594,67 +634,85 @@ public class CalFfiModule: Module {
     // + cached window, then kicks a warm pass). The recovery action for a "stuck"
     // external cache; credentials are untouched.
     AsyncFunction("resetAccountSync") { (accountId: String) in
-      try self.host.resetAccountSync(accountId: accountId)
+      try self.hostCoded {
+        try self.host.resetAccountSync(accountId: accountId)
+      }
     }
 
     AsyncFunction("listAccountsMissingCredentialsJson") { (lang: String?) -> String in
-      try self.host.listAccountsMissingCredentialsJson(lang: lang)
+      try self.hostCoded {
+        try self.host.listAccountsMissingCredentialsJson(lang: lang)
+      }
     }
 
     AsyncFunction("setAccountSecret") { (accountId: String, secret: String) in
-      try self.host.setAccountSecret(accountId: accountId, secret: secret)
+      try self.hostCoded {
+        try self.host.setAccountSecret(accountId: accountId, secret: secret)
+      }
     }
 
     // ─── Calendars + events (local + external adapters) ───
     // JSON passthrough; routing happens Rust-side. Mirrors the Android module.
 
     AsyncFunction("listCalendarsJson") { () -> String in
-      try self.host.listCalendarsJson()
+      try self.hostCoded {
+        try self.host.listCalendarsJson()
+      }
     }
 
     AsyncFunction("createCalendarJson") { (requestJson: String) -> String in
-      try self.host.createCalendarJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.createCalendarJson(requestJson: requestJson)
+      }
     }
 
     AsyncFunction("deleteCalendar") { (id: String) in
-      try self.host.deleteCalendar(id: id)
+      try self.hostCoded {
+        try self.host.deleteCalendar(id: id)
+      }
     }
 
     AsyncFunction("getEventsJson") { (requestJson: String) -> String in
-      try self.host.getEventsJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.getEventsJson(requestJson: requestJson)
+      }
     }
 
     AsyncFunction("getEventByIdJson") { (id: String, calendarId: String?) -> String in
-      try self.host.getEventByIdJson(id: id, calendarId: calendarId)
+      try self.hostCoded {
+        try self.host.getEventByIdJson(id: id, calendarId: calendarId)
+      }
     }
 
     AsyncFunction("queryFreeBusyJson") { (requestJson: String) -> String in
-      try self.host.queryFreeBusyJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.queryFreeBusyJson(requestJson: requestJson)
+      }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("createEventJson") { (requestJson: String) -> String in
       try self.inBackgroundTask("createEventJson") {
-        try self.eventCoded { try self.host.createEventJson(requestJson: requestJson) }
+        try self.hostCoded { try self.host.createEventJson(requestJson: requestJson) }
       }
     }
 
     AsyncFunction("updateEventJson") { (eventJson: String, previousCalendarId: String?) -> String in
       try self.inBackgroundTask("updateEventJson") {
-        try self.eventCoded {
+        try self.hostCoded {
           try self.host.updateEventJson(eventJson: eventJson, previousCalendarId: previousCalendarId)
         }
       }
     }
 
     AsyncFunction("deleteEvent") { (id: String, calendarId: String?, sendCancellations: Bool?) in
-      try self.eventCoded {
+      try self.hostCoded {
         try self.host.deleteEvent(
           id: id, calendarId: calendarId, sendCancellations: sendCancellations)
       }
     }
 
     AsyncFunction("addEventExdateJson") { (id: String, occurrence: String, calendarId: String?, sendCancellations: Bool) in
-      try self.eventCoded {
+      try self.hostCoded {
         try self.host.addEventExdateJson(
           id: id, occurrence: occurrence, calendarId: calendarId,
           sendCancellations: sendCancellations)
@@ -664,122 +722,176 @@ public class CalFfiModule: Module {
     // ─── Sync ───
 
     AsyncFunction("configureSyncAdapterJson") { (configJson: String) in
-      try self.coded { try self.host.configureSyncAdapterJson(configJson: configJson) }
+      try self.hostCoded { try self.host.configureSyncAdapterJson(configJson: configJson) }
     }.runOnQueue(slowQueue)
 
     // The sync SCREEN's verb: point this device at an account it already has.
     // Probes the target before it commits, so it belongs on the slow queue with
     // the other network-touching calls.
     AsyncFunction("selectSyncAccount") { (accountId: String) in
-      try self.coded { try self.host.selectSyncAccount(accountId: accountId) }
+      try self.hostCoded { try self.host.selectSyncAccount(accountId: accountId) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("syncStatusJson") { () -> String in
-      try self.coded { try self.host.syncStatusJson() }
+      try self.hostCoded { try self.host.syncStatusJson() }
     }
 
     AsyncFunction("syncNowJson") { (trigger: String) -> String in
-      try self.coded { try self.host.syncNowJson(trigger: trigger) }
+      try self.hostCoded { try self.host.syncNowJson(trigger: trigger) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("disconnectSync") { () in
-      try self.host.disconnectSync()
+      try self.hostCoded {
+        try self.host.disconnectSync()
+      }
     }
 
     AsyncFunction("getSyncAdapterSummaryJson") { () -> String in
-      try self.host.getSyncAdapterSummaryJson()
+      try self.hostCoded {
+        try self.host.getSyncAdapterSummaryJson()
+      }
     }
 
     AsyncFunction("pushNow") { (trigger: String) -> Int in
-      Int(try self.host.pushNow(trigger: trigger))
+      try self.hostCoded {
+        Int(try self.host.pushNow(trigger: trigger))
+      }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("listSyncLogJson") { (limit: Int) -> String in
-      try self.host.listSyncLogJson(limit: UInt32(limit))
+      try self.hostCoded {
+        try self.host.listSyncLogJson(limit: UInt32(limit))
+      }
     }
 
     AsyncFunction("clearSyncLog") {
-      try self.host.clearSyncLog()
+      try self.hostCoded {
+        try self.host.clearSyncLog()
+      }
     }
 
     AsyncFunction("compactNowJson") { () -> String in
-      try self.coded { try self.host.compactNowJson() }
+      try self.hostCoded { try self.host.compactNowJson() }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("refreshExternalCache") {
-      self.host.refreshExternalCache()
+      try self.hostCoded {
+        self.host.refreshExternalCache()
+      }
+    }
+
+    AsyncFunction("refreshAccountCache") { (accountId: String) in
+      try self.hostCoded {
+        self.host.refreshAccountCache(accountId: accountId)
+      }
+    }
+
+    AsyncFunction("refreshExternalCacheInBackground") {
+      try self.hostCoded {
+        self.host.refreshExternalCacheInBackground()
+      }
     }
 
     AsyncFunction("getCacheRefreshStatusJson") { () -> String in
-      try self.host.getCacheRefreshStatusJson()
+      try self.hostCoded {
+        try self.host.getCacheRefreshStatusJson()
+      }
     }
 
     // Per-account refresh-error surface (silent-staleness warning).
     AsyncFunction("refreshErrorsJson") { () -> String in
-      try self.host.refreshErrorsJson()
+      try self.hostCoded {
+        try self.host.refreshErrorsJson()
+      }
     }
 
     AsyncFunction("warmCacheOnForeground") {
-      self.host.warmCacheOnForeground()
+      try self.hostCoded {
+        self.host.warmCacheOnForeground()
+      }
     }
 
     // Contact sync (§10.5). The pass is driven from JS (manual button /
     // foreground); the interval + include-read-only prefs are device-local.
     AsyncFunction("syncContactsNow") { (includeReadOnly: Bool?) -> Bool in
-      try self.coded { try self.host.syncContactsNow(includeReadOnly: includeReadOnly) }
+      try self.hostCoded { try self.host.syncContactsNow(includeReadOnly: includeReadOnly) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("getContactsSyncStatusJson") { () -> String in
-      try self.host.getContactsSyncStatusJson()
+      try self.hostCoded {
+        try self.host.getContactsSyncStatusJson()
+      }
     }
 
     AsyncFunction("setContactsSyncInterval") { (minutes: Int) -> Int in
-      Int(try self.host.setContactsSyncInterval(minutes: UInt32(minutes)))
+      try self.hostCoded {
+        Int(try self.host.setContactsSyncInterval(minutes: UInt32(minutes)))
+      }
     }
 
     AsyncFunction("setContactsIncludeReadOnlyOnSync") { (enabled: Bool) in
-      try self.host.setContactsIncludeReadOnlyOnSync(enabled: enabled)
+      try self.hostCoded {
+        try self.host.setContactsIncludeReadOnlyOnSync(enabled: enabled)
+      }
     }
 
     AsyncFunction("clearContactsCache") { () -> Int in
-      Int(try self.host.clearContactsCache())
+      try self.hostCoded {
+        Int(try self.host.clearContactsCache())
+      }
     }
 
     // Diagnostics / logs (§ Diagnostics).
     AsyncFunction("getLogLevel") { () -> String in
-      try self.host.getLogLevel()
+      try self.hostCoded {
+        try self.host.getLogLevel()
+      }
     }
 
     AsyncFunction("setLogLevel") { (level: String) in
-      try self.host.setLogLevel(level: level)
+      try self.hostCoded {
+        try self.host.setLogLevel(level: level)
+      }
     }
 
     AsyncFunction("getRecentLogs") { (lines: Int?) -> String in
-      try self.host.getRecentLogs(lines: lines.map { UInt32($0) })
+      try self.hostCoded {
+        try self.host.getRecentLogs(lines: lines.map { UInt32($0) })
+      }
     }
 
     AsyncFunction("collectLogs") { (redact: Bool?) -> String in
-      try self.host.collectLogs(redact: redact)
+      try self.hostCoded {
+        try self.host.collectLogs(redact: redact)
+      }
     }
 
     AsyncFunction("clearLogs") {
-      try self.host.clearLogs()
+      try self.hostCoded {
+        try self.host.clearLogs()
+      }
     }
 
     AsyncFunction("logsDirPath") { () -> String in
-      try self.host.logsDirPath()
+      try self.hostCoded {
+        try self.host.logsDirPath()
+      }
     }
 
     AsyncFunction("syncConflictCount") { () -> Int in
-      Int(try self.coded { try self.host.syncConflictCount() })
+      Int(try self.hostCoded { try self.host.syncConflictCount() })
     }
 
     AsyncFunction("listSyncConflictsJson") { () -> String in
-      try self.host.listSyncConflictsJson()
+      try self.hostCoded {
+        try self.host.listSyncConflictsJson()
+      }
     }
 
     AsyncFunction("resolveSyncConflict") { (id: Int, choice: String) in
-      try self.host.resolveSyncConflict(id: Int64(id), choice: choice)
+      try self.hostCoded {
+        try self.host.resolveSyncConflict(id: Int64(id), choice: choice)
+      }
     }
 
     // ─── Reminders ───
@@ -787,7 +899,9 @@ public class CalFfiModule: Module {
     // layer to schedule as expo-notifications.
 
     AsyncFunction("upcomingRemindersJson") { (horizonMinutes: Int) -> String in
-      try self.host.upcomingRemindersJson(horizonMinutes: UInt32(horizonMinutes))
+      try self.hostCoded {
+        try self.host.upcomingRemindersJson(horizonMinutes: UInt32(horizonMinutes))
+      }
     }
 
     // ─── Custom reminder sounds (§14.4 / §19.2.2) ─────────────────────────────
@@ -795,19 +909,27 @@ public class CalFfiModule: Module {
     // import + in-app preview + sync only; the notification falls back to default.
 
     AsyncFunction("importSoundJson") { (path: String) -> String in
-      try self.host.importSoundJson(path: path)
+      try self.hostCoded {
+        try self.host.importSoundJson(path: path)
+      }
     }
 
     AsyncFunction("listCustomSoundsJson") { () -> String in
-      try self.host.listCustomSoundsJson()
+      try self.hostCoded {
+        try self.host.listCustomSoundsJson()
+      }
     }
 
     AsyncFunction("customSoundPath") { (sha256: String) -> String? in
-      try self.host.customSoundPath(sha256: sha256)
+      try self.hostCoded {
+        try self.host.customSoundPath(sha256: sha256)
+      }
     }
 
     AsyncFunction("deleteCustomSound") { (sha256: String) in
-      try self.host.deleteCustomSound(sha256: sha256)
+      try self.hostCoded {
+        try self.host.deleteCustomSound(sha256: sha256)
+      }
     }
 
     // No-op on iOS: UNNotificationSound only plays sounds bundled into the app
@@ -819,67 +941,97 @@ public class CalFfiModule: Module {
 
     // ─── User preferences (generic key/value; synced-key whitelist) ───
     AsyncFunction("getUserPref") { (key: String) -> String? in
-      try self.host.getUserPref(key: key)
+      try self.hostCoded {
+        try self.host.getUserPref(key: key)
+      }
     }
 
     AsyncFunction("setUserPref") { (key: String, value: String) in
-      try self.host.setUserPref(key: key, value: value)
+      try self.hostCoded {
+        try self.host.setUserPref(key: key, value: value)
+      }
     }
 
     AsyncFunction("deleteUserPref") { (key: String) in
-      try self.host.deleteUserPref(key: key)
+      try self.hostCoded {
+        try self.host.deleteUserPref(key: key)
+      }
     }
 
     // ─── Day markers (what a day was like; local-only, always synced) ───
 
     AsyncFunction("listDayMarkersJson") { () -> String in
-      try self.host.listDayMarkersJson()
+      try self.hostCoded {
+        try self.host.listDayMarkersJson()
+      }
     }
 
     AsyncFunction("createDayMarkerJson") { (name: String, symbol: String?, colorLabel: String?) -> String in
-      try self.host.createDayMarkerJson(name: name, symbol: symbol, colorLabel: colorLabel)
+      try self.hostCoded {
+        try self.host.createDayMarkerJson(name: name, symbol: symbol, colorLabel: colorLabel)
+      }
     }
 
     AsyncFunction("updateDayMarkerJson") { (markerJson: String) -> String in
-      try self.host.updateDayMarkerJson(markerJson: markerJson)
+      try self.hostCoded {
+        try self.host.updateDayMarkerJson(markerJson: markerJson)
+      }
     }
 
     AsyncFunction("deleteDayMarker") { (id: String) in
-      try self.host.deleteDayMarker(id: id)
+      try self.hostCoded {
+        try self.host.deleteDayMarker(id: id)
+      }
     }
 
     AsyncFunction("dayLogJson") { (day: String) -> String in
-      try self.host.dayLogJson(day: day)
+      try self.hostCoded {
+        try self.host.dayLogJson(day: day)
+      }
     }
 
     AsyncFunction("dayLogsInRangeJson") { (from: String, to: String) -> String in
-      try self.host.dayLogsInRangeJson(from: from, to: to)
+      try self.hostCoded {
+        try self.host.dayLogsInRangeJson(from: from, to: to)
+      }
     }
 
     AsyncFunction("setDayLogJson") { (logJson: String) -> String in
-      try self.host.setDayLogJson(logJson: logJson)
+      try self.hostCoded {
+        try self.host.setDayLogJson(logJson: logJson)
+      }
     }
 
     // ─── Colour labels (app-wide palette; local-only, always synced) ───
 
     AsyncFunction("listColorLabelsJson") { () -> String in
-      try self.host.listColorLabelsJson()
+      try self.hostCoded {
+        try self.host.listColorLabelsJson()
+      }
     }
 
     AsyncFunction("createColorLabelJson") { (name: String, hex: String) -> String in
-      try self.host.createColorLabelJson(name: name, hex: hex)
+      try self.hostCoded {
+        try self.host.createColorLabelJson(name: name, hex: hex)
+      }
     }
 
     AsyncFunction("getOrCreateAdHocColorLabelJson") { (hex: String) -> String in
-      try self.host.getOrCreateAdHocColorLabelJson(hex: hex)
+      try self.hostCoded {
+        try self.host.getOrCreateAdHocColorLabelJson(hex: hex)
+      }
     }
 
     AsyncFunction("updateColorLabelJson") { (labelJson: String) -> String in
-      try self.host.updateColorLabelJson(labelJson: labelJson)
+      try self.hostCoded {
+        try self.host.updateColorLabelJson(labelJson: labelJson)
+      }
     }
 
     AsyncFunction("deleteColorLabel") { (id: String) in
-      try self.host.deleteColorLabel(id: id)
+      try self.hostCoded {
+        try self.host.deleteColorLabel(id: id)
+      }
     }
 
     AsyncFunction("groupEventsJson") { (membersJson: String) -> String in
@@ -887,124 +1039,174 @@ public class CalFfiModule: Module {
     }
 
     AsyncFunction("ungroupEventJson") { (calendarId: String, eventId: String, bookkeeping: Bool) -> String? in
-      try self.host.ungroupEventJson(
-        calendarId: calendarId, eventId: eventId, bookkeeping: bookkeeping)
+      try self.hostCoded {
+        try self.host.ungroupEventJson(
+          calendarId: calendarId, eventId: eventId, bookkeeping: bookkeeping)
+      }
     }
 
     AsyncFunction("dissolveEventGroup") { (groupId: String) in
-      try self.host.dissolveEventGroup(groupId: groupId)
+      try self.hostCoded {
+        try self.host.dissolveEventGroup(groupId: groupId)
+      }
     }
 
     AsyncFunction("eventGroupsForEventsJson") { (eventsJson: String) -> String in
-      try self.host.eventGroupsForEventsJson(eventsJson: eventsJson)
+      try self.hostCoded {
+        try self.host.eventGroupsForEventsJson(eventsJson: eventsJson)
+      }
     }
 
     AsyncFunction("declineGroupSuggestionJson") { (firstJson: String, secondJson: String) in
-      try self.host.declineGroupSuggestionJson(firstJson: firstJson, secondJson: secondJson)
+      try self.hostCoded {
+        try self.host.declineGroupSuggestionJson(firstJson: firstJson, secondJson: secondJson)
+      }
     }
 
     AsyncFunction("groupSuggestionDeclinesJson") { () -> String in
-      try self.host.groupSuggestionDeclinesJson()
+      try self.hostCoded {
+        try self.host.groupSuggestionDeclinesJson()
+      }
     }
 
     // Reminders Aperio keeps for one event and tells no provider about
     // (migration 0043).
     AsyncFunction("eventLocalRemindersJson") { () in
-      try self.host.eventLocalRemindersJson()
+      try self.hostCoded {
+        try self.host.eventLocalRemindersJson()
+      }
     }
 
     AsyncFunction("setEventLocalRemindersJson") {
       (calendarId: String, eventId: String, remindersJson: String, title: String, startsAt: String) in
-      try self.host.setEventLocalRemindersJson(
-        calendarId: calendarId,
-        eventId: eventId,
-        remindersJson: remindersJson,
-        title: title,
-        startsAt: startsAt)
+      try self.hostCoded {
+        try self.host.setEventLocalRemindersJson(
+          calendarId: calendarId,
+          eventId: eventId,
+          remindersJson: remindersJson,
+          title: title,
+          startsAt: startsAt)
+      }
     }
 
     AsyncFunction("healEventLocalReminders") {
       (calendarId: String, oldEventId: String, newEventId: String) in
-      try self.host.healEventLocalReminders(
-        calendarId: calendarId,
-        oldEventId: oldEventId,
-        newEventId: newEventId)
+      try self.hostCoded {
+        try self.host.healEventLocalReminders(
+          calendarId: calendarId,
+          oldEventId: oldEventId,
+          newEventId: newEventId)
+      }
     }
 
     AsyncFunction("refreshEventLocalReminderSignature") {
       (calendarId: String, eventId: String, title: String, startsAt: String) in
-      try self.host.refreshEventLocalReminderSignature(
-        calendarId: calendarId,
-        eventId: eventId,
-        title: title,
-        startsAt: startsAt)
+      try self.hostCoded {
+        try self.host.refreshEventLocalReminderSignature(
+          calendarId: calendarId,
+          eventId: eventId,
+          title: title,
+          startsAt: startsAt)
+      }
     }
 
     AsyncFunction("setContainerColorLabel") { (containerId: String, kind: String, colorLabelId: String?) in
-      try self.host.setContainerColorLabel(containerId: containerId, kind: kind, colorLabelId: colorLabelId)
+      try self.hostCoded {
+        try self.host.setContainerColorLabel(containerId: containerId, kind: kind, colorLabelId: colorLabelId)
+      }
     }
 
     AsyncFunction("renameContainer") { (containerId: String, kind: String, name: String) in
-      try self.host.renameContainer(containerId: containerId, kind: kind, name: name)
+      try self.hostCoded {
+        try self.host.renameContainer(containerId: containerId, kind: kind, name: name)
+      }
     }
 
     AsyncFunction("setSectionColor") { (sectionId: String, listId: String, colorLabelId: String?) in
-      try self.host.setSectionColor(sectionId: sectionId, listId: listId, colorLabelId: colorLabelId)
+      try self.hostCoded {
+        try self.host.setSectionColor(sectionId: sectionId, listId: listId, colorLabelId: colorLabelId)
+      }
     }
 
     AsyncFunction("setEventColor") { (eventId: String, calendarId: String, colorLabelId: String?) in
-      try self.host.setEventColor(eventId: eventId, calendarId: calendarId, colorLabelId: colorLabelId)
+      try self.hostCoded {
+        try self.host.setEventColor(eventId: eventId, calendarId: calendarId, colorLabelId: colorLabelId)
+      }
     }
 
     AsyncFunction("searchJson") { (query: String, filtersJson: String) -> String in
-      try self.host.searchJson(query: query, filtersJson: filtersJson)
+      try self.hostCoded {
+        try self.host.searchJson(query: query, filtersJson: filtersJson)
+      }
     }
 
     AsyncFunction("searchContactsJson") { (query: String) -> String in
-      try self.host.searchContactsJson(query: query)
+      try self.hostCoded {
+        try self.host.searchContactsJson(query: query)
+      }
     }
 
     // ─── Contacts ───
     // JSON passthrough, routed Rust-side. Mirrors the Android module.
 
     AsyncFunction("contactListsJson") { () -> String in
-      try self.host.contactListsJson()
+      try self.hostCoded {
+        try self.host.contactListsJson()
+      }
     }
 
     AsyncFunction("contactsJson") { (listId: String) -> String in
-      try self.host.contactsJson(listId: listId)
+      try self.hostCoded {
+        try self.host.contactsJson(listId: listId)
+      }
     }
 
     AsyncFunction("createContactJson") { (listId: String, contactJson: String) -> String in
-      try self.host.createContactJson(listId: listId, contactJson: contactJson)
+      try self.hostCoded {
+        try self.host.createContactJson(listId: listId, contactJson: contactJson)
+      }
     }
 
     AsyncFunction("updateContactJson") { (contactJson: String) -> String in
-      try self.host.updateContactJson(contactJson: contactJson)
+      try self.hostCoded {
+        try self.host.updateContactJson(contactJson: contactJson)
+      }
     }
 
     AsyncFunction("deleteContact") { (id: String, listId: String?) in
-      try self.host.deleteContact(id: id, listId: listId)
+      try self.hostCoded {
+        try self.host.deleteContact(id: id, listId: listId)
+      }
     }
 
     AsyncFunction("getContactPhotoJson") { (id: String, listId: String?) -> String in
-      try self.host.getContactPhotoJson(id: id, listId: listId)
+      try self.hostCoded {
+        try self.host.getContactPhotoJson(id: id, listId: listId)
+      }
     }
 
     AsyncFunction("setContactPhotoJson") { (id: String, listId: String?, photoJson: String) in
-      try self.host.setContactPhotoJson(id: id, listId: listId, photoJson: photoJson)
+      try self.hostCoded {
+        try self.host.setContactPhotoJson(id: id, listId: listId, photoJson: photoJson)
+      }
     }
 
     AsyncFunction("deleteContactPhoto") { (id: String, listId: String?) in
-      try self.host.deleteContactPhoto(id: id, listId: listId)
+      try self.hostCoded {
+        try self.host.deleteContactPhoto(id: id, listId: listId)
+      }
     }
 
     AsyncFunction("createContactListJson") { (name: String) -> String in
-      try self.host.createContactListJson(name: name)
+      try self.hostCoded {
+        try self.host.createContactListJson(name: name)
+      }
     }
 
     AsyncFunction("deleteContactList") { (id: String) in
-      try self.host.deleteContactList(id: id)
+      try self.hostCoded {
+        try self.host.deleteContactList(id: id)
+      }
     }
 
     // ─── Collaboration: RSVP (§7.3) + task-list members/sharing (§9.7) ────────
@@ -1014,12 +1216,14 @@ public class CalFfiModule: Module {
     // the new status.
 
     AsyncFunction("calendarCurrentUserEmail") { (calendarId: String) -> String? in
-      try self.host.calendarCurrentUserEmail(calendarId: calendarId)
+      try self.hostCoded {
+        try self.host.calendarCurrentUserEmail(calendarId: calendarId)
+      }
     }
 
     AsyncFunction("respondToEvent") {
       (calendarId: String, eventId: String, status: String, sendResponse: Bool) in
-      try self.eventCoded {
+      try self.hostCoded {
         try self.host.respondToEvent(
           calendarId: calendarId, eventId: eventId, status: status, sendResponse: sendResponse)
       }
@@ -1028,31 +1232,43 @@ public class CalFfiModule: Module {
     // Coded, so a refused read keeps its token (`cal_core::ReadRefusal`) and
     // the editor can say which permission the account's token lacks.
     AsyncFunction("taskListMembersJson") { (listId: String) -> String in
-      try self.eventCoded { try self.host.taskListMembersJson(listId: listId) }
+      try self.hostCoded { try self.host.taskListMembersJson(listId: listId) }
     }
 
     AsyncFunction("taskCurrentUserJson") { (listId: String) -> String in
-      try self.host.taskCurrentUserJson(listId: listId)
+      try self.hostCoded {
+        try self.host.taskCurrentUserJson(listId: listId)
+      }
     }
 
     AsyncFunction("taskListSharesJson") { (listId: String) -> String in
-      try self.host.taskListSharesJson(listId: listId)
+      try self.hostCoded {
+        try self.host.taskListSharesJson(listId: listId)
+      }
     }
 
     AsyncFunction("taskSearchUsersJson") { (listId: String, query: String) -> String in
-      try self.host.taskSearchUsersJson(listId: listId, query: query)
+      try self.hostCoded {
+        try self.host.taskSearchUsersJson(listId: listId, query: query)
+      }
     }
 
     AsyncFunction("taskAddMember") { (listId: String, memberRef: String, right: String?) in
-      try self.host.taskAddMember(listId: listId, memberRef: memberRef, right: right)
+      try self.hostCoded {
+        try self.host.taskAddMember(listId: listId, memberRef: memberRef, right: right)
+      }
     }
 
     AsyncFunction("taskRemoveMember") { (listId: String, memberRef: String) in
-      try self.host.taskRemoveMember(listId: listId, memberRef: memberRef)
+      try self.hostCoded {
+        try self.host.taskRemoveMember(listId: listId, memberRef: memberRef)
+      }
     }
 
     AsyncFunction("taskSetMemberRight") { (listId: String, memberRef: String, right: String) in
-      try self.host.taskSetMemberRight(listId: listId, memberRef: memberRef, right: right)
+      try self.hostCoded {
+        try self.host.taskSetMemberRight(listId: listId, memberRef: memberRef, right: right)
+      }
     }
 
     // ─── Schema-driven accounts ──────────────────────────────────────────────
@@ -1063,42 +1279,60 @@ public class CalFfiModule: Module {
     // ─── Meetings (network: they talk to the provider) ───────────────────────
 
     AsyncFunction("attachMeetingJson") { (requestJson: String) -> String in
-      try self.host.attachMeetingJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.attachMeetingJson(requestJson: requestJson)
+      }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("detachMeetingJson") { (requestJson: String) -> String in
-      try self.host.detachMeetingJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.detachMeetingJson(requestJson: requestJson)
+      }
     }.runOnQueue(slowQueue)
 
     // Network: it asks the provider about the meeting.
     AsyncFunction("inspectEventMeetingJson") { (requestJson: String) -> String in
-      try self.host.inspectEventMeetingJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.inspectEventMeetingJson(requestJson: requestJson)
+      }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("adoptMeetingJson") { (requestJson: String) -> String in
-      try self.host.adoptMeetingJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.adoptMeetingJson(requestJson: requestJson)
+      }
     }
 
     AsyncFunction("eventMeetingJson") { (eventId: String, calendarId: String?) -> String in
-      try self.host.eventMeetingJson(eventId: eventId, calendarId: calendarId)
+      try self.hostCoded {
+        try self.host.eventMeetingJson(eventId: eventId, calendarId: calendarId)
+      }
     }
 
     AsyncFunction("listAdapterKindsJson") { (lang: String?) -> String in
-      try self.host.listAdapterKindsJson(lang: lang)
+      try self.hostCoded {
+        try self.host.listAdapterKindsJson(lang: lang)
+      }
     }
 
     AsyncFunction("accountFormSpecJson") { (adapterKind: String, lang: String?) -> String in
-      try self.host.accountFormSpecJson(adapterKind: adapterKind, lang: lang)
+      try self.hostCoded {
+        try self.host.accountFormSpecJson(adapterKind: adapterKind, lang: lang)
+      }
     }
 
     // Pure (no network): builds the consent URL + PKCE verifier + state.
     AsyncFunction("beginAccountOauthJson") { (adapterKind: String, valuesJson: String) -> String in
-      try self.host.beginAccountOauthJson(adapterKind: adapterKind, valuesJson: valuesJson)
+      try self.hostCoded {
+        try self.host.beginAccountOauthJson(adapterKind: adapterKind, valuesJson: valuesJson)
+      }
     }
 
     // Network: the token exchange, then the row + keychain + registration.
     AsyncFunction("connectAccountJson") { (requestJson: String) -> String in
-      try self.host.connectAccountJson(requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.connectAccountJson(requestJson: requestJson)
+      }
     }.runOnQueue(slowQueue)
 
     // Re-sign-in for an EXISTING account. Both halves take only the account id:
@@ -1107,11 +1341,11 @@ public class CalFfiModule: Module {
     // `coded`, so `client_secret_required` reaches JS as error.code — the
     // second-device repair asks for the secret and retries on exactly that.
     AsyncFunction("beginAccountReconnectJson") { (accountId: String) -> String in
-      try self.coded { try self.host.beginAccountReconnectJson(accountId: accountId) }
+      try self.hostCoded { try self.host.beginAccountReconnectJson(accountId: accountId) }
     }
 
     AsyncFunction("completeAccountReconnectJson") { (accountId: String, requestJson: String) -> String in
-      try self.coded {
+      try self.hostCoded {
         try self.host.completeAccountReconnectJson(accountId: accountId, requestJson: requestJson)
       }
     }.runOnQueue(slowQueue)
@@ -1119,7 +1353,9 @@ public class CalFfiModule: Module {
     // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──
 
     AsyncFunction("beginOauthJson") { (pluginId: String, argsJson: String) -> String in
-      try self.host.beginOauthJson(pluginId: pluginId, argsJson: argsJson)
+      try self.hostCoded {
+        try self.host.beginOauthJson(pluginId: pluginId, argsJson: argsJson)
+      }
     }
 
 
@@ -1127,50 +1363,54 @@ public class CalFfiModule: Module {
     // ─── Discovery (EWS Autodiscover; host-driven, like the desktop) ──────────
 
     AsyncFunction("discoverJson") { (pluginId: String, argsJson: String) -> String in
-      try self.host.discoverJson(pluginId: pluginId, argsJson: argsJson)
+      try self.hostCoded {
+        try self.host.discoverJson(pluginId: pluginId, argsJson: argsJson)
+      }
     }.runOnQueue(slowQueue)
 
     // ─── Sync-target OAuth (Dropbox / Google Drive) ───────────────────────────
 
     AsyncFunction("completeSyncOauthJson") { (pluginId: String, requestJson: String) in
-      try self.host.completeSyncOauthJson(pluginId: pluginId, requestJson: requestJson)
+      try self.hostCoded {
+        try self.host.completeSyncOauthJson(pluginId: pluginId, requestJson: requestJson)
+      }
     }.runOnQueue(slowQueue)
 
     // ─── E2E sync encryption (§19.7) ──────────────────────────────────────────
 
     AsyncFunction("enableSyncEncryptionJson") { (passphrase: String) -> String in
-      try self.coded { try self.host.enableSyncEncryptionJson(passphrase: passphrase) }
+      try self.hostCoded { try self.host.enableSyncEncryptionJson(passphrase: passphrase) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("disableSyncEncryptionJson") { (passphrase: String) -> String in
-      try self.coded { try self.host.disableSyncEncryptionJson(passphrase: passphrase) }
+      try self.hostCoded { try self.host.disableSyncEncryptionJson(passphrase: passphrase) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("changeSyncPassphraseJson") { (oldPassphrase: String, newPassphrase: String) in
-      try self.coded {
+      try self.hostCoded {
         try self.host.changeSyncPassphraseJson(
           oldPassphrase: oldPassphrase, newPassphrase: newPassphrase)
       }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("adoptRemoteEncryptionJson") { (passphrase: String) in
-      try self.coded { try self.host.adoptRemoteEncryptionJson(passphrase: passphrase) }
+      try self.hostCoded { try self.host.adoptRemoteEncryptionJson(passphrase: passphrase) }
     }.runOnQueue(slowQueue)
 
     // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
 
     AsyncFunction("previewSyncTargetJson") { (configJson: String) -> String in
-      try self.coded { try self.host.previewSyncTargetJson(configJson: configJson) }
+      try self.hostCoded { try self.host.previewSyncTargetJson(configJson: configJson) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("previewSyncTargetValuesJson") { (requestJson: String) -> String in
-      try self.coded {
+      try self.hostCoded {
         try self.host.previewSyncTargetValuesJson(requestJson: requestJson)
       }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("acceptRemoteDatasetJson") { (configJson: String, deviceName: String?, passphrase: String?) -> String in
-      try self.coded {
+      try self.hostCoded {
         try self.host.acceptRemoteDatasetJson(
           configJson: configJson, deviceName: deviceName, passphrase: passphrase)
       }
@@ -1179,7 +1419,7 @@ public class CalFfiModule: Module {
     // adoptLocalDatasetJson initialises a FRESH dataset (the unified Connect
     // button's empty-target path), optionally enabling E2E at creation.
     AsyncFunction("adoptLocalDatasetJson") { (configJson: String, deviceName: String?, passphrase: String?) -> String in
-      try self.coded {
+      try self.hostCoded {
         try self.host.adoptLocalDatasetJson(
           configJson: configJson, deviceName: deviceName, passphrase: passphrase)
       }
@@ -1188,69 +1428,73 @@ public class CalFfiModule: Module {
     // The same two answers, asked with the shared schema form's own values, and
     // committing to an ACCOUNT ROW rather than to device-local preferences.
     AsyncFunction("acceptRemoteDatasetValuesJson") { (requestJson: String, deviceName: String?, passphrase: String?) -> String in
-      try self.coded {
+      try self.hostCoded {
         try self.host.acceptRemoteDatasetValuesJson(
           requestJson: requestJson, deviceName: deviceName, passphrase: passphrase)
       }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("adoptLocalDatasetValuesJson") { (requestJson: String, deviceName: String?, passphrase: String?) -> String in
-      try self.coded {
+      try self.hostCoded {
         try self.host.adoptLocalDatasetValuesJson(
           requestJson: requestJson, deviceName: deviceName, passphrase: passphrase)
       }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("resumeStaleDeviceJson") { () -> String in
-      try self.coded { try self.host.resumeStaleDeviceJson() }
+      try self.hostCoded { try self.host.resumeStaleDeviceJson() }
     }.runOnQueue(slowQueue)
 
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
 
     AsyncFunction("previewSftpHostKeyJson") { (argsJson: String) -> String in
-      try self.coded { try self.host.previewSftpHostKeyJson(argsJson: argsJson) }
+      try self.hostCoded { try self.host.previewSftpHostKeyJson(argsJson: argsJson) }
     }.runOnQueue(slowQueue)
 
     // The same probe for an account the user is about to sync through — the
     // repair for a selectSyncAccount that refused an unconfirmed host key.
     // Returns the JSON `null` (no network) when the adapter pins no host key.
     AsyncFunction("previewSyncAccountHostKeyJson") { (accountId: String) -> String in
-      try self.coded { try self.host.previewSyncAccountHostKeyJson(accountId: accountId) }
+      try self.hostCoded { try self.host.previewSyncAccountHostKeyJson(accountId: accountId) }
     }.runOnQueue(slowQueue)
 
     // Read-only, and no network: what this device already confirmed.
     AsyncFunction("syncAccountHostKeyPinJson") { (accountId: String) -> String in
-      try self.coded { try self.host.syncAccountHostKeyPinJson(accountId: accountId) }
+      try self.hostCoded { try self.host.syncAccountHostKeyPinJson(accountId: accountId) }
     }
 
     AsyncFunction("trustSftpHostKey") { (hostPort: String, fingerprint: String) in
-      try self.coded { try self.host.trustSftpHostKey(hostPort: hostPort, fingerprint: fingerprint) }
+      try self.hostCoded { try self.host.trustSftpHostKey(hostPort: hostPort, fingerprint: fingerprint) }
     }
 
     AsyncFunction("forgetSftpHostKey") { (hostPort: String) in
-      try self.host.forgetSftpHostKey(hostPort: hostPort)
+      try self.hostCoded {
+        try self.host.forgetSftpHostKey(hostPort: hostPort)
+      }
     }
 
     AsyncFunction("pinnedSftpHostKey") { (hostPort: String) -> String? in
-      try self.host.pinnedSftpHostKey(hostPort: hostPort)
+      try self.hostCoded {
+        try self.host.pinnedSftpHostKey(hostPort: hostPort)
+      }
     }
 
     // §19 device registry: this device's own name, and the list of everyone the
     // dataset still counts as a participant.
     AsyncFunction("syncDeviceNameJson") { () -> String in
-      try self.coded { try self.host.syncDeviceNameJson() }
+      try self.hostCoded { try self.host.syncDeviceNameJson() }
     }
 
     AsyncFunction("setSyncDeviceName") { (name: String) in
-      try self.coded { try self.host.setSyncDeviceName(name: name) }
+      try self.hostCoded { try self.host.setSyncDeviceName(name: name) }
     }
 
     AsyncFunction("listSyncDevicesJson") { () -> String in
-      try self.coded { try self.host.listSyncDevicesJson() }
+      try self.hostCoded { try self.host.listSyncDevicesJson() }
     }
 
     AsyncFunction("forgetSyncDevice") { (deviceId: String) in
-      try self.coded { try self.host.forgetSyncDevice(deviceId: deviceId) }
+      try self.hostCoded { try self.host.forgetSyncDevice(deviceId: deviceId) }
     }
 
     // ── Widgets ──
@@ -1283,7 +1527,9 @@ public class CalFfiModule: Module {
     // The background round is the one path a user cannot watch happen, so it has
     // to be able to say what it did.
     AsyncFunction("logLine") { (level: String, message: String) in
-      self.host.logLine(level: level, message: message)
+      try self.hostCoded {
+        self.host.logLine(level: level, message: message)
+      }
     }
 
     // ── The second background wake-up ──

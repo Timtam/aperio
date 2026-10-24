@@ -23,7 +23,7 @@ import {
   listContactLists,
   searchContacts,
 } from '../api/contacts';
-import { primaryChannelValue } from '@aperio/shared';
+import { primaryChannelValue, readErrorMessage, writeErrorMessage } from '@aperio/shared';
 
 import { expandedA11y } from '../a11y/roles';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -44,10 +44,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 /** A contact paired with its owning list, for grouped rendering. */
 interface Group {
   list: ContactList;
@@ -63,6 +59,11 @@ export default function ContactsScreen({
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // A failed delete's line, apart from a load's: a load clears only its own,
+  // so the refresh after the write leaves it. It goes with the next delete
+  // that works or the screen's return from elsewhere (the editor), where the
+  // person acted again. Mirrors CalendarDayList.
+  const [writeError, setWriteError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   // Native pull-to-refresh — manual sync + external-cache warm; the list reloads
   // via useCacheReload('contacts') below.
@@ -176,7 +177,7 @@ export default function ContactsScreen({
       );
       setGroups(withContacts);
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -189,6 +190,7 @@ export default function ContactsScreen({
   // reflected in the overlay, not just the browse groups.
   useEffect(() => {
     const onFocus = () => {
+      setWriteError(null);
       void load();
       setRefreshNonce((n) => n + 1);
       void getContactsSyncStatus().then(setSyncStatus).catch(() => {});
@@ -265,14 +267,19 @@ export default function ContactsScreen({
               void (async () => {
                 try {
                   await apiDeleteContact(c.id, c.list_id);
+                  setWriteError(null);
                   announce(t('dialogs.contact.deleted', { name: c.display_name }));
                   await load();
                   // Re-run any active search so the deleted row leaves the
                   // overlay (load() only refreshes the browse groups).
                   setRefreshNonce((n) => n + 1);
                 } catch (err) {
-                  const message = errorMessage(err);
-                  setError(message);
+                  // A delete whose answer was lost may have landed: the list
+                  // and any search read again, as on the desktop (277).
+                  const message = writeErrorMessage(err, t);
+                  setWriteError(message);
+                  void load();
+                  setRefreshNonce((n) => n + 1);
                   announce(t('mobile.error', { message }));
                 }
               })();
@@ -453,7 +460,12 @@ export default function ContactsScreen({
         </View>
       )}
 
-      {error != null && (
+      {writeError != null && (
+        <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
+          {writeError}
+        </Text>
+      )}
+      {error != null && error !== writeError && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
         </Text>

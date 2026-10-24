@@ -1,5 +1,5 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { writeErrorMessage } from '@aperio/shared';
+import { readErrorMessage, writeErrorMessage } from '@aperio/shared';
 import {
   useCallback,
   useEffect,
@@ -415,6 +415,11 @@ export function CalendarDayList({
   const [sections, setSections] = useState<Section[]>(() => seed?.sections ?? []);
   const [loading, setLoading] = useState(seed == null);
   const [error, setError] = useState<string | null>(null);
+  // A failed write's line, apart from a load's: a load clears only its own,
+  // so a refresh after the write leaves it. It goes with the list's next
+  // write that works, another period, or the screen's return from elsewhere
+  // (the editor), where the person acted again.
+  const [writeError, setWriteError] = useState<string | null>(null);
   // "Loading …" only when the wait is long enough to notice (the desktop's
   // useDeferredLoading, ported): a warm host-cache round trip stays silent
   // instead of flashing the text for a frame or two.
@@ -659,6 +664,9 @@ export function CalendarDayList({
   // to avoid. The catalogs (calendars, labels, lists) are window-independent
   // and stay.
   const windowKey = `${range.start.toISOString()}|${range.end.toISOString()}`;
+  useEffect(() => {
+    setWriteError(null);
+  }, [windowKey]);
   const seededWindowKeyRef = useRef(windowKey);
   useLayoutEffect(() => {
     if (seededWindowKeyRef.current === windowKey) return;
@@ -861,7 +869,8 @@ export function CalendarDayList({
       });
     } catch (err) {
       if (reqToken.current !== token) return;
-      const message = writeErrorMessage(err, t);
+      // A load: a busy provider says so, never that nothing was changed.
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -904,7 +913,10 @@ export function CalendarDayList({
   // so rapid paging collapses into one reload on the period the user settles on.
   const didFirstLoadRef = useRef(false);
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => scheduleLoad());
+    const unsubscribe = navigation.addListener('focus', () => {
+      setWriteError(null);
+      scheduleLoad();
+    });
     if (!didFirstLoadRef.current) {
       didFirstLoadRef.current = true;
       void load();
@@ -1162,11 +1174,17 @@ export function CalendarDayList({
         ev,
         t,
         (message) => {
+          setWriteError(null);
           announce(message);
           void load();
         },
         (message) => {
-          setError(message);
+          // A delete that failed may have landed in part — a series cut
+          // short — so the list reads again, as the desktop grid does (277).
+          // Its line is a write's: neither this re-read nor a refresh it
+          // starts clears it.
+          setWriteError(message);
+          void load();
           announce(t('mobile.error', { message }));
         },
         {
@@ -1254,9 +1272,13 @@ export function CalendarDayList({
       try {
         const next = await applyTaskToggle(task, listsById.get(task.list_id), tasks);
         if (next == null) return;
+        setWriteError(null);
         announce(statusAnnounce(t, next, task.title));
         await load();
       } catch (err) {
+        // A check-off that landed in part is real: the day reads again, as on
+        // the desktop (decision 277).
+        void load();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
@@ -1278,9 +1300,13 @@ export function CalendarDayList({
                 void (async () => {
                   try {
                     await apiDeleteTask(task.id, task.list_id);
+                    setWriteError(null);
                     announce(t('mobile.deleted', { title: task.title }));
                     await load();
                   } catch (err) {
+                    // A delete whose answer was lost may have landed: the day
+                    // reads again, as the desktop's menu does (277).
+                    void load();
                     announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
                   }
                 })();
@@ -1296,10 +1322,14 @@ export function CalendarDayList({
         taskLists,
         t,
         (message) => {
+          setWriteError(null);
           announce(message);
           void load();
         },
-        (message) => announce(t('mobile.error', { message })),
+        (message) => {
+          void load();
+          announce(t('mobile.error', { message }));
+        },
         plainConfirm,
       );
     },
@@ -2065,7 +2095,12 @@ export function CalendarDayList({
   // a reload after a mutation fails but stale data remains).
   return (
     <>
-      {error != null && (
+      {writeError != null && (
+        <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
+          {writeError}
+        </Text>
+      )}
+      {error != null && error !== writeError && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
         </Text>

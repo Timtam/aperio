@@ -87,15 +87,7 @@ async fn propfind_calendars(
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if body.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                body.chars().take(200).collect()
-            },
-        });
+        return Err(crate::http::read_failure(response).await);
     }
     let body = response.text().await?;
     parse_multistatus(&body)
@@ -204,7 +196,9 @@ pub async fn proppatch_displayname(
         .request(method, collection_url.clone())
         .headers(headers)
         .body(body)
-        .send_retrying()
+        .send_write()
+        .await?
+        .settled(collection_url.as_str())
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {

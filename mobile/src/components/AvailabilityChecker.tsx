@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { readFailureSentence } from '@aperio/shared';
 
 import { FreeBusy, FreeBusySlot, queryFreeBusy } from '../api/calendar';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -64,12 +66,20 @@ export function AvailabilityChecker({
     setError(null);
   }, [attendeesKey, start, end, calendarId]);
 
+  // A failure shown in the line below and said. The line's live region is
+  // ANDROID ONLY (`accessibilityLiveRegion` does nothing on iOS), so VoiceOver
+  // is told here, as the group screen does; TalkBack hears the region.
+  const fail = useCallback((message: string) => {
+    setError(message);
+    if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(message);
+  }, []);
+
   const check = useCallback(async () => {
-    // An unparseable/empty window: tell the user why nothing happened (the
-    // assertive error region announces it), matching the desktop — a silent
-    // no-op button is a dead end for a screen-reader user.
+    // An unparseable/empty window: tell the user why nothing happened,
+    // matching the desktop — a silent no-op button is a dead end for a
+    // screen-reader user.
     if (start == null || end == null) {
-      setError(t('dialogs.event.dateInvalid'));
+      fail(t('dialogs.event.dateInvalid'));
       return;
     }
     const emails = attendees.map(attendeeEmail).filter((e) => e.length > 0);
@@ -87,11 +97,15 @@ export function AvailabilityChecker({
           : t('dialogs.event.availability.someBusy', { count: busyCount }),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // A check that failed says why, and the previous answer goes: "All
+      // attendees are free" must never stand beside it (decision 273).
+      setAvailability(null);
+      setCheckedWindow(null);
+      fail(readFailureSentence('dialogs.event.availability.failed', err, t));
     } finally {
       setChecking(false);
     }
-  }, [attendees, calendarId, end, start, t]);
+  }, [attendees, calendarId, end, fail, start, t]);
 
   const busyCount =
     availability && checkedWindow

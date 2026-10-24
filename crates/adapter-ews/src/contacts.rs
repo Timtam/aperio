@@ -80,7 +80,7 @@
 
 use base64::Engine;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use futures::stream::{self, StreamExt};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 
@@ -225,6 +225,11 @@ fn gal_contact_list() -> ContactList {
 /// bubbling a single error, since the caller's
 /// `useContacts` `.catch` would otherwise eat just one prefix's
 /// failure and confusingly succeed with the others.
+///
+/// A busy server is the exception (decision 270): its prefixes would come
+/// back empty and the walk would end as a GAL with people missing, cached as
+/// the whole directory. The first busy answer ends the walk with that error,
+/// and the GAL cached before stays.
 async fn get_gal_contacts(client: &EwsClient) -> EwsResult<Vec<Contact>> {
     use std::collections::HashMap;
 
@@ -247,13 +252,14 @@ async fn get_gal_contacts(client: &EwsClient) -> EwsResult<Vec<Contact>> {
     // having to short-circuit on the first miss. We capture the
     // prefix in the log line so a user enabling debug tracing
     // can tell which letter dropped if results look short.
-    let personas: Vec<ParsedPersona> = stream::iter(prefixes)
+    let personas: Vec<Vec<ParsedPersona>> = stream::iter(prefixes)
         .map(move |prefix: String| {
             let client = owned_client.clone();
             async move {
                 let body = resolve_names_envelope(&prefix);
                 let xml = match client.post_soap(body).await {
                     Ok(x) => x,
+                    Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
                     Err(err) => {
                         // `ErrorNameResolutionNoResults` is normal
                         // for prefixes the directory has no entries
@@ -264,7 +270,7 @@ async fn get_gal_contacts(client: &EwsClient) -> EwsResult<Vec<Contact>> {
                             ?err,
                             "ResolveNames prefix yielded no usable results",
                         );
-                        return Vec::new();
+                        return Ok(Vec::new());
                     }
                 };
                 let parsed = parse_resolve_names_response(&xml).unwrap_or_default();
@@ -274,13 +280,13 @@ async fn get_gal_contacts(client: &EwsClient) -> EwsResult<Vec<Contact>> {
                     returned = parsed.len(),
                     "ResolveNames prefix walked",
                 );
-                parsed
+                Ok(parsed)
             }
         })
         .buffer_unordered(GAL_CONCURRENCY)
-        .flat_map(stream::iter)
-        .collect()
-        .await;
+        .try_collect()
+        .await?;
+    let personas = personas.into_iter().flatten();
 
     // Dedup by lower-cased primary email — same person can match
     // multiple prefix queries (display name AND alias). For
@@ -458,15 +464,31 @@ pub async fn set_contact_photo(
     let envelope = get_item_attachments_envelope(&item_id, change_key.as_deref());
     let response = client.post_soap(envelope).await?;
     let attachments = parse_attachment_index(&response)?;
+    // Once an old photo is gone, a later failure leaves the contact without
+    // one: the change stands in part (decision 277), never "nothing changed".
+    let mut landed = false;
+    let after = |err: EwsError, landed: bool| {
+        if landed {
+            err.after_landed("photo")
+        } else {
+            err
+        }
+    };
     for attachment in attachments {
         if attachment.is_contact_photo {
             let envelope = delete_attachment_envelope(&attachment.attachment_id);
-            client.post_soap(envelope).await?;
+            client
+                .post_soap(envelope)
+                .await
+                .map_err(|err| after(err, landed))?;
+            landed = true;
         }
     }
 
     // 2. Upload the new bytes.
-    upload_contact_photo(client, &item_id, change_key.as_deref(), &photo).await
+    upload_contact_photo(client, &item_id, change_key.as_deref(), &photo)
+        .await
+        .map_err(|err| after(err, landed))
 }
 
 /// Strip the avatar by deleting every ContactPicture attachment
@@ -477,10 +499,20 @@ pub async fn delete_contact_photo(client: &EwsClient, contact_id: &str) -> EwsRe
     let envelope = get_item_attachments_envelope(&item_id, change_key.as_deref());
     let response = client.post_soap(envelope).await?;
     let attachments = parse_attachment_index(&response)?;
+    // Once one picture is gone, a later failure leaves the change standing in
+    // part (decision 277), never "nothing changed", as in `set_contact_photo`.
+    let mut landed = false;
     for attachment in attachments {
         if attachment.is_contact_photo {
             let envelope = delete_attachment_envelope(&attachment.attachment_id);
-            client.post_soap(envelope).await?;
+            client.post_soap(envelope).await.map_err(|err| {
+                if landed {
+                    err.after_landed("photo")
+                } else {
+                    err
+                }
+            })?;
+            landed = true;
         }
     }
     Ok(())
@@ -3253,5 +3285,226 @@ mod tests {
         let list = gal_contact_list();
         assert_eq!(list.id, GAL_LIST_ID);
         assert!(list.read_only);
+    }
+}
+
+#[cfg(test)]
+mod busy_tests {
+    //! A busy Exchange in the contact paths that send several requests or
+    //! walk many (decisions 270, 277).
+    use std::sync::{Arc, Mutex};
+
+    use mockito::Server;
+
+    use super::*;
+    use crate::auth::BasicCredentials;
+
+    fn client_for(server: &Server) -> EwsClient {
+        EwsClient::new(
+            server.url(),
+            BasicCredentials {
+                username: "alice".into(),
+                password: "pw".into(),
+            },
+            reqwest::Client::builder().build().unwrap(),
+        )
+    }
+
+    fn envelope(inner: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>{inner}</s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    /// The old photo is deleted, then the upload meets a busy server: the
+    /// contact is left without a photo, so the change stands in part —
+    /// never "nothing was changed".
+    #[tokio::test]
+    async fn a_busy_upload_after_the_old_photo_went_is_partly_saved() {
+        let mut server = Server::new_async().await;
+        let attachments = envelope(
+            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:Contact><t:ItemId Id="C1" ChangeKey="CK"/>
+        <t:Attachments><t:FileAttachment>
+          <t:AttachmentId Id="OLD"/>
+          <t:IsContactPhoto>true</t:IsContactPhoto>
+        </t:FileAttachment></t:Attachments>
+      </t:Contact></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#,
+        );
+        let deleted = envelope(
+            r#"<m:DeleteAttachmentResponse><m:ResponseMessages>
+    <m:DeleteAttachmentResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+    </m:DeleteAttachmentResponseMessage>
+  </m:ResponseMessages></m:DeleteAttachmentResponse>"#,
+        );
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log = Arc::clone(&seen);
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let answer = if body.contains("DeleteAttachment") {
+                    deleted.clone()
+                } else if body.contains("CreateAttachment") {
+                    envelope(
+                        r#"<m:CreateAttachmentResponse><m:ResponseMessages>
+    <m:CreateAttachmentResponseMessage ResponseClass="Error">
+      <m:ResponseCode>ErrorServerBusy</m:ResponseCode>
+    </m:CreateAttachmentResponseMessage>
+  </m:ResponseMessages></m:CreateAttachmentResponse>"#,
+                    )
+                } else {
+                    attachments.clone()
+                };
+                log.lock().unwrap().push(body);
+                answer.into_bytes()
+            })
+            .create_async()
+            .await;
+        let photo = ContactPhoto {
+            content_type: "image/jpeg".into(),
+            data: vec![0xff, 0xd8, 0xff],
+        };
+        let err = set_contact_photo(&client_for(&server), "C1|CK", photo)
+            .await
+            .unwrap_err();
+        let core = crate::to_core_error_for_tests(err);
+        assert!(core.is_partly_saved(), "{core:?}");
+        let seen = seen.lock().unwrap();
+        assert!(seen.iter().any(|b| b.contains("DeleteAttachment")));
+        assert!(seen.iter().any(|b| b.contains("CreateAttachment")));
+    }
+
+    /// Removing a photo whose second picture a busy server keeps, after the
+    /// first went: the change stands in part, never "nothing changed" (277).
+    #[tokio::test]
+    async fn a_busy_second_photo_delete_is_partly_saved() {
+        let mut server = Server::new_async().await;
+        let attachments = envelope(
+            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:Contact><t:ItemId Id="C1" ChangeKey="CK"/>
+        <t:Attachments>
+          <t:FileAttachment><t:AttachmentId Id="OLD-1"/><t:IsContactPhoto>true</t:IsContactPhoto></t:FileAttachment>
+          <t:FileAttachment><t:AttachmentId Id="OLD-2"/><t:IsContactPhoto>true</t:IsContactPhoto></t:FileAttachment>
+        </t:Attachments>
+      </t:Contact></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#,
+        );
+        let answer = |class: &str, code: &str| {
+            envelope(&format!(
+                r#"<m:DeleteAttachmentResponse><m:ResponseMessages>
+    <m:DeleteAttachmentResponseMessage ResponseClass="{class}">
+      <m:ResponseCode>{code}</m:ResponseCode>
+    </m:DeleteAttachmentResponseMessage>
+  </m:ResponseMessages></m:DeleteAttachmentResponse>"#
+            ))
+        };
+        let deleted = answer("Success", "NoError");
+        let busy = answer("Error", "ErrorServerBusy");
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let reply = if body.contains("OLD-1") {
+                    deleted.clone()
+                } else if body.contains("OLD-2") {
+                    busy.clone()
+                } else {
+                    attachments.clone()
+                };
+                reply.into_bytes()
+            })
+            .create_async()
+            .await;
+        let err = delete_contact_photo(&client_for(&server), "C1|CK")
+            .await
+            .unwrap_err();
+        let core = crate::to_core_error_for_tests(err);
+        assert!(core.is_partly_saved(), "{core:?}");
+    }
+
+    /// Removing a photo whose only picture a busy server keeps changed
+    /// nothing: that is the busy answer itself.
+    #[tokio::test]
+    async fn a_busy_first_photo_delete_is_busy() {
+        let mut server = Server::new_async().await;
+        let attachments = envelope(
+            r#"<m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:Contact><t:ItemId Id="C1" ChangeKey="CK"/>
+        <t:Attachments>
+          <t:FileAttachment><t:AttachmentId Id="OLD-1"/><t:IsContactPhoto>true</t:IsContactPhoto></t:FileAttachment>
+        </t:Attachments>
+      </t:Contact></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse>"#,
+        );
+        let busy = envelope(
+            r#"<m:DeleteAttachmentResponse><m:ResponseMessages>
+    <m:DeleteAttachmentResponseMessage ResponseClass="Error">
+      <m:ResponseCode>ErrorServerBusy</m:ResponseCode>
+    </m:DeleteAttachmentResponseMessage>
+  </m:ResponseMessages></m:DeleteAttachmentResponse>"#,
+        );
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body = request.utf8_lossy_body().unwrap().into_owned();
+                let reply = if body.contains("DeleteAttachment") {
+                    busy.clone()
+                } else {
+                    attachments.clone()
+                };
+                reply.into_bytes()
+            })
+            .create_async()
+            .await;
+        let err = delete_contact_photo(&client_for(&server), "C1|CK")
+            .await
+            .unwrap_err();
+        let core = crate::to_core_error_for_tests(err);
+        assert!(core.is_provider_busy(), "{core:?}");
+    }
+
+    /// A busy server under the GAL walk ends it with that error, so the
+    /// directory cached before stays: its prefixes would come back empty and
+    /// a GAL with people missing would be cached as the whole one.
+    #[tokio::test]
+    async fn a_busy_gal_walk_fails_instead_of_coming_back_short() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(envelope(
+                r#"<m:ResolveNamesResponse><m:ResponseMessages>
+    <m:ResolveNamesResponseMessage ResponseClass="Error">
+      <m:ResponseCode>ErrorServerBusy</m:ResponseCode>
+    </m:ResolveNamesResponseMessage>
+  </m:ResponseMessages></m:ResolveNamesResponse>"#,
+            ))
+            .create_async()
+            .await;
+        let err = get_gal_contacts(&client_for(&server)).await.unwrap_err();
+        assert!(
+            crate::to_core_error_for_tests(err).is_provider_busy(),
+            "a busy walk is a busy provider"
+        );
     }
 }

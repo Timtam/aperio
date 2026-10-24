@@ -115,6 +115,11 @@ impl EwsClient {
 
         let res = req.send().await?;
         let status = res.status();
+        let retry_after = res
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         let text = res.text().await.unwrap_or_default();
         tracing::debug!(
             target: "adapter_ews::soap",
@@ -122,6 +127,7 @@ impl EwsClient {
             response = %truncate_for_log(&text),
             "EWS response",
         );
+        log_busy_answer(status.as_u16(), retry_after.as_deref(), &text);
         if !status.is_success() {
             return Err(EwsError::Http {
                 status: status.as_u16(),
@@ -134,6 +140,35 @@ impl EwsClient {
         }
         Ok(text)
     }
+}
+
+/// One line in the normal log for an answer that asks to slow down — HTTP
+/// 429, or `ErrorServerBusy` with the back-off Exchange names — so the wait
+/// the sentences never say (decision 278) is in the log.
+fn log_busy_answer(status: u16, retry_after: Option<&str>, body: &str) {
+    let busy = status == 429
+        || body.contains("ResponseCode>ErrorServerBusy<")
+        || body.contains(":ErrorServerBusy<");
+    if !busy {
+        return;
+    }
+    tracing::info!(
+        target: "adapter_ews::soap",
+        status,
+        retry_after,
+        back_off_ms = back_off_ms(body),
+        "Exchange asks to slow down"
+    );
+}
+
+/// The `BackOffMilliseconds` an `ErrorServerBusy` names in its
+/// `MessageXml`, where it does.
+fn back_off_ms(body: &str) -> Option<u64> {
+    let at = body.find("\"BackOffMilliseconds\"")?;
+    let rest = &body[at..];
+    let start = rest.find('>')? + 1;
+    let end = rest[start..].find('<')?;
+    rest[start..start + end].trim().parse().ok()
 }
 
 /// Enumerate every calendar folder reachable from the user's
@@ -634,6 +669,12 @@ async fn enrich_occurrence_details(
         // content, silently. Name it — the code and the ids it hit — and go on
         // to the next batch; the per-item tolerance above is untouched.
         if let Err(err) = crate::soap::check_for_fault(&xml) {
+            // A busy server is no answer about these occurrences (decision
+            // 270): the drain fails without persisting, and the cache keeps
+            // what it had rather than the series' content in their place.
+            if crate::busy_detail(&err).is_some() {
+                return Err(err);
+            }
             tracing::warn!(
                 target: "adapter_ews::sync",
                 error = %err,
@@ -707,10 +748,11 @@ pub async fn create_event(
     // Exchange takes a series' rule but not its deleted occurrences: such a
     // series is created bare and they are deleted again one by one (decisions
     // 202-213, 225, 263-266).
+    // A rule and deletions both, as the surfaces' wait asks (`createsInSteps`).
     if event
         .recurrence
         .as_ref()
-        .is_some_and(|r| !r.exceptions.is_empty())
+        .is_some_and(|r| !r.rrule.trim().is_empty() && !r.exceptions.is_empty())
     {
         return crate::series_create::create_keeping_deletions(
             client,
@@ -842,7 +884,7 @@ pub async fn update_event(
             %why,
             "a series is not written without its current copy; nothing is written",
         );
-        if let Some(err) = read_error.take_if(|err| crate::names_sign_in_or_gone(err)) {
+        if let Some(err) = read_error.take_if(|err| keeps_its_own_error(err)) {
             return Err(err);
         }
         return Err(EwsError::Protocol(
@@ -890,7 +932,7 @@ pub async fn update_event(
                 %why,
                 "an all-day day is not written without the current copy; nothing is written",
             );
-            if let Some(err) = read_error.take_if(|err| crate::names_sign_in_or_gone(err)) {
+            if let Some(err) = read_error.take_if(|err| keeps_its_own_error(err)) {
                 return Err(err);
             }
             return Err(EwsError::Protocol(
@@ -1362,7 +1404,8 @@ async fn current_change_key(client: &EwsClient, item_id: &str) -> EwsResult<Opti
 /// Created first, so a failure halfway leaves a duplicate rather than a gap.
 /// The delete sends no cancellation: the appointment still exists, it only
 /// moved. A delete that fails is logged and the move stands, as for a move to
-/// another calendar; the event that comes back is the new single.
+/// another calendar; the event that comes back is the new single. One turned
+/// away by a busy server is said: the change stands in part (decision 277).
 async fn detach_exception(
     client: &EwsClient,
     event: &Event,
@@ -1398,6 +1441,12 @@ async fn detach_exception(
             %err,
             "the exception was detached as a single but stays in its series; a duplicate may exist",
         );
+        // A busy server kept the exception: the single stands beside it, and
+        // the change is saved in part (decision 277). Saving again would
+        // detach another single.
+        if crate::busy_detail(&err).is_some() {
+            return Err(err.after_landed("delete"));
+        }
     }
     Ok(created)
 }
@@ -1471,6 +1520,11 @@ async fn occurrence_start(
     let xml = client
         .post_soap_raw(get_occurrence_item(master_id, change_key, index))
         .await?;
+    // A busy server says nothing about this index (decision 270): never
+    // "past the series' end".
+    if let Some(busy) = busy_answer(&xml) {
+        return Err(busy);
+    }
     let items = crate::mapping::parse_get_calendar_items_response(&xml)?;
     // Without the OriginalStart, an exception moved more than the tolerance
     // away from its slot never matched: the delete aborted, and a move that had
@@ -1830,6 +1884,14 @@ struct SeriesShape {
 }
 
 /// Whether a message is the refusal for a day in an unknown zone.
+/// Whether a failed read of the copy a write needs is said as itself, not as
+/// `copy-unreadable`: a failed sign-in or a vanished item, which "try again"
+/// would not mend, and a busy server, which it would (decision 270). All three
+/// already count as nothing written.
+fn keeps_its_own_error(err: &EwsError) -> bool {
+    crate::names_sign_in_or_gone(err) || crate::busy_detail(err).is_some()
+}
+
 fn day_zone_unreadable(message: &str) -> bool {
     matches!(
         cal_core::WriteRefusal::parse(message),
@@ -1929,7 +1991,23 @@ pub async fn query_free_busy(
     }
     let envelope = get_user_availability(emails, range.start, range.end);
     let xml = client.post_soap_raw(envelope).await?;
+    // A busy server is no answer about anyone's day (decision 270): read as
+    // empty slots, every attendee would be free.
+    if let Some(busy) = busy_answer(&xml) {
+        return Err(busy);
+    }
     parse_get_user_availability(&xml, emails)
+}
+
+/// The error a raw answer (one taken without the fault check) is when its own
+/// response code says the server is busy — the error every other path reads
+/// as a busy provider (decision 270); `None` for anything else, which the
+/// caller tolerates as before.
+fn busy_answer(xml: &str) -> Option<EwsError> {
+    match crate::soap::check_for_fault(xml) {
+        Err(err) if crate::busy_detail(&err).is_some() => Some(err),
+        _ => None,
+    }
 }
 
 /// Resolve the current ChangeKey for `folder_id` via FindFolder. The
@@ -1986,6 +2064,7 @@ pub(crate) fn build_event_from_new(
     let now = Utc::now();
     let aperio_id = encode_event_id(kind, item_id, change_key.as_deref());
     Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
@@ -2023,6 +2102,17 @@ pub(crate) fn build_event_from_new(
 
 #[cfg(test)]
 mod tests {
+    /// The back-off an `ErrorServerBusy` names, for the log (decision 278).
+    #[test]
+    fn a_busy_server_names_its_back_off() {
+        let body = r#"<m:ResponseCode>ErrorServerBusy</m:ResponseCode><m:MessageXml><t:Value Name="BackOffMilliseconds">29845</t:Value></m:MessageXml>"#;
+        assert_eq!(super::back_off_ms(body), Some(29845));
+        assert_eq!(
+            super::back_off_ms("<m:ResponseCode>ErrorServerBusy</m:ResponseCode>"),
+            None
+        );
+    }
+
     use super::*;
     use mockito::Server;
 
@@ -2503,6 +2593,7 @@ mod tests {
             .create_async()
             .await;
         let starting = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -2986,6 +3077,7 @@ mod tests {
             .await;
 
         let starting = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3111,6 +3203,7 @@ mod tests {
         let override_id =
             crate::mapping::encode_override_event_id("M:MASTER-ID|MCK-V1", original_start);
         let edit = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3298,6 +3391,7 @@ mod tests {
             crate::mapping::local_midnight_in(d.parse().unwrap(), &chrono::Local).unwrap()
         };
         let edit = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3435,6 +3529,7 @@ mod tests {
             Some(&crate::mapping::DayZone::Tz(auckland)),
         );
         let edit = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3487,6 +3582,16 @@ mod tests {
         server: &mut Server,
         update_code: &'static str,
     ) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        refuse_exception_update_and_delete(server, update_code, "NoError").await
+    }
+
+    /// [`refuse_exception_update`], with the `DeleteItem` of the exception
+    /// answered `delete_code`.
+    async fn refuse_exception_update_and_delete(
+        server: &mut Server,
+        update_code: &'static str,
+        delete_code: &'static str,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
         use std::sync::{Arc, Mutex};
         let envelope = |inner: String| {
             format!(
@@ -3532,14 +3637,18 @@ mod tests {
   </m:ResponseMessages></m:CreateItemResponse>"#
                 .to_string(),
         );
-        let deleted = envelope(
+        let class = if delete_code == "NoError" {
+            "Success"
+        } else {
+            "Error"
+        };
+        let deleted = envelope(format!(
             r#"<m:DeleteItemResponse><m:ResponseMessages>
-    <m:DeleteItemResponseMessage ResponseClass="Success">
-      <m:ResponseCode>NoError</m:ResponseCode>
+    <m:DeleteItemResponseMessage ResponseClass="{class}">
+      <m:ResponseCode>{delete_code}</m:ResponseCode>
     </m:DeleteItemResponseMessage>
   </m:ResponseMessages></m:DeleteItemResponse>"#
-                .to_string(),
-        );
+        ));
         // What the exception owns, for `read_before`: its own subject at its
         // own time, so the refused update carries the fields the edit changed.
         let occurrence = envelope(
@@ -3587,6 +3696,7 @@ mod tests {
     fn exception_moved_to_thursday() -> Event {
         let original_start: chrono::DateTime<chrono::Utc> = "2026-10-20T08:00:00Z".parse().unwrap();
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3662,6 +3772,34 @@ mod tests {
             updated.id,
             encode_event_id(EventIdKind::Single, "NEW-ID", Some("NCK")),
             "the event that comes back is the new single"
+        );
+    }
+
+    /// The single stands, and a busy server kept the exception beside it: the
+    /// change is saved in part (decision 277), never "nothing was changed",
+    /// which would invite detaching another single.
+    #[tokio::test]
+    async fn a_detached_exception_whose_delete_is_busy_is_partly_saved() {
+        let mut server = Server::new_async().await;
+        let requests = refuse_exception_update_and_delete(
+            &mut server,
+            "ErrorOccurrenceCrossingBoundary",
+            "ErrorServerBusy",
+        )
+        .await;
+
+        let err = update_event(&client_for(&server), &exception_moved_to_thursday(), None)
+            .await
+            .unwrap_err();
+
+        let core = crate::to_core_error_for_tests(err);
+        assert!(core.is_partly_saved(), "{core:?}");
+        assert!(!core.never_landed(), "{core:?}");
+        let requests = requests.lock().unwrap();
+        assert!(requests[3].contains("CreateItem"), "the single was created");
+        assert!(
+            requests[4].contains("DeleteItem"),
+            "and the exception's delete sent"
         );
     }
 
@@ -3777,6 +3915,7 @@ mod tests {
     /// [`server_copy`] holds.
     fn saved_single() -> Event {
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -4422,6 +4561,63 @@ mod tests {
             .await
             .unwrap();
         del.assert_async().await;
+    }
+
+    /// Probes a busy server answered say nothing about the occurrence: the
+    /// delete says the provider is busy, never "could not confirm" (270).
+    #[tokio::test]
+    async fn busy_probes_make_the_occurrence_delete_busy() {
+        let mut server = Server::new_async().await;
+        let _master = mock_master(&mut server).await;
+        let _probes = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("m:GetItem".into()),
+                mockito::Matcher::Regex("InstanceIndex=".into()),
+            ]))
+            .with_status(200)
+            .with_body(read_fault("ErrorServerBusy"))
+            .create_async()
+            .await;
+        let target = "2026-07-20T09:00:00Z".parse().unwrap();
+        let err =
+            delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), target, false)
+                .await
+                .unwrap_err();
+        assert!(crate::busy_detail(&err).is_some(), "{err:?}");
+    }
+
+    /// An availability answer a busy server gave is no answer about anyone:
+    /// busy, never every attendee free (270).
+    #[tokio::test]
+    async fn a_busy_availability_answer_is_busy() {
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body><m:GetUserAvailabilityResponse><m:FreeBusyResponseArray>
+    <m:FreeBusyResponse>
+      <m:ResponseMessage ResponseClass="Error">
+        <m:MessageText>busy</m:MessageText>
+        <m:ResponseCode>ErrorServerBusy</m:ResponseCode>
+      </m:ResponseMessage>
+    </m:FreeBusyResponse>
+  </m:FreeBusyResponseArray></m:GetUserAvailabilityResponse></s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        let range = DateRange::new(
+            "2026-06-01T00:00:00Z".parse().unwrap(),
+            "2026-06-02T00:00:00Z".parse().unwrap(),
+        );
+        let err = query_free_busy(&client_for(&server), &["bob@example.com"], range)
+            .await
+            .unwrap_err();
+        assert!(crate::busy_detail(&err).is_some(), "{err:?}");
     }
 
     #[tokio::test]

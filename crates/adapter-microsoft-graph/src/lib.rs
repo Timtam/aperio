@@ -389,6 +389,13 @@ impl CalendarFeature for MicrosoftGraphAdapter {
             // asked. Reported as a failure, undoing a split's new series said
             // it could not, while it was cancelled and off the calendar.
             Err(GraphError::Http { status: 404, .. }) if cancelled => Ok(()),
+            // The same for a busy Graph (critique P8): the cancelled event is
+            // off the calendar already, so the delete that follows asks for
+            // what is done.
+            Err(err @ GraphError::Busy { .. }) if cancelled => {
+                tracing::debug!(%err, event_id, "graph busy for the delete after /cancel; done");
+                Ok(())
+            }
             other => other.map_err(to_core_error),
         }
     }
@@ -745,7 +752,14 @@ fn urlencoding(s: &str) -> String {
 /// (decision 144) — must be told that nothing was written.
 fn to_update_error(err: GraphError) -> CoreError {
     match err {
-        GraphError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
+        // A busy Graph answers as itself (decision 270), never as the server
+        // refusing the change: `turned_down_by_status` says which comes first.
+        GraphError::Http { status, message }
+            if matches!(
+                cal_core::WriteRefusal::turned_down_by_status(status),
+                Some(cal_core::WriteRefusal::ServerRefused)
+            ) =>
+        {
             tracing::warn!(status, %message, "Graph refused the update");
             CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(
                 &match server_reason(&message) {
@@ -796,10 +810,30 @@ fn server_reason(body: &str) -> Option<String> {
     Some(reason.chars().take(160).collect())
 }
 
+/// The core's error for a Graph error, for the plugin's sign-in phases: a
+/// token first where it carries one (`plugin_sdk::auth_error`).
+pub fn core_error(err: GraphError) -> CoreError {
+    to_core_error(err)
+}
+
 fn to_core_error(err: GraphError) -> CoreError {
     use GraphError::*;
     match err {
         Network(m) => CoreError::Network(m),
+        // Throttling: nothing was done, try later (decision 270).
+        Busy {
+            detail,
+            retry_after,
+        } => {
+            tracing::debug!(detail = detail.word(), ?retry_after, "graph is busy");
+            CoreError::provider_busy(detail)
+        }
+        // A later step failed after an earlier one landed (decision 277):
+        // never a refusal, by the core's rule.
+        PartlySaved { step, cause } => {
+            tracing::debug!(step, %cause, "graph saved the change in part");
+            to_core_error(*cause).after_landed(step)
+        }
         Http { status, message } => match status {
             401 | 403 => CoreError::Authentication(message),
             404 => CoreError::NotFound(message),
@@ -825,6 +859,7 @@ mod delta_tests {
     /// A series head, cut short: what splitting a series writes.
     fn truncated_master() -> Event {
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -887,6 +922,121 @@ mod delta_tests {
             CoreError::Forbidden(msg) => assert_eq!(msg, "server-refused: HTTP 400"),
             other => panic!("{other:?}"),
         }
+    }
+
+    /// A 429 is a busy Graph, never the server refusing the change: trying
+    /// later helps (decision 270). A 400 stays the refusal.
+    #[tokio::test]
+    async fn a_throttled_update_is_a_busy_provider() {
+        let mut server = Server::new_async().await;
+        let _get = server
+            .mock("GET", "/me/events/ev-1")
+            .with_status(404)
+            .create_async()
+            .await;
+        let _patch = server
+            .mock("PATCH", "/me/events/ev-1")
+            .with_status(429)
+            .with_header("retry-after", "7")
+            .with_body(r#"{"error":{"code":"TooManyRequests","message":"slow down"}}"#)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .update_event(truncated_master())
+            .await
+            .unwrap_err();
+        assert_eq!(err.message(), "provider-busy: http-429");
+    }
+
+    /// A busy Graph for the read before the update: nothing is sent, and the
+    /// save says busy, rather than flattening the description for it.
+    #[tokio::test]
+    async fn a_busy_read_before_an_update_sends_no_patch() {
+        let mut server = Server::new_async().await;
+        let _get = server
+            .mock("GET", "/me/events/ev-1")
+            .with_status(429)
+            .create_async()
+            .await;
+        let patch = server
+            .mock("PATCH", "/me/events/ev-1")
+            .with_status(200)
+            .expect(0)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .update_event(truncated_master())
+            .await
+            .unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        patch.assert_async().await;
+    }
+
+    /// A 503 with `Retry-After` is busy where the request writes nothing,
+    /// and unsure where it writes: a write answered so may have been carried
+    /// out (critique P23).
+    #[test]
+    fn a_503_with_a_wait_is_busy_only_where_nothing_is_written() {
+        let wait = Some(std::time::Duration::from_secs(5));
+        assert!(matches!(
+            api::answer_error(503, wait, "later", false),
+            GraphError::Busy {
+                detail: cal_core::BusyDetail::Unavailable,
+                ..
+            }
+        ));
+        assert!(matches!(
+            api::answer_error(503, wait, "later", true),
+            GraphError::Http { status: 503, .. }
+        ));
+        assert!(matches!(
+            api::answer_error(503, None, "down", false),
+            GraphError::Http { status: 503, .. }
+        ));
+        let write = to_core_error(api::answer_error(503, wait, "later", true));
+        assert!(matches!(write, CoreError::Protocol(_)), "{write:?}");
+        assert!(!write.never_landed());
+    }
+
+    /// `/cancel` landed and moved the meeting to Deleted Items; a busy Graph
+    /// for the DELETE that follows asks for what is done (critique P8).
+    #[tokio::test]
+    async fn a_busy_delete_after_cancel_is_done() {
+        let mut server = Server::new_async().await;
+        let _cancel = server
+            .mock("POST", "/me/events/ev-x/cancel")
+            .with_status(202)
+            .create_async()
+            .await;
+        let del = server
+            .mock("DELETE", "/me/events/ev-x")
+            .with_status(429)
+            .create_async()
+            .await;
+        adapter_for(&server)
+            .delete_event("ev-x", true)
+            .await
+            .unwrap();
+        del.assert_async().await;
+    }
+
+    /// The token endpoint turning a refresh away for throttling is a busy
+    /// provider, never a sign-in failure: no new sign-in helps.
+    #[tokio::test]
+    async fn a_throttled_token_refresh_is_a_busy_provider() {
+        let mut server = Server::new_async().await;
+        let _expired = server
+            .mock("GET", "/me/calendars")
+            .with_status(401)
+            .create_async()
+            .await;
+        let _token = server
+            .mock("POST", "/token")
+            .with_status(429)
+            .create_async()
+            .await;
+        let err = adapter_for(&server).list_calendars().await.unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
     }
 
     /// The error keeps only the first 300 characters of an answer, so a
@@ -1115,8 +1265,8 @@ mod delta_tests {
             .delete_event("ev-x", true)
             .await
             .unwrap_err();
-        // 429 → CoreError::Protocol (to_core_error's catch-all), NOT swallowed.
-        assert!(matches!(err, cal_core::Error::Protocol(_)));
+        // 429 → a busy provider (decision 270), NOT swallowed.
+        assert!(err.is_provider_busy(), "{err:?}");
     }
 
     #[tokio::test]

@@ -6,7 +6,16 @@ import {
   useState,
   type RefObject,
 } from 'react';
-import { writeErrorMessage } from '@aperio/shared';
+import {
+  eventWriteFailureReason,
+  eventWriteLeftover,
+  joinNames,
+  originalKeptSentence,
+  readErrorMessage,
+  withLaterForBusy,
+  writeAfterLanded,
+  writeErrorMessage,
+} from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -76,12 +85,14 @@ import { SubtaskSection } from '../components/SubtaskSection';
 import { TitleField } from '../components/TitleField';
 import { SwitchRow } from '../components/SwitchRow';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
+import { CloseOnlyNotice } from '../components/CloseOnlyNotice';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { formatLocalDate, formatLocalTime } from '../intl/dateTimeField';
 import { useShowHiddenTaskListTargets } from '../settings/hiddenTargets';
 import { currentUserForList } from '../state/currentUser';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { priorityScaleFor, readTaskBehaviour } from '../state/taskBehaviour';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
 import {
@@ -100,8 +111,9 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // a full CreateTaskRequest / Task that round-trips through the existing JSON
 // bridge. The assignee pool's read is not quite: its refusal token
 // (`cal_core::ReadRefusal`) reaches the editor because both native modules
-// wrap `taskListMembersJson` in `eventCoded`. Every picker is a collapsed SelectFieldButton — one focus stop;
-// the options open in a dialog (RN has no native <select>).
+// wrap every host call, `taskListMembersJson` among them, in `hostCoded`.
+// Every picker is a collapsed SelectFieldButton — one focus stop; the options
+// open in a dialog (RN has no native <select>).
 
 interface FormState {
   title: string;
@@ -239,7 +251,7 @@ export default function TaskEditorModal({
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const {
-    taskId,
+    taskId: taskIdParam,
     listId,
     parentId,
     initialTitle,
@@ -264,7 +276,13 @@ export default function TaskEditorModal({
     }),
   );
   const [loaded, setLoaded] = useState<Task | null>(null);
-  const [loading, setLoading] = useState(taskId != null);
+  // The task a save created whose staged subtasks did not all follow: it
+  // stands, so the editor edits it from then on — its fields go out as an
+  // update, and the next Save makes the drafts still left under it (273;
+  // Toni, 2026-10-24). Creating it again would make two. Mirrors the desktop.
+  const [createdTask, setCreatedTask] = useState<Task | null>(null);
+  const taskId = taskIdParam ?? createdTask?.id;
+  const [loading, setLoading] = useState(taskIdParam != null);
   const [error, setError] = useState<string | null>(null);
   // The selected list's assignable member pool + the connected account's own id
   // ("me"), for the assignee picker. Both empty/null for local lists and
@@ -282,6 +300,9 @@ export default function TaskEditorModal({
   // parent on Save (the parent has no id to reference yet). Edit mode manages
   // real subtasks live via SubtaskSection instead.
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
+  // What the editor says in place of the form once a save landed in part:
+  // saving again would write twice what stands (273, 277).
+  const { notice, showNotice } = useCloseOnlyNotice();
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   // Which priority system to draw: three levels (the default) or the
   // normal/important pair. Read once — it is a setting, not live data.
@@ -333,8 +354,11 @@ export default function TaskEditorModal({
     });
   }, [navigation, t, taskId]);
   // A Cancel button as the first header element so the user can back out
-  // without swiping to the bottom of the form.
-  useCancelHeader(navigation);
+  // without swiping to the bottom of the form; Close while a notice is up.
+  const closeNotice = useCallback(() => navigation.goBack(), [navigation]);
+  useCancelHeader(navigation, 'mobile.cancel', {
+    close: notice != null ? closeNotice : undefined,
+  });
 
   // Every dismissal (Save, Cancel, header back, swipe) bumps the data version so
   // the list refetches — the desktop DialogState.close() behaviour.
@@ -342,13 +366,14 @@ export default function TaskEditorModal({
     return () => invalidateData();
   }, [invalidateData]);
 
-  // Edit mode: load the task and prefill. Create mode starts blank.
+  // Edit mode: load the task and prefill. Create mode starts blank, and a task
+  // it created is already loaded: read again, it would reset what was typed.
   useEffect(() => {
-    if (taskId == null) return;
+    if (taskIdParam == null) return;
     let cancelled = false;
     void (async () => {
       try {
-        const task = await getTaskById(taskId, listId);
+        const task = await getTaskById(taskIdParam, listId);
         if (cancelled) return;
         if (task == null) {
           setError(t('mobile.taskMissing'));
@@ -358,7 +383,7 @@ export default function TaskEditorModal({
         setLoaded(task);
         setForm(buildInitialState(task, listId));
       } catch (err) {
-        if (!cancelled) setError(writeErrorMessage(err, t));
+        if (!cancelled) setError(readErrorMessage(err, t));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -366,7 +391,7 @@ export default function TaskEditorModal({
     return () => {
       cancelled = true;
     };
-  }, [taskId, listId, t]);
+  }, [taskIdParam, listId, t]);
 
   // Move SR focus into the title field once content is ready (a modal must
   // drive focus explicitly or TalkBack lingers on the trigger row).
@@ -375,9 +400,11 @@ export default function TaskEditorModal({
     const tag = findNodeHandle(titleRef.current);
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
     // New task: also open the keyboard on the title so the user can start
-    // typing immediately (the desktop autofocuses the title).
-    if (taskId == null) titleRef.current?.focus();
-  }, [loading, taskId]);
+    // typing immediately (the desktop autofocuses the title). Keyed on the
+    // route's task: turning into the edit of a task it created must not pull
+    // focus away from what the editor says about it.
+    if (taskIdParam == null) titleRef.current?.focus();
+  }, [loading, taskIdParam]);
 
   // Make sure the selected list's sections are loaded so the section picker can
   // offer them (lazy + sticky in the store).
@@ -727,8 +754,11 @@ export default function TaskEditorModal({
     taskId != null &&
     loaded != null &&
     (loadedList?.task_capabilities?.subtasks ?? true);
+  // The drafts a created task's subtasks left stay in its edit, without an
+  // input of their own: the edit's subtask manager adds directly.
   const showDraftSubtasks =
-    taskId == null && (caps?.subtasks ?? true) && parentId == null;
+    parentId == null &&
+    (taskId == null ? (caps?.subtasks ?? true) : draftSubtasks.length > 0);
 
   const addDraftSubtask = useCallback(() => {
     const trimmed = newSubtaskTitle.trim();
@@ -836,7 +866,9 @@ export default function TaskEditorModal({
     // to one that can't hold them hides the draft section but keeps the
     // drafts — block the save so the user removes them or picks another
     // list, rather than creating flat loose tasks (desktop TaskDialog parity).
-    if (taskId == null && draftSubtasks.length > 0 && !(caps?.subtasks ?? true)) {
+    // Also in the edit of a task this editor created, whose drafts are still
+    // staged: made on such a list, they would be loose tasks.
+    if (draftSubtasks.length > 0 && !(caps?.subtasks ?? true)) {
       setError(t('dialogs.task.subtasks.listNoSubtasks'));
       AccessibilityInfo.announceForAccessibility(
         t('dialogs.task.subtasks.listNoSubtasks'),
@@ -868,6 +900,84 @@ export default function TaskEditorModal({
     const dead = toStored(form.deadlineDate, form.deadlineTime);
     const description = form.description.trim() || null;
     setError(null);
+    // The staged subtasks not made yet, as the save goes: what a leftover
+    // names as never created. Drafts exist only for a task this editor
+    // creates, or created.
+    let unmade: string[] = [...draftSubtasks];
+    // The staged subtasks, made under `parent` once it stands (they default
+    // to open/medium and inherit its section, matching the edit-mode add),
+    // then the parent's derived status recomputed. A parent in a terminal
+    // state passes it down (cascade-down semantics) — otherwise the
+    // recompute would derive a completed parent right back to open from its
+    // open children. One that fails leaves the editor on the parent, as its
+    // edit, with the drafts not yet made (273); a subtask that stands without
+    // a step of its own is made. `true` when all were made.
+    const makeDrafts = async (parent: Task): Promise<boolean> => {
+      const draftStatus =
+        parent.status === 'completed' || parent.status === 'cancelled'
+          ? parent.status
+          : 'open';
+      const left = [...draftSubtasks];
+      unmade = left;
+      while (left.length > 0) {
+        try {
+          await createTask({
+            list_id: parent.list_id,
+            title: left[0],
+            description: null,
+            status: draftStatus,
+            priority: 'medium',
+            effort: 'medium',
+            scheduled_date: null,
+            scheduled_time: null,
+            deadline_date: null,
+            deadline_time: null,
+            deadline_reminder_days: null,
+            recurrence: null,
+            parent_id: parent.id,
+            section_id: parent.section_id,
+            color_label: null,
+            reminders: [],
+            assignees: [],
+            sound: null,
+          });
+        } catch (err) {
+          if (eventWriteLeftover(err)) left.shift();
+          if (left.length === 0) {
+            showNotice(writeErrorMessage(err, t));
+            return false;
+          }
+          // The editor edits what stands from here: the form takes the task
+          // as it was stored, with what its create derived (a day pinned on
+          // start). Mirrors the desktop.
+          setForm(buildInitialState(parent, listId));
+          setCreatedTask(parent);
+          setLoaded(parent);
+          setDraftSubtasks(left);
+          const message = withLaterForBusy(
+            t('dialogs.task.subtasks.draftsFailed', {
+              title: parent.title,
+              count: left.length,
+              titles: joinNames(
+                left.map((name) => t('actions.quotedTitle', { title: name })),
+                t,
+              ),
+              reason: eventWriteFailureReason(err, t),
+            }),
+            err,
+            t,
+          );
+          setError(message);
+          AccessibilityInfo.announceForAccessibility(message);
+          return false;
+        }
+        left.shift();
+      }
+      await writeAfterLanded('cascade', async () =>
+        recomputeAncestors(parent.id, await getTasks(parent.list_id)),
+      );
+      return true;
+    };
     try {
       if (taskId == null) {
         const created = await createTask({
@@ -902,44 +1012,24 @@ export default function TaskEditorModal({
         // CREATED in a terminal state passes it down (cascade-down semantics)
         // — otherwise the recompute below would derive the fresh completed
         // parent right back to open from its open children.
-        if (draftSubtasks.length > 0 && (caps?.subtasks ?? true)) {
-          const draftStatus =
-            form.status === 'completed' || form.status === 'cancelled'
-              ? form.status
-              : 'open';
-          for (const subTitle of draftSubtasks) {
-            await createTask({
-              list_id: created.list_id,
-              title: subTitle,
-              description: null,
-              status: draftStatus,
-              priority: 'medium',
-              effort: 'medium',
-              scheduled_date: null,
-              scheduled_time: null,
-              deadline_date: null,
-              deadline_time: null,
-              deadline_reminder_days: null,
-              recurrence: null,
-              parent_id: created.id,
-              section_id: created.section_id,
-              color_label: null,
-              reminders: [],
-              assignees: [],
-              sound: null,
-            });
-          }
-          await recomputeAncestors(created.id, await getTasks(created.list_id));
+        // Remember the chosen list so the next quick-add / new-task defaults to
+        // it (a top-level create; a subtask's list is locked to its parent's).
+        if (parentId == null) await writeLastUsedTaskList(created.list_id);
+        if (
+          draftSubtasks.length > 0 &&
+          (caps?.subtasks ?? true) &&
+          !(await makeDrafts(created))
+        ) {
+          return;
         }
         // Adding a subtask can change the parent's derived status (e.g. an open
         // child re-opens a completed parent). Recompute ancestors against the
         // owning list's post-create snapshot, honouring the coupling knob.
         if (parentId != null) {
-          await recomputeAncestors(parentId, await getTasks(created.list_id));
+          await writeAfterLanded('cascade', async () =>
+            recomputeAncestors(parentId, await getTasks(created.list_id)),
+          );
         }
-        // Remember the chosen list so the next quick-add / new-task defaults to
-        // it (a top-level create; a subtask's list is locked to its parent's).
-        if (parentId == null) await writeLastUsedTaskList(form.listId);
         AccessibilityInfo.announceForAccessibility(
           t('mobile.added', { title }),
         );
@@ -977,7 +1067,7 @@ export default function TaskEditorModal({
         // Pass loaded.list_id as the previous list so a list-picker change is
         // detected as a cross-list move (create-on-target + delete-from-source)
         // rather than an in-place PATCH at the wrong resource (412/404 external).
-        await updateTask(
+        const saved = await updateTask(
           {
             ...loaded,
             title,
@@ -1018,9 +1108,18 @@ export default function TaskEditorModal({
         // Mirror the desktop TaskDialog: a parent's list change drags its whole
         // family along, and a status change made via the editor cascades through
         // the family (the root was just written above with its full field set).
+        // The rows a list change moved: one whose original the provider was
+        // too busy to delete says so (decision 277).
+        const movedRows = [saved];
         if (listChanged) {
           for (const child of collectDescendants(loaded.id, familyTasks)) {
-            await updateTask({ ...child, list_id: form.listId }, child.list_id);
+            // The task itself was saved: a later write's failure never reads
+            // as "nothing was changed" (decision 277). Mirrors the desktop.
+            movedRows.push(
+              await writeAfterLanded('subtasks', () =>
+                updateTask({ ...child, list_id: form.listId }, child.list_id),
+              ),
+            );
           }
         }
         if (statusChanged) {
@@ -1039,13 +1138,29 @@ export default function TaskEditorModal({
                 ? { ...row, list_id: form.listId }
                 : row,
           );
-          await cascadeEditorStatus(
-            loaded.id,
-            form.status,
-            form.listId,
-            taskLists.find((l) => l.id === form.listId),
-            cascadeSnapshot,
+          await writeAfterLanded('cascade', () =>
+            cascadeEditorStatus(
+              loaded.id,
+              form.status,
+              form.listId,
+              taskLists.find((l) => l.id === form.listId),
+              cascadeSnapshot,
+            ),
           );
+        }
+        // A task this editor created whose subtasks did not all follow: the
+        // drafts left are made under it now.
+        if (draftSubtasks.length > 0 && !(await makeDrafts(saved))) return;
+        const kept = listChanged
+          ? originalKeptSentence(
+              movedRows,
+              (id) => taskLists.find((l) => l.id === id)?.name,
+              t,
+            )
+          : null;
+        if (kept != null) {
+          showNotice(kept);
+          return;
         }
         AccessibilityInfo.announceForAccessibility(
           t('mobile.saved', { title }),
@@ -1055,6 +1170,25 @@ export default function TaskEditorModal({
       }
       navigation.goBack();
     } catch (err) {
+      // Something stands that saving again would write twice: a task saved
+      // without one of its follow-up steps (273). Said in place of the form,
+      // which only closes. A new task's staged subtasks were never made, and
+      // are named so nothing goes unsaid.
+      if (eventWriteLeftover(err)) {
+        const sentence = writeErrorMessage(err, t);
+        showNotice(
+          unmade.length > 0
+            ? `${sentence} ${t('dialogs.task.subtasks.draftsNotCreated', {
+                count: unmade.length,
+                titles: joinNames(
+                  unmade.map((name) => t('actions.quotedTitle', { title: name })),
+                  t,
+                ),
+              })}`
+            : sentence,
+        );
+        return;
+      }
       const message = writeErrorMessage(err, t);
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
@@ -1065,6 +1199,7 @@ export default function TaskEditorModal({
     caps,
     isLocalList,
     form,
+    listId,
     loaded,
     navigation,
     parentId,
@@ -1072,7 +1207,12 @@ export default function TaskEditorModal({
     taskId,
     taskLists,
     draftSubtasks,
+    showNotice,
   ]);
+
+  if (notice != null) {
+    return <CloseOnlyNotice sentence={notice} onClose={closeNotice} />;
+  }
 
   return (
     <FormScrollView
@@ -1383,7 +1523,9 @@ export default function TaskEditorModal({
       {showDraftSubtasks && (
         <View style={styles.field}>
           <Text style={styles.legend} accessibilityRole="header">
-            {t('dialogs.task.subtasks.heading')}
+            {taskId == null
+              ? t('dialogs.task.subtasks.heading')
+              : t('dialogs.task.subtasks.draftsLeftHeading')}
           </Text>
           {draftSubtasks.length === 0 ? (
             <Text style={styles.hint} accessibilityRole="text">
@@ -1392,7 +1534,11 @@ export default function TaskEditorModal({
           ) : (
             <View
               accessibilityRole="list"
-              accessibilityLabel={t('dialogs.task.subtasks.heading')}
+              accessibilityLabel={
+                taskId == null
+                  ? t('dialogs.task.subtasks.heading')
+                  : t('dialogs.task.subtasks.draftsLeftHeading')
+              }
               style={styles.draftList}
             >
               {draftSubtasks.map((title, i) => (
@@ -1417,27 +1563,34 @@ export default function TaskEditorModal({
               ))}
             </View>
           )}
-          <View style={styles.subtaskAddRow}>
-            <TextInput
-              style={[styles.input, styles.subtaskInput]}
-              value={newSubtaskTitle}
-              onChangeText={setNewSubtaskTitle}
-              placeholder={t('dialogs.task.subtasks.placeholder')}
-              accessibilityLabel={t('dialogs.task.subtasks.newAria')}
-              returnKeyType="done"
-              onSubmitEditing={addDraftSubtask}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('dialogs.task.subtasks.addButton')}
-              accessibilityState={{ disabled: newSubtaskTitle.trim() === '' }}
-              disabled={newSubtaskTitle.trim() === ''}
-              onPress={addDraftSubtask}
-              style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
-            >
-              <Text style={styles.ghostButtonText}>{t('dialogs.task.subtasks.addButton')}</Text>
-            </Pressable>
-          </View>
+          {taskId != null && !(caps?.subtasks ?? true) && (
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.task.subtasks.listNoSubtasks')}
+            </Text>
+          )}
+          {taskId == null && (
+            <View style={styles.subtaskAddRow}>
+              <TextInput
+                style={[styles.input, styles.subtaskInput]}
+                value={newSubtaskTitle}
+                onChangeText={setNewSubtaskTitle}
+                placeholder={t('dialogs.task.subtasks.placeholder')}
+                accessibilityLabel={t('dialogs.task.subtasks.newAria')}
+                returnKeyType="done"
+                onSubmitEditing={addDraftSubtask}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('dialogs.task.subtasks.addButton')}
+                accessibilityState={{ disabled: newSubtaskTitle.trim() === '' }}
+                disabled={newSubtaskTitle.trim() === ''}
+                onPress={addDraftSubtask}
+                style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+              >
+                <Text style={styles.ghostButtonText}>{t('dialogs.task.subtasks.addButton')}</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       )}
 

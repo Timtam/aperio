@@ -395,6 +395,11 @@ async fn parse_token_response(
     sent_secret: bool,
 ) -> VcResult<TokenSet> {
     let status = response.status();
+    let retry_after = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
     let text = response
         .text()
         .await
@@ -415,9 +420,15 @@ async fn parse_token_response(
                 "Webex refused the token request ({posture}): {detail}"
             )),
             403 => VcError::Forbidden(format!("Webex refused the token request: {detail}")),
-            429 => VcError::Network(format!(
-                "Webex is rate-limiting the token endpoint: {detail}"
-            )),
+            // A busy token endpoint: the token, never the wait (270, 278).
+            429 => {
+                tracing::info!(
+                    retry_after = retry_after.as_deref(),
+                    %detail,
+                    "webex is rate-limiting the token endpoint"
+                );
+                crate::api::busy()
+            }
             // The server having a bad day, not a response we failed to
             // understand. `Network` is what the UI treats as transient and
             // offers a retry for; `Protocol` reads as "this adapter is broken"

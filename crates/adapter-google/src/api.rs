@@ -49,6 +49,10 @@ pub struct ApiState {
     pub token_url: String,
     /// API base URL — overridable for tests.
     pub api_base: String,
+    /// People API base URL — overridable for tests.
+    pub people_base: String,
+    /// Tasks API base URL — overridable for tests.
+    pub tasks_base: String,
 }
 
 impl ApiState {
@@ -65,6 +69,8 @@ impl ApiState {
             http,
             token_url: GOOGLE_TOKEN_URL.to_string(),
             api_base: API_BASE.to_string(),
+            people_base: crate::contacts::PEOPLE_API_BASE.to_string(),
+            tasks_base: crate::tasks::TASKS_API_BASE.to_string(),
         }
     }
 
@@ -143,7 +149,12 @@ impl ApiState {
         if status.is_success() {
             return Ok(());
         }
+        let retry_after = retry_after_of(response.headers());
         let text = response.text().await.unwrap_or_default();
+        if let Some(turned_away) = throttled(status.as_u16(), retry_after, &text) {
+            warn!(method = "DELETE", path, %turned_away, "google turned the request away");
+            return Err(turned_away);
+        }
         let message: String = text.chars().take(300).collect();
         warn!(
             method = "DELETE",
@@ -155,6 +166,61 @@ impl ApiState {
         Err(GoogleError::Http {
             status: status.as_u16(),
             message,
+        })
+    }
+
+    /// One request as a new series written in steps sends it
+    /// ([`crate::series_create`]): whatever status Google answers comes back
+    /// as an [`Answer`], for the run to judge. Only a request that failed on
+    /// its way is an error: one that never left ([`GoogleError::Unreached`]),
+    /// one whose answer was lost ([`GoogleError::Network`]), and one Google
+    /// answered 401 whose sign-in could not be renewed — refused, a 401 as
+    /// everywhere ([`refresh_refused`]); failed otherwise, `Unreached`, as
+    /// the request itself was not carried out.
+    pub(crate) async fn send_raw(
+        &self,
+        method: reqwest::Method,
+        path_and_query: &str,
+        body: Option<&serde_json::Value>,
+    ) -> GoogleResult<Answer> {
+        debug!(method = %method, path = path_and_query, "google request");
+        let url = self.build_url(path_and_query)?;
+        let json = body.map(|b| b.to_string());
+        let build = |access: &str| {
+            let request = self
+                .http
+                .request(method.clone(), url.clone())
+                .bearer_auth(access);
+            match &json {
+                Some(json) => request
+                    .header("content-type", "application/json")
+                    .body(json.clone()),
+                None => request,
+            }
+        };
+        let access = self.tokens.lock().await.access_token.clone();
+        let mut response = build(&access).send().await?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            if let Err(err) = self.refresh_access_token().await {
+                return Err(match err {
+                    refused @ GoogleError::Http { status: 401, .. } => refused,
+                    // The token endpoint throttling: the request was not
+                    // carried out, and it says so (decision 270).
+                    busy @ GoogleError::Busy { .. } => busy,
+                    other => GoogleError::Unreached(format!("sign-in not renewed: {other}")),
+                });
+            }
+            let fresh = self.tokens.lock().await.access_token.clone();
+            response = build(&fresh).send().await?;
+        }
+        let status = response.status().as_u16();
+        let retry_after = retry_after_of(response.headers());
+        let body = response.text().await?;
+        debug!(method = %method, path = path_and_query, status, "google response");
+        Ok(Answer {
+            status,
+            retry_after,
+            body,
         })
     }
 
@@ -229,6 +295,83 @@ impl ApiState {
     }
 }
 
+/// What Google answered a request of the step run ([`ApiState::send_raw`]).
+#[derive(Debug, Clone)]
+pub(crate) struct Answer {
+    pub status: u16,
+    /// What Google asked to wait before the next request, in seconds; a
+    /// date in that header is not read.
+    pub retry_after: Option<std::time::Duration>,
+    pub body: String,
+}
+
+/// The reason Google names for an error: `error.errors[0].reason` of its
+/// answer (`rateLimitExceeded`, `quotaExceeded`, `forbiddenForNonOrganizer`,
+/// …). Read from the whole answer: the message ahead of it can be longer
+/// than what an error keeps of it.
+pub(crate) fn error_reason(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    value
+        .get("error")?
+        .get("errors")?
+        .get(0)?
+        .get("reason")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// What Google asked to wait before the next request (`Retry-After`, in
+/// seconds; a date there is not read).
+pub(crate) fn retry_after_of(headers: &reqwest::header::HeaderMap) -> Option<std::time::Duration> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(std::time::Duration::from_secs)
+}
+
+/// The usage-limit reasons a 403 names when a limit is used up for a while
+/// (decision 275): not a sign-in failure, and not a throttle either.
+const USAGE_LIMIT_REASONS: &[&str] = &[
+    "quotaExceeded",
+    "dailyLimitExceeded",
+    "calendarUsageLimitsExceeded",
+];
+
+/// Whether Google turned a request away because it is busy (decision 270) or
+/// a usage limit is used up (275), read from the status and the whole answer:
+/// the error keeps only the start of a long one. `None` for any other answer,
+/// which keeps its [`GoogleError::Http`].
+pub(crate) fn throttled(
+    status: u16,
+    retry_after: Option<std::time::Duration>,
+    body: &str,
+) -> Option<GoogleError> {
+    use cal_core::{BusyDetail, WriteRefusal};
+    if WriteRefusal::turned_down_by_status(status) == Some(WriteRefusal::ProviderBusy) {
+        return Some(GoogleError::Busy {
+            detail: BusyDetail::TooManyRequests,
+            retry_after,
+        });
+    }
+    if status != 403 {
+        return None;
+    }
+    let reason = error_reason(body)?;
+    let detail = match reason.as_str() {
+        "rateLimitExceeded" => BusyDetail::RateLimit,
+        "userRateLimitExceeded" => BusyDetail::UserRateLimit,
+        other if USAGE_LIMIT_REASONS.contains(&other) => {
+            return Some(GoogleError::UsageLimit { reason })
+        }
+        _ => return None,
+    };
+    Some(GoogleError::Busy {
+        detail,
+        retry_after,
+    })
+}
+
 /// A token endpoint that answered the refresh with 400 or 401 — a revoked or
 /// expired grant (`invalid_grant`), a client it does not know — refused the
 /// sign-in, not the request that needed it: said as a 401, the write that was
@@ -270,8 +413,13 @@ pub(crate) async fn decode_json<T: DeserializeOwned>(
     response: reqwest::Response,
 ) -> GoogleResult<T> {
     let status = response.status();
+    let retry_after = retry_after_of(response.headers());
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
+        if let Some(turned_away) = throttled(status.as_u16(), retry_after, &text) {
+            warn!(%turned_away, "google turned the request away");
+            return Err(turned_away);
+        }
         let message: String = text.chars().take(300).collect();
         // Log the body — Google's error payload says WHY (e.g. "Invalid resource id
         // value") and is otherwise lost inside the propagated error.
@@ -411,7 +559,12 @@ pub(crate) async fn delete_absolute(state: &ApiState, url: &str) -> GoogleResult
     if status.is_success() {
         return Ok(());
     }
+    let retry_after = retry_after_of(response.headers());
     let text = response.text().await.unwrap_or_default();
+    if let Some(turned_away) = throttled(status.as_u16(), retry_after, &text) {
+        warn!(method = "DELETE", url, %turned_away, "google turned the request away");
+        return Err(turned_away);
+    }
     Err(GoogleError::Http {
         status: status.as_u16(),
         message: text.chars().take(300).collect(),
@@ -437,6 +590,12 @@ pub(crate) async fn get_absolute_bytes(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
     if !status.is_success() {
+        if let Some(turned_away) =
+            throttled(status.as_u16(), retry_after_of(response.headers()), "")
+        {
+            warn!(%turned_away, "google turned the photo fetch away");
+            return Err(turned_away);
+        }
         return Err(GoogleError::Http {
             status: status.as_u16(),
             message: format!("photo fetch returned status {status}"),
@@ -640,11 +799,33 @@ pub async fn create_event(
     calendar_id: &str,
     new: NewEvent,
 ) -> GoogleResult<Event> {
+    // A series with deleted occurrences is created bare and they are
+    // cancelled one by one (decisions 202-213, 263-269): whether Google heeds
+    // a deletion line with a new series was never measured.
+    if new
+        .recurrence
+        .as_ref()
+        .is_some_and(|r| !r.rrule.trim().is_empty() && !r.exceptions.is_empty())
+    {
+        // Drawn before the steps: the generator is not to be held across them.
+        let id = crate::mapping::fresh_event_id(&mut rand::thread_rng());
+        return crate::series_create::create_keeping_deletions(
+            state,
+            calendar_id,
+            new,
+            &chrono::Local,
+            Utc::now(),
+            cal_core::SERIES_WITH_DELETIONS,
+            crate::series_create::Pacing::GOOGLE,
+            id,
+        )
+        .await;
+    }
     let cal_enc = urlencoding(calendar_id);
     // `sendUpdates=all` makes Google email the attendees; `none` stores
     // them silently. Only notify when the user opted in and there's
-    // someone to notify.
-    let su = send_updates_param(new.send_invitations && !new.attendees.is_empty());
+    // someone to notify: an invitee the create writes.
+    let su = send_updates_param(new.send_invitations && crate::mapping::written_attendees(&new));
     let path = format!("/calendars/{cal_enc}/events?sendUpdates={su}");
     let body = new_event_to_body(&new);
     let entry: EventEntry = state.post_json(&path, &body).await?;
@@ -906,6 +1087,10 @@ pub async fn respond_to_event(
             .await
         {
             Ok(e) => e,
+            // A busy provider or a used-up limit holds for the whole account
+            // and stops the walk (decisions 270, 275): a later "not found"
+            // would hide why.
+            Err(e @ (GoogleError::Busy { .. } | GoogleError::UsageLimit { .. })) => return Err(e),
             Err(e) => {
                 last_err = Some(e);
                 continue;
@@ -1142,7 +1327,7 @@ pub async fn rename_calendar(
 
 /// Percent-encode for URL query / path segment use. We do this
 /// manually so we don't pull in a dedicated crate for one helper.
-fn urlencoding(s: &str) -> String {
+pub(crate) fn urlencoding(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
@@ -1191,6 +1376,205 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_raw_request_brings_back_any_answer() {
+        let mut server = mockito::Server::new_async().await;
+        let patch = server
+            .mock("PATCH", "/calendars/cal/events/inst_1?sendUpdates=none")
+            .match_header("authorization", "Bearer initial-token")
+            .match_header("content-type", "application/json")
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({"status": "cancelled"}),
+            ))
+            .with_status(403)
+            .with_header("retry-after", "3")
+            .with_body(r#"{"error":{"code":403,"errors":[{"reason":"rateLimitExceeded"}]}}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let answer = state
+            .send_raw(
+                reqwest::Method::PATCH,
+                "/calendars/cal/events/inst_1?sendUpdates=none",
+                Some(&serde_json::json!({"status": "cancelled"})),
+            )
+            .await
+            .unwrap();
+        patch.assert_async().await;
+        // Not an error: the run judges the status.
+        assert_eq!(answer.status, 403);
+        assert_eq!(answer.retry_after, Some(std::time::Duration::from_secs(3)));
+        assert_eq!(
+            error_reason(&answer.body).as_deref(),
+            Some("rateLimitExceeded")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_raw_request_renews_the_sign_in_once() {
+        let mut server = mockito::Server::new_async().await;
+        let stale = server
+            .mock("GET", "/calendars/cal/events/s1")
+            .match_header("authorization", "Bearer initial-token")
+            .with_status(401)
+            .create_async()
+            .await;
+        let token = server
+            .mock("POST", "/token")
+            .with_status(200)
+            .with_body(r#"{"access_token":"fresh-token","expires_in":3600,"token_type":"Bearer"}"#)
+            .create_async()
+            .await;
+        let fresh = server
+            .mock("GET", "/calendars/cal/events/s1")
+            .match_header("authorization", "Bearer fresh-token")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let answer = state
+            .send_raw(reqwest::Method::GET, "/calendars/cal/events/s1", None)
+            .await
+            .unwrap();
+        stale.assert_async().await;
+        token.assert_async().await;
+        fresh.assert_async().await;
+        assert_eq!(answer.status, 200);
+    }
+
+    #[tokio::test]
+    async fn a_raw_request_whose_sign_in_is_refused_says_so() {
+        let mut server = mockito::Server::new_async().await;
+        let _stale = server
+            .mock("POST", "/calendars/cal/events?sendUpdates=none")
+            .with_status(401)
+            .expect(1)
+            .create_async()
+            .await;
+        let _token = server
+            .mock("POST", "/token")
+            .with_status(400)
+            .with_body(r#"{"error":"invalid_grant"}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let err = state
+            .send_raw(
+                reqwest::Method::POST,
+                "/calendars/cal/events?sendUpdates=none",
+                Some(&serde_json::json!({})),
+            )
+            .await
+            .unwrap_err();
+        // A refused sign-in, not a lost answer: nothing was carried out.
+        assert!(
+            matches!(err, GoogleError::Http { status: 401, .. }),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn throttling_is_read_from_the_status_and_the_whole_answer() {
+        use cal_core::BusyDetail;
+        let envelope = |reason: &str| {
+            // Google's own message ahead of the reason, longer than an error keeps.
+            let long = "x".repeat(400);
+            format!(
+                r#"{{"error":{{"code":403,"message":"{long}","errors":[{{"domain":"usageLimits","reason":"{reason}"}}]}}}}"#
+            )
+        };
+        let wait = Some(std::time::Duration::from_secs(7));
+        // The wait reaches the log lines that show the error, never a
+        // sentence (decision 278).
+        let shown = throttled(429, wait, "").unwrap().to_string();
+        assert!(shown.ends_with("it asks to wait 7 s"), "{shown}");
+        let shown = throttled(429, None, "").unwrap().to_string();
+        assert!(!shown.contains("wait"), "{shown}");
+        assert!(matches!(
+            throttled(429, wait, ""),
+            Some(GoogleError::Busy { detail: BusyDetail::TooManyRequests, retry_after }) if retry_after == wait
+        ));
+        assert!(matches!(
+            throttled(403, None, &envelope("rateLimitExceeded")),
+            Some(GoogleError::Busy {
+                detail: BusyDetail::RateLimit,
+                ..
+            })
+        ));
+        assert!(matches!(
+            throttled(403, None, &envelope("userRateLimitExceeded")),
+            Some(GoogleError::Busy {
+                detail: BusyDetail::UserRateLimit,
+                ..
+            })
+        ));
+        for reason in [
+            "quotaExceeded",
+            "dailyLimitExceeded",
+            "calendarUsageLimitsExceeded",
+        ] {
+            assert!(
+                matches!(throttled(403, None, &envelope(reason)), Some(GoogleError::UsageLimit { reason: r }) if r == reason),
+                "{reason}"
+            );
+        }
+        assert!(throttled(403, None, &envelope("insufficientPermissions")).is_none());
+        assert!(throttled(403, None, "not json").is_none());
+        assert!(throttled(500, None, &envelope("rateLimitExceeded")).is_none());
+        assert!(throttled(400, None, "").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_raw_request_whose_sign_in_is_throttled_says_busy() {
+        let mut server = mockito::Server::new_async().await;
+        let _stale = server
+            .mock("GET", "/calendars/cal/events/s1")
+            .with_status(401)
+            .create_async()
+            .await;
+        let _token = server
+            .mock("POST", "/token")
+            .with_status(429)
+            .with_body(r#"{"error":"rate_limit_exceeded"}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let err = state
+            .send_raw(reqwest::Method::GET, "/calendars/cal/events/s1", None)
+            .await
+            .unwrap_err();
+        // Busy, not a request that may have run.
+        assert!(matches!(err, GoogleError::Busy { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn a_reason_is_read_from_the_whole_answer() {
+        // Google's own message ahead of the reason, longer than an error keeps.
+        let long = "x".repeat(400);
+        let body = format!(
+            r#"{{"error":{{"code":403,"message":"{long}","errors":[{{"message":"{long}","domain":"usageLimits","reason":"userRateLimitExceeded"}}]}}}}"#
+        );
+        assert_eq!(
+            error_reason(&body).as_deref(),
+            Some("userRateLimitExceeded")
+        );
+        assert_eq!(error_reason("not json"), None);
+        assert_eq!(error_reason(r#"{"error":{"code":500}}"#), None);
+    }
+
+    #[tokio::test]
+    async fn a_server_that_cannot_be_reached_got_nothing() {
+        // Nothing listens on port 1: the connection is refused, so the
+        // request never left.
+        let state = fixture_state("http://127.0.0.1:1");
+        let err = state
+            .get_json::<serde_json::Value>("/calendars/primary/events")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GoogleError::Unreached(_)), "{err:?}");
+    }
+
     fn fixture_state(server_url: &str) -> ApiState {
         ApiState {
             tokens: Arc::new(Mutex::new(TokenSet {
@@ -1204,6 +1588,8 @@ mod tests {
             http: reqwest::Client::new(),
             token_url: format!("{server_url}/token"),
             api_base: server_url.to_string(),
+            people_base: server_url.to_string(),
+            tasks_base: server_url.to_string(),
         }
     }
 
@@ -2094,6 +2480,7 @@ mod tests {
 
     fn moved_override() -> Event {
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

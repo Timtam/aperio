@@ -152,7 +152,10 @@
   "common": {
     "colorComposer": {
       "invalidHex": "Please enter a valid hex value, e.g. #e53935."
-    }
+    },
+    "providerBusy": "The provider is busy right now. Try again later.",
+    "tryAgainLater": "Try again later.",
+    "accessNotGranted": "Aperio has no access to this device's calendars and reminders. Allow it for Aperio in the Settings app."
   },
   "descriptionLinks": {
     "label": "Links in this description",
@@ -207,12 +210,17 @@
     "duplicatedSeries": "The whole series \"{{title}}\" was duplicated.",
     "copyMayStand": "\"{{title}}\" may now be in the calendar twice: its new copy could neither be completed nor removed again. Please check the calendar and do not repeat this.",
     "moveMayStand": "\"{{title}}\" may now be in the target calendar as well as in its own: the moved series could neither be completed nor removed again there. Please check both calendars and do not repeat this.",
+    "originalKept": "\"{{title}}\" was moved, but its original in \"{{source}}\" could not be removed because the provider is busy right now. Delete it there yourself; do not move it again.",
+    "occurrenceKept": "\"{{title}}\" was saved as an event of its own, but the series' occurrence in \"{{source}}\" could not be left out because the provider is busy right now. Delete that occurrence of the series there yourself; do not save again.",
+    "originalsKept": "Moved, but these originals in \"{{source}}\" could not be removed because the provider is busy right now: {{titles}}. Delete them there yourself; do not move them again.",
+    "quotedTitle": "\"{{title}}\"",
     "duplicateFailed": "\"{{title}}\" could not be duplicated: {{reason}}."
   },
   "toast": {
     "regionLabel": "Notifications",
     "undoLabel": "Undo",
     "undoInFlight": "Undoing…",
+    "undoFailed": "That could not be undone: {{reason}}",
     "dismissLabel": "Dismiss"
   },
   "birthdays": {
@@ -382,7 +390,11 @@
       "tasks": "Task list",
       "sections": "Sections",
       "contacts": "Address book"
-    }
+    },
+    "announceBusy": "Warning: updating one or more accounts is failing because a provider is busy right now. Aperio tries again the next time it updates. Details are on the Sync screen.",
+    "bannerBusy": "Some accounts are not updating because a provider is busy. Details are on the Sync screen.",
+    "busyHint": "The provider is busy right now and is turning updates away. You do not need to do anything: Aperio tries again the next time it updates, for instance when you open the app again. The warning goes away once an update succeeds.",
+    "busyEntry": "The provider is busy."
   },
   "syncStatus": {
     "label": "Sync status",
@@ -582,6 +594,7 @@
       "save": "Save",
       "create": "Create",
       "created": "Contact {{name}} created.",
+      "createdWithoutPhoto": "Contact {{name}} created, but without its photo: the photo could not be saved. Add it again later.",
       "updated": "Contact {{name}} saved.",
       "deleted": "Contact {{name}} deleted.",
       "deleteTitle": "Delete contact?",
@@ -1617,7 +1630,8 @@
         "someBusy_one": "{{count}} attendee is busy at this time.",
         "someBusy_other": "{{count}} attendees are busy at this time.",
         "busy": "Busy",
-        "free": "Free"
+        "free": "Free",
+        "failed": "Availability could not be checked: {{reason}}."
       },
       "rsvp": {
         "yourResponseLabel": "Your response",
@@ -1747,6 +1761,9 @@
         "invitationsCancelledToo": "If invitations were sent, the invitees also received its cancellation.",
         "createdMayStand": "A new series was created in the calendar but could not be completed, and Aperio could not remove it again. It may now stand there as well. Please check the calendar.",
         "invitationsMayHaveGone": "The invitees may have received an invitation.",
+        "providerBusy": "The provider is busy right now. Nothing was changed. Try again later.",
+        "deletionsNotKeptBusy": "The provider was busy, so Aperio could not finish the new series in time and removed it again. Nothing was changed. Try again later.",
+        "partlySaved": "The change was only partly saved because the provider is busy right now. Check it and try the rest again later.",
         "reason": {
           "replyOnly": "only the organizer can change this meeting",
           "serverRefused": "the calendar server refused it ({{detail}})",
@@ -1755,13 +1772,16 @@
           "unsafeToWrite": "Aperio cannot change it safely on the server",
           "accessNotGranted": "Aperio has no access to this device's calendars and reminders",
           "dayZoneUnreadable": "Exchange stores it in a time zone Aperio cannot read, so its day cannot be changed here",
-          "copyUnreadable": "Aperio could not read its current state from the server",
+          "copyUnreadable": "Aperio could not read the current state from the server",
           "exceptionsWouldBeLost": "Exchange would drop its changed and deleted occurrences",
           "forbidden": "the provider does not allow it ({{detail}})",
-          "changedOnServer": "it changed on the server since you opened it",
-          "deletionsNotKeptTime": "deleting its deleted occurrences again one by one took too long",
-          "deletionsNotKept": "the calendar did not take its deleted occurrences",
-          "createdMayStand": "a new series was created but could neither be completed nor removed again"
+          "changedOnServer": "it was changed on the server in the meantime",
+          "deletionsNotKeptTime": "deleting the new series' deleted occurrences again one by one took too long",
+          "deletionsNotKept": "the calendar did not take the new series' deleted occurrences",
+          "createdMayStand": "a new series was created but could neither be completed nor removed again",
+          "providerBusy": "the provider is busy right now",
+          "deletionsNotKeptBusy": "the provider was busy, so the new series could not be finished in time",
+          "partlySaved": "the change was only partly saved because the provider is busy right now"
         }
       },
       "deleteAndDecline": "Delete and decline"
@@ -1875,7 +1895,12 @@
         "listAria": "Subtasks. Arrow keys to navigate, Space to toggle done, Shift+F10 for actions.",
         "rowLabel": "{{title}}, {{state}}{{priority}}",
         "removeAria": "Remove subtask \"{{title}}\"",
-        "listNoSubtasks": "The selected list doesn't support subtasks. Remove the drafts or pick another list."
+        "listNoSubtasks": "The selected list doesn't support subtasks. Remove the drafts or pick another list.",
+        "draftsFailed_one": "\"{{title}}\" was created, but its subtask {{titles}} was not: {{reason}}. You are now editing the created task; saving also creates the subtask.",
+        "draftsFailed_other": "\"{{title}}\" was created, but its subtasks {{titles}} were not: {{reason}}. You are now editing the created task; saving also creates them.",
+        "draftsLeftHeading": "Subtasks not yet created",
+        "draftsNotCreated_one": "The subtask {{titles}} was not created.",
+        "draftsNotCreated_other": "These {{count}} subtasks were not created: {{titles}}."
       },
       "status": {
         "open": "Open",
@@ -2075,7 +2100,10 @@
           "tasks": "Task list",
           "sections": "Sections",
           "contacts": "Address book"
-        }
+        },
+        "announceBusy": "Warning: updating one or more accounts is failing because a provider is busy right now. Aperio tries again by itself. Details: Settings, Accounts.",
+        "busyHint": "The provider is busy right now and is turning updates away. You do not need to do anything: Aperio tries again by itself, and the warning goes away once an update succeeds.",
+        "busyEntry": "The provider is busy."
       },
       "missingPluginBadge": "plugin missing",
       "missingCredentials_one": "1 account needs credentials on this device.",
@@ -2294,7 +2322,8 @@
       "needsConnect": "Warning: this device is not signed in to this account — sign in again under Settings, Accounts. Nothing is being fetched until then.",
       "sectionLabel": "{{name}}",
       "empty": "No calendars or task lists yet — open this account in \"Manage accounts\" to check the connection.",
-      "contextMenuHint": "Use arrow keys to navigate, Space to toggle visibility, Shift+F10 or the Menu key for actions."
+      "contextMenuHint": "Use arrow keys to navigate, Space to toggle visibility, Shift+F10 or the Menu key for actions.",
+      "refreshErrorBusy": "Warning: updating this account is failing because the provider is busy right now; shown data may be outdated."
     },
     "taskListDeleted": "Task list \"{{name}}\" deleted.",
     "menu": {
@@ -2515,7 +2544,8 @@
       "refreshing": "Refreshing …",
       "refreshAria": "Sync contacts now",
       "lastSynced": "Last synced: {{time}}",
-      "neverSynced": "No sync run yet."
+      "neverSynced": "No sync run yet.",
+      "syncFailed": "The contact sync could not be started: {{reason}}"
     }
   },
   "widgets": {

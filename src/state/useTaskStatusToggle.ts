@@ -1,7 +1,12 @@
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { errorMessage, selfAssignOnStatusChange } from '@aperio/shared';
+import {
+  failureOfWrites,
+  selfAssignOnStatusChange,
+  writeErrorMessage,
+  writeStatusLanded,
+} from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { todayIsoKey } from '../intl/taskDay';
@@ -38,7 +43,10 @@ import type { Task, TaskStatus } from '../api/types';
 
 export interface TaskStatusActions {
   toggle: (task: Task) => Promise<void>;
-  set: (task: Task, status: TaskStatus) => Promise<void>;
+  /** `true` when the task holds `status` afterwards; `false` when its own
+   *  write was turned away (said already), so a surface does not treat it as
+   *  done. */
+  set: (task: Task, status: TaskStatus) => Promise<boolean>;
 }
 
 export function useTaskStatusActions(): TaskStatusActions {
@@ -67,8 +75,8 @@ export function useTaskStatusActions(): TaskStatusActions {
     useTaskCascadeEnabled();
 
   const set = useCallback(
-    async (task: Task, nextStatus: TaskStatus): Promise<void> => {
-      if (task.status === nextStatus) return;
+    async (task: Task, nextStatus: TaskStatus): Promise<boolean> => {
+      if (task.status === nextStatus) return true;
       const { cascade, autoDate } = effectiveForList(task.list_id);
       // Skip the auto-pin when the owning provider can't store
       // in_progress (e.g. Google Tasks / Todoist): the status reverts to
@@ -88,7 +96,7 @@ export function useTaskStatusActions(): TaskStatusActions {
         // scheduledDate field.
         ...(autoDate && inProgressSticks ? { todayKey: todayIsoKey() } : {}),
       });
-      if (writes.length === 0) return;
+      if (writes.length === 0) return false;
       const outcome = await applyCascade(writes, tasks, autoSelfAssign);
       // ALWAYS, even on a failure: whatever landed before it is real, and a
       // view still showing the old state is a view that disagrees with the
@@ -100,14 +108,31 @@ export function useTaskStatusActions(): TaskStatusActions {
       // lie is what the old `console.warn` amounted to by saying nothing at
       // all while the family changed underneath.
       const rootFailure = outcome.failed.find((f) => f.taskId === task.id);
+      if (rootFailure && writeStatusLanded(rootFailure.err)) {
+        // Its own save stood in part with the status — a later step of it
+        // (Vikunja's assignees, Graph's extension) was turned away: the task
+        // did change. Said as the leftover alone, never "could not change"
+        // (decision 277), as `writeFailureSentence` does.
+        announce(writeErrorMessage(rootFailure.err, t));
+        return true;
+      }
       if (rootFailure) {
+        // Every write is attempted: where others of the family landed or
+        // may have, its failure never says "nothing was changed" (decision
+        // 277).
+        const rest = outcome.failed.filter((f) => f !== rootFailure);
+        const err = failureOfWrites(
+          'cascade',
+          [rootFailure.err, ...rest.map((f) => f.err)],
+          outcome.applied.length > 0,
+        );
         announce(
           t('views.tasks.statusChangeFailed', {
             title: task.title,
-            message: errorMessage(rootFailure.err),
+            message: writeErrorMessage(err, t),
           }),
         );
-        return;
+        return false;
       }
 
       // Announce: focused task gets the usual status message; if additional
@@ -130,6 +155,7 @@ export function useTaskStatusActions(): TaskStatusActions {
       } else {
         announce(base);
       }
+      return true;
     },
     [
       announce,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { readErrorMessage, writeErrorMessage } from '@aperio/shared';
 import {
   AccessibilityInfo,
   Pressable,
@@ -40,10 +41,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // Remove, and every mutation announces its result.
 
 const RIGHTS: MemberRight[] = ['read', 'write', 'admin'];
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function TaskMembersScreen({
   route,
@@ -88,11 +85,11 @@ export default function TaskMembersScreen({
       setShares(await taskListShares(listId));
       setError(null);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(readErrorMessage(err, t));
     } finally {
       setLoading(false);
     }
-  }, [listId]);
+  }, [listId, t]);
 
   useEffect(() => {
     void reload();
@@ -120,7 +117,7 @@ export default function TaskMembersScreen({
         .catch((err) => {
           if (cancelled) return;
           setResults([]);
-          setSearchError(errorMessage(err));
+          setSearchError(readErrorMessage(err, t));
           setSearchState('error');
         });
     }, 250);
@@ -128,7 +125,7 @@ export default function TaskMembersScreen({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [listId, query, addByEmail]);
+  }, [listId, query, addByEmail, t]);
 
   const run = useCallback(
     async (fn: () => Promise<void>) => {
@@ -137,12 +134,12 @@ export default function TaskMembersScreen({
         await fn();
         await reload();
       } catch (err) {
-        setError(errorMessage(err));
+        setError(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
       }
     },
-    [reload],
+    [reload, t],
   );
 
   const add = (user: TaskUser) =>
@@ -188,7 +185,7 @@ export default function TaskMembersScreen({
         setShares((rows) =>
           rows.map((r) => (r.user.id === share.user.id ? { ...r, right: prev } : r)),
         );
-        setError(errorMessage(err));
+        setError(writeErrorMessage(err, t));
       });
   };
 

@@ -1157,6 +1157,7 @@ mod tests {
         start: DateTime<Utc>,
     ) -> cal_core::Event {
         cal_core::Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

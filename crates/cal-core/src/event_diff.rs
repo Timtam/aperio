@@ -282,6 +282,7 @@ mod tests {
     fn event() -> Event {
         let at = Utc.with_ymd_and_hms(2026, 11, 9, 15, 0, 0).unwrap();
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

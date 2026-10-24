@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { eventWriteLeftover, writeErrorMessage } from '@aperio/shared';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  eventWriteLeftover,
+  type MovedRow,
+  originalKeptSentence,
+  readErrorMessage,
+  writeErrorMessage,
+} from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
-  findNodeHandle,
   Pressable,
   StyleSheet,
   Text,
@@ -21,6 +26,7 @@ import {
   getTaskById,
   getTasks,
 } from '../api/client';
+import { CloseOnlyNotice } from '../components/CloseOnlyNotice';
 import { FormScrollView } from '../components/FormScrollView';
 import { SelectFieldButton } from '../components/SelectFieldButton';
 import { SegmentedSelect } from '../components/SegmentedSelect';
@@ -41,6 +47,7 @@ import { useCalendarVisibility } from '../state/calendarVisibility';
 import { stepWriteWait } from '../state/stepWriteWait';
 import { canAssignSection } from '../state/taskBehaviour';
 import { useTaskStore } from '../state/taskStoreContext';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -85,30 +92,15 @@ function MoveCopyScreen({
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [mode, setMode] = useState<MoveCopyMode>('move');
   const [scope, setScope] = useState<MoveCopyScope>('occurrence');
-  // A new series that may stand (decisions 203, 210): said in place of the
-  // form, focused, with only Close — doing it again would create another.
-  const [mayStand, setMayStand] = useState<string | null>(null);
-  // Whether the screen is still there: one left while its write runs gets no
-  // notice, so what may stand is said instead.
-  const shown = useRef(true);
-  useEffect(() => {
-    shown.current = true;
-    return () => {
-      shown.current = false;
-    };
-  }, []);
-  const mayStandRef = useRef<Text | null>(null);
-  useEffect(() => {
-    if (mayStand == null) return;
-    requestAnimationFrame(() => {
-      const tag = findNodeHandle(mayStandRef.current);
-      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-    });
-  }, [mayStand]);
+  // What a move or a copy left that doing it again would write twice: a new
+  // series that may stand (210), a task without one of its follow-up steps
+  // (273), an original the provider was too busy to delete (277). Said in
+  // place of the form, focused, with only Close.
+  const { notice, showNotice } = useCloseOnlyNotice();
   // Every way out of the notice is its Close, as in the editor's: the header
   // button says Close, not Cancel — nothing is cancelled any more — and the
   // swipe is off (set with the header, below).
-  const closeMayStand = useCallback(() => navigation.goBack(), [navigation]);
+  const closeNotice = useCallback(() => navigation.goBack(), [navigation]);
   const [targetContainerId, setTargetContainerId] = useState(
     params.kind === 'task' ? params.listId : params.event.calendar_id,
   );
@@ -125,7 +117,7 @@ function MoveCopyScreen({
   // may stand would never be said on screen.
   useCancelHeader(navigation, 'mobile.cancel', {
     writing: submitting,
-    close: mayStand != null ? closeMayStand : undefined,
+    close: notice != null ? closeNotice : undefined,
   });
 
   const initialContainerId =
@@ -157,7 +149,7 @@ function MoveCopyScreen({
           if (!cancelled) setCalendars(cals);
         }
       } catch (err) {
-        if (!cancelled) setError(writeErrorMessage(err, t));
+        if (!cancelled) setError(readErrorMessage(err, t));
       }
     })();
     return () => {
@@ -308,13 +300,15 @@ function MoveCopyScreen({
     }
     setSubmitting(true);
     try {
+      let moved: MovedRow[] = [];
       if (params.kind === 'event') {
-        await moveOrCopyEvent(params.event, targetContainerId, mode, scope, {
+        const row = await moveOrCopyEvent(params.event, targetContainerId, mode, scope, {
           wait: stepWriteWait,
           target: calendars.find((c) => c.id === targetContainerId),
         });
+        if (row != null) moved = [row];
       } else if (task != null) {
-        await moveOrCopyTask(
+        moved = await moveOrCopyTask(
           task,
           targetContainerId,
           mode,
@@ -323,6 +317,18 @@ function MoveCopyScreen({
         );
       }
       invalidateData();
+      // An original the provider was too busy to delete (277): said, and
+      // only closed — moving it again would make a second copy.
+      const kept = originalKeptSentence(
+        moved,
+        (id) =>
+          (params.kind === 'event' ? calendars : taskLists).find((c) => c.id === id)?.name,
+        t,
+      );
+      if (kept != null) {
+        showNotice(kept);
+        return;
+      }
       AccessibilityInfo.announceForAccessibility(
         t(mode === 'move' ? 'dialogs.moveCopy.moved' : 'dialogs.moveCopy.copied', {
           title: itemTitle,
@@ -332,17 +338,15 @@ function MoveCopyScreen({
     } catch (err) {
       // A failed move or copy may still have written at the target: it shows
       // on the next read.
-      if (params.kind === 'event') invalidateData();
+      invalidateData();
       const message =
         err instanceof SeriesNotLoadedError
           ? t('dialogs.event.seriesLoadFailed', { title: itemTitle })
           : writeErrorMessage(err, t);
-      if (params.kind === 'event' && eventWriteLeftover(err)) {
-        if (!shown.current) {
-          AccessibilityInfo.announceForAccessibility(message);
-          return;
-        }
-        setMayStand(message);
+      // Something stands — a new series (210), a task without one of its
+      // steps (273): said in place of the form and only closed.
+      if (eventWriteLeftover(err)) {
+        showNotice(message);
         return;
       }
       setError(message);
@@ -366,31 +370,15 @@ function MoveCopyScreen({
     targetSectionId,
     submitting,
     calendars,
+    taskLists,
+    showNotice,
   ]);
 
   // A task move/copy isn't actionable until its row has loaded.
   const blocked = submitting || (params.kind === 'task' && task == null);
 
-  if (mayStand != null) {
-    return (
-      <FormScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.content}
-        accessibilityViewIsModal
-      >
-        <Text ref={mayStandRef} style={styles.error} accessibilityRole="text">
-          {mayStand}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('dialogs.close')}
-          onPress={() => navigation.goBack()}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-        >
-          <Text style={styles.buttonText}>{t('dialogs.close')}</Text>
-        </Pressable>
-      </FormScrollView>
-    );
+  if (notice != null) {
+    return <CloseOnlyNotice sentence={notice} onClose={closeNotice} />;
   }
 
   return (

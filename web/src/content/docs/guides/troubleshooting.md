@@ -67,16 +67,28 @@ When the operating system withholds an account's data — the phone's own
 calendars without access — the account shows one line instead of one row per
 calendar ("Aperio may not read the calendars"), and on the phone a button that
 opens the accounts, where **Allow access…** is. A withheld grant comes before
-a login problem, and a login problem before anything else, wherever Aperio
-names only one of them. An account that is already failing is announced again
-only when its cause grows more severe.
+a login problem, a login problem before a busy provider, and a busy provider
+before anything else, wherever Aperio names only one of them. An account that
+is already failing is announced again only when its cause grows more severe.
+
+When the provider is busy — it turns requests away because many arrived in a
+short time — the warning says so, and that you need do nothing: on the
+desktop Aperio tries again by itself, on the phone the next time it updates,
+for instance when you open the app again. Its rows say "The provider is
+busy." While it is busy, the views stop asking the provider for what they
+already show; a week or month that was never loaded is still asked for,
+once.
 
 A brief, one-off connection hiccup does not raise the warning: a network
-failure is only shown once it recurs, so a cold start on a not-yet-ready
-network never flashes a false alarm. A login problem — which never fixes
-itself — shows straight away, and a manual refresh always reports its
-result at once, also in the first seconds after the app starts. The warning
-clears by itself as soon as an update succeeds again.
+failure or a busy provider is only shown once it recurs in a second automatic
+update at least a minute after the first, so a cold start on a not-yet-ready
+network never flashes a false alarm, and the two or three updates that
+opening the phone starts count once. A busy provider the views meet when they
+ask on their own does not count; any other failure of theirs counts each time
+it happens. A login problem — which never fixes itself — shows straight away,
+and a refresh you start, or the change of an account, reports its result at
+once for the accounts concerned, also in the first seconds after the app
+starts. The warning clears by itself as soon as an update succeeds again.
 
 ## This device stops updating after a move to a new phone
 
@@ -283,10 +295,10 @@ series, and nothing else:
   usual time, with the series' title, place and time. After a move its own
   change is gone with the old series; after a copy or a duplicate it stays in
   the old one.
-- Moved or copied into Exchange, or duplicated there, the new series keeps
-  the deletions from today on: Exchange takes none when a series is created,
-  so Aperio deletes them again one by one afterwards. The ones before today
-  show again.
+- Moved or copied into Exchange or Google, or duplicated there, the new
+  series keeps the deletions from today on: Exchange takes none when a series
+  is created, and Google deletes an occurrence by cancelling it, so Aperio
+  removes them one by one afterwards. The ones before today show again.
 - Moved or copied into Microsoft 365, the new series shows deleted
   occurrences again for now: Microsoft 365 takes no deletions when a series
   is created.
@@ -299,16 +311,20 @@ calendar.
 
 ## Aperio removed a new series again
 
-Exchange takes a new series without its deleted occurrences, so Aperio
-creates it first and deletes them there again one by one, while the dialog
-**Working, please wait …** is shown. When that cannot be done completely —
-Exchange does not find an occurrence, answers too slowly, or the series
+On Exchange and Google, Aperio creates a new series first and then removes
+its deleted occurrences there one by one, while the dialog **Working, please
+wait …** is shown: Exchange takes a new series without them, and Google
+deletes an occurrence by cancelling it. When that cannot be done completely —
+the calendar does not find an occurrence, answers too slowly, or the series
 afterwards does not hold exactly the deletions Aperio made —, Aperio removes
 the new series again and says so: nothing was changed, the old series is as
-it was. The removed series is in Exchange's Deleted Items. If the series
-invited people, they got its cancellation too, and the message says so. When
-it says it took too long, Exchange answered slowly or asked Aperio to wait, or
-the series has very many deleted occurrences from today on.
+it was. On Exchange the removed series is in the Deleted Items. If the series
+invited people, they got its cancellation too, and the message says so; on
+Google, when you notified them, they may also have got a cancellation for each
+occurrence Aperio had cancelled before. When it says it took too long, the
+calendar answered slowly, or the series has very many deleted occurrences
+from today on. When it says the provider was busy, the calendar kept asking
+Aperio to wait: it does that when many requests arrive in a short time.
 
 What you can do: try again later. If it keeps failing, send the log with the
 report (see below): it names the step that failed and why, without any
@@ -316,14 +332,55 @@ appointment or calendar id.
 
 ## A new series may stand in the calendar as well
 
-If Aperio could neither complete a new series on Exchange nor remove it
-again, it says the series may now stand in the calendar as well — next to the
+If Aperio could neither complete a new series on Exchange or Google nor
+remove it again, it says the series may now stand in the calendar as well — next to the
 old one, from the day you split it, or in the other calendar after a move or
 a copy. This message only closes: saving again would create yet another
 series. If invitations may have gone out, the message says that too.
 
-What you can do: open the calendar, in Aperio or in Outlook, and delete the
-series that is there twice.
+What you can do: open the calendar, in Aperio or in the calendar's own app
+(Outlook, Google Calendar), and delete the series that is there twice.
+
+## The provider is busy right now
+
+When many requests come in a short time, some providers turn further ones
+away for a while. Aperio then says "The provider is busy right now": with
+"Nothing was changed" when saving, without it when loading, checking
+availability and for meetings. In an editor, what you entered stays; the
+views show what was loaded last. Aperio does not say how long the
+provider asks to wait; the log does.
+
+What you can do: wait a moment and try again.
+
+## A change was only partly saved
+
+Some providers save a task, an appointment or a contact in several steps:
+first the item, then, for example, its assignees, its photo or a group's
+members. When the provider is busy after the first step, the item stands, but
+not everything about it. Aperio then says the change was only partly saved,
+and the message only closes: saving again would create the item a second
+time. The view reloads and shows what the provider holds.
+
+When the provider does not take a new contact's photo, the contact stands
+without it, and Aperio says so.
+
+When you create a task with subtasks and one of the subtasks fails, the
+editor now edits the created task: the subtasks not yet created stay listed
+under their own heading, and saving keeps your changes to the task and
+creates the subtasks still missing.
+
+What you can do: open the item again later and add what is missing.
+
+## After a move, the original is still there
+
+When you move a task or an appointment into another list or calendar — any
+move except one between two of Aperio's own local ones, also within one
+account — Aperio creates a copy there and then deletes the original. When the
+provider is busy for the delete, the moved item stands at the target, and the
+original stays where it was. Aperio names the list or calendar it is still in.
+
+What you can do: delete the original there yourself. Do not move it again,
+because that would create a second copy at the target.
 
 ## Reporting a bug
 

@@ -1,8 +1,8 @@
 //! Unit tests for the external-adapter snapshot cache (CACHE-0).
 
 use super::{
-    listing_delta, CacheStore, Delta, ListingDelta, RefreshCause, RefreshCoordinator, SyncScope,
-    SyncState,
+    listing_delta, Attempt, CacheStore, Delta, ListingDelta, RefreshCause, RefreshCoordinator,
+    SyncScope, SyncState,
 };
 use crate::db::DbHandle;
 use cal_core::event_diff::EventField;
@@ -51,6 +51,7 @@ fn wide() -> DateRange {
 
 fn event(id: &str, start_h: u32, end_h: u32) -> Event {
     Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
@@ -85,6 +86,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
 
 fn task(id: &str) -> Task {
     Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id: id.into(),
         list_id: LIST.into(),
@@ -2747,7 +2749,7 @@ fn a_withheld_os_grant_is_one_fact_per_family_and_never_a_login_problem() {
                 SyncScope::Events,
                 cal,
                 &withheld("calendars 1403ABCD: Denied"),
-                false,
+                Attempt::Read { generation: 0 },
             )
             .unwrap();
     }
@@ -2757,7 +2759,7 @@ fn a_withheld_os_grant_is_one_fact_per_family_and_never_a_login_problem() {
             SyncScope::Tasks,
             LIST,
             &withheld("reminders: Denied"),
-            false,
+            Attempt::Read { generation: 0 },
         )
         .unwrap();
 
@@ -2767,13 +2769,250 @@ fn a_withheld_os_grant_is_one_fact_per_family_and_never_a_login_problem() {
     assert!(acc.no_access);
     assert!(!acc.auth_suspected, "a withheld grant is no login problem");
     assert_eq!(acc.cause, RefreshCause::Access);
-    assert_eq!(acc.rank, 2);
+    assert_eq!(acc.rank, RefreshCause::Access.rank());
     let shown: Vec<(&str, &str)> = acc
         .errors
         .iter()
         .map(|e| (e.scope.as_str(), e.container_id.as_str()))
         .collect();
     assert_eq!(shown, vec![("calendars", ""), ("task_lists", "")]);
+}
+
+fn busy() -> cal_core::Error {
+    cal_core::Error::provider_busy(cal_core::BusyDetail::RateLimit)
+}
+
+/// How many failures the row of `scope`/`container` has counted.
+fn counted(store: &CacheStore, scope: SyncScope, container: &str) -> i64 {
+    store
+        .db
+        .with_read_conn(|c| {
+            c.query_row(
+                "SELECT consecutive_failures FROM cache_sync_state
+                 WHERE account_id = ?1 AND scope = ?2 AND container_id = ?3",
+                params![ACC, scope.as_str(), container],
+                |r| r.get(0),
+            )
+        })
+        .unwrap()
+}
+
+/// A read's busy failure never counts toward the warning (decision 271):
+/// reads come with every view, and the warm pass decides.
+#[test]
+fn a_busy_read_never_counts_toward_the_warning() {
+    let store = setup();
+    for _ in 0..3 {
+        store
+            .mark_failure(
+                ACC,
+                SyncScope::Events,
+                CAL,
+                &busy(),
+                Attempt::Read { generation: 0 },
+            )
+            .unwrap();
+    }
+    assert_eq!(counted(&store, SyncScope::Events, CAL), 0);
+    assert!(store.refresh_errors().unwrap().is_empty());
+}
+
+/// Automatic rounds count toward the warning, but rounds less than a minute
+/// apart count once (Toni, 2026-10-23): one opening of the phone starts two
+/// or three. Two rounds a minute apart show it; any failure kind.
+#[test]
+fn automatic_rounds_under_a_minute_apart_count_once() {
+    for err in [busy, || cal_core::Error::Network("down".into())] {
+        let store = setup();
+        let round = || {
+            store
+                .mark_failure(
+                    ACC,
+                    SyncScope::Events,
+                    CAL,
+                    &err(),
+                    Attempt::Background { generation: 0 },
+                )
+                .unwrap()
+        };
+        round();
+        round();
+        round();
+        assert_eq!(counted(&store, SyncScope::Events, CAL), 1);
+        assert!(store.refresh_errors().unwrap().is_empty());
+        store.age_counted_round(ACC, SyncScope::Events, CAL);
+        round();
+        assert_eq!(counted(&store, SyncScope::Events, CAL), 2);
+        assert_eq!(store.refresh_errors().unwrap().len(), 1);
+    }
+}
+
+/// A round someone started shows a busy provider at once.
+#[test]
+fn a_forced_busy_round_shows_at_once() {
+    let store = setup();
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            CAL,
+            &busy(),
+            Attempt::Forced { generation: 0 },
+        )
+        .unwrap();
+    assert_eq!(store.refresh_errors().unwrap().len(), 1);
+}
+
+/// A read claimed before Aperio's own write whose busy answer comes after a
+/// newer read's never lifts the newer pause, nor forgets what it noted
+/// (decision 271).
+#[test]
+fn an_older_reads_busy_answer_keeps_the_newer_pause() {
+    let store = setup();
+    let week = DateRange::new(
+        chrono::Utc.with_ymd_and_hms(2026, 6, 15, 0, 0, 0).unwrap(),
+        chrono::Utc.with_ymd_and_hms(2026, 6, 22, 0, 0, 0).unwrap(),
+    );
+    // Aperio's own write moves the calendar to generation 1.
+    store.invalidate(ACC, SyncScope::Events, "cal-1").unwrap();
+    let now = store.refresh_generation(ACC, SyncScope::Events, "cal-1");
+    assert!(now > 0);
+    // The newer read, claimed at it, meets the busy provider for a week.
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            "cal-1",
+            &busy(),
+            Attempt::Read { generation: now },
+        )
+        .unwrap();
+    store.note_uncovered_busy(ACC, SyncScope::Events, "cal-1", now, week);
+    assert!(store.busy_paused(ACC, SyncScope::Events, "cal-1"));
+    assert!(!store.ask_uncovered(ACC, SyncScope::Events, "cal-1", week));
+    // The older read's busy answer comes last.
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            "cal-1",
+            &busy(),
+            Attempt::Read {
+                generation: now - 1,
+            },
+        )
+        .unwrap();
+    assert!(store.busy_paused(ACC, SyncScope::Events, "cal-1"));
+    assert!(!store.ask_uncovered(ACC, SyncScope::Events, "cal-1", week));
+}
+
+/// The busy pause ends on a success, on another kind of failure and on
+/// Aperio's own write, and outlives a restart.
+#[test]
+fn the_busy_pause_ends_and_outlives_a_restart() {
+    let store = setup();
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Calendars,
+            "",
+            &busy(),
+            Attempt::Read { generation: 0 },
+        )
+        .unwrap();
+    assert!(store.busy_paused(ACC, SyncScope::Calendars, ""));
+    // A restart: a new store on the same database.
+    let restarted = CacheStore::new(store.db.clone());
+    assert!(restarted.busy_paused(ACC, SyncScope::Calendars, ""));
+    // Another kind of failure lifts it.
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Calendars,
+            "",
+            &cal_core::Error::Network("down".into()),
+            Attempt::Read { generation: 0 },
+        )
+        .unwrap();
+    assert!(!store.busy_paused(ACC, SyncScope::Calendars, ""));
+    // Busy again, then a success.
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Calendars,
+            "",
+            &busy(),
+            Attempt::Read { generation: 0 },
+        )
+        .unwrap();
+    assert!(store.busy_paused(ACC, SyncScope::Calendars, ""));
+    store.replace_calendars(ACC, &[]).unwrap();
+    assert!(!store.busy_paused(ACC, SyncScope::Calendars, ""));
+    // Busy again, then Aperio's own write.
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Calendars,
+            "",
+            &busy(),
+            Attempt::Read { generation: 0 },
+        )
+        .unwrap();
+    store.invalidate(ACC, SyncScope::Calendars, "").unwrap();
+    assert!(!store.busy_paused(ACC, SyncScope::Calendars, ""));
+}
+
+/// An account leads with the most severe of its rows: access before auth
+/// before a busy provider before anything else (decisions 181, 272).
+#[test]
+fn an_account_ranks_busy_between_other_and_auth() {
+    let lead = |rows: &[(&str, cal_core::Error)]| {
+        let store = setup();
+        for (cal, err) in rows {
+            store
+                .mark_failure(
+                    ACC,
+                    SyncScope::Events,
+                    cal,
+                    err,
+                    Attempt::Forced { generation: 0 },
+                )
+                .unwrap();
+        }
+        let errors = store.refresh_errors().unwrap();
+        (errors[0].cause, errors[0].rank)
+    };
+    let other = || cal_core::Error::Network("down".into());
+    let auth = || cal_core::Error::Authentication("refused".into());
+    assert_eq!(
+        lead(&[("a", other()), ("b", busy())]),
+        (RefreshCause::Busy, 1)
+    );
+    assert_eq!(
+        lead(&[("a", busy()), ("b", auth())]),
+        (RefreshCause::Auth, 2)
+    );
+    assert_eq!(lead(&[("a", other())]), (RefreshCause::Other, 0));
+    assert_eq!(RefreshCause::Access.rank(), 3);
+}
+
+/// A busy row never reads as a login problem, even when its text holds
+/// "403": its kind is busy, and the kind decides.
+#[test]
+fn a_busy_row_never_reads_as_a_login_problem() {
+    let store = setup();
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            CAL,
+            &cal_core::Error::Forbidden("provider-busy: user-rate-limit (403)".into()),
+            Attempt::Forced { generation: 0 },
+        )
+        .unwrap();
+    let errors = store.refresh_errors().unwrap();
+    assert_eq!(errors.len(), 1);
+    assert!(!errors[0].auth_suspected, "{errors:?}");
 }
 
 #[test]
@@ -2789,7 +3028,7 @@ fn an_account_leads_with_its_most_severe_row() {
             SyncScope::Calendars,
             "",
             &cal_core::Error::Network("down".into()),
-            true,
+            Attempt::Forced { generation: 0 },
         )
         .unwrap();
     store
@@ -2798,7 +3037,7 @@ fn an_account_leads_with_its_most_severe_row() {
             SyncScope::Tasks,
             LIST,
             &withheld("reminders: Denied"),
-            false,
+            Attempt::Read { generation: 0 },
         )
         .unwrap();
     let errors = store.refresh_errors().unwrap();
@@ -2843,7 +3082,7 @@ fn a_withheld_family_hides_its_older_container_errors_too() {
             SyncScope::Calendars,
             "",
             &withheld("calendars: Denied"),
-            false,
+            Attempt::Read { generation: 0 },
         )
         .unwrap();
 
@@ -2873,7 +3112,7 @@ fn a_withheld_family_blocks_its_reads_until_the_listing_succeeds() {
             SyncScope::Events,
             CAL,
             &withheld("calendars: Denied"),
-            false,
+            Attempt::Read { generation: 0 },
         )
         .unwrap();
     assert!(store.access_withheld(ACC, SyncScope::Events));
@@ -2896,7 +3135,7 @@ fn another_failure_does_not_block_the_reads() {
             SyncScope::Calendars,
             "",
             &cal_core::Error::Network("down".into()),
-            true,
+            Attempt::Forced { generation: 0 },
         )
         .unwrap();
     assert!(!store.access_withheld(ACC, SyncScope::Events));
@@ -2907,14 +3146,32 @@ fn a_failure_is_news_once() {
     let store = setup();
     let err = withheld("calendars: Denied");
     assert!(store
-        .mark_failure(ACC, SyncScope::Events, CAL, &err, false)
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            CAL,
+            &err,
+            Attempt::Read { generation: 0 }
+        )
         .unwrap());
     assert!(!store
-        .mark_failure(ACC, SyncScope::Events, CAL, &err, false)
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            CAL,
+            &err,
+            Attempt::Read { generation: 0 }
+        )
         .unwrap());
     let other = cal_core::Error::Network("down".into());
     assert!(store
-        .mark_failure(ACC, SyncScope::Events, CAL, &other, false)
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            CAL,
+            &other,
+            Attempt::Read { generation: 0 }
+        )
         .unwrap());
 }
 
@@ -2931,7 +3188,7 @@ fn a_contacts_resync_keeps_the_last_success() {
             SyncScope::Contacts,
             LIST,
             &cal_core::Error::Network("down".into()),
-            true,
+            Attempt::Forced { generation: 0 },
         )
         .unwrap();
     let errors = store.refresh_errors().unwrap();
@@ -2951,7 +3208,7 @@ fn a_full_resync_keeps_the_last_success() {
             SyncScope::Calendars,
             "",
             &withheld("calendars: Denied"),
-            true,
+            Attempt::Forced { generation: 0 },
         )
         .unwrap();
     let errors = store.refresh_errors().unwrap();

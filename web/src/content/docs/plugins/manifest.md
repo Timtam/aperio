@@ -337,6 +337,13 @@ own registration, and the account records only *which* one it was (a marker plus
 a short fingerprint), never the credential. Half a pair — an id typed with the
 secret left blank — is refused rather than quietly completed.
 
+A failed phase comes back to the host as text. Build it with
+`plugin_sdk::auth_error(phase, &error)` from the `cal_core::Error` your adapter
+maps the failure to: a message that starts with a refusal or leftover token
+(a throttled token endpoint's `provider-busy`) keeps it first, so the host
+says the provider is busy instead of asking to sign in again; anything else
+reads `phase: error`.
+
 ### `host_channel`
 
 ```json

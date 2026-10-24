@@ -1,6 +1,7 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { readErrorMessage } from '@aperio/shared';
 import {
   AccessibilityInfo,
   findNodeHandle,
@@ -114,13 +115,6 @@ export interface SyncTargetAccountPickerProps {
   onChanged: () => void | Promise<void>;
 }
 
-/** Loading the account list is not a sync failure — it never carries a code,
- *  so it keeps the plain message. Everything the engine raises goes through
- *  `useSyncErrorMessage` instead. */
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 export function SyncTargetAccountPicker({
   currentAccountId,
   active,
@@ -197,13 +191,13 @@ export function SyncTargetAccountPicker({
       );
       setPins(found);
     } catch (err) {
-      setLoadError(errorMessage(err));
+      setLoadError(readErrorMessage(err, t));
     } finally {
       setLoaded(true);
     }
     // Re-run when the language changes: each adapter names its own kinds,
     // so the answer is only in the language it was asked for.
-  }, [i18n.language]);
+  }, [i18n.language, t]);
 
   // Re-read on every focus, not just on mount: the "no accounts yet" route
   // below sends the user to the accounts screen to add one, and coming back is

@@ -29,6 +29,7 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
   'copy-unreadable': 'dialogs.event.writeError.copyUnreadable',
   'exceptions-would-be-lost': 'dialogs.event.writeError.exceptionsWouldBeLost',
   'deletions-not-kept': 'dialogs.event.writeError.deletionsNotKept',
+  'provider-busy': 'dialogs.event.writeError.providerBusy',
 };
 
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];
@@ -46,17 +47,20 @@ const REFUSAL_REASON_KEYS: Record<WriteRefusal, string> = {
   'copy-unreadable': 'dialogs.event.writeError.reason.copyUnreadable',
   'exceptions-would-be-lost': 'dialogs.event.writeError.reason.exceptionsWouldBeLost',
   'deletions-not-kept': 'dialogs.event.writeError.reason.deletionsNotKept',
+  'provider-busy': 'dialogs.event.writeError.reason.providerBusy',
 };
 
 /** The sentence each leftover reads as (`cal_core::WriteLeftover`): something
  *  was written and may still stand. Typed by the generated union, as above. */
 const LEFTOVER_KEYS: Record<WriteLeftover, string> = {
   'created-may-stand': 'dialogs.event.writeError.createdMayStand',
+  'partly-saved': 'dialogs.event.writeError.partlySaved',
 };
 
 /** The same leftovers as a reason alone. */
 const LEFTOVER_REASON_KEYS: Record<WriteLeftover, string> = {
   'created-may-stand': 'dialogs.event.writeError.reason.createdMayStand',
+  'partly-saved': 'dialogs.event.writeError.reason.partlySaved',
 };
 
 const LEFTOVER_TOKENS = Object.keys(LEFTOVER_KEYS) as WriteLeftover[];
@@ -68,6 +72,10 @@ const INVITED = 'invited';
 /** The reason a step-wise write gives when its steps took too long
  *  (`cal_core::step_write::OUT_OF_TIME`). */
 const OUT_OF_TIME = 'time';
+
+/** The reason a step-wise write gives when the provider kept asking it to wait
+ *  (`cal_core::step_write::PROVIDER_BUSY`, decision 276). */
+const PROVIDER_BUSY = 'busy';
 
 /**
  * The detail of a write that settles in steps (`cal_core::step_detail`): its
@@ -158,10 +166,50 @@ export function eventWriteLeftover(
       leftover,
       key: LEFTOVER_KEYS[leftover],
       detail,
-      invited: stepDetail(detail).invited,
+      // Only a series that may stand can stand in the invitees' calendars
+      // (228); a save made in part names its step, never "invited".
+      invited: leftover === 'created-may-stand' && stepDetail(detail).invited,
     };
   }
   return null;
+}
+
+/** The step a task's status request goes under (`cal_core::STATUS_STEP`). */
+const STATUS_STEP = 'status';
+
+/**
+ * Whether a task save that failed still completed its status change: it
+ * stands in part at a step other than the status request
+ * (`cal_core::Error::status_landed`, decision 277) — Vikunja's assignees or
+ * Graph's extension after the fields went. Pinned to the `status_landed`
+ * rows of `writeOutcome.json`.
+ */
+export function writeStatusLanded(err: unknown): boolean {
+  const leftover = eventWriteLeftover(err);
+  return leftover?.leftover === 'partly-saved' && leftover.detail !== STATUS_STEP;
+}
+
+/**
+ * Whether the provider turned the request away because it is busy (decision
+ * 270), whichever error carries the token: nothing was written, and trying
+ * again later may work.
+ */
+export function isProviderBusy(err: unknown): boolean {
+  return eventWriteRefusal(err)?.refusal === 'provider-busy';
+}
+
+/**
+ * Whether the sentence for `err` says the provider is busy: a busy provider
+ * ({@link isProviderBusy}), or a new series taken back because it was busy
+ * (`deletions-not-kept: busy`, decision 276). Such a sentence ends with "try
+ * again later" (decisions 272, 278).
+ */
+export function saysBusy(err: unknown): boolean {
+  if (isProviderBusy(err)) return true;
+  const refusal = eventWriteRefusal(err);
+  return (
+    refusal?.refusal === 'deletions-not-kept' && stepDetail(refusal.detail).why === PROVIDER_BUSY
+  );
 }
 
 /**
@@ -194,11 +242,13 @@ const REFUSED_CODES = new Set([
  *
  * A refusal token or a refusing code says so. Anything else may have reached
  * the provider before its answer was lost — a network failure above all, but
- * also a protocol error on an answer that could not be read, or an error that
- * arrived without a code (on the phone, every code but `forbidden`, `conflict`
- * and `network` does, see TODO B9). Those are never taken as "nothing
- * happened": a caller that undoes on the strength of it would undo half of a
- * write that went through.
+ * also a protocol error on an answer that could not be read, or an error
+ * without a code. The desktop hands every error over with its code, and so
+ * does the phone's Android module (`hostCoded`, TODO B9); on iOS the code is
+ * lost on the way to JavaScript (TODO "iPhone: verliert Expo den
+ * Fehlercode?"), so there only a token reads. Those are never taken as
+ * "nothing happened": a caller that undoes on the strength of it would undo
+ * half of a write that went through.
  */
 export function writeNeverLanded(err: unknown): boolean {
   // Something stands that could not be taken back, whatever code carried it.
@@ -206,6 +256,131 @@ export function writeNeverLanded(err: unknown): boolean {
   if (eventWriteRefusal(err)) return true;
   const code = codedError(err)?.code;
   return code != null && REFUSED_CODES.has(code);
+}
+
+/** How the core writes each kind of error it hands over under a code
+ *  (`cal_core::Error`'s display): `afterLanded` keeps it behind the step, as
+ *  the core does. */
+const KIND_TEXT: Record<string, string> = {
+  auth: 'authentication failed',
+  forbidden: 'access denied',
+  not_found: 'resource not found',
+  conflict: 'conflict (ETag / precondition failed)',
+  network: 'network error',
+  protocol: 'protocol error',
+  invalid_input: 'invalid input',
+  unsupported: 'operation not supported by adapter',
+  internal: 'internal error',
+};
+
+/**
+ * What a failed request of a save becomes when an earlier request of the same
+ * save had landed (decision 277): never an error a surface reads as "nothing
+ * was changed". A busy provider leaves the change partly saved; a network
+ * error that may have landed stays as it is; anything else — a refusal above
+ * all — becomes a network error that keeps its text behind `step`, a word for
+ * the log. The same rule as `cal_core::Error::after_landed`, for the saves a
+ * surface sends as several calls (a move's subtasks after their parent, a
+ * cascade); both read the `after_landed` rows of `writeOutcome.json`. An
+ * error without a code (one a surface threw itself) keeps its text the same
+ * way — a leftover without one stays the leftover, as the hosts carry it
+ * under `network`: on iOS no host error reaches JavaScript with its code
+ * (TODO "iPhone: verliert Expo den Fehlercode?"), and in front of `step` its
+ * token would no longer be read.
+ */
+export function afterLanded(err: unknown, step: string): CodedError {
+  if (isProviderBusy(err)) return { code: 'network', message: `partly-saved: ${step}` };
+  const code = codedError(err)?.code;
+  const message = errorMessageText(err);
+  if (code === 'network' && !writeNeverLanded(err)) return { code, message };
+  if (code == null && eventWriteLeftover(err)) return { code: 'network', message };
+  const kind = code == null ? null : (KIND_TEXT[code] ?? code);
+  return {
+    code: 'network',
+    message: kind == null ? `${step}: ${message}` : `${step}: ${kind}: ${message}`,
+  };
+}
+
+/**
+ * A write that follows one of the same save that landed: its failure reads as
+ * {@link afterLanded} says, never as "nothing was changed".
+ */
+export async function writeAfterLanded<T>(step: string, write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    throw afterLanded(err, step);
+  }
+}
+
+/**
+ * The removal of an original after its copy landed — one occurrence moved to
+ * another calendar or carved out of its series (decision 277). `true` when it
+ * went; `false` when a busy provider kept the original: the copy stands, and
+ * the caller says where the original stayed, as any move whose original
+ * stayed does (`originalKeptSentence`) — doing it again would make a second
+ * copy. Any other failure is a later step's, never "nothing was changed".
+ */
+export async function removeOriginalAfterCopy(
+  step: string,
+  remove: () => Promise<unknown>,
+): Promise<boolean> {
+  try {
+    await remove();
+    return true;
+  } catch (err) {
+    if (isProviderBusy(err)) return false;
+    throw afterLanded(err, step);
+  }
+}
+
+/**
+ * What one action of several writes says when some of them failed
+ * (decision 277): the first failure, read as {@link afterLanded} says where
+ * another write landed or may have — one whose failure is not a certain
+ * "never landed", as a lost answer — and as itself where every write
+ * certainly changed nothing. The Rust walks keep an answer that may have
+ * landed over a later busy one for the same reason.
+ */
+export function failureOfWrites(
+  step: string,
+  failures: readonly unknown[],
+  landed: boolean,
+): unknown {
+  const [first] = failures;
+  const mayStand = landed || failures.some((err) => !writeNeverLanded(err));
+  return mayStand ? afterLanded(first, step) : first;
+}
+
+/**
+ * The writes one action makes together (the day-start review's "all to
+ * today"): every one is attempted, side by side or, with `oneAtATime`, one
+ * after the other. What landed comes back, and the failure reads as
+ * {@link failureOfWrites} says — never "nothing was changed" while another
+ * write landed or may have. `null` when every write landed.
+ */
+export async function writeAll<T>(
+  step: string,
+  items: readonly T[],
+  write: (item: T) => Promise<unknown>,
+  { oneAtATime = false }: { oneAtATime?: boolean } = {},
+): Promise<{ landed: T[]; failure: unknown }> {
+  let results: PromiseSettledResult<unknown>[];
+  if (oneAtATime) {
+    results = [];
+    for (const item of items) {
+      const [result] = await Promise.allSettled([write(item)]);
+      results.push(result);
+    }
+  } else {
+    results = await Promise.allSettled(items.map((item) => write(item)));
+  }
+  const landed = items.filter((_, i) => results[i].status === 'fulfilled');
+  const failures = results
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map((result) => result.reason as unknown);
+  if (failures.length === 0) return { landed, failure: null };
+  return { landed, failure: failureOfWrites(step, failures, landed.length > 0) };
 }
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
@@ -253,13 +428,12 @@ export function eventWriteFailureReason(err: unknown, t: Translate): string {
   if (leftover) return t(LEFTOVER_REASON_KEYS[leftover.leftover]);
   const refusal = eventWriteRefusal(err);
   if (refusal) {
-    // A series taken back because its steps took too long says so (decision
-    // 213), as its sentence does.
-    if (
-      refusal.refusal === 'deletions-not-kept' &&
-      stepDetail(refusal.detail).why === OUT_OF_TIME
-    ) {
-      return t('dialogs.event.writeError.reason.deletionsNotKeptTime');
+    // A series taken back because its steps took too long, or because the
+    // provider was busy, says so (decisions 213, 276), as its sentence does.
+    if (refusal.refusal === 'deletions-not-kept') {
+      const { why } = stepDetail(refusal.detail);
+      if (why === OUT_OF_TIME) return t('dialogs.event.writeError.reason.deletionsNotKeptTime');
+      if (why === PROVIDER_BUSY) return t('dialogs.event.writeError.reason.deletionsNotKeptBusy');
     }
     return t(REFUSAL_REASON_KEYS[refusal.refusal], { detail: refusal.detail });
   }
@@ -288,7 +462,11 @@ function refusalSentence(
   }
   const { invited, why } = stepDetail(refusal.detail);
   const sentence =
-    why === OUT_OF_TIME ? t('dialogs.event.writeError.deletionsNotKeptTime') : t(refusal.key);
+    why === OUT_OF_TIME
+      ? t('dialogs.event.writeError.deletionsNotKeptTime')
+      : why === PROVIDER_BUSY
+        ? t('dialogs.event.writeError.deletionsNotKeptBusy')
+        : t(refusal.key);
   return invited ? `${sentence} ${t('dialogs.event.writeError.invitationsCancelledToo')}` : sentence;
 }
 

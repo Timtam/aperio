@@ -3,7 +3,9 @@
 /**
  * Why a refresh fails, in the order the surfaces lead with it: a withheld
  * grant (only the system settings help), then a login problem (only the
- * user's credentials help), then everything else, which may heal by
- * itself. Declared from least to most severe, so `Ord` is the severity.
+ * user's credentials help), then a busy provider (nothing to do: it heals
+ * by itself, and the surfaces say when Aperio tries again, decision 272),
+ * then everything else. Declared from least to most severe, so `Ord` is the
+ * severity.
  */
-export type RefreshCause = "other" | "auth" | "access";
+export type RefreshCause = "other" | "busy" | "auth" | "access";

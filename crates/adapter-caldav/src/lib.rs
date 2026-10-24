@@ -235,14 +235,18 @@ impl CaldavAdapter {
     /// when the server supports RFC 6578 sync-collection, otherwise a
     /// `ctag:` token, otherwise `None`. Collection-agnostic — shared by
     /// the events, tasks and contacts bootstrap paths.
-    async fn bootstrap_token(&self, url: &Url) -> Option<String> {
+    /// The token a bootstrap mints: the sync-token, else the CTag, else none.
+    /// A busy server ends the bootstrap instead (decision 270): a snapshot
+    /// stored without its token would be read again in full next time.
+    async fn bootstrap_token(&self, url: &Url) -> CoreResult<Option<String>> {
         match sync::read_sync_token(&self.http, url, &self.credentials).await {
-            Ok(Some(st)) => Some(format!("sync:{st}")),
-            _ => ctag::read_ctag(&self.http, url, &self.credentials)
-                .await
-                .ok()
-                .flatten()
-                .map(|c| format!("ctag:{c}")),
+            Ok(Some(st)) => Ok(Some(format!("sync:{st}"))),
+            Err(err) if busy_detail(&err).is_some() => Err(to_core_error(err)),
+            _ => match ctag::read_ctag(&self.http, url, &self.credentials).await {
+                Ok(ctag) => Ok(ctag.map(|c| format!("ctag:{c}"))),
+                Err(err) if busy_detail(&err).is_some() => Err(to_core_error(err)),
+                Err(_) => Ok(None),
+            },
         }
     }
 
@@ -285,7 +289,7 @@ impl CaldavAdapter {
                 // otherwise every retry bootstrap with a different skip set
                 // jittered the visible event count until one clean pass.
                 let new_token = if skipped.is_empty() {
-                    self.bootstrap_token(cal_url).await
+                    self.bootstrap_token(cal_url).await?
                 } else {
                     None
                 };
@@ -298,6 +302,9 @@ impl CaldavAdapter {
                     unfetched: skipped,
                 })
             }
+            // A busy server starts no fallback (decision 270): the windowed
+            // read would meet the same throttle and store a bounded window.
+            Err(err) if busy_detail(&err).is_some() => Err(to_core_error(err)),
             Err(err) => {
                 // The server didn't answer the resource-enumeration PROPFIND, so we
                 // fall back to a windowed time-range read. The cached window then
@@ -314,7 +321,7 @@ impl CaldavAdapter {
                      range read (bounded cache window, complete=false)"
                 );
                 let events = self.read_events(cal_url, range).await?;
-                let new_token = self.bootstrap_token(cal_url).await;
+                let new_token = self.bootstrap_token(cal_url).await?;
                 Ok(ChangeSet {
                     changes: events,
                     deletions: Vec::new(),
@@ -362,6 +369,10 @@ impl CaldavAdapter {
                     changes.append(&mut evs);
                     fetched += n;
                 }
+                // A busy server: no resource is at fault, and asking for each
+                // on its own would only meet the throttle many times
+                // (decision 270). The read fails, and the cache stays.
+                Err(e) if e.is_provider_busy() => return Err(e),
                 // Batch failed and there's more than one resource in it —
                 // isolate the offender by fetching each on its own.
                 Err(_) if batch.len() > 1 => {
@@ -374,6 +385,7 @@ impl CaldavAdapter {
                                 changes.append(&mut evs);
                                 fetched += n;
                             }
+                            Err(e) if e.is_provider_busy() => return Err(e),
                             Err(e) => {
                                 skipped.push(href.clone());
                                 last_err = Some(e);
@@ -474,7 +486,7 @@ impl CaldavAdapter {
         let tasks = tasks::get_tasks(&self.http, list_url, &self.credentials)
             .await
             .map_err(to_core_error)?;
-        let new_token = self.bootstrap_token(list_url).await;
+        let new_token = self.bootstrap_token(list_url).await?;
         Ok(ChangeSet {
             changes: tasks,
             deletions: Vec::new(),
@@ -536,6 +548,8 @@ impl CaldavAdapter {
         .await
         {
             Ok(r) => r,
+            // A busy server starts no full read (decision 270).
+            Err(err) if busy_detail(&err).is_some() => return Err(to_core_error(err)),
             Err(_) => return self.tasks_bootstrap(list_url).await,
         };
         let next_token = result
@@ -579,7 +593,7 @@ impl CaldavAdapter {
         let contacts = contacts::get_contacts(&self.http, book_url, &self.credentials)
             .await
             .map_err(to_core_error)?;
-        let new_token = self.bootstrap_token(book_url).await;
+        let new_token = self.bootstrap_token(book_url).await?;
         Ok(ChangeSet {
             changes: contacts,
             deletions: Vec::new(),
@@ -641,6 +655,8 @@ impl CaldavAdapter {
         .await
         {
             Ok(r) => r,
+            // A busy server starts no full read (decision 270).
+            Err(err) if busy_detail(&err).is_some() => return Err(to_core_error(err)),
             Err(_) => return self.contacts_bootstrap(book_url).await,
         };
         let next_token = result
@@ -711,6 +727,8 @@ impl CaldavAdapter {
         let result =
             match sync::sync_collection(&self.http, cal_url, sync_token, &self.credentials).await {
                 Ok(r) => r,
+                // A busy server starts no full read (decision 270).
+                Err(err) if busy_detail(&err).is_some() => return Err(to_core_error(err)),
                 Err(_) => return self.events_bootstrap(cal_url, range).await,
             };
         let next_token = result
@@ -849,6 +867,9 @@ impl CaldavAdapter {
             &self.credentials,
         )
         .await;
+        if let Some(detail) = scheduling.busy {
+            return Err(CoreError::provider_busy(detail));
+        }
         if scheduling.failed {
             return Err(CoreError::Network(
                 "the account's calendar-user addresses could not be read".into(),
@@ -867,12 +888,15 @@ impl CaldavAdapter {
     /// What a write needs to know about the account on this server. The
     /// account's addresses are left unknown when the scheduling probe keeps
     /// failing; a write that needs them (one that touches a meeting) is then
-    /// refused by [`scheduling::plan_block`], and a plain one goes ahead.
+    /// refused by [`scheduling::plan_block`], and a plain one goes ahead. A
+    /// busy server stops the write instead (decision 270): written without
+    /// the account's addresses, a new meeting would lose its invitees.
     async fn write_ctx(&self) -> CoreResult<WriteCtx> {
         let discovery = self.discover().await.map_err(to_core_error)?;
         let discovery = if discovery.scheduling_probe_failed {
             match self.discovery_with_scheduling().await {
                 Ok(fresh) => fresh,
+                Err(err) if err.is_provider_busy() => return Err(err),
                 Err(_) => {
                     return Ok(WriteCtx {
                         identity: None,
@@ -933,7 +957,14 @@ impl CaldavAdapter {
 /// (decision 144) — must be told that nothing was written.
 fn to_update_error(err: CaldavError) -> CoreError {
     match err {
-        CaldavError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
+        // A busy server answers as itself (decision 270), never as the server
+        // refusing the change: `turned_down_by_status` says which comes first.
+        CaldavError::Http { status, message }
+            if matches!(
+                cal_core::WriteRefusal::turned_down_by_status(status),
+                Some(cal_core::WriteRefusal::ServerRefused)
+            ) =>
+        {
             tracing::warn!(status, %message, "the server refused the update");
             CoreError::Forbidden(
                 cal_core::WriteRefusal::ServerRefused.message(&format!("HTTP {status}")),
@@ -943,9 +974,41 @@ fn to_update_error(err: CaldavError) -> CoreError {
     }
 }
 
+/// Whether the server turned a request away because it is busy, and how
+/// (decision 270): HTTP 429, which did nothing, and a read's 503 with
+/// `Retry-After` (`http::read_failure`). A replay's 429 never gets here: it
+/// may be about a first attempt that landed, and reads as unsure
+/// (`http::WriteAnswer::settled`).
+pub(crate) fn busy_detail(err: &CaldavError) -> Option<cal_core::BusyDetail> {
+    match err {
+        CaldavError::Busy(detail) => Some(*detail),
+        CaldavError::Http { status, .. }
+            if matches!(
+                cal_core::WriteRefusal::turned_down_by_status(*status),
+                Some(cal_core::WriteRefusal::ProviderBusy)
+            ) =>
+        {
+            Some(cal_core::BusyDetail::TooManyRequests)
+        }
+        _ => None,
+    }
+}
+
+/// Whether a write's failure leaves it unsure — it may have landed — as the
+/// shells read it (`cal_core::Error::never_landed`): a walk keeps such an
+/// answer past whatever a later calendar says (277).
+pub(crate) fn may_have_landed(err: &CaldavError) -> bool {
+    busy_detail(err).is_none() && !to_core_error(err.clone()).never_landed()
+}
+
 /// Translate a CalDAV-specific error into the shared `cal_core::Error`
 /// shape so the rest of the app can pattern-match it uniformly.
 fn to_core_error(err: CaldavError) -> CoreError {
+    // Throttling: nothing was done, try later (decision 270).
+    if let Some(detail) = busy_detail(&err) {
+        tracing::debug!(detail = detail.word(), %err, "the server is busy");
+        return CoreError::provider_busy(detail);
+    }
     match err {
         CaldavError::Network(msg) => CoreError::Network(msg),
         CaldavError::Http { status, message } => match status {
@@ -958,6 +1021,7 @@ fn to_core_error(err: CaldavError) -> CoreError {
         CaldavError::Discovery(msg) => CoreError::Protocol(format!("discovery: {msg}")),
         CaldavError::Config(msg) => CoreError::InvalidInput(msg),
         CaldavError::Forbidden(msg) => CoreError::Forbidden(msg),
+        CaldavError::Busy(detail) => CoreError::provider_busy(detail),
     }
 }
 
@@ -1146,7 +1210,7 @@ impl CalendarFeature for CaldavAdapter {
             // the loop below falls through to the not-found error.
             None => Vec::new(),
         };
-        let mut last_err: Option<CoreError> = None;
+        let mut failures = events::WalkFailures::default();
         for cal in cals {
             let cal_url = match Url::parse(&cal.id) {
                 Ok(u) => u,
@@ -1162,6 +1226,13 @@ impl CalendarFeature for CaldavAdapter {
             .await
             {
                 Ok(()) => return Ok(()),
+                // A busy server ends the walk (decision 270): asking the next
+                // calendar now meets the same throttle, and nothing was done.
+                // A cancel that may have landed on an earlier calendar stays
+                // unsure (277).
+                Err(err) if busy_detail(&err).is_some() => {
+                    return Err(to_core_error(failures.stopped(err)))
+                }
                 Err(err) => {
                     // 404 just means "this event lives in a different
                     // calendar" — keep walking. Anything else we
@@ -1169,11 +1240,11 @@ impl CalendarFeature for CaldavAdapter {
                     if matches!(err, CaldavError::Http { status: 404, .. }) {
                         continue;
                     }
-                    last_err = Some(to_core_error(err));
+                    failures.keep(err);
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| {
+        Err(failures.finish().map(to_core_error).unwrap_or_else(|| {
             CoreError::NotFound(format!("event '{event_id}' not found in any calendar"))
         }))
     }
@@ -1237,7 +1308,7 @@ impl CalendarFeature for CaldavAdapter {
             let outcome =
                 events::delete_event(&self.http, &cal_url, event_id, None, &self.credentials).await;
             if walk.step(outcome) {
-                return Ok(());
+                break;
             }
         }
         walk.finish(format!("event '{event_id}' not found in any calendar"))
@@ -1256,7 +1327,21 @@ impl CalendarFeature for CaldavAdapter {
         // (empty slots per address) rather than erroring.
         let discovery = match self.discover().await {
             Ok(d) => d,
+            // A busy server says so (decision 270), where "unknown" read as
+            // every attendee free.
+            Err(err) if busy_detail(&err).is_some() => return Err(to_core_error(err)),
             Err(_) => return Ok(freebusy::unknown(emails)),
+        };
+        // A scheduling probe that met a busy server left no outbox: asked
+        // again, a busy answer is said rather than read as no scheduling.
+        let discovery = if discovery.scheduling_probe_failed {
+            match self.discovery_with_scheduling().await {
+                Ok(fresh) => fresh,
+                Err(err) if err.is_provider_busy() => return Err(err),
+                Err(_) => discovery,
+            }
+        } else {
+            discovery
         };
         let (Some(outbox), Some(organizer)) = (
             discovery.schedule_outbox_url,
@@ -1444,7 +1529,7 @@ impl TasksFeature for CaldavAdapter {
             let outcome =
                 tasks::delete_task(&self.http, &url, task_id, None, &self.credentials).await;
             if walk.step(outcome) {
-                return Ok(());
+                break;
             }
         }
         walk.finish(format!("task '{task_id}' not found in any list"))
@@ -1608,7 +1693,7 @@ impl ContactsFeature for CaldavAdapter {
         let lists = contacts::list_contact_lists(&self.http, home, &self.credentials)
             .await
             .map_err(to_core_error)?;
-        let mut last_err: Option<CaldavError> = None;
+        let mut failures = events::WalkFailures::default();
         for list in lists {
             let Ok(url) = Url::parse(&list.id) else {
                 continue;
@@ -1617,15 +1702,20 @@ impl ContactsFeature for CaldavAdapter {
                 .await
             {
                 Ok(()) => return Ok(()),
+                // A busy server ends the walk (decision 270); a delete that
+                // may have landed in an earlier book stays unsure (277).
+                Err(err) if busy_detail(&err).is_some() => {
+                    return Err(to_core_error(failures.stopped(err)))
+                }
                 Err(err) => {
                     if matches!(err, CaldavError::Http { status: 404, .. }) {
                         continue;
                     }
-                    last_err = Some(err);
+                    failures.keep(err);
                 }
             }
         }
-        Err(last_err.map(to_core_error).unwrap_or_else(|| {
+        Err(failures.finish().map(to_core_error).unwrap_or_else(|| {
             CoreError::NotFound(format!(
                 "contact '{contact_id}' not found in any address book"
             ))
@@ -1715,11 +1805,19 @@ mod update_refusal_tests {
     use super::*;
 
     /// A status with which the server turned the update down whole is a
-    /// refusal (decision 144); a server failure and the named statuses keep
-    /// their error.
+    /// refusal (decision 144), a 429 a busy provider (270); a server failure
+    /// and the named statuses keep their error.
     #[test]
     fn an_update_the_server_turned_down_is_a_refusal() {
-        for status in [400, 413, 415, 422, 429, 507] {
+        assert_eq!(
+            to_update_error(CaldavError::Http {
+                status: 429,
+                message: "slow down".into(),
+            })
+            .message(),
+            "provider-busy: http-429"
+        );
+        for status in [400, 413, 415, 422, 507] {
             match to_update_error(CaldavError::Http {
                 status,
                 message: "no".into(),
@@ -1821,6 +1919,278 @@ mod tests {
         let second = adapter.discover().await.unwrap();
         assert_eq!(first.calendar_home_url, second.calendar_home_url);
         assert!(adapter.cached_calendar_home().is_some());
+    }
+
+    /// A well-known probe a busy server turned away — 429, or 503 with
+    /// Retry-After — ends discovery as busy: the base-URL fallback would run
+    /// discovery somewhere the server never pointed to (decision 270).
+    #[tokio::test]
+    async fn a_busy_well_known_probe_starts_no_fallback() {
+        for (status, wait) in [(429, None), (503, Some("30"))] {
+            let mut server = Server::new_async().await;
+            let mut probe = server
+                .mock("GET", "/.well-known/caldav")
+                .with_status(status);
+            if let Some(wait) = wait {
+                probe = probe.with_header("retry-after", wait);
+            }
+            probe.create_async().await;
+            let fallback = server.mock("PROPFIND", "/").expect(0).create_async().await;
+            let adapter = build_adapter(&server);
+            let err = adapter.discover().await.unwrap_err();
+            assert!(busy_detail(&err).is_some(), "{status}: {err:?}");
+            fallback.assert_async().await;
+        }
+    }
+
+    /// A scheduling probe a busy server turned away is no answer about the
+    /// server: never cached as "does not schedule", it is asked again, and
+    /// says busy (decision 270).
+    #[tokio::test]
+    async fn a_busy_scheduling_probe_is_asked_again_and_says_busy() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("calendar-home-set".into()))
+            .with_status(207)
+            .with_body(HOME_SET_RESPONSE)
+            .create_async()
+            .await;
+        let busy = server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("schedule-outbox-URL".into()))
+            .with_status(429)
+            .expect(2)
+            .create_async()
+            .await;
+        let adapter = build_adapter(&server);
+        assert!(adapter.discover().await.unwrap().scheduling_probe_failed);
+        let err = adapter.own_identity().await.unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        busy.assert_async().await;
+    }
+
+    /// A busy answer to a home-set probe is no answer about that side: never
+    /// cached as an account without calendars, the listing says busy
+    /// (decision 270).
+    #[tokio::test]
+    async fn a_busy_home_set_probe_is_no_empty_account() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("calendar-home-set".into()))
+            .with_status(429)
+            .create_async()
+            .await;
+        let adapter = build_adapter(&server);
+        let err = adapter.list_calendars().await.unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        assert!(adapter.cached_calendar_home().is_none());
+    }
+
+    /// A new event needs the account's addresses to keep its invitees: a
+    /// scheduling probe the server is still too busy to answer stops the
+    /// save as busy, and nothing is written (decision 270).
+    #[tokio::test]
+    async fn a_busy_scheduling_probe_stops_a_write() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("calendar-home-set".into()))
+            .with_status(207)
+            .with_body(HOME_SET_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("schedule-outbox-URL".into()))
+            .with_status(429)
+            .create_async()
+            .await;
+        let put = server
+            .mock("PUT", mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+        let adapter = build_adapter(&server);
+        let event: NewEvent = serde_json::from_value(serde_json::json!({
+            "title": "Planning", "description": null, "location": null,
+            "start": "2026-06-20T09:00:00Z", "end": "2026-06-20T09:30:00Z",
+            "all_day": false, "recurrence": null, "color_label": null,
+            "reminders": [], "sound": null,
+            "attendees": ["bob@example.com"]
+        }))
+        .unwrap();
+        let calendar = format!("{}/calendars/alice/work/", server.url());
+        let err = adapter.create_event(&calendar, event).await.unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        put.assert_async().await;
+    }
+
+    /// A delta a busy server turned away starts no full read: the bootstrap
+    /// would meet the same throttle (decision 270).
+    #[tokio::test]
+    async fn a_busy_delta_starts_no_bootstrap() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("REPORT", "/calendars/alice/work/")
+            .with_status(429)
+            .create_async()
+            .await;
+        let bootstrap = server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .expect(0)
+            .create_async()
+            .await;
+        let adapter = build_adapter(&server);
+        let range = DateRange::new(chrono::Utc::now(), chrono::Utc::now());
+        let err = adapter
+            .get_events_delta(
+                &format!("{}/calendars/alice/work/", server.url()),
+                range,
+                Some("sync:tok-1"),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        bootstrap.assert_async().await;
+    }
+
+    /// A bootstrap whose sync-token read a busy server turned away ends
+    /// there: taken as "no sync-token support", the collection would go on
+    /// the CTag path for good (decision 270).
+    #[tokio::test]
+    async fn a_busy_sync_token_read_ends_the_bootstrap() {
+        let mut server = Server::new_async().await;
+        // The enumeration answers with an empty calendar: nothing to fetch.
+        server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("getetag".into()))
+            .with_status(207)
+            .with_body(r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"/>"#)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("sync-token".into()))
+            .with_status(429)
+            .create_async()
+            .await;
+        let ctag = server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("getctag".into()))
+            .with_status(207)
+            .expect(0)
+            .create_async()
+            .await;
+        let adapter = build_adapter(&server);
+        let range = DateRange::new(chrono::Utc::now(), chrono::Utc::now());
+        let err = adapter
+            .get_events_delta(
+                &format!("{}/calendars/alice/work/", server.url()),
+                range,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        ctag.assert_async().await;
+    }
+
+    /// A multiget a busy server turned away is not asked again one resource
+    /// at a time: no resource is at fault (decision 270).
+    #[tokio::test]
+    async fn a_busy_multiget_is_not_asked_resource_by_resource() {
+        let mut server = Server::new_async().await;
+        let changed = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/calendars/alice/work/a.ics</d:href><d:propstat><d:prop><d:getetag>"1"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+  <d:response><d:href>/calendars/alice/work/b.ics</d:href><d:propstat><d:prop><d:getetag>"2"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+  <d:sync-token>tok-2</d:sync-token>
+</d:multistatus>"#;
+        server
+            .mock("REPORT", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("sync-collection".into()))
+            .with_status(207)
+            .with_body(changed)
+            .create_async()
+            .await;
+        let multiget = server
+            .mock("REPORT", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("calendar-multiget".into()))
+            .with_status(429)
+            .expect(1)
+            .create_async()
+            .await;
+        let adapter = build_adapter(&server);
+        let range = DateRange::new(chrono::Utc::now(), chrono::Utc::now());
+        let err = adapter
+            .get_events_delta(
+                &format!("{}/calendars/alice/work/", server.url()),
+                range,
+                Some("sync:tok-1"),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        multiget.assert_async().await;
+    }
+
+    /// A read answered 503 with `Retry-After` is a busy server; without the
+    /// wait, it says nothing either way.
+    #[tokio::test]
+    async fn a_read_503_with_a_wait_is_busy() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("REPORT", "/calendars/alice/work/")
+            .with_status(503)
+            .with_header("retry-after", "30")
+            .create_async()
+            .await;
+        let adapter = build_adapter(&server);
+        let range = DateRange::new(chrono::Utc::now(), chrono::Utc::now());
+        let err = adapter
+            .get_events_delta(
+                &format!("{}/calendars/alice/work/", server.url()),
+                range,
+                Some("sync:tok-1"),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.message(), "provider-busy: http-503");
     }
 
     /// A scheduling probe that failed on a server error leaves the account's

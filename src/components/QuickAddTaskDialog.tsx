@@ -9,19 +9,23 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import {
+  eventWriteLeftover,
   findOffer,
   offerOptions,
   offerUsable,
   pickedOverOffer,
   selectableTaskLists,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import { createTask as apiCreateTask, isCommandError } from '../api/client';
+import { createTask as apiCreateTask } from '../api/client';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
 import { useViewState } from '../state/viewStateContext';
 import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import { Modal } from './Modal';
 import { QuickDateButton } from './QuickDateButton';
 import { TitleSuggestBox } from './TitleSuggestBox';
@@ -53,7 +57,8 @@ export function QuickAddTaskDialog({
   const announce = useAnnouncer();
   const { taskLists, selectedTaskListIds } = useCalendarStore();
   const { showHiddenTaskListTargets } = useViewState();
-  const { openTaskDialog } = useDialogState();
+  const { openTaskDialog, invalidateData } = useDialogState();
+  const { notice, showNotice } = useCloseOnlyNotice();
 
   const initial = useMemo(
     () => buildInitial(taskLists, selectedTaskListIds, defaultDate),
@@ -184,16 +189,20 @@ export function QuickAddTaskDialog({
         announce(t('dialogs.task.created', { title: trimmed }));
         onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          setError(String(err));
+        // Something stands that saving again would write twice: an item saved
+        // without one of its follow-up steps (273). Said in place of the
+        // form, which only closes, and the data reloads.
+        if (eventWriteLeftover(err)) {
+          invalidateData();
+          showNotice(writeErrorMessage(err, t));
+          return;
         }
+        setError(writeErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
     },
-    [title, listId, date, announce, onClose, t],
+    [title, listId, date, announce, onClose, t, invalidateData, showNotice],
   );
 
   const openFullDialog = useCallback(() => {
@@ -216,6 +225,17 @@ export function QuickAddTaskDialog({
     currentId: listId,
     includeHidden: showHiddenTaskListTargets,
   });
+
+  if (notice) {
+    return (
+      <CloseOnlyNotice
+        title={t('dialogs.quickAddTask.title')}
+        sentence={notice}
+        onClose={onClose}
+        className="modal--form modal--narrow"
+      />
+    );
+  }
 
   return (
     <Modal

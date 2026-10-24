@@ -4,9 +4,11 @@ import { invoke } from '@tauri-apps/api/core';
 
 import {
   detectConference,
+  eventWriteErrorMessage,
   invitationLocked,
   isRecurringProjection,
   parseDefaultDate,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 // Through the shim, not straight from the package: on the desktop these two
@@ -32,7 +34,7 @@ import type {
   TaskStatus,
 } from '../api/types';
 import { cancellationNotice } from '@aperio/shared';
-import { duplicateTask } from '../components/duplicateActions';
+import { duplicateTaskAndSay } from '../components/duplicateActions';
 import { seriesIdOf } from '../intl/recurrence';
 import { useCalendarStore } from './calendarStoreContext';
 import { useDialogState } from './dialogStateContext';
@@ -310,11 +312,11 @@ export function useChipContextMenu(
           );
           invalidateData();
         } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
+          // A delete that failed may have landed in part — a calendar walk
+          // that lost an answer, a meeting cancelled before its DELETE
+          // failed — so the view reads again, as its Delete key does (277).
+          invalidateData();
+          announce(eventWriteErrorMessage(err, t));
         }
       } else if (selected?.startsWith('color:')) {
         const raw = selected.slice('color:'.length);
@@ -338,11 +340,8 @@ export function useChipContextMenu(
           announce(t('chipMenu.colorSet', { title: event.title }));
           invalidateData();
         } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
+          invalidateData();
+          announce(eventWriteErrorMessage(err, t));
         }
       }
       onAfter?.();
@@ -459,17 +458,7 @@ export function useChipContextMenu(
       } else if (selected === 'duplicate') {
         // Same primitive as the Ctrl+D shortcut and the mobile menu — a flat,
         // in-place copy in the same list (no subtree, parent_id reset).
-        try {
-          await duplicateTask(task);
-          announce(t('actions.duplicated', { title: task.title }));
-          invalidateData();
-        } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
-        }
+        await duplicateTaskAndSay(task, { announce, invalidateData, t });
       } else if (selected === 'move') {
         openMoveCopy({ kind: 'task', task, defaultMode: 'move' });
       } else if (selected === 'copy') {
@@ -493,11 +482,8 @@ export function useChipContextMenu(
           announce(t('chipMenu.broughtToBacklog', { title: task.title }));
           invalidateData();
         } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
+          invalidateData();
+          announce(writeErrorMessage(err, t));
         }
       } else if (selected === 'delete') {
         // Tasks don't have a recurring-occurrence concept on the
@@ -511,11 +497,10 @@ export function useChipContextMenu(
           announce(t('dialogs.task.deleted', { title: task.title }));
           invalidateData();
         } catch (err) {
-          if (isCommandError(err)) {
-            announce(`${err.code}: ${err.message}`);
-          } else {
-            announce(String(err));
-          }
+          // A delete whose answer was lost may have landed: the view reads
+          // again.
+          invalidateData();
+          announce(writeErrorMessage(err, t));
         }
       }
       onAfter?.();

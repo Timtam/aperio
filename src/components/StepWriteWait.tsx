@@ -6,8 +6,9 @@ import { Modal } from './Modal';
 
 /**
  * The "please wait" dialog while a series is created in steps (decisions 227,
- * 265): Exchange takes a new series without its deleted occurrences, and the
- * adapter deletes them again one by one, which can take up to half a minute.
+ * 265): the calendar takes a new series without its deleted occurrences, and
+ * the adapter removes them again one by one, which can take up to half a
+ * minute.
  * Without it a blind user heard silence for that long and could not tell work
  * from a hang, and a sighted one saw a form that looked ready.
  *

@@ -245,5 +245,9 @@ schon belegt ist, sagt Aperio das, bevor der Browser überhaupt aufgeht.
 Version hat sich geändert — das passiert beim Wechsel zwischen einer offiziellen
 Version und einer selbst gebauten. Konto neu verbinden.
 
+**„Der Anbieter ist gerade ausgelastet."** Webex nimmt in kurzer Zeit nicht
+mehr Anfragen an. Am Meeting wurde nichts geändert; versuche es später noch
+einmal. Wie lange Webex warten lässt, steht nur im Protokoll.
+
 Aperios Protokoll (**Einstellungen → Fehlersuche**) hält den fehlgeschlagenen
 Anfragepfad samt Status fest, deine Token niemals.

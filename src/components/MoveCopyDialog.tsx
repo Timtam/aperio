@@ -10,18 +10,21 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import {
+  afterLanded,
   eventWriteErrorMessage,
   eventWriteLeftover,
   invitationLocked,
+  type MovedRow,
+  originalKeptSentence,
   selectableEventCalendars,
   selectableTaskLists,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
   createSection as apiCreateSection,
   createTask as apiCreateTask,
-  isCommandError,
 } from '../api/client';
 import type { Task } from '../api/types';
 import { isSeriesOccurrence } from '../intl/recurrence';
@@ -38,6 +41,8 @@ import type { MoveCopyTarget } from '../state/DialogState';
 import { useDialogState } from '../state/dialogStateContext';
 import { useTasks } from '../state/useTasks';
 import { useViewState } from '../state/viewStateContext';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import { Modal } from './Modal';
 import { useStepWriteWait } from './useStepWriteWait';
 
@@ -80,11 +85,10 @@ export function MoveCopyDialog({
   // The "please wait" dialog while a series is created in steps (decisions
   // 227, 265), and the sentence that a new series may stand (210).
   const { waitDialog, wait } = useStepWriteWait();
-  const [mayStand, setMayStand] = useState<string | null>(null);
-  const mayStandRef = useRef<HTMLParagraphElement>(null);
-  useEffect(() => {
-    if (mayStand) mayStandRef.current?.focus();
-  }, [mayStand]);
+  // What a move or a copy left that doing it again would write twice: a new
+  // series that may stand (210), an item without one of its follow-up steps
+  // (273), an original the provider was too busy to delete (277).
+  const { notice, showNotice } = useCloseOnlyNotice();
   const {
     calendars,
     taskLists,
@@ -212,12 +216,13 @@ export function MoveCopyDialog({
         name,
         position: 0,
       });
-      await loadSections(targetContainerId);
+      // The section stands: a read that fails shows it anyway (277).
+      await loadSections(targetContainerId, { upsert: created });
       setTargetSectionId(created.id);
       announce(t('dialogs.task.section.created', { name: created.name }));
       setSectionDraft(null);
     } catch (err) {
-      setError(isCommandError(err) ? `${err.code}: ${err.message}` : String(err));
+      setError(writeErrorMessage(err, t));
     } finally {
       setSectionBusy(false);
       // Back to the picker, which now holds the new section — the user asked
@@ -251,19 +256,33 @@ export function MoveCopyDialog({
 
       setSubmitting(true);
       try {
+        let moved: MovedRow[];
         if (target.kind === 'event') {
-          await moveOrCopyEvent(target.event, targetContainerId, mode, scope, {
+          const row = await moveOrCopyEvent(target.event, targetContainerId, mode, scope, {
             wait,
             target: calendars.find((c) => c.id === targetContainerId),
           });
+          moved = row ? [row] : [];
         } else {
-          await moveOrCopyTask(
+          moved = await moveOrCopyTask(
             target.task,
             targetContainerId,
             mode,
             children,
             sectionsEnabled ? targetSectionId || null : null,
           );
+        }
+        const kept = originalKeptSentence(
+          moved,
+          (id) =>
+            (target.kind === 'event' ? calendars : taskLists).find((c) => c.id === id)
+              ?.name,
+          t,
+        );
+        if (kept) {
+          invalidateData();
+          showNotice(kept);
+          return;
         }
         announce(
           t(
@@ -275,24 +294,20 @@ export function MoveCopyDialog({
         );
         onClose();
       } catch (err) {
-        if (target.kind === 'event') {
-          // A failed move or copy may still have written at the target: it
-          // shows on the next read.
-          invalidateData();
-        }
+        // A failed move or copy may still have written at the target: it
+        // shows on the next read.
+        invalidateData();
+        // In words, a provider's refusal included.
+        const say = target.kind === 'event' ? eventWriteErrorMessage : writeErrorMessage;
         if (err instanceof SeriesNotLoadedError) {
           setError(t('dialogs.event.seriesLoadFailed', { title: itemTitle }));
-        } else if (target.kind === 'event' && eventWriteLeftover(err)) {
-          // A new series that may stand: said on screen, focused, and only
-          // closed — doing it again would create another (210).
-          setMayStand(eventWriteErrorMessage(err, t));
-        } else if (target.kind === 'event') {
-          // In words, a provider's refusal included.
-          setError(eventWriteErrorMessage(err, t));
-        } else if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
+        } else if (eventWriteLeftover(err)) {
+          // Something stands — a new series (210), a task without one of its
+          // steps (273): said on screen, focused, and only closed. Doing it
+          // again would create another.
+          showNotice(say(err, t));
         } else {
-          setError(String(err));
+          setError(say(err, t));
         }
       } finally {
         setSubmitting(false);
@@ -314,7 +329,9 @@ export function MoveCopyDialog({
       submitting,
       wait,
       calendars,
+      taskLists,
       invalidateData,
+      showNotice,
     ],
   );
 
@@ -325,30 +342,14 @@ export function MoveCopyDialog({
     { title: itemTitle },
   );
 
-  if (mayStand) {
+  if (notice) {
     return (
-      <Modal
-        isOpen={isOpen}
-        onClose={onClose}
+      <CloseOnlyNotice
         title={title}
+        sentence={notice}
+        onClose={onClose}
         className="modal--form modal--narrow"
-        dismissOnBackdrop={false}
-      >
-        <div className="form">
-          <FocusableNote ref={mayStandRef} className="form__hint form__hint--warning">
-            {mayStand}
-          </FocusableNote>
-          <div className="form__actions">
-            <button
-              type="button"
-              className="form__action form__action--primary"
-              onClick={onClose}
-            >
-              {t('dialogs.close')}
-            </button>
-          </div>
-        </div>
-      </Modal>
+      />
     );
   }
 
@@ -585,18 +586,19 @@ export function MoveCopyDialog({
   );
 }
 
+/** Returns the moved rows (see `moveTaskToList`); a copy deletes nothing and
+ *  returns none. */
 async function moveOrCopyTask(
   task: Task,
   targetListId: string,
   mode: Mode,
   children: Task[],
   sectionId: string | null,
-): Promise<void> {
+): Promise<Task[]> {
   if (mode === 'move') {
     // Reuses the shared move primitive (see moveActions.ts for the
     // move-hint + child-re-threading rationale).
-    await moveTaskToList(task, targetListId, children, sectionId);
-    return;
+    return moveTaskToList(task, targetListId, children, sectionId);
   }
 
   // Copy: create a fresh parent row, then re-parent each child copy
@@ -625,29 +627,36 @@ async function moveOrCopyTask(
     assignees: [],
     sound: task.sound,
   });
-  for (const child of children) {
-    await apiCreateTask({
-      list_id: targetListId,
-      title: child.title,
-      description: child.description,
-      status: child.status,
-      priority: child.priority,
-      effort: child.effort,
-      scheduled_date: child.scheduled_date,
-      scheduled_time: child.scheduled_time,
-      deadline_date: child.deadline_date,
-      deadline_time: child.deadline_time,
-      deadline_reminder_days: child.deadline_reminder_days,
-      recurrence: child.recurrence,
-      parent_id: newParent.id,
-      // Children file where their parent does; a family split across
-      // sections is the same surprise as one split across lists.
-      section_id: sectionId,
-      color_label: child.color_label,
-      reminders: child.reminders,
-      assignees: [],
-      sound: child.sound,
-    });
+  // The copy of the task itself stands: a subtask's failure never reads as
+  // "nothing was changed" (decision 277).
+  try {
+    for (const child of children) {
+      await apiCreateTask({
+        list_id: targetListId,
+        title: child.title,
+        description: child.description,
+        status: child.status,
+        priority: child.priority,
+        effort: child.effort,
+        scheduled_date: child.scheduled_date,
+        scheduled_time: child.scheduled_time,
+        deadline_date: child.deadline_date,
+        deadline_time: child.deadline_time,
+        deadline_reminder_days: child.deadline_reminder_days,
+        recurrence: child.recurrence,
+        parent_id: newParent.id,
+        // Children file where their parent does; a family split across
+        // sections is the same surprise as one split across lists.
+        section_id: sectionId,
+        color_label: child.color_label,
+        reminders: child.reminders,
+        assignees: [],
+        sound: child.sound,
+      });
+    }
+  } catch (err) {
+    throw afterLanded(err, 'subtasks');
   }
+  return [];
 }
 

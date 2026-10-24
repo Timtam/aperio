@@ -265,7 +265,8 @@ async fn list_suggested_people(state: &ApiState) -> GraphResult<Vec<Contact>> {
 /// (`/me/contacts?$search=`) and Suggested People (`/me/people?
 /// $search=`) in parallel; results are deduped by id and the
 /// fan-out swallows per-source errors so a transient 5xx on one
-/// path doesn't sink the other.
+/// path doesn't sink the other. Where neither answered and one was
+/// busy, the search says the provider is busy instead of finding nobody.
 ///
 /// Graph requires `$search` queries to be wrapped in double
 /// quotes — we add them here so callers can pass plain strings.
@@ -279,9 +280,16 @@ pub async fn search_contacts(state: &ApiState, query: &str) -> GraphResult<Vec<C
         search_suggested_people(state, trimmed),
     );
 
+    // A busy Graph is said only where no source answered (decision 270):
+    // what one source found is worth more than the other's throttle.
+    let batches = match (personal, people) {
+        (Err(err @ GraphError::Busy { .. }), Err(_))
+        | (Err(_), Err(err @ GraphError::Busy { .. })) => return Err(err),
+        (personal, people) => [personal, people],
+    };
     let mut out: Vec<Contact> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for batch in [personal, people] {
+    for batch in batches {
         let hits = match batch {
             Ok(h) => h,
             Err(err) => {
@@ -1406,5 +1414,70 @@ mod tests {
     fn odata_escape_doubles_single_quotes() {
         assert_eq!(odata_escape("O'Brien"), "O''Brien");
         assert_eq!(odata_escape("plain"), "plain");
+    }
+}
+
+#[cfg(test)]
+mod busy_search_tests {
+    //! The contact search when Graph is busy (decision 270).
+    use super::*;
+    use crate::auth::TokenSet;
+
+    fn state_for(server: &mockito::Server) -> ApiState {
+        let mut state = ApiState::new(
+            TokenSet {
+                access_token: "tok".into(),
+                refresh_token: None,
+                expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                scope: None,
+            },
+            "client".into(),
+            format!("{}/token", server.url()),
+            reqwest::Client::new(),
+        );
+        state.api_base = server.url();
+        state
+    }
+
+    /// Neither source answered and one was busy: the search says so, rather
+    /// than finding nobody.
+    #[tokio::test]
+    async fn a_search_no_source_answered_is_busy() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", mockito::Matcher::Regex("^/me/contacts".into()))
+            .with_status(429)
+            .create_async()
+            .await;
+        server
+            .mock("GET", mockito::Matcher::Regex("^/me/people".into()))
+            .with_status(500)
+            .create_async()
+            .await;
+        let err = search_contacts(&state_for(&server), "ann")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GraphError::Busy { .. }), "{err:?}");
+    }
+
+    /// One source answered: what it found counts, the other's throttle not.
+    #[tokio::test]
+    async fn a_search_one_source_answered_keeps_its_hits() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", mockito::Matcher::Regex("^/me/contacts".into()))
+            .with_status(429)
+            .create_async()
+            .await;
+        server
+            .mock("GET", mockito::Matcher::Regex("^/me/people".into()))
+            .with_status(200)
+            .with_body(r#"{"value":[]}"#)
+            .create_async()
+            .await;
+        assert!(search_contacts(&state_for(&server), "ann")
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

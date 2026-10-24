@@ -37,8 +37,8 @@ use tracing::{debug, info, warn};
 use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
 
 use super::{
-    swr, CacheObserver, CacheRefreshStatus, CacheStore, CacheUpdatedPayload, FailingAccount,
-    PassOutcome, RefreshCoordinator, SyncScope,
+    swr, Attempt, CacheObserver, CacheRefreshStatus, CacheStore, CacheUpdatedPayload,
+    FailingAccount, PassOutcome, RefreshCoordinator, SyncScope,
 };
 use crate::db::SharedConn;
 use crate::registry::AdapterRegistry;
@@ -89,27 +89,85 @@ pub struct CacheRefresher {
     /// a single pass — hence a latch that only `trigger` SETS and the pass
     /// CONSUMES, never a value the later caller overwrites. Collapsing
     /// therefore resolves in the user's favour (forced), and forced-ness
-    /// can never leak into a later, unrelated wake.
-    next_trigger_forced: Arc<AtomicBool>,
-    /// Whether the CURRENT pass was user-forced (manual refresh). Set at
-    /// the start of every pass, a queued follow-up included; read by the
-    /// enumerate/refresh failure paths
-    /// so a forced failure surfaces at once (see `CacheStore::mark_error`).
-    /// Single-flight makes this stable for a pass's duration; the
-    /// concurrent per-read SWR path never touches it.
-    pass_forced: Arc<AtomicBool>,
+    /// can never leak into a later, unrelated wake. Which accounts it
+    /// forces ([`Forcing`]): collapsed requests force every account either
+    /// forced.
+    next_trigger: Arc<Mutex<Forcing>>,
+    /// The accounts the CURRENT pass runs forced for (a manual refresh: all;
+    /// an account change: that account). Set at the start of every pass, a
+    /// queued follow-up included; read by the enumerate/refresh failure
+    /// paths so a forced failure surfaces at once (see
+    /// `CacheStore::mark_failure`). Single-flight makes this stable for a
+    /// pass's duration; the concurrent per-read SWR path never touches it.
+    pass_forcing: Arc<Mutex<Forcing>>,
+    /// The (account, listing family) pairs a busy provider turned away in the
+    /// CURRENT pass (decision 271): the pass asks none of that family's
+    /// remaining containers, and records nothing for them. Reset as each pass
+    /// begins, so the next one asks again.
+    busy_families: Arc<Mutex<std::collections::HashSet<(String, &'static str)>>>,
     /// Whether the running pass read anything successfully: a listing, or a
     /// container. Reset at the start of every pass; "nothing could be
     /// updated" is said only when it stayed false, not because every account
     /// has SOME failing container.
     pass_succeeded: Arc<AtomicBool>,
     /// A pass asked for through [`Self::warm_all_queued`] while another ran:
-    /// `Some(forced)` runs once more when the running pass ends. Bounded to
+    /// `Some(forcing)` runs once more when the running pass ends. Bounded to
     /// one: any number of requests during a pass collapse into a single
-    /// follow-up, forced if any of them was.
-    follow_up: Arc<Mutex<Option<bool>>>,
+    /// follow-up, forced for every account any of them forced.
+    follow_up: Arc<Mutex<Option<Forcing>>>,
     /// Last successful pass, kept in memory + mirrored to prefs.
     last_refreshed: Arc<Mutex<Option<DateTime<Utc>>>>,
+}
+
+/// Which accounts a warm pass runs forced for: a failure there shows at once
+/// instead of waiting for a confirming second round (decision 271). A manual
+/// refresh forces every account; a change of one account forces only that
+/// one (Toni, 2026-10-23); the rest count as an automatic round.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Forcing {
+    #[default]
+    None,
+    All,
+    Accounts(std::collections::BTreeSet<String>),
+}
+
+impl Forcing {
+    /// Forced for one account.
+    pub fn account(id: &str) -> Self {
+        Self::Accounts(std::collections::BTreeSet::from([id.to_string()]))
+    }
+
+    /// Two requests collapsed into one pass: forced for every account
+    /// either forced.
+    pub fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::All, _) | (_, Self::All) => Self::All,
+            (Self::None, other) | (other, Self::None) => other,
+            (Self::Accounts(mut one), Self::Accounts(two)) => {
+                one.extend(two);
+                Self::Accounts(one)
+            }
+        }
+    }
+
+    /// Whether a failure of `account` shows at once.
+    pub fn covers(&self, account: &str) -> bool {
+        match self {
+            Self::None => false,
+            Self::All => true,
+            Self::Accounts(accounts) => accounts.contains(account),
+        }
+    }
+}
+
+impl From<bool> for Forcing {
+    fn from(forced: bool) -> Self {
+        if forced {
+            Self::All
+        } else {
+            Self::None
+        }
+    }
 }
 
 /// One container queued for an items refresh in a warm pass. Collected during a
@@ -171,11 +229,12 @@ impl CacheRefresher {
             observer,
             notify: Arc::new(Notify::new()),
             in_flight: Arc::new(Mutex::new(false)),
-            pass_forced: Arc::new(AtomicBool::new(false)),
+            pass_forcing: Arc::new(Mutex::new(Forcing::None)),
+            busy_families: Arc::new(Mutex::new(std::collections::HashSet::new())),
             pass_succeeded: Arc::new(AtomicBool::new(false)),
             follow_up: Arc::new(Mutex::new(None)),
             // Unset until a user `trigger` latches it.
-            next_trigger_forced: Arc::new(AtomicBool::new(false)),
+            next_trigger: Arc::new(Mutex::new(Forcing::None)),
             last_refreshed: Arc::new(Mutex::new(initial_last)),
         })
     }
@@ -206,8 +265,8 @@ impl CacheRefresher {
             // cannot force an unrelated later pass. Automatic wakes
             // (`trigger_background`, the cache-generation reset at launch)
             // never set it.
-            let forced = worker.next_trigger_forced.swap(false, Ordering::Relaxed);
-            worker.warm_all(forced).await;
+            let forcing = worker.take_trigger();
+            worker.warm_all(forcing).await;
 
             loop {
                 let minutes = worker.read_interval_minutes();
@@ -225,9 +284,9 @@ impl CacheRefresher {
                         // CONSUME the latch: a collapsed forced+background
                         // pair resolves as forced, and the flag can't leak
                         // into the next automatic wake.
-                        let forced = worker.next_trigger_forced.swap(false, Ordering::Relaxed);
-                        debug!(target: "aperio::cache", forced, "cache warm trigger");
-                        worker.warm_all(forced).await;
+                        let forcing = worker.take_trigger();
+                        debug!(target: "aperio::cache", ?forcing, "cache warm trigger");
+                        worker.warm_all(forcing).await;
                     }
                 }
             }
@@ -239,8 +298,29 @@ impl CacheRefresher {
     /// already running. The pass runs FORCED, so its failures surface at
     /// once instead of waiting for a confirming second attempt.
     pub fn trigger(&self) {
-        self.next_trigger_forced.store(true, Ordering::Relaxed);
+        self.latch(Forcing::All);
         self.notify.notify_one();
+    }
+
+    /// [`Self::trigger`] for a change of ONE account (added, edited,
+    /// reconnected, reset): the pass runs forced for that account only, and
+    /// counts as an automatic round for the others (Toni, 2026-10-23), so an
+    /// unchanged account the provider is busy for does not warn after one
+    /// round (decision 271).
+    pub fn trigger_account(&self, account_id: &str) {
+        self.latch(Forcing::account(account_id));
+        self.notify.notify_one();
+    }
+
+    fn latch(&self, forcing: Forcing) {
+        let mut next = self.next_trigger.lock().expect("cache refresher poisoned");
+        let before = std::mem::take(&mut *next);
+        *next = before.merge(forcing);
+    }
+
+    /// CONSUME the latch, so it cannot force an unrelated later pass.
+    fn take_trigger(&self) -> Forcing {
+        std::mem::take(&mut *self.next_trigger.lock().expect("cache refresher poisoned"))
     }
 
     /// Wake the worker for an immediate pass that is NOT a user action —
@@ -291,7 +371,8 @@ impl CacheRefresher {
     /// app-start / periodic schedule. A forced pass's failures surface on
     /// the error screen at once instead of waiting for a confirming second
     /// attempt (see `CacheStore::mark_error`).
-    pub async fn warm_all(self: &Arc<Self>, forced: bool) {
+    pub async fn warm_all(self: &Arc<Self>, forcing: impl Into<Forcing>) {
+        let forcing = forcing.into();
         // Single-flight: a periodic tick that lands while a manual pass
         // is still running just bails.
         {
@@ -301,7 +382,7 @@ impl CacheRefresher {
             }
             *guard = true;
         }
-        self.run_passes(forced).await;
+        self.run_passes(forcing).await;
     }
 
     /// [`Self::warm_all`] for a request that must not be lost.
@@ -313,24 +394,25 @@ impl CacheRefresher {
     /// worker, so a manual refresh, an account reset or a fresh OS grant
     /// that landed during the launch pass simply never happened. Here the
     /// request waits, and the running pass runs once more when it ends.
-    pub async fn warm_all_queued(self: &Arc<Self>, forced: bool) {
+    pub async fn warm_all_queued(self: &Arc<Self>, forcing: impl Into<Forcing>) {
+        let forcing = forcing.into();
         {
             let mut guard = self.in_flight.lock().expect("cache refresher poisoned");
             if *guard {
                 let mut follow_up = self.follow_up.lock().expect("cache refresher poisoned");
-                *follow_up = Some(follow_up.unwrap_or(false) || forced);
+                *follow_up = Some(follow_up.take().unwrap_or_default().merge(forcing));
                 return;
             }
             *guard = true;
         }
-        self.run_passes(forced).await;
+        self.run_passes(forcing).await;
     }
 
     /// Run passes while one is queued behind the current one. `in_flight`
     /// stays set across them, and the indicator hears "finished" once.
-    async fn run_passes(self: &Arc<Self>, mut forced: bool) {
+    async fn run_passes(self: &Arc<Self>, mut forcing: Forcing) {
         loop {
-            let (completed, total) = self.pass(forced).await;
+            let (completed, total) = self.pass(forcing).await;
             // Before the lock below: a read here must not widen the gap
             // between clearing `in_flight` and saying "finished".
             let outcome = self.pass_outcome();
@@ -350,8 +432,8 @@ impl CacheRefresher {
             };
             match next {
                 Some(queued) => {
-                    debug!(target: "aperio::cache", forced = queued, "a queued cache warm pass follows");
-                    forced = queued;
+                    debug!(target: "aperio::cache", forcing = ?queued, "a queued cache warm pass follows");
+                    forcing = queued;
                 }
                 None => {
                     self.emit_status(
@@ -369,12 +451,16 @@ impl CacheRefresher {
     }
 
     /// One pass; the caller holds `in_flight`.
-    async fn pass(self: &Arc<Self>, forced: bool) -> (DateTime<Utc>, u32) {
+    async fn pass(self: &Arc<Self>, forcing: Forcing) -> (DateTime<Utc>, u32) {
         // Record the pass's forced-ness for the failure paths. Safe under
         // single-flight: only this pass writes it, and the concurrent SWR
         // path passes its own (false) flag to mark_error directly.
-        self.pass_forced.store(forced, Ordering::Relaxed);
+        *self.pass_forcing.lock().expect("cache refresher poisoned") = forcing;
         self.pass_succeeded.store(false, Ordering::Relaxed);
+        self.busy_families
+            .lock()
+            .expect("busy families poisoned")
+            .clear();
         let last = self.status().last_refreshed_at;
         // Spinner on immediately; the target total isn't known until the cheap
         // enumeration below completes.
@@ -438,6 +524,11 @@ impl CacheRefresher {
 
     async fn enumerate_calendars(&self, out: &mut Vec<RefreshTarget>) {
         for (account, adapter) in self.registry.snapshot_calendar_adapters() {
+            // Taken before the fetch: a write landing while it runs must not
+            // be paused by its busy answer (decision 271).
+            let generation = self
+                .cache
+                .refresh_generation(&account, SyncScope::Calendars, "");
             match adapter.list_calendars().await {
                 Ok(cals) => {
                     self.pass_succeeded.store(true, Ordering::Relaxed);
@@ -462,7 +553,7 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    self.failed(&account, SyncScope::Calendars, "", &err);
+                    self.failed(&account, SyncScope::Calendars, "", &err, generation);
                 }
             }
         }
@@ -470,6 +561,11 @@ impl CacheRefresher {
 
     async fn enumerate_task_lists(&self, out: &mut Vec<RefreshTarget>) {
         for (account, adapter) in self.registry.snapshot_task_adapters() {
+            // Taken before the fetch: a write landing while it runs must not
+            // be paused by its busy answer (decision 271).
+            let generation = self
+                .cache
+                .refresh_generation(&account, SyncScope::TaskLists, "");
             match adapter.list_task_lists().await {
                 Ok(lists) => {
                     self.pass_succeeded.store(true, Ordering::Relaxed);
@@ -500,7 +596,7 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    self.failed(&account, SyncScope::TaskLists, "", &err);
+                    self.failed(&account, SyncScope::TaskLists, "", &err, generation);
                 }
             }
         }
@@ -508,6 +604,11 @@ impl CacheRefresher {
 
     async fn enumerate_contact_lists(&self, out: &mut Vec<RefreshTarget>) {
         for (account, adapter) in self.registry.snapshot_contact_adapters() {
+            // Taken before the fetch: a write landing while it runs must not
+            // be paused by its busy answer (decision 271).
+            let generation = self
+                .cache
+                .refresh_generation(&account, SyncScope::ContactLists, "");
             match adapter.list_contact_lists().await {
                 Ok(lists) => {
                     self.pass_succeeded.store(true, Ordering::Relaxed);
@@ -530,7 +631,7 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    self.failed(&account, SyncScope::ContactLists, "", &err);
+                    self.failed(&account, SyncScope::ContactLists, "", &err, generation);
                 }
             }
         }
@@ -540,6 +641,12 @@ impl CacheRefresher {
     /// the shared coordinator. A claim miss means a per-read refresh is already
     /// handling it — skip without releasing (we never claimed).
     async fn refresh_one(&self, target: RefreshTarget, window: DateRange) {
+        // A busy provider turned this family of the account away earlier in
+        // the pass: asking its other containers now would only be turned away
+        // too (decision 271).
+        if self.family_busy(&target) {
+            return;
+        }
         match target {
             RefreshTarget::Events {
                 account,
@@ -567,7 +674,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        self.failed(&account, SyncScope::Events, &cal_id, &err);
+                        self.failed(&account, SyncScope::Events, &cal_id, &err, generation);
                     }
                 }
                 self.coord.release(&key);
@@ -594,7 +701,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        self.failed(&account, SyncScope::Tasks, &list_id, &err);
+                        self.failed(&account, SyncScope::Tasks, &list_id, &err, generation);
                     }
                 }
                 self.coord.release(&key);
@@ -622,7 +729,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        self.failed(&account, SyncScope::Sections, &list_id, &err);
+                        self.failed(&account, SyncScope::Sections, &list_id, &err, generation);
                     }
                 }
                 self.coord.release(&key);
@@ -662,7 +769,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
-                        self.failed(&account, SyncScope::Contacts, &list_id, &err);
+                        self.failed(&account, SyncScope::Contacts, &list_id, &err, generation);
                     }
                 }
                 self.coord.release(&key);
@@ -670,14 +777,54 @@ impl CacheRefresher {
         }
     }
 
+    /// Whether a busy provider turned this target's family of its account
+    /// away earlier in the pass.
+    fn family_busy(&self, target: &RefreshTarget) -> bool {
+        let (account, scope) = match target {
+            RefreshTarget::Events { account, .. } => (account, SyncScope::Events),
+            RefreshTarget::Tasks { account, .. } => (account, SyncScope::Tasks),
+            RefreshTarget::Sections { account, .. } => (account, SyncScope::Sections),
+            RefreshTarget::Contacts { account, .. } => (account, SyncScope::Contacts),
+        };
+        self.busy_families
+            .lock()
+            .expect("busy families poisoned")
+            .contains(&(account.clone(), super::listing_of(scope).as_str()))
+    }
+
     /// Record a failed attempt of this pass, and log it when it is news:
     /// the container was not failing, or fails differently now. An account
     /// that keeps failing the same way says so once, not on every pass.
-    fn failed(&self, account: &str, scope: SyncScope, container: &str, err: &cal_core::Error) {
-        let forced = self.pass_forced.load(Ordering::Relaxed);
+    ///
+    /// `generation` is the one the attempt was claimed at; a listing, which
+    /// is not claimed, gives the one it had when its fetch started.
+    fn failed(
+        &self,
+        account: &str,
+        scope: SyncScope,
+        container: &str,
+        err: &cal_core::Error,
+        generation: u64,
+    ) {
+        let forced = self
+            .pass_forcing
+            .lock()
+            .expect("cache refresher poisoned")
+            .covers(account);
+        let attempt = if forced {
+            Attempt::Forced { generation }
+        } else {
+            Attempt::Background { generation }
+        };
+        if err.is_provider_busy() {
+            self.busy_families
+                .lock()
+                .expect("busy families poisoned")
+                .insert((account.to_string(), super::listing_of(scope).as_str()));
+        }
         let news = self
             .cache
-            .mark_failure(account, scope, container, err, forced)
+            .mark_failure(account, scope, container, err, attempt)
             .unwrap_or(true);
         if news {
             tracing::warn!(
@@ -1055,6 +1202,210 @@ mod tests {
         }
     }
 
+    /// An account whose ten calendars all answer that the provider is busy,
+    /// and whose one task list answers; it counts what was asked.
+    struct Throttled {
+        events_asked: AtomicU32,
+        tasks_asked: AtomicU32,
+    }
+
+    #[async_trait]
+    impl Adapter for Throttled {
+        async fn authenticate(&self, _: Credentials) -> cal_core::Result<AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait]
+    impl CalendarFeature for Throttled {
+        async fn list_calendars(&self) -> cal_core::Result<Vec<Calendar>> {
+            Ok((0..10)
+                .map(|n| Calendar {
+                    color_label: None,
+                    supports_scheduling: false,
+                    supports_event_color: false,
+                    always_notifies_attendees: false,
+                    invitations_reply_only: false,
+                    stores_occurrence_exceptions: false,
+                    notifier_name: None,
+                    id: format!("cal-{n}"),
+                    name: format!("Calendar {n}"),
+                    color: None,
+                    read_only: false,
+                    default_sound: None,
+                })
+                .collect())
+        }
+        async fn get_events(&self, _: &str, _: DateRange) -> cal_core::Result<Vec<Event>> {
+            self.events_asked.fetch_add(1, Ordering::SeqCst);
+            Err(cal_core::Error::provider_busy(
+                cal_core::BusyDetail::TooManyRequests,
+            ))
+        }
+        async fn create_event(&self, _: &str, _: NewEvent) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn update_event(&self, _: Event) -> cal_core::Result<Event> {
+            unreachable!()
+        }
+        async fn delete_event(&self, _: &str, _: bool) -> cal_core::Result<()> {
+            unreachable!()
+        }
+        async fn get_free_busy(&self, _: &[&str], _: DateRange) -> cal_core::Result<Vec<FreeBusy>> {
+            unreachable!()
+        }
+        fn calendar_color(&self, _: &str) -> Option<cal_core::ContainerColor> {
+            None
+        }
+    }
+
+    #[async_trait]
+    impl TasksFeature for Throttled {
+        async fn list_task_lists(&self) -> cal_core::Result<Vec<cal_core::TaskList>> {
+            Ok(vec![cal_core::TaskList {
+                id: "list-1".into(),
+                name: "Inbox".into(),
+                color: None,
+                read_only: false,
+                parent_id: None,
+                color_label: None,
+                default_sound: None,
+                embedded_in_calendar: None,
+            }])
+        }
+        async fn get_tasks(&self, _: &str) -> cal_core::Result<Vec<cal_core::Task>> {
+            self.tasks_asked.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+        async fn create_task(
+            &self,
+            _: &str,
+            _: cal_core::NewTask,
+        ) -> cal_core::Result<cal_core::Task> {
+            unreachable!()
+        }
+        async fn update_task(&self, _: cal_core::Task) -> cal_core::Result<cal_core::Task> {
+            unreachable!()
+        }
+        async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
+            unreachable!()
+        }
+    }
+
+    /// A task list made while the listing is fetched moves the listing's
+    /// generation on; the fetch's busy answer pauses at the generation it
+    /// started at, so the new list's next read goes through (decision 271).
+    struct ListsWrittenMidFetch {
+        cache: Arc<CacheStore>,
+    }
+
+    #[async_trait]
+    impl Adapter for ListsWrittenMidFetch {
+        async fn authenticate(&self, _: Credentials) -> cal_core::Result<AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait]
+    impl TasksFeature for ListsWrittenMidFetch {
+        async fn list_task_lists(&self) -> cal_core::Result<Vec<cal_core::TaskList>> {
+            self.cache
+                .invalidate("acc-1", SyncScope::TaskLists, "")
+                .unwrap();
+            Err(cal_core::Error::provider_busy(
+                cal_core::BusyDetail::TooManyRequests,
+            ))
+        }
+        async fn get_tasks(&self, _: &str) -> cal_core::Result<Vec<cal_core::Task>> {
+            unreachable!()
+        }
+        async fn create_task(
+            &self,
+            _: &str,
+            _: cal_core::NewTask,
+        ) -> cal_core::Result<cal_core::Task> {
+            unreachable!()
+        }
+        async fn update_task(&self, _: cal_core::Task) -> cal_core::Result<cal_core::Task> {
+            unreachable!()
+        }
+        async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_listing_written_during_its_busy_fetch_is_not_paused() {
+        let (refresher, _gated, _statuses) = refresher();
+        // Without the gated calendars, which would hold the pass.
+        refresher.registry.unregister("acc-1");
+        refresher.registry.register_host_adapter(
+            "acc-1",
+            None,
+            Some(Arc::new(ListsWrittenMidFetch {
+                cache: Arc::clone(&refresher.cache),
+            }) as Arc<dyn TasksFeature>),
+        );
+        refresher.warm_all(false).await;
+        assert!(!refresher
+            .cache
+            .busy_paused("acc-1", SyncScope::TaskLists, ""));
+    }
+
+    /// Once a calendar of an account answers busy, the pass asks none of the
+    /// account's other calendars (decision 271), records nothing for them,
+    /// and still asks its task lists; the next pass, forced or not, asks
+    /// again.
+    #[tokio::test]
+    async fn a_busy_answer_spares_the_rest_of_its_family_in_that_pass() {
+        let (refresher, _gated, _statuses) = refresher();
+        let throttled = Arc::new(Throttled {
+            events_asked: AtomicU32::new(0),
+            tasks_asked: AtomicU32::new(0),
+        });
+        refresher.registry.register_host_adapter(
+            "acc-1",
+            Some(Arc::clone(&throttled) as Arc<dyn CalendarFeature>),
+            Some(Arc::clone(&throttled) as Arc<dyn TasksFeature>),
+        );
+        let failing_rows = |refresher: &CacheRefresher| -> u32 {
+            refresher
+                .db
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM cache_sync_state
+                     WHERE account_id = 'acc-1' AND scope = 'events' AND last_error IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        refresher.warm_all(false).await;
+        let asked = throttled.events_asked.load(Ordering::SeqCst);
+        assert!((1..10).contains(&asked), "asked {asked} of 10 calendars");
+        assert_eq!(
+            failing_rows(&refresher),
+            asked,
+            "the spared calendars record nothing"
+        );
+        assert_eq!(throttled.tasks_asked.load(Ordering::SeqCst), 1);
+        // The next pass asks again, a forced one too.
+        refresher.warm_all(true).await;
+        let again = throttled.events_asked.load(Ordering::SeqCst) - asked;
+        assert!(
+            (1..10).contains(&again),
+            "asked {again} of 10 calendars again"
+        );
+        assert_eq!(throttled.tasks_asked.load(Ordering::SeqCst), 2);
+    }
+
     #[tokio::test]
     async fn one_failing_calendar_is_named_not_all_failed() {
         // Five of six calendars updated: "updated, except: Work", never
@@ -1103,7 +1454,7 @@ mod tests {
                     account_id: "acc-1".into(),
                     name: "Work".into(),
                     cause: super::super::RefreshCause::Access,
-                    rank: 2,
+                    rank: super::super::RefreshCause::Access.rank(),
                 }],
                 // Work was the only account the pass tried.
                 all_failed: true,
@@ -1188,6 +1539,76 @@ mod tests {
         assert!(outcome.all_failed);
     }
 
+    /// A change of one account forces only that account (Toni, 2026-10-23):
+    /// an unchanged account that fails in the same pass counts as an
+    /// automatic round and is not named after one.
+    #[tokio::test]
+    async fn an_account_change_forces_only_that_account() {
+        let (refresher, _gated, statuses) = refresher();
+        refresher
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-2', 'caldav', 'Home', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        for account in ["acc-1", "acc-2"] {
+            refresher.registry.register_host_adapter(
+                account,
+                Some(Arc::new(Down) as Arc<dyn CalendarFeature>),
+                None,
+            );
+        }
+        refresher.warm_all(Forcing::account("acc-1")).await;
+        let outcome = statuses.last_outcome();
+        assert_eq!(
+            outcome
+                .failing
+                .iter()
+                .map(|f| f.account_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["acc-1"]
+        );
+    }
+
+    /// Requests collapsed into one pass force every account either forced.
+    #[test]
+    fn forcing_merges_and_covers() {
+        let one = Forcing::account("a").merge(Forcing::account("b"));
+        assert!(one.covers("a") && one.covers("b") && !one.covers("c"));
+        assert_eq!(
+            Forcing::None.merge(Forcing::account("a")),
+            Forcing::account("a")
+        );
+        assert_eq!(Forcing::account("a").merge(Forcing::All), Forcing::All);
+        assert!(!Forcing::None.covers("a"));
+        assert!(Forcing::All.covers("a"));
+        assert_eq!(Forcing::from(true), Forcing::All);
+        assert_eq!(Forcing::from(false), Forcing::None);
+    }
+
+    /// A queued request for one account and one for another run as one
+    /// follow-up, forced for both.
+    #[tokio::test]
+    async fn queued_account_changes_collapse_into_one_follow_up() {
+        let (refresher, gated, _statuses) = refresher();
+        let running = tokio::spawn({
+            let refresher = Arc::clone(&refresher);
+            async move { refresher.warm_all(false).await }
+        });
+        gated.entered.notified().await;
+        refresher.warm_all_queued(Forcing::account("acc-1")).await;
+        refresher.warm_all_queued(Forcing::account("acc-2")).await;
+        gated.release.notify_one();
+        running.await.unwrap();
+        let ran = refresher.pass_forcing.lock().unwrap().clone();
+        assert!(ran.covers("acc-1") && ran.covers("acc-2"), "{ran:?}");
+        assert!(!ran.covers("acc-3"), "{ran:?}");
+    }
+
     /// The first pass of the desktop worker, woken by `wake` before the
     /// start delay ran out, against an account whose listing is down.
     async fn first_pass_woken_by(wake: fn(&CacheRefresher)) -> PassOutcome {
@@ -1249,8 +1670,9 @@ mod tests {
             2,
             "the follow-up listed again"
         );
-        assert!(
-            refresher.pass_forced.load(Ordering::Relaxed),
+        assert_eq!(
+            *refresher.pass_forcing.lock().unwrap(),
+            Forcing::All,
             "the follow-up ran forced"
         );
         let finished = statuses

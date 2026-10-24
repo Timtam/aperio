@@ -458,6 +458,120 @@ Siehe DESIGN §4.2.
     Offen: Handy ohne Testläufer — ↻ im Test.
   - 🚩 **Folge-PR „Ausnahmen beim Teilen“** (zweite Prüfung von #94, 132; alle
     älter als #94):
+    - ↻ **Eine neue Google-Serie behält ihre gelöschten Termine** (PR 7,
+      Entscheidungen 202-213, 263-270): Ob Google eine Löschzeile mit einer
+      neuen Serie beachtet, ist ungemessen (137), und Google selbst löscht
+      einen Termin, indem es ihn absagt. Der Adapter legt die Serie ohne
+      Löschzeile an, unter einer eigenen Kennung (268), mit dem
+      Benachrichtigen-Schalter (204, 267: die Einladung kommt mit der Serie).
+      Dann listet er Googles Termine im Fenster der Löschungen und sagt jede
+      Löschung ab heute einzeln ab (263), per PATCH auf die Kennung, die
+      Google listet; ein Termin zählt, wenn er dort beginnt oder höchstens
+      eine Stunde daneben (veraltete Zeitzonendaten) und nie über die halbe
+      Lücke zu den Nachbarn. Fehlt einer, liest er einmal nach; dann wird
+      die Stelle übersprungen und geloggt (207, 266, 269). Die Antwort jeder
+      Absage ist der Beweis (208), eine zweite Liste prüft, dass sonst alles
+      steht. Eine verlorene Antwort aufs Anlegen wird über die Kennung
+      nachgelesen, nie neu angelegt (268). Drosselung wird nach Retry-After
+      oder 1-2-4 s ausgewartet, ein aufgebrauchtes Kontingent nicht. Scheitert
+      ein Schritt, löscht er die Serie wieder (203), mit Absage, wo die
+      Eingeladenen von ihr gehört haben (212). Das Manifest schaltet den
+      Warte-Dialog an. Ohne Live-Test (Toni nutzt kein Google): Ein
+      nachgebautes Google mit Fehlern je Anfrage und eine Fehlermatrix sichern
+      ab, wie Aperio Googles Dokumentation liest — ↻ im Test.
+      - [ ] **Ungemessen bei Google**, für einen späteren Test mit einem
+        Google-Konto: welche Felder die Antwort einer Absage trägt (Aperio
+        verlangt nur Kennung und Status), ob die Liste direkt nach dem
+        Schreiben schon stimmt (Aperio liest einmal nach), ob Google Aperios
+        Kennung mit 400 ablehnt, ob Google die Regel anders schreibt, wo eine
+        gelöschte Serie landet.
+      - [ ] **Eigene Kennung auch für einfache Google-Anlagen**: Eine
+        verlorene Antwort aufs Anlegen eines einzelnen Termins ist dort
+        heute ein Fehler, obwohl der Termin stehen kann.
+      - [ ] **Verschieben innerhalb eines Google-Kontos per `events.move`**:
+        nähme die Löschungen ohne Schritte mit; heute legt Aperio am Ziel an
+        und löscht am Ursprung.
+      - [ ] **Gemeinsamer getakteter Sender**, sobald Microsoft 365 (140)
+        dasselbe braucht: EWS und Google haben je ihre eigene Sende-Schleife.
+      - [ ] **Anlegen mit Folgeschritt, ehrlich abgeschlossen** (in PR 7,
+        Toni 2026-10-23): Steht ein Anlegen, aber ein Folgeschritt scheitert,
+        bietet kein Editor das Anlegen erneut an. Google-Gruppe ohne
+        Mitglieder: Hinweis, der sich nur schließen lässt, Daten laden neu.
+        Google-Foto: weiter verschluckt, der Editor sagt „ohne Foto
+        gespeichert“. Unteraufgaben-Entwürfe: der Editor bearbeitet danach
+        die angelegte Aufgabe, Speichern schreibt ihre Felder und legt die
+        übrigen Entwürfe an (Toni, 2026-10-24). Vikunja (Zuständige),
+        Todoist (Abschließen), Graph (Erweiterung) und Exchange
+        (Herauslösen, Kontaktfoto ersetzen) laufen über
+        `Error::after_landed` denselben Weg; das Foto eines neuen Kontakts
+        bleibt bei Graph und Exchange wie bei Google verschluckt. Der volle Wunsch („Editor
+        bleibt auf dem Angelegten“ überall) kommt mit O1 des Bogens unten.
+        ↻ Die Oberflächen beider Seiten sind gebaut: Aufgaben-Editor,
+        Schnell-Anlegen, Einplanen, Verschieben/Kopieren und Kontakt-Editor
+        zeigen den Hinweis, der sich nur schließen lässt (Desktop
+        `CloseOnlyNotice`, Handy dasselbe); der Editor bearbeitet nach
+        gescheiterten Entwürfen die angelegte Aufgabe; „ohne Foto angelegt“ über `has_photo`; ein beim
+        Verschieben stehengebliebenes Original wird mit seiner Liste oder
+        seinem Kalender benannt (277). Exchange, Graph, Vikunja und Todoist
+        sind gebaut. Am Handy ohne Testläufer zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
+        prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
+        ist (VoiceOver sagt den Satz an); eine zum Teil gespeicherte Aufgabe
+        schließt den Editor; im Tagesstart behält ein Sammelknopf den Fokus,
+        solange nach dem Neu-Lesen eine Zeile seines Stapels bleibt (auch
+        wenn der Aufgaben-Reiter offen ist und seine Zeilen zuerst noch einmal
+        aus dem Zwischenspeicher kommen), und ein
+        Zeilenknopf, dessen Unteraufgabe scheiterte, gibt ihn an die nächste
+        Zeile, wenn seine Zeile geht; ein Löschen in der Aufgabenliste, dessen
+        Antwort verloren ging, das aber angekommen ist, gibt den Fokus an die
+        nächste Zeile, sobald die Aktualisierung die Zeile nimmt (15 s
+        Beobachtung; die nächste Aktion beendet sie, Einklappen zählt nicht
+        als Löschen; dasselbe für eine Unteraufgabe im Editor); die
+        Fehlerzeile eines
+        gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
+        neu geladen wird, und geht, sobald etwas anderes gelingt oder du aus
+        dem Editor zurückkommst; Erinnerungen und Suche sagen einen Ladefehler
+        an.
+      - ↻ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
+        274): CalDAV liest 429 und beim Lesen 503 mit `Retry-After` als
+        ausgelasteten Anbieter, Todoist und Vikunja 429. Ob iCloud so
+        antwortet oder anders (etwa 403 oder 503 ohne Wartezeit), ob Todoist
+        auch innerhalb von `sync_status` drosselt und wie Vikunja es tut, ist
+        ungemessen; je eine Live-Runde mit vielen schnellen Anfragen klärt es.
+        Ebenso ungemessen: ob Googles Token-Endpunkt mit 429 drosselt und ob
+        ein Anmeldecode einen gedrosselten Austausch übersteht.
+      - [ ] **CardDAV: Kontakt löschen trifft nur das erste Adressbuch**
+        (gefunden in PR 7): `contacts::delete_contact` liest 404 als Erfolg,
+        und der Lauf über alle Adressbücher in `lib.rs::delete_contact` endet
+        beim ersten `Ok`. Liegt der Kontakt im zweiten Adressbuch, sagt
+        Aperio „gelöscht“ und löscht nichts. Wie bei Terminen und Aufgaben
+        sollte das Löschen ein `DeleteOutcome` liefern und der Lauf weitergehen.
+      - [ ] **Automatische Schreibvorgänge sagen ihr Scheitern nicht**
+        (gefunden in PR 7, Entscheidung 273): Was eine Person auslöst, sagt
+        jetzt jeden Fehlschlag (Tagesstart-Knöpfe, Strg+D, Ziehen, Rückgängig
+        im Hinweis). Still bleiben die Vorgänge ohne Knopfdruck: der
+        automatische Übertrag des Tagesstarts (`DayStartReviewChecker`), das
+        Anheften einer fälligen Frist (`DeadlinePinChecker`) und die
+        Aktionen aus Widget und Siri in der Warteschlange. Sie schreiben nur
+        ins Protokoll; offen ist, wo ein solcher Fehlschlag gesagt wird (beim
+        nächsten Öffnen, als Benachrichtigung, im Konto-Hinweis).
+      - [ ] **Listenwechsel im Editor fädelt Unteraufgaben nicht neu ein**
+        (gefunden in PR 7): Wechselt eine Elternaufgabe im Editor in eine
+        Liste eines anderen Kontos, bekommt sie dort eine neue Kennung; ihre
+        Unteraufgaben ziehen mit, behalten aber die alte Eltern-Kennung
+        (Desktop `TaskDialog`, Handy `TaskEditorModal`). `moveTaskToList`
+        fädelt sie auf die neue Kennung ein; die Editoren sollten denselben
+        Weg nehmen, Enkel eingeschlossen.
+    - [ ] 🚩 **Vorgänge mit Schritten, Rücknahme und Weitermachen** (Toni,
+      2026-10-19): Statt dass der Nutzer alles neu machen muss, wenn ein
+      Schreiben hängen bleibt (Drosselung, Internetausfall, halb
+      gespeichert), melden Adapter Vorgänge beim Kern an: Schritte mit
+      Erfolg oder Misserfolg, eine Rücknahme, ein speicherbarer Zustand,
+      damit der Kern später von selbst weitermacht. Jeder Vorgang trägt das
+      Element im Zielzustand; die Oberfläche warnt, und weitere Änderungen
+      hängen sich dahinter. Recherchiert 2026-10-19: machbar, etwa 25 bis 30
+      PRs (Bogen O1-O13), Grenzen und 28 Korrekturen aus der Kritik in
+      `DESIGN-write-operations.md`. Toni 2026-10-23: als eigener Bogen nach
+      PR 7, 9 und 10. Zu Beginn die 15 offenen Fragen aus §8 stellen.
     - ↻ **Eine neue Exchange-Serie behält ihre gelöschten Termine** (PR 8,
       Entscheidungen 202-213, 223-230, 263-266): Exchange nimmt eine Serie
       ohne ihre Löschungen an (140). Der Adapter legt sie still an, löscht
@@ -517,7 +631,8 @@ Siehe DESIGN §4.2.
       (261). Kopieren und Duplizieren behalten die Zone der Quelle (262).
       Microsoft 365 nimmt beim Anlegen noch keine Löschungen (140): Dort
       erscheinen gelöschte Termine in der neuen Serie vorerst wieder; Exchange
-      löscht sie seit PR 8 ab heute einzeln wieder. Aus einem Google-Kalender
+      löscht sie seit PR 8 ab heute einzeln wieder, Google sagt sie seit PR 7
+      ab heute einzeln ab. Aus einem Google-Kalender
       kennt Aperio gelöschte Termine etwa
       drei Monate zurück und ein Jahr voraus (150). Das Handy hat keinen
       Testläufer; ein Paritätstest am Desktop rechnet sein Modul mit — ↻ im
@@ -536,14 +651,11 @@ Siehe DESIGN §4.2.
       Zwischenspeicher reicht (etwa ein Jahr voraus); weiter vorn gelöschte
       Vorkommen kommen zurück (150: benennen, später gezielt bei Google
       nachlesen, eigener PR). EWS löscht sie seit PR 8 nach dem Anlegen einzeln
-      wieder, ab heute (202, 263). Google schreibt Löschungen seit PR 6 in seiner eigenen Form
-      (Wanduhr in der Zone der Serie, ganztägig als Datum); ob Google eine
-      Löschzeile beachtet, ist ungemessen, und Toni nutzt kein Google. Darum
-      legt PR 7 den neuen Serienteil ohne Löschzeilen an und sagt die
-      gelöschten Vorkommen danach einzeln ab, wie Google selbst löscht (202:
-      anlegen, dann absagen, nachgelesen; 203: scheitert eine Absage, wird
-      alles zurückgenommen; 204: Absagen folgen dem Benachrichtigen-Schalter).
-      CalDAV schreibt sie seit PR 5 als Datum.
+      wieder, ab heute (202, 263); Google sagt sie seit PR 7 nach dem Anlegen
+      einzeln ab, ab heute (202, 263, 267). Aperios eigene Absagen weiter als
+      das Fenster voraus sieht es nach einem neuen Einlesen nicht mehr, eine
+      spätere Kopie der Serie zeigt sie wieder (150). CalDAV schreibt sie
+      seit PR 5 als Datum.
     - ✅ **Die Regel wandert mit dem Datum** (PR 3c, 189, 192-197): Verschiebt
       „dieser und alle folgenden“ das Datum, wandert eine Regel, die ihre Tage
       nennt, wie beim Ziehen einer ganzen Serie (jeden Montag → jeden Dienstag,
@@ -727,15 +839,16 @@ Siehe DESIGN §4.2.
       „weg oder nie hier“, die Suche über die Kalender geht weiter und zählt
       es nur als gelöscht, wenn kein anderer Kalender den Termin hat
       (`DeleteWalk`). Nach einem gescheiterten Verbindungsaufbau gilt nichts
-      davon: da ging nichts hinaus. Am Handy kommen nur `forbidden`,
-      `conflict` und `network` mit Code an (B9); eine Ablehnung mit Marke
-      (`server-refused`, `unsafe-to-write`) reist aber als `forbidden` und
-      wird erkannt, jede andere gilt dort vorsichtig als unklar. Handy ohne
+      davon: da ging nichts hinaus. Am Android-Handy kommen seit PR 7 alle
+      Fehler mit dem Code des Desktops an (B9), am iPhone nur der Text (siehe
+      „iPhone: verliert Expo den Fehlercode?“); eine Ablehnung mit Marke
+      (`server-refused`, `unsafe-to-write`) wird an der Marke erkannt, auf
+      beiden. Handy ohne
       Testläufer — ↻ im Test.
-    - 🚩 CalDAV `create_task_list`: MKCALENDAR läuft über `send_retrying`.
-      Kam der erste Versuch an und brach dann die Verbindung ab, antwortet die
-      Wiederholung 405 (die Liste gibt es schon): gemeldet als Fehler, ein
-      erneuter Versuch legt eine zweite Liste an. Vor #97 schon so.
+    - ✅ CalDAV `create_task_list`: MKCALENDAR läuft seit PR 7 (7950e08b)
+      über `send_write`. Eine Wiederholung, die 405 bekommt, ist die Liste des
+      ersten Versuchs, jede andere Ablehnung einer Wiederholung unsicher
+      (`a_replayed_mkcalendar_reads_its_answer_as_the_first_attempts`).
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
     Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,
@@ -1281,12 +1394,16 @@ auch für die Schreib-Ablehnungen) und lädt Personen und „ich“ getrennt. De
 Fokus bleibt nach „Erneut versuchen“ im Feld (Desktop), am Handy geht er auf die
 Beschriftung und das Ergebnis wird angesagt. ↻ im Test (Handy ohne Testläufer).
 
-🚩 **Offen:** Am Handy tragen nur `forbidden`, `conflict` und `network` ihren
-Code nach JS (`eventCoded` in `CalFfiModule.swift`/`.kt`). Andere Fehler (502,
-404, …) kommen als technischer Name der nativen Ausnahme an, etwa
-„StoreException$Protocol: detail=…“. Braucht die übrigen Varianten im
-nativen Code, mit den Codes des Desktops; das lässt sich nur in einem
-Handy-Build prüfen.
+↻ **Erledigt in PR 7 (2026-10-23):** Jeder Aufruf des Rust-Hosts aus der
+Handy-Brücke läuft jetzt durch `hostCoded` (`CalFfiModule.swift`/`.kt`), das
+jede Variante mit dem Code des Desktops nach JS gibt (`auth`, `forbidden`,
+`not_found`, `conflict`, `network`, `protocol`, `invalid_input`,
+`unsupported`, `internal`, beim Abgleich dessen eigener Code);
+`check-ffi-bridges.mjs` lässt keine unumhüllte Registrierung durch. Kotlin
+lokal gebaut; Swift baut erst der iOS-Bau — ↻ im Test. Das gilt so nur für
+Android: Auf iOS kommt der Code nicht in JavaScript an (siehe „iPhone:
+verliert Expo den Fehlercode?“ unter B14), dort liest nur die Marke im
+Text.
 
 ### B10 · iOS: VoiceOver tippte durch die Tab-Leiste (159) `[~]`
 
@@ -1541,16 +1658,172 @@ Vorschläge sind nicht aufgenommen.
       Bildschirm, der oberste gewinnt); für das Deckblatt vom obersten
       gezeigten Controller aus. Gefunden in der sechsten Prüfrunde von #127
       (2026-10-18), älter als #127.
+- [ ] **Verfügbarkeit: jeder andere Fehler heißt „alle frei“.** Seit PR 7
+      sagt eine Verfügbarkeitsprüfung, die ein ausgelasteter Anbieter
+      abweist, das in Worten (`host_core::free_busy::query_free_busy`, beide
+      Geräte). Jeder andere Fehler (Netz, Rechte, ein Anbieter ohne
+      Frei/Belegt) gibt weiter eine leere Antwort, und der Editor sagt „Alle
+      Teilnehmer sind zu dieser Zeit frei.“ Zu entscheiden: welche Fehler
+      einen Satz bekommen (ein Anbieter ohne Frei/Belegt ist keiner). Google
+      meldet Fehler auch je Kalender in der Antwort (`calendars.<id>.errors`);
+      die liest Aperio nicht, so dass eine unbekannte Adresse als frei
+      erscheint. Aus der Planung von PR 7 (2026-10-23).
+- [ ] **Google: eine Unteraufgabe lösen erreicht Google nicht.**
+      `tasks::update_task` schickt `/move` nur mit einer neuen übergeordneten
+      Aufgabe. Ist `parent_id` leer, die Aufgabe bei Google aber noch
+      eingehängt, geht kein `/move` (ohne `parent`, also nach oben) hinaus;
+      die Antwort des PATCH zeigt sie weiter eingehängt, und die Änderung
+      verfällt stumm. Zuerst prüfen, ob eine Oberfläche das Lösen anbietet.
+      Dazu: Das `/move` beim Einhängen schickt kein `previous`; laut Google
+      steht die Aufgabe dann an erster Stelle ihrer Geschwister, der
+      Kommentar in `update_task` sagt „ans Ende“. Gefunden beim Umbau der
+      mehrstufigen Speicherungen in PR 7 (2026-10-19), älter.
+- [ ] **Ein späterer Schritt, der aus anderem Grund scheitert, sagt nicht,
+      dass ein Teil steht.** Scheitert ein späterer Schritt eines Speicherns
+      an etwas anderem als Auslastung (Netz, Rechte, eine Ablehnung),
+      nachdem ein früherer angekommen ist, macht `Error::after_landed` daraus
+      einen Netzwerkfehler mit dem Namen des Schritts davor; die Oberflächen
+      zeigen dessen Text. Zu entscheiden: ob `partly-saved:` für jede Ursache
+      gilt oder ein eigener Satz kommt. Aus der Planung von PR 7
+      (2026-10-23).
+- [ ] **Exchange: eine schon geänderte Ausnahme über einen Nachbarn
+      verschoben, Löschen ausgelastet.** Exchange lehnt das Verschieben
+      eines Serientermins auf oder über einen Nachbarn ab
+      (`ErrorOccurrenceCrossingBoundary`). Für eine Ausnahme, die schon
+      geändert ist (sie geht an Ort und Stelle, `occurrenceWrite`), löst
+      `update_event` sie dann ab (`detach_exception`,
+      crates/adapter-ews/src/api.rs): Es legt einen Einzeltermin an und
+      löscht die Ausnahme. Ist das Löschen ausgelastet, gibt PR 7
+      `after_landed("delete")` zurück, und Ziehen in Woche, Tag und Monat
+      (`moveEventToSlot`) sowie beide Editoren sagen den allgemeinen Satz
+      „nur zum Teil gespeichert … versuche den Rest später noch einmal“. Wer
+      das tut, zieht die Ausnahme noch einmal und bekommt einen zweiten
+      Einzeltermin. Es ist derselbe Zustand wie ein Herauslösen, dessen
+      Auslassen ausgelastet ist; das sagt seit der dritten und vierten
+      Prüfrunde von #128 `occurrenceKept` („speichere nicht noch einmal“).
+      Dazu verliert der neue Einzeltermin die Farbe, die Aperio für den
+      Termin hält: Der Fehler überspringt das Nachtragen in
+      `moveEventToSlot` und den Editoren (auf main kam der Einzeltermin
+      zurück, nur geloggt). Abhilfe: Das Ablösen gibt den Einzeltermin mit
+      dem Kalender zurück, in dem die Ausnahme blieb (wie
+      `original_left_in` beim Verschieben), und die Oberflächen sagen
+      `carvedOccurrenceKeptSentence` und tragen die Farbe nach. Gefunden in
+      der fünften Prüfrunde von #128 (2026-10-24); auf Tonis Wunsch hier
+      statt im PR.
+- [ ] **Aufgabe verschieben: das gebliebene Original geht verloren, wenn eine
+      Unteraufgabe danach scheitert.** `moveTaskToList` (beide Geräte,
+      src/state/moveActions.ts und mobile/src/state/moveActions.ts) sammelt
+      die Zeilen, die der Host zurückgibt. Die übergeordnete Aufgabe trägt
+      `original_left_in`, wenn ein ausgelasteter Anbieter das Original nicht
+      löschen ließ (277). Scheitert danach eine Unteraufgabe, wirft der
+      Fang `afterLanded(err, 'subtasks')`, und die gesammelten Zeilen sind
+      weg: Verschieben/Kopieren, das Ablegen in der Seitenleiste und auf
+      einem Abschnitt sagen nur „nur zum Teil gespeichert … versuche den Rest
+      später noch einmal“, nie, dass das Original in Liste A blieb. Wer
+      noch einmal verschiebt, bekommt eine zweite Kopie in B. Beide Editoren beim
+      Listenwechsel ebenso (TaskDialog und TaskEditorModal lesen
+      `originalKeptSentence` erst nach den Unteraufgaben und der Kaskade).
+      Unter Drosselung ist das der wahrscheinliche Fall: Die erste
+      Unteraufgabe geht direkt nach dem 429 des Löschens hinaus. Abhilfe: im
+      Fang die schon zurückgekommenen Zeilen behalten (ein eigener
+      Fehlertyp mit den Zeilen und der Ursache) und den Satz vom gebliebenen
+      Original zuerst sagen. Vorsicht beim Satz: Das Original in A trägt
+      noch die Unteraufgaben, die nicht umgezogen sind; „lösche es dort
+      selbst“ löschte sie mit. Er sagt nur, dass das Original blieb und
+      nicht noch einmal verschoben werden soll. Der Paritätstest
+      (moveTaskToList.parity.test.ts) deckt nur eine übergeordnete Aufgabe
+      ohne `original_left_in` ab. Gefunden in der fünften Prüfrunde von
+      #128 (2026-10-24); auf Tonis Wunsch hier statt im PR.
+- [ ] **iPhone: Fehlerzeilen, die nur Android ansagt.** Das Handy zeigt
+      viele Fehler in einer Zeile mit `accessibilityLiveRegion="assertive"`.
+      Das gibt es nur auf Android; auf iOS sagt VoiceOver die Zeile nie an,
+      wenn nicht daneben `announceForAccessibility` steht (so schon in
+      EventGroupModal und EventRsvp). In PR 7 nachgezogen: die
+      Verfügbarkeitsprüfung, Erinnerungen und Suche. Offen: die übrigen 28
+      Dateien mit einer solchen Zeile (`git grep accessibilityLiveRegion`)
+      einzeln prüfen, ob jeder Weg, der die Zeile setzt, auf iOS auch
+      ansagt; am besten ein gemeinsamer Baustein (Zeile + iOS-Ansage), den
+      jede Fehlerzeile nimmt. Gefunden in der sechsten Prüfrunde von #128
+      (2026-10-24), älter als #128.
+- [ ] **Ein Lesen vor dem Ersetzen, das nicht an Auslastung scheitert, kann
+      Daten verlieren.** Manche Speicherungen lesen zuerst, was sie nicht
+      selbst kennen, und schreiben dann das Ganze. Ist der Anbieter dabei
+      ausgelastet, bricht das Speichern seit PR 7 ab. Jeder andere
+      Lesefehler wird weiter übergangen, und das Schreiben löscht, was nicht
+      gelesen wurde: bei Google die weiteren Daten eines Kontakts
+      (`update_person`, `other_events`), bei CardDAV das Foto eines
+      Kontakts, bei Graph die HTML-Beschreibung eines Termins
+      (`update_event`). Abhilfe: bei jedem Lesefehler abbrechen oder nur
+      ändern, was bekannt ist. Aus der Planung von PR 7 (2026-10-23).
+- [ ] **Zusagen fehlt, wenn die eigene Adresse ausgelastet ist.** Die
+      Zu-/Absage im Termin (`EventRsvp`, beide Geräte) fragt zuerst die
+      eigene Adresse des Kontos ab (`resolveCalendarUserEmail`). Scheitert
+      das, auch an einem ausgelasteten Anbieter, verschwinden die Knöpfe
+      ohne Wort. Besser: einen Satz zeigen und später neu fragen. Aus der
+      Planung von PR 7 (2026-10-23).
+- [ ] **Desktop: Lesen am Zwischenspeicher vorbei.** Abschnitte
+      (`get_sections`), Mitglieder einer Liste und die eigene Person einer
+      Aufgabenliste liest der Desktop direkt beim Anbieter, nicht über den
+      Zwischenspeicher. Ein ausgelasteter Anbieter hält diese Lesevorgänge
+      daher nicht an und zählt sie nicht; nur ihr Satz sagt es. Am Handy
+      laufen sie über den Zwischenspeicher. Angleichen. Aus der Planung von
+      PR 7 (2026-10-23).
+- [ ] **Gleichzeitige Schreibvorgänge drosseln den Anbieter selbst.** Die
+      Sammelknöpfe des Tagesstarts (`writeAll`), sein automatischer Übertrag
+      (`DayStartReviewChecker`) und das Anheften fälliger Fristen
+      (`DeadlinePinChecker`, beide `Promise.all`) schreiben viele Aufgaben
+      auf einmal. Bei einem Konto mit vielen Aufgaben kann das allein die
+      Drosselung auslösen. Abhilfe: nacheinander oder in kleinen Gruppen
+      schreiben (`writeAll` mit `oneAtATime`). Aus der Planung von PR 7
+      (2026-10-23).
+- [ ] **Die Wartezeit des Anbieters bleibt ungenutzt.** Nennt ein
+      ausgelasteter Anbieter, wie lange zu warten ist (`Retry-After`), steht
+      das nur im Protokoll. Die Aktualisierung im Hintergrund hält an, bis
+      ein eigenes Schreiben sie freigibt, und die Runden fragen im üblichen
+      Takt neu. Sie könnten bis zur genannten Zeit warten. Aus der Planung
+      von PR 7 (2026-10-23).
+- [ ] ↻ **iPhone: verliert Expo den Fehlercode?** Expo 56 scheint auf iOS bei
+      jeder abgewiesenen `AsyncFunction` `error.code` fallen zu lassen. Dann
+      sind die Zweige, die nach dem Code fragen, auf dem iPhone tot:
+      `useSyncErrorMessage`, `EventGroupModal`, `client_secret_required` im
+      `AccountsScreen`, `SyncTargetSchemaForm`, und in `shared` die Sätze zu
+      `conflict` und `forbidden` ohne Marke sowie `writeNeverLanded` über den
+      Code (eine Ablehnung ohne Marke liest dort als „ist vielleicht
+      angekommen“, die sichere Seite). PR 7 verlässt sich nur auf die Marke
+      im Text. Die achte Prüfrunde von #128 (2026-10-24) hat den Weg in den
+      gesperrten Quellen gelesen (expo-modules-core 56.0.17, expo-modules-jsi
+      56.0.10): `AsyncFunctionDefinition` gibt den Fehler an
+      `JavaScriptPromise.reject`, und das baut `JavaScriptError` nur mit der
+      Meldung; den Code hängt nur der Weg für synchrone Würfe an. Android
+      gibt ihn mit. Am iPhone prüfen (etwa ein Speichern mit Konflikt); wenn
+      ja, entweder expo-modules-jsi per patch-package den Code mitgeben lassen
+      oder den Code in den Text legen, ohne dass die Marke ihren ersten Platz
+      verliert. Aus der Planung von PR 7 (2026-10-23).
+- [ ] **Plugins: Abgleich liest „verboten“ als Anmeldung.** Der Abgleich
+      eines Plugins (`plugin-core/src/shim/sync.rs`, `status_to_sync_error`)
+      macht aus `FORBIDDEN` einen Anmeldefehler, auch wenn die Meldung eine
+      Marke wie `provider-busy:` trägt; Kalender, Aufgaben und Kontakte
+      behalten sie. Ebenso kommt „Zugriff nicht erteilt“ eines Plugins als
+      `forbidden` mit der Marke an, und `host_core::cache::failure_kind`
+      erkennt den Zugriff nur am Fehlertyp, nicht an der Marke. Aus der
+      Planung von PR 7 (2026-10-23).
 - [ ] **Ein Schnell-Hinzufügen-Test wackelt unter Last.** Der erste Test in
       `src/components/quickAddOfferCalendar.test.tsx` lief in einem vollen
       vitest-Lauf in seine 15 s, die übrigen neun scheiterten als Folge (die
       Ansicht des ersten blieb stehen); allein und beim nächsten vollen Lauf
       grün. Gesehen in der ersten Prüfrunde von #127 (2026-10-18), älter.
+      Wieder in der sechsten Prüfrunde von #128 (2026-10-24), als `cargo test
+      --workspace` gleichzeitig lief; dazu lief „says a busy provider in
+      words“ in `TaskDialog.writeError.test.tsx` in seine 20 s, und der
+      nächste Test fand zwei Titelfelder. Ohne Last beide grün. Abhilfe:
+      eine Ansicht, die ein abgebrochener Test stehen lässt, vor dem nächsten
+      abräumen, oder die Zeitgrenze an der Last ausrichten.
 - [ ] **Anlegen und Ändern halten die Handy-Warteschlange.** `createEventJson`
       und `updateEventJson` laufen auf beiden Plattformen auf Expos einer
       Standard-Warteschlange (`CalFfiModule.swift`, `CalFfiModule.kt`, kein
-      `runOnQueue`). Seit PR 8 kann ein Anlegen bei Exchange sie bis zu etwa
-      einer halben Minute belegen; jedes Lesen dahinter wartet. Eigene
+      `runOnQueue`). Seit PR 8 kann ein Anlegen bei Exchange, seit PR 7 bei
+      Google sie bis zu etwa einer halben Minute belegen; jedes Lesen dahinter
+      wartet. Eigene
       Warteschlange (nicht `slowQueue`, die die Abgleich-Runden teilen), wie
       218 für die Erinnerungen fordert. Aus der Planung von PR 8 (2026-10-18).
 - [ ] **Veraltete Kopien der erzeugten Typen.** `crates/cal-core/bindings`,
@@ -1618,19 +1891,15 @@ Vorschläge sind nicht aufgenommen.
       groupSyncConflicts) und Erfolg oder Fehler mit
       dialogs.syncConflicts.copied/copyFailed ansagen. Vorschlag vom
       2026-06-30, aus der Vorschlagsliste gefallen.
-- [ ] **Fehler beim Ändern von Aufgaben am Desktop ansagen.** Abhaken meldet
-      Fehler jetzt (1fd68102). Andere Aufgaben-Änderungen am Desktop schreiben
-      bei Fehlern aber weiterhin nur console.warn und sagen nichts an, teils
-      ohne die Ansicht neu zu laden. Betroffen:
-      src/components/DayStartReviewDialog.tsx (delete_task, update_task,
-      Sammel-Updates an 7 Stellen), DeadlinePinChecker.tsx:126,
-      views/DayView.tsx:923 (Ziehen auf eine Uhrzeit), TaskDialog.tsx:787/819
-      (Abschnitte), views/TaskView.tsx:261 (Abschnittsfarbe) und
-      Sidebar.tsx:486/523 (Liste löschen oder umhängen). Jede Stelle soll den
-      Fehler ansagen, wie es mobile tut (neuer Desktop-Fehlerschlüssel EN+DE),
-      und nach einem Teilerfolg neu laden. Optional die Teilzählung
-      (cascadePartial) auch mobil nachziehen. Vorschlag vom 2026-09-09, aus
-      der Vorschlagsliste gefallen; das Abhaken selbst ist erledigt.
+- [ ] **Teilzählung beim Abhaken auch am Handy.** Seit PR 7 sagen alle
+      Aufgaben-Änderungen am Desktop, die eine Person auslöst, ihr Scheitern
+      (Tagesstart, Ziehen, Abschnitte, Abschnitts- und Behälterfarbe, Liste
+      umhängen und löschen) und lesen nach einem Teilerfolg neu; das
+      automatische Anheften einer Frist (`DeadlinePinChecker`) steht unter
+      „Automatische Schreibvorgänge sagen ihr Scheitern nicht“. Offen ist
+      nur, die Teilzählung des Desktops beim Abhaken
+      (`views.tasks.cascadePartial`: „2 von 3 weiteren Aufgaben mit
+      aktualisiert“) auch mobil nachzuziehen. Vorschlag vom 2026-09-09.
 - [ ] **Schlüsselbund-Test gelegentlich rot (Ursache unklar).** Der Test
       secrets::tests::round_trip_when_keychain_is_reachable
       (src-tauri/src/secrets.rs:155-177) ist laut Meldung gelegentlich rot:
@@ -1713,6 +1982,8 @@ Vorschläge sind nicht aufgenommen.
       Ersatz. Damit fehlen Marokko (dauerhaft +00 seit 20.09.2026), Vancouver,
       Edmonton und Inuvik (ab 01.11.2026) sowie Chisinau, und die Erinnerungen
       in crates/host-core/src/reminders.rs klingeln dort eine Stunde daneben.
+      Deshalb lässt Googles Neuanlage einer Serie eine Stunde zwischen
+      Aperios Stelle und Googles Termin zu (269).
       Zu tun (32a, TODO.md ~2037): drei Wege untersuchen, nämlich chrono-tz
       mit neuerem tz-Verzeichnis oder [patch], jiff/jiff-tzdb und die
       OS-Datenbank zur Laufzeit. Für jeden Aufwand, Binärgröße, Folgen für
@@ -3914,7 +4185,12 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
     nichts mehr findet, gilt als erledigt (die Absage verschiebt das
     Ereignis nach „Gelöschte Elemente“, mit neuer Id). Nicht hier: Anlegen
     und Löschen melden solche Ablehnungen weiter als `protocol` (für das
-    Teilen zählt nur das Kürzen).
+    Teilen zählt nur das Kürzen). Seit PR 7 (270) sind HTTP 429 und
+    Exchanges `ErrorServerBusy` keine Ablehnung mehr, sondern ein
+    ausgelasteter Anbieter (`provider-busy`, über
+    `WriteRefusal::turned_down_by_status` vor jeder Ablehnung geprüft);
+    `server-refused` bleibt für 400, 413, 415, 422, 507 und die übrigen
+    Prüfcodes von Exchange.
   - ✅ Die Editoren nutzten `seriesLeftTruncated` nicht: scheiterte beim
     Teilen auch das Zurücksetzen, hörte man nur den ersten Fehler. Das
     Zurücksetzen gibt es nicht mehr (136); scheitert das Zurücknehmen der

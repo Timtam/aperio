@@ -10,7 +10,12 @@ import {
   View,
 } from 'react-native';
 
-import { isBirthdayCalendarId, type ColorLabel } from '@aperio/shared';
+import {
+  type ColorLabel,
+  isBirthdayCalendarId,
+  readErrorMessage,
+  writeErrorMessage,
+} from '@aperio/shared';
 
 import { ADAPTER_KIND_DEVICE_CALENDAR, listAccounts, type Account } from '../api/accounts';
 import { Calendar, deleteCalendar, listCalendars } from '../api/calendar';
@@ -39,10 +44,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // back to a host-local name override) and its colour is a host-local override —
 // both handled Rust-side, so this screen opens for every calendar (delete stays
 // local-only, since an external calendar is provider-owned).
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function CalendarEditorModal({
   route,
@@ -110,12 +111,12 @@ export default function CalendarEditorModal({
       try {
         await reload();
       } catch (err) {
-        setError(errorMessage(err));
+        setError(readErrorMessage(err, t));
       } finally {
         setLoading(false);
       }
     })();
-  }, [reload]);
+  }, [reload, t]);
 
   const isLocal = calendar?.account_id === 'local';
   // Synthetic birthday calendars have no backing row: rename/colour/delete
@@ -145,7 +146,7 @@ export default function CalendarEditorModal({
       await reload();
       announce(t('mobile.calendarRenamed', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -171,7 +172,7 @@ export default function CalendarEditorModal({
             : t('sidebar.menu.colorClearedAnnouncement', { name }),
         );
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {
@@ -201,7 +202,7 @@ export default function CalendarEditorModal({
                 announce(t('sidebar.calendarDeleted', { name }));
                 navigation.goBack();
               } catch (err) {
-                const message = errorMessage(err);
+                const message = writeErrorMessage(err, t);
                 setError(message);
                 announce(t('mobile.error', { message }));
                 setBusy(false);

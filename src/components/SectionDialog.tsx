@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { writeErrorMessage } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
   createSection,
-  isCommandError,
   setSectionColor,
   updateSection,
 } from '../api/client';
@@ -72,7 +72,10 @@ export function SectionDialog({
         if (colorDraft !== (section.color_label ?? null)) {
           await setSectionColor(section.id, listId, colorDraft);
         }
-        await loadSections(listId);
+        // The rename stands: a read that fails after it shows it anyway.
+        await loadSections(listId, {
+          upsert: { ...section, name: trimmed, color_label: colorDraft },
+        });
         announce(t('dialogs.task.section.renamed', { name: trimmed }));
       } else {
         const created = await createSection({
@@ -84,7 +87,11 @@ export function SectionDialog({
         if (colorDraft) {
           await setSectionColor(created.id, listId, colorDraft);
         }
-        await loadSections(listId);
+        // The section stands: a read that fails after it shows it anyway,
+        // and the dialog closes — creating it again would make two.
+        await loadSections(listId, {
+          upsert: { ...created, color_label: colorDraft ?? created.color_label },
+        });
         announce(t('dialogs.task.section.created', { name: trimmed }));
       }
       // Reset the draft before closing so a reused dialog instance never
@@ -94,11 +101,7 @@ export function SectionDialog({
       setColorDraft(section?.color_label ?? null);
       onClose();
     } catch (err) {
-      if (isCommandError(err)) {
-        setError(`${err.code}: ${err.message}`);
-      } else {
-        setError(String(err));
-      }
+      setError(writeErrorMessage(err, t));
     } finally {
       setBusy(false);
     }

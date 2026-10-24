@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { writeErrorMessage } from '@aperio/shared';
+import { readErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -118,6 +118,11 @@ export default function AgendaScreen({
   // "Loading …" only when the wait is long enough to notice (desktop parity).
   const showLoading = useDeferredLoading(loading);
   const [error, setError] = useState<string | null>(null);
+  // A failed write's line, apart from a load's: a load clears only its own,
+  // so a refresh after the write leaves it. It goes with the next delete,
+  // another window, or the screen's return from elsewhere (the editor), where
+  // the person acted again. Mirrors CalendarDayList.
+  const [writeError, setWriteError] = useState<string | null>(null);
   // First load blanks; later reloads (focus return, delete/edit, cache refresh)
   // keep the current list on screen and refresh in place — the view stays open
   // instead of flashing the loading screen.
@@ -157,6 +162,9 @@ export default function AgendaScreen({
     end.setHours(23, 59, 59, 999);
     return { start, end };
   }, [anchor]);
+  useEffect(() => {
+    setWriteError(null);
+  }, [range]);
 
   const fmtFullDate = useCallback(
     (d: Date) =>
@@ -272,7 +280,8 @@ export default function AgendaScreen({
       hasLoadedRef.current = true;
     } catch (err) {
       if (reqToken.current !== token) return;
-      const message = writeErrorMessage(err, t);
+      // A load: a busy provider says so, never that nothing was changed.
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -284,7 +293,10 @@ export default function AgendaScreen({
 
   // Reload when the window changes or the screen regains focus (after the editor).
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => void load());
+    const unsubscribe = navigation.addListener('focus', () => {
+      setWriteError(null);
+      void load();
+    });
     void load();
     return unsubscribe;
   }, [navigation, load]);
@@ -439,11 +451,17 @@ export default function AgendaScreen({
         ev,
         t,
         (message) => {
+          setWriteError(null);
           announce(message);
           void load();
         },
         (message) => {
-          setError(message);
+          // A delete that failed may have landed in part — a series cut
+          // short — so the list reads again, as the desktop grid does (277).
+          // Its line is a write's: neither this re-read nor a refresh it
+          // starts clears it.
+          setWriteError(message);
+          void load();
           announce(t('mobile.error', { message }));
         },
         {
@@ -551,7 +569,12 @@ export default function AgendaScreen({
         <CalendarActions navigation={navigation} anchorDay={anchor} />
       </View>
 
-      {error != null && (
+      {writeError != null && (
+        <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
+          {writeError}
+        </Text>
+      )}
+      {error != null && error !== writeError && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
         </Text>

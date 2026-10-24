@@ -21,7 +21,6 @@ import {
   createSection,
   createTask as apiCreateTask,
   deleteSection,
-  isCommandError,
   setSectionColor,
   showContextMenu,
   taskCurrentUser,
@@ -31,19 +30,28 @@ import {
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  selectableTaskLists,
-  findOffer,
-  offerOptions,
-  offerUsable,
-  prefillTarget,
   assigneeField,
+  type AssigneePool,
   assigneePoolErrorMessage,
   clampAssignees,
+  eventWriteFailureReason,
+  eventWriteLeftover,
+  findOffer,
+  joinNames,
+  offerOptions,
+  offerUsable,
+  originalKeptSentence,
+  prefillTarget,
+  selectableTaskLists,
   selfAssignOnStatusChange,
   taskAssignmentMode,
   taskPrefillFrom,
-  type AssigneePool,
+  withLaterForBusy,
+  writeAfterLanded,
+  writeErrorMessage,
 } from '@aperio/shared';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import { todayIsoKey } from '../intl/taskDay';
 import {
   effortSuffix,
@@ -63,6 +71,7 @@ import type {
   TaskUser,
 } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import type { SectionWrite } from '../state/CalendarStore';
 import { currentUserForList } from '../state/currentUser';
 import { useViewState } from '../state/viewStateContext';
 import { timeInputStep } from '../state/timeStep';
@@ -176,7 +185,7 @@ interface FormState {
 export function TaskDialog({
   isOpen,
   onClose,
-  task,
+  task: taskProp,
   defaultListId,
   defaultDate,
   defaultTitle,
@@ -191,6 +200,15 @@ export function TaskDialog({
   const { showHiddenTaskListTargets, timeStepMinutes } = useViewState();
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
+  // The task a save created whose staged subtasks did not all follow: it
+  // stands, so the editor edits it from then on — its fields go out as an
+  // update, and the next Save makes the drafts still left under it (273;
+  // Toni, 2026-10-24). Creating it again would make two.
+  const [createdTask, setCreatedTask] = useState<Task | null>(null);
+  const task = taskProp ?? createdTask;
+  useEffect(() => {
+    if (!isOpen) setCreatedTask(null);
+  }, [isOpen]);
   // Shared status actions — they own the parent/subtask cascade
   // (taskCascade.ts) and the SR announce. Used both for the listbox
   // Space-toggle and the per-row context menu.
@@ -418,6 +436,9 @@ export function TaskDialog({
   // parent has no id yet, so children can't be written until it exists —
   // we collect titles here and create them right after the parent on Save.
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
+  // What the editor says in place of the form once a save landed in part:
+  // saving again would write twice what stands (273, 277).
+  const { notice, showNotice } = useCloseOnlyNotice();
   // Date inputs for the two optional slots. The "clear" buttons move
   // focus here after wiping the slot (the button itself unmounts once
   // the date is empty, so focus would otherwise fall to <body>).
@@ -601,6 +622,9 @@ export function TaskDialog({
       task ? false : (listForSections?.task_capabilities?.subtasks ?? true),
     [task, listForSections],
   );
+  // Whether the list the form points at can hold the drafts still staged —
+  // in create mode, and in the edit of a task this editor created.
+  const draftsFit = listForSections?.task_capabilities?.subtasks ?? true;
   const sectionsEnabled = canAssignSection(listForSections);
   // How many people the TARGET list's source can hold on one task. Gates the
   // picker entirely (`none`) and, above that, whether it offers more than one
@@ -746,6 +770,9 @@ export function TaskDialog({
     const name = sectionDraft.trim();
     if (!name || sectionBusy) return;
     setSectionBusy(true);
+    // What was written, for the read after it: a read that fails then shows
+    // it rather than saying the write failed (decision 277).
+    let written: SectionWrite | undefined;
     try {
       if (sectionMode === 'rename' && form.sectionId) {
         const current = sectionsForList.find((s) => s.id === form.sectionId);
@@ -757,6 +784,7 @@ export function TaskDialog({
           if (sectionColorDraft !== (current.color_label ?? null)) {
             await setSectionColor(current.id, form.listId, sectionColorDraft);
           }
+          written = { upsert: { ...current, name, color_label: sectionColorDraft } };
           announce(t('dialogs.task.section.renamed', { name }));
         }
       } else {
@@ -770,8 +798,11 @@ export function TaskDialog({
         }
         // Reload BEFORE selecting the new section so the
         // "section gone from list" reset effect sees it as valid and
-        // doesn't race-clear the fresh selection.
-        await loadSections(form.listId);
+        // doesn't race-clear the fresh selection. The section stands: a
+        // read that fails shows it anyway, and the editor closes.
+        await loadSections(form.listId, {
+          upsert: { ...created, color_label: sectionColorDraft ?? created.color_label },
+        });
         setForm((prev) => ({ ...prev, sectionId: created.id }));
         announce(t('dialogs.task.section.created', { name }));
         setSectionMode(null);
@@ -779,12 +810,11 @@ export function TaskDialog({
         setSectionColorDraft(null);
         return;
       }
-      await loadSections(form.listId);
+      await loadSections(form.listId, written);
       setSectionMode(null);
       setSectionDraft('');
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('section mutation failed', err);
+      setError(writeErrorMessage(err, t));
     } finally {
       setSectionBusy(false);
     }
@@ -808,15 +838,16 @@ export function TaskDialog({
     try {
       // Deleting a section only ungroups its tasks (ON DELETE SET NULL),
       // so there's no destructive-confirm — the tasks survive.
-      await deleteSection(form.sectionId, form.listId);
+      const removed = form.sectionId;
+      await deleteSection(removed, form.listId);
       setForm((prev) => ({ ...prev, sectionId: '' }));
-      await loadSections(form.listId);
+      // The section is gone: a read that fails shows that anyway (277).
+      await loadSections(form.listId, { remove: removed });
       announce(
         t('dialogs.task.section.deleted', { name: current?.name ?? '' }),
       );
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('delete_section failed', err);
+      setError(writeErrorMessage(err, t));
     } finally {
       setSectionBusy(false);
       // The delete button unmounts once form.sectionId clears (the manage
@@ -922,6 +953,7 @@ export function TaskDialog({
     // where I left it" from "the user tabbed away during the round-trip".
     const focusAtStart = document.activeElement;
     setSubtaskBusy(true);
+    let made = false;
     try {
       const created = await apiCreateTask({
         list_id: task.list_id,
@@ -945,17 +977,21 @@ export function TaskDialog({
         assignees: [],
         sound: null,
       });
+      made = true;
       // Cascade-up: if the parent was completed before this new
       // open child appeared, the parent should re-derive to
       // in_progress (or open if no other progress exists). The
       // snapshot we hand the planner has to *include* the freshly
-      // created row, since `tasks` is the pre-mutation cache.
-      await applyAncestorWrites(
-        planAncestorRecompute(task.id, [...tasks, created], {
-          cascadeEnabled,
-          ...(autoDate ? { todayKey: todayIsoKey() } : {}),
-        }),
-        [...tasks, created],
+      // created row, since `tasks` is the pre-mutation cache. The
+      // subtask stands by then: a failure here is a later step (277).
+      await writeAfterLanded('cascade', () =>
+        applyAncestorWrites(
+          planAncestorRecompute(task.id, [...tasks, created], {
+            cascadeEnabled,
+            ...(autoDate ? { todayKey: todayIsoKey() } : {}),
+          }),
+          [...tasks, created],
+        ),
       );
       // Clear only if the field still holds what we submitted. The input stays
       // enabled during the round-trip (so the Enter path never blurs to <body>),
@@ -964,10 +1000,16 @@ export function TaskDialog({
       invalidateData();
       announce(t('dialogs.task.subtasks.added', { title: trimmed }));
     } catch (err) {
+      // A subtask that stands leaves the field, so adding again does not make
+      // it twice, and the rows read again (decision 277) — also one whose own
+      // create stands in part (a leftover: Vikunja's bucket move or parent
+      // link turned away), as the drafts count it.
+      if (made || eventWriteLeftover(err)) {
+        setNewSubtaskTitle((prev) => (prev.trim() === trimmed ? '' : prev));
+      }
+      invalidateData();
       // Show inline rather than steal the parent form's error slot.
-      announce(
-        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-      );
+      announce(writeErrorMessage(err, t));
     } finally {
       setSubtaskBusy(false);
       // Return focus to the (cleared) input so the user keeps typing the next
@@ -1023,23 +1065,26 @@ export function TaskDialog({
         // Recompute ancestors against the post-deletion snapshot:
         // removing the last open child should mark the parent
         // completed (or whatever its other children imply).
+        // The subtask is gone by then: a failure there is a later step (277).
         const parentId = subtask.parent_id;
         if (parentId) {
           const snapshot = tasks.filter((row) => row.id !== subtask.id);
-          await applyAncestorWrites(
-            planAncestorRecompute(parentId, snapshot, {
-              cascadeEnabled,
-              ...(autoDate ? { todayKey: todayIsoKey() } : {}),
-            }),
-            snapshot,
+          await writeAfterLanded('cascade', () =>
+            applyAncestorWrites(
+              planAncestorRecompute(parentId, snapshot, {
+                cascadeEnabled,
+                ...(autoDate ? { todayKey: todayIsoKey() } : {}),
+              }),
+              snapshot,
+            ),
           );
         }
         invalidateData();
         announce(t('dialogs.task.deleted', { title: subtask.title }));
       } catch (err) {
-        announce(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-        );
+        // What landed shows (decision 277).
+        invalidateData();
+        announce(writeErrorMessage(err, t));
       }
     },
     [invalidateData, announce, t, tasks, cascadeEnabled, autoDate],
@@ -1206,15 +1251,12 @@ export function TaskDialog({
         setError(t('dialogs.task.listRequired'));
         return;
       }
-      // Don't silently drop staged subtasks: if the user switched the
-      // (create-mode) list to one that can't hold subtasks while drafts
-      // are pending, block the save so they remove them or pick another
-      // list, rather than creating a parent with the children lost.
-      if (
-        !isEdit &&
-        draftSubtasks.length > 0 &&
-        !createSupportsSubtasks
-      ) {
+      // Don't silently drop staged subtasks: if the user switched the list
+      // to one that can't hold subtasks while drafts are pending — creating
+      // a task, or editing one this editor created — block the save so they
+      // remove them or pick another list, rather than creating a parent with
+      // the children lost or made as loose tasks.
+      if (draftSubtasks.length > 0 && !draftsFit) {
         setError(t('dialogs.task.subtasks.listNoSubtasks'));
         return;
       }
@@ -1248,6 +1290,88 @@ export function TaskDialog({
               autoDate ? todayIsoKey() : undefined,
             )
           : undefined) ?? scheduled_date;
+
+      // The subtasks staged on the form, made under `parent` once it stands.
+      // They inherit its section so they group with it, and default to
+      // open/medium like the inline add — but a parent in a terminal state
+      // passes it down (cascade-down semantics: open children under a
+      // completed parent would derive the parent right back to open on the
+      // next recompute). One that fails leaves the editor on the parent, as
+      // its edit, with the drafts not yet made (273); a subtask that stands
+      // without a step of its own is made. `true` when all were made.
+      const makeDrafts = async (parent: Task): Promise<boolean> => {
+        const draftStatus =
+          parent.status === 'completed' || parent.status === 'cancelled'
+            ? parent.status
+            : 'open';
+        const left = [...draftSubtasks];
+        while (left.length > 0) {
+          try {
+            await apiCreateTask({
+              list_id: parent.list_id,
+              title: left[0],
+              description: null,
+              status: draftStatus,
+              priority: 'medium',
+              effort: 'medium',
+              scheduled_date: null,
+              scheduled_time: null,
+              deadline_date: null,
+              deadline_time: null,
+              deadline_reminder_days: null,
+              recurrence: null,
+              parent_id: parent.id,
+              section_id: parent.section_id,
+              color_label: null,
+              reminders: [],
+              assignees: [],
+              sound: null,
+            });
+          } catch (err) {
+            invalidateData();
+            if (eventWriteLeftover(err)) left.shift();
+            if (left.length === 0) {
+              showNotice(writeErrorMessage(err, t));
+              return false;
+            }
+            // The editor edits what stands from here: the form takes the
+            // task as it was stored, with what its create derived (a day
+            // pinned on start), so saving it changes only what the user
+            // changes.
+            setForm(
+              buildInitialState(
+                parent,
+                defaultListId,
+                defaultDate,
+                defaultTitle,
+                taskLists,
+                selectedTaskListIds,
+              ),
+            );
+            statusTouched.current = false;
+            setCreatedTask(parent);
+            setDraftSubtasks(left);
+            setError(
+              withLaterForBusy(
+                t('dialogs.task.subtasks.draftsFailed', {
+                  title: parent.title,
+                  count: left.length,
+                  titles: joinNames(
+                    left.map((title) => t('actions.quotedTitle', { title })),
+                    t,
+                  ),
+                  reason: eventWriteFailureReason(err, t),
+                }),
+                err,
+                t,
+              ),
+            );
+            return false;
+          }
+          left.shift();
+        }
+        return true;
+      };
 
       setSubmitting(true);
       try {
@@ -1319,10 +1443,13 @@ export function TaskDialog({
           // resource URL and iCloud-shaped servers reject the
           // precondition with 412 / Conflict — same root cause
           // the event-side `previousCalendarId` hint addresses.
-          await invoke<Task>('update_task', {
+          const saved = await invoke<Task>('update_task', {
             task: updated,
             previousListId: task.list_id,
           });
+          // The rows a list change moved: one whose original the provider
+          // was too busy to delete says so (decision 277).
+          const moved = [saved];
           // List-cohabitation: if a parent's list changed, every
           // descendant follows along so the family stays together.
           // Otherwise a subsequent reload would surface a parent in
@@ -1338,10 +1465,16 @@ export function TaskDialog({
               // already lives (task.list_id, captured before the
               // parent's move); the post-move target is the new
               // form.listId.
-              await invoke<Task>('update_task', {
-                task: { ...child, list_id: form.listId },
-                previousListId: child.list_id,
-              });
+              // The task itself was saved: a later write's failure never
+              // reads as "nothing was changed" (decision 277).
+              moved.push(
+                await writeAfterLanded('subtasks', () =>
+                  invoke<Task>('update_task', {
+                    task: { ...child, list_id: form.listId },
+                    previousListId: child.list_id,
+                  }),
+                ),
+              );
             }
           }
           // Status cascade: if the user changed the Status dropdown
@@ -1364,7 +1497,25 @@ export function TaskDialog({
                 ...(autoDate ? { todayKey: todayIsoKey() } : {}),
               },
             ).filter((w) => w.taskId !== task.id);
-            await applyAncestorWrites(cascadeWrites, snapshot);
+            await writeAfterLanded('cascade', () =>
+              applyAncestorWrites(cascadeWrites, snapshot),
+            );
+          }
+          // A task this editor created whose subtasks did not all follow:
+          // the drafts left are made under it now.
+          if (draftSubtasks.length > 0 && !(await makeDrafts(saved))) return;
+          const kept =
+            form.listId !== task.list_id
+              ? originalKeptSentence(
+                  moved,
+                  (id) => taskLists.find((l) => l.id === id)?.name,
+                  t,
+                )
+              : null;
+          if (kept) {
+            invalidateData();
+            showNotice(kept);
+            return;
           }
           announce(t('dialogs.task.updated', { title: trimmedTitle }));
         } else {
@@ -1393,51 +1544,36 @@ export function TaskDialog({
             assignees: form.assignees,
             sound: null,
           });
-          // Create the subtasks staged on the form now that the parent
-          // has an id. They inherit the parent's section so they group
-          // with it, and default to open/medium like the inline add — but a
-          // parent CREATED in a terminal state passes it down (cascade-down
-          // semantics: open children under a completed parent would derive
-          // the parent right back to open on the next recompute).
-          if (createSupportsSubtasks) {
-            const draftStatus =
-              form.status === 'completed' || form.status === 'cancelled'
-                ? form.status
-                : 'open';
-            for (const subtaskTitle of draftSubtasks) {
-              await apiCreateTask({
-                list_id: form.listId,
-                title: subtaskTitle,
-                description: null,
-                status: draftStatus,
-                priority: 'medium',
-                effort: 'medium',
-                scheduled_date: null,
-                scheduled_time: null,
-                deadline_date: null,
-                deadline_time: null,
-                deadline_reminder_days: null,
-                recurrence: null,
-                parent_id: created.id,
-                section_id: form.sectionId || null,
-                color_label: null,
-                reminders: [],
-                assignees: [],
-                sound: null,
-              });
-            }
-          }
           // Remember for next time — only on create, not edit.
-          writeLastUsedTaskList(form.listId);
+          writeLastUsedTaskList(created.list_id);
+          if (createSupportsSubtasks && !(await makeDrafts(created))) return;
           announce(t('dialogs.task.created', { title: trimmedTitle }));
         }
         onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          setError(String(err));
+        // Something stands that saving again would write twice: a task saved
+        // without one of its follow-up steps (273). Said in place of the
+        // form, which only closes, and the data reloads. A new task's staged
+        // subtasks were never made, and are named so nothing goes unsaid.
+        if (eventWriteLeftover(err)) {
+          invalidateData();
+          // Drafts exist only for a task this editor creates, or created.
+          const unmade = draftSubtasks;
+          const sentence = writeErrorMessage(err, t);
+          showNotice(
+            unmade.length > 0
+              ? `${sentence} ${t('dialogs.task.subtasks.draftsNotCreated', {
+                  count: unmade.length,
+                  titles: joinNames(
+                    unmade.map((title) => t('actions.quotedTitle', { title })),
+                    t,
+                  ),
+                })}`
+              : sentence,
+          );
+          return;
         }
+        setError(writeErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
@@ -1457,6 +1593,14 @@ export function TaskDialog({
       autoSelfAssign,
       draftSubtasks,
       createSupportsSubtasks,
+      draftsFit,
+      invalidateData,
+      showNotice,
+      taskLists,
+      defaultListId,
+      defaultDate,
+      defaultTitle,
+      selectedTaskListIds,
     ],
   );
 
@@ -1473,11 +1617,7 @@ export function TaskDialog({
       announce(t('dialogs.task.deleted', { title: task.title }));
       onClose();
     } catch (err) {
-      if (isCommandError(err)) {
-        setError(`${err.code}: ${err.message}`);
-      } else {
-        setError(String(err));
-      }
+      setError(writeErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }
@@ -1486,6 +1626,10 @@ export function TaskDialog({
   const title = isEdit
     ? t('dialogs.task.editTitle')
     : t('dialogs.task.newTitle');
+
+  if (notice) {
+    return <CloseOnlyNotice title={title} sentence={notice} onClose={onClose} />;
+  }
 
   return (
     <Modal
@@ -2241,10 +2385,14 @@ export function TaskDialog({
           </fieldset>
         )}
 
-        {!isEdit && (createSupportsSubtasks || draftSubtasks.length > 0) && (
+        {(isEdit
+          ? draftSubtasks.length > 0
+          : createSupportsSubtasks || draftSubtasks.length > 0) && (
           <fieldset className="form__field form__field--subtasks">
             <legend className="form__label">
-              {t('dialogs.task.subtasks.heading')}
+              {isEdit
+                ? t('dialogs.task.subtasks.draftsLeftHeading')
+                : t('dialogs.task.subtasks.heading')}
             </legend>
             {/* Create mode: subtasks are staged as titles here and
                 written right after the parent on Save (the parent has
@@ -2257,7 +2405,11 @@ export function TaskDialog({
             ) : (
               <ul
                 className="subtasks__list"
-                aria-label={t('dialogs.task.subtasks.listAria')}
+                aria-label={
+                  isEdit
+                    ? t('dialogs.task.subtasks.draftsLeftHeading')
+                    : t('dialogs.task.subtasks.listAria')
+                }
               >
                 {draftSubtasks.map((title, i) => (
                   <li
@@ -2281,7 +2433,13 @@ export function TaskDialog({
                 ))}
               </ul>
             )}
-            {createSupportsSubtasks ? (
+            {!draftsFit ? (
+              // List was switched to one that can't hold subtasks while
+              // drafts are still staged — warn instead of dropping them.
+              <p className="form__hint form__hint--warning">
+                {t('dialogs.task.subtasks.listNoSubtasks')}
+              </p>
+            ) : isEdit ? null : (
               <div className="subtasks__add">
                 <input
                   type="text"
@@ -2305,12 +2463,6 @@ export function TaskDialog({
                   {t('dialogs.task.subtasks.addButton')}
                 </button>
               </div>
-            ) : (
-              // List was switched to one that can't hold subtasks while
-              // drafts are still staged — warn instead of dropping them.
-              <p className="form__hint form__hint--warning">
-                {t('dialogs.task.subtasks.listNoSubtasks')}
-              </p>
             )}
           </fieldset>
         )}

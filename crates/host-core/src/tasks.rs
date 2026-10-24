@@ -146,6 +146,24 @@ async fn record_completion(ext: &dyn TasksFeature, cached: &[Task], completed: &
     }
 }
 
+/// What a host does after an external task save failed, before it reads the
+/// list again (decisions 273, 277): a save whose status went out with its
+/// fields ([`cal_core::Error::status_landed`]) completed the task at the
+/// provider, so a recurring task still gets its next turn or its record —
+/// against the snapshot from before the save, which is why this runs before
+/// the cache is invalidated. Anything else changed no status.
+pub async fn after_failed_external_update(
+    ext: &dyn TasksFeature,
+    cache: &CacheStore,
+    account: &str,
+    completed: &Task,
+    err: &cal_core::Error,
+) {
+    if err.status_landed() {
+        record_external_recurrence_completion(ext, cache, account, completed).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,6 +231,7 @@ mod tests {
 
     fn base_task(id: &str) -> Task {
         Task {
+            original_left_in: None,
             id: id.into(),
             list_id: LIST.into(),
             title: "Bins out".into(),
@@ -347,5 +366,30 @@ mod tests {
         record_external_recurrence_completion(&ext, &cache, ACC, &completed).await;
 
         assert!(ext.created.lock().unwrap().is_empty());
+    }
+
+    /// A check-off whose fields landed while a later step met a busy
+    /// provider completed the task: the native rule still leaves its record.
+    /// One whose own status request was turned away, or that never landed,
+    /// completed nothing (decision 277).
+    #[tokio::test]
+    async fn a_completion_that_landed_in_part_still_leaves_its_record() {
+        let mut live = base_task("t1");
+        live.recurrence = Some(native_weekly());
+        let mut completed = live.clone();
+        completed.status = TaskStatus::Completed;
+        for (err, records) in [
+            (cal_core::Error::partly_saved("parent"), 1),
+            (cal_core::Error::partly_saved(cal_core::STATUS_STEP), 0),
+            (
+                cal_core::Error::provider_busy(cal_core::BusyDetail::TooManyRequests),
+                0,
+            ),
+        ] {
+            let cache = cache_with(std::slice::from_ref(&live));
+            let ext = RecordingAdapter::default();
+            after_failed_external_update(&ext, &cache, ACC, &completed, &err).await;
+            assert_eq!(ext.created.lock().unwrap().len(), records, "{err:?}");
+        }
     }
 }

@@ -57,6 +57,21 @@ flow and token refresh; the adapter sends a `Bearer` token.
   "Microsoft 365", and the editors say so instead of offering a silent save
   or delete (decision 82b).
 
+- **A busy Graph.** The request helpers build `GraphError::Busy` (decision
+  270): for 429, which did nothing, and for 503 with `Retry-After` on a
+  request that writes nothing (the reads, `getSchedule` through
+  `post_query_json`, and the token endpoint). A write answered 503 may have
+  been carried out, so it stays unsure. The wait Graph names is only logged.
+  An update whose read of the current event is busy sends no PATCH. A task's
+  Aperio-Extras extension is written in place (`PATCH`, a `POST` only where
+  it is missing), never deleted and created again: a create that failed after
+  the delete took the task's recurrence with it. A failure of that write
+  after the task's own PATCH is `GraphError::PartlySaved` (277). A busy
+  DELETE after a landed `/cancel` counts as done, as a 404 does: the meeting
+  is cancelled and off the calendar. A contact search says busy only where
+  neither source answered. A new contact whose photo upload fails is still
+  returned, with `has_photo` false, and the editor says so.
+
 ## Testing
 
 `mockito` with canned Graph JSON, including delta envelopes

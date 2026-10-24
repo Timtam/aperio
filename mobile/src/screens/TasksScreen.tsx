@@ -28,6 +28,7 @@ import {
   statusMarker,
   subtaskProgressSuffix,
   type TaskGroupBy,
+  writeAfterLanded,
   writeErrorMessage,
 } from '@aperio/shared';
 
@@ -49,6 +50,11 @@ import { useCurrentUserByList } from '../state/currentUser';
 import { useTaskStore } from '../state/taskStoreContext';
 import { surfaceTaskNow } from '../state/moveActions';
 import { priorityScaleFor, readTaskBehaviour } from '../state/taskBehaviour';
+import {
+  FAILED_FOCUS_WATCH_MS,
+  focusAfterFailedAction,
+  type FailedAction,
+} from '../state/reviewFocus';
 import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
 import { MagicTapView } from '../components/MagicTapView';
@@ -77,7 +83,7 @@ export default function TasksScreen({
 }: RootStackScreenProps<'Tasks'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const { tasks, loading, taskListById } = useTasks();
+  const { tasks, loading, taskListById, fetchedVersion } = useTasks();
   const {
     selectedTaskListIds,
     taskLists,
@@ -85,6 +91,7 @@ export default function TasksScreen({
     loadSections,
     colorLabels,
     invalidateData,
+    dataVersion,
   } = useTaskStore();
   // Native pull-to-refresh — manual sync + external-cache warm; the list reloads
   // off the resulting cache-update / dataVersion bump.
@@ -213,7 +220,19 @@ export default function TasksScreen({
   const headerTags = useRef<Record<string, number | null>>({});
   const emptyRef = useRef<Text>(null);
   const pendingFocusId = useRef<string | null>(null);
+  // Where focus goes when the pending row no longer shows after the refetch:
+  // a check-off that landed in part may or may not have moved it.
+  const pendingFocusFallback = useRef<string | null>(null);
   const pendingEmptyFocus = useRef(false);
+  // A delete that failed: its row is watched for a moment, as in the
+  // day-start review (`focusAfterFailedAction`) — the refresh after the
+  // re-read may still take it away, its delete having landed after all.
+  const failedFocus = useRef<FailedAction | null>(null);
+  // The data version last rendered: a failure's re-read reads at the next.
+  const versionShown = useRef(dataVersion);
+  useEffect(() => {
+    versionShown.current = dataVersion;
+  }, [dataVersion]);
 
   // Long-press action menu — the sighted twin of the rows' SR custom actions
   // (one shared action list feeds both).
@@ -287,11 +306,35 @@ export default function TasksScreen({
 
   // Restore focus to a sibling row after a mutation refetch remounts the list.
   useEffect(() => {
+    const gone = failedFocus.current;
+    if (gone != null) {
+      // By the rows the data holds, not the ones showing: a row the person
+      // folded away under its parent or its group is still there.
+      const held = tasks.map((task) => task.id);
+      const step = focusAfterFailedAction(gone, held, fetchedVersion, Date.now());
+      if (step.kind === 'wait') return;
+      failedFocus.current = null;
+      if (step.kind === 'move') {
+        const tag =
+          step.id === EMPTY_FOCUS
+            ? findNodeHandle(emptyRef.current)
+            : (rowTags.current[step.id] ?? null);
+        if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+        return;
+      }
+    }
     if (pendingFocusId.current != null) {
       const id = pendingFocusId.current;
+      const fallback = pendingFocusFallback.current;
       pendingFocusId.current = null;
+      pendingFocusFallback.current = null;
       pendingEmptyFocus.current = false;
-      const tag = rowTags.current[id] ?? headerTags.current[id];
+      const tag =
+        rowTags.current[id] ??
+        headerTags.current[id] ??
+        (fallback != null
+          ? (rowTags.current[fallback] ?? headerTags.current[fallback])
+          : null);
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
       return;
     }
@@ -300,7 +343,7 @@ export default function TasksScreen({
       const tag = findNodeHandle(emptyRef.current);
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
     }
-  }, [entries]);
+  }, [entries, fetchedVersion, tasks]);
 
   const targetListId = [...selectedTaskListIds][0] ?? taskLists[0]?.id ?? null;
 
@@ -339,6 +382,9 @@ export default function TasksScreen({
         invalidateData();
         announce(t('chipMenu.broughtToBacklog', { title: task.title }));
       } catch (err) {
+        // A save whose answer was lost may have landed: the list reads again,
+        // as the desktop's menu does (277).
+        invalidateData();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
@@ -373,6 +419,7 @@ export default function TasksScreen({
       // The check-off honours the synced task-behaviour knobs (mode, status
       // coupling, auto-date) via the shared toggle path; it returns the new
       // status (or null if nothing changed).
+      failedFocus.current = null;
       try {
         const next = await applyTaskToggle(task, taskListById.get(task.list_id), tasks);
         if (next == null) return;
@@ -388,7 +435,14 @@ export default function TasksScreen({
         invalidateData();
         announce(statusAnnounce(t, next, task.title));
       } catch (err) {
-        pendingFocusId.current = null;
+        // A check-off that landed in part — the task, not its parent — is
+        // real: the rows read again, as on the desktop (decision 277). Focus
+        // stays on the row where it still shows, and goes where a check-off
+        // that worked puts it where the row moved into the Done group.
+        pendingFocusId.current = task.id;
+        pendingFocusFallback.current =
+          focusTargetAfterRemoving(entries, task.id) ?? DONE_GROUP_ID;
+        invalidateData();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
@@ -401,27 +455,47 @@ export default function TasksScreen({
         // Land focus on a surviving sibling (excluding the deleted task's own
         // subtree, which cascades away with it), or the empty-state message.
         const siblingId = focusTargetAfterRemoving(entries, task.id);
+        failedFocus.current = null;
         if (siblingId) {
           pendingFocusId.current = siblingId;
         } else {
           pendingEmptyFocus.current = true;
         }
+        let deleted = false;
         try {
           await deleteTask(task.id, task.list_id);
+          deleted = true;
           // A subtask's removal can change the parent's derived status (e.g. the
           // last open child gone → parent completes). Recompute ancestors against
           // the post-deletion snapshot, honouring the coupling knob.
-          if (task.parent_id != null) {
-            await recomputeAncestors(
-              task.parent_id,
-              tasks.filter((t) => t.id !== task.id),
+          // The task is gone by then: a failure there is a later step (277).
+          const parentId = task.parent_id;
+          if (parentId != null) {
+            await writeAfterLanded('cascade', () =>
+              recomputeAncestors(
+                parentId,
+                tasks.filter((t) => t.id !== task.id),
+              ),
             );
           }
           invalidateData();
           announce(t('mobile.deleted', { title: task.title }));
         } catch (err) {
-          pendingFocusId.current = null;
-          pendingEmptyFocus.current = false;
+          // What landed shows (decision 277). A task that is gone leaves focus
+          // to the sibling chosen above; one whose delete failed keeps it
+          // while its row shows, and hands it on if a read in the next
+          // moments takes the row away after all.
+          if (!deleted) {
+            pendingFocusId.current = null;
+            pendingEmptyFocus.current = false;
+            failedFocus.current = {
+              acted: [task.id],
+              fallback: siblingId ?? EMPTY_FOCUS,
+              version: versionShown.current + 1,
+              until: Date.now() + FAILED_FOCUS_WATCH_MS,
+            };
+          }
+          invalidateData();
           announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
         }
       };
@@ -451,6 +525,7 @@ export default function TasksScreen({
           // Restore SR focus like the plain delete does: a removed task lands on
           // a surviving sibling / the empty state; a skipped one still exists
           // (moved to the next date) so re-focus it directly.
+          failedFocus.current = null;
           if (outcome === 'skipped') {
             pendingFocusId.current = task.id;
           } else {
@@ -475,13 +550,17 @@ export default function TasksScreen({
   // once the refetch remounts the list.
   const duplicate = useCallback(
     async (task: Task) => {
+      failedFocus.current = null;
       try {
         const created = await duplicateTask(task);
         pendingFocusId.current = created.id;
         invalidateData();
         announce(t('actions.duplicated', { title: task.title }));
       } catch (err) {
-        pendingFocusId.current = null;
+        // A copy that stands in part — without its assignees, say — shows,
+        // as on the desktop (decision 277); focus stays on the original.
+        pendingFocusId.current = task.id;
+        invalidateData();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
@@ -879,6 +958,10 @@ export default function TasksScreen({
   );
 }
 
+
+/** The focus target meaning the empty-state message, where no row is left:
+ *  no task has an empty id. */
+const EMPTY_FOCUS = '';
 
 /**
  * The id of the next (or previous) VISIBLE task row to land screen-reader focus

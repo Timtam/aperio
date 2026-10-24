@@ -18,6 +18,7 @@ pub mod contacts;
 pub mod drive;
 pub mod error;
 pub mod mapping;
+mod series_create;
 pub mod tasks;
 
 use std::collections::HashMap;
@@ -204,6 +205,27 @@ impl GoogleAdapter {
         }
     }
 
+    /// The calendars, cached, as a [`GoogleError`]: a write that walks them
+    /// maps a failed listing as a write, which wrote nothing.
+    async fn calendars(&self) -> GoogleResult<Vec<Calendar>> {
+        if let Some(cached) = self.cached_calendars().await {
+            return Ok(cached);
+        }
+        let fresh = api::list_calendars(&self.state).await?;
+        *self.calendars_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
+        Ok(fresh)
+    }
+
+    /// The task lists, cached, as a [`GoogleError`] (see [`Self::calendars`]).
+    async fn task_lists(&self) -> GoogleResult<Vec<TaskList>> {
+        if let Some(cached) = self.cached_task_lists().await {
+            return Ok(cached);
+        }
+        let fresh = tasks::list_task_lists(&self.state).await?;
+        *self.task_lists_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
+        Ok(fresh)
+    }
+
     async fn cached_task_lists(&self) -> Option<Vec<TaskList>> {
         let guard = self.task_lists_cache.lock().await;
         let (items, ts) = guard.as_ref()?;
@@ -285,14 +307,7 @@ impl Adapter for GoogleAdapter {
 #[async_trait]
 impl CalendarFeature for GoogleAdapter {
     async fn list_calendars(&self) -> CoreResult<Vec<Calendar>> {
-        if let Some(cached) = self.cached_calendars().await {
-            return Ok(cached);
-        }
-        let fresh = api::list_calendars(&self.state)
-            .await
-            .map_err(to_core_error)?;
-        *self.calendars_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
-        Ok(fresh)
+        self.calendars().await.map_err(to_core_error)
     }
 
     async fn get_events(&self, calendar_id: &str, range: DateRange) -> CoreResult<Vec<Event>> {
@@ -347,13 +362,13 @@ impl CalendarFeature for GoogleAdapter {
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
         api::create_event(&self.state, calendar_id, event)
             .await
-            .map_err(to_core_error)
+            .map_err(to_create_error)
     }
 
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
         api::update_event(&self.state, &event)
             .await
-            .map_err(to_update_error)
+            .map_err(to_write_error)
     }
 
     async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
@@ -371,19 +386,35 @@ impl CalendarFeature for GoogleAdapter {
         // "not on this calendar" (keep walking); a 410 = "already gone" anywhere =
         // success (idempotent). Any OTHER error (403/412/5xx) on a calendar is a
         // real failure — remember it and surface it after the walk instead of
-        // masking it as the misleading "not found in any calendar".
-        let cals = self.list_calendars().await?;
-        let mut real_error: Option<GoogleError> = None;
+        // masking it as the misleading "not found in any calendar". An answer
+        // that may have landed — a lost one — is kept apart: a later
+        // calendar's refusal must not hide that the event may be gone.
+        let cals = self.calendars().await.map_err(to_write_error)?;
+        let mut real_error: Option<CoreError> = None;
+        let mut unsure: Option<CoreError> = None;
         for cal in cals {
             match api::delete_event(&self.state, &cal.id, event_id, send_cancellations).await {
                 Ok(()) => return Ok(()),
                 Err(GoogleError::Http { status: 404, .. }) => continue,
                 Err(GoogleError::Http { status: 410, .. }) => return Ok(()),
-                Err(e) => real_error = Some(e),
+                // An answer for the whole account stops the walk (decisions
+                // 270, 275): the other calendars would be asked while it
+                // holds, and a later answer would hide why.
+                Err(e @ (GoogleError::Busy { .. } | GoogleError::UsageLimit { .. })) => {
+                    return Err(stopped_walk(e, unsure))
+                }
+                Err(e) => {
+                    let e = to_write_error(e);
+                    if e.never_landed() {
+                        real_error = Some(e);
+                    } else if unsure.is_none() {
+                        unsure = Some(e);
+                    }
+                }
             }
         }
-        if let Some(e) = real_error {
-            return Err(to_core_error(e));
+        if let Some(e) = unsure.or(real_error) {
+            return Err(e);
         }
         Err(CoreError::NotFound(format!(
             "event '{event_id}' not found in any calendar"
@@ -413,7 +444,7 @@ impl CalendarFeature for GoogleAdapter {
     ) -> CoreResult<()> {
         api::respond_to_event(&self.state, event_id, status, send_response)
             .await
-            .map_err(to_core_error)
+            .map_err(to_write_error)
     }
 
     fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {
@@ -426,7 +457,7 @@ impl CalendarFeature for GoogleAdapter {
     async fn rename_calendar(&self, calendar_id: &str, new_name: &str) -> CoreResult<()> {
         api::rename_calendar(&self.state, calendar_id, new_name)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         // The cached listing still has the old summary — drop it so
         // the next list_calendars walks Google again and surfaces
         // the new name.
@@ -445,7 +476,7 @@ impl CalendarFeature for GoogleAdapter {
         // master lives on THIS calendar: `MasterNotHere` → keep walking; a real
         // error (the DELETE failed on the owning calendar) → surface it instead of
         // masking every failure as the misleading "not found in any calendar".
-        let cals = self.list_calendars().await?;
+        let cals = self.calendars().await.map_err(to_write_error)?;
         for cal in cals {
             match api::add_event_exdate(
                 &self.state,
@@ -458,7 +489,7 @@ impl CalendarFeature for GoogleAdapter {
             {
                 Ok(api::ExdateOutcome::Cancelled) => return Ok(()),
                 Ok(api::ExdateOutcome::MasterNotHere) => continue,
-                Err(e) => return Err(to_core_error(e)),
+                Err(e) => return Err(to_write_error(e)),
             }
         }
         Err(CoreError::NotFound(format!(
@@ -470,14 +501,7 @@ impl CalendarFeature for GoogleAdapter {
 #[async_trait]
 impl TasksFeature for GoogleAdapter {
     async fn list_task_lists(&self) -> CoreResult<Vec<TaskList>> {
-        if let Some(cached) = self.cached_task_lists().await {
-            return Ok(cached);
-        }
-        let fresh = tasks::list_task_lists(&self.state)
-            .await
-            .map_err(to_core_error)?;
-        *self.task_lists_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
-        Ok(fresh)
+        self.task_lists().await.map_err(to_core_error)
     }
 
     async fn get_tasks(&self, list_id: &str) -> CoreResult<Vec<Task>> {
@@ -489,13 +513,13 @@ impl TasksFeature for GoogleAdapter {
     async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
         tasks::create_task(&self.state, list_id, task)
             .await
-            .map_err(to_core_error)
+            .map_err(to_write_error)
     }
 
     async fn update_task(&self, task: Task) -> CoreResult<Task> {
         tasks::update_task(&self.state, &task)
             .await
-            .map_err(to_core_error)
+            .map_err(to_write_error)
     }
 
     async fn delete_task(&self, task_id: &str) -> CoreResult<()> {
@@ -505,14 +529,30 @@ impl TasksFeature for GoogleAdapter {
         // round-trip per non-matching list) and same justification:
         // the Aperio command layer already knows the list, but the
         // trait surface does not carry it.
-        let lists = self.list_task_lists().await?;
+        let lists = self.task_lists().await.map_err(to_write_error)?;
+        // A list's answer that may have landed — a lost one — is kept: the
+        // task may be gone, and "not found" would say nothing changed.
+        // Whatever else a list answers, the task is looked for on the next.
+        let mut unsure: Option<CoreError> = None;
         for list in lists {
-            if tasks::delete_task(&self.state, &list.id, task_id)
-                .await
-                .is_ok()
-            {
-                return Ok(());
+            match tasks::delete_task(&self.state, &list.id, task_id).await {
+                Ok(()) => return Ok(()),
+                // An answer for the whole account stops the walk (decisions
+                // 270, 275): every other list would be asked while it holds,
+                // and "not found" would hide why.
+                Err(e @ (GoogleError::Busy { .. } | GoogleError::UsageLimit { .. })) => {
+                    return Err(stopped_walk(e, unsure))
+                }
+                Err(e) => {
+                    let e = to_write_error(e);
+                    if !e.never_landed() {
+                        unsure = Some(e);
+                    }
+                }
             }
+        }
+        if let Some(e) = unsure {
+            return Err(e);
         }
         Err(CoreError::NotFound(format!(
             "task '{task_id}' not found in any task list"
@@ -522,7 +562,7 @@ impl TasksFeature for GoogleAdapter {
     async fn rename_task_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         tasks::rename_task_list(&self.state, list_id, new_name)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         // Drop the cached listing — the cached title is stale.
         *self.task_lists_cache.lock().await = None;
         Ok(())
@@ -531,7 +571,7 @@ impl TasksFeature for GoogleAdapter {
     async fn create_task_list(&self, name: &str, parent_id: Option<&str>) -> CoreResult<TaskList> {
         let created = tasks::create_task_list(&self.state, name, parent_id)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         *self.task_lists_cache.lock().await = None;
         Ok(created)
     }
@@ -539,7 +579,7 @@ impl TasksFeature for GoogleAdapter {
     async fn delete_task_list(&self, list_id: &str) -> CoreResult<()> {
         tasks::delete_task_list(&self.state, list_id)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         *self.task_lists_cache.lock().await = None;
         Ok(())
     }
@@ -637,13 +677,11 @@ impl ContactsFeature for GoogleAdapter {
                 "the Google list '{list_id}' is read-only and does not accept new contacts"
             )));
         }
-        let result = contacts::create_contact(&self.state, contact)
-            .await
-            .map_err(to_core_error)?;
-        // Invalidate the listing cache so the next `get_contacts`
-        // shows the newly created row.
+        let result = contacts::create_contact(&self.state, contact).await;
+        // Invalidate the listing cache so the next `get_contacts` shows the
+        // newly created row — also one saved in part (decision 277).
         self.contacts_cache.lock().await.clear();
-        Ok(result)
+        result.map_err(to_write_error)
     }
 
     async fn update_contact(&self, contact: Contact) -> CoreResult<Contact> {
@@ -653,17 +691,16 @@ impl ContactsFeature for GoogleAdapter {
                 contact.list_id,
             )));
         }
-        let result = contacts::update_contact(&self.state, contact)
-            .await
-            .map_err(to_core_error)?;
+        let result = contacts::update_contact(&self.state, contact).await;
+        // Also after a change saved in part (decision 277).
         self.contacts_cache.lock().await.clear();
-        Ok(result)
+        result.map_err(to_write_error)
     }
 
     async fn delete_contact(&self, contact_id: &str) -> CoreResult<()> {
         contacts::delete_contact(&self.state, contact_id)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         self.contacts_cache.lock().await.clear();
         Ok(())
     }
@@ -687,7 +724,7 @@ impl ContactsFeature for GoogleAdapter {
     async fn set_contact_photo(&self, contact_id: &str, photo: ContactPhoto) -> CoreResult<()> {
         contacts::set_contact_photo(&self.state, contact_id, photo)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         self.contacts_cache.lock().await.clear();
         Ok(())
     }
@@ -695,7 +732,7 @@ impl ContactsFeature for GoogleAdapter {
     async fn delete_contact_photo(&self, contact_id: &str) -> CoreResult<()> {
         contacts::delete_contact_photo(&self.state, contact_id)
             .await
-            .map_err(to_core_error)?;
+            .map_err(to_write_error)?;
         self.contacts_cache.lock().await.clear();
         Ok(())
     }
@@ -725,8 +762,14 @@ fn is_read_only_google_list(list_id: &str) -> bool {
 /// not a protocol error: a caller deciding whether the write may have landed —
 /// splitting a series undoes its new part only when the cut certainly did not
 /// (decision 144) — must be told that nothing was written.
-fn to_update_error(err: GoogleError) -> CoreError {
+fn to_write_error(err: GoogleError) -> CoreError {
     match err {
+        // A used-up limit turned the write down whole: the server refused it,
+        // with Google's reason (decision 275).
+        GoogleError::UsageLimit { reason } => {
+            tracing::warn!(%reason, "Google refused the write: a usage limit is used up");
+            CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(&reason))
+        }
         GoogleError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
             tracing::warn!(status, %message, "Google refused the update");
             CoreError::Forbidden(cal_core::WriteRefusal::ServerRefused.message(
@@ -735,6 +778,32 @@ fn to_update_error(err: GoogleError) -> CoreError {
                     None => format!("HTTP {status}"),
                 },
             ))
+        }
+        other => to_core_error(other),
+    }
+}
+
+/// What a walk over the calendars or lists says when an answer for the whole
+/// account stopped it — a busy provider (decision 270), a used-up limit (275):
+/// that answer, unless an earlier answer of the walk may have landed (a lost
+/// one), which then stays what it was rather than read as "nothing changed".
+fn stopped_walk(stop: GoogleError, earlier: Option<CoreError>) -> CoreError {
+    match earlier {
+        Some(earlier) if !earlier.never_landed() => earlier,
+        _ => to_write_error(stop),
+    }
+}
+
+/// A create's error (decisions 202-213, 270): a new series not kept is that
+/// outcome, one Google turned down whole — a refused status, a busy provider,
+/// a used-up limit — reads as the update's refusal, anything else as any
+/// error.
+fn to_create_error(err: GoogleError) -> CoreError {
+    match err {
+        err @ (GoogleError::NotKept { .. } | GoogleError::Busy { .. }) => to_core_error(err),
+        err @ GoogleError::UsageLimit { .. } => to_write_error(err),
+        GoogleError::Http { status, message } if cal_core::WriteRefusal::refused_status(status) => {
+            to_write_error(GoogleError::Http { status, message })
         }
         other => to_core_error(other),
     }
@@ -778,10 +847,41 @@ fn server_reason(body: &str) -> Option<String> {
     Some(reason.chars().take(160).collect())
 }
 
+/// A Google error as the core error it maps to, for the plugin's
+/// interactive auth, which reports its failures as text
+/// (`plugin_sdk::auth_error`).
+pub fn core_error(err: GoogleError) -> CoreError {
+    to_core_error(err)
+}
+
 fn to_core_error(err: GoogleError) -> CoreError {
     use GoogleError::*;
     match err {
-        Network(m) => CoreError::Network(m),
+        Network(m) | Unreached(m) => CoreError::Network(m),
+        NotKept {
+            undone: true,
+            detail,
+        } => CoreError::Forbidden(cal_core::WriteRefusal::DeletionsNotKept.message(&detail)),
+        NotKept {
+            undone: false,
+            detail,
+        } => CoreError::Network(cal_core::WriteLeftover::CreatedMayStand.message(&detail)),
+        // Throttling: nothing was done, try later (decision 270).
+        Busy {
+            detail,
+            retry_after,
+        } => {
+            tracing::debug!(detail = detail.word(), ?retry_after, "google is busy");
+            CoreError::provider_busy(detail)
+        }
+        // A used-up limit: no sign-in helps (decision 275).
+        UsageLimit { reason } => CoreError::Protocol(format!("google usage limit: {reason}")),
+        // A later step failed after an earlier one landed (decision 277):
+        // never a refusal, by the core's rule.
+        PartlySaved { step, cause } => {
+            tracing::debug!(step, %cause, "google saved the change in part");
+            to_core_error(*cause).after_landed(step)
+        }
         Http { status, message } => match status {
             401 | 403 => CoreError::Authentication(message),
             404 => CoreError::NotFound(message),
@@ -807,6 +907,7 @@ mod delta_tests {
     /// A series head, cut short: what splitting a series writes.
     fn truncated_master() -> Event {
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -848,7 +949,7 @@ mod delta_tests {
     /// protocol error it has to treat as maybe landed.
     #[tokio::test]
     async fn an_update_google_turned_down_is_a_refusal() {
-        for status in [400, 429] {
+        for status in [400] {
             let mut server = Server::new_async().await;
             let _patch = server
                 .mock(
@@ -873,8 +974,647 @@ mod delta_tests {
         }
     }
 
+    /// A write or a read Google turns away for throttling says the provider
+    /// is busy, and nothing was written (decision 270); a used-up limit no
+    /// longer says to sign in again (275).
+    #[tokio::test]
+    async fn a_busy_google_says_so_on_a_write_and_on_a_read() {
+        let busy = |reason: &str| {
+            format!(
+                r#"{{"error":{{"code":403,"errors":[{{"domain":"usageLimits","reason":"{reason}"}}]}}}}"#
+            )
+        };
+        for (status, body, word) in [
+            (429, r#"{"error":{"code":429}}"#.to_string(), "http-429"),
+            (403, busy("rateLimitExceeded"), "rate-limit"),
+            (403, busy("userRateLimitExceeded"), "user-rate-limit"),
+        ] {
+            let mut server = Server::new_async().await;
+            let _patch = server
+                .mock(
+                    "PATCH",
+                    Matcher::Regex(r"^/calendars/primary/events/master-1".into()),
+                )
+                .with_status(status)
+                .with_body(&body)
+                .create_async()
+                .await;
+            let _list = server
+                .mock(
+                    "GET",
+                    Matcher::Regex(r"^/calendars/primary/events\?".into()),
+                )
+                .with_status(status)
+                .with_body(&body)
+                .create_async()
+                .await;
+            let adapter = adapter_for(&server);
+            let err = adapter.update_event(truncated_master()).await.unwrap_err();
+            assert!(err.is_provider_busy(), "{status} {err:?}");
+            assert!(
+                matches!(&err, CoreError::Forbidden(m) if m == &format!("provider-busy: {word}"))
+            );
+            let err = adapter.get_events("primary", range()).await.unwrap_err();
+            assert!(err.is_provider_busy(), "{status} read {err:?}");
+        }
+        // A used-up limit: the write was refused by the server, with the
+        // reason; a read is an ordinary failure. Neither says to sign in.
+        let mut server = Server::new_async().await;
+        let _patch = server
+            .mock(
+                "PATCH",
+                Matcher::Regex(r"^/calendars/primary/events/master-1".into()),
+            )
+            .with_status(403)
+            .with_body(busy("quotaExceeded"))
+            .create_async()
+            .await;
+        let _list = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/calendars/primary/events\?".into()),
+            )
+            .with_status(403)
+            .with_body(busy("dailyLimitExceeded"))
+            .create_async()
+            .await;
+        let adapter = adapter_for(&server);
+        match adapter.update_event(truncated_master()).await.unwrap_err() {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: quotaExceeded"),
+            other => panic!("{other:?}"),
+        }
+        match adapter.get_events("primary", range()).await.unwrap_err() {
+            CoreError::Protocol(m) => assert_eq!(m, "google usage limit: dailyLimitExceeded"),
+            other => panic!("{other:?}"),
+        }
+        // Any other 403 keeps what it said.
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/calendars/primary/events\?".into()),
+            )
+            .with_status(403)
+            .with_body(busy("insufficientPermissions"))
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .get_events("primary", range())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Authentication(_)), "{err:?}");
+    }
+
+    /// A busy provider stops a walk over the calendars at once (decision
+    /// 270): the delete and the answer to an invitation ask nothing more, and
+    /// say the provider is busy rather than what a later calendar answered.
+    #[tokio::test]
+    async fn a_walk_over_the_calendars_stops_at_a_busy_provider() {
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock("GET", "/users/me/calendarList")
+            .with_status(200)
+            .with_body(
+                r##"{"items":[{"id":"work","summary":"Work","accessRole":"owner"},
+                              {"id":"home","summary":"Home","accessRole":"owner"}]}"##,
+            )
+            .create_async()
+            .await;
+        let _primary = server
+            .mock("GET", "/calendars/primary")
+            .with_status(200)
+            .with_body(r#"{"id":"me@example.com"}"#)
+            .create_async()
+            .await;
+        let _first = server
+            .mock(
+                "DELETE",
+                Matcher::Regex(r"^/calendars/work/events/ev1".into()),
+            )
+            .with_status(429)
+            .create_async()
+            .await;
+        let second = server
+            .mock("DELETE", Matcher::Regex(r"^/calendars/home/".into()))
+            .expect(0)
+            .create_async()
+            .await;
+        let adapter = adapter_for(&server);
+        let err = adapter.delete_event("ev1", false).await.unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        second.assert_async().await;
+
+        let _read = server
+            .mock("GET", "/calendars/work/events/ev2")
+            .with_status(403)
+            .with_body(r#"{"error":{"code":403,"errors":[{"reason":"rateLimitExceeded"}]}}"#)
+            .create_async()
+            .await;
+        let further = server
+            .mock("GET", Matcher::Regex(r"^/calendars/home/events/".into()))
+            .expect(0)
+            .create_async()
+            .await;
+        let answer = server
+            .mock("PATCH", Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+        let err = adapter
+            .respond_to_event("ev2", AttendeeStatus::Accepted, false)
+            .await
+            .unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        further.assert_async().await;
+        answer.assert_async().await;
+    }
+
+    /// A used-up limit holds for the whole account too: the answer to an
+    /// invitation asks no other calendar, whose "not found" would hide why
+    /// (decision 275).
+    #[tokio::test]
+    async fn the_answer_to_an_invitation_stops_at_a_used_up_limit() {
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock("GET", "/users/me/calendarList")
+            .with_status(200)
+            .with_body(
+                r##"{"items":[{"id":"work","summary":"Work","accessRole":"owner"},
+                              {"id":"home","summary":"Home","accessRole":"owner"}]}"##,
+            )
+            .create_async()
+            .await;
+        let _primary = server
+            .mock("GET", "/calendars/primary")
+            .with_status(200)
+            .with_body(r#"{"id":"me@example.com"}"#)
+            .create_async()
+            .await;
+        let _read = server
+            .mock("GET", "/calendars/work/events/ev3")
+            .with_status(403)
+            .with_body(r#"{"error":{"code":403,"errors":[{"reason":"dailyLimitExceeded"}]}}"#)
+            .create_async()
+            .await;
+        let further = server
+            .mock("GET", Matcher::Regex(r"^/calendars/home/events/".into()))
+            .expect(0)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .respond_to_event("ev3", AttendeeStatus::Accepted, false)
+            .await
+            .unwrap_err();
+        assert!(!matches!(err, CoreError::NotFound(_)), "{err:?}");
+        further.assert_async().await;
+    }
+
+    /// A single write turned down for a used-up limit was refused by the
+    /// server, with the reason, never a sign-in failure (decision 275).
+    #[tokio::test]
+    async fn a_write_refused_for_a_used_up_limit_says_the_server_refused() {
+        let mut server = Server::new_async().await;
+        let _rename = server
+            .mock("PATCH", "/calendars/work")
+            .with_status(403)
+            .with_body(r#"{"error":{"code":403,"errors":[{"reason":"quotaExceeded"}]}}"#)
+            .create_async()
+            .await;
+        match adapter_for(&server)
+            .rename_calendar("work", "Arbeit")
+            .await
+            .unwrap_err()
+        {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: quotaExceeded"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// A create Google turns down whole is a refusal like an update's
+    /// (decisions 147, 270): a busy provider says so.
+    #[tokio::test]
+    async fn a_create_google_turned_down_is_a_refusal() {
+        for (status, token) in [(400, "server-refused"), (429, "provider-busy")] {
+            let mut server = Server::new_async().await;
+            let _post = server
+                .mock("POST", Matcher::Regex(r"^/calendars/cal/events\?".into()))
+                .with_status(status)
+                .with_body(r#"{"error":{"message":"no"}}"#)
+                .create_async()
+                .await;
+            let err = adapter_for(&server)
+                .create_event("cal", weekly_from_2030(vec![]))
+                .await
+                .unwrap_err();
+            match &err {
+                CoreError::Forbidden(m) => assert!(m.starts_with(token), "{status} {m}"),
+                other => panic!("{status}: {other:?}"),
+            }
+        }
+    }
+
+    /// A task or contact save Google turned down whole is a refusal like an
+    /// event's (decisions 147, 270): nothing was changed.
+    #[tokio::test]
+    async fn a_task_or_contact_save_turned_down_whole_is_a_refusal() {
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock("GET", Matcher::Regex(r"^/lists/L/tasks\?".into()))
+            .with_status(200)
+            .with_body(r#"{"items":[{"id":"T","title":"Einkaufen"}]}"#)
+            .create_async()
+            .await;
+        let _patch = server
+            .mock("PATCH", "/lists/L/tasks/T")
+            .with_status(400)
+            .with_body(r#"{"error":{"message":"bad due"}}"#)
+            .create_async()
+            .await;
+        let _create = server
+            .mock("POST", Matcher::Regex(r"^/people:createContact\?".into()))
+            .with_status(400)
+            .with_body(r#"{"error":{"message":"bad name"}}"#)
+            .create_async()
+            .await;
+        let adapter = adapter_for(&server);
+        let task = adapter.get_tasks("L").await.unwrap().remove(0);
+        match adapter.update_task(task).await.unwrap_err() {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: HTTP 400: bad due"),
+            other => panic!("{other:?}"),
+        }
+        let new: NewContact = serde_json::from_value(serde_json::json!({
+            "display_name": "Max",
+            "emails": [],
+            "phone_numbers": [],
+        }))
+        .unwrap();
+        match adapter
+            .create_contact(contacts::GOOGLE_CONTACT_LIST_ID, new)
+            .await
+            .unwrap_err()
+        {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: HTTP 400: bad name"),
+            other => panic!("{other:?}"),
+        }
+        let _people = server
+            .mock("GET", Matcher::Regex(r"^/people/me/connections\?".into()))
+            .with_status(200)
+            .with_body(r#"{"connections":[{"resourceName":"people/c1","etag":"e1","names":[{"displayName":"Max"}]}]}"#)
+            .create_async()
+            .await;
+        let _groups = server
+            .mock("GET", Matcher::Regex(r"^/contactGroups\?".into()))
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let _events = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/people/c1\?personFields=events$".into()),
+            )
+            .with_status(200)
+            .with_body(r#"{"resourceName":"people/c1"}"#)
+            .create_async()
+            .await;
+        let _update = server
+            .mock(
+                "PATCH",
+                Matcher::Regex(r"^/people/c1:updateContact\?".into()),
+            )
+            .with_status(400)
+            .with_body(r#"{"error":{"message":"bad date"}}"#)
+            .create_async()
+            .await;
+        let contact = adapter
+            .get_contacts(contacts::GOOGLE_CONTACT_LIST_ID)
+            .await
+            .unwrap()
+            .remove(0);
+        match adapter.update_contact(contact).await.unwrap_err() {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: HTTP 400: bad date"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// A delete whose answer was lost on one calendar stays unsure, whatever
+    /// a later calendar answers: a refusal there (a read-only calendar's
+    /// 403) and a busy provider after it must not say "nothing changed"
+    /// while the event may be gone.
+    #[tokio::test]
+    async fn a_lost_delete_stays_unsure_past_a_later_refusal() {
+        for with_busy in [false, true] {
+            let calendars = if with_busy {
+                r#"{"items":[{"id":"work","summary":"Work"},{"id":"holidays","summary":"Holidays"},{"id":"home","summary":"Home"}]}"#
+            } else {
+                r#"{"items":[{"id":"work","summary":"Work"},{"id":"holidays","summary":"Holidays"}]}"#
+            };
+            let mut server = Server::new_async().await;
+            let _list = server
+                .mock("GET", Matcher::Regex(r"^/users/me/calendarList".into()))
+                .with_status(200)
+                .with_body(calendars)
+                .create_async()
+                .await;
+            let _work = server
+                .mock(
+                    "DELETE",
+                    Matcher::Regex(r"^/calendars/work/events/ev1".into()),
+                )
+                .with_status(500)
+                .create_async()
+                .await;
+            let _holidays = server
+                .mock(
+                    "DELETE",
+                    Matcher::Regex(r"^/calendars/holidays/events/ev1".into()),
+                )
+                .with_status(403)
+                .with_body(r#"{"error":{"code":403,"errors":[{"reason":"forbidden"}]}}"#)
+                .create_async()
+                .await;
+            let _home = server
+                .mock(
+                    "DELETE",
+                    Matcher::Regex(r"^/calendars/home/events/ev1".into()),
+                )
+                .with_status(429)
+                .with_body(r#"{"error":{"code":429}}"#)
+                .create_async()
+                .await;
+            let err = adapter_for(&server)
+                .delete_event("ev1", false)
+                .await
+                .unwrap_err();
+            assert!(!err.never_landed(), "with_busy={with_busy}: {err:?}");
+        }
+    }
+
+    /// A walk over the calendars stopped by a busy provider says so — unless
+    /// an earlier calendar's delete lost its answer, which may have deleted
+    /// the event: that stays unsure, never "nothing changed". A used-up
+    /// limit stops it the same way, and a listing that fails before any
+    /// delete is mapped as a write.
+    #[tokio::test]
+    async fn a_walk_stopped_for_the_account_keeps_an_earlier_unsure_answer() {
+        let calendars =
+            r#"{"items":[{"id":"work","summary":"Work"},{"id":"home","summary":"Home"}]}"#;
+        let busy = r#"{"error":{"code":429}}"#;
+        // work: lost answer (500); home: busy.
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock("GET", Matcher::Regex(r"^/users/me/calendarList".into()))
+            .with_status(200)
+            .with_body(calendars)
+            .create_async()
+            .await;
+        let _work = server
+            .mock(
+                "DELETE",
+                Matcher::Regex(r"^/calendars/work/events/ev1".into()),
+            )
+            .with_status(500)
+            .create_async()
+            .await;
+        let _home = server
+            .mock(
+                "DELETE",
+                Matcher::Regex(r"^/calendars/home/events/ev1".into()),
+            )
+            .with_status(429)
+            .with_body(busy)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .delete_event("ev1", false)
+            .await
+            .unwrap_err();
+        assert!(!err.never_landed(), "{err:?}");
+        assert!(!err.is_provider_busy(), "{err:?}");
+        // work: a used-up limit, which holds for the whole account: home is
+        // not asked.
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock("GET", Matcher::Regex(r"^/users/me/calendarList".into()))
+            .with_status(200)
+            .with_body(calendars)
+            .create_async()
+            .await;
+        let _work = server
+            .mock(
+                "DELETE",
+                Matcher::Regex(r"^/calendars/work/events/ev1".into()),
+            )
+            .with_status(403)
+            .with_body(r#"{"error":{"code":403,"errors":[{"reason":"dailyLimitExceeded"}]}}"#)
+            .create_async()
+            .await;
+        let home = server
+            .mock(
+                "DELETE",
+                Matcher::Regex(r"^/calendars/home/events/ev1".into()),
+            )
+            .expect(0)
+            .create_async()
+            .await;
+        match adapter_for(&server)
+            .delete_event("ev1", false)
+            .await
+            .unwrap_err()
+        {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: dailyLimitExceeded"),
+            other => panic!("{other:?}"),
+        }
+        home.assert_async().await;
+        // The listing itself turned down: nothing was written.
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock("GET", Matcher::Regex(r"^/users/me/calendarList".into()))
+            .with_status(403)
+            .with_body(r#"{"error":{"code":403,"errors":[{"reason":"quotaExceeded"}]}}"#)
+            .create_async()
+            .await;
+        match adapter_for(&server)
+            .delete_event("ev1", false)
+            .await
+            .unwrap_err()
+        {
+            CoreError::Forbidden(m) => assert_eq!(m, "server-refused: quotaExceeded"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// A task delete whose list lost its answer stays unsure; one no list
+    /// holds is not found.
+    #[tokio::test]
+    async fn a_task_delete_that_lost_its_answer_is_unsure() {
+        let lists = r#"{"items":[{"id":"L1","title":"One"},{"id":"L2","title":"Two"}]}"#;
+        for (first, unsure) in [(500, true), (404, false)] {
+            let mut server = Server::new_async().await;
+            let _lists = server
+                .mock("GET", Matcher::Regex(r"^/users/@me/lists".into()))
+                .with_status(200)
+                .with_body(lists)
+                .create_async()
+                .await;
+            let _one = server
+                .mock("DELETE", "/lists/L1/tasks/T")
+                .with_status(first)
+                .create_async()
+                .await;
+            let _two = server
+                .mock("DELETE", "/lists/L2/tasks/T")
+                .with_status(404)
+                .create_async()
+                .await;
+            let err = adapter_for(&server).delete_task("T").await.unwrap_err();
+            if unsure {
+                assert!(!err.never_landed(), "{err:?}");
+            } else {
+                assert!(matches!(err, CoreError::NotFound(_)), "{err:?}");
+            }
+        }
+    }
+
+    /// A save stopped after an earlier step landed is never a refusal
+    /// (decision 277): a busy provider has its sentence, any other cause is
+    /// an error read as "may have landed".
+    #[test]
+    fn a_save_left_in_part_is_never_a_refusal() {
+        let in_part = |step, cause| GoogleError::PartlySaved {
+            step,
+            cause: Box::new(cause),
+        };
+        let busy = GoogleError::Busy {
+            detail: cal_core::BusyDetail::TooManyRequests,
+            retry_after: None,
+        };
+        match to_write_error(in_part("members", busy)) {
+            CoreError::Network(m) => assert_eq!(
+                cal_core::WriteLeftover::parse(&m),
+                Some((cal_core::WriteLeftover::PartlySaved, "members"))
+            ),
+            other => panic!("{other:?}"),
+        }
+        for cause in [
+            GoogleError::Http {
+                status: 400,
+                message: "no".into(),
+            },
+            GoogleError::UsageLimit {
+                reason: "quotaExceeded".into(),
+            },
+            GoogleError::Http {
+                status: 401,
+                message: "no".into(),
+            },
+        ] {
+            match to_write_error(in_part("move", cause)) {
+                CoreError::Network(m) => {
+                    assert!(m.starts_with("move: "), "{m}");
+                    assert_eq!(cal_core::WriteLeftover::parse(&m), None);
+                    assert_eq!(cal_core::WriteRefusal::parse(&m), None);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        // A lost answer stays one.
+        assert!(matches!(
+            to_write_error(in_part("move", GoogleError::Network("reset".into()))),
+            CoreError::Network(m) if m == "reset"
+        ));
+    }
+
+    /// A contact saved in part is read fresh: the listing cache is dropped.
+    #[tokio::test]
+    async fn a_contact_saved_in_part_is_read_fresh() {
+        let mut server = Server::new_async().await;
+        let _search = server
+            .mock("GET", Matcher::Regex(r"^/people:searchContacts\?".into()))
+            .with_status(200)
+            .with_body(
+                r#"{"results":[{"person":{"resourceName":"people/c1","emailAddresses":[{"value":"a@x.de"}]}}]}"#,
+            )
+            .create_async()
+            .await;
+        let _others = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/(otherContacts:search|people:searchDirectoryPeople)\?".into()),
+            )
+            .with_status(403)
+            .create_async()
+            .await;
+        let _created = server
+            .mock("POST", "/contactGroups")
+            .with_status(200)
+            .with_body(r#"{"resourceName":"contactGroups/g1","name":"Friends"}"#)
+            .create_async()
+            .await;
+        let _modified = server
+            .mock("POST", "/contactGroups/g1/members:modify")
+            .with_status(429)
+            .create_async()
+            .await;
+        let adapter = adapter_for(&server);
+        adapter.contacts_cache.lock().await.insert(
+            contacts::GOOGLE_CONTACT_LIST_ID.into(),
+            (Vec::new(), chrono::Utc::now()),
+        );
+        let new: NewContact = serde_json::from_value(serde_json::json!({
+            "display_name": "Friends",
+            "emails": [],
+            "phone_numbers": [],
+            "members": [{"email": "a@x.de"}],
+        }))
+        .unwrap();
+        match adapter
+            .create_contact(contacts::GOOGLE_CONTACT_LIST_ID, new)
+            .await
+            .unwrap_err()
+        {
+            CoreError::Network(m) => assert_eq!(m, "partly-saved: members"),
+            other => panic!("{other:?}"),
+        }
+        assert!(adapter.contacts_cache.lock().await.is_empty());
+    }
+
     /// The error keeps only the first 300 characters of an answer, so a
     /// realistic envelope arrives cut: its reason is still read.
+    #[test]
+    fn a_series_not_kept_is_a_refusal_or_a_leftover() {
+        // Deleted again: nothing stands, a refusal the shells read as such.
+        match to_core_error(GoogleError::NotKept {
+            undone: true,
+            detail: "invited time".into(),
+        }) {
+            CoreError::Forbidden(msg) => assert_eq!(
+                cal_core::WriteRefusal::parse(&msg),
+                Some((cal_core::WriteRefusal::DeletionsNotKept, "invited time"))
+            ),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        // Not deleted again: it may stand, never a refusal.
+        match to_core_error(GoogleError::NotKept {
+            undone: false,
+            detail: "create-answer-lost".into(),
+        }) {
+            CoreError::Network(msg) => assert_eq!(
+                cal_core::WriteLeftover::parse(&msg),
+                Some((
+                    cal_core::WriteLeftover::CreatedMayStand,
+                    "create-answer-lost"
+                ))
+            ),
+            other => panic!("expected a leftover, got {other:?}"),
+        }
+        // A request that never left is a plain network error.
+        assert!(matches!(
+            to_core_error(GoogleError::Unreached("refused".into())),
+            CoreError::Network(_)
+        ));
+    }
+
     #[test]
     fn the_reason_is_read_from_a_cut_answer() {
         let long = "The recurrence rule does not generate an occurrence on the start date \
@@ -962,8 +1702,189 @@ mod delta_tests {
             },
         );
         adapter.state.api_base = server.url();
+        adapter.state.people_base = server.url();
+        adapter.state.tasks_base = server.url();
         adapter.state.token_url = format!("{}/token", server.url());
         adapter
+    }
+
+    /// A weekly series on Mondays 09:00 UTC from 7 January 2030, with `deleted`.
+    fn weekly_from_2030(deleted: Vec<chrono::DateTime<chrono::Utc>>) -> NewEvent {
+        NewEvent {
+            title: "Teamrunde".into(),
+            description: None,
+            location: None,
+            start: chrono::Utc.with_ymd_and_hms(2030, 1, 7, 9, 0, 0).unwrap(),
+            end: chrono::Utc.with_ymd_and_hms(2030, 1, 7, 10, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: Some(cal_core::EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO;COUNT=4".into(),
+                exceptions: deleted,
+                tzid: None,
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec![],
+            send_invitations: false,
+            organizer: None,
+            organized_elsewhere: false,
+        }
+    }
+
+    /// Through the adapter: a series with a deletion ahead is created bare
+    /// under an id of Aperio's, its occurrences listed, the deleted one
+    /// cancelled, and the listing read again (decisions 202, 268).
+    #[tokio::test]
+    async fn a_new_series_with_a_deletion_ahead_is_created_bare_and_cancelled() {
+        let mut server = Server::new_async().await;
+        let sent = std::sync::Arc::new(std::sync::Mutex::new(serde_json::Value::Null));
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sink = std::sync::Arc::clone(&sent);
+        let insert = server
+            .mock("POST", "/calendars/cal/events?sendUpdates=none")
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let body: serde_json::Value =
+                    serde_json::from_slice(request.body().unwrap()).unwrap();
+                *sink.lock().unwrap() = body.clone();
+                serde_json::json!({
+                    "id": body["id"],
+                    "status": "confirmed",
+                    "summary": body["summary"],
+                    "start": body["start"],
+                    "end": body["end"],
+                    "recurrence": body["recurrence"],
+                })
+                .to_string()
+                .into_bytes()
+            })
+            .expect(1)
+            .create_async()
+            .await;
+        let seen = std::sync::Arc::clone(&cancelled);
+        let list = server
+            .mock(
+                "GET",
+                Matcher::Regex(
+                    r"^/calendars/cal/events/[0-9a-f]{32}/instances\?showDeleted=true&timeMin="
+                        .into(),
+                ),
+            )
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                let series = request.path().split('/').nth(4).unwrap().to_string();
+                let gone = seen.load(std::sync::atomic::Ordering::SeqCst);
+                let item = |day: u32, cancelled: bool| {
+                    serde_json::json!({
+                        "id": format!("{series}_203001{day:02}T090000Z"),
+                        "status": if cancelled { "cancelled" } else { "confirmed" },
+                        "recurringEventId": series,
+                        "originalStartTime": { "dateTime": format!("2030-01-{day:02}T09:00:00Z") },
+                    })
+                };
+                serde_json::json!({ "items": [item(7, false), item(14, gone), item(21, false)] })
+                    .to_string()
+                    .into_bytes()
+            })
+            .expect(2)
+            .create_async()
+            .await;
+        let done = std::sync::Arc::clone(&cancelled);
+        let patch = server
+            .mock(
+                "PATCH",
+                Matcher::Regex(
+                    r"^/calendars/cal/events/[0-9a-f]{32}_20300114T090000Z\?sendUpdates=none$"
+                        .into(),
+                ),
+            )
+            .match_body(Matcher::Json(serde_json::json!({ "status": "cancelled" })))
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                done.store(true, std::sync::atomic::Ordering::SeqCst);
+                let id = request.path().rsplit('/').next().unwrap().to_string();
+                serde_json::json!({ "id": id, "status": "cancelled" })
+                    .to_string()
+                    .into_bytes()
+            })
+            .expect(1)
+            .create_async()
+            .await;
+
+        let deleted = chrono::Utc.with_ymd_and_hms(2030, 1, 14, 9, 0, 0).unwrap();
+        let created = adapter_for(&server)
+            .create_event("cal", weekly_from_2030(vec![deleted]))
+            .await
+            .unwrap();
+        insert.assert_async().await;
+        list.assert_async().await;
+        patch.assert_async().await;
+        let sent = sent.lock().unwrap().clone();
+        let id = sent["id"].as_str().unwrap();
+        assert_eq!(id.len(), 32);
+        assert_eq!(
+            sent["recurrence"],
+            serde_json::json!(["RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4"])
+        );
+        assert_eq!(created.recurrence.unwrap().exceptions, [deleted]);
+    }
+
+    /// A series without deletions, or with deletions only in the past, is one
+    /// create as any (263): nothing listed, nothing cancelled.
+    #[tokio::test]
+    async fn a_new_series_with_nothing_to_cancel_is_one_create() {
+        let ahead = chrono::Utc.with_ymd_and_hms(2030, 1, 14, 9, 0, 0).unwrap();
+        let past = chrono::Utc.with_ymd_and_hms(2020, 1, 6, 9, 0, 0).unwrap();
+        // No deletion, one in the past, and one ahead without a rule: no
+        // series to write in steps, as the surfaces' wait says too.
+        for (deleted, rule) in [(vec![], true), (vec![past], true), (vec![ahead], false)] {
+            let mut server = Server::new_async().await;
+            let sent = std::sync::Arc::new(std::sync::Mutex::new(serde_json::Value::Null));
+            let sink = std::sync::Arc::clone(&sent);
+            let insert = server
+                .mock("POST", "/calendars/cal/events?sendUpdates=none")
+                .with_status(200)
+                .with_body_from_request(move |request| {
+                    let body: serde_json::Value =
+                        serde_json::from_slice(request.body().unwrap()).unwrap();
+                    *sink.lock().unwrap() = body.clone();
+                    serde_json::json!({
+                        "id": "plain1",
+                        "status": "confirmed",
+                        "start": body["start"],
+                        "end": body["end"],
+                        "recurrence": body["recurrence"],
+                    })
+                    .to_string()
+                    .into_bytes()
+                })
+                .expect(1)
+                .create_async()
+                .await;
+            let elsewhere = server
+                .mock("GET", Matcher::Any)
+                .expect(0)
+                .create_async()
+                .await;
+            let mut event = weekly_from_2030(deleted.clone());
+            if !rule {
+                event.recurrence.as_mut().unwrap().rrule = String::new();
+            }
+            let created = adapter_for(&server)
+                .create_event("cal", event)
+                .await
+                .unwrap();
+            insert.assert_async().await;
+            elsewhere.assert_async().await;
+            let sent = sent.lock().unwrap().clone();
+            assert!(sent.get("id").is_none(), "{sent}");
+            if rule {
+                assert!(!sent.to_string().contains("EXDATE"), "{sent}");
+            }
+            assert_eq!(created.id, "plain1");
+        }
     }
 
     fn range() -> DateRange {

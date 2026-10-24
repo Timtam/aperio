@@ -410,7 +410,7 @@ pub async fn get_events(
     // Refreshing on a coverage miss — not just staleness — stops events "going
     // missing" when the view moves to a date the cached window never reached
     // (issue #1). The whole decision, INCLUDING the cold-cache feedback-loop
-    // cooldown, lives in the shared `cache_swr::event_self_warm_needed` so the
+    // cooldown, lives in the shared `cache_swr::event_self_warm` so the
     // desktop command and the mobile cal-ffi host self-warm identically; see its
     // doc for the loop rationale. `covers`/`stale` here only feed the diagnostic
     // log below.
@@ -473,13 +473,13 @@ pub async fn get_events(
         stale,
         "get_events served from cache",
     );
-    if cache_swr::event_self_warm_needed(&state, range) {
+    if let Some(why) = cache_swr::event_self_warm(&state, range) {
         let ext_bg = Arc::clone(&ext);
         let cache_bg = Arc::clone(&cache);
         let acc = account.clone();
         let cal = request.calendar_id.clone();
         let rt = tauri::async_runtime::handle();
-        cache_swr::spawn_item_refresh(
+        cache_swr::spawn_read_refresh(
             rt.inner(),
             Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
             Arc::clone(&cache),
@@ -487,6 +487,7 @@ pub async fn get_events(
             SyncScope::Events,
             account.clone(),
             request.calendar_id.clone(),
+            why,
             move || async move {
                 cache_swr::refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range).await
             },
@@ -754,7 +755,7 @@ pub async fn update_event(
             new_payload.color_hex = resolve_color_hex(&adapter, new_payload.color_label.as_ref())?;
         }
 
-        let created = if target_account == LOCAL_ID {
+        let mut created = if target_account == LOCAL_ID {
             adapter
                 .create_event(&event.calendar_id, new_payload)
                 .await?
@@ -812,27 +813,27 @@ pub async fn update_event(
                 // still exists at the target, so never email attendees here.
                 .delete_event(&event.id, false)
                 .await
-                .map_err(CommandError::from)
         } else if let Some(ext) = registry.calendar_adapter(&source_account) {
-            ext.delete_event(&event.id, false)
-                .await
-                .map_err(CommandError::from)
+            ext.delete_event(&event.id, false).await
         } else {
             // Source isn't routable (account was removed between
             // the dialog opening and save). Treat as a "no
             // cleanup needed" — the create on the target stands.
             Ok(())
         };
-        if let Err(err) = delete_result {
+        if let Err(err) = &delete_result {
             tracing::warn!(
                 event_id = %event.id,
                 source = %previous,
                 target = %event.calendar_id,
-                code = %err.code,
-                message = %err.message,
+                %err,
                 "delete from source calendar failed after move; duplicate may exist",
             );
         }
+        // A busy provider kept the original: the move stands, and the
+        // surfaces say to delete it (decision 277). Said on the row returned
+        // below, never in the sync event.
+        let kept = host_core::moves::original_kept(&delete_result);
 
         // Sync-event emission for cross-adapter moves. A move is
         // create-on-target + delete-from-source under the hood,
@@ -863,6 +864,9 @@ pub async fn update_event(
         }
 
         scheduler.invalidate();
+        if kept {
+            created.original_left_in = Some(previous.clone());
+        }
         return Ok(created);
     }
 
@@ -885,7 +889,18 @@ pub async fn update_event(
             // adapter writes (or clears) the native RFC 7986 COLOR.
             event.color_hex = resolve_color_hex(&adapter, event.color_label.as_ref())?;
         }
-        let updated = ext.update_event(event).await?;
+        let calendar_id = event.calendar_id.clone();
+        let updated = match ext.update_event(event).await {
+            Ok(updated) => updated,
+            Err(err) => {
+                // A failed update may have landed in part — an occurrence
+                // detached into a single whose old exception stayed (decision
+                // 277): the next read shows what the provider holds.
+                let _ = cache.invalidate(&target_account, SyncScope::Events, &calendar_id);
+                scheduler.invalidate();
+                return Err(err.into());
+            }
+        };
         if capable {
             // The provider's COLOR is now authoritative — drop any host-local
             // override left over from Stage 1 (when this calendar was treated
@@ -946,9 +961,17 @@ pub async fn delete_event(
                 message: format!("account '{account}' is not routable"),
             });
         };
-        ext.delete_event(&id, send_cancellations).await?;
+        let deleted = ext.delete_event(&id, send_cancellations).await;
         if let Some(cid) = &calendar_id {
+            // Failed or not: a delete that failed may have landed in part — a
+            // calendar walk that lost an answer, a meeting cancelled before its
+            // DELETE failed (decision 277) — so the next read asks the provider
+            // what it holds.
             let _ = cache.invalidate(&account, SyncScope::Events, cid);
+        }
+        if let Err(err) = deleted {
+            scheduler.invalidate();
+            return Err(err.into());
         }
     }
     if is_local {
@@ -982,9 +1005,10 @@ pub struct FreeBusyRequest {
 }
 
 /// Query attendee availability through the account that owns `calendar_id`.
-/// Best-effort: local/iCal calendars and any provider error or missing
-/// permission degrade to an empty result (the UI reads that as "couldn't
-/// determine", never an error) so the dialog never blocks on it.
+/// Best-effort: local/iCal calendars and any failure other than a busy
+/// provider degrade to an empty result, so the dialog never blocks on it. A
+/// busy provider is an error (`host_core::free_busy`, decision 270): the
+/// editor says the check could not be made, never "all free".
 #[tauri::command]
 pub async fn query_free_busy(
     registry: State<'_, Arc<AdapterRegistry>>,
@@ -996,23 +1020,11 @@ pub async fn query_free_busy(
     if account == LOCAL_ID {
         return Ok(Vec::new());
     }
-    let Some(ext) = registry.calendar_adapter(&account) else {
-        return Ok(Vec::new());
-    };
+    let ext = registry.calendar_adapter(&account);
     let range = DateRange::new(request.range_start, request.range_end);
     let refs: Vec<&str> = request.emails.iter().map(|s| s.as_str()).collect();
-    match ext.get_free_busy(&refs, range).await {
-        Ok(fb) => Ok(fb),
-        Err(err) => {
-            tracing::warn!(
-                target: "aperio::commands",
-                account = %account,
-                ?err,
-                "free/busy query failed; returning empty",
-            );
-            Ok(Vec::new())
-        }
-    }
+    // The rule once, in the core (decision 270): a busy provider is said.
+    Ok(host_core::free_busy::query_free_busy(ext.as_deref(), &refs, range).await?)
 }
 
 /// The connected account's email for `calendar_id`, used by the RSVP
@@ -1196,9 +1208,15 @@ pub async fn add_event_exdate(
                 message: format!("account '{account}' is not routable"),
             });
         };
-        ext.add_event_exdate(&id, occurrence, notify).await?;
+        let skipped = ext.add_event_exdate(&id, occurrence, notify).await;
         if let Some(cid) = &calendar_id {
+            // A skip whose answer was lost may have landed (decision 277):
+            // failed or not, the next read asks the provider.
             let _ = cache.invalidate(&account, SyncScope::Events, cid);
+        }
+        if let Err(err) = skipped {
+            scheduler.invalidate();
+            return Err(err.into());
         }
     }
     // For local events the exdate mutation rewrote the master

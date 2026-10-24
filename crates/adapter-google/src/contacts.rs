@@ -54,7 +54,7 @@ use crate::api::{
 use crate::error::{GoogleError, GoogleResult};
 
 /// Base URL for the People API v1.
-const PEOPLE_API_BASE: &str = "https://people.googleapis.com/v1";
+pub(crate) const PEOPLE_API_BASE: &str = "https://people.googleapis.com/v1";
 
 /// Sentinel id of the synthetic ContactList for the user's own
 /// address book. The registry routes any `list_id` matching this
@@ -223,7 +223,10 @@ async fn list_other_contacts(state: &ApiState) -> GoogleResult<Vec<Contact>> {
     let mut page_token: Option<String> = None;
     let read_mask = urlencoding("names,emailAddresses,phoneNumbers,metadata");
     loop {
-        let mut url = format!("{PEOPLE_API_BASE}/otherContacts?pageSize=500&readMask={read_mask}",);
+        let mut url = format!(
+            "{}/otherContacts?pageSize=500&readMask={read_mask}",
+            state.people_base,
+        );
         if let Some(t) = &page_token {
             url.push_str("&pageToken=");
             url.push_str(&urlencoding(t));
@@ -278,8 +281,9 @@ pub async fn other_contacts_full(state: &ApiState) -> GoogleResult<(Vec<Contact>
     let mut sync_token: Option<String> = None;
     loop {
         let mut url = format!(
-            "{PEOPLE_API_BASE}/otherContacts\
+            "{}/otherContacts\
              ?pageSize=1000&requestSyncToken=true&readMask={read_mask}",
+            state.people_base,
         );
         if let Some(t) = &page_token {
             url.push_str("&pageToken=");
@@ -329,7 +333,8 @@ pub async fn other_contacts_delta(
     let mut page_token: Option<String> = None;
     loop {
         let mut url = format!(
-            "{PEOPLE_API_BASE}/otherContacts?pageSize=1000&syncToken={st}&readMask={read_mask}",
+            "{}/otherContacts?pageSize=1000&syncToken={st}&readMask={read_mask}",
+            state.people_base,
             st = urlencoding(sync_token),
         );
         if let Some(t) = &page_token {
@@ -402,8 +407,9 @@ async fn list_directory_people(state: &ApiState) -> GoogleResult<Vec<Contact>> {
                    &sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE";
     loop {
         let mut url = format!(
-            "{PEOPLE_API_BASE}/people:listDirectoryPeople\
+            "{}/people:listDirectoryPeople\
              ?pageSize=500&readMask={read_mask}&{sources}",
+            state.people_base,
         );
         if let Some(t) = &page_token {
             url.push_str("&pageToken=");
@@ -442,6 +448,15 @@ async fn list_directory_people(state: &ApiState) -> GoogleResult<Vec<Contact>> {
 /// resourceName because the same address can appear in both
 /// personal + Other or personal + Directory.
 pub async fn search_contacts(state: &ApiState, query: &str) -> GoogleResult<Vec<Contact>> {
+    search_sources(state, query, false).await
+}
+
+/// [`search_contacts`]; `strict` for finding a group's members (decision
+/// 270): a source that answered "nothing for this account" — a 4xx other
+/// than a refused sign-in — still gives no hits, but one that gave no
+/// answer — busy, unreached, a server error — fails the search. A member it
+/// missed would be left out of the group, or taken out of it.
+async fn search_sources(state: &ApiState, query: &str, strict: bool) -> GoogleResult<Vec<Contact>> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
@@ -453,9 +468,22 @@ pub async fn search_contacts(state: &ApiState, query: &str) -> GoogleResult<Vec<
     );
     let mut out: Vec<Contact> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for batch in [personal, other, directory] {
+    // Whether a source answered the query, and a busy one's answer.
+    let mut answered = false;
+    let mut busy: Option<GoogleError> = None;
+    for batch in [personal.map(Some), other.map(Some), directory] {
         let hits = match batch {
-            Ok(h) => h,
+            Ok(Some(h)) => {
+                answered = true;
+                h
+            }
+            // No directory for this account: no answer to the query.
+            Ok(None) => continue,
+            Err(err) if strict && !answered_with_nothing(&err) => return Err(err),
+            Err(err @ GoogleError::Busy { .. }) => {
+                busy = Some(err);
+                continue;
+            }
             Err(err) => {
                 tracing::debug!(
                     target: "adapter_google::contacts",
@@ -471,12 +499,24 @@ pub async fn search_contacts(state: &ApiState, query: &str) -> GoogleResult<Vec<
             }
         }
     }
+    // No source answered and one was busy: that, rather than "no matches"
+    // (decision 270). Any answer gives what it found.
+    if let (false, Some(busy)) = (answered, busy) {
+        return Err(busy);
+    }
     Ok(out)
+}
+
+/// Whether a search source answered that it has nothing for this account:
+/// a 4xx, not a refused sign-in.
+fn answered_with_nothing(err: &GoogleError) -> bool {
+    matches!(err, GoogleError::Http { status, .. } if (400..500).contains(status) && *status != 401)
 }
 
 async fn search_personal_contacts(state: &ApiState, query: &str) -> GoogleResult<Vec<Contact>> {
     let url = format!(
-        "{PEOPLE_API_BASE}/people:searchContacts?query={}&readMask={}",
+        "{}/people:searchContacts?query={}&readMask={}",
+        state.people_base,
         urlencoding(query),
         urlencoding(PERSON_FIELDS),
     );
@@ -491,7 +531,8 @@ async fn search_personal_contacts(state: &ApiState, query: &str) -> GoogleResult
 
 async fn search_other_contacts(state: &ApiState, query: &str) -> GoogleResult<Vec<Contact>> {
     let url = format!(
-        "{PEOPLE_API_BASE}/otherContacts:search?query={}&readMask={}",
+        "{}/otherContacts:search?query={}&readMask={}",
+        state.people_base,
         urlencoding(query),
         urlencoding("names,emailAddresses,phoneNumbers,metadata"),
     );
@@ -504,12 +545,18 @@ async fn search_other_contacts(state: &ApiState, query: &str) -> GoogleResult<Ve
         .collect())
 }
 
-async fn search_directory_people(state: &ApiState, query: &str) -> GoogleResult<Vec<Contact>> {
+/// The directory's hits; `None` where the account has no directory, which
+/// is no answer to the query (a personal account).
+async fn search_directory_people(
+    state: &ApiState,
+    query: &str,
+) -> GoogleResult<Option<Vec<Contact>>> {
     let url = format!(
-        "{PEOPLE_API_BASE}/people:searchDirectoryPeople\
+        "{}/people:searchDirectoryPeople\
          ?query={}&readMask={}\
          &sources=DIRECTORY_SOURCE_TYPE_DOMAIN_CONTACT\
          &sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE",
+        state.people_base,
         urlencoding(query),
         urlencoding(PERSON_FIELDS),
     );
@@ -518,14 +565,16 @@ async fn search_directory_people(state: &ApiState, query: &str) -> GoogleResult<
         // A personal account has no directory to search — treat it as no hits,
         // not an error (the caller swallows per-source failures anyway, but this
         // keeps the two directory paths consistent).
-        Err(e) if directory_unavailable(&e) => return Ok(Vec::new()),
+        Err(e) if directory_unavailable(&e) => return Ok(None),
         Err(e) => return Err(e),
     };
-    Ok(response
-        .people
-        .into_iter()
-        .map(|p| person_to_contact(p, GOOGLE_DIRECTORY_LIST_ID))
-        .collect())
+    Ok(Some(
+        response
+            .people
+            .into_iter()
+            .map(|p| person_to_contact(p, GOOGLE_DIRECTORY_LIST_ID))
+            .collect(),
+    ))
 }
 
 /// Create a person (regular contact) or a contactGroup
@@ -562,10 +611,10 @@ pub async fn delete_contact(state: &ApiState, contact_id: &str) -> GoogleResult<
         });
     }
     if contact_id.starts_with("contactGroups/") {
-        let url = format!("{PEOPLE_API_BASE}/{contact_id}?deleteContacts=false");
+        let url = format!("{}/{contact_id}?deleteContacts=false", state.people_base);
         delete_absolute(state, &url).await
     } else {
-        let url = format!("{PEOPLE_API_BASE}/{contact_id}:deleteContact");
+        let url = format!("{}/{contact_id}:deleteContact", state.people_base);
         delete_absolute(state, &url).await
     }
 }
@@ -581,7 +630,7 @@ pub async fn get_contact_photo(
         // Groups don't carry photos in the People API model.
         return Ok(None);
     }
-    let url = format!("{PEOPLE_API_BASE}/{contact_id}?personFields=photos",);
+    let url = format!("{}/{contact_id}?personFields=photos", state.people_base,);
     let person: Person = get_absolute(state, &url).await?;
     let Some(photo_url) = primary_photo_url(&person) else {
         return Ok(None);
@@ -612,7 +661,7 @@ pub async fn set_contact_photo(
             message: "contact groups do not support photos".into(),
         });
     }
-    let url = format!("{PEOPLE_API_BASE}/{contact_id}:updateContactPhoto");
+    let url = format!("{}/{contact_id}:updateContactPhoto", state.people_base);
     let body = UpdateContactPhotoRequest {
         photo_bytes: base64::engine::general_purpose::STANDARD.encode(&photo.data),
         person_fields: Some(PERSON_FIELDS.to_string()),
@@ -627,7 +676,8 @@ pub async fn delete_contact_photo(state: &ApiState, contact_id: &str) -> GoogleR
         return Ok(());
     }
     let url = format!(
-        "{PEOPLE_API_BASE}/{contact_id}:deleteContactPhoto?personFields={}",
+        "{}/{contact_id}:deleteContactPhoto?personFields={}",
+        state.people_base,
         urlencoding(PERSON_FIELDS),
     );
     delete_absolute(state, &url).await
@@ -643,7 +693,8 @@ async fn list_all_people(state: &ApiState) -> GoogleResult<Vec<Person>> {
         // pick 200 to balance round-trip count against per-page
         // parsing cost.
         let mut url = format!(
-            "{PEOPLE_API_BASE}/people/me/connections?pageSize=200&personFields={}",
+            "{}/people/me/connections?pageSize=200&personFields={}",
+            state.people_base,
             urlencoding(PERSON_FIELDS),
         );
         if let Some(t) = &page_token {
@@ -667,7 +718,8 @@ async fn list_all_contact_groups(state: &ApiState) -> GoogleResult<Vec<ContactGr
     let mut page_token: Option<String> = None;
     loop {
         let mut url = format!(
-            "{PEOPLE_API_BASE}/contactGroups?pageSize=200&groupFields=name,groupType,memberCount,metadata",
+            "{}/contactGroups?pageSize=200&groupFields=name,groupType,memberCount,metadata",
+            state.people_base,
         );
         if let Some(t) = &page_token {
             url.push_str("&pageToken=");
@@ -689,7 +741,8 @@ async fn list_all_contact_groups(state: &ApiState) -> GoogleResult<Vec<ContactGr
 
 async fn create_person(state: &ApiState, new: NewContact) -> GoogleResult<Contact> {
     let url = format!(
-        "{PEOPLE_API_BASE}/people:createContact?personFields={}",
+        "{}/people:createContact?personFields={}",
+        state.people_base,
         urlencoding(PERSON_FIELDS),
     );
     let body = new_contact_to_person_body(&new);
@@ -701,15 +754,21 @@ async fn create_person(state: &ApiState, new: NewContact) -> GoogleResult<Contac
     let mut contact = person_to_contact(person, GOOGLE_CONTACT_LIST_ID);
     if let Some(photo) = new.photo {
         if !photo.data.is_empty() {
-            if let Err(err) = set_contact_photo(state, &contact.id, photo).await {
-                tracing::warn!(
-                    contact_id = %contact.id,
-                    ?err,
-                    "google contact created but photo upload failed",
-                );
-                contact.has_photo = false;
-            } else {
-                contact.has_photo = true;
+            match set_contact_photo(state, &contact.id, photo).await {
+                Ok(()) => contact.has_photo = true,
+                // The contact stands, so any failure here — a busy provider
+                // too — keeps it without the photo. Not partly saved: the
+                // editors would offer the create again and make a second
+                // contact, until a create can say what it left unsaved
+                // (TODO.md, PR 7).
+                Err(err) => {
+                    tracing::warn!(
+                        contact_id = %contact.id,
+                        ?err,
+                        "google contact created but photo upload failed",
+                    );
+                    contact.has_photo = false;
+                }
             }
         }
     }
@@ -718,7 +777,8 @@ async fn create_person(state: &ApiState, new: NewContact) -> GoogleResult<Contac
 
 async fn update_person(state: &ApiState, contact: Contact) -> GoogleResult<Contact> {
     let url = format!(
-        "{PEOPLE_API_BASE}/{}:updateContact?updatePersonFields={}&personFields={}",
+        "{}/{}:updateContact?updatePersonFields={}&personFields={}",
+        state.people_base,
         contact.id,
         urlencoding(UPDATE_PERSON_FIELDS),
         urlencoding(PERSON_FIELDS),
@@ -729,7 +789,7 @@ async fn update_person(state: &ApiState, contact: Contact) -> GoogleResult<Conta
     // in the model to survive a round-trip. So they are fetched back right
     // before the write and passed through untouched; without this, renaming a
     // contact would delete every custom date they had.
-    let keep = other_events(state, &contact.id).await;
+    let keep = other_events(state, &contact.id).await?;
     let body = contact_to_person_body(&contact, &keep);
     let person: Person = patch_absolute(state, &url, &body).await?;
     Ok(person_to_contact(person, GOOGLE_CONTACT_LIST_ID))
@@ -738,11 +798,14 @@ async fn update_person(state: &ApiState, contact: Contact) -> GoogleResult<Conta
 /// The contact's dated entries OTHER than the anniversary, as raw JSON ready
 /// to go back out. A failed read yields an empty list and a log line rather
 /// than an error: losing a secondary date is bad, refusing to save the edit
-/// the user actually made is worse.
-async fn other_events(state: &ApiState, contact_id: &str) -> Vec<serde_json::Value> {
-    let url = format!("{PEOPLE_API_BASE}/{contact_id}?personFields=events");
+/// the user actually made is worse. A busy provider is the exception
+/// (decision 270): it would turn the update away as well, so it says so and
+/// nothing is changed, rather than the dates being dropped.
+async fn other_events(state: &ApiState, contact_id: &str) -> GoogleResult<Vec<serde_json::Value>> {
+    let url = format!("{}/{contact_id}?personFields=events", state.people_base);
     let person: Person = match get_absolute(state, &url).await {
         Ok(person) => person,
+        Err(err @ GoogleError::Busy { .. }) => return Err(err),
         Err(err) => {
             tracing::warn!(
                 %contact_id,
@@ -750,10 +813,10 @@ async fn other_events(state: &ApiState, contact_id: &str) -> Vec<serde_json::Val
                 "could not re-read google events before update; other dated \
                  entries on this contact may be dropped",
             );
-            return Vec::new();
+            return Ok(Vec::new());
         }
     };
-    person
+    Ok(person
         .events
         .unwrap_or_default()
         .into_iter()
@@ -771,7 +834,7 @@ async fn other_events(state: &ApiState, contact_id: &str) -> Vec<serde_json::Val
             }
             Some(serde_json::Value::Object(entry))
         })
-        .collect()
+        .collect())
 }
 
 /// A `PersonDate` back in the shape it arrived in. Missing components stay
@@ -794,20 +857,22 @@ fn google_date_parts(date: &PersonDate) -> serde_json::Value {
 // ── Internal: contact group CRUD ───────────────────────────────────────
 
 async fn create_contact_group(state: &ApiState, new: NewContact) -> GoogleResult<Contact> {
-    let url = format!("{PEOPLE_API_BASE}/contactGroups");
+    // The members are found before anything is written (decision 270): a
+    // search that got no answer leaves nothing created.
+    let member_ids = resolve_members(state, new.members.as_deref().unwrap_or_default()).await?;
+    let url = format!("{}/contactGroups", state.people_base);
     let body = serde_json::json!({
         "contactGroup": {
             "name": new.display_name,
         }
     });
     let group: ContactGroup = post_absolute(state, &url, &body).await?;
-    // members:modify in a second pass — `contactGroups.create`
-    // doesn't take initial members in its request shape.
-    if let Some(members) = new.members.as_ref() {
-        if !members.is_empty() {
-            apply_group_members(state, &group.resource_name, members, &[]).await?;
-        }
-    }
+    // members:modify in a second pass — `contactGroups.create` doesn't take
+    // initial members in its request shape. The group stands now: a failure
+    // leaves the change saved in part (decision 277).
+    apply_group_members_ids(state, &group.resource_name, &member_ids, &[])
+        .await
+        .map_err(|err| err.after_landed("members"))?;
     Ok(group_to_contact(
         group,
         new.members.unwrap_or_default(),
@@ -816,53 +881,20 @@ async fn create_contact_group(state: &ApiState, new: NewContact) -> GoogleResult
 }
 
 async fn update_contact_group(state: &ApiState, contact: Contact) -> GoogleResult<Contact> {
-    let url = format!("{PEOPLE_API_BASE}/{}", contact.id);
-    let body = serde_json::json!({
-        "contactGroup": {
-            "etag": contact.etag.clone().unwrap_or_default(),
-            "name": contact.display_name,
-        },
-        "updateGroupFields": "name",
-    });
-    let group: ContactGroup = put_absolute(state, &url, &body).await?;
-
-    // Diff membership against what the server currently has. We
-    // need to know the existing members to compute add/remove
-    // sets. A `GET ?maxMembers=N` returns them.
+    // Everything is read before anything is written (decision 270): a read
+    // that got no answer leaves nothing changed. Diff membership against
+    // what the server currently has — a `GET ?maxMembers=N` returns the
+    // members, and the name.
     let existing_url = format!(
-        "{PEOPLE_API_BASE}/{}?maxMembers=1000&groupFields=name,groupType,memberCount,metadata",
-        contact.id,
+        "{}/{}?maxMembers=1000&groupFields=name,groupType,memberCount,metadata",
+        state.people_base, contact.id,
     );
     let existing: ContactGroup = get_absolute(state, &existing_url).await?;
-    let existing_member_ids: Vec<String> = existing.member_resource_names.unwrap_or_default();
+    let existing_member_ids: Vec<String> =
+        existing.member_resource_names.clone().unwrap_or_default();
 
     let desired_members = contact.members.clone().unwrap_or_default();
-    // Look up resource names for desired members. Google's group
-    // membership is keyed by resourceName, not email — we need to
-    // resolve each desired email back to a resourceName via a
-    // searchContacts query. Cheap (one round-trip per member)
-    // and easier than maintaining a parallel cache.
-    let mut desired_member_ids: Vec<String> = Vec::with_capacity(desired_members.len());
-    for member in &desired_members {
-        let hits = search_contacts(state, &member.email)
-            .await
-            .unwrap_or_default();
-        if let Some(hit) = hits.into_iter().find(|c| {
-            c.emails
-                .iter()
-                .any(|e| e.value.eq_ignore_ascii_case(&member.email))
-        }) {
-            // Skip group-contacts in the search results — only
-            // people can be members of groups.
-            if !hit.id.starts_with("contactGroups/") {
-                desired_member_ids.push(hit.id);
-            }
-        }
-        // Unresolved members (e.g. an email not in the user's
-        // address book) silently drop — the People API only
-        // accepts existing person resourceNames in
-        // `resourceNamesToAdd`.
-    }
+    let desired_member_ids = resolve_members(state, &desired_members).await?;
 
     let to_add: Vec<String> = desired_member_ids
         .iter()
@@ -875,9 +907,33 @@ async fn update_contact_group(state: &ApiState, contact: Contact) -> GoogleResul
         .cloned()
         .collect();
 
-    if !to_add.is_empty() || !to_remove.is_empty() {
-        apply_group_members_ids(state, &group.resource_name, &to_add, &to_remove).await?;
-    }
+    // A members-only edit is one write: the name goes out only when it
+    // changed.
+    let renamed = existing.name.as_deref() != Some(contact.display_name.as_str());
+    let group = if renamed {
+        let url = format!("{}/{}", state.people_base, contact.id);
+        let body = serde_json::json!({
+            "contactGroup": {
+                "etag": contact.etag.clone().unwrap_or_default(),
+                "name": contact.display_name,
+            },
+            "updateGroupFields": "name",
+        });
+        put_absolute(state, &url, &body).await?
+    } else {
+        existing
+    };
+    // After a rename landed, a members change that fails leaves the change
+    // saved in part (decision 277).
+    apply_group_members_ids(state, &group.resource_name, &to_add, &to_remove)
+        .await
+        .map_err(|err| {
+            if renamed {
+                err.after_landed("members")
+            } else {
+                err
+            }
+        })?;
     Ok(group_to_contact(
         group,
         desired_members,
@@ -885,31 +941,29 @@ async fn update_contact_group(state: &ApiState, contact: Contact) -> GoogleResul
     ))
 }
 
-/// Resolve member email→resourceName + apply add/remove to the
-/// group. Used during create where we don't yet have a server
-/// side roster.
-async fn apply_group_members(
-    state: &ApiState,
-    group_resource_name: &str,
-    desired: &[GroupMember],
-    to_remove_ids: &[String],
-) -> GoogleResult<()> {
-    let mut to_add: Vec<String> = Vec::with_capacity(desired.len());
-    for member in desired {
-        let hits = search_contacts(state, &member.email)
-            .await
-            .unwrap_or_default();
+/// The person resource names of `members`, found by address. Google's group
+/// membership is keyed by resourceName, not email, so each one is looked up
+/// with a search — one round-trip per member, easier than keeping a parallel
+/// cache. An address not in the address book has none and is left out (the
+/// People API takes only existing people in `resourceNamesToAdd`); a search
+/// that got no answer fails it all ([`search_sources`]).
+async fn resolve_members(state: &ApiState, members: &[GroupMember]) -> GoogleResult<Vec<String>> {
+    let mut ids: Vec<String> = Vec::with_capacity(members.len());
+    for member in members {
+        let hits = search_sources(state, &member.email, true).await?;
         if let Some(hit) = hits.into_iter().find(|c| {
             c.emails
                 .iter()
                 .any(|e| e.value.eq_ignore_ascii_case(&member.email))
         }) {
+            // Skip group-contacts in the search results — only
+            // people can be members of groups.
             if !hit.id.starts_with("contactGroups/") {
-                to_add.push(hit.id);
+                ids.push(hit.id);
             }
         }
     }
-    apply_group_members_ids(state, group_resource_name, &to_add, to_remove_ids).await
+    Ok(ids)
 }
 
 async fn apply_group_members_ids(
@@ -921,7 +975,7 @@ async fn apply_group_members_ids(
     if to_add.is_empty() && to_remove.is_empty() {
         return Ok(());
     }
-    let url = format!("{PEOPLE_API_BASE}/{group_resource_name}/members:modify",);
+    let url = format!("{}/{group_resource_name}/members:modify", state.people_base,);
     let body = serde_json::json!({
         "resourceNamesToAdd": to_add,
         "resourceNamesToRemove": to_remove,
@@ -2016,10 +2070,9 @@ mod tests {
             client_secret: "secret".into(),
             http: reqwest::Client::new(),
             token_url: format!("{server_url}/token"),
-            // Each test builds its own absolute URLs against the
-            // mockito root, so api_base stays at the mock URL —
-            // the People API helpers use absolute URLs anyway.
             api_base: server_url.to_string(),
+            people_base: server_url.to_string(),
+            tasks_base: server_url.to_string(),
         }
     }
 
@@ -2221,16 +2274,8 @@ mod tests {
             .with_body(r#"{"error":{"code":403,"message":"insufficient scope"}}"#)
             .create_async()
             .await;
-        // We need the People-API URL to point at the mockito root.
-        // The helper builds it from PEOPLE_API_BASE which is a
-        // const, so we instead call list_other_contacts via a
-        // small wrapper that patches the base. For test purposes
-        // we exercise the helper with a path the api_base points
-        // at — same outcome.
-        //
-        // Simpler: this test just asserts the get_absolute path
-        // surfaces 403 as Http{status:403}; the calling helper's
-        // match arm collapses that to Ok(empty).
+        // The get_absolute path surfaces 403 as Http{status:403}; the
+        // calling helper's match arm collapses that to Ok(empty).
         let state = fixture_state(&server.url());
         let url = format!("{}/otherContacts?pageSize=500&readMask=names", server.url());
         let err = get_absolute::<ListOtherContactsResponse>(&state, &url)
@@ -2287,5 +2332,376 @@ mod tests {
         let url = format!("{}/people/c1?personFields=photos", server.url());
         let person: Person = get_absolute(&state, &url).await.unwrap();
         assert!(primary_photo_url(&person).is_none());
+    }
+
+    // ── Saves of more than one request (decisions 270, 277) ───────────
+
+    use mockito::Matcher;
+
+    /// The three search sources: the personal one finds `a@x.de` as
+    /// `people/c1` (or answers `personal_status`), the other two answer
+    /// that they have nothing for this account.
+    async fn searches(server: &mut Server, personal_status: usize) -> Vec<mockito::Mock> {
+        let personal = server
+            .mock("GET", Matcher::Regex(r"^/people:searchContacts\?".into()))
+            .with_status(personal_status)
+            .with_body(
+                r#"{"results":[{"person":{"resourceName":"people/c1","emailAddresses":[{"value":"a@x.de"}]}}]}"#,
+            )
+            .create_async()
+            .await;
+        let other = server
+            .mock("GET", Matcher::Regex(r"^/otherContacts:search\?".into()))
+            .with_status(403)
+            .with_body(r#"{"error":{"code":403,"message":"insufficient scope"}}"#)
+            .create_async()
+            .await;
+        let directory = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/people:searchDirectoryPeople\?".into()),
+            )
+            .with_status(400)
+            .with_body(r#"{"error":{"status":"FAILED_PRECONDITION"}}"#)
+            .create_async()
+            .await;
+        vec![personal, other, directory]
+    }
+
+    fn members() -> Vec<GroupMember> {
+        vec![GroupMember {
+            name: None,
+            email: "a@x.de".into(),
+        }]
+    }
+
+    fn new_group() -> NewContact {
+        serde_json::from_value(serde_json::json!({
+            "display_name": "Friends",
+            "emails": [],
+            "phone_numbers": [],
+            "members": [{"email": "a@x.de"}],
+        }))
+        .unwrap()
+    }
+
+    /// The group as Aperio holds it, named `name`.
+    fn group_named(name: &str) -> Contact {
+        let group: ContactGroup = serde_json::from_value(serde_json::json!({
+            "resourceName": "contactGroups/g1",
+            "etag": "e1",
+            "name": name,
+        }))
+        .unwrap();
+        group_to_contact(group, members(), GOOGLE_CONTACT_LIST_ID)
+    }
+
+    /// The group as Google has it: named `Friends`, with `people/c1` and
+    /// `people/c2`.
+    async fn group_as_it_stands(server: &mut Server) -> mockito::Mock {
+        server
+            .mock("GET", Matcher::Regex(r"^/contactGroups/g1\?maxMembers=".into()))
+            .with_status(200)
+            .with_body(
+                r#"{"resourceName":"contactGroups/g1","etag":"e1","name":"Friends","memberResourceNames":["people/c1","people/c2"]}"#,
+            )
+            .create_async()
+            .await
+    }
+
+    async fn never(server: &mut Server, method: &str, path: &str) -> mockito::Mock {
+        server
+            .mock(method, Matcher::Regex(path.into()))
+            .expect(0)
+            .create_async()
+            .await
+    }
+
+    /// The members are found before the group is created: a search that
+    /// got no answer leaves nothing created, while a source that answered it
+    /// has nothing for the account counts as no hits.
+    #[tokio::test]
+    async fn a_group_is_created_only_once_its_members_are_found() {
+        for status in [429, 500] {
+            let mut server = Server::new_async().await;
+            let _searches = searches(&mut server, status).await;
+            let created = never(&mut server, "POST", r"^/contactGroups$").await;
+            let err = create_contact_group(&fixture_state(&server.url()), new_group())
+                .await
+                .unwrap_err();
+            match (status, &err) {
+                (429, GoogleError::Busy { .. }) | (500, GoogleError::Http { status: 500, .. }) => {}
+                _ => panic!("{status}: {err:?}"),
+            }
+            created.assert_async().await;
+        }
+    }
+
+    /// The group stands once it is created: members that did not land leave
+    /// the change saved in part.
+    #[tokio::test]
+    async fn a_new_group_whose_members_did_not_land_is_saved_in_part() {
+        let mut server = Server::new_async().await;
+        let _searches = searches(&mut server, 200).await;
+        let _created = server
+            .mock("POST", "/contactGroups")
+            .with_status(200)
+            .with_body(r#"{"resourceName":"contactGroups/g1","etag":"e1","name":"Friends"}"#)
+            .create_async()
+            .await;
+        let modified = server
+            .mock("POST", "/contactGroups/g1/members:modify")
+            .match_body(Matcher::PartialJson(
+                serde_json::json!({"resourceNamesToAdd": ["people/c1"]}),
+            ))
+            .with_status(429)
+            .create_async()
+            .await;
+        let err = create_contact_group(&fixture_state(&server.url()), new_group())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, GoogleError::PartlySaved { step: "members", cause } if matches!(**cause, GoogleError::Busy { .. })),
+            "{err:?}"
+        );
+        modified.assert_async().await;
+    }
+
+    /// A members-only edit is one write, and a member found is kept.
+    #[tokio::test]
+    async fn a_members_only_edit_writes_once() {
+        let mut server = Server::new_async().await;
+        let _searches = searches(&mut server, 200).await;
+        let _existing = group_as_it_stands(&mut server).await;
+        let renamed = never(&mut server, "PUT", r"^/contactGroups/g1").await;
+        let modified = server
+            .mock("POST", "/contactGroups/g1/members:modify")
+            .match_body(Matcher::Json(serde_json::json!({
+                "resourceNamesToAdd": [],
+                "resourceNamesToRemove": ["people/c2"],
+            })))
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let saved = update_contact_group(&fixture_state(&server.url()), group_named("Friends"))
+            .await
+            .unwrap();
+        assert_eq!(saved.display_name, "Friends");
+        renamed.assert_async().await;
+        modified.assert_async().await;
+    }
+
+    /// A search that got no answer changes nothing — above all, it takes no
+    /// member out of the group.
+    #[tokio::test]
+    async fn a_group_edit_finds_its_members_before_it_writes() {
+        for status in [429, 500] {
+            let mut server = Server::new_async().await;
+            let _searches = searches(&mut server, status).await;
+            let _existing = group_as_it_stands(&mut server).await;
+            let renamed = never(&mut server, "PUT", r"^/contactGroups/g1").await;
+            let modified = never(&mut server, "POST", r"^/contactGroups/g1/members:modify").await;
+            let err = update_contact_group(&fixture_state(&server.url()), group_named("Renamed"))
+                .await
+                .unwrap_err();
+            match (status, &err) {
+                (429, GoogleError::Busy { .. }) | (500, GoogleError::Http { status: 500, .. }) => {}
+                _ => panic!("{status}: {err:?}"),
+            }
+            renamed.assert_async().await;
+            modified.assert_async().await;
+        }
+    }
+
+    /// After a rename landed, members that did not land leave the change
+    /// saved in part; without a rename, nothing was changed.
+    #[tokio::test]
+    async fn a_group_edit_whose_members_did_not_land() {
+        for (name, saved_in_part) in [("Renamed", true), ("Friends", false)] {
+            let mut server = Server::new_async().await;
+            let _searches = searches(&mut server, 200).await;
+            let _existing = group_as_it_stands(&mut server).await;
+            let renamed = server
+                .mock("PUT", "/contactGroups/g1")
+                .with_status(200)
+                .with_body(r#"{"resourceName":"contactGroups/g1","etag":"e2","name":"Renamed"}"#)
+                .expect(usize::from(saved_in_part))
+                .create_async()
+                .await;
+            let _modified = server
+                .mock("POST", "/contactGroups/g1/members:modify")
+                .with_status(429)
+                .create_async()
+                .await;
+            let err = update_contact_group(&fixture_state(&server.url()), group_named(name))
+                .await
+                .unwrap_err();
+            match err {
+                GoogleError::PartlySaved {
+                    step: "members",
+                    cause,
+                } if saved_in_part => {
+                    assert!(matches!(*cause, GoogleError::Busy { .. }), "{cause:?}")
+                }
+                GoogleError::Busy { .. } if !saved_in_part => {}
+                other => panic!("{name}: {other:?}"),
+            }
+            renamed.assert_async().await;
+        }
+    }
+
+    /// A busy provider meeting the re-read of a contact's dates changes
+    /// nothing, rather than dropping the dates; any other failure there still
+    /// saves the edit.
+    #[tokio::test]
+    async fn an_update_meeting_a_busy_provider_drops_no_dates() {
+        let person: Person = serde_json::from_value(serde_json::json!({
+            "resourceName": "people/c1",
+            "etag": "e1",
+            "names": [{"displayName": "Max"}],
+        }))
+        .unwrap();
+        let contact = person_to_contact(person, GOOGLE_CONTACT_LIST_ID);
+        for (status, written) in [(429, false), (500, true)] {
+            let mut server = Server::new_async().await;
+            let _events = server
+                .mock(
+                    "GET",
+                    Matcher::Regex(r"^/people/c1\?personFields=events$".into()),
+                )
+                .with_status(status)
+                .create_async()
+                .await;
+            let patched = server
+                .mock(
+                    "PATCH",
+                    Matcher::Regex(r"^/people/c1:updateContact\?".into()),
+                )
+                .with_status(200)
+                .with_body(r#"{"resourceName":"people/c1","names":[{"displayName":"Max"}]}"#)
+                .expect(usize::from(written))
+                .create_async()
+                .await;
+            let result = update_person(&fixture_state(&server.url()), contact.clone()).await;
+            match (written, result) {
+                (true, Ok(_)) | (false, Err(GoogleError::Busy { .. })) => {}
+                (_, other) => panic!("{status}: {other:?}"),
+            }
+            patched.assert_async().await;
+        }
+    }
+
+    /// The contact stands once it is created: a photo turned away — by a busy
+    /// provider too — keeps the contact without it, and the create succeeds,
+    /// so no editor offers it again.
+    #[tokio::test]
+    async fn a_new_contact_whose_photo_did_not_land() {
+        for status in [429, 500] {
+            let mut server = Server::new_async().await;
+            let _created = server
+                .mock("POST", Matcher::Regex(r"^/people:createContact\?".into()))
+                .with_status(200)
+                .with_body(r#"{"resourceName":"people/c9","names":[{"displayName":"Max"}]}"#)
+                .create_async()
+                .await;
+            let _photo = server
+                .mock("PATCH", "/people/c9:updateContactPhoto")
+                .with_status(status)
+                .create_async()
+                .await;
+            let new: NewContact = serde_json::from_value(serde_json::json!({
+                "display_name": "Max",
+                "emails": [],
+                "phone_numbers": [],
+                "photo": {"content_type": "image/png", "data": "iVBORw=="},
+            }))
+            .unwrap();
+            let contact = create_person(&fixture_state(&server.url()), new)
+                .await
+                .unwrap();
+            assert_eq!(contact.id, "people/c9", "{status}");
+            assert!(!contact.has_photo, "{status}");
+        }
+    }
+
+    /// The typeahead says the provider is busy only when no source answered
+    /// and one was busy; any answer gives what it found, and an account
+    /// without a directory is no answer.
+    #[tokio::test]
+    async fn a_search_no_source_answered_says_the_provider_is_busy() {
+        let body = r#"{"results":[{"person":{"resourceName":"people/c1","emailAddresses":[{"value":"a@x.de"}]}}]}"#;
+        for (personal, other, found) in [(429, 429, None), (200, 429, Some(1)), (429, 200, Some(1))]
+        {
+            let mut server = Server::new_async().await;
+            let _personal = server
+                .mock("GET", Matcher::Regex(r"^/people:searchContacts\?".into()))
+                .with_status(personal)
+                .with_body(body)
+                .create_async()
+                .await;
+            let _other = server
+                .mock("GET", Matcher::Regex(r"^/otherContacts:search\?".into()))
+                .with_status(other)
+                .with_body(body)
+                .create_async()
+                .await;
+            let _directory = server
+                .mock(
+                    "GET",
+                    Matcher::Regex(r"^/people:searchDirectoryPeople\?".into()),
+                )
+                .with_status(400)
+                .with_body(r#"{"error":{"status":"FAILED_PRECONDITION"}}"#)
+                .create_async()
+                .await;
+            let result = search_contacts(&fixture_state(&server.url()), "a@x.de").await;
+            match (found, result) {
+                (None, Err(GoogleError::Busy { .. })) => {}
+                (Some(n), Ok(hits)) => assert_eq!(hits.len(), n, "{personal} {other}"),
+                (_, other_result) => panic!("{personal} {other}: {other_result:?}"),
+            }
+        }
+    }
+
+    /// A listing of Other Contacts Google turns away for throttling is an
+    /// error, not an empty list the host would take for the whole of it; a
+    /// scope not granted still reads as no Other Contacts.
+    #[tokio::test]
+    async fn a_busy_other_contacts_listing_is_no_empty_list() {
+        let body = |reason: &str| {
+            format!(
+                r#"{{"error":{{"code":403,"errors":[{{"domain":"usageLimits","reason":"{reason}"}}]}}}}"#
+            )
+        };
+        for (reason, busy) in [
+            ("rateLimitExceeded", true),
+            ("insufficientPermissions", false),
+        ] {
+            let mut server = Server::new_async().await;
+            let _list = server
+                .mock("GET", Matcher::Regex(r"^/otherContacts\?".into()))
+                .with_status(403)
+                .with_body(body(reason))
+                .expect(2)
+                .create_async()
+                .await;
+            let state = fixture_state(&server.url());
+            let full = other_contacts_full(&state).await;
+            let listed = list_other_contacts(&state).await;
+            if busy {
+                assert!(matches!(full, Err(GoogleError::Busy { .. })), "{full:?}");
+                assert!(
+                    matches!(listed, Err(GoogleError::Busy { .. })),
+                    "{listed:?}"
+                );
+            } else {
+                assert!(
+                    matches!(&full, Ok((rows, None)) if rows.is_empty()),
+                    "{full:?}"
+                );
+                assert!(matches!(&listed, Ok(rows) if rows.is_empty()), "{listed:?}");
+            }
+        }
     }
 }

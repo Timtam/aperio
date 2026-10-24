@@ -154,7 +154,7 @@ pub async fn get_tasks(client: &VikunjaClient, list_id: &str) -> VikunjaResult<V
     // Vikunja ≥0.24 keeps on the view, not on the task — can be stitched
     // back into its section. `None` on section-less / older servers, where
     // `map_task` falls back to the flat `bucket_id`.
-    let view = kanban_view(client, project_id).await;
+    let view = kanban_view(client, project_id).await?;
     let kanban_view_id = view.as_ref().map(|v| v.id);
     // The "done bucket" (DESIGN §8.2) is Vikunja's done-status mechanism, not
     // a user section — a task it filed there on completion must not surface as
@@ -232,12 +232,13 @@ pub async fn get_tasks(client: &VikunjaClient, list_id: &str) -> VikunjaResult<V
 /// for section-less backends.
 pub async fn list_sections(client: &VikunjaClient, list_id: &str) -> VikunjaResult<Vec<Section>> {
     let project_id = parse_id(list_id, "task list id")?;
-    let Some(view) = kanban_view(client, project_id).await else {
+    let Some(view) = kanban_view(client, project_id).await? else {
         return Ok(Vec::new());
     };
     let path = format!("/projects/{project_id}/views/{}/buckets", view.id);
     let buckets: Vec<BucketEntry> = match get_all_pages(client, &path).await {
         Ok(b) => b,
+        Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
         Err(_) => return Ok(Vec::new()),
     };
     // The done bucket is Vikunja's done-status mechanism, not a user section —
@@ -294,7 +295,7 @@ async fn get_all_pages<T: serde::de::DeserializeOwned>(
 
 async fn section_view(client: &VikunjaClient, list_id: &str) -> VikunjaResult<(i64, KanbanView)> {
     let project_id = parse_id(list_id, "task list id")?;
-    let Some(view) = kanban_view(client, project_id).await else {
+    let Some(view) = kanban_view(client, project_id).await? else {
         return Err(VikunjaError::Protocol(
             "project has no kanban view — sections can't be managed".into(),
         ));
@@ -395,19 +396,24 @@ pub async fn delete_section(
 /// Resolve a project's kanban view (id + default bucket), if it has one.
 /// One `GET /projects/{id}/views`; `None` (error swallowed) on servers
 /// without the views endpoint, matching `list_sections`' graceful
-/// degradation.
-async fn kanban_view(client: &VikunjaClient, project_id: i64) -> Option<KanbanView> {
-    let views: Vec<ViewEntry> = get_all_pages(client, &format!("/projects/{project_id}/views"))
-        .await
-        .ok()?;
-    views
+/// degradation. A busy server is no answer about the views (decision 270):
+/// read as "no kanban view", the tasks came back without their sections and
+/// the cache stored them so.
+async fn kanban_view(client: &VikunjaClient, project_id: i64) -> VikunjaResult<Option<KanbanView>> {
+    let views: Vec<ViewEntry> =
+        match get_all_pages(client, &format!("/projects/{project_id}/views")).await {
+            Ok(views) => views,
+            Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
+            Err(_) => return Ok(None),
+        };
+    Ok(views
         .into_iter()
         .find(|v| v.view_kind.as_deref() == Some("kanban"))
         .map(|v| KanbanView {
             id: v.id,
             default_bucket_id: v.default_bucket_id,
             done_bucket_id: v.done_bucket_id,
-        })
+        }))
 }
 
 /// The lowest-`position` bucket of a kanban view — Vikunja's implicit
@@ -419,14 +425,18 @@ async fn leftmost_bucket(
     project_id: i64,
     view_id: i64,
     exclude: i64,
-) -> Option<i64> {
-    let buckets: Vec<BucketEntry> = get_all_pages(
+) -> VikunjaResult<Option<i64>> {
+    let buckets: Vec<BucketEntry> = match get_all_pages(
         client,
         &format!("/projects/{project_id}/views/{view_id}/buckets"),
     )
     .await
-    .ok()?;
-    buckets
+    {
+        Ok(buckets) => buckets,
+        Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
+        Err(_) => return Ok(None),
+    };
+    Ok(buckets
         .into_iter()
         .filter(|b| exclude == 0 || b.id != exclude)
         .min_by(|a, b| {
@@ -434,7 +444,7 @@ async fn leftmost_bucket(
                 .partial_cmp(&b.position)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
-        .map(|b| b.id)
+        .map(|b| b.id))
 }
 
 /// A bucket id seen as an Aperio section — `None` for the done bucket, which
@@ -448,16 +458,24 @@ fn open_section(bucket: i64, done_bucket_id: i64) -> Option<i64> {
 /// populate it (older Vikunja / no `expand` support / task in no bucket
 /// of this view) — callers treat `None` as "can't determine" and skip
 /// any move rather than risk placing the task in the wrong bucket.
-async fn current_bucket(client: &VikunjaClient, task_id: i64, view_id: i64) -> Option<i64> {
-    let entry: TaskEntry = client
+async fn current_bucket(
+    client: &VikunjaClient,
+    task_id: i64,
+    view_id: i64,
+) -> VikunjaResult<Option<i64>> {
+    let entry: TaskEntry = match client
         .get_json(&format!("/tasks/{task_id}?expand=buckets"))
         .await
-        .ok()?;
-    entry
+    {
+        Ok(entry) => entry,
+        Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
+        Err(_) => return Ok(None),
+    };
+    Ok(entry
         .buckets
         .iter()
         .find(|b| b.project_view_id == view_id && b.id != 0)
-        .map(|b| b.id)
+        .map(|b| b.id))
 }
 
 /// Best-effort: place `task` in its target kanban bucket on Vikunja
@@ -476,19 +494,27 @@ async fn current_bucket(client: &VikunjaClient, task_id: i64, view_id: i64) -> O
 /// reports the real section, not an optimistic guess): the target on a
 /// successful move, the unchanged current bucket on a no-op / failed /
 /// skipped move, or `None` when it genuinely can't be determined (no
-/// kanban view, or the current bucket couldn't be read).
-async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> Option<i64> {
-    let project_id = parse_id(&task.list_id, "task list id").ok()?;
-    let Some(view) = kanban_view(client, project_id).await else {
+/// kanban view, or the current bucket couldn't be read). A busy server, for
+/// the move or the reads before it, is the one error it returns (decision
+/// 270): the caller says the save stands in part.
+async fn move_task_bucket(
+    client: &VikunjaClient,
+    task: &Task,
+    task_id: i64,
+) -> VikunjaResult<Option<i64>> {
+    let Ok(project_id) = parse_id(&task.list_id, "task list id") else {
+        return Ok(None);
+    };
+    let Some(view) = kanban_view(client, project_id).await? else {
         if task.section_id.is_some() {
             tracing::warn!(
                 project_id,
                 "vikunja: no kanban view — section change not applied",
             );
         }
-        return None;
+        return Ok(None);
     };
-    let Some(current) = current_bucket(client, task_id, view.id).await else {
+    let Some(current) = current_bucket(client, task_id, view.id).await? else {
         // Can't read where the task currently sits → don't risk a wrong
         // move. (Older server / no `expand` support.)
         if task.section_id.is_some() {
@@ -497,7 +523,7 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> 
                 "vikunja: can't read current bucket — section change not applied",
             );
         }
-        return None;
+        return Ok(None);
     };
     let done = view.done_bucket_id;
     // Resolve the bucket the task should sit in. The done bucket is NEVER a
@@ -520,16 +546,16 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> 
             if view.default_bucket_id != 0 && view.default_bucket_id != done {
                 view.default_bucket_id
             } else {
-                match leftmost_bucket(client, project_id, view.id, done).await {
+                match leftmost_bucket(client, project_id, view.id, done).await? {
                     Some(b) => b,
                     // Only the done bucket exists — nothing open to move to.
-                    None => return open_section(current, done),
+                    None => return Ok(open_section(current, done)),
                 }
             }
         }
     };
     if target == current {
-        return open_section(current, done); // already in the right bucket.
+        return Ok(open_section(current, done)); // already in the right bucket.
     }
     let path = format!(
         "/projects/{project_id}/views/{}/buckets/{target}/tasks",
@@ -544,7 +570,8 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> 
     };
     match moved {
         // `target` is a non-done bucket by construction.
-        Ok(_) => Some(target),
+        Ok(_) => Ok(Some(target)),
+        Err(err) if crate::busy_detail(&err).is_some() => Err(err),
         Err(err) => {
             tracing::warn!(
                 ?err,
@@ -553,7 +580,7 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> 
                 "vikunja: bucket move failed — task edit preserved",
             );
             // The move didn't apply → the task is still in `current`.
-            open_section(current, done)
+            Ok(open_section(current, done))
         }
     }
 }
@@ -600,8 +627,12 @@ pub async fn create_task(
     let mut mapped = map_task(entry, list_id);
     // A fresh task has no assignees, so skip the round-trip unless the
     // caller asked for some.
+    // The task stands from here: a follow-up's failure leaves it saved in
+    // part (decision 277), and creating it again would make a second one.
     if !task.assignees.is_empty() {
-        set_assignees(client, new_id, &task.assignees).await?;
+        set_assignees(client, new_id, &task.assignees)
+            .await
+            .map_err(|err| err.after_landed("assignees"))?;
         mapped.assignees = task.assignees;
     }
     // Honour the requested section. A fresh task lands in the view's default
@@ -621,7 +652,10 @@ pub async fn create_task(
         if let Some(requested) = task.section_id.clone() {
             let mut probe = mapped.clone();
             probe.section_id = Some(requested);
-            if let Some(bucket) = move_task_bucket(client, &probe, new_id).await {
+            if let Some(bucket) = move_task_bucket(client, &probe, new_id)
+                .await
+                .map_err(|err| err.after_landed("move"))?
+            {
                 mapped.section_id = Some(bucket.to_string());
             }
             // `None` ⇒ the move couldn't be determined; keep the default bucket
@@ -653,6 +687,9 @@ pub async fn create_task(
         match parse_id(parent, "parent task id") {
             Ok(parent_id) => match set_parent_relation(client, new_id, parent_id).await {
                 Ok(()) => mapped.parent_id = Some(parent.to_string()),
+                Err(err) if crate::busy_detail(&err).is_some() => {
+                    return Err(err.after_landed("parent"))
+                }
                 Err(err) => tracing::warn!(
                     error = %err,
                     "Vikunja adapter could not link the new subtask to its parent",
@@ -698,7 +735,11 @@ pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<T
     };
     // Sync the assignee set on every update so the picker can both add
     // and clear assignees (the bulk endpoint takes the full list).
-    set_assignees(client, task_id, &task.assignees).await?;
+    // The fields stand from here: a follow-up's failure leaves the save in
+    // part (decision 277).
+    set_assignees(client, task_id, &task.assignees)
+        .await
+        .map_err(|err| err.after_landed("assignees"))?;
     // Apply a section (kanban bucket) change via the dedicated per-view
     // endpoint — the task body's `bucket_id` is ignored on ≥0.24. This is
     // a best-effort follow-up (like assignees) that never fails the edit.
@@ -713,7 +754,9 @@ pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<T
     let effective_section = if matches!(task.status, TaskStatus::Completed) {
         None
     } else {
-        move_task_bucket(client, task, task_id).await
+        move_task_bucket(client, task, task_id)
+            .await
+            .map_err(|err| err.after_landed("move"))?
     };
     let mut mapped = map_task(entry, &task.list_id);
     mapped.assignees = task.assignees.clone();
@@ -731,7 +774,9 @@ pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<T
     // on the POST echo — so `reconcile_parent` fetches the authoritative
     // state itself. Best-effort like the other follow-ups; the returned
     // value is the parent actually in effect afterwards.
-    mapped.parent_id = reconcile_parent(client, task_id, task.parent_id.as_deref()).await;
+    mapped.parent_id = reconcile_parent(client, task_id, task.parent_id.as_deref())
+        .await
+        .map_err(|err| err.after_landed("parent"))?;
     Ok(mapped)
 }
 
@@ -740,9 +785,13 @@ pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<T
 /// `related_tasks` — update responses echo the request and leave it
 /// empty (same reason `current_bucket` does its own GET). `None` when
 /// the read fails — callers skip the reconcile rather than guess.
-async fn current_parents(client: &VikunjaClient, task_id: i64) -> Option<Vec<i64>> {
-    let entry: TaskEntry = client.get_json(&format!("/tasks/{task_id}")).await.ok()?;
-    Some(
+async fn current_parents(client: &VikunjaClient, task_id: i64) -> VikunjaResult<Option<Vec<i64>>> {
+    let entry: TaskEntry = match client.get_json(&format!("/tasks/{task_id}")).await {
+        Ok(entry) => entry,
+        Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(
         entry
             .related_tasks
             .map(|r| {
@@ -753,7 +802,7 @@ async fn current_parents(client: &VikunjaClient, task_id: i64) -> Option<Vec<i64
                     .collect()
             })
             .unwrap_or_default(),
-    )
+    ))
 }
 
 /// Bring the server's `parenttask` relations in line with `desired` and
@@ -765,12 +814,13 @@ async fn current_parents(client: &VikunjaClient, task_id: i64) -> Option<Vec<i64
 /// warned about and reflected in the return value rather than failing
 /// the surrounding edit, and when the authoritative state can't even be
 /// read the relations are left untouched and the caller's intent is
-/// reported (the overwhelmingly common edit doesn't change the parent).
+/// reported (the overwhelmingly common edit doesn't change the parent). A
+/// busy server is the one error it returns (decision 270).
 async fn reconcile_parent(
     client: &VikunjaClient,
     task_id: i64,
     desired: Option<&str>,
-) -> Option<String> {
+) -> VikunjaResult<Option<String>> {
     let desired_id = match desired {
         Some(p) => match parse_id(p, "parent task id") {
             Ok(id) => Some(id),
@@ -779,17 +829,17 @@ async fn reconcile_parent(
                     error = %err,
                     "Vikunja adapter can't express this parent id — parent left unchanged",
                 );
-                return desired.map(str::to_string);
+                return Ok(desired.map(str::to_string));
             }
         },
         None => None,
     };
-    let Some(current) = current_parents(client, task_id).await else {
+    let Some(current) = current_parents(client, task_id).await? else {
         tracing::warn!(
             task_id,
             "Vikunja adapter can't read the current parent relations — parent left unchanged",
         );
-        return desired.map(str::to_string);
+        return Ok(desired.map(str::to_string));
     };
     let mut remaining = current.clone();
     for old in current {
@@ -798,6 +848,7 @@ async fn reconcile_parent(
         }
         match remove_parent_relation(client, task_id, old).await {
             Ok(()) => remaining.retain(|&p| p != old),
+            Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
             Err(err) => tracing::warn!(
                 error = %err,
                 "Vikunja adapter could not unlink the task's old parent",
@@ -808,6 +859,7 @@ async fn reconcile_parent(
         if !remaining.contains(&new_parent) {
             match set_parent_relation(client, task_id, new_parent).await {
                 Ok(()) => remaining.push(new_parent),
+                Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
                 Err(err) => tracing::warn!(
                     error = %err,
                     "Vikunja adapter could not link the task to its new parent",
@@ -821,7 +873,7 @@ async fn reconcile_parent(
     // a stale parent survived a failed unlink, IT is reported — not the
     // desired one — and the editor stays consistent with the next
     // refresh instead of silently flipping back.
-    remaining.first().map(|p| p.to_string())
+    Ok(remaining.first().map(|p| p.to_string()))
 }
 
 /// `PUT /tasks/{child}/relations` — link `child` under `parent` via the
@@ -1022,6 +1074,8 @@ pub async fn list_task_list_shares(
     let entries: Vec<ProjectUserEntry> =
         match get_all_pages(client, &format!("/projects/{project_id}/users")).await {
             Ok(e) => e,
+            // A busy server is no answer about the members (decision 270).
+            Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
             Err(_) => return Ok(Vec::new()),
         };
     Ok(entries
@@ -1590,6 +1644,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     }
 
     Task {
+        original_left_in: None,
         assignees: entry
             .assignees
             .unwrap_or_default()
@@ -2906,6 +2961,7 @@ mod tests {
 
     fn task_fixture(id: &str, list_id: &str, section_id: Option<&str>) -> Task {
         Task {
+            original_left_in: None,
             assignees: Vec::new(),
             id: id.into(),
             list_id: list_id.into(),
@@ -4180,5 +4236,126 @@ mod tests {
         .unwrap();
         assert!(entry.buckets.is_empty());
         assert!(entry.related_tasks.unwrap().parenttask.is_empty());
+    }
+
+    /// A create a busy Vikunja turned away did nothing: a busy provider.
+    #[tokio::test]
+    async fn a_429_to_a_create_is_a_busy_provider() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("PUT", "/api/v1/projects/5/tasks")
+            .with_status(429)
+            .create_async()
+            .await;
+        let err = create_task(&fixture_client(&server.url()), "5", new_task_min("Play"))
+            .await
+            .unwrap_err();
+        assert!(crate::to_core_error_for_tests(err).is_provider_busy());
+    }
+
+    /// The task was created; its assignees met a busy server. The change
+    /// stands in part (decision 277), and creating it again would make a
+    /// second task.
+    #[tokio::test]
+    async fn busy_assignees_after_a_create_are_partly_saved() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("PUT", "/api/v1/projects/5/tasks")
+            .with_status(200)
+            .with_body(r#"{"id":99,"title":"Play","project_id":5}"#)
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/api/v1/tasks/99/assignees/bulk")
+            .with_status(429)
+            .create_async()
+            .await;
+        let mut new = new_task_min("Play");
+        new.assignees = vec![cal_core::TaskUser {
+            id: "3".into(),
+            name: "bob".into(),
+            email: None,
+        }];
+        let err = create_task(&fixture_client(&server.url()), "5", new)
+            .await
+            .unwrap_err();
+        let core = crate::to_core_error_for_tests(err);
+        assert!(core.is_partly_saved(), "{core:?}");
+    }
+
+    /// The fields landed; the bucket move met a busy server: partly saved.
+    /// Any other move failure stays best-effort, as before.
+    #[tokio::test]
+    async fn a_busy_bucket_move_after_an_update_is_partly_saved() {
+        for (status, partly) in [(429, true), (500, false)] {
+            let mut server = Server::new_async().await;
+            mount_update_prelude(&mut server).await;
+            server
+                .mock("GET", "/api/v1/projects/3/views")
+                .with_status(200)
+                .with_body(r#"[{"id":11,"view_kind":"kanban","default_bucket_id":5}]"#)
+                .create_async()
+                .await;
+            server
+                .mock("GET", "/api/v1/tasks/7?expand=buckets")
+                .with_status(200)
+                .with_body(r#"{"id":7,"buckets":[{"id":9,"project_view_id":11}]}"#)
+                .create_async()
+                .await;
+            server
+                .mock("POST", "/api/v1/projects/3/views/11/buckets/12/tasks")
+                .with_status(status)
+                .create_async()
+                .await;
+            server
+                .mock("GET", "/api/v1/tasks/7")
+                .with_status(200)
+                .with_body(r#"{"id":7}"#)
+                .create_async()
+                .await;
+            let result = update_task(
+                &fixture_client(&server.url()),
+                &task_fixture("7", "3", Some("12")),
+            )
+            .await;
+            if partly {
+                let core = crate::to_core_error_for_tests(result.unwrap_err());
+                assert!(core.is_partly_saved(), "{status}: {core:?}");
+            } else {
+                assert!(result.is_ok(), "{status}: {result:?}");
+            }
+        }
+    }
+
+    /// A kanban view a busy server would not list is no answer about it:
+    /// the tasks are not read without their sections, which the cache would
+    /// store so (decision 270).
+    #[tokio::test]
+    async fn a_busy_kanban_view_fails_the_task_read() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(429)
+            .create_async()
+            .await;
+        let err = get_tasks(&fixture_client(&server.url()), "3")
+            .await
+            .unwrap_err();
+        assert!(crate::to_core_error_for_tests(err).is_provider_busy());
+    }
+
+    /// A busy server is no answer about a list's members.
+    #[tokio::test]
+    async fn busy_shares_are_an_error_not_an_empty_list() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/api/v1/projects/3/users")
+            .with_status(429)
+            .create_async()
+            .await;
+        let err = list_task_list_shares(&fixture_client(&server.url()), "3")
+            .await
+            .unwrap_err();
+        assert!(crate::to_core_error_for_tests(err).is_provider_busy());
     }
 }

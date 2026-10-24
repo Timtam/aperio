@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { collectValues, firstMissingField } from '@aperio/shared';
+import { collectValues, firstMissingField, readErrorMessage } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
@@ -125,7 +125,7 @@ export function AccountEditDialog({
         setValues(seeded);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError(readErrorMessage(err, t));
         }
       }
     })();
@@ -159,7 +159,8 @@ export function AccountEditDialog({
       setTestResult(t('dialogs.accounts.testOk'));
       announce(t('dialogs.accounts.testOk'));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // A probe is a read: a busy provider says so, never "[object Object]".
+      const message = readErrorMessage(err, t);
       setTestResult(message);
       announce(message);
     } finally {
@@ -184,12 +185,12 @@ export function AccountEditDialog({
         );
         setValues((prev) => ({ ...prev, ...produced }));
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(readErrorMessage(err, t));
       } finally {
         setRunningAction(null);
       }
     },
-    [editSpec, values, account.adapter_kind],
+    [editSpec, values, account.adapter_kind, t],
   );
 
   const onSubmit = useCallback(async () => {
@@ -210,7 +211,7 @@ export function AccountEditDialog({
       onSaved();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(readErrorMessage(err, t));
     } finally {
       setBusy(false);
     }

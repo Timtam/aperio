@@ -93,6 +93,7 @@ impl VcCalendar {
         // appointment.
         let (start, end) = (meeting.start_time?, meeting.end_time?);
         Some(Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -282,6 +283,7 @@ mod tests {
     fn sample_event() -> Event {
         let start = Utc.with_ymd_and_hms(2026, 7, 29, 9, 0, 0).unwrap();
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
