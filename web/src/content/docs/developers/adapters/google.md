@@ -231,8 +231,9 @@ through `series_create` (decisions 202-213, 263-269):
   in part, and the error never says nothing was changed (277,
   `cal_core::Error::after_landed`): a busy provider is said as "partly
   saved" (`partly-saved: move` or `members`), anything else as a network
-  error that may have landed. After any contact create or edit, saved in
-  part or not, the adapter drops its own contacts listing.
+  error that may have landed. After any contact create, edit, delete or
+  photo write, whether it worked, stood in part or failed, the adapter drops
+  its own contacts listing, so the hosts' re-read asks Google again.
 - **Other Contacts.** A listing Google throttles, or turns away for a
   used-up limit, is an error. Only a 403 that names neither (the scope not
   granted) still reads as an empty list, so neither ever empties the Other

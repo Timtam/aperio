@@ -698,11 +698,11 @@ impl ContactsFeature for GoogleAdapter {
     }
 
     async fn delete_contact(&self, contact_id: &str) -> CoreResult<()> {
-        contacts::delete_contact(&self.state, contact_id)
-            .await
-            .map_err(to_write_error)?;
+        let result = contacts::delete_contact(&self.state, contact_id).await;
+        // Also after one that failed: its answer may be lost after it landed,
+        // and the hosts read again (decision 277).
         self.contacts_cache.lock().await.clear();
-        Ok(())
+        result.map_err(to_write_error)
     }
 
     async fn rename_contact_list(&self, _list_id: &str, _new_name: &str) -> CoreResult<()> {
@@ -722,19 +722,17 @@ impl ContactsFeature for GoogleAdapter {
     }
 
     async fn set_contact_photo(&self, contact_id: &str, photo: ContactPhoto) -> CoreResult<()> {
-        contacts::set_contact_photo(&self.state, contact_id, photo)
-            .await
-            .map_err(to_write_error)?;
+        let result = contacts::set_contact_photo(&self.state, contact_id, photo).await;
+        // Also after one that failed, as for a delete (decision 277).
         self.contacts_cache.lock().await.clear();
-        Ok(())
+        result.map_err(to_write_error)
     }
 
     async fn delete_contact_photo(&self, contact_id: &str) -> CoreResult<()> {
-        contacts::delete_contact_photo(&self.state, contact_id)
-            .await
-            .map_err(to_write_error)?;
+        let result = contacts::delete_contact_photo(&self.state, contact_id).await;
+        // Also after one that failed, as for a delete (decision 277).
         self.contacts_cache.lock().await.clear();
-        Ok(())
+        result.map_err(to_write_error)
     }
 
     async fn invalidate_contacts_cache(&self) -> CoreResult<()> {
@@ -1577,6 +1575,51 @@ mod delta_tests {
             other => panic!("{other:?}"),
         }
         assert!(adapter.contacts_cache.lock().await.is_empty());
+    }
+
+    /// A contact delete or photo write that failed may have landed — its
+    /// answer lost after the change — so the listing cache is dropped as
+    /// after a create or an edit, and the hosts' re-read asks Google again
+    /// (decision 277).
+    #[tokio::test]
+    async fn a_failed_contact_delete_or_photo_write_drops_the_listing() {
+        let mut server = Server::new_async().await;
+        let _deleted = server
+            .mock("DELETE", Matcher::Regex(r"^/people/c1:delete".into()))
+            .with_status(500)
+            .create_async()
+            .await;
+        let _photo = server
+            .mock(
+                "PATCH",
+                Matcher::Regex(r"^/people/c1:updateContactPhoto".into()),
+            )
+            .with_status(500)
+            .create_async()
+            .await;
+        let adapter = adapter_for(&server);
+        let cached = || async {
+            adapter.contacts_cache.lock().await.insert(
+                contacts::GOOGLE_CONTACT_LIST_ID.into(),
+                (Vec::new(), chrono::Utc::now()),
+            );
+        };
+        cached().await;
+        assert!(adapter.delete_contact("people/c1").await.is_err());
+        assert!(adapter.contacts_cache.lock().await.is_empty(), "delete");
+        cached().await;
+        let photo = ContactPhoto {
+            content_type: "image/jpeg".into(),
+            data: vec![0xff, 0xd8, 0xff],
+        };
+        assert!(adapter.set_contact_photo("people/c1", photo).await.is_err());
+        assert!(adapter.contacts_cache.lock().await.is_empty(), "photo set");
+        cached().await;
+        assert!(adapter.delete_contact_photo("people/c1").await.is_err());
+        assert!(
+            adapter.contacts_cache.lock().await.is_empty(),
+            "photo removal"
+        );
     }
 
     /// The error keeps only the first 300 characters of an answer, so a
