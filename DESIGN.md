@@ -1490,7 +1490,8 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     `readErrorMessage` und `readFailureSentence` beim Lesen,
     `writeFailureSentence` für ein Schreiben im Rahmen des Aufrufers (das
     Rückgängig im Hinweis, Meetings über `meetingFailureSentence`). Am Handy reicht `hostCoded` jeden
-    Fehler des Rust-Hosts mit dem Code des Desktops weiter.
+    Fehler des Rust-Hosts mit dem Code des Desktops weiter; auf iOS kommt in
+    Expo 56 nur der Text in JavaScript an, dort tragen die Marken (TODO).
 
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit
 prüfen" — sichtbar bei scheduling-fähigem Kalender und vorhandenen

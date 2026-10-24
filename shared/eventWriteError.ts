@@ -229,10 +229,12 @@ const REFUSED_CODES = new Set([
  * A refusal token or a refusing code says so. Anything else may have reached
  * the provider before its answer was lost — a network failure above all, but
  * also a protocol error on an answer that could not be read, or an error
- * without a code. Both hosts hand every error over with its code (the phone
- * through `hostCoded`, TODO B9), so one without is an error a surface threw
- * itself. Those are never taken as "nothing happened": a caller that undoes
- * on the strength of it would undo half of a write that went through.
+ * without a code. The desktop hands every error over with its code, and so
+ * does the phone's Android module (`hostCoded`, TODO B9); on iOS the code is
+ * lost on the way to JavaScript (TODO "iPhone: verliert Expo den
+ * Fehlercode?"), so there only a token reads. Those are never taken as
+ * "nothing happened": a caller that undoes on the strength of it would undo
+ * half of a write that went through.
  */
 export function writeNeverLanded(err: unknown): boolean {
   // Something stands that could not be taken back, whatever code carried it.

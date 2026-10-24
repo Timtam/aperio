@@ -145,7 +145,10 @@ public class CalFfiModule: Module {
   /// the engine's text. The codes are the desktop's (`CommandError`), so one
   /// translator serves both surfaces; a sync failure keeps the engine's own.
   /// Every registration that calls the host goes through it or `groupCoded`
-  /// (check-ffi-bridges.mjs fails one that does not).
+  /// (check-ffi-bridges.mjs fails one that does not). Expo 56 rejects an
+  /// AsyncFunction's promise on iOS with the message only, so JS reads the
+  /// token first in it, not the code (TODO "iPhone: verliert Expo den
+  /// Fehlercode?").
   private func hostCoded<T>(_ block: () throws -> T) throws -> T {
     do {
       return try block()

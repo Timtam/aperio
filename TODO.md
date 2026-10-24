@@ -837,10 +837,11 @@ Siehe DESIGN §4.2.
       „weg oder nie hier“, die Suche über die Kalender geht weiter und zählt
       es nur als gelöscht, wenn kein anderer Kalender den Termin hat
       (`DeleteWalk`). Nach einem gescheiterten Verbindungsaufbau gilt nichts
-      davon: da ging nichts hinaus. Am Handy kommen seit PR 7 alle
-      Fehler mit dem Code des Desktops an (B9); eine Ablehnung mit Marke
-      (`server-refused`, `unsafe-to-write`) reist als `forbidden` und wird
-      erkannt. Handy ohne
+      davon: da ging nichts hinaus. Am Android-Handy kommen seit PR 7 alle
+      Fehler mit dem Code des Desktops an (B9), am iPhone nur der Text (siehe
+      „iPhone: verliert Expo den Fehlercode?“); eine Ablehnung mit Marke
+      (`server-refused`, `unsafe-to-write`) wird an der Marke erkannt, auf
+      beiden. Handy ohne
       Testläufer — ↻ im Test.
     - ✅ CalDAV `create_task_list`: MKCALENDAR läuft seit PR 7 (7950e08b)
       über `send_write`. Eine Wiederholung, die 405 bekommt, ist die Liste des
@@ -1397,7 +1398,10 @@ jede Variante mit dem Code des Desktops nach JS gibt (`auth`, `forbidden`,
 `not_found`, `conflict`, `network`, `protocol`, `invalid_input`,
 `unsupported`, `internal`, beim Abgleich dessen eigener Code);
 `check-ffi-bridges.mjs` lässt keine unumhüllte Registrierung durch. Kotlin
-lokal gebaut; Swift baut erst der iOS-Bau — ↻ im Test.
+lokal gebaut; Swift baut erst der iOS-Bau — ↻ im Test. Das gilt so nur für
+Android: Auf iOS kommt der Code nicht in JavaScript an (siehe „iPhone:
+verliert Expo den Fehlercode?“ unter B14), dort liest nur die Marke im
+Text.
 
 ### B10 · iOS: VoiceOver tippte durch die Tab-Leiste (159) `[~]`
 
@@ -1780,10 +1784,19 @@ Vorschläge sind nicht aufgenommen.
       jeder abgewiesenen `AsyncFunction` `error.code` fallen zu lassen. Dann
       sind die Zweige, die nach dem Code fragen, auf dem iPhone tot:
       `useSyncErrorMessage`, `EventGroupModal`, `client_secret_required` im
-      `AccountsScreen`, `SyncTargetSchemaForm`. PR 7 verlässt sich nur auf
-      die Marke im Text. Am iPhone prüfen; wenn ja, die Zweige auf den Text
-      umstellen oder den Code in den Text legen. Aus der Planung von PR 7
-      (2026-10-23).
+      `AccountsScreen`, `SyncTargetSchemaForm`, und in `shared` die Sätze zu
+      `conflict` und `forbidden` ohne Marke sowie `writeNeverLanded` über den
+      Code (eine Ablehnung ohne Marke liest dort als „ist vielleicht
+      angekommen“, die sichere Seite). PR 7 verlässt sich nur auf die Marke
+      im Text. Die achte Prüfrunde von #128 (2026-10-24) hat den Weg in den
+      gesperrten Quellen gelesen (expo-modules-core 56.0.17, expo-modules-jsi
+      56.0.10): `AsyncFunctionDefinition` gibt den Fehler an
+      `JavaScriptPromise.reject`, und das baut `JavaScriptError` nur mit der
+      Meldung; den Code hängt nur der Weg für synchrone Würfe an. Android
+      gibt ihn mit. Am iPhone prüfen (etwa ein Speichern mit Konflikt); wenn
+      ja, entweder expo-modules-jsi per patch-package den Code mitgeben lassen
+      oder den Code in den Text legen, ohne dass die Marke ihren ersten Platz
+      verliert. Aus der Planung von PR 7 (2026-10-23).
 - [ ] **Plugins: Abgleich liest „verboten“ als Anmeldung.** Der Abgleich
       eines Plugins (`plugin-core/src/shim/sync.rs`, `status_to_sync_error`)
       macht aus `FORBIDDEN` einen Anmeldefehler, auch wenn die Meldung eine
