@@ -159,5 +159,7 @@ describe('ContactDialog → a delete that failed', () => {
     await waitFor(() => expect(invalidateData).toHaveBeenCalledTimes(1));
     expect(invokeMock.mock.calls.filter((c) => c[0] === 'delete_contact')).toHaveLength(1);
     expect(onClose).not.toHaveBeenCalled();
+    // Said where the dialog shows its errors.
+    expect(await screen.findByText(/connection reset/)).toBeTruthy();
   });
 });

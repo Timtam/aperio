@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+import { writeErrorMessage } from '@aperio/shared';
+
 import type { Contact, ContactList } from '../../api/types';
+import i18n from '../../i18n';
 
 /**
  * The Contacts view's Delete key, after a delete that failed, reads the list
@@ -77,6 +80,10 @@ describe('ContactsView → the Delete key after a delete that failed (277)', () 
     fireEvent.click(confirm[confirm.length - 1]);
     await waitFor(() => expect(invalidateData).toHaveBeenCalledTimes(1));
     expect(invokeMock.mock.calls.filter((call) => call[0] === 'delete_contact')).toHaveLength(1);
-    expect(announced.some((line) => /Anna.*gelöscht|deleted/i.test(line))).toBe(false);
+    const t = (key: string, values?: Record<string, unknown>): string =>
+      i18n.t(key, values as never) as unknown as string;
+    expect(announced).toEqual([
+      writeErrorMessage({ code: 'network', message: 'connection reset' }, t),
+    ]);
   });
 });
