@@ -524,6 +524,11 @@ impl CacheRefresher {
 
     async fn enumerate_calendars(&self, out: &mut Vec<RefreshTarget>) {
         for (account, adapter) in self.registry.snapshot_calendar_adapters() {
+            // Taken before the fetch: a write landing while it runs must not
+            // be paused by its busy answer (decision 271).
+            let generation = self
+                .cache
+                .refresh_generation(&account, SyncScope::Calendars, "");
             match adapter.list_calendars().await {
                 Ok(cals) => {
                     self.pass_succeeded.store(true, Ordering::Relaxed);
@@ -548,9 +553,6 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    let generation =
-                        self.cache
-                            .refresh_generation(&account, SyncScope::Calendars, "");
                     self.failed(&account, SyncScope::Calendars, "", &err, generation);
                 }
             }
@@ -559,6 +561,11 @@ impl CacheRefresher {
 
     async fn enumerate_task_lists(&self, out: &mut Vec<RefreshTarget>) {
         for (account, adapter) in self.registry.snapshot_task_adapters() {
+            // Taken before the fetch: a write landing while it runs must not
+            // be paused by its busy answer (decision 271).
+            let generation = self
+                .cache
+                .refresh_generation(&account, SyncScope::TaskLists, "");
             match adapter.list_task_lists().await {
                 Ok(lists) => {
                     self.pass_succeeded.store(true, Ordering::Relaxed);
@@ -589,9 +596,6 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    let generation =
-                        self.cache
-                            .refresh_generation(&account, SyncScope::TaskLists, "");
                     self.failed(&account, SyncScope::TaskLists, "", &err, generation);
                 }
             }
@@ -600,6 +604,11 @@ impl CacheRefresher {
 
     async fn enumerate_contact_lists(&self, out: &mut Vec<RefreshTarget>) {
         for (account, adapter) in self.registry.snapshot_contact_adapters() {
+            // Taken before the fetch: a write landing while it runs must not
+            // be paused by its busy answer (decision 271).
+            let generation = self
+                .cache
+                .refresh_generation(&account, SyncScope::ContactLists, "");
             match adapter.list_contact_lists().await {
                 Ok(lists) => {
                     self.pass_succeeded.store(true, Ordering::Relaxed);
@@ -622,9 +631,6 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    let generation =
-                        self.cache
-                            .refresh_generation(&account, SyncScope::ContactLists, "");
                     self.failed(&account, SyncScope::ContactLists, "", &err, generation);
                 }
             }
@@ -791,7 +797,7 @@ impl CacheRefresher {
     /// that keeps failing the same way says so once, not on every pass.
     ///
     /// `generation` is the one the attempt was claimed at; a listing, which
-    /// is not claimed, gives its generation as it failed.
+    /// is not claimed, gives the one it had when its fetch started.
     fn failed(
         &self,
         account: &str,
@@ -1287,6 +1293,69 @@ mod tests {
         async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
             unreachable!()
         }
+    }
+
+    /// A task list made while the listing is fetched moves the listing's
+    /// generation on; the fetch's busy answer pauses at the generation it
+    /// started at, so the new list's next read goes through (decision 271).
+    struct ListsWrittenMidFetch {
+        cache: Arc<CacheStore>,
+    }
+
+    #[async_trait]
+    impl Adapter for ListsWrittenMidFetch {
+        async fn authenticate(&self, _: Credentials) -> cal_core::Result<AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait]
+    impl TasksFeature for ListsWrittenMidFetch {
+        async fn list_task_lists(&self) -> cal_core::Result<Vec<cal_core::TaskList>> {
+            self.cache
+                .invalidate("acc-1", SyncScope::TaskLists, "")
+                .unwrap();
+            Err(cal_core::Error::provider_busy(
+                cal_core::BusyDetail::TooManyRequests,
+            ))
+        }
+        async fn get_tasks(&self, _: &str) -> cal_core::Result<Vec<cal_core::Task>> {
+            unreachable!()
+        }
+        async fn create_task(
+            &self,
+            _: &str,
+            _: cal_core::NewTask,
+        ) -> cal_core::Result<cal_core::Task> {
+            unreachable!()
+        }
+        async fn update_task(&self, _: cal_core::Task) -> cal_core::Result<cal_core::Task> {
+            unreachable!()
+        }
+        async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_listing_written_during_its_busy_fetch_is_not_paused() {
+        let (refresher, _gated, _statuses) = refresher();
+        // Without the gated calendars, which would hold the pass.
+        refresher.registry.unregister("acc-1");
+        refresher.registry.register_host_adapter(
+            "acc-1",
+            None,
+            Some(Arc::new(ListsWrittenMidFetch {
+                cache: Arc::clone(&refresher.cache),
+            }) as Arc<dyn TasksFeature>),
+        );
+        refresher.warm_all(false).await;
+        assert!(!refresher
+            .cache
+            .busy_paused("acc-1", SyncScope::TaskLists, ""));
     }
 
     /// Once a calendar of an account answers busy, the pass asks none of the
