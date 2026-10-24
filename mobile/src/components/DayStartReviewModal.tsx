@@ -267,6 +267,15 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   // that landed in part does. Mirrors the desktop.
   const lastFailure = useRef<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The review stays mounted all session: a new opening starts with nothing
+  // said, watched or acted on, as the desktop's dialog does by mounting anew.
+  useEffect(() => {
+    if (!visible) return;
+    lastFailure.current = null;
+    focusIfGone.current = null;
+    actedIds.current = [];
+    setNotice(null);
+  }, [visible]);
   // The data version last rendered: a failure's re-read reads at the next.
   const versionShown = useRef(dataVersion);
   useEffect(() => {
