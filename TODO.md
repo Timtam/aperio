@@ -1667,6 +1667,54 @@ Vorschläge sind nicht aufgenommen.
       zeigen dessen Text. Zu entscheiden: ob `partly-saved:` für jede Ursache
       gilt oder ein eigener Satz kommt. Aus der Planung von PR 7
       (2026-10-23).
+- [ ] **Exchange: eine schon geänderte Ausnahme über einen Nachbarn
+      verschoben, Löschen ausgelastet.** Exchange lehnt das Verschieben
+      eines Serientermins auf oder über einen Nachbarn ab
+      (`ErrorOccurrenceCrossingBoundary`). Für eine Ausnahme, die schon
+      geändert ist (sie geht an Ort und Stelle, `occurrenceWrite`), löst
+      `update_event` sie dann ab (`detach_exception`,
+      crates/adapter-ews/src/api.rs): Es legt einen Einzeltermin an und
+      löscht die Ausnahme. Ist das Löschen ausgelastet, gibt PR 7
+      `after_landed("delete")` zurück, und Ziehen in Woche, Tag und Monat
+      (`moveEventToSlot`) sowie beide Editoren sagen den allgemeinen Satz
+      „nur zum Teil gespeichert … versuche den Rest später noch einmal“. Wer
+      das tut, zieht die Ausnahme noch einmal und bekommt einen zweiten
+      Einzeltermin. Es ist derselbe Zustand wie ein Herauslösen, dessen
+      Auslassen ausgelastet ist; das sagt seit der dritten und vierten
+      Prüfrunde von #128 `occurrenceKept` („speichere nicht noch einmal“).
+      Dazu verliert der neue Einzeltermin die Farbe, die Aperio für den
+      Termin hält: Der Fehler überspringt das Nachtragen in
+      `moveEventToSlot` und den Editoren (auf main kam der Einzeltermin
+      zurück, nur geloggt). Abhilfe: Das Ablösen gibt den Einzeltermin mit
+      dem Kalender zurück, in dem die Ausnahme blieb (wie
+      `original_left_in` beim Verschieben), und die Oberflächen sagen
+      `carvedOccurrenceKeptSentence` und tragen die Farbe nach. Gefunden in
+      der fünften Prüfrunde von #128 (2026-10-24); auf Tonis Wunsch hier
+      statt im PR.
+- [ ] **Aufgabe verschieben: das gebliebene Original geht verloren, wenn eine
+      Unteraufgabe danach scheitert.** `moveTaskToList` (beide Geräte,
+      src/state/moveActions.ts und mobile/src/state/moveActions.ts) sammelt
+      die Zeilen, die der Host zurückgibt. Die übergeordnete Aufgabe trägt
+      `original_left_in`, wenn ein ausgelasteter Anbieter das Original nicht
+      löschen ließ (277). Scheitert danach eine Unteraufgabe, wirft der
+      Fang `afterLanded(err, 'subtasks')`, und die gesammelten Zeilen sind
+      weg: Verschieben/Kopieren, das Ablegen in der Seitenleiste und auf
+      einem Abschnitt sagen nur „nur zum Teil gespeichert … versuche den Rest
+      später noch einmal“, nie, dass das Original in Liste A blieb. Wer
+      noch einmal verschiebt, bekommt eine zweite Kopie in B. Beide Editoren beim
+      Listenwechsel ebenso (TaskDialog und TaskEditorModal lesen
+      `originalKeptSentence` erst nach den Unteraufgaben und der Kaskade).
+      Unter Drosselung ist das der wahrscheinliche Fall: Die erste
+      Unteraufgabe geht direkt nach dem 429 des Löschens hinaus. Abhilfe: im
+      Fang die schon zurückgekommenen Zeilen behalten (ein eigener
+      Fehlertyp mit den Zeilen und der Ursache) und den Satz vom gebliebenen
+      Original zuerst sagen. Vorsicht beim Satz: Das Original in A trägt
+      noch die Unteraufgaben, die nicht umgezogen sind; „lösche es dort
+      selbst“ löschte sie mit. Er sagt nur, dass das Original blieb und
+      nicht noch einmal verschoben werden soll. Der Paritätstest
+      (moveTaskToList.parity.test.ts) deckt nur eine übergeordnete Aufgabe
+      ohne `original_left_in` ab. Gefunden in der fünften Prüfrunde von
+      #128 (2026-10-24); auf Tonis Wunsch hier statt im PR.
 - [ ] **Ein Lesen vor dem Ersetzen, das nicht an Auslastung scheitert, kann
       Daten verlieren.** Manche Speicherungen lesen zuerst, was sie nicht
       selbst kennen, und schreiben dann das Ganze. Ist der Anbieter dabei
