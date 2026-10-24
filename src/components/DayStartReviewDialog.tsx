@@ -202,6 +202,17 @@ export function DayStartReviewDialog({
   );
 
   const [busy, setBusy] = useState(false);
+  // Whether a row action ran in this opening: a failed one resolves no row,
+  // but its re-read may still take the row away (part of it landed), and
+  // focus must not fall out of the dialog then.
+  const acted = useRef(false);
+  useEffect(() => {
+    if (busy) acted.current = true;
+  }, [busy]);
+  useEffect(() => {
+    if (!isOpen) acted.current = false;
+  }, [isOpen]);
+
   // Rows the user has just handled disappear instantly even though
   // the `update_task` round-trip + cache refresh hasn't landed yet.
   // Without this, rows stick around until invalidateData propagates
@@ -291,7 +302,7 @@ export function DayStartReviewDialog({
   // the dialog just switched into.
   useLayoutEffect(() => {
     if (!isOpen) return;
-    if (resolvedIds.size === 0) return;
+    if (resolvedIds.size === 0 && !acted.current) return;
     const body = introRef.current?.closest('.modal__body') ?? null;
     const active = document.activeElement;
     if (active instanceof HTMLElement && body?.contains(active)) return;
@@ -306,6 +317,8 @@ export function DayStartReviewDialog({
 
   const markCompleted = useCallback(
     async (task: Task): Promise<void> => {
+      // `busy` may never commit as true when the write answers at once.
+      acted.current = true;
       setBusy(true);
       try {
         // Delegate to the shared status action — it runs the same

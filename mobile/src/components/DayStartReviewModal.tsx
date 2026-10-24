@@ -250,6 +250,11 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const titleRef = useRef<Text>(null);
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
+  // Where focus goes when the pending row no longer shows after a re-read: a
+  // write that failed may still have landed in part and taken its row away.
+  const pendingFocusFallback = useRef<string | null>(null);
+  // The rows the last action worked on, for a failure to keep focus on.
+  const actedIds = useRef<string[]>([]);
 
   const focusTitle = useCallback(() => {
     const tag = findNodeHandle(titleRef.current);
@@ -266,8 +271,10 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   useEffect(() => {
     if (pendingFocusId.current == null) return;
     const id = pendingFocusId.current;
+    const fallback = pendingFocusFallback.current;
     pendingFocusId.current = null;
-    const tag = rowTags.current[id];
+    pendingFocusFallback.current = null;
+    const tag = rowTags.current[id] ?? (fallback != null ? rowTags.current[fallback] : null);
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, [orderedIds]);
 
@@ -276,17 +283,20 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     (removedIds: string[]) => {
       const removed = new Set(removedIds);
       const survivor = orderedIds.find((id) => !removed.has(id));
+      actedIds.current = removedIds;
       pendingFocusId.current = survivor ?? null;
     },
     [orderedIds],
   );
 
   /** A button's write that failed: said, never an unhandled rejection
-   *  (decision 273). The rows it would have removed stay, so the focus queued
-   *  for after them is dropped, and what may have landed reads again. */
+   *  (decision 273), and what may have landed reads again. Focus stays on the
+   *  row it worked on where that still shows, and goes to the row queued for
+   *  after it where the re-read took it away (part of the write landed). */
   const failed = useCallback(
     (err: unknown) => {
-      pendingFocusId.current = null;
+      pendingFocusFallback.current = pendingFocusId.current;
+      pendingFocusId.current = actedIds.current[0] ?? null;
       invalidateData();
       announce(writeErrorMessage(err, t));
     },

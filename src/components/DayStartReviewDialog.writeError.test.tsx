@@ -124,6 +124,23 @@ describe('DayStartReviewDialog → a write that failed', () => {
     STATUS.set = async () => true;
   });
 
+  it("keeps focus in the dialog when a failed Done's re-read takes the row away", async () => {
+    // The completion landed, a later step did not: set() says the failure
+    // and reports no success, and the re-read no longer lists the task.
+    STATUS.set = async () => {
+      TASKS.rows = TASKS.rows.filter((row) => row.id !== 't1');
+      return false;
+    };
+    await open([slipped('t1', 'Einkaufen'), slipped('t2', 'Putzen')]);
+    const [first] = await screen.findAllByRole('button', { name: 'Erledigt' });
+    first.focus();
+    fireEvent.click(first);
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Erledigt' })).toHaveLength(1));
+    const dialog = screen.getByRole('dialog');
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    STATUS.set = async () => true;
+  });
+
   it('says a batch that landed in part as partly saved', async () => {
     invokeMock.mockImplementation((_cmd: string, args: { task: Task }) =>
       args.task.id === 't1' ? Promise.resolve(args.task) : Promise.reject(BUSY),
