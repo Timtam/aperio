@@ -1870,7 +1870,13 @@ impl CacheStore {
             let mut asks = self.uncovered_asks.lock().expect("uncovered asks poisoned");
             if busy {
                 generations.insert(key.clone(), attempt.generation());
-                if !pausing_again {
+                // A new pause starts with nothing asked. So does one this
+                // process has no note of: a pause stored before a restart
+                // outlives it, and its never-loaded ranges are asked once too.
+                let noted = asks
+                    .get(&key)
+                    .is_some_and(|(at, _)| *at == attempt.generation());
+                if !pausing_again || !noted {
                     asks.insert(key, (attempt.generation(), Vec::new()));
                 }
             } else {

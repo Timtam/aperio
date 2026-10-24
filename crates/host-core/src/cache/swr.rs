@@ -911,6 +911,39 @@ mod tests {
         );
     }
 
+    /// A pause stored before a restart outlives it, and the ranges never
+    /// loaded are asked once in it too: the new process has no note of what
+    /// was asked, so the first busy answer starts one (decision 271).
+    #[tokio::test]
+    async fn after_a_restart_a_range_never_loaded_is_asked_once_while_busy() {
+        let db = DbHandle::open_in_memory().unwrap();
+        db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'caldav', 'Work', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+        })
+        .unwrap();
+        let before = Arc::new(CacheStore::new(db.clone()));
+        assert_eq!(
+            read_fetches(&before, ReadRefresh::Stale, Some(busy()), |_| {}).await,
+            1
+        );
+        // The process ends; the stored busy row stays.
+        let after = Arc::new(CacheStore::new(db));
+        assert!(after.busy_paused("acc-1", SyncScope::Events, "cal-1"));
+        let uncovered = ReadRefresh::Uncovered(range());
+        assert_eq!(
+            read_fetches(&after, uncovered, Some(busy()), |_| {}).await,
+            1
+        );
+        assert_eq!(
+            read_fetches(&after, uncovered, Some(busy()), |_| {}).await,
+            0
+        );
+    }
+
     /// A range never loaded is asked once during a busy pause, then paused
     /// like an old snapshot: a failed ask writes no window, so every read of
     /// it would ask again. So after Aperio's own write, which clears the
