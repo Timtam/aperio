@@ -51,7 +51,9 @@ Apple's well-known endpoints.
   provider (`busy_detail`, decision 270), and an update says so before any
   refusal. A walk over every calendar or address book (delete, EXDATE) stops
   at the first busy answer; a delete walk that met a replayed 404 before it is
-  unsure, never done. A contact's PUT replaces the whole vCard, so a busy read
+  unsure, never done. A failure on an earlier calendar that may have landed
+  (a lost answer, a server error) stays what it was, whatever a later
+  calendar answers (`WalkFailures`). A contact's PUT replaces the whole vCard, so a busy read
   of its photo sends nothing rather than wiping the avatar.
 - **A busy server on a read.** A read answered 429, or 503 with
   `Retry-After` (`http::read_failure`; a write answered so may have been

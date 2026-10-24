@@ -10,7 +10,7 @@
 
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum CaldavError {
     #[error("network error: {0}")]
     Network(String),

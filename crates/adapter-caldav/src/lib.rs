@@ -991,6 +991,13 @@ pub(crate) fn busy_detail(err: &CaldavError) -> Option<cal_core::BusyDetail> {
     }
 }
 
+/// Whether a write's failure leaves it unsure — it may have landed — as the
+/// shells read it (`cal_core::Error::never_landed`): a walk keeps such an
+/// answer past whatever a later calendar says (277).
+pub(crate) fn may_have_landed(err: &CaldavError) -> bool {
+    busy_detail(err).is_none() && !to_core_error(err.clone()).never_landed()
+}
+
 /// Translate a CalDAV-specific error into the shared `cal_core::Error`
 /// shape so the rest of the app can pattern-match it uniformly.
 fn to_core_error(err: CaldavError) -> CoreError {
@@ -1200,7 +1207,7 @@ impl CalendarFeature for CaldavAdapter {
             // the loop below falls through to the not-found error.
             None => Vec::new(),
         };
-        let mut last_err: Option<CoreError> = None;
+        let mut failures = events::WalkFailures::default();
         for cal in cals {
             let cal_url = match Url::parse(&cal.id) {
                 Ok(u) => u,
@@ -1218,7 +1225,11 @@ impl CalendarFeature for CaldavAdapter {
                 Ok(()) => return Ok(()),
                 // A busy server ends the walk (decision 270): asking the next
                 // calendar now meets the same throttle, and nothing was done.
-                Err(err) if busy_detail(&err).is_some() => return Err(to_core_error(err)),
+                // A cancel that may have landed on an earlier calendar stays
+                // unsure (277).
+                Err(err) if busy_detail(&err).is_some() => {
+                    return Err(to_core_error(failures.stopped(err)))
+                }
                 Err(err) => {
                     // 404 just means "this event lives in a different
                     // calendar" — keep walking. Anything else we
@@ -1226,11 +1237,11 @@ impl CalendarFeature for CaldavAdapter {
                     if matches!(err, CaldavError::Http { status: 404, .. }) {
                         continue;
                     }
-                    last_err = Some(to_core_error(err));
+                    failures.keep(err);
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| {
+        Err(failures.finish().map(to_core_error).unwrap_or_else(|| {
             CoreError::NotFound(format!("event '{event_id}' not found in any calendar"))
         }))
     }
@@ -1679,7 +1690,7 @@ impl ContactsFeature for CaldavAdapter {
         let lists = contacts::list_contact_lists(&self.http, home, &self.credentials)
             .await
             .map_err(to_core_error)?;
-        let mut last_err: Option<CaldavError> = None;
+        let mut failures = events::WalkFailures::default();
         for list in lists {
             let Ok(url) = Url::parse(&list.id) else {
                 continue;
@@ -1688,17 +1699,20 @@ impl ContactsFeature for CaldavAdapter {
                 .await
             {
                 Ok(()) => return Ok(()),
-                // A busy server ends the walk (decision 270).
-                Err(err) if busy_detail(&err).is_some() => return Err(to_core_error(err)),
+                // A busy server ends the walk (decision 270); a delete that
+                // may have landed in an earlier book stays unsure (277).
+                Err(err) if busy_detail(&err).is_some() => {
+                    return Err(to_core_error(failures.stopped(err)))
+                }
                 Err(err) => {
                     if matches!(err, CaldavError::Http { status: 404, .. }) {
                         continue;
                     }
-                    last_err = Some(err);
+                    failures.keep(err);
                 }
             }
         }
-        Err(last_err.map(to_core_error).unwrap_or_else(|| {
+        Err(failures.finish().map(to_core_error).unwrap_or_else(|| {
             CoreError::NotFound(format!(
                 "contact '{contact_id}' not found in any address book"
             ))

@@ -24,7 +24,7 @@ use uuid::Uuid;
 use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
-use crate::http::{is_transient_send_error, SendRetrying};
+use crate::http::SendRetrying;
 use crate::ical_raw::{
     component_lines, fold, insert_after_head, insert_before_end, line_ending, unfold,
     without_ranges,
@@ -164,27 +164,25 @@ pub async fn create_event(
     );
     headers.insert(IF_NONE_MATCH, HeaderValue::from_static("*"));
 
-    // Hand-rolled retry (instead of `send_retrying`) so the replay reuses
-    // the SAME freshly minted UID: if the first PUT secretly landed before
-    // the connection died, the replay answers 412 (`If-None-Match: *` on an
-    // existing resource) — and since nobody else can own this UUID, a 412
-    // *after a retry* simply means "our first attempt succeeded". That turns
-    // the worst-case duplicate into a clean success.
-    let request = client.put(resource.clone()).headers(headers).body(body);
-    let retry = request.try_clone();
-    let (response, retried) = match request.send().await {
-        Ok(response) => (response, false),
-        Err(err) if is_transient_send_error(&err) => match retry {
-            Some(builder) => (builder.send().await?, true),
-            None => return Err(err.into()),
-        },
-        Err(err) => return Err(err.into()),
-    };
-    let etag = if retried && response.status() == StatusCode::PRECONDITION_FAILED {
+    // The replay `send_write` makes reuses the SAME freshly minted UID: if
+    // the first PUT secretly landed before the connection died, the replay
+    // answers 412 (`If-None-Match: *` on an existing resource) — and since
+    // nobody else can own this UUID, a 412 after a replay simply means "our
+    // first attempt succeeded". That turns the worst-case duplicate into a
+    // clean success. Any other failure of that replay is unsure
+    // (`WriteAnswer::settled`): a 429 may be the server throttling a second
+    // copy of what it already stored, and must never say nothing was made.
+    let answer = client
+        .put(resource.clone())
+        .headers(headers)
+        .body(body)
+        .send_write()
+        .await?;
+    let etag = if answer.replayed && answer.response.status() == StatusCode::PRECONDITION_FAILED {
         // First PUT landed; a 412 carries no ETag — the next read refreshes it.
         None
     } else {
-        check_write(response).await?
+        check_write(answer.settled(resource.as_str()).await?).await?
     };
     let now = Utc::now();
 
@@ -1079,6 +1077,39 @@ pub enum DeleteOutcome {
     GoneOnReplay,
 }
 
+/// What a walk over calendars, task lists or address books keeps of the
+/// failures it walked past: the first that may have landed (a lost answer, a
+/// server error), which no later answer hides (277), and the last of the
+/// others, for when nothing else works.
+#[derive(Debug, Default)]
+pub(crate) struct WalkFailures {
+    unsure: Option<CaldavError>,
+    last: Option<CaldavError>,
+}
+
+impl WalkFailures {
+    /// Remember one calendar's failure.
+    pub(crate) fn keep(&mut self, err: CaldavError) {
+        if self.unsure.is_none() && crate::may_have_landed(&err) {
+            self.unsure = Some(err);
+        } else {
+            self.last = Some(err);
+        }
+    }
+
+    /// What a walk a busy server stopped says: an earlier failure that may
+    /// have landed stays what it was, never "nothing changed"; otherwise the
+    /// busy answer (decision 270).
+    pub(crate) fn stopped(self, busy: CaldavError) -> CaldavError {
+        self.unsure.unwrap_or(busy)
+    }
+
+    /// What a walk that asked everywhere says, if anything failed.
+    pub(crate) fn finish(self) -> Option<CaldavError> {
+        self.unsure.or(self.last)
+    }
+}
+
 /// Where a walk over every calendar (or task list) stands, DELETE by
 /// DELETE: the rule both home-set walkers in `lib.rs` follow.
 #[derive(Debug, Default)]
@@ -1086,7 +1117,7 @@ pub(crate) struct DeleteWalk {
     deleted: bool,
     gone_on_replay: bool,
     busy: Option<CaldavError>,
-    last_err: Option<CaldavError>,
+    failures: WalkFailures,
 }
 
 impl DeleteWalk {
@@ -1108,33 +1139,35 @@ impl DeleteWalk {
             // Non-404 errors might be transient (auth hiccup, server
             // hiccup). Remember the last one in case nothing else works,
             // but keep walking — the resource might still live in another
-            // calendar we haven't tried yet.
-            Err(err) => self.last_err = Some(err),
+            // calendar we haven't tried yet. One that may have deleted it is
+            // kept apart, so a later refusal cannot say nothing changed.
+            Err(err) => self.failures.keep(err),
         }
         false
     }
 
-    /// Where the walk ended. Removed somewhere, it is done. Stopped by a busy
-    /// server, calendars were left unasked (critique P9): with a replayed 404
-    /// before it the event may be gone already or still in one of them —
-    /// unsure, never done —, without one it is the busy answer. Otherwise a
-    /// replayed 404 counts as gone when no calendar failed: the first DELETE
-    /// may have removed it, and none of the others holds it. `missing` names
-    /// it otherwise.
+    /// Where the walk ended. Removed somewhere, it is done. An earlier
+    /// failure that may have removed it stays what it was, whatever came
+    /// after. Stopped by a busy server, calendars were left unasked (critique
+    /// P9): with a replayed 404 before it the event may be gone already or
+    /// still in one of them — unsure, never done —, without one it is the
+    /// busy answer. Otherwise a replayed 404 counts as gone when no calendar
+    /// failed: the first DELETE may have removed it, and none of the others
+    /// holds it. `missing` names it otherwise.
     pub(crate) fn finish(self, missing: String) -> Result<(), CaldavError> {
         if self.deleted {
             return Ok(());
         }
         if let Some(busy) = self.busy {
-            return Err(if self.gone_on_replay {
-                CaldavError::Network(format!(
+            return Err(match self.failures.finish() {
+                Some(err) if crate::may_have_landed(&err) => err,
+                _ if self.gone_on_replay => CaldavError::Network(format!(
                     "{missing}: a replayed delete may have removed it before the server was busy"
-                ))
-            } else {
-                busy
+                )),
+                _ => busy,
             });
         }
-        match self.last_err {
+        match self.failures.finish() {
             Some(err) => Err(err),
             None if self.gone_on_replay => Ok(()),
             None => Err(CaldavError::Http {
@@ -1826,6 +1859,28 @@ END:VCALENDAR</c:calendar-data>
         let seen = paths.lock().unwrap().clone();
         assert_eq!(seen.len(), 2, "exactly one replay");
         assert_eq!(seen[0], seen[1], "the replay must reuse the SAME UID");
+    }
+
+    /// A new event whose first PUT may have landed and whose replay is
+    /// answered 429 is unsure, never a busy provider that made nothing: a
+    /// second save would make a second event (274, critique P24).
+    #[tokio::test]
+    async fn a_busy_replay_of_a_new_event_is_unsure() {
+        let base = crate::http::first_attempt_lost_then(
+            b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let cal_url = Url::parse(&format!("{base}/calendars/alice/work/")).unwrap();
+        let err = create_event(
+            &client(),
+            &cal_url,
+            sample_new_event(),
+            &creds(&base),
+            &WriteCtx::default(),
+        )
+        .await
+        .expect_err("the replay was refused");
+        assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
     }
 
     /// A guarded PUT whose first attempt may have landed: the replay's 412 is
@@ -3805,5 +3860,84 @@ Buenos_Aires:20260615T090000\r\nSUMMARY:x\r\nEND:VEVENT\r\n";
         let mut walk = DeleteWalk::default();
         assert!(walk.step(Ok(DeleteOutcome::Deleted)));
         assert!(walk.finish("gone".into()).is_ok());
+    }
+
+    /// The walks over calendars and address books that stop at a busy
+    /// server (cancelling one occurrence, deleting a contact) keep an
+    /// earlier failure that may have landed, and say busy only without one;
+    /// asked everywhere, that failure wins over a later refusal (277).
+    #[test]
+    fn walk_failures_keep_what_may_have_landed() {
+        let refused = || CaldavError::Http {
+            status: 403,
+            message: "read-only".into(),
+        };
+        let busy = || CaldavError::Http {
+            status: 429,
+            message: "slow down".into(),
+        };
+        let mut failures = WalkFailures::default();
+        failures.keep(CaldavError::Network("timed out".into()));
+        failures.keep(refused());
+        assert!(matches!(failures.stopped(busy()), CaldavError::Network(_)));
+
+        let mut failures = WalkFailures::default();
+        failures.keep(refused());
+        assert!(matches!(
+            failures.stopped(busy()),
+            CaldavError::Http { status: 429, .. }
+        ));
+
+        let mut failures = WalkFailures::default();
+        failures.keep(CaldavError::Network("timed out".into()));
+        failures.keep(refused());
+        assert!(matches!(failures.finish(), Some(CaldavError::Network(_))));
+        assert!(WalkFailures::default().finish().is_none());
+    }
+
+    /// A delete that may have landed on an earlier calendar — its answer
+    /// lost, or a server error — stays unsure, whether a busy answer or a
+    /// refusal came after: neither may say nothing changed (277). A refusal
+    /// before a busy answer changed nothing, so the walk says busy.
+    #[test]
+    fn an_earlier_unsure_delete_outlasts_what_comes_after() {
+        let busy = || {
+            Err(CaldavError::Http {
+                status: 429,
+                message: "slow down".into(),
+            })
+        };
+        let refused = || {
+            Err(CaldavError::Http {
+                status: 403,
+                message: "read-only".into(),
+            })
+        };
+        let mut walk = DeleteWalk::default();
+        assert!(!walk.step(Err(CaldavError::Network("timed out".into()))));
+        assert!(walk.step(busy()));
+        assert!(matches!(
+            walk.finish("gone".into()),
+            Err(CaldavError::Network(_))
+        ));
+
+        let mut walk = DeleteWalk::default();
+        assert!(!walk.step(Err(CaldavError::Http {
+            status: 503,
+            message: "unavailable".into(),
+        })));
+        assert!(!walk.step(refused()));
+        assert!(matches!(
+            walk.finish("gone".into()),
+            Err(CaldavError::Http { status: 503, .. })
+        ));
+
+        let mut walk = DeleteWalk::default();
+        assert!(!walk.step(refused()));
+        assert!(walk.step(busy()));
+        assert!(matches!(
+            walk.finish("gone".into()),
+            Err(CaldavError::Http { status: 429, .. })
+        ));
     }
 }
