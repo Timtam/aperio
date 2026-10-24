@@ -1,7 +1,15 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { isBirthdayEventId, readErrorMessage } from '@aperio/shared';
 
@@ -40,7 +48,11 @@ export default function RemindersScreen({
     try {
       setReminders(await upcomingReminders(HORIZON_MINUTES));
     } catch (err) {
-      setError(readErrorMessage(err, t));
+      const message = readErrorMessage(err, t);
+      setError(message);
+      // The line's live region is ANDROID ONLY: VoiceOver is told here, so a
+      // busy provider is heard on both (decision 272).
+      if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(message);
     } finally {
       setLoading(false);
     }

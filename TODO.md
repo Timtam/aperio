@@ -519,7 +519,7 @@ Siehe DESIGN §4.2.
         schließt den Editor; im Tagesstart behält ein Sammelknopf den Fokus,
         solange eine Zeile seines Stapels bleibt; die Fehlerzeile eines
         gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
-        neu geladen wird.
+        neu geladen wird; Erinnerungen und Suche sagen einen Ladefehler an.
       - ↻ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
         274): CalDAV liest 429 und beim Lesen 503 mit `Retry-After` als
         ausgelasteten Anbieter, Todoist und Vikunja 429. Ob iCloud so
@@ -1719,6 +1719,17 @@ Vorschläge sind nicht aufgenommen.
       (moveTaskToList.parity.test.ts) deckt nur eine übergeordnete Aufgabe
       ohne `original_left_in` ab. Gefunden in der fünften Prüfrunde von
       #128 (2026-10-24); auf Tonis Wunsch hier statt im PR.
+- [ ] **iPhone: Fehlerzeilen, die nur Android ansagt.** Das Handy zeigt
+      viele Fehler in einer Zeile mit `accessibilityLiveRegion="assertive"`.
+      Das gibt es nur auf Android; auf iOS sagt VoiceOver die Zeile nie an,
+      wenn nicht daneben `announceForAccessibility` steht (so schon in
+      EventGroupModal und EventRsvp). In PR 7 nachgezogen: die
+      Verfügbarkeitsprüfung, Erinnerungen und Suche. Offen: die übrigen 28
+      Dateien mit einer solchen Zeile (`git grep accessibilityLiveRegion`)
+      einzeln prüfen, ob jeder Weg, der die Zeile setzt, auf iOS auch
+      ansagt; am besten ein gemeinsamer Baustein (Zeile + iOS-Ansage), den
+      jede Fehlerzeile nimmt. Gefunden in der sechsten Prüfrunde von #128
+      (2026-10-24), älter als #128.
 - [ ] **Ein Lesen vor dem Ersetzen, das nicht an Auslastung scheitert, kann
       Daten verlieren.** Manche Speicherungen lesen zuerst, was sie nicht
       selbst kennen, und schreiben dann das Ganze. Ist der Anbieter dabei

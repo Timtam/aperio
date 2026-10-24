@@ -9,6 +9,8 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  AccessibilityInfo,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -162,8 +164,12 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
           setError(null);
         } catch (err) {
           if (reqToken.current !== token) return;
-          setError(readErrorMessage(err, t));
+          const message = readErrorMessage(err, t);
+          setError(message);
           setResults(EMPTY);
+          // The line's live region is ANDROID ONLY: VoiceOver is told here,
+          // so a busy provider is heard on both (decision 272).
+          if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(message);
         } finally {
           if (reqToken.current === token) setLoading(false);
         }
