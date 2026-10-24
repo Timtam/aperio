@@ -389,6 +389,9 @@ export default function TasksScreen({
         announce(statusAnnounce(t, next, task.title));
       } catch (err) {
         pendingFocusId.current = null;
+        // A check-off that landed in part — the task, not its parent — is
+        // real: the rows read again, as on the desktop (decision 277).
+        invalidateData();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },

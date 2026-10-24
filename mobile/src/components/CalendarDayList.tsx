@@ -1258,6 +1258,9 @@ export function CalendarDayList({
         announce(statusAnnounce(t, next, task.title));
         await load();
       } catch (err) {
+        // A check-off that landed in part is real: the day reads again, as on
+        // the desktop (decision 277).
+        void load();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },

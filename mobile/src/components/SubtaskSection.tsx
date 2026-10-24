@@ -175,6 +175,10 @@ export function SubtaskSection({
         onChanged();
         if (next) announce(statusAnnounce(t, next, sub.title));
       } catch (err) {
+        // A check-off that landed in part — the subtask, not its parent — is
+        // real: the list reads again, as on the desktop (decision 277).
+        void reload();
+        onChanged();
         announce(writeErrorMessage(err, t));
       }
     },
@@ -194,6 +198,9 @@ export function SubtaskSection({
           }),
         );
       } catch (err) {
+        // As a check-off: what landed shows (decision 277).
+        void reload();
+        onChanged();
         announce(writeErrorMessage(err, t));
       }
     },

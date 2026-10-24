@@ -618,6 +618,9 @@ export function MonthView() {
           }),
         );
       } catch (err) {
+        // A failed save may have landed in part: the rows read again, as the
+        // week and day drops do (decision 277).
+        invalidateData();
         announce(writeErrorMessage(err, t));
       }
     },
