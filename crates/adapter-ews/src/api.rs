@@ -1883,7 +1883,6 @@ struct SeriesShape {
     deleted: Vec<DateTime<Utc>>,
 }
 
-/// Whether a message is the refusal for a day in an unknown zone.
 /// Whether a failed read of the copy a write needs is said as itself, not as
 /// `copy-unreadable`: a failed sign-in or a vanished item, which "try again"
 /// would not mend, and a busy server, which it would (decision 270). All three
@@ -1892,6 +1891,7 @@ fn keeps_its_own_error(err: &EwsError) -> bool {
     crate::names_sign_in_or_gone(err) || crate::busy_detail(err).is_some()
 }
 
+/// Whether a message is the refusal for a day in an unknown zone.
 fn day_zone_unreadable(message: &str) -> bool {
     matches!(
         cal_core::WriteRefusal::parse(message),
