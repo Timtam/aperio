@@ -137,9 +137,9 @@ PR 7 bleibt, wie gebaut: `Error::provider_busy`, `Error::never_landed`, `Error::
 
 **Anlegen mit gescheitertem Folgeschritt, bis der Bogen kommt (Toni, 2026-10-23: „ehrlicher Abschluss“):**
 
-- Google-Gruppe, deren Mitglieder nicht ankamen: Der Editor schließt mit einem Hinweis, der sich nur schließen lässt („Die Gruppe wurde angelegt, aber ihre Mitglieder nicht hinzugefügt …“), und die Daten laden neu. Kein zweites Anlegen.
-- Google-Foto: wird weiter verschluckt; der Editor vergleicht `has_photo` der zurückgegebenen Zeile mit dem gesendeten Foto und sagt „ohne Foto gespeichert“.
-- Unteraufgaben-Entwürfe: Der Editor bleibt auf der angelegten Aufgabe, behält die noch nicht angelegten Entwürfe, und Speichern legt nur diese an (Tonis ursprünglicher Wunsch, ohne Kern-Umbau).
+- Google-Gruppe, deren Mitglieder nicht ankamen: Der Editor schließt mit dem allgemeinen Hinweis, die Änderung sei nur zum Teil gespeichert; der Hinweis lässt sich nur schließen, und die Daten laden neu. Kein zweites Anlegen.
+- Google-Foto: wird weiter verschluckt; der Editor vergleicht `has_photo` der zurückgegebenen Zeile mit dem gesendeten Foto und sagt „Kontakt … angelegt, aber ohne Foto“.
+- Unteraufgaben-Entwürfe: Der Editor bearbeitet danach die angelegte Aufgabe (Überschrift und Knopf sagen es), zeigt die noch nicht angelegten Entwürfe unter eigener Überschrift, und Speichern schreibt die Felder der Aufgabe und legt dann diese Entwürfe an (Toni, 2026-10-24). Das Formular übernimmt dabei die Aufgabe, wie sie gespeichert wurde.
 - Vikunja (Zuständige), Todoist (Abschließen), Graph (Erweiterung), Exchange (Herauslösen, Kontaktfoto ersetzen): Diese Folgeschritte laufen über `Error::after_landed` und nehmen denselben Weg wie die Google-Gruppe. Das Foto eines neuen Kontakts bleibt bei Graph und Exchange wie bei Google verschluckt; der Editor sagt „ohne Foto angelegt“.
 
 ## 7. Risiken

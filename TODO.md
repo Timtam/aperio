@@ -829,10 +829,10 @@ Siehe DESIGN §4.2.
       (`server-refused`, `unsafe-to-write`) reist als `forbidden` und wird
       erkannt. Handy ohne
       Testläufer — ↻ im Test.
-    - 🚩 CalDAV `create_task_list`: MKCALENDAR läuft über `send_retrying`.
-      Kam der erste Versuch an und brach dann die Verbindung ab, antwortet die
-      Wiederholung 405 (die Liste gibt es schon): gemeldet als Fehler, ein
-      erneuter Versuch legt eine zweite Liste an. Vor #97 schon so.
+    - ✅ CalDAV `create_task_list`: MKCALENDAR läuft seit PR 7 (7950e08b)
+      über `send_write`. Eine Wiederholung, die 405 bekommt, ist die Liste des
+      ersten Versuchs, jede andere Ablehnung einer Wiederholung unsicher
+      (`a_replayed_mkcalendar_reads_its_answer_as_the_first_attempts`).
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
     Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,
