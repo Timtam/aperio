@@ -21,7 +21,6 @@ import {
   type ShiftRefusal,
   createsInSteps,
   removeOriginalAfterCopy,
-  writeAfterLanded,
   writeWithoutWaiting,
   type StepWriteOptions,
 } from '@aperio/shared';
@@ -552,7 +551,7 @@ export async function moveEventToSlot(
   }
 
   if (write.kind === 'carve-out') {
-    await apiCreateEvent({
+    const created = await apiCreateEvent({
       calendar_id: event.calendar_id,
       title: event.title,
       description: event.description,
@@ -567,10 +566,14 @@ export async function moveEventToSlot(
       attendees: event.attendees,
       ...organizerOf(event),
     });
-    // The standalone copy stands: the skip after it is a later step (277).
-    await writeAfterLanded('skip', () =>
+    // The standalone copy stands: a busy provider that kept the occurrence
+    // in its series is said as a move whose original stayed — dragging again
+    // would make a second copy; any other failure of the skip is a later
+    // step's, never "nothing was changed" (277).
+    const removed = await removeOriginalAfterCopy('skip', () =>
       addEventExdate(write.seriesId, write.occurrence, event.calendar_id),
     );
+    if (!removed) throw new OriginalKeptError(created.title, event.calendar_id);
     return true;
   }
 
@@ -590,6 +593,23 @@ export type { ShiftRefusal };
 
 /** Moving someone else's meeting to another day or time was refused (77a):
  *  only the organizer may. The surface says so, naming the meeting. */
+/**
+ * A drag whose copy landed while a busy provider kept the occurrence it left
+ * in its series (decision 277): the view says it as a move whose original
+ * stayed (`originalKeptSentence`), naming the calendar, and reads again.
+ */
+export class OriginalKeptError extends Error {
+  readonly title: string;
+  readonly calendarId: string;
+
+  constructor(title: string, calendarId: string) {
+    super(`"${title}" was moved; its original in ${calendarId} stayed`);
+    this.name = 'OriginalKeptError';
+    this.title = title;
+    this.calendarId = calendarId;
+  }
+}
+
 export class InvitationLockedError extends Error {
   readonly title: string;
 

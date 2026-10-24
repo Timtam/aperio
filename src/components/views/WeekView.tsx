@@ -36,6 +36,7 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   type MoveCopyScope,
+  OriginalKeptError,
   SeriesNotLoadedError,
   SeriesShiftRefusedError,
   type ShiftRefusal,
@@ -107,6 +108,7 @@ import {
   type TimedSpan,
   withDeletionsNotRestored,
   writeErrorMessage,
+  originalKeptSentence,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
@@ -344,7 +346,7 @@ export function WeekView() {
     openForTask: openTaskMenu,
     openForTaskProjection: openTaskProjectionMenu,
   } = useChipContextMenu({ requestDelete: requestDeleteFromMenu });
-  const { colorLabels, sectionColorById, sectionsByList, loadSections, taskLists } =
+  const { calendars, colorLabels, sectionColorById, sectionsByList, loadSections, taskLists } =
     useCalendarStore();
 
   // Load sections for the lists with tasks here so a colored section
@@ -1003,6 +1005,19 @@ export function WeekView() {
           announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
           return;
         }
+        if (err instanceof OriginalKeptError) {
+          // The copy stands at the new slot; the occurrence it left could
+          // not be skipped while the provider is busy (277).
+          invalidateData();
+          announce(
+            originalKeptSentence(
+              [{ title: err.title, original_left_in: err.calendarId }],
+              (id) => calendars.find((c) => c.id === id)?.name,
+              t,
+            ) ?? eventWriteErrorMessage(err, t),
+          );
+          return;
+        }
         // A move that would drop occurrences of the series asks, after the
         // scope question, in a dialog of its own (decision 250); yes moves it
         // again with the consent, on that write only. A view the user has
@@ -1025,7 +1040,7 @@ export function WeekView() {
         announce(eventWriteErrorMessage(err, t));
       }
     },
-    [announce, t, i18n.language, fmt, invalidateData, clockAt, calendarById, askLoss],
+    [announce, t, i18n.language, fmt, invalidateData, clockAt, calendarById, calendars, askLoss],
   );
   /** Someone else's meeting does not move: said before a scope question
    *  nothing could answer (77a). */

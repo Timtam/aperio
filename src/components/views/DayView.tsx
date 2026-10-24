@@ -32,6 +32,7 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   type MoveCopyScope,
+  OriginalKeptError,
   SeriesNotLoadedError,
   SeriesShiftRefusedError,
   type ShiftRefusal,
@@ -115,6 +116,7 @@ import {
   type TimedSpan,
   withDeletionsNotRestored,
   writeErrorMessage,
+  originalKeptSentence,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event row gets at `eventBlockFactor === 1`
@@ -847,6 +849,19 @@ export function DayView() {
       }
       if (err instanceof SeriesNotLoadedError) {
         announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
+        return;
+      }
+      if (err instanceof OriginalKeptError) {
+        // The copy stands at the new slot; the occurrence it left could
+        // not be skipped while the provider is busy (277).
+        invalidateData();
+        announce(
+          originalKeptSentence(
+            [{ title: err.title, original_left_in: err.calendarId }],
+            (id) => calendars.find((c) => c.id === id)?.name,
+            t,
+          ) ?? eventWriteErrorMessage(err, t),
+        );
         return;
       }
       // A move that would drop occurrences of the series asks, after the

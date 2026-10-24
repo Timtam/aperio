@@ -32,6 +32,7 @@ import {
   deletionsNotRestoredSentence,
   withDeletionsNotRestored,
   writeErrorMessage,
+  originalKeptSentence,
 } from '@aperio/shared';
 import { useDateFormat } from '../../intl/dateFormat';
 import {
@@ -96,6 +97,7 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   type MoveCopyScope,
+  OriginalKeptError,
   SeriesNotLoadedError,
   SeriesShiftRefusedError,
   type ShiftRefusal,
@@ -165,7 +167,7 @@ export function MonthView() {
   );
   const toggleTaskStatus = useTaskStatusToggle();
   const { shouldShow: shouldShowCompletedForList } = useTaskListShowCompleted();
-  const { colorLabels, sectionColorById, sectionsByList, loadSections } =
+  const { calendars, colorLabels, sectionColorById, sectionsByList, loadSections } =
     useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -568,6 +570,19 @@ export function MonthView() {
           announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
           return;
         }
+        if (err instanceof OriginalKeptError) {
+          // The copy stands at the new slot; the occurrence it left could
+          // not be skipped while the provider is busy (277).
+          invalidateData();
+          announce(
+            originalKeptSentence(
+              [{ title: err.title, original_left_in: err.calendarId }],
+              (id) => calendars.find((c) => c.id === id)?.name,
+              t,
+            ) ?? eventWriteErrorMessage(err, t),
+          );
+          return;
+        }
         // A move that would drop occurrences of the series asks, after the
         // scope question, in a dialog of its own (decision 250); yes moves it
         // again with the consent, on that write only. A view the user has
@@ -590,7 +605,7 @@ export function MonthView() {
         announce(eventWriteErrorMessage(err, t));
       }
     },
-    [announce, t, i18n.language, fmt, invalidateData, calendarById, askLoss],
+    [announce, t, i18n.language, fmt, invalidateData, calendarById, calendars, askLoss],
   );
 
   // Drag-and-drop: a task dropped on a day cell is scheduled on that day

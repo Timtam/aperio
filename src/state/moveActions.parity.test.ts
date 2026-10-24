@@ -16,7 +16,11 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('../../mobile/src/api/calendar', () => phone);
 vi.mock('../../mobile/src/api/client', () => ({ createTask: vi.fn(), updateTask: vi.fn() }));
 
-import { moveEventToDay, moveOrCopyEvent as desktopMoveOrCopy } from './moveActions';
+import {
+  moveEventToDay,
+  moveOrCopyEvent as desktopMoveOrCopy,
+  OriginalKeptError,
+} from './moveActions';
 
 /**
  * The phone's module, loaded through a path the type checker does not follow,
@@ -211,10 +215,11 @@ describe('an occurrence moved: a busy cancel after its copy landed keeps the ori
     invokeMock.mockImplementation((cmd: string) =>
       cmd === 'add_event_exdate' ? Promise.reject(busy) : Promise.resolve({}),
     );
-    await expect(moveEventToDay(occurrence, '2026-06-10', 'occurrence', null)).rejects.toEqual({
-      code: 'network',
-      message: 'partly-saved: skip',
-    });
+    // The drag's copy stands; the occurrence it left stayed, which the view
+    // says as a move whose original stayed.
+    await expect(moveEventToDay(occurrence, '2026-06-10', 'occurrence', null)).rejects.toBeInstanceOf(
+      OriginalKeptError,
+    );
     expect(invokeMock.mock.calls.map((c) => c[0])).toEqual(['create_event', 'add_event_exdate']);
   });
 });
