@@ -211,6 +211,7 @@
     "copyMayStand": "\"{{title}}\" may now be in the calendar twice: its new copy could neither be completed nor removed again. Please check the calendar and do not repeat this.",
     "moveMayStand": "\"{{title}}\" may now be in the target calendar as well as in its own: the moved series could neither be completed nor removed again there. Please check both calendars and do not repeat this.",
     "originalKept": "\"{{title}}\" was moved, but its original in \"{{source}}\" could not be removed because the provider is busy right now. Delete it there yourself; do not move it again.",
+    "occurrenceKept": "\"{{title}}\" was saved as an event of its own, but the series' occurrence in \"{{source}}\" could not be left out because the provider is busy right now. Delete that occurrence of the series there yourself; do not save again.",
     "originalsKept": "Moved, but these originals in \"{{source}}\" could not be removed because the provider is busy right now: {{titles}}. Delete them there yourself; do not move them again.",
     "quotedTitle": "\"{{title}}\"",
     "duplicateFailed": "\"{{title}}\" could not be duplicated: {{reason}}."

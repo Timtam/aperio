@@ -211,6 +211,7 @@
     "copyMayStand": "„{{title}}“ steht möglicherweise doppelt im Kalender: Die neue Kopie ließ sich weder fertigstellen noch wieder entfernen. Bitte prüfe den Kalender und wiederhole es nicht.",
     "moveMayStand": "„{{title}}“ steht möglicherweise im Zielkalender und noch in seinem eigenen: Die verschobene Serie ließ sich dort weder fertigstellen noch wieder entfernen. Bitte prüfe beide Kalender und wiederhole es nicht.",
     "originalKept": "„{{title}}“ wurde verschoben, aber das Original in „{{source}}“ ließ sich nicht entfernen, weil der Anbieter gerade ausgelastet ist. Lösche es dort selbst; verschiebe es nicht noch einmal.",
+    "occurrenceKept": "„{{title}}“ ist als eigener Termin gespeichert, aber der Termin der Serie in „{{source}}“ ließ sich nicht auslassen, weil der Anbieter gerade ausgelastet ist. Lösche diesen Termin der Serie dort selbst; speichere nicht noch einmal.",
     "originalsKept": "Verschoben, aber diese Originale in „{{source}}“ ließen sich nicht entfernen, weil der Anbieter gerade ausgelastet ist: {{titles}}. Lösche sie dort selbst; verschiebe sie nicht noch einmal.",
     "quotedTitle": "„{{title}}“",
     "duplicateFailed": "„{{title}}“ konnte nicht dupliziert werden: {{reason}}."

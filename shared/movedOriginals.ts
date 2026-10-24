@@ -17,6 +17,27 @@ export interface MovedRow {
 }
 
 /**
+ * What an editor says when it saved one occurrence of a series as an event of
+ * its own and a busy provider kept the occurrence in its series (decision
+ * 277). Saved to another calendar, it is a move whose original stayed; in the
+ * series' own calendar nothing moved — it was an edit, and saving again would
+ * make a second event.
+ */
+export function carvedOccurrenceKeptSentence(
+  title: string,
+  sourceId: string,
+  targetId: string,
+  containerName: (id: string) => string | undefined,
+  t: Translate,
+): string {
+  const source = containerName(sourceId) ?? sourceId;
+  return t(targetId === sourceId ? 'actions.occurrenceKept' : 'actions.originalKept', {
+    title,
+    source,
+  });
+}
+
+/**
  * The sentence for the rows of one move (the item, then the subtasks that
  * followed it) whose originals stayed, or `null` when every original went.
  * `containerName` names the list or calendar by its id.

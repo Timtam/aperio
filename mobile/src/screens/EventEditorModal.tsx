@@ -140,6 +140,7 @@ import {
   seriesTailMayStand,
   seriesTailRemoved,
   removeOriginalAfterCopy,
+  carvedOccurrenceKeptSentence,
 } from '@aperio/shared';
 import { eventGroupsForEvents } from '../api/eventGroups';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -1290,9 +1291,9 @@ function EventEditorScreen({
           ...organizerOf(original),
         });
         // The standalone event stands: a busy provider that kept the
-        // occurrence in its series is said as a move whose original stayed,
-        // and the editor only closes; any other failure never reads as
-        // "nothing was changed" (277). Mirrors the desktop.
+        // occurrence in its series is said, and the editor only closes; any
+        // other failure never reads as "nothing was changed" (277). Mirrors
+        // the desktop.
         const removed = await removeOriginalAfterCopy('skip', () =>
           addEventExdate(
             occurrenceWriteKind.seriesId,
@@ -1300,19 +1301,23 @@ function EventEditorScreen({
             original.calendar_id,
           ),
         );
-        if (!removed) {
-          throw new CloseOnlyNotice(
-            originalKeptSentence(
-              [{ title: created.title, original_left_in: original.calendar_id }],
-              (id) => calendars.find((c) => c.id === id)?.name,
-              t,
-            ) ?? '',
-          );
-        }
-        // The series lives on without this slot: it keeps its key.
+        // The series lives on without this slot, or with it while the
+        // provider is busy: it keeps its key, and the event that stands gets
+        // what Aperio keeps for it either way.
         await savePrivate(created, { oldKeyLivesOn: true });
         if (!isLocalCal) {
           await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
+        }
+        if (!removed) {
+          throw new CloseOnlyNotice(
+            carvedOccurrenceKeptSentence(
+              created.title,
+              original.calendar_id,
+              created.calendar_id,
+              (id) => calendars.find((c) => c.id === id)?.name,
+              t,
+            ),
+          );
         }
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),

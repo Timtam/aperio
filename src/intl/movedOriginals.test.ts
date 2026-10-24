@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { originalKeptSentence } from '@aperio/shared';
+import { carvedOccurrenceKeptSentence, originalKeptSentence } from '@aperio/shared';
 
 import i18n from '../i18n';
 
@@ -47,5 +47,20 @@ describe('originalKeptSentence', () => {
     expect(
       originalKeptSentence([{ title: 'Einkaufen', original_left_in: 'L9' }], nameOf, en),
     ).toContain('"L9"');
+  });
+});
+
+describe('carvedOccurrenceKeptSentence', () => {
+  const calendarName = (id: string) => ({ work: 'Arbeit', home: 'Privat' })[id];
+  it('says a carve-out kept in its own calendar as an edit, not a move', () => {
+    expect(carvedOccurrenceKeptSentence('Planung', 'work', 'work', calendarName, de)).toBe(
+      '„Planung“ ist als eigener Termin gespeichert, aber der Termin der Serie in „Arbeit“ ließ sich nicht auslassen, weil der Anbieter gerade ausgelastet ist. Lösche diesen Termin der Serie dort selbst; speichere nicht noch einmal.',
+    );
+  });
+
+  it('says one saved to another calendar as a move whose original stayed', () => {
+    expect(carvedOccurrenceKeptSentence('Planung', 'work', 'home', calendarName, de)).toContain(
+      'wurde verschoben, aber das Original in „Arbeit“',
+    );
   });
 });

@@ -548,7 +548,15 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     await waitFor(() => expect(reminderRows()).toHaveLength(1));
 
     fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
-    expect(await screen.findByText(/das Original in „Arbeit“ ließ sich nicht entfernen/)).toBeTruthy();
+    // In its own calendar nothing moved: the sentence says it was saved as
+    // an event of its own, and not to save again.
+    expect(
+      await screen.findByText(/als eigener Termin gespeichert, aber der Termin der Serie in „Arbeit“/),
+    ).toBeTruthy();
+    // The copy that stands still got the reminders Aperio keeps for it.
+    expect(privateWrites()).toEqual([
+      expect.objectContaining({ calendar_id: 'cal-work', event_id: 'created-1', reminders: STORED }),
+    ]);
     // The save has settled: no update lands after the test.
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /speichern|save/i })).toBeNull(),

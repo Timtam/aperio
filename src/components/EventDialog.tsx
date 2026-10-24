@@ -91,6 +91,7 @@ import {
   type CarryScope,
   type ExceptionsLoss,
   removeOriginalAfterCopy,
+  carvedOccurrenceKeptSentence,
 } from '@aperio/shared';
 import {
   createsInSteps,
@@ -1546,28 +1547,31 @@ export function EventDialog({
                 ...organizerOf(event ?? {}),
               });
               // The standalone event stands: a busy provider that kept the
-              // occurrence in its series is said as a move whose original
-              // stayed, and the editor only closes; any other failure never
-              // reads as "nothing was changed" (277).
+              // occurrence in its series is said, and the editor only closes;
+              // any other failure never reads as "nothing was changed" (277).
               const removed = await removeOriginalAfterCopy('skip', () =>
                 addEventExdate(seriesId, occIso, event.calendar_id),
               );
-              if (!removed) {
-                throw new CloseOnlyNotice(
-                  originalKeptSentence(
-                    [{ title: created.title, original_left_in: event.calendar_id }],
-                    (id) => calendars.find((c) => c.id === id)?.name,
-                    t,
-                  ) ?? '',
-                );
-              }
-              // The series lives on without this slot: it keeps its key.
+              // The series lives on without this slot, or with it while the
+              // provider is busy: it keeps its key, and the event that stands
+              // gets what Aperio keeps for it either way.
               await savePrivate(created, { oldKeyLivesOn: true });
               if (!storesColorNatively) {
                 await setEventColor(
                   created.id,
                   created.calendar_id,
                   form.colorLabel,
+                );
+              }
+              if (!removed) {
+                throw new CloseOnlyNotice(
+                  carvedOccurrenceKeptSentence(
+                    created.title,
+                    event.calendar_id,
+                    created.calendar_id,
+                    (id) => calendars.find((c) => c.id === id)?.name,
+                    t,
+                  ),
                 );
               }
               announce(
