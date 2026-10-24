@@ -254,8 +254,10 @@ export function SubtaskSection({
 
   const remove = useCallback(
     async (sub: Task, index: number) => {
+      let deleted = false;
       try {
         await deleteTask(sub.id, sub.list_id);
+        deleted = true;
         // Removing the last open child can mark the parent completed — recompute
         // ancestors against the post-deletion snapshot. The subtask is gone by
         // then: a failure there is a later step (277).
@@ -267,7 +269,9 @@ export function SubtaskSection({
         onChanged();
         announce(t('dialogs.task.deleted', { title: sub.title }));
       } catch (err) {
-        // What landed shows (decision 277).
+        // What landed shows (decision 277); a subtask that is gone moves
+        // focus on as a delete that worked does.
+        if (deleted) onRemove(index);
         void reload();
         onChanged();
         announce(writeErrorMessage(err, t));

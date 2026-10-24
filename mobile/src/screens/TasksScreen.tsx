@@ -23,6 +23,7 @@ import {
   DONE_GROUP_ID,
   effortSizeModifier,
   effortSuffix,
+  eventWriteLeftover,
   prioritySuffix,
   statusI18nKey,
   statusMarker,
@@ -389,9 +390,14 @@ export default function TasksScreen({
         invalidateData();
         announce(statusAnnounce(t, next, task.title));
       } catch (err) {
-        pendingFocusId.current = null;
         // A check-off that landed in part — the task, not its parent — is
-        // real: the rows read again, as on the desktop (decision 277).
+        // real: the rows read again, as on the desktop (decision 277), and
+        // focus lands where a check-off that worked puts it. One that changed
+        // nothing keeps focus on the row.
+        pendingFocusId.current =
+          eventWriteLeftover(err) && task.status !== 'completed'
+            ? (focusTargetAfterRemoving(entries, task.id) ?? DONE_GROUP_ID)
+            : task.id;
         invalidateData();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
@@ -410,8 +416,10 @@ export default function TasksScreen({
         } else {
           pendingEmptyFocus.current = true;
         }
+        let deleted = false;
         try {
           await deleteTask(task.id, task.list_id);
+          deleted = true;
           // A subtask's removal can change the parent's derived status (e.g. the
           // last open child gone → parent completes). Recompute ancestors against
           // the post-deletion snapshot, honouring the coupling knob.
@@ -428,9 +436,12 @@ export default function TasksScreen({
           invalidateData();
           announce(t('mobile.deleted', { title: task.title }));
         } catch (err) {
-          pendingFocusId.current = null;
-          pendingEmptyFocus.current = false;
-          // What landed shows (decision 277).
+          // What landed shows (decision 277). A task that is gone leaves focus
+          // to the sibling chosen above; one that stays keeps it.
+          if (!deleted) {
+            pendingFocusId.current = task.id;
+            pendingEmptyFocus.current = false;
+          }
           invalidateData();
           announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
         }
@@ -491,7 +502,10 @@ export default function TasksScreen({
         invalidateData();
         announce(t('actions.duplicated', { title: task.title }));
       } catch (err) {
-        pendingFocusId.current = null;
+        // A copy that stands in part — without its assignees, say — shows,
+        // as on the desktop (decision 277); focus stays on the original.
+        pendingFocusId.current = task.id;
+        invalidateData();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
