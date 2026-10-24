@@ -2384,7 +2384,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 4483.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_query_free_busy_json() != 44096.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_query_free_busy_json() != 34138.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_account_cache() != 20722.toShort()) {
@@ -5447,10 +5447,11 @@ public interface HostInterface {
     /**
      * Attendee free/busy over `[range_start, range_end]` for the account owning
      * the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
-     * [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
-     * calendar, an unroutable account, or a provider that can't answer (no
-     * scheduling / permission denied) returns `[]` — the UI reads that as
-     * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+     * [{start, end}]}`). Best-effort: a LOCAL calendar, an unroutable
+     * account, and any failure other than a busy provider (no scheduling,
+     * permission denied) return `[]`. A busy provider is an error (decision
+     * 270): the editor says the check could not be made, never "all free".
+     * Mirrors the desktop `query_free_busy`.
      */
     fun `queryFreeBusyJson`(`requestJson`: kotlin.String): kotlin.String
     
@@ -8209,10 +8210,11 @@ open class Host: Disposable, AutoCloseable, HostInterface
     /**
      * Attendee free/busy over `[range_start, range_end]` for the account owning
      * the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
-     * [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
-     * calendar, an unroutable account, or a provider that can't answer (no
-     * scheduling / permission denied) returns `[]` — the UI reads that as
-     * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+     * [{start, end}]}`). Best-effort: a LOCAL calendar, an unroutable
+     * account, and any failure other than a busy provider (no scheduling,
+     * permission denied) return `[]`. A busy provider is an error (decision
+     * 270): the editor says the check could not be made, never "all free".
+     * Mirrors the desktop `query_free_busy`.
      */
     @Throws(StoreException::class)override fun `queryFreeBusyJson`(`requestJson`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(

@@ -6975,10 +6975,11 @@ impl Host {
 
     /// Attendee free/busy over `[range_start, range_end]` for the account owning
     /// the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
-    /// [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
-    /// calendar, an unroutable account, or a provider that can't answer (no
-    /// scheduling / permission denied) returns `[]` — the UI reads that as
-    /// "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+    /// [{start, end}]}`). Best-effort: a LOCAL calendar, an unroutable
+    /// account, and any failure other than a busy provider (no scheduling,
+    /// permission denied) return `[]`. A busy provider is an error (decision
+    /// 270): the editor says the check could not be made, never "all free".
+    /// Mirrors the desktop `query_free_busy`.
     pub fn query_free_busy_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: FreeBusyRequest = from_json("request", &request_json)?;
         let ext = self.route(&req.calendar_id).ok().flatten();

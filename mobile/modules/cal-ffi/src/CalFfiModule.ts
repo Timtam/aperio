@@ -329,7 +329,8 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   getEventByIdJson(id: string, calendarId: string | null): Promise<string>;
   /** Attendee free/busy over a window for the account owning the request's
    *  calendar, as a JSON `FreeBusy[]`. `{calendar_id, emails, range_start,
-   *  range_end}`; best-effort → `[]` for local/unroutable/can't-answer. */
+   *  range_end}`; best-effort → `[]` for local/unroutable/can't-answer, a
+   *  rejection for a busy provider (decision 270). */
   queryFreeBusyJson(requestJson: string): Promise<string>;
   /** Create an event from `{calendar_id, …NewEvent}`; returns the created
    *  `Event` as JSON. */
