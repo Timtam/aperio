@@ -60,8 +60,9 @@ Apple's well-known endpoints.
   carried out, so writes never read it that way), is a busy provider, and it
   starts no fallback: a delta does not fall back to a full bootstrap, the
   bootstrap's PROPFIND not to a windowed read, a multiget batch is not asked
-  again one resource at a time, and a bootstrap that cannot read its token
-  fails rather than storing a snapshot without one. The scheduling probe met
+  again one resource at a time, a busy sync-token read does not fall back to
+  the CTag (the collection would stay on it), and a bootstrap that cannot
+  read its token fails rather than storing a snapshot without one. The scheduling probe met
   by a busy server is asked again, never cached as "does not schedule", and a
   write that needs it while the server is still busy stops as busy rather than
   dropping a meeting's invitees. A free/busy query says busy instead of

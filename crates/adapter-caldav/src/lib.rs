@@ -2067,6 +2067,47 @@ mod tests {
         bootstrap.assert_async().await;
     }
 
+    /// A bootstrap whose sync-token read a busy server turned away ends
+    /// there: taken as "no sync-token support", the collection would go on
+    /// the CTag path for good (decision 270).
+    #[tokio::test]
+    async fn a_busy_sync_token_read_ends_the_bootstrap() {
+        let mut server = Server::new_async().await;
+        // The enumeration answers with an empty calendar: nothing to fetch.
+        server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("getetag".into()))
+            .with_status(207)
+            .with_body(r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"/>"#)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("sync-token".into()))
+            .with_status(429)
+            .create_async()
+            .await;
+        let ctag = server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("getctag".into()))
+            .with_status(207)
+            .expect(0)
+            .create_async()
+            .await;
+        let adapter = build_adapter(&server);
+        let range = DateRange::new(chrono::Utc::now(), chrono::Utc::now());
+        let err = adapter
+            .get_events_delta(
+                &format!("{}/calendars/alice/work/", server.url()),
+                range,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        ctag.assert_async().await;
+    }
+
     /// A multiget a busy server turned away is not asked again one resource
     /// at a time: no resource is at fault (decision 270).
     #[tokio::test]
