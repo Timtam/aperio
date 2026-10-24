@@ -269,13 +269,17 @@ const KIND_TEXT: Record<string, string> = {
  * surface sends as several calls (a move's subtasks after their parent, a
  * cascade); both read the `after_landed` rows of `writeOutcome.json`. An
  * error without a code (one a surface threw itself) keeps its text the same
- * way.
+ * way — a leftover without one stays the leftover, as the hosts carry it
+ * under `network`: on iOS no host error reaches JavaScript with its code
+ * (TODO "iPhone: verliert Expo den Fehlercode?"), and in front of `step` its
+ * token would no longer be read.
  */
 export function afterLanded(err: unknown, step: string): CodedError {
   if (isProviderBusy(err)) return { code: 'network', message: `partly-saved: ${step}` };
   const code = codedError(err)?.code;
   const message = errorMessageText(err);
   if (code === 'network' && !writeNeverLanded(err)) return { code, message };
+  if (code == null && eventWriteLeftover(err)) return { code: 'network', message };
   const kind = code == null ? null : (KIND_TEXT[code] ?? code);
   return {
     code: 'network',

@@ -335,6 +335,18 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
     }
   });
 
+  it('keeps a leftover that arrives without a code, as on the iPhone (277)', () => {
+    // Expo 56 rejects on iOS with the message only, behind its wrapper.
+    for (const err of [
+      new Error("Calling the 'updateTaskJson' function has failed\n→ Caused by: partly-saved: assignees"),
+      new Error('created-may-stand: time'),
+    ]) {
+      const after = afterLanded(err, 'cascade');
+      expect(eventWriteLeftover(after), String(err)).not.toBeNull();
+      expect(writeErrorMessage(after, t)).toBe(writeErrorMessage(err, t));
+    }
+  });
+
   it('reads when a task save completed its status as the core does (277)', () => {
     expect(outcome.status_landed.length).toBeGreaterThanOrEqual(7);
     for (const row of outcome.status_landed) {
