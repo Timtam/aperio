@@ -47,8 +47,16 @@ const LIST: TaskList = {
   task_capabilities: DEFAULT_TASK_CAPABILITIES,
 } as unknown as TaskList;
 
+/** A list that keeps no subtasks, for the drafts guard. */
+const FLAT_LIST: TaskList = {
+  id: 'L2',
+  name: 'Flach',
+  read_only: false,
+  task_capabilities: { ...DEFAULT_TASK_CAPABILITIES, subtasks: false },
+} as unknown as TaskList;
+
 const STORE = {
-  taskLists: [LIST],
+  taskLists: [LIST] as TaskList[],
   selectedTaskListIds: new Set(['L1']),
   colorLabels: [],
   sectionsByList: {},
@@ -95,6 +103,8 @@ afterEach(() => {
   announce.mockClear();
   TASKS.current = [];
   CASCADE.enabled = false;
+  STORE.taskLists = [LIST];
+  STORE.selectedTaskListIds = new Set(['L1']);
   resetAnswers();
 });
 
@@ -173,7 +183,9 @@ describe('TaskDialog → a save that failed', () => {
 
   it('edits a created task whose subtasks did not all follow, and saves its changes with them', async () => {
     answers.create_task = [
-      () => Promise.resolve(created('t-1', 'Einkaufen')),
+      // Stored with a day its create derived (started → pinned to today).
+      () =>
+        Promise.resolve({ ...created('t-1', 'Einkaufen'), scheduled_date: '2026-10-24' } as Task),
       () => Promise.resolve(created('t-2', 'Milch', 't-1')),
       () => Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' }),
       () => Promise.resolve(created('t-3', 'Brot', 't-1')),
@@ -188,7 +200,7 @@ describe('TaskDialog → a save that failed', () => {
     create();
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe(
-      '„Einkaufen“ wurde angelegt, die Unteraufgabe aber nicht: der Anbieter ist gerade ausgelastet. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an.',
+      '„Einkaufen“ wurde angelegt, die Unteraufgabe „Brot“ aber nicht: der Anbieter ist gerade ausgelastet. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt sie mit an.',
     );
     expect(onClose).not.toHaveBeenCalled();
     // The editor edits the task that stands; the draft that was made is
@@ -209,6 +221,8 @@ describe('TaskDialog → a save that failed', () => {
       .filter((call) => call[0] === 'update_task')
       .map((call) => (call[1] as { task: Task }).task);
     expect(updates.map((u) => [u.id, u.title])).toEqual([['t-1', 'Einkaufen Samstag']]);
+    // The day the create stored is kept, though the form never showed it.
+    expect(updates[0].scheduled_date).toBe('2026-10-24');
     // The parent was not created again: only the draft left, under it.
     const sent = createCalls().map(
       (call) => (call[1] as { request: { title: string; parent_id: string | null } }).request,
@@ -220,6 +234,31 @@ describe('TaskDialog → a save that failed', () => {
       ['Brot', 't-1'],
     ]);
     expect(announce).toHaveBeenCalledWith(expect.stringContaining('Einkaufen Samstag'));
+  });
+});
+
+describe('TaskDialog: the edit of a created task keeps the drafts guard', () => {
+  it('blocks a save that would make the drafts left on a list without subtasks', async () => {
+    STORE.taskLists = [LIST, FLAT_LIST];
+    STORE.selectedTaskListIds = new Set(['L1', 'L2']);
+    answers.create_task = [
+      () => Promise.resolve(created('t-1', 'Einkaufen')),
+      () => Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' }),
+    ];
+    await openNew();
+    addDraft('Brot');
+    create();
+    await screen.findByRole('button', { name: 'Speichern' });
+    fireEvent.change(screen.getByRole('combobox', { name: /^liste$|^list$/i }), {
+      target: { value: 'L2' },
+    });
+    // Said where the drafts are, before anything is sent.
+    expect(screen.getByText(/unterstützt keine Unteraufgaben/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+    expect(
+      (await screen.findByRole('alert')).textContent,
+    ).toBe('Die gewählte Liste unterstützt keine Unteraufgaben. Entferne die Entwürfe oder wähle eine andere Liste.');
+    expect(invokeMock.mock.calls.filter((c) => c[0] === 'update_task')).toHaveLength(0);
   });
 });
 

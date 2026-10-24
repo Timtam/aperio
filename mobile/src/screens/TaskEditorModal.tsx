@@ -756,9 +756,8 @@ export default function TaskEditorModal({
   // The drafts a created task's subtasks left stay in its edit, without an
   // input of their own: the edit's subtask manager adds directly.
   const showDraftSubtasks =
-    (taskId == null || draftSubtasks.length > 0) &&
-    (caps?.subtasks ?? true) &&
-    parentId == null;
+    parentId == null &&
+    (taskId == null ? (caps?.subtasks ?? true) : draftSubtasks.length > 0);
 
   const addDraftSubtask = useCallback(() => {
     const trimmed = newSubtaskTitle.trim();
@@ -866,7 +865,9 @@ export default function TaskEditorModal({
     // to one that can't hold them hides the draft section but keeps the
     // drafts — block the save so the user removes them or picks another
     // list, rather than creating flat loose tasks (desktop TaskDialog parity).
-    if (taskId == null && draftSubtasks.length > 0 && !(caps?.subtasks ?? true)) {
+    // Also in the edit of a task this editor created, whose drafts are still
+    // staged: made on such a list, they would be loose tasks.
+    if (draftSubtasks.length > 0 && !(caps?.subtasks ?? true)) {
       setError(t('dialogs.task.subtasks.listNoSubtasks'));
       AccessibilityInfo.announceForAccessibility(
         t('dialogs.task.subtasks.listNoSubtasks'),
@@ -945,12 +946,20 @@ export default function TaskEditorModal({
             showNotice(writeErrorMessage(err, t));
             return false;
           }
+          // The editor edits what stands from here: the form takes the task
+          // as it was stored, with what its create derived (a day pinned on
+          // start). Mirrors the desktop.
+          setForm(buildInitialState(parent, listId));
           setCreatedTask(parent);
           setLoaded(parent);
           setDraftSubtasks(left);
           const message = t('dialogs.task.subtasks.draftsFailed', {
             title: parent.title,
             count: left.length,
+            titles: joinNames(
+              left.map((name) => t('actions.quotedTitle', { title: name })),
+              t,
+            ),
             reason: eventWriteFailureReason(err, t),
           });
           setError(message);
@@ -1185,6 +1194,7 @@ export default function TaskEditorModal({
     caps,
     isLocalList,
     form,
+    listId,
     loaded,
     navigation,
     parentId,
@@ -1547,6 +1557,11 @@ export default function TaskEditorModal({
                 </View>
               ))}
             </View>
+          )}
+          {taskId != null && !(caps?.subtasks ?? true) && (
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.task.subtasks.listNoSubtasks')}
+            </Text>
           )}
           {taskId == null && (
             <View style={styles.subtaskAddRow}>

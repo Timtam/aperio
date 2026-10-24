@@ -621,6 +621,9 @@ export function TaskDialog({
       task ? false : (listForSections?.task_capabilities?.subtasks ?? true),
     [task, listForSections],
   );
+  // Whether the list the form points at can hold the drafts still staged —
+  // in create mode, and in the edit of a task this editor created.
+  const draftsFit = listForSections?.task_capabilities?.subtasks ?? true;
   const sectionsEnabled = canAssignSection(listForSections);
   // How many people the TARGET list's source can hold on one task. Gates the
   // picker entirely (`none`) and, above that, whether it offers more than one
@@ -1243,15 +1246,12 @@ export function TaskDialog({
         setError(t('dialogs.task.listRequired'));
         return;
       }
-      // Don't silently drop staged subtasks: if the user switched the
-      // (create-mode) list to one that can't hold subtasks while drafts
-      // are pending, block the save so they remove them or pick another
-      // list, rather than creating a parent with the children lost.
-      if (
-        !isEdit &&
-        draftSubtasks.length > 0 &&
-        !createSupportsSubtasks
-      ) {
+      // Don't silently drop staged subtasks: if the user switched the list
+      // to one that can't hold subtasks while drafts are pending — creating
+      // a task, or editing one this editor created — block the save so they
+      // remove them or pick another list, rather than creating a parent with
+      // the children lost or made as loose tasks.
+      if (draftSubtasks.length > 0 && !draftsFit) {
         setError(t('dialogs.task.subtasks.listNoSubtasks'));
         return;
       }
@@ -1329,12 +1329,31 @@ export function TaskDialog({
               showNotice(writeErrorMessage(err, t));
               return false;
             }
+            // The editor edits what stands from here: the form takes the
+            // task as it was stored, with what its create derived (a day
+            // pinned on start), so saving it changes only what the user
+            // changes.
+            setForm(
+              buildInitialState(
+                parent,
+                defaultListId,
+                defaultDate,
+                defaultTitle,
+                taskLists,
+                selectedTaskListIds,
+              ),
+            );
+            statusTouched.current = false;
             setCreatedTask(parent);
             setDraftSubtasks(left);
             setError(
               t('dialogs.task.subtasks.draftsFailed', {
                 title: parent.title,
                 count: left.length,
+                titles: joinNames(
+                  left.map((title) => t('actions.quotedTitle', { title })),
+                  t,
+                ),
                 reason: eventWriteFailureReason(err, t),
               }),
             );
@@ -1565,9 +1584,14 @@ export function TaskDialog({
       autoSelfAssign,
       draftSubtasks,
       createSupportsSubtasks,
+      draftsFit,
       invalidateData,
       showNotice,
       taskLists,
+      defaultListId,
+      defaultDate,
+      defaultTitle,
+      selectedTaskListIds,
     ],
   );
 
@@ -2400,7 +2424,13 @@ export function TaskDialog({
                 ))}
               </ul>
             )}
-            {isEdit ? null : createSupportsSubtasks ? (
+            {!draftsFit ? (
+              // List was switched to one that can't hold subtasks while
+              // drafts are still staged — warn instead of dropping them.
+              <p className="form__hint form__hint--warning">
+                {t('dialogs.task.subtasks.listNoSubtasks')}
+              </p>
+            ) : isEdit ? null : (
               <div className="subtasks__add">
                 <input
                   type="text"
@@ -2424,12 +2454,6 @@ export function TaskDialog({
                   {t('dialogs.task.subtasks.addButton')}
                 </button>
               </div>
-            ) : (
-              // List was switched to one that can't hold subtasks while
-              // drafts are still staged — warn instead of dropping them.
-              <p className="form__hint form__hint--warning">
-                {t('dialogs.task.subtasks.listNoSubtasks')}
-              </p>
             )}
           </fieldset>
         )}
