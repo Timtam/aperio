@@ -7,6 +7,7 @@ import {
   eventWriteLeftover,
   eventWriteRefusal,
   exceptionsLossOf,
+  removeOriginalAfterCopy,
   stepDetail,
   writeAll,
   writeErrorMessage,
@@ -536,5 +537,27 @@ describe('the writes of one action (decision 277)', () => {
     const { landed, failure } = await run(['ok', busy]);
     expect(landed).toEqual([0]);
     expect(eventWriteLeftover(failure)?.leftover).toBe('partly-saved');
+  });
+});
+
+describe('removing the original after its copy landed (decision 277)', () => {
+  it('says whether the original went', async () => {
+    await expect(removeOriginalAfterCopy('skip', () => Promise.resolve())).resolves.toBe(true);
+    // A busy provider kept it: the caller says where it stayed.
+    await expect(
+      removeOriginalAfterCopy('skip', () =>
+        Promise.reject(command('forbidden', 'provider-busy: http-429')),
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it('reads any other failure as a later step, never as nothing written', async () => {
+    const refused = command('forbidden', 'server-refused: 403');
+    expect(eventWriteErrorMessage(refused, t)).toMatch(/nichts geändert/);
+    const failure = await removeOriginalAfterCopy('skip', () => Promise.reject(refused)).catch(
+      (err: unknown) => err,
+    );
+    expect(writeNeverLanded(failure)).toBe(false);
+    expect(eventWriteErrorMessage(failure, t)).not.toMatch(/nichts geändert/);
   });
 });

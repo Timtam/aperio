@@ -178,17 +178,19 @@ describe('EventGroupCarryDialog → "only this occurrence" to a copy', () => {
     const said = announced.filter((line) => kept.test(line));
     expect(said).toHaveLength(1);
     expect(said[0]).toMatch(/Eine Kopie aktualisiert|One copy updated/);
-    expect(said[0]).not.toMatch(/Nichts wurde geändert|Nothing was changed/);
+    expect(said[0]).not.toMatch(/nichts geändert|nothing was changed/i);
   });
 
   it('says a later failure of the skip as one, never "not changed" (277)', async () => {
-    skipFails.current = { code: 'not_found', message: 'gone' };
+    // A refusal whose own sentence says nothing was changed: after the
+    // standalone landed, it must not reach the copy's line as it is.
+    skipFails.current = { code: 'forbidden', message: 'server-refused: 403' };
     await carry();
     await waitFor(() => expect(calls('group_events')).toHaveLength(1));
     expect(screen.getByText(/Eine Kopie aktualisiert|One copy updated/)).toBeTruthy();
     expect(screen.queryByText(/Nicht geändert|Not changed/)).toBeNull();
     const said = announced.find((line) => /Privat:/.test(line));
     expect(said).toBeDefined();
-    expect(said).not.toMatch(/Nichts wurde geändert|Nothing was changed/);
+    expect(said).not.toMatch(/nichts geändert|nothing was changed/i);
   });
 });
