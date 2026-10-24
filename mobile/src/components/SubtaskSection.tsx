@@ -246,6 +246,9 @@ export function SubtaskSection({
               }),
         );
       } catch (err) {
+        // A save whose answer was lost may have landed: the subtasks read
+        // again, as on the desktop (277).
+        void reload();
         announce(writeErrorMessage(err, t));
       }
     },

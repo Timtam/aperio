@@ -374,6 +374,9 @@ export function TaskView() {
         // run through DialogState — bump explicitly.
         invalidateData();
       } catch (err) {
+        // A delete whose answer was lost may have landed: the list reads
+        // again, as the row menu's Delete does (277).
+        invalidateData();
         announce(writeErrorMessage(err, t));
       }
     },

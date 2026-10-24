@@ -61,6 +61,9 @@ export function useTaskPriorityAction(): (
         );
         invalidateData();
       } catch (err) {
+        // A save whose answer was lost, or one that stands in part, may have
+        // landed: the view reads again, as a failed status change does (277).
+        invalidateData();
         announce(writeErrorMessage(err, t));
       }
     },

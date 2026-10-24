@@ -350,6 +350,9 @@ export default function TasksScreen({
         invalidateData();
         announce(t('chipMenu.broughtToBacklog', { title: task.title }));
       } catch (err) {
+        // A save whose answer was lost may have landed: the list reads again,
+        // as the desktop's menu does (277).
+        invalidateData();
         announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
