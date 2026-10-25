@@ -203,6 +203,8 @@ export default function TasksScreen({
     };
   }, []);
   const changeGroupBy = useCallback((next: TaskGroupBy) => {
+    // Every act of the person's ends a failed delete's watch.
+    failedFocus.current = null;
     setGroupBy(next);
     void AsyncStorage.setItem(GROUP_BY_KEY, next);
   }, []);
@@ -237,6 +239,15 @@ export default function TasksScreen({
   useEffect(() => {
     versionShown.current = dataVersion;
   }, [dataVersion]);
+  // Leaving the screen is an act of the person's too — Lists, Search, another
+  // tab: a row that goes while they are elsewhere takes no focus.
+  useEffect(
+    () =>
+      navigation.addListener('blur', () => {
+        failedFocus.current = null;
+      }),
+    [navigation],
+  );
 
   // Long-press action menu — the sighted twin of the rows' SR custom actions
   // (one shared action list feeds both).

@@ -1817,7 +1817,9 @@
         "renameLabel": "Rename section",
         "created": "Section \"{{name}}\" created.",
         "renamed": "Section renamed to \"{{name}}\".",
-        "deleted": "Section \"{{name}}\" deleted; its tasks are now ungrouped."
+        "deleted": "Section \"{{name}}\" deleted; its tasks are now ungrouped.",
+        "unread": "The sections of this list could not be loaded: {{reason}}",
+        "unreadCurrent": "Current section (not loaded)"
       },
       "assignees": {
         "nobody": "Nobody",

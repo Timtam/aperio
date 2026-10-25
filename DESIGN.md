@@ -1486,6 +1486,13 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     2026-10-24). Ein Verschieben, dessen
     Original der Anbieter wegen Auslastung nicht löschen konnte, steht und
     nennt die Liste oder den Kalender des Originals (`original_left_in`).
+    Das Lesen nach einem Abschnitt, der angelegt, umbenannt oder gelöscht
+    wurde, ist ein Lesen: Scheitert es, zeigt die Auswahl, was geschrieben
+    wurde — bei einer Liste, deren Abschnitte nie gelesen wurden, neben dem
+    Lesestand (`sectionsWritten`), damit die Ansichten sie weiter als
+    ungelesen fragen —, und die Abschnittsauswahl sagt, warum die übrigen
+    fehlen (`sectionsReadFailure`). Die Farbe eines Abschnitts ist ein
+    eigener Schritt nach ihm (`sectionColorAfterLanded`).
   - Jede Oberfläche liest Fehler nur über die geteilten Helfer (273):
     `writeErrorMessage` und `eventWriteErrorMessage` beim Schreiben,
     `readErrorMessage` und `readFailureSentence` beim Lesen,

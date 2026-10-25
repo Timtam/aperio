@@ -447,10 +447,19 @@ export default function TaskEditorModal({
     };
   }, [form.listId, poolRead]);
 
+  // A subtask whose delete failed is watched for a moment (SubtaskSection);
+  // every act of the person's elsewhere in the editor ends that, as on the
+  // task list, so a row that goes then takes no focus from where they are.
+  const endSubtaskWatch = useRef<(() => void) | null>(null);
+  const acted = useCallback(() => endSubtaskWatch.current?.(), []);
+  useEffect(() => navigation.addListener('blur', acted), [navigation, acted]);
+
   const update = useCallback(
-    <K extends keyof FormState>(key: K, value: FormState[K]) =>
-      setForm((f) => ({ ...f, [key]: value })),
-    [],
+    <K extends keyof FormState>(key: K, value: FormState[K]) => {
+      acted();
+      setForm((f) => ({ ...f, [key]: value }));
+    },
+    [acted],
   );
 
   // Stable, because the title field is memoised against the renders the
@@ -468,10 +477,11 @@ export default function TaskEditorModal({
   const statusTouched = useRef(false);
   const changeStatus = useCallback(
     (value: TaskStatus) => {
+      acted();
       statusTouched.current = true;
       setForm((f) => ({ ...f, status: value }));
     },
-    [],
+    [acted],
   );
 
   // Adopt a subtask-cascade-updated parent: `loaded` (the persisted truth) takes
@@ -492,6 +502,7 @@ export default function TaskEditorModal({
 
   const changeList = useCallback(
     (nextListId: string) => {
+      acted();
       setForm((f) => {
         const secs = sectionsByList[nextListId] ?? [];
         const keep = secs.some((s) => s.id === f.sectionId);
@@ -506,11 +517,12 @@ export default function TaskEditorModal({
       });
       if (!(nextListId in sectionsByList)) void loadSections(nextListId);
     },
-    [sectionsByList, loadSections],
+    [acted, sectionsByList, loadSections],
   );
 
   const clearSlot = useCallback(
     (which: 'scheduled' | 'deadline') => {
+      acted();
       setForm((f) =>
         which === 'scheduled'
           ? { ...f, scheduledDate: '', scheduledTime: '', scheduledEndTime: '' }
@@ -525,7 +537,7 @@ export default function TaskEditorModal({
       const tag = findNodeHandle(ref.current);
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
     },
-    [t],
+    [acted, t],
   );
 
   // Offer only lists the user can write to AND still checks in the Lists
@@ -851,6 +863,7 @@ export default function TaskEditorModal({
   }, [form.status, loaded, i18n.language, t]);
 
   const save = useCallback(async () => {
+    acted();
     const title = form.title.trim();
     if (!title) {
       setError(t('dialogs.task.titleRequired'));
@@ -1206,6 +1219,7 @@ export default function TaskEditorModal({
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     }
   }, [
+    acted,
     canRecur,
     canSection,
     caps,
@@ -1529,6 +1543,7 @@ export default function TaskEditorModal({
           priorityScale={priorityScale}
           onChanged={invalidateData}
           onParentSync={syncParent}
+          endWatchRef={endSubtaskWatch}
         />
       )}
 

@@ -58,6 +58,7 @@ export default function ContactsScreen({
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   // A failed delete's line, apart from a load's: a load clears only its own,
   // so the refresh after the write leaves it. It goes with the next delete
@@ -163,7 +164,10 @@ export default function ContactsScreen({
   }, [bookName, groups, searchResults, searching, hiddenBooks]);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    // Only the first load blanks the list, as in the agenda: a later one — a
+    // focus return, the read after a failed delete, a cache refresh — keeps
+    // the rows on screen, and with them the person's place and focus.
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     try {
       // listContactLists also primes the Host's route map, so it must run
@@ -176,6 +180,7 @@ export default function ContactsScreen({
         })),
       );
       setGroups(withContacts);
+      hasLoadedRef.current = true;
     } catch (err) {
       const message = readErrorMessage(err, t);
       setError(message);

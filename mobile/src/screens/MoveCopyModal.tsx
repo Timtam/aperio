@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   eventWriteLeftover,
   type MovedRow,
@@ -109,6 +109,10 @@ function MoveCopyScreen({
   const [sections, setSections] = useState<Section[]>([]);
   /** Non-null while the "new section" name box is open. */
   const [sectionDraft, setSectionDraft] = useState<string | null>(null);
+  /** A failed "new section", said at its field: the next try clears it, and
+   *  the move's own failure is not touched. */
+  const [sectionError, setSectionError] = useState<string | null>(null);
+  const sectionBusy = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // The header: Cancel; Close while the notice is up; and while a move or
@@ -175,6 +179,7 @@ function MoveCopyScreen({
     // target drops the choice rather than carrying a stale one across.
     setTargetSectionId('');
     setSectionDraft(null);
+    setSectionError(null);
     if (!sectionsEnabled) {
       setSections([]);
       return;
@@ -201,25 +206,41 @@ function MoveCopyScreen({
    * in passing at the top, where the thing being filed is about to be.
    */
   const createTargetSection = useCallback(async () => {
+    // One at a time: a second press while the first is on its way would make
+    // the section twice.
+    if (sectionBusy.current) return;
     const name = (sectionDraft ?? '').trim();
     if (!name) {
       setSectionDraft(null);
       return;
     }
+    sectionBusy.current = true;
+    setSectionError(null);
     try {
       const created = await createSection({
         list_id: targetContainerId,
         name,
         position: 0,
       });
-      setSections(await getSections(targetContainerId));
+      // The section stands (277). The read after it serves the list's kept
+      // rows until its refresh lands, or fails: either way the new one is
+      // offered, at the top where it was made, and selected.
+      const rows = await getSections(targetContainerId).catch(() => null);
+      setSections((prev) => [
+        created,
+        ...(rows ?? prev).filter((section) => section.id !== created.id),
+      ]);
       setTargetSectionId(created.id);
       setSectionDraft(null);
       AccessibilityInfo.announceForAccessibility(
         t('dialogs.task.section.created', { name: created.name }),
       );
     } catch (err) {
-      setError(writeErrorMessage(err, t));
+      const message = writeErrorMessage(err, t);
+      setSectionError(message);
+      AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
+    } finally {
+      sectionBusy.current = false;
     }
   }, [sectionDraft, targetContainerId, t]);
 
@@ -495,6 +516,11 @@ function MoveCopyScreen({
             </Text>
           </Pressable>
         </View>
+      )}
+      {sectionsManageable && sectionError != null && (
+        <Text style={styles.error} accessibilityRole="text">
+          {sectionError}
+        </Text>
       )}
 
       {params.kind === 'task' && children.length > 0 && (

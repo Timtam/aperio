@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -76,6 +83,7 @@ export function SubtaskSection({
   priorityScale,
   onChanged,
   onParentSync,
+  endWatchRef,
 }: {
   /** The task whose children this section manages (the loaded editor task). */
   parentTask: Task;
@@ -89,6 +97,10 @@ export function SubtaskSection({
   /** Report the parent's fresh state after a mutation so the editor adopts a
    *  cascade-derived status (and doesn't revert it on Save). */
   onParentSync?: (parent: Task) => void;
+  /** Filled with what ends the watch after a failed delete: the editor calls
+   *  it on every act of the person's outside this section, as the task list
+   *  ends its own. */
+  endWatchRef?: RefObject<(() => void) | null>;
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -121,6 +133,15 @@ export function SubtaskSection({
   useEffect(() => {
     removed.current = onRemove;
   }, [onRemove]);
+  useEffect(() => {
+    if (endWatchRef == null) return;
+    endWatchRef.current = () => {
+      goneWatch.current = null;
+    };
+    return () => {
+      endWatchRef.current = null;
+    };
+  }, [endWatchRef]);
 
   /** Read the list's tasks again; the rows read, or `null` when the read
    *  failed (said in the line). A subtask watched after its failed delete
@@ -425,7 +446,11 @@ export function SubtaskSection({
         <TextInput
           style={styles.input}
           value={newTitle}
-          onChangeText={setNewTitle}
+          onChangeText={(text) => {
+            // Typing is an act too: a row that goes now takes no focus.
+            goneWatch.current = null;
+            setNewTitle(text);
+          }}
           placeholder={t('dialogs.task.subtasks.placeholder')}
           accessibilityLabel={t('dialogs.task.subtasks.newAria')}
           editable={!busy}

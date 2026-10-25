@@ -51,7 +51,8 @@ Apple's well-known endpoints.
   provider (`busy_detail`, decision 270), and an update says so before any
   refusal. A walk over every calendar or address book (delete, EXDATE) stops
   at the first busy answer; a delete walk that met a replayed 404 before it is
-  unsure, never done. A failure on an earlier calendar that may have landed
+  unsure, never done, and so is one where another calendar refused the
+  delete: the event may be gone already. A failure on an earlier calendar that may have landed
   (a lost answer, a server error) stays what it was, whatever a later
   calendar answers (`WalkFailures`). A contact's PUT replaces the whole vCard, so a busy read
   of its photo sends nothing rather than wiping the avatar.

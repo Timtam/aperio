@@ -534,7 +534,14 @@ Siehe DESIGN §4.2.
         gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
         neu geladen wird, und geht, sobald etwas anderes gelingt oder du aus
         dem Editor zurückkommst; Erinnerungen und Suche sagen einen Ladefehler
-        an.
+        an; ein gescheitertes Löschen in den Kontakten lässt die Liste stehen
+        (kein „Lädt…“, der Fokus bleibt auf dem Kontakt); Gruppieren, Listen,
+        Suche oder ein anderer Reiter beenden die Beobachtung nach einem
+        gescheiterten Löschen, im Editor auch jedes Feld und das Tippen einer
+        neuen Unteraufgabe; ein unter Verschieben/Kopieren neu angelegter
+        Abschnitt steht in der Auswahl und ist gewählt, sein Fehler steht am
+        Feld und geht beim nächsten Versuch; scheitert beim Umbenennen eines
+        Abschnitts nur die Farbe, heißt es „nur zum Teil gespeichert“.
       - ↻ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
         274): CalDAV liest 429 und beim Lesen 503 mit `Retry-After` als
         ausgelasteten Anbieter, Todoist und Vikunja 429. Ob iCloud so
@@ -1784,9 +1791,15 @@ Vorschläge sind nicht aufgenommen.
       (`get_sections`), Mitglieder einer Liste und die eigene Person einer
       Aufgabenliste liest der Desktop direkt beim Anbieter, nicht über den
       Zwischenspeicher. Ein ausgelasteter Anbieter hält diese Lesevorgänge
-      daher nicht an und zählt sie nicht; nur ihr Satz sagt es. Am Handy
-      laufen sie über den Zwischenspeicher. Angleichen. Aus der Planung von
-      PR 7 (2026-10-23).
+      daher nicht an und zählt sie nicht. Gesagt wird es nur zum Teil: die
+      Personen im Feld des Aufgaben-Editors, die Abschnitte in den
+      Abschnittsauswahlen von Aufgaben-Editor und Verschieben/Kopieren.
+      Aufgabenansicht, Rückstau und Kalenderansichten zeigen eine Liste,
+      deren Abschnitte nie gelesen wurden, ohne Wort ungegliedert; die eigene
+      Person fällt ohne Wort weg. Am Handy laufen sie über den
+      Zwischenspeicher (letzter Stand und die Warnung des Kontos).
+      Angleichen. Aus der Planung von PR 7 (2026-10-23), berichtigt in
+      Prüfrunde 13.
 - [ ] **Gleichzeitige Schreibvorgänge drosseln den Anbieter selbst.** Die
       Sammelknöpfe des Tagesstarts (`writeAll`), sein automatischer Übertrag
       (`DayStartReviewChecker`) und das Anheften fälliger Fristen

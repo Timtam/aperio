@@ -1817,7 +1817,9 @@
         "renameLabel": "Abschnitt umbenennen",
         "created": "Abschnitt „{{name}}\" wurde angelegt.",
         "renamed": "Abschnitt in „{{name}}\" umbenannt.",
-        "deleted": "Abschnitt „{{name}}\" gelöscht; seine Aufgaben sind jetzt ohne Abschnitt."
+        "deleted": "Abschnitt „{{name}}\" gelöscht; seine Aufgaben sind jetzt ohne Abschnitt.",
+        "unread": "Die Abschnitte dieser Liste konnten nicht geladen werden: {{reason}}",
+        "unreadCurrent": "Bisheriger Abschnitt (nicht geladen)"
       },
       "assignees": {
         "nobody": "Niemand",

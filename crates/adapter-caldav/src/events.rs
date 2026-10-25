@@ -1153,7 +1153,9 @@ impl DeleteWalk {
     /// still in one of them — unsure, never done —, without one it is the
     /// busy answer. Otherwise a replayed 404 counts as gone when no calendar
     /// failed: the first DELETE may have removed it, and none of the others
-    /// holds it. `missing` names it otherwise.
+    /// holds it. Where another calendar refused, it is unsure the same way —
+    /// gone already, or kept where the refusal came from —, never "nothing
+    /// changed". `missing` names it otherwise.
     pub(crate) fn finish(self, missing: String) -> Result<(), CaldavError> {
         if self.deleted {
             return Ok(());
@@ -1168,6 +1170,11 @@ impl DeleteWalk {
             });
         }
         match self.failures.finish() {
+            Some(err) if crate::may_have_landed(&err) => Err(err),
+            Some(refused) if self.gone_on_replay => Err(CaldavError::Network(format!(
+                "{missing}: a replayed delete may have removed it; another calendar refused: \
+                 {refused}"
+            ))),
             Some(err) => Err(err),
             None if self.gone_on_replay => Ok(()),
             None => Err(CaldavError::Http {
@@ -1986,8 +1993,10 @@ END:VCALENDAR</c:calendar-data>
     }
 
     /// ...and when no calendar holds it, the replayed 404 was the first DELETE
-    /// removing it: gone, as asked. A failure elsewhere still wins — the event
-    /// may live where the DELETE failed.
+    /// removing it: gone, as asked. A failure elsewhere that may have landed
+    /// still wins — the event may live where the DELETE failed. A refusal
+    /// elsewhere leaves it unsure: gone already, or kept where it was refused,
+    /// never "nothing changed".
     #[test]
     fn a_replayed_404_found_nowhere_else_is_gone() {
         let mut walk = DeleteWalk::default();
@@ -2001,6 +2010,23 @@ END:VCALENDAR</c:calendar-data>
         assert!(matches!(
             walk.finish("nowhere".into()),
             Err(CaldavError::Http { status: 500, .. })
+        ));
+
+        let mut walk = DeleteWalk::default();
+        walk.step(Ok(DeleteOutcome::GoneOnReplay));
+        walk.step(Err(gone(403)));
+        assert!(matches!(
+            walk.finish("nowhere".into()),
+            Err(CaldavError::Network(_))
+        ));
+
+        // Without a replayed 404, the refusal is what it was.
+        let mut walk = DeleteWalk::default();
+        walk.step(Ok(DeleteOutcome::NotFound));
+        walk.step(Err(gone(403)));
+        assert!(matches!(
+            walk.finish("nowhere".into()),
+            Err(CaldavError::Http { status: 403, .. })
         ));
 
         let mut walk = DeleteWalk::default();

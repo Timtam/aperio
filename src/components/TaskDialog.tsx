@@ -21,7 +21,6 @@ import {
   createSection,
   createTask as apiCreateTask,
   deleteSection,
-  setSectionColor,
   showContextMenu,
   taskCurrentUser,
   taskListMembers,
@@ -34,6 +33,7 @@ import {
   type AssigneePool,
   assigneePoolErrorMessage,
   clampAssignees,
+  type CodedError,
   eventWriteFailureReason,
   eventWriteLeftover,
   findOffer,
@@ -42,6 +42,7 @@ import {
   offerUsable,
   originalKeptSentence,
   prefillTarget,
+  readFailureSentence,
   selectableTaskLists,
   selfAssignOnStatusChange,
   taskAssignmentMode,
@@ -72,6 +73,7 @@ import type {
 } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import type { SectionWrite } from '../state/CalendarStore';
+import { sectionColorAfterLanded } from '../state/sectionColor';
 import { currentUserForList } from '../state/currentUser';
 import { useViewState } from '../state/viewStateContext';
 import { timeInputStep } from '../state/timeStep';
@@ -195,8 +197,15 @@ export function TaskDialog({
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const fmt = useDateFormat();
-  const { taskLists, selectedTaskListIds, colorLabels, sectionsByList, loadSections } =
-    useCalendarStore();
+  const {
+    taskLists,
+    selectedTaskListIds,
+    colorLabels,
+    sectionsByList,
+    sectionsWritten,
+    sectionsReadFailure,
+    loadSections,
+  } = useCalendarStore();
   const { showHiddenTaskListTargets, timeStepMinutes } = useViewState();
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
@@ -234,6 +243,7 @@ export function TaskDialog({
   const subtaskHintId = useId();
   const moveLockHintId = useId();
   const sectionFieldId = useId();
+  const sectionUnreadId = useId();
   const assigneeFailureId = useId();
   const assigneeLabelId = useId();
 
@@ -649,10 +659,17 @@ export function TaskDialog({
   // can't reparent tasks (Todoist). Creation is unaffected — you can
   // always pick the list for a brand-new task.
   const moveLocked = isEdit && !canMoveLists;
+  // A list whose sections could not be read still shows the ones written
+  // here, so the picker says where the task is filed.
   const sectionsForList = useMemo(
-    () => sectionsByList[form.listId] ?? [],
-    [sectionsByList, form.listId],
+    () => sectionsByList[form.listId] ?? sectionsWritten[form.listId] ?? [],
+    [sectionsByList, sectionsWritten, form.listId],
   );
+  // Said with the picker, so "No section" is not taken for the task's place.
+  const sectionsUnread =
+    form.listId in sectionsReadFailure && !(form.listId in sectionsByList)
+      ? readFailureSentence('dialogs.task.section.unread', sectionsReadFailure[form.listId], t)
+      : null;
   // The day presets for the per-task early-reminder override, plus the
   // current value spliced in (sorted) when it's a non-null override that
   // isn't one of the presets — e.g. a `10` synced from another device. Keeps
@@ -758,63 +775,84 @@ export function TaskDialog({
     null,
   );
   const [sectionBusy, setSectionBusy] = useState(false);
+  // A section write's failure, said at the section field rather than in the
+  // form's error: the next section write clears it, and the task's own save
+  // failure is not touched.
+  const [sectionError, setSectionError] = useState<string | null>(null);
 
   // Reset the inline editor whenever the dialog re-opens or the target
   // list changes (its sections — and thus what's manageable — differ).
   useEffect(() => {
     setSectionMode(null);
     setSectionDraft('');
+    setSectionError(null);
   }, [isOpen, form.listId]);
 
   const submitSection = useCallback(async () => {
     const name = sectionDraft.trim();
     if (!name || sectionBusy) return;
     setSectionBusy(true);
+    setSectionError(null);
     // What was written, for the read after it: a read that fails then shows
     // it rather than saying the write failed (decision 277).
     let written: SectionWrite | undefined;
     try {
       if (sectionMode === 'rename' && form.sectionId) {
         const current = sectionsForList.find((s) => s.id === form.sectionId);
+        let colorFailure: CodedError | null = null;
         if (current) {
           // Rename via update_section (provider-routed); the colour is a
           // separate, always-local-or-override write so it works for
           // external sections too.
           await updateSection({ ...current, name });
           if (sectionColorDraft !== (current.color_label ?? null)) {
-            await setSectionColor(current.id, form.listId, sectionColorDraft);
+            colorFailure = await sectionColorAfterLanded(
+              current.id,
+              form.listId,
+              sectionColorDraft,
+            );
           }
-          written = { upsert: { ...current, name, color_label: sectionColorDraft } };
-          announce(t('dialogs.task.section.renamed', { name }));
+          written = {
+            upsert: {
+              ...current,
+              name,
+              color_label: colorFailure ? current.color_label : sectionColorDraft,
+            },
+          };
+          if (!colorFailure) announce(t('dialogs.task.section.renamed', { name }));
         }
-      } else {
-        const created = await createSection({
-          list_id: form.listId,
-          name,
-          position: sectionsForList.length,
-        });
-        if (sectionColorDraft) {
-          await setSectionColor(created.id, form.listId, sectionColorDraft);
-        }
-        // Reload BEFORE selecting the new section so the
-        // "section gone from list" reset effect sees it as valid and
-        // doesn't race-clear the fresh selection. The section stands: a
-        // read that fails shows it anyway, and the editor closes.
-        await loadSections(form.listId, {
-          upsert: { ...created, color_label: sectionColorDraft ?? created.color_label },
-        });
-        setForm((prev) => ({ ...prev, sectionId: created.id }));
-        announce(t('dialogs.task.section.created', { name }));
+        await loadSections(form.listId, written);
         setSectionMode(null);
         setSectionDraft('');
-        setSectionColorDraft(null);
+        if (colorFailure) setSectionError(writeErrorMessage(colorFailure, t));
         return;
       }
-      await loadSections(form.listId, written);
+      const created = await createSection({
+        list_id: form.listId,
+        name,
+        position: sectionsForList.length,
+      });
+      const colorFailure = sectionColorDraft
+        ? await sectionColorAfterLanded(created.id, form.listId, sectionColorDraft)
+        : null;
+      // Reload BEFORE selecting the new section so the
+      // "section gone from list" reset effect sees it as valid and
+      // doesn't race-clear the fresh selection. The section stands: a
+      // read that fails shows it anyway (277), and the editor closes.
+      await loadSections(form.listId, {
+        upsert: {
+          ...created,
+          color_label: colorFailure ? created.color_label : (sectionColorDraft ?? created.color_label),
+        },
+      });
+      setForm((prev) => ({ ...prev, sectionId: created.id }));
+      if (colorFailure) setSectionError(writeErrorMessage(colorFailure, t));
+      else announce(t('dialogs.task.section.created', { name }));
       setSectionMode(null);
       setSectionDraft('');
+      setSectionColorDraft(null);
     } catch (err) {
-      setError(writeErrorMessage(err, t));
+      setSectionError(writeErrorMessage(err, t));
     } finally {
       setSectionBusy(false);
     }
@@ -835,6 +873,7 @@ export function TaskDialog({
     if (!form.sectionId || sectionBusy) return;
     const current = sectionsForList.find((s) => s.id === form.sectionId);
     setSectionBusy(true);
+    setSectionError(null);
     try {
       // Deleting a section only ungroups its tasks (ON DELETE SET NULL),
       // so there's no destructive-confirm — the tasks survive.
@@ -847,7 +886,7 @@ export function TaskDialog({
         t('dialogs.task.section.deleted', { name: current?.name ?? '' }),
       );
     } catch (err) {
-      setError(writeErrorMessage(err, t));
+      setSectionError(writeErrorMessage(err, t));
     } finally {
       setSectionBusy(false);
       // The delete button unmounts once form.sectionId clears (the manage
@@ -1799,6 +1838,7 @@ export function TaskDialog({
                 value={form.sectionId}
                 onChange={(e) => update('sectionId', e.target.value)}
                 disabled={sectionMode !== null}
+                aria-describedby={sectionsUnread ? sectionUnreadId : undefined}
               >
                 <option value="">{t('dialogs.task.noSection')}</option>
                 {sectionsForList.map((section) => (
@@ -1806,6 +1846,16 @@ export function TaskDialog({
                     {section.name}
                   </option>
                 ))}
+                {/* The task's own section, where its list could not be read:
+                    without it the picker would read "No section" while the
+                    save keeps the section. */}
+                {sectionsUnread &&
+                  form.sectionId &&
+                  !sectionsForList.some((s) => s.id === form.sectionId) && (
+                    <option value={form.sectionId}>
+                      {t('dialogs.task.section.unreadCurrent')}
+                    </option>
+                  )}
               </select>
               {/* Manage buttons — local lists only. Hidden while the
                   inline name editor is open. */}
@@ -1851,6 +1901,11 @@ export function TaskDialog({
                 </>
               )}
             </div>
+            {sectionsUnread && (
+              <p id={sectionUnreadId} className="form__hint form__hint--warning">
+                {sectionsUnread}
+              </p>
+            )}
             {sectionMode !== null && (
               <div className="section-field__edit">
                 <input
@@ -1916,6 +1971,11 @@ export function TaskDialog({
                   {t('dialogs.task.section.cancel')}
                 </button>
               </div>
+            )}
+            {sectionError && (
+              <p role="alert" className="form__error">
+                {sectionError}
+              </p>
             )}
           </div>
         )}

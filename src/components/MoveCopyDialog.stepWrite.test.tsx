@@ -73,6 +73,8 @@ const STORE = {
   selectedCalendarIds: new Set(['cal-home', 'cal-exchange']),
   selectedTaskListIds: new Set<string>(),
   sectionsByList: {},
+  sectionsWritten: {},
+  sectionsReadFailure: {},
   loadSections: () => Promise.resolve(),
 };
 vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));

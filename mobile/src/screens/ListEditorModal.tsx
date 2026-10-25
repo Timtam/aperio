@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { readErrorMessage, writeErrorMessage } from '@aperio/shared';
+import { afterLanded, readErrorMessage, writeErrorMessage } from '@aperio/shared';
 import {
   AccessibilityInfo,
   Alert,
@@ -297,6 +297,18 @@ export default function ListEditorModal({
     focus.focusRow(i);
   }, [editingId, focus]);
 
+  // The read after a section write that landed is a read (decision 277): its
+  // failure says the sections could not be read, never that the write failed,
+  // and a sentence the write left stays.
+  const reloadAfterWrite = useCallback(
+    () =>
+      loadSections(listId).then(
+        () => undefined,
+        (err: unknown) => setError((prev) => prev ?? readErrorMessage(err, t)),
+      ),
+    [listId, loadSections, t],
+  );
+
   const addSection = useCallback(async () => {
     if (busy) return;
     const name = newSectionName.trim();
@@ -309,9 +321,9 @@ export default function ListEditorModal({
       focus.onAdd();
       await createSection({ list_id: listId, name, position });
       setNewSectionName('');
-      await loadSections(listId);
       invalidateData();
       announce(t('dialogs.task.section.created', { name }));
+      await reloadAfterWrite();
     } catch (err) {
       const message = writeErrorMessage(err, t);
       setError(message);
@@ -325,8 +337,8 @@ export default function ListEditorModal({
     focus,
     invalidateData,
     listId,
-    loadSections,
     newSectionName,
+    reloadAfterWrite,
     sections,
     t,
   ]);
@@ -344,12 +356,22 @@ export default function ListEditorModal({
       // colour via set_section_color, which routes local → row, external →
       // host-local override (update_section ignores colour for external).
       await updateSection({ ...section, name });
-      await setSectionColor(section.id, listId, editingColor || null);
+      // The rename landed, so the colour's failure is a later step's (277).
+      const colorFailure = await setSectionColor(section.id, listId, editingColor || null).then(
+        () => null,
+        (err: unknown) => afterLanded(err, 'section-color'),
+      );
       pendingRenameFocus.current = renameIndex.current;
       setEditingId(null);
-      await loadSections(listId);
       invalidateData();
-      announce(t('dialogs.task.section.renamed', { name }));
+      if (colorFailure) {
+        const message = writeErrorMessage(colorFailure, t);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      } else {
+        announce(t('dialogs.task.section.renamed', { name }));
+      }
+      await reloadAfterWrite();
     } catch (err) {
       const message = writeErrorMessage(err, t);
       setError(message);
@@ -365,7 +387,7 @@ export default function ListEditorModal({
     editingName,
     invalidateData,
     listId,
-    loadSections,
+    reloadAfterWrite,
     sections,
     t,
   ]);
@@ -385,9 +407,9 @@ export default function ListEditorModal({
         // ungrouped), so no confirmation — just a clear announcement.
         focus.onRemove(index);
         await deleteSection(sectionId, listId);
-        await loadSections(listId);
         invalidateData();
         announce(t('dialogs.task.section.deleted', { name: sectionName }));
+        await reloadAfterWrite();
       } catch (err) {
         const message = writeErrorMessage(err, t);
         setError(message);
@@ -396,7 +418,7 @@ export default function ListEditorModal({
         setBusy(false);
       }
     },
-    [announce, busy, focus, invalidateData, listId, loadSections, t],
+    [announce, busy, focus, invalidateData, listId, reloadAfterWrite, t],
   );
 
   const removeList = useCallback(() => {

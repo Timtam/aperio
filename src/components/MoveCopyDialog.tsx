@@ -16,6 +16,7 @@ import {
   invitationLocked,
   type MovedRow,
   originalKeptSentence,
+  readFailureSentence,
   selectableEventCalendars,
   selectableTaskLists,
   writeErrorMessage,
@@ -95,6 +96,8 @@ export function MoveCopyDialog({
     selectedCalendarIds,
     selectedTaskListIds,
     sectionsByList,
+    sectionsWritten,
+    sectionsReadFailure,
     loadSections,
   } = useCalendarStore();
   const { showHiddenCalendarTargets, showHiddenTaskListTargets } =
@@ -118,8 +121,12 @@ export function MoveCopyDialog({
   /** Non-null while the inline "new section" name box is open. */
   const [sectionDraft, setSectionDraft] = useState<string | null>(null);
   const [sectionBusy, setSectionBusy] = useState(false);
+  /** A failed "new section", said at its field: the next try clears it, and
+   *  the move's own failure is not touched. */
+  const [sectionError, setSectionError] = useState<string | null>(null);
   const sectionSelectRef = useRef<HTMLSelectElement>(null);
   const sectionFieldId = useId();
+  const sectionUnreadId = useId();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -177,10 +184,21 @@ export function MoveCopyDialog({
   // picker — it just cannot grow a new one from here.
   const sectionsManageable =
     sectionsEnabled && !!targetList?.task_capabilities?.manageable_sections;
+  // A list whose sections could not be read still shows the ones made here,
+  // so the picker says where the task lands.
   const sectionsForTarget = useMemo(
-    () => sectionsByList[targetContainerId] ?? [],
-    [sectionsByList, targetContainerId],
+    () => sectionsByList[targetContainerId] ?? sectionsWritten[targetContainerId] ?? [],
+    [sectionsByList, sectionsWritten, targetContainerId],
   );
+  // Said with the picker, so its "No section" is not taken for all there is.
+  const sectionsUnread =
+    targetContainerId in sectionsReadFailure && !(targetContainerId in sectionsByList)
+      ? readFailureSentence(
+          'dialogs.task.section.unread',
+          sectionsReadFailure[targetContainerId],
+          t,
+        )
+      : null;
 
   useEffect(() => {
     if (!isOpen || !sectionsEnabled) return;
@@ -193,6 +211,7 @@ export function MoveCopyDialog({
   useEffect(() => {
     setTargetSectionId('');
     setSectionDraft(null);
+    setSectionError(null);
   }, [targetContainerId]);
 
   /**
@@ -203,6 +222,9 @@ export function MoveCopyDialog({
    * made in passing at the top, where the thing being filed is about to be.
    */
   const createTargetSection = useCallback(async () => {
+    // One at a time: a second Enter while the first is on its way would make
+    // the section twice.
+    if (sectionBusy) return;
     const name = (sectionDraft ?? '').trim();
     if (!name) {
       setSectionDraft(null);
@@ -210,6 +232,7 @@ export function MoveCopyDialog({
       return;
     }
     setSectionBusy(true);
+    setSectionError(null);
     try {
       const created = await apiCreateSection({
         list_id: targetContainerId,
@@ -222,14 +245,14 @@ export function MoveCopyDialog({
       announce(t('dialogs.task.section.created', { name: created.name }));
       setSectionDraft(null);
     } catch (err) {
-      setError(writeErrorMessage(err, t));
+      setSectionError(writeErrorMessage(err, t));
     } finally {
       setSectionBusy(false);
       // Back to the picker, which now holds the new section — the user asked
       // where this lands, and that is the control that answers.
       sectionSelectRef.current?.focus({ preventScroll: true });
     }
-  }, [sectionDraft, targetContainerId, loadSections, announce, t]);
+  }, [sectionBusy, sectionDraft, targetContainerId, loadSections, announce, t]);
 
   const itemTitle =
     target.kind === 'event' ? target.event.title : target.task.title;
@@ -459,6 +482,7 @@ export function MoveCopyDialog({
                 value={targetSectionId}
                 onChange={(e) => setTargetSectionId(e.target.value)}
                 disabled={sectionDraft !== null}
+                aria-describedby={sectionsUnread ? sectionUnreadId : undefined}
               >
                 <option value="">{t('dialogs.task.noSection')}</option>
                 {sectionsForTarget.map((section) => (
@@ -477,6 +501,11 @@ export function MoveCopyDialog({
                 </button>
               )}
             </div>
+            {sectionsUnread && (
+              <p id={sectionUnreadId} className="form__hint form__hint--warning">
+                {sectionsUnread}
+              </p>
+            )}
             {/* Naming it here rather than in a second dialog: filing
                 something into a section that does not exist yet is one
                 thought, and the detour through the editor was the reason
@@ -523,6 +552,11 @@ export function MoveCopyDialog({
                   {t('dialogs.task.section.cancel')}
                 </button>
               </div>
+            )}
+            {sectionError && (
+              <p role="alert" className="form__error">
+                {sectionError}
+              </p>
             )}
           </div>
         )}
