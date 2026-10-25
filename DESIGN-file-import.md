@@ -1,0 +1,108 @@
+# Datei-Import (zuerst ICS)
+
+Ein Bogen zwischen PR 7 (#128, pausiert) und PR 9. Er bringt Termine aus einer
+`.ics`-Datei nach Aperio, auf beiden Seiten.
+
+## Entscheidungen (Toni, 2026-10-25)
+
+1. **Keine Dateiverknüpfung** an Mac und Windows, vorerst. Importiert wird über
+   einen Eintrag in Aperio; am Handy auch über „Teilen“ und „Öffnen in“.
+2. **Ein Termin in der Datei** öffnet den Termin-Editor im Anlegen-Modus,
+   vorausgefüllt aus der Datei. Das Kalender-Feld ist die Zielauswahl; der
+   Schalter „Benachrichtigen“ gilt wie bei jedem neuen Termin.
+3. **Mehrere Termine** zeigen erst eine Liste mit Vorschau. Ein Eintrag öffnet
+   den Editor vorausgefüllt; „Alle in Kalender … importieren“ legt die übrigen
+   an. Schon vorhandene (gleiche UID im Ziel) sind markiert und abgewählt; wer
+   sie anwählt, bekommt sie als Kopie.
+4. **Teilnehmer bleiben.** Ein Termin mit Teilnehmern, den du selbst
+   organisierst, ist wie ein neuer Termin: Die bestehenden Regeln gelten
+   (iCloud schreibt Teilnehmer nur beim Benachrichtigen). Für eine Einladung,
+   die jemand anderes organisiert, kommt zuerst ein Live-Test bei Exchange
+   (I0); danach wird je Anbieter entschieden (I6).
+5. **Umfang zuerst:** Termine samt Serien und ihren gelöschten Terminen. Ein
+   geänderter Einzeltermin einer Serie wird ein eigener Termin, die Serie
+   bekommt an seinem Platz eine Lücke. Aufgaben (VTODO) kommen später.
+6. **Einträge:** am Desktop „Importieren …“ in der Werkzeugleiste (Gruppe
+   Neu) mit Strg+O, dazu eine Datei, die auf das Fenster gezogen wird; am
+   Handy „Termine importieren …“ in der Kalenderliste neben „Neuer Kalender“.
+7. **Adapter melden Dateiformate an** (Toni): Der Host verdrahtet keinen
+   Parser. Ein Adapter sagt im Manifest, welche Dateien er lesen kann, und
+   liest sie selbst; `.ics` meldet der iCal-Adapter an, der den Parser des
+   CalDAV-Adapters schon teilt.
+
+## Was gemessen ist und was nicht
+
+- iCloud verschickt selbst Einladungen, sobald ein Termin mit Teilnehmern und
+  dem Konto als Organisator ankommt; Aperio schreibt dort Teilnehmer daher nur
+  beim Benachrichtigen (gemessen, Entscheidungen 76a, 80a).
+- Eine von Apple importierte Einladung trägt `SCHEDULE-AGENT=CLIENT` am
+  Organisator und `NONE` an der eigenen Zeile; iCloud schickte dann weder die
+  Antwort auf eine Zusage noch die Absage beim Löschen (Live-Runde 6). Ob das
+  Anlegen selbst still bleibt, ist ungemessen; RFC 6638 §7.1 sagt ja.
+- Google hat `events.import`, das Organisator und Teilnehmer behält und nichts
+  verschickt — laut Dokumentation, ungemessen (kein Google-Konto).
+- Exchange legt über `CreateItem` keinen Termin mit fremdem Organisator an; ob
+  `MimeContent` mit dem iCal-Text es tut, zeigt I0.
+
+## Bauweise
+
+**Manifest.** Ein Adapter nennt seine Formate:
+
+```json
+"file_imports": [
+  {
+    "id": "ics",
+    "extensions": ["ics", "ical", "ifb"],
+    "mime_types": ["text/calendar"],
+    "yields": ["events"],
+    "name_key": "import.ics.name"
+  }
+]
+```
+
+Der Name kommt wie die übrigen Texte des Manifests aus `strings` (de, en).
+
+**Einstieg.** Ein optionaler C-ABI-Einstieg `aperio_plugin_import_file`, wie
+`discover` ohne Konto: Er bekommt das Format und den Inhalt und gibt die Teile
+als JSON zurück. Am Handy, wo alles statisch gelinkt ist, trägt ihn
+`StaticHooks`. Ein Plugin, das ihn nicht exportiert, meldet keine Formate an.
+
+**Ergebnis.** `cal_core::FileImport` (TS-Typen generiert): die gelesenen
+Termine — Titel, Beschreibung, Ort, Beginn und Ende, ganztägig, Wiederholung
+mit Ausnahmen und Zone, Erinnerungen, Teilnehmer, Organisator, UID — und was
+übersprungen wurde, benannt (Aufgaben, Notizen, Frei/Belegt, ein Teil, der
+sich nicht lesen ließ), nicht nur gezählt.
+
+**Host.** Die Registry sammelt die Formate der geladenen Plugins. Desktop und
+Handy fragen sie nach dem Dateifilter und reichen eine Datei an das Plugin,
+dessen Format sie trägt. Kein Adapter-Name im Host.
+
+**Doppelte.** `cal_core::Event` kennt keine UID. I4 gibt `Event` und
+`NewEvent` ein `ical_uid`: gelesen, wo der Anbieter sie kennt (CalDAV, Google
+`iCalUID`, Graph `iCalUId`, Exchange `UID`, lokal), geschrieben, wo er sie
+annimmt. Die Liste prüft das Ziel über den Zeitraum der Termine.
+
+## Schritte
+
+- **I0 Live-Test Exchange.** Eine fremde Einladung über `CreateItem` mit
+  `MimeContent` anlegen, `SendMeetingInvitations=SendToNone`: Bleibt der
+  Organisator, bleiben die Teilnehmer, geht eine Mail hinaus? Teilnehmer-
+  Adressen unter `.invalid`, damit jede verschickte Mail als Unzustellbar-
+  Meldung zurückkommt. Toni startet das Testprogramm.
+- **I1 Anmeldung.** Manifest-Feld, C-ABI-Einstieg, statischer Haken, Registry
+  im Host, Befehle beider Hosts (Formate, Datei lesen). Test mit einem
+  Test-Plugin.
+- **I2 ICS im iCal-Adapter.** Einzeltermine und Serien, geänderte Termine als
+  eigene Termine mit Lücke in der Serie, Zonen, Erinnerungen, Teilnehmer,
+  Organisator. Proben echter Dateien (Outlook-, Teams-, Google-, Apple-
+  Einladungen und -Exporte).
+- **I3 Desktop.** „Importieren …“ und Strg+O, Dateidialog mit dem Filter der
+  Registry, eine aufs Fenster gezogene Datei; ein Termin im Editor (der Tag
+  reist mit), mehrere als Liste.
+- **I4 UID.** `ical_uid` lesen und schreiben, Doppelte in Liste und Editor.
+- **I5 Handy.** „Termine importieren …“ in der Kalenderliste mit
+  Dokumentwähler; „Teilen“ und „Öffnen in“: iOS als
+  Dokumenttyp mit Rang `Alternate` (Aperio wird angeboten, nicht Standard),
+  Android mit Intent-Filtern `VIEW` und `SEND` für `text/calendar`.
+- **I6 Fremde Einladungen** je Anbieter, nach I0.
+- **I7 Aufgaben** aus VTODO, später.
