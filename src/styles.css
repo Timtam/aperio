@@ -2466,6 +2466,34 @@ button[aria-disabled='true'] {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* The appointments of an imported file (ImportDialog): a checkbox, the
+   appointment in words, its Edit button; an imported one says so instead. */
+.import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.import-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+}
+.import-list__row + .import-list__row {
+  border-top: 1px solid var(--color-border);
+}
+.import-list__row label,
+.import-list__done {
+  flex: 1 1 auto;
+}
+.import-list__done {
+  color: var(--color-text-muted, inherit);
+}
 .section-field__button--danger {
   color: var(--color-danger, #c0392b);
 }

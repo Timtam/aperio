@@ -30,6 +30,12 @@ Ein Bogen zwischen PR 7 (#128, pausiert) und PR 9. Er bringt Termine aus einer
    liest sie selbst; `.ics` meldet der iCal-Adapter an, der den Parser des
    CalDAV-Adapters schon teilt.
 
+8. **Reihenfolge** (Toni, 2026-10-26): erst der Desktop (I3) mit einer
+   vorläufigen Regel, dann I4, I6, dann das Handy. Bis I6 kommt eine
+   Einladung, die einen Organisator nennt, ohne Teilnehmer und Organisator
+   in den Editor, und der Editor sagt das; bis I4 werden Doppelte nicht
+   erkannt.
+
 ## Was gemessen ist und was nicht
 
 - iCloud verschickt selbst Einladungen, sobald ein Termin mit Teilnehmern und
@@ -127,9 +133,21 @@ annimmt. Die Liste prüft das Ziel über den Zeitraum der Termine.
     Notizen, Frei/Belegt und Unlesbares. Proben in
     `crates/adapter-ical/tests/fixtures/` (Outlook-Einladung, Teams-Serie,
     Google-Einladung, Apple-Export, Absage, Antwort).
-- **I3 Desktop.** „Importieren …“ und Strg+O, Dateidialog mit dem Filter der
-  Registry, eine aufs Fenster gezogene Datei; ein Termin im Editor (der Tag
-  reist mit), mehrere als Liste.
+- **I3 Desktop** (gebaut). „Importieren …“ in der Werkzeugleiste und Strg+O
+  öffnen den Dateidialog mit dem Filter der Registry (`useFileImport`); eine
+  aufs Fenster gezogene Datei kommt als HTML-Drop ohne Pfad und wird aus
+  ihren Bytes gelesen (`useFileDrop`, `read_import_content`). Ein Termin
+  öffnet den Editor (`importFrom`): Tag, Zeit, Ort, Beschreibung,
+  Erinnerungen, die Serie mit den Lücken und der Zone der Datei
+  (`preserveRecurrenceZone`), der Hinweis als erster Halt, der Titel „Termin
+  aus Datei“. Mehrere öffnen `ImportDialog`: angehakt alle, „Bearbeiten …“
+  öffnet einen im Editor, „N Termine importieren“ schreibt die angehakten
+  nacheinander in den gewählten Kalender, ohne zu benachrichtigen; was nicht
+  ankam, wird mit Titel und Grund genannt, was ankam, als „importiert“
+  markiert. Kein Termin, oder ein Fehler, ist ein Satz mit Schließen
+  (`importFailureSentence`, ein zu großer Datei am Marker
+  `import-too-large`). Die vorläufige Regel `importedForEditor` gilt in
+  Editor und Liste.
 - **I4 UID.** `ical_uid` lesen und schreiben, Doppelte in Liste und Editor.
 - **I5 Handy.** „Termine importieren …“ in der Kalenderliste mit
   Dokumentwähler; „Teilen“ und „Öffnen in“: iOS als

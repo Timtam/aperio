@@ -17,6 +17,7 @@ import { TaskView } from './components/views/TaskView';
 import { WeekView } from './components/views/WeekView';
 import { YearView } from './components/views/YearView';
 import { useDialogShortcuts } from './hooks/useDialogShortcuts';
+import { useFileDrop } from './hooks/useFileDrop';
 import { useRegionFocus } from './hooks/useRegionFocus';
 import { useSuppressBrowserDefaults } from './hooks/useSuppressBrowserDefaults';
 import { useStoredLanguage } from './intl/useStoredLanguage';
@@ -123,6 +124,7 @@ function Shell() {
   const { t } = useTranslation();
   useViewShortcuts();
   useDialogShortcuts();
+  useFileDrop();
   const { mode } = useDialogState();
   const { collapsed: sidebarCollapsed, toggle: toggleSidebar } =
     useSidebarCollapse();

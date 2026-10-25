@@ -382,6 +382,29 @@ resolving the copy is looked for and the group repairs itself silently. If
 nothing matching is there, nothing is changed: it may be a copy you deleted, and
 dropping it on suspicion is not Aperio's call.
 
+## Importing appointments from a file
+
+An appointment someone sent you as a `.ics` file — an invitation from Outlook,
+Teams or Google, an export from another calendar — comes into Aperio from the
+toolbar's **Import …** (or `Ctrl+O`), or by dropping the file onto the window.
+Aperio itself registers for no file type; it imports only while it runs.
+
+- **One appointment** opens the editor, filled in from the file: its day and
+  time, its place and description, its reminders, a series with the
+  occurrences it skips. The **Calendar** field is where it goes; nothing is
+  written until you press **Create**.
+- **Several** open a list. Each one can be opened in the editor, or every
+  checked one written to one calendar at once.
+- **What the file holds besides appointments** — tasks, notes, a
+  cancellation, an answer to an invitation — is named and left out.
+- **A changed occurrence of a series** becomes an appointment of its own, and
+  the series skips the slot it took.
+- **An invitation someone else organizes** comes, for now, without its
+  attendees and organizer, and the editor says so: the appointment becomes your
+  own. Keeping the invitation as it is, quietly, follows.
+
+Times keep their zone, including the Windows zone names Outlook writes.
+
 ## Time steps
 
 Under **Settings → General**, **Time steps** decides how far one press of the

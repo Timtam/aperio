@@ -20,6 +20,8 @@ import type {
   Account,
   CalendarEvent,
   Contact,
+  FileImport,
+  ImportedEvent,
   Section,
   Task,
   TaskCapabilities,
@@ -81,6 +83,15 @@ export type DialogMode =
        *  sets it only when its picker was left on something other than the
        *  default it showed (decision 160). */
       targetPinned?: boolean;
+      /** An appointment read from a file (DESIGN-file-import.md): the editor
+       *  creates it, its day and its series included. Create only. */
+      importFrom?: ImportedEvent | null;
+      /** What the import says beside it: what the file held that is not
+       *  taken over, an invitation set aside. */
+      importNote?: string | null;
+      /** Told once the imported appointment was created, so the list it came
+       *  from can mark it. */
+      onImported?: () => void;
     }
   | {
       // Outlook-style "this occurrence vs the whole series?" prompt shown
@@ -186,7 +197,13 @@ export type DialogMode =
    *  in the sidebar, Ctrl+D (decisions 227, 265) —, and the notice it turns
    *  into when the write failed (210). `id` tells one wait's frame from any
    *  other, so the wait only ever closes its own. */
-  | { kind: 'stepWrite'; id: number; notice: string | null };
+  | { kind: 'stepWrite'; id: number; notice: string | null }
+  /** A calendar file that was read for an import: the list of what it holds
+   *  when it holds more than one appointment, or what went wrong. */
+  | { kind: 'fileImport'; fileName: string; outcome: FileImportOutcome };
+
+/** What reading a file for an import came to. */
+export type FileImportOutcome = { read: FileImport } | { failed: unknown };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -211,6 +228,13 @@ export interface OpenEventOptions {
    *  replace it with the older appointment's. The quick-add sets it only when
    *  its own picker was moved off the default. */
   targetPinned?: boolean;
+  /** An appointment read from a file, which the editor creates as it stands
+   *  — its day and series included (DESIGN-file-import.md). */
+  importFrom?: ImportedEvent | null;
+  /** The import's note beside it. */
+  importNote?: string | null;
+  /** Told once the imported appointment was created. */
+  onImported?: () => void;
   /** Replace the current top dialog frame instead of stacking on top — used by
    *  the quick-add's "weitere Details" hand-off so the editor inherits the
    *  quick-add's trigger and focus returns to the original opener (the
@@ -294,6 +318,9 @@ export interface DialogStateValue {
   openAccounts: () => void;
   openSearch: () => void;
   openReminders: () => void;
+  /** Show what reading a calendar file came to: the list of its
+   *  appointments, or the failure. */
+  openFileImport: (fileName: string, outcome: FileImportOutcome) => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
   /** Open the event-group dialog for one event. */
   openEventGroup: (event: CalendarEvent) => void;
@@ -506,6 +533,9 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         defaultTitle: options?.defaultTitle,
         prefillFrom: options?.prefillFrom,
         targetPinned: options?.targetPinned,
+        importFrom: options?.importFrom,
+        importNote: options?.importNote,
+        onImported: options?.onImported,
       };
       // The quick-add "weitere Details" hand-off swaps its own frame for the
       // editor (no new trigger capture, no close()) so the editor inherits the
@@ -658,6 +688,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [openSettings],
   );
   const openSearch = useCallback(() => push({ kind: 'search' }), [push]);
+  const openFileImport = useCallback(
+    (fileName: string, outcome: FileImportOutcome) =>
+      push({ kind: 'fileImport', fileName, outcome }),
+    [push],
+  );
   const openReminders = useCallback(
     () => push({ kind: 'reminders' }),
     [push],
@@ -843,6 +878,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openAccounts,
       openSearch,
       openReminders,
+      openFileImport,
       openMoveCopy,
       openEventGroup,
       openEventGroupCarry,
@@ -875,6 +911,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openAccounts,
       openSearch,
       openReminders,
+      openFileImport,
       openMoveCopy,
       openEventGroup,
       openEventGroupCarry,

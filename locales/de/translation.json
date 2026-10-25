@@ -2619,5 +2619,66 @@
       "month": "monatlich",
       "year": "jährlich"
     }
+  },
+  "fileImport": {
+    "toolbarButton": "Importieren …",
+    "dialogTitle": "Termine importieren",
+    "editorTitle": "Termin aus Datei",
+    "filterAll": "Kalenderdateien",
+    "failed": "„{{file}}“ ließ sich nicht importieren: {{reason}}",
+    "reason": {
+      "unsupported": "Aperio kann Dateien dieser Art nicht importieren.",
+      "unreadable": "Die Datei ist keine Kalenderdatei oder beschädigt. Einzelheiten stehen im Protokoll.",
+      "tooLarge": "Die Datei ist größer als 25 MB.",
+      "notOpened": "Die Datei ließ sich nicht öffnen. Einzelheiten stehen im Protokoll."
+    },
+    "nothing": "In „{{file}}“ steht kein Termin, der sich importieren lässt.",
+    "invitationSetAside": "Teilnehmer und Organisator dieser Einladung übernimmt Aperio noch nicht; der Termin wird dein eigener, ohne Teilnehmer.",
+    "invitationsSetAside": "Teilnehmer und Organisator von Einladungen übernimmt Aperio noch nicht; solche Termine werden deine eigenen, ohne Teilnehmer.",
+    "skipped": {
+      "sentence": "Nicht übernommen: {{parts}}.",
+      "task": {
+        "titled": "die Aufgabe „{{title}}“",
+        "untitled": "eine Aufgabe ohne Titel"
+      },
+      "journal": {
+        "titled": "die Notiz „{{title}}“",
+        "untitled": "eine Notiz ohne Titel"
+      },
+      "free_busy": {
+        "titled": "die Frei/Belegt-Zeiten „{{title}}“",
+        "untitled": "Frei/Belegt-Zeiten"
+      },
+      "cancelled": {
+        "titled": "die Absage „{{title}}“",
+        "untitled": "eine Absage"
+      },
+      "reply": {
+        "titled": "die Antwort „{{title}}“",
+        "untitled": "eine Antwort auf eine Einladung"
+      },
+      "unreadable": {
+        "titled": "der unlesbare Teil „{{title}}“",
+        "untitled": "ein unlesbarer Teil"
+      }
+    },
+    "list": {
+      "summary": "In „{{file}}“ stehen {{count}} Termine.",
+      "calendar": "In Kalender",
+      "listLabel": "Termine aus der Datei",
+      "series": "Serie",
+      "allDay": "{{date}}, ganztägig",
+      "timed": "{{date}}, {{time}}",
+      "edit": "Bearbeiten …",
+      "editLabel": "„{{title}}“ im Editor öffnen",
+      "imported": "importiert",
+      "importChosen_one": "{{count}} Termin importieren",
+      "importChosen_other": "{{count}} Termine importieren",
+      "noneChosen": "Kein Termin ausgewählt.",
+      "done_one": "{{count}} Termin in „{{calendar}}“ importiert.",
+      "done_other": "{{count}} Termine in „{{calendar}}“ importiert.",
+      "partly": "{{done}} von {{count}} Terminen in „{{calendar}}“ importiert. Nicht importiert: {{titles}}. {{reason}}",
+      "quoted": "„{{title}}“"
+    }
   }
 }

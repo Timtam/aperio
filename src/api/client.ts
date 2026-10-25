@@ -29,7 +29,9 @@ import type {
   DayLog,
   DayMarker,
   FailedPluginInfo,
+  FileImport,
   FreeBusy,
+  ImportFormat,
   MemberRight,
   NewContact,
   NewEvent,
@@ -63,6 +65,23 @@ export function isCommandError(value: unknown): value is CommandError {
 export async function openExternalUrl(url: string): Promise<void> {
   await invoke('open_external_url', { url });
 }
+
+// ── File import (DESIGN-file-import.md) ───────────────────────────────────
+
+/** The formats the enabled plugins read, named in the UI language: the open
+ *  dialog's filter. */
+export const fileImportFormats = () =>
+  invoke<ImportFormat[]>('file_import_formats', { lang: i18n.language });
+
+/** Read the file at `path` through the plugin that reads its format. Nothing
+ *  is written. */
+export const readImportFile = (path: string) =>
+  invoke<FileImport>('read_import_file', { path });
+
+/** Read a file dropped on the window, which brings its name and bytes but no
+ *  path. */
+export const readImportContent = (fileName: string, contentBase64: string) =>
+  invoke<FileImport>('read_import_content', { fileName, content: contentBase64 });
 
 // ── Calendars ──────────────────────────────────────────────────────────────
 

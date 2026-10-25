@@ -27,6 +27,7 @@ Tastaturkürzel**, wo du jedes Kürzel ändern kannst.
 | Neuer Termin (volles Formular) | `Strg+Umschalt+N` |
 | Aufgabe schnell anlegen | `Alt+N` |
 | Neue Aufgabe (volles Formular) | `Alt+Umschalt+N` |
+| Kalenderdatei importieren | `Strg+O` |
 | Eintrag bearbeiten | `Eingabe` |
 | Aufgabe abhaken / wieder öffnen | `Leertaste` |
 | Eintrag löschen | `Entf` |

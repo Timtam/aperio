@@ -417,6 +417,30 @@ die Gruppe repariert sich still. Wird nichts Passendes gefunden, bleibt alles,
 wie es ist: Es könnte eine Kopie sein, die Sie gelöscht haben, und das auf
 Verdacht zu entscheiden steht Aperio nicht zu.
 
+## Termine aus einer Datei importieren
+
+Ein Termin, den dir jemand als `.ics`-Datei geschickt hat — eine Einladung aus
+Outlook, Teams oder Google, ein Export aus einem anderen Kalender —, kommt über
+**Importieren …** in der Werkzeugleiste (oder `Strg+O`) nach Aperio, oder indem
+du die Datei auf das Fenster ziehst. Aperio meldet sich selbst für keinen
+Dateityp an; es importiert nur, solange es läuft.
+
+- **Ein Termin** öffnet den Editor, ausgefüllt aus der Datei: Tag und Uhrzeit,
+  Ort und Beschreibung, Erinnerungen, eine Serie mit den Terminen, die sie
+  auslässt. Das Feld **Kalender** sagt, wohin er geht; geschrieben wird erst
+  mit **Anlegen**.
+- **Mehrere** öffnen eine Liste. Jeder lässt sich im Editor öffnen, oder alle
+  angehakten auf einmal in einen Kalender schreiben.
+- **Was die Datei außer Terminen enthält** — Aufgaben, Notizen, eine Absage,
+  eine Antwort auf eine Einladung —, wird genannt und nicht übernommen.
+- **Ein geänderter Termin einer Serie** wird ein eigener Termin, und die Serie
+  lässt seinen Platz aus.
+- **Eine Einladung, die jemand anderes organisiert,** kommt vorerst ohne
+  Teilnehmer und Organisator, und der Editor sagt das: Der Termin wird dein
+  eigener. Die Einladung still so zu behalten, wie sie ist, folgt.
+
+Zeiten behalten ihre Zone, auch die Windows-Zonennamen, die Outlook schreibt.
+
 ## Zeitschritte
 
 Unter **Einstellungen → Allgemein** legt **Zeitschritte** fest, wie weit ein

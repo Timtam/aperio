@@ -42,7 +42,7 @@ import {
   setEventLocalReminders,
   updateEvent as apiUpdateEvent,
 } from '../api/client';
-import type { CalendarEvent, FreeBusy, FreeBusySlot } from '../api/types';
+import type { CalendarEvent, FreeBusy, FreeBusySlot, ImportedEvent } from '../api/types';
 import {
   isProviderOverride,
   isSeriesOccurrence,
@@ -220,6 +220,15 @@ export interface EventDialogProps {
    *  leave it alone. The quick-add sets it only when its picker was left on
    *  something other than the default it showed (decision 160). */
   targetPinned?: boolean;
+  /** An appointment read from a file (DESIGN-file-import.md): the editor
+   *  creates it as it stands, its day, its series and the series' gaps
+   *  included. The calendar is the editor's own default, as for any new
+   *  appointment: the picker is where the import goes. Create only. */
+  importFrom?: ImportedEvent | null;
+  /** What the import says beside it, as the dialog's first stop. */
+  importNote?: string | null;
+  /** Told once the imported appointment was created. */
+  onImported?: () => void;
 }
 
 interface FormState {
@@ -307,6 +316,9 @@ export function EventDialog({
   initialScope,
   prefillFrom,
   targetPinned,
+  importFrom,
+  importNote,
+  onImported,
 }: EventDialogProps) {
   const { t, i18n } = useTranslation();
   const fmt = useDateFormat();
@@ -383,8 +395,10 @@ export function EventDialog({
     (event.reminders ?? []).length === 0 &&
     attachedDefaultsFor(event.calendar_id).length > 0;
 
+  // Read once: the editor is not reopened on another file without closing.
+  const imported = !isEdit ? (importFrom ?? null) : null;
   const initialState = useMemo<FormState>(() => {
-    const base = buildInitialState(
+    const fresh = buildInitialState(
       event,
       defaultCalendarId,
       defaultDate,
@@ -393,6 +407,8 @@ export function EventDialog({
       calendars,
       selectedCalendarIds,
     );
+    // An appointment from a file is the form, all but the calendar.
+    const base = imported ? formFromImport(imported, fresh.calendarId) : fresh;
     // The event's private reminders sit in the same list, marked as the kind
     // that never reaches the provider. They are the user's decision about this
     // appointment just as much — the difference is only who else gets told.
@@ -417,6 +433,7 @@ export function EventDialog({
     return { ...base, reminders: [...base.reminders, ...privateRows] };
   }, [
     event,
+    imported,
     defaultCalendarId,
     defaultDate,
     defaultTime,
@@ -1264,9 +1281,13 @@ export function EventDialog({
       // series (an expanded occurrence, or a provider override that carries no
       // rule of its own) is never a new series: saved as the whole series it
       // lands on the master, which may recur without a zone on purpose.
+      // An imported series keeps the file's gaps and zone, as a series edited
+      // here keeps its own.
       const recurrence = editedRecurrence(
         form.rrule,
-        isOccurrence ? (event?.recurrence ?? { exceptions: [] }) : event?.recurrence,
+        isOccurrence
+          ? (event?.recurrence ?? { exceptions: [] })
+          : (event?.recurrence ?? imported?.recurrence),
         form.allDay,
       );
 
@@ -2104,7 +2125,9 @@ export function EventDialog({
               remindersTouchedRef.current,
               remindersForWire,
             ),
-          });
+            // An imported series keeps the file's zone, or none, as a copy
+            // does (decision 262).
+          }, { preserveRecurrenceZone: imported != null });
           await savePrivate(created);
           if (!storesColorNatively) {
             await setEventColor(
@@ -2113,6 +2136,7 @@ export function EventDialog({
               form.colorLabel,
             );
           }
+          onImported?.();
           // Remember the calendar for the next new-event open. Only
           // for *creates*: edits shouldn't bias future picks, since
           // the user might have only changed a recurring event in
@@ -2163,6 +2187,8 @@ export function EventDialog({
       submitting,
       isEdit,
       event,
+      imported,
+      onImported,
       locked,
       isOccurrence,
       editScope,
@@ -2417,7 +2443,9 @@ export function EventDialog({
   const chosenScope =
     isEdit && initialScope != null ? t(SCOPE_LABEL_KEY[editScope]) : null;
   const title = !isEdit
-    ? t('dialogs.event.newTitle')
+    ? imported
+      ? t('fileImport.editorTitle')
+      : t('dialogs.event.newTitle')
     : initialScope != null
       ? t(SCOPE_TITLE_KEY[editScope])
       : t('dialogs.event.editTitle');
@@ -2516,6 +2544,11 @@ export function EventDialog({
           <FocusableNote className="form__hint form__hint--invitation">
             {t('dialogs.event.invitation.hint')}
           </FocusableNote>
+        )}
+        {/* What the import left out, before the first field and the first
+            stop in the dialog, so it is heard on open. */}
+        {imported && importNote && (
+          <FocusableNote className="form__hint">{importNote}</FocusableNote>
         )}
         {isEdit && event && (
           <EventRsvp
@@ -3183,6 +3216,32 @@ export function EventDialog({
     )}
     </>
   );
+}
+
+/**
+ * The form an appointment read from a file fills (DESIGN-file-import.md),
+ * in `calendarId`: its day and time, its series' rule (the gaps and zone
+ * travel with `importFrom` to the save), its alarms as the user's own
+ * choice, and its invitees.
+ */
+function formFromImport(imported: ImportedEvent, calendarId: string): FormState {
+  const start = new Date(imported.start);
+  const end = new Date(imported.end);
+  return {
+    title: imported.title,
+    calendarId,
+    startDate: dateInput(start),
+    startTime: timeInput(start),
+    endDate: imported.all_day ? allDayFormEndDate(start, end) : dateInput(end),
+    endTime: timeInput(end),
+    allDay: imported.all_day,
+    location: imported.location ?? '',
+    description: imported.description ?? '',
+    rrule: imported.recurrence?.rrule ?? null,
+    colorLabel: null,
+    reminders: imported.reminders.map((r) => ({ ...r, attach: true })),
+    attendees: imported.attendees,
+  };
 }
 
 function buildInitialState(

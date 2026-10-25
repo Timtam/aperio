@@ -15,6 +15,7 @@ vollständige Liste findest du in der
 | Neuer Termin (volles Formular) | `Strg+Umschalt+N` |
 | Aufgabe schnell anlegen | `Alt+N` |
 | Neue Aufgabe (volles Formular) | `Alt+Umschalt+N` |
+| Kalenderdatei importieren | `Strg+O` |
 | Eintrag öffnen / bearbeiten | `Eingabe` |
 | Aufgabe abhaken | `Leertaste` |
 | Eintrag löschen | `Entf` |

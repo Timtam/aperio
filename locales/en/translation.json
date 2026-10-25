@@ -2619,5 +2619,66 @@
       "month": "monthly",
       "year": "yearly"
     }
+  },
+  "fileImport": {
+    "toolbarButton": "Import …",
+    "dialogTitle": "Import appointments",
+    "editorTitle": "Appointment from a file",
+    "filterAll": "Calendar files",
+    "failed": "“{{file}}” could not be imported: {{reason}}",
+    "reason": {
+      "unsupported": "Aperio cannot import files of this kind.",
+      "unreadable": "The file is not a calendar file, or it is damaged. The log has the details.",
+      "tooLarge": "The file is larger than 25 MB.",
+      "notOpened": "The file could not be opened. The log has the details."
+    },
+    "nothing": "“{{file}}” holds no appointment that can be imported.",
+    "invitationSetAside": "Aperio does not take over this invitation's attendees and organizer yet; the appointment becomes your own, without attendees.",
+    "invitationsSetAside": "Aperio does not take over the attendees and organizer of invitations yet; such appointments become your own, without attendees.",
+    "skipped": {
+      "sentence": "Not taken over: {{parts}}.",
+      "task": {
+        "titled": "the task “{{title}}”",
+        "untitled": "a task without a title"
+      },
+      "journal": {
+        "titled": "the note “{{title}}”",
+        "untitled": "a note without a title"
+      },
+      "free_busy": {
+        "titled": "the busy times “{{title}}”",
+        "untitled": "busy times"
+      },
+      "cancelled": {
+        "titled": "the cancellation “{{title}}”",
+        "untitled": "a cancellation"
+      },
+      "reply": {
+        "titled": "the reply “{{title}}”",
+        "untitled": "a reply to an invitation"
+      },
+      "unreadable": {
+        "titled": "the unreadable part “{{title}}”",
+        "untitled": "an unreadable part"
+      }
+    },
+    "list": {
+      "summary": "“{{file}}” holds {{count}} appointments.",
+      "calendar": "Into calendar",
+      "listLabel": "Appointments from the file",
+      "series": "Series",
+      "allDay": "{{date}}, all day",
+      "timed": "{{date}}, {{time}}",
+      "edit": "Edit …",
+      "editLabel": "Open “{{title}}” in the editor",
+      "imported": "imported",
+      "importChosen_one": "Import {{count}} appointment",
+      "importChosen_other": "Import {{count}} appointments",
+      "noneChosen": "No appointment chosen.",
+      "done_one": "{{count}} appointment imported into “{{calendar}}”.",
+      "done_other": "{{count}} appointments imported into “{{calendar}}”.",
+      "partly": "{{done}} of {{count}} appointments imported into “{{calendar}}”. Not imported: {{titles}}. {{reason}}",
+      "quoted": "“{{title}}”"
+    }
   }
 }

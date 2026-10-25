@@ -18,6 +18,10 @@ use serde::Serialize;
 /// few megabytes; anything far beyond that is not a calendar file.
 pub const MAX_IMPORT_BYTES: u64 = 25 * 1024 * 1024;
 
+/// The token a too large file's error starts with, so a surface says it in
+/// its own words (`shared/fileImport.ts` reads it).
+pub const TOO_LARGE: &str = "import-too-large";
+
 /// One format a plugin reads, as the open dialog and the share sheet offer it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
@@ -92,13 +96,42 @@ pub async fn import_file(manager: &PluginManager, path: &Path) -> Result<FileImp
         .len();
     if size > MAX_IMPORT_BYTES {
         return Err(Error::InvalidInput(format!(
-            "{file_name} is {size} bytes, more than an import reads"
+            "{TOO_LARGE}: {file_name} is {size} bytes, more than an import reads"
         )));
     }
     let content = std::fs::read(path)
         .map_err(|err| Error::Internal(format!("could not read {file_name}: {err}")))?;
+    read_through(manager, &format, &file_name, &content).await
+}
+
+/// Read a file the surface already holds — one dropped on the desktop window,
+/// which comes without a path — through the plugin whose format names the
+/// extension of `file_name`. Errors as [`import_file`] has them.
+pub async fn import_content(
+    manager: &PluginManager,
+    file_name: &str,
+    content: &[u8],
+) -> Result<FileImport, Error> {
+    let format = format_for(manager, file_name)
+        .ok_or_else(|| Error::Unsupported(format!("no import format reads {file_name}")))?;
+    if content.len() as u64 > MAX_IMPORT_BYTES {
+        return Err(Error::InvalidInput(format!(
+            "{TOO_LARGE}: {file_name} is {} bytes, more than an import reads",
+            content.len()
+        )));
+    }
+    read_through(manager, &format, file_name, content).await
+}
+
+/// Hand the bytes to the format's plugin and read its answer.
+async fn read_through(
+    manager: &PluginManager,
+    format: &ImportFormat,
+    file_name: &str,
+    content: &[u8],
+) -> Result<FileImport, Error> {
     let answer = manager
-        .import_file(&format.plugin_id, &format.format_id, &file_name, &content)
+        .import_file(&format.plugin_id, &format.format_id, file_name, content)
         .await
         .map_err(|err| match err {
             ImportFileError::PluginMissing(_) | ImportFileError::Unsupported { .. } => {
@@ -257,7 +290,7 @@ mod tests {
         drop(handle);
         assert!(matches!(
             import_file(&manager, &large).await,
-            Err(Error::InvalidInput(_))
+            Err(Error::InvalidInput(message)) if message.starts_with(TOO_LARGE)
         ));
 
         // A file that is gone.
@@ -299,5 +332,22 @@ mod tests {
         assert_eq!(import.events.len(), 2);
         assert_eq!(import.events[0].title, "Jour fixe");
         assert_eq!(import.events[1].title, "Jour fixe (verschoben)");
+
+        // The same bytes handed over without a path, as a drop on the window
+        // brings them.
+        let content = std::fs::read(&file).unwrap();
+        let dropped = import_content(&manager, "Serie.ICS", &content)
+            .await
+            .unwrap();
+        assert_eq!(dropped, import);
+        assert!(matches!(
+            import_content(&manager, "Serie.txt", &content).await,
+            Err(Error::Unsupported(_))
+        ));
+        let large = vec![b' '; MAX_IMPORT_BYTES as usize + 1];
+        assert!(matches!(
+            import_content(&manager, "riesig.ics", &large).await,
+            Err(Error::InvalidInput(message)) if message.starts_with(TOO_LARGE)
+        ));
     }
 }

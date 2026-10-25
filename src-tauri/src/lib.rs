@@ -931,6 +931,7 @@ pub fn run() {
             // read, and a file read through its plugin.
             commands::file_import_formats,
             commands::read_import_file,
+            commands::read_import_content,
             commands::inspect_plugin_archive,
             commands::install_plugin_archive,
             commands::uninstall_plugin,

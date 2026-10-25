@@ -5,6 +5,7 @@ import { DayStartReviewDialog } from './DayStartReviewDialog';
 import { EditEventScopeDialog } from './EditEventScopeDialog';
 import { EventDialog } from './EventDialog';
 import { FirstLaunchWizardDialog } from './FirstLaunchWizardDialog';
+import { ImportDialog } from './ImportDialog';
 import { EventGroupCarryDialog } from './EventGroupCarryDialog';
 import { EventGroupDialog } from './EventGroupDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
@@ -46,6 +47,18 @@ export function DialogHost() {
           initialScope={mode.initialScope}
           prefillFrom={mode.prefillFrom}
           targetPinned={mode.targetPinned}
+          importFrom={mode.importFrom}
+          importNote={mode.importNote}
+          onImported={mode.onImported}
+        />
+      );
+    case 'fileImport':
+      return (
+        <ImportDialog
+          isOpen
+          onClose={close}
+          fileName={mode.fileName}
+          outcome={mode.outcome}
         />
       );
     case 'eventEditScope':
