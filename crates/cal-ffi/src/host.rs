@@ -8179,6 +8179,33 @@ impl Host {
         })
     }
 
+    // ── File import (DESIGN-file-import.md) ─────────────────────────────────
+
+    /// The formats the enabled plugins read, named in `lang`, as JSON
+    /// (`host_core::file_import::ImportFormat` rows): the document picker's
+    /// filter. Mirrors the desktop `file_import_formats` command.
+    pub fn file_import_formats_json(&self, lang: String) -> Result<String, StoreError> {
+        to_json(&host_core::file_import::import_formats(
+            &self.plugin_manager,
+            &lang,
+        ))
+    }
+
+    /// Read the file at `path` — a filesystem path: the document picker's
+    /// copy, or a shared file copied into the app — through the plugin that
+    /// reads its format, as a JSON `cal_core::FileImport`. Nothing is written.
+    /// Mirrors the desktop `read_import_file` command.
+    pub fn read_import_file_json(&self, path: String) -> Result<String, StoreError> {
+        let import = self
+            .runtime
+            .block_on(host_core::file_import::import_file(
+                &self.plugin_manager,
+                std::path::Path::new(&path),
+            ))
+            .map_err(map_store_err)?;
+        to_json(&import)
+    }
+
     // ── Schema-driven accounts ───────────────────────────────────────────────
     //
     // The generic path: an adapter publishes an account schema in its

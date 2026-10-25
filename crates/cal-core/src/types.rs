@@ -354,6 +354,7 @@ fn is_false(b: &bool) -> bool {
 /// Stored as a string so adapters can pass it through verbatim; evaluation
 /// happens centrally in the backend with a dedicated crate (Phase 4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct EventRecurrence {
     pub rrule: String,
     /// Exception dates that should be skipped.
@@ -367,6 +368,7 @@ pub struct EventRecurrence {
     /// UTC too — a UTC name, or one tzdata does not know; see
     /// [`crate::series_clock_zone`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
     pub tzid: Option<String>,
 }
 

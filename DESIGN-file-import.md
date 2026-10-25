@@ -102,13 +102,26 @@ annimmt. Die Liste prüft das Ziel über den Zeitraum der Termine.
   Organisator, bleiben die Teilnehmer, geht eine Mail hinaus? Teilnehmer-
   Adressen unter `.invalid`, damit jede verschickte Mail als Unzustellbar-
   Meldung zurückkommt. Toni startet das Testprogramm.
-- **I1 Anmeldung.** Manifest-Feld, C-ABI-Einstieg, statischer Haken, Registry
-  im Host, Befehle beider Hosts (Formate, Datei lesen). Test mit einem
-  Test-Plugin.
-- **I2 ICS im iCal-Adapter.** Einzeltermine und Serien, geänderte Termine als
-  eigene Termine mit Lücke in der Serie, Zonen, Erinnerungen, Teilnehmer,
-  Organisator. Proben echter Dateien (Outlook-, Teams-, Google-, Apple-
-  Einladungen und -Exporte).
+- **I1 Anmeldung** (gebaut). `PluginManifest::file_imports`
+  (`FileImportFormat`, beim Laden geprüft), der Einstieg
+  `aperio_plugin_import_file` (`ImportFileFn`, `StaticHooks::import_file_fn`,
+  `PluginManager::import_file`), im SDK `declare_import_file!` und
+  `import_file: yes`, statisch `register!(crate, import_file)`;
+  `host_core::file_import` (`import_formats`, `format_for`, `import_file`,
+  höchstens 25 MB) und die Befehle beider Hosts (`file_import_formats`,
+  `read_import_file`; am Handy `fileImportFormatsJson`,
+  `readImportFileJson`). Die Typen `FileImport`, `ImportedEvent`,
+  `SkippedPart`, `ImportFormat` kommen generiert nach TS.
+- **I2 ICS im iCal-Adapter**, in drei Teilen:
+  - **I2a** Die CLDR-Tabelle Windows → tzdata zieht aus dem Exchange-Adapter
+    in den Kern; Exchange liest sie von dort.
+  - **I2b** Der iCal-Leser (auch CalDAV) löst eine Zone wie Outlooks „W.
+    Europe Standard Time“ über die Tabelle auf und, wo sie fehlt, über die
+    VTIMEZONE der Datei. Bisher las er solche Zeiten als UTC.
+  - **I2c** Der Import selbst: Einzeltermine und Serien, geänderte Termine
+    als eigene Termine mit Lücke in der Serie, abgesagte übersprungen,
+    Erinnerungen, Teilnehmer, Organisator. Proben echter Dateien (Outlook-,
+    Teams-, Google-, Apple-Einladungen und -Exporte).
 - **I3 Desktop.** „Importieren …“ und Strg+O, Dateidialog mit dem Filter der
   Registry, eine aufs Fenster gezogene Datei; ein Termin im Editor (der Tag
   reist mit), mehrere als Liste.

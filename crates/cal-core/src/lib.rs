@@ -21,6 +21,7 @@ pub mod event_group;
 pub mod event_group_fold;
 pub mod event_local_reminders;
 pub mod extras;
+pub mod file_import;
 pub mod group_carry;
 pub mod group_suggestion;
 pub mod invitation;
@@ -116,6 +117,7 @@ pub use extras::{
     apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
     AperioExtras,
 };
+pub use file_import::{FileImport, ImportedEvent, SkippedKind, SkippedPart};
 pub use group_carry::{
     carry_onto, carry_onto_json, future_carry_fields, future_carry_fields_json,
     occurrence_carry_fields, occurrence_carry_fields_json, plan_carry, plan_carry_json, CarryField,

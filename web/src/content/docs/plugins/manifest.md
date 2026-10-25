@@ -52,6 +52,7 @@ reads it to discover the plugin before loading any code.
 | `adopts_adapter_kinds` | string[] | — | Kinds written by an adapter this plugin has absorbed, so the rows keep resolving here. Resolution only — never offered as its own entry. See below. |
 | `kind_names` | object | — | What to call each kind you claim or adopt, keyed by the kind. Without it your accounts are labelled with your plugin's `name` — which is wrong the moment you serve more than one kind. See below. |
 | `account` | object | — | What the plugin needs in order to have an account: the fields to ask for, which are secrets, and whether it signs in via OAuth. See below. |
+| `file_imports` | object[] | — | The files your plugin reads for an import: a format id, its extensions and media types, and what it yields. You read the file yourself through `aperio_plugin_import_file`. See below. |
 
 ## Capability detail blocks
 
@@ -142,6 +143,45 @@ name dot acme", once per account, with nothing on screen looking wrong.
 If you leave `kind_names` out, your accounts fall back to the plugin's own
 `name`. That is survivable for a plugin serving one kind and wrong for one
 serving two — both rows get the same label.
+
+## `file_imports` — files your plugin reads for an import
+
+Aperio imports files (a `.ics` invitation, a calendar export) without parsing
+any format itself. A plugin that can read one declares it here and answers the
+optional export `aperio_plugin_import_file`, which needs no account: the file
+is all there is.
+
+```json
+"file_imports": [
+  {
+    "id": "ics",
+    "name": "iCalendar file",
+    "name_key": "import.ics.name",
+    "extensions": ["ics", "ical"],
+    "mime_types": ["text/calendar"],
+    "yields": ["events"]
+  }
+]
+```
+
+- **`id`** is yours, stable within the plugin; the host hands it back on the
+  call, so one plugin can read several formats.
+- **`name`** is what the open dialog's filter says, verbatim or through
+  `name_key` into your `strings`.
+- **`extensions`** are lower case and without the dot. The host routes a file
+  by its extension; if two plugins claim one, the first in load order reads it.
+- **`mime_types`** are the names a phone's share sheet gives the file.
+- **`yields`** is what the file turns into: `"events"` today.
+
+The call gets `{"format": "<id>", "file_name": "…", "content": "<base64>"}` and
+answers a JSON `cal_core::FileImport`: the events read, and every part it left
+out, named (a task, a note, a part it could not read). A file you cannot read
+answers `PLUGIN_CALL_ERR_INVALID` with your own sentence; the host shows it.
+
+A manifest that declares formats without the export offers none of them, and
+the host logs a warning at load: a file type in the open dialog that fails on
+every file is worse than none. The Rust SDK's `declare_import_file!` writes the
+export; see [the Rust SDK](/plugins/rust-sdk/#reading-files-for-an-import).
 
 ## `single_instance` — one account per database
 

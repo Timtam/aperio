@@ -927,6 +927,10 @@ pub fn run() {
             // matching accounts.
             commands::list_plugins,
             commands::set_plugin_enabled,
+            // File import (DESIGN-file-import.md): the formats the plugins
+            // read, and a file read through its plugin.
+            commands::file_import_formats,
+            commands::read_import_file,
             commands::inspect_plugin_archive,
             commands::install_plugin_archive,
             commands::uninstall_plugin,

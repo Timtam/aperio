@@ -123,6 +123,31 @@ plugin_sdk::declare_lifecycle! {
 }
 ```
 
+### Reading files for an import
+
+A plugin that declares [`file_imports`](/plugins/manifest/#file_imports--files-your-plugin-reads-for-an-import)
+reads the file in a plain function and lets the SDK write the export:
+
+```rust
+use plugin_sdk::cal_core::FileImport;
+use plugin_sdk::ImportRequest;
+
+fn import_file(request: ImportRequest) -> Result<FileImport, String> {
+    // `request.format` is one of your manifest's ids, `request.content` the
+    // file's bytes, `request.file_name` its name (never a path).
+    parse(&request.content).map_err(|err| format!("not a calendar file: {err}"))
+}
+
+plugin_sdk::declare_import_file! {
+    handler: import_file,
+}
+```
+
+It is synchronous: no account, no network, only the file. The `Err` string is
+what the person reads, so make it a sentence. The companion `-cdylib` crate
+opts in with `import_file: yes` in `declare_cdylib_exports!`, and a statically
+linked build registers the hook with `register!(your_crate, import_file)`.
+
 ## What you get for free
 
 - **One dependency:** `plugin-sdk` re-exports `cal_core`, `sync_core`,
