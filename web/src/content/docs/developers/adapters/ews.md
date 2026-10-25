@@ -225,12 +225,14 @@ The endpoint is discovered or user-supplied.
 EWS names a recurring series' zone by a **Windows id** (`W. Europe Standard
 Time`); the rest of Aperio uses tzdata names. The translation lives in
 `windows_tz.rs`, over a table generated from the Unicode CLDR
-`windowsZones.xml`:
+`windowsZones.xml` that the core keeps (`cal_core::windows_zone`, shared with
+the iCalendar reader):
 
-- **The data is pinned.** `crates/adapter-ews/cldr/` holds the XML, its
+- **The data is pinned.** `crates/cal-core/cldr/` holds the XML, its
   Unicode License V3 and `SOURCE` (release tag, publication date, URLs,
   sha256). `cargo xtask windows-zones` generates
-  `src/windows_tz/windows_zones.rs` from it; CI runs it with `--check`.
+  `crates/cal-core/src/windows_zone/table.rs` from it; CI runs it with
+  `--check`.
 - **Reading.** A series created without a zone comes back with the start zone
   `Greenwich Standard Time` and the end zone `tzone://Microsoft/Utc`; that end
   zone means no zone. Otherwise the start zone's id reads as the zone of its

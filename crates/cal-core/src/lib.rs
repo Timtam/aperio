@@ -71,6 +71,7 @@ pub mod task_priority;
 pub mod task_settings;
 pub mod task_status;
 pub mod types;
+pub mod windows_zone;
 pub mod write_leftover;
 pub mod write_refusal;
 // The names and the search are in every build; the offsets are behind the

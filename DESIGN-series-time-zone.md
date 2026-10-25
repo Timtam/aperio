@@ -100,8 +100,9 @@ keinen, dort ist die Wahl Tonis Sache.
 - **39 — der Testserver** ist ein eigener Exchange-Server (on-premises). Die
   Abschaltung von EWS in Exchange Online ab Oktober 2026 betrifft ihn nicht.
 - **40a — Lizenzhinweis bei den Daten.** Die CLDR-Datei liegt mit ihrer
-  Unicode-Lizenz V3 und einer Herkunftsdatei in `crates/adapter-ews/cldr/`, und
-  der Kopf der erzeugten Tabelle nennt sie. Eine Seite mit Open-Source-Hinweisen
+  Unicode-Lizenz V3 und einer Herkunftsdatei in `crates/cal-core/cldr/` (bis
+  zum Datei-Import in `crates/adapter-ews/cldr/`), und der Kopf der erzeugten
+  Tabelle nennt sie. Eine Seite mit Open-Source-Hinweisen
   in beiden Apps ist eine eigene Aufgabe.
 - **41a — der Server wird gefragt.** Ein Exchange-Server lehnt einen
   Windows-Namen, den er nicht kennt, mit `ErrorTimeZone` ab, und das ganze
@@ -943,7 +944,7 @@ Handy im selben PR.
 4. **Exchange-Zonentabelle aus CLDR** — `feat(ews): Windows zone table generated from CLDR windowsZones`.
    `cargo xtask windows-zones` erzeugt die Tabelle des EWS-Adapters aus der
    CLDR-Datei `windowsZones.xml`. Die Datei liegt mit Lizenz und Herkunft
-   (Release, Datum, sha256) in `crates/adapter-ews/cldr/`, und CI prüft die
+   (Release, Datum, sha256) heute in `crates/cal-core/cldr/`, und CI prüft die
    Tabelle mit `--check`. Jeder Name läuft dabei durch `cal_core`, also durch
    dieselbe Regel, die der Adapter beim Schreiben fragt.
    - Lesen: Die Endzone `tzone://Microsoft/Utc` heißt keine Zone (43b). Sonst

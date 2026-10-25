@@ -2,11 +2,10 @@
 //!
 //! Exchange (EWS) names a series' zone by its WINDOWS id ("W. Europe Standard
 //! Time"); the rest of Aperio speaks tzdata ("Europe/Berlin"). The translation
-//! is the Unicode CLDR `windowsZones` mapping, generated into
-//! `windows_tz/windows_zones.rs` by `cargo xtask windows-zones` from the file
-//! pinned in `cldr/` (release tag, sha256 and licence beside it). Nothing here
-//! is kept by hand: a hand-kept copy had drifted to three wrong rows and wrote
-//! 174 of the 312 listed zones without a zone.
+//! is the Unicode CLDR `windowsZones` mapping in the core
+//! (`cal_core::windows_zone`), which the iCalendar reader shares. This module
+//! holds Exchange's own rules on top of it: which id means no zone, and which
+//! zone Exchange cannot store.
 //!
 //! ## Reading a series' zone
 //!
@@ -45,15 +44,13 @@
 //! The EWS delta sync compares it with the one in the host's token and emits
 //! every cached item again when they differ.
 
-#[rustfmt::skip]
-mod windows_zones;
+pub use cal_core::windows_zone::{CLDR_RELEASE, TZDATA_VERSION};
 
-pub use windows_zones::{CLDR_RELEASE, TZDATA_VERSION};
-
-use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-use windows_zones::{OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS};
+use cal_core::windows_zone::{
+    folded, lookup, OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS,
+};
 
 /// The reading rule's version. Bump it when an id read from Exchange becomes
 /// a series' zone differently without the generated table changing, or when
@@ -209,20 +206,6 @@ pub fn windows_zone_for(tzid: Option<&str>, server: Option<&ServerTimeZones>) ->
         NotStorable::NoWindowsZone
     };
     WindowsZoneWrite::NotStorable { zone, reason }
-}
-
-/// ASCII case folded, the order the generated tables are sorted in.
-fn folded(a: &str, b: &str) -> Ordering {
-    a.bytes()
-        .map(|c| c.to_ascii_lowercase())
-        .cmp(b.bytes().map(|c| c.to_ascii_lowercase()))
-}
-
-fn lookup(table: &'static [(&'static str, &'static str)], key: &str) -> Option<&'static str> {
-    table
-        .binary_search_by(|(k, _)| folded(k, key))
-        .ok()
-        .map(|at| table[at].1)
 }
 
 #[cfg(test)]
@@ -381,71 +364,10 @@ mod tests {
     }
 
     #[test]
-    fn the_table_was_resolved_with_the_cores_tzdata() {
-        assert_eq!(TZDATA_VERSION, cal_core::TZDATA_VERSION);
-    }
-
-    #[test]
     fn the_translation_id_names_the_table_and_the_reading_rule() {
         assert_eq!(translation_id(), format!("{TABLE_ID}.{READ_RULE}"));
         assert_eq!(TABLE_ID.len(), 16);
         assert!(TABLE_ID.bytes().all(|b| b.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn every_zone_in_the_table_is_spelled_as_tzdata_spells_it() {
-        let zones = WINDOWS_ZONES
-            .iter()
-            .map(|(_, zone)| *zone)
-            .chain(ZONE_WINDOWS.iter().map(|(zone, _)| *zone))
-            .chain(OTHER_CLOCK.iter().map(|(zone, _)| *zone))
-            .chain(UNMAPPED.iter().copied());
-        for zone in zones {
-            assert_eq!(cal_core::canonical_zone(zone), Some(zone), "{zone}");
-        }
-    }
-
-    #[test]
-    fn every_id_written_is_one_the_table_reads() {
-        for (zone, windows) in ZONE_WINDOWS.iter().chain(OTHER_CLOCK) {
-            assert!(
-                lookup(WINDOWS_ZONES, windows).is_some(),
-                "{zone} -> {windows}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_tables_are_sorted_for_binary_search_and_unique() {
-        fn sorted(name: &str, keys: &[&str]) {
-            for pair in keys.windows(2) {
-                assert_eq!(
-                    folded(pair[0], pair[1]),
-                    Ordering::Less,
-                    "{name}: {} must sort before {}",
-                    pair[0],
-                    pair[1]
-                );
-            }
-        }
-        let keys = |table: &[(&'static str, &'static str)]| -> Vec<&'static str> {
-            table.iter().map(|(key, _)| *key).collect()
-        };
-        sorted("WINDOWS_ZONES", &keys(WINDOWS_ZONES));
-        sorted("ZONE_WINDOWS", &keys(ZONE_WINDOWS));
-        sorted("OTHER_CLOCK", &keys(OTHER_CLOCK));
-        sorted("UNMAPPED", UNMAPPED);
-    }
-
-    #[test]
-    fn no_zone_is_in_two_of_the_lists() {
-        for (zone, _) in ZONE_WINDOWS {
-            assert!(lookup(OTHER_CLOCK, zone).is_none(), "{zone}");
-            assert!(!UNMAPPED.contains(zone), "{zone}");
-        }
-        for (zone, _) in OTHER_CLOCK {
-            assert!(!UNMAPPED.contains(zone), "{zone}");
-        }
     }
 
     #[test]

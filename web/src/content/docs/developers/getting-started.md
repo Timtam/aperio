@@ -62,7 +62,7 @@ cargo xtask ts-types
 cargo xtask ts-types --check                            # what CI runs
 
 # After a chrono-tz update, or a new CLDR windowsZones file in
-# crates/adapter-ews/cldr/: regenerate the zone tables, in this order.
+# crates/cal-core/cldr/: regenerate the zone tables, in this order.
 # CI checks both are current.
 cargo xtask tz-list
 cargo xtask windows-zones

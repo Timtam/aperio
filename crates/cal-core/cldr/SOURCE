@@ -1,8 +1,8 @@
-# The Unicode CLDR file the Exchange zone table is generated from, pinned.
+# The Unicode CLDR file the Windows zone table is generated from, pinned.
 #
 # `cargo xtask windows-zones` reads this file, checks windowsZones.xml against
 # sha256 (reading CRLF as LF), and writes the release into the generated table,
-# crates/adapter-ews/src/windows_tz/windows_zones.rs. The XML's own version
+# crates/cal-core/src/windows_zone/table.rs. The XML's own version
 # attributes (typeVersion="2021a", otherVersion="7e11800") were never updated
 # upstream, so the release tag is the version. The file's last data change is
 # CLDR commit c33a1f0a23 (2025-04-10, "Update CLDR data to TZDB 2025b"), and it

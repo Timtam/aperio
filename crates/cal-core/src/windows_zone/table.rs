@@ -2,7 +2,7 @@
 // common/supplemental/windowsZones.xml (sha256 9cf3db6a31fb382fee21b70be6feba1e82766b0fcd06e6261fb7936a73e537ff),
 // names resolved with cal_core (IANA tzdata 2025b), clocks compared 2026-03-17 to 2031-03-17.
 // CLDR data © Unicode, Inc., Unicode License V3: see ../../cldr/LICENSE.
-// Do not edit: run the task and commit what it writes. See ../windows_tz.rs.
+// Do not edit: run the task and commit what it writes. See ../windows_zone.rs.
 
 /// The CLDR release the table was generated from.
 pub const CLDR_RELEASE: &str = "release-48-2";
