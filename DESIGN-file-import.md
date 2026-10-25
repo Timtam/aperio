@@ -16,9 +16,9 @@ Ein Bogen zwischen PR 7 (#128, pausiert) und PR 9. Er bringt Termine aus einer
    sie anwählt, bekommt sie als Kopie.
 4. **Teilnehmer bleiben.** Ein Termin mit Teilnehmern, den du selbst
    organisierst, ist wie ein neuer Termin: Die bestehenden Regeln gelten
-   (iCloud schreibt Teilnehmer nur beim Benachrichtigen). Für eine Einladung,
-   die jemand anderes organisiert, kommt zuerst ein Live-Test bei Exchange
-   (I0); danach wird je Anbieter entschieden (I6).
+   (iCloud schreibt Teilnehmer nur beim Benachrichtigen). Eine Einladung, die
+   jemand anderes organisiert, behält Organisator und Teilnehmer, still, je
+   Anbieter auf seinem Weg (nach dem Live-Test I0, siehe I6).
 5. **Umfang zuerst:** Termine samt Serien und ihren gelöschten Terminen. Ein
    geänderter Einzeltermin einer Serie wird ein eigener Termin, die Serie
    bekommt an seinem Platz eine Lücke. Aufgaben (VTODO) kommen später.
@@ -41,8 +41,21 @@ Ein Bogen zwischen PR 7 (#128, pausiert) und PR 9. Er bringt Termine aus einer
   Anlegen selbst still bleibt, ist ungemessen; RFC 6638 §7.1 sagt ja.
 - Google hat `events.import`, das Organisator und Teilnehmer behält und nichts
   verschickt — laut Dokumentation, ungemessen (kein Google-Konto).
-- Exchange legt über `CreateItem` keinen Termin mit fremdem Organisator an; ob
-  `MimeContent` mit dem iCal-Text es tut, zeigt I0.
+- Exchange (I0, Live-Lauf 231133, 2026-10-25, Exchange der Hochschule):
+  - `CreateItem` mit `MimeContent` und `METHOD:REQUEST` legt eine fremde
+    Einladung an, roh als iCal-Text wie als MIME-Nachricht: Organisator,
+    Teilnehmer und UID bleiben, Exchange führt den Organisator auch unter den
+    Teilnehmern. `MeetingRequestWasSent` false, nichts in „Gesendete
+    Elemente“, keine Unzustellbar-Meldung an die `.invalid`-Adressen.
+    `MyResponseType` fehlt beim Lesen.
+  - Ohne `METHOD` wird derselbe Text ein eigenes Meeting des Kontos
+    (`MyResponseType` Organizer): Der fremde Organisator geht verloren.
+  - Ein eigener Termin (`ORGANIZER` = Konto) bleibt ein eigenes Meeting mit
+    dem Gast; nichts verschickt.
+  - Das gewöhnliche `CreateItem` lehnt ein `Organizer`-Feld ab
+    (`ErrorInvalidPropertySet`), behält aber eine mitgegebene `UID`.
+  - Ungemessen: ob Zusagen, Absagen und Löschen an so einem Termin sich
+    verhalten wie an einer empfangenen Einladung.
 
 ## Bauweise
 
@@ -104,5 +117,12 @@ annimmt. Die Liste prüft das Ziel über den Zeitraum der Termine.
   Dokumentwähler; „Teilen“ und „Öffnen in“: iOS als
   Dokumenttyp mit Rang `Alternate` (Aperio wird angeboten, nicht Standard),
   Android mit Intent-Filtern `VIEW` und `SEND` für `text/calendar`.
-- **I6 Fremde Einladungen** je Anbieter, nach I0.
+- **I6 Fremde Einladungen** (Toni, nach I0): Organisator und Teilnehmer
+  bleiben, niemand bekommt etwas. Exchange schreibt sie über `MimeContent`
+  mit `METHOD:REQUEST` (gemessen), iCloud mit `SCHEDULE-AGENT=CLIENT` am
+  Organisator und `NONE` an der eigenen Zeile, Google über `events.import`
+  (beides ungemessen), lokal behält alles. Ein Anbieter ohne stillen Weg legt
+  den Termin ohne Teilnehmer an, und der Editor sagt es. Vorher ein zweiter
+  Exchange-Live-Lauf: importieren, dann zusagen, absagen und löschen über
+  Aperios eigenen Weg, und messen, was hinausgeht.
 - **I7 Aufgaben** aus VTODO, später.
