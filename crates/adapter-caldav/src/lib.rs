@@ -39,6 +39,7 @@ pub mod tasks;
 pub mod vcard;
 mod vtimezone;
 mod xml;
+mod zone_definitions;
 
 use std::sync::Mutex;
 use std::time::Duration;

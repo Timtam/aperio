@@ -90,6 +90,16 @@ fn logical_lines(text: &str) -> Vec<(Range<usize>, String)> {
     out
 }
 
+/// Every content line of `text`, BEGIN and END included, unfolded and split
+/// into its name, parameters and value, at whatever depth it sits. A line
+/// without a colon is left out.
+pub(crate) fn all_lines(text: &str) -> Vec<(String, Vec<(String, String)>, String)> {
+    logical_lines(text)
+        .into_iter()
+        .filter_map(|(_, unfolded)| split_line(&unfolded))
+        .collect()
+}
+
 /// `NAME;PARAM=value;…:value` into its parts. The value starts after the
 /// first colon outside double quotes; parameters split at semicolons outside
 /// them. `None` for a line without a colon.

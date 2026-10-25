@@ -94,6 +94,14 @@ Apple's well-known endpoints.
   (`event_in_window` returns true for `recurrence.is_some()`).
 - **iCloud date sentinels / colours.** Colours arrive as `#RRGGBBAA`; the
   alpha is dropped to a plain hex.
+- **A `TZID` resolves three ways.** A tzdata name as it is; a Windows id
+  (`W. Europe Standard Time`, what Outlook, Teams and Exchange write) through
+  the core's CLDR table (`cal_core::windows_zone`), and then the series'
+  zone is the tzdata name; any other name by the body's own `VTIMEZONE`
+  (`zone_definitions.rs`: observances with a yearly nth-weekday rule or
+  `RDATE`s). Such a zone keeps its own name, which no expansion knows, so its
+  series repeats in UTC. A time none of the three resolves still reads as UTC.
+  The same reader serves the iCal feeds and the `.ics` import.
 - **`getctag` fast-path.** When the collection's ctag is unchanged, the
   adapter can skip a full enumeration.
 - **The account is every href of its `calendar-user-address-set`.** A server

@@ -41,7 +41,11 @@
 - Einstieg: `src-tauri/Cargo.toml`, `.github/workflows/release.yml`, neues `src-tauri/src/commands/update.rs`.
 
 ### A2 · System-Integration: Datei-/URL-Verknüpfungen (§17) — nahezu vollständig offen
-- [ ] `.ics`-Dateiverknüpfung + Import-Dialog (Vorschau Titel/Datum/Beschreibung, Kalenderwahl, Batch- oder Einzelauswahl) (§17.1)
+- [~] `.ics`-Dateiverknüpfung + Import-Dialog (Vorschau Titel/Datum/Beschreibung, Kalenderwahl, Batch- oder Einzelauswahl) (§17.1)
+  ↳ Der Import selbst ist im Bau, ohne Verknüpfung (Toni, 2026-10-25):
+  `DESIGN-file-import.md`, Branch `feat/ics-import`. Adapter melden ihre
+  Formate an; ein Termin öffnet den Editor vorausgefüllt, mehrere eine
+  Liste. Die Verknüpfung an Mac und Windows kommt später.
 - [~] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)  
   ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)
@@ -1524,6 +1528,14 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Eine Zone, die nur die Datei kennt, wiederholt sich in UTC.** Der
+      iCal-Leser löst eine `TZID`, die weder tzdata noch die Windows-Tabelle
+      kennt (Outlooks „Customized Time Zone“), über die `VTIMEZONE` der Datei
+      auf: Die Zeiten stimmen. Die Serie behält aber den eigenen Namen, den
+      keine Erweiterung kennt, und läuft nach einer Zeitumstellung eine
+      Stunde versetzt. Abhilfe: der Definition eine tzdata-Zone mit denselben
+      Regeln zuordnen, vorhersagbar statt geraten. Aus I2b des Datei-Imports
+      (2026-10-26).
 - [ ] **iPhone: Dialoge an der App-Wurzel über einem Blatt.** Ein RN-Modal
       erscheint auf iOS über dem Bildschirm, in dem es steht
       (`reactViewController`). Die Editoren, Verschieben/Kopieren und das

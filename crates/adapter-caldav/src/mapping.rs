@@ -36,6 +36,7 @@ use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike, Pr
 use crate::error::{CaldavError, CaldavResult};
 use crate::ical_raw::{component_lines, fold};
 use crate::identity::OwnIdentity;
+use crate::zone_definitions::ZoneDefinitions;
 
 /// The one VALARM property Aperio insists on authoring: it is the event's own
 /// title, so it has to follow the title being written. Everything else on an
@@ -86,10 +87,13 @@ pub fn parse_calendar_data_as(
     let parsed: ICalendar = body
         .parse()
         .map_err(|err: String| CaldavError::Protocol(format!("ical: {err}")))?;
+    // A TZID neither tzdata nor the Windows table knows resolves by the
+    // body's own VTIMEZONE.
+    let zones = ZoneDefinitions::from_body(body);
     let mut out = Vec::new();
     for comp in parsed.components {
         if let icalendar::CalendarComponent::Event(ev) = comp {
-            match map_event(&ev, calendar_id, href, own) {
+            match map_event(&ev, calendar_id, href, own, &zones) {
                 Ok(event) => out.push(event),
                 Err(err) => {
                     tracing::warn!(?err, "skipping unmapped VEVENT");
@@ -124,6 +128,7 @@ fn map_event(
     calendar_id: &str,
     href: Option<&str>,
     own: &OwnIdentity,
+    zones: &ZoneDefinitions,
 ) -> CaldavResult<Event> {
     let uid = ev
         .get_uid()
@@ -132,7 +137,7 @@ fn map_event(
     let description = ev.get_description().map(|s| s.to_string());
     let location = ev.get_location().map(|s| s.to_string());
 
-    let (start, end, all_day, start_tzid) = resolve_range(ev)?;
+    let (start, end, all_day, start_tzid) = resolve_range(ev, zones)?;
 
     // RFC 5545 RECURRENCE-ID marks this VEVENT as a single *modified instance*
     // (an override) of a recurring series — not the master. iCloud packs the
@@ -141,7 +146,7 @@ fn map_event(
     // upsert drops one — taking the master's RRULE, and thus the whole series,
     // with it. Parse it like DTSTART (TZID / all-day aware) so the instant lines
     // up with the master's expanded occurrence on the frontend.
-    let recurrence_id = ev.get_recurrence_id().map(|d| datetime_to_utc(d).0);
+    let recurrence_id = ev.get_recurrence_id().map(|d| datetime_to_utc(d, zones).0);
 
     // An override is a single instance, so it must NOT carry a series rule (a
     // server may still send RRULE on it; ignore it). Masters keep rule + EXDATE.
@@ -150,7 +155,7 @@ fn map_event(
     } else {
         ev.property_value("RRULE").map(|r| EventRecurrence {
             rrule: r.to_string(),
-            exceptions: collect_exdates(ev),
+            exceptions: collect_exdates(ev, zones),
             // Carry the master DTSTART's zone so the frontend expands the rule in
             // local wall-clock time (DST-correct). `None` for floating/Z/all-day.
             tzid: start_tzid,
@@ -491,8 +496,9 @@ impl PriorAlarms {
     /// Read the alarms off the override VEVENT that stands in for the
     /// occurrence at `slot`, for a write of that one occurrence.
     pub fn read_occurrence(body: &str, slot: DateTime<Utc>) -> Self {
+        let zones = ZoneDefinitions::from_body(body);
         Self::read_where(body, |ev| {
-            ev.get_recurrence_id().map(|d| datetime_to_utc(d).0) == Some(slot)
+            ev.get_recurrence_id().map(|d| datetime_to_utc(d, &zones).0) == Some(slot)
         })
     }
 
@@ -760,16 +766,17 @@ fn parse_iso_duration_to_minutes_before(raw: &str) -> Option<i64> {
 ///   - DATE without time — all-day event; we anchor at 00:00 UTC
 fn resolve_range(
     ev: &icalendar::Event,
+    zones: &ZoneDefinitions,
 ) -> CaldavResult<(DateTime<Utc>, DateTime<Utc>, bool, Option<String>)> {
     let start = ev
         .get_start()
         .ok_or_else(|| CaldavError::Protocol("VEVENT without DTSTART".into()))?;
-    let (start_utc, all_day, start_tzid) = datetime_to_utc(start);
+    let (start_utc, all_day, start_tzid) = datetime_to_utc(start, zones);
     // Fall back to DTSTART when DTEND is missing — RFC 5545 §3.8.2.2
     // says a missing DTEND means a zero-duration event for date-time
     // and "until end of day" for date. We honour both.
     let end_utc = match ev.get_end() {
-        Some(end) => datetime_to_utc(end).0,
+        Some(end) => datetime_to_utc(end, zones).0,
         None => {
             if all_day {
                 start_utc + chrono::Duration::days(1)
@@ -783,8 +790,14 @@ fn resolve_range(
 
 /// Resolve a DATE/DATE-TIME to a UTC instant, the all-day flag, and — only for
 /// the zoned (`WithTimezone`) shape — the IANA tzid, so a recurring master can
-/// be expanded in its own zone (DST-correct) rather than flattened to UTC.
-fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool, Option<String>) {
+/// be expanded in its own zone (DST-correct) rather than flattened to UTC. A
+/// Windows id ("W. Europe Standard Time") reads as its tzdata zone, and is
+/// the series' zone under that name; a zone only the body defines resolves
+/// by its `VTIMEZONE` and keeps its own name, which no expansion knows.
+fn datetime_to_utc(
+    value: DatePerhapsTime,
+    zones: &ZoneDefinitions,
+) -> (DateTime<Utc>, bool, Option<String>) {
     match value {
         DatePerhapsTime::Date(d) => (naive_date_to_utc(d), true, None),
         DatePerhapsTime::DateTime(dt) => {
@@ -795,9 +808,15 @@ fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool, Option<Strin
             match dt {
                 icalendar::CalendarDateTime::Utc(u) => (u, false, None),
                 icalendar::CalendarDateTime::WithTimezone { date_time, tzid } => {
-                    let resolved = resolve_with_tzid(date_time, &tzid)
+                    let resolved = resolve_with_tzid(date_time, &tzid, zones)
                         .unwrap_or_else(|| Utc.from_utc_datetime(&date_time));
-                    (resolved, false, Some(tzid))
+                    let named = match tzid.parse::<chrono_tz::Tz>() {
+                        Ok(_) => tzid,
+                        Err(_) => cal_core::windows_zone::tzdata_for_windows(&tzid)
+                            .map(str::to_string)
+                            .unwrap_or(tzid),
+                    };
+                    (resolved, false, Some(named))
                 }
                 icalendar::CalendarDateTime::Floating(naive) => {
                     (Utc.from_utc_datetime(&naive), false, None)
@@ -871,11 +890,26 @@ fn naive_date_to_utc(d: NaiveDate) -> DateTime<Utc> {
         .unwrap_or_else(|| Utc.from_utc_datetime(&midnight))
 }
 
-fn resolve_with_tzid(naive: NaiveDateTime, tzid: &str) -> Option<DateTime<Utc>> {
+/// The instant a wall-clock time names in the zone `tzid`: a tzdata name, a
+/// Windows id through the CLDR table, or else a zone the body defines.
+fn resolve_with_tzid(
+    naive: NaiveDateTime,
+    tzid: &str,
+    zones: &ZoneDefinitions,
+) -> Option<DateTime<Utc>> {
     use chrono_tz::Tz;
-    let tz: Tz = tzid.parse().ok()?;
-    let local = tz.from_local_datetime(&naive).single()?;
-    Some(local.with_timezone(&Utc))
+    let tz: Option<Tz> = tzid.parse().ok().or_else(|| {
+        cal_core::windows_zone::tzdata_for_windows(tzid)?
+            .parse()
+            .ok()
+    });
+    match tz {
+        Some(tz) => {
+            let local = tz.from_local_datetime(&naive).single()?;
+            Some(local.with_timezone(&Utc))
+        }
+        None => zones.resolve(tzid, naive),
+    }
 }
 
 fn read_utc(ev: &icalendar::Event, prop: &str) -> Option<DateTime<Utc>> {
@@ -895,7 +929,7 @@ fn read_utc(ev: &icalendar::Event, prop: &str) -> Option<DateTime<Utc>> {
     None
 }
 
-fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
+fn collect_exdates(ev: &icalendar::Event, zones: &ZoneDefinitions) -> Vec<DateTime<Utc>> {
     // EXDATE is RFC 5545 a "multi-property": it can appear several
     // times on one VEVENT and each occurrence may carry comma-
     // separated values. icalendar stores those under
@@ -923,7 +957,7 @@ fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
                 // Naive date-time: resolve in the EXDATE's TZID when present,
                 // else read as UTC (the floating-DTSTART convention).
                 out.push(
-                    tzid.and_then(|tz| resolve_with_tzid(naive, tz))
+                    tzid.and_then(|tz| resolve_with_tzid(naive, tz, zones))
                         .unwrap_or_else(|| Utc.from_utc_datetime(&naive)),
                 );
             } else if let Ok(d) = NaiveDate::parse_from_str(trimmed, "%Y%m%d") {
@@ -1350,7 +1384,7 @@ pub(crate) fn mint_recurrence_id(
                 .parse()
                 .map_err(|_| SlotRefusal::UnknownZone(tzid.clone()))?;
             let naive = slot.with_timezone(&tz).naive_local();
-            if resolve_with_tzid(naive, &tzid) != Some(slot) {
+            if resolve_with_tzid(naive, &tzid, &ZoneDefinitions::default()) != Some(slot) {
                 return Err(SlotRefusal::AmbiguousLocalTime);
             }
             format!(
@@ -1749,6 +1783,50 @@ END:VCALENDAR\r\n";
         // Without the account's addresses nothing is known about it.
         let events = parse_calendar_data(&body, "cal-1").unwrap();
         assert!(events[0].organized_elsewhere);
+    }
+
+    fn instant(text: &str) -> DateTime<Utc> {
+        text.parse().unwrap()
+    }
+
+    /// Outlook and Teams name a zone by its Windows id. The reader takes it as
+    /// its tzdata zone, for every instant and as the series' zone; before, it
+    /// read the wall-clock times as UTC, an hour or two off. No VTIMEZONE here:
+    /// a server may keep the event without it, and the table alone answers.
+    #[test]
+    fn a_windows_zone_id_reads_as_its_tzdata_zone() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:teams-1\r\nSUMMARY:Jour fixe\r\n\
+DTSTART;TZID=W. Europe Standard Time:20261116T100000\r\n\
+DTEND;TZID=W. Europe Standard Time:20261116T103000\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\n\
+EXDATE;TZID=W. Europe Standard Time:20261123T100000\r\n\
+END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let events = parse_calendar_data(body, "cal").unwrap();
+        assert_eq!(events[0].start, instant("2026-11-16T09:00:00Z"));
+        assert_eq!(events[0].end, instant("2026-11-16T09:30:00Z"));
+        let recurrence = events[0].recurrence.as_ref().unwrap();
+        assert_eq!(recurrence.tzid.as_deref(), Some("Europe/Berlin"));
+        assert_eq!(recurrence.exceptions, [instant("2026-11-23T09:00:00Z")]);
+    }
+
+    /// A zone only the file defines — Outlook's "Customized Time Zone" —
+    /// resolves by its VTIMEZONE and keeps its own name.
+    #[test]
+    fn a_zone_only_the_body_defines_resolves_by_its_definition() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VTIMEZONE\r\nTZID:Customized Time Zone\r\n\
+BEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\n\
+RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10\r\nEND:STANDARD\r\n\
+BEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\n\
+RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n\
+BEGIN:VEVENT\r\nUID:custom-1\r\nSUMMARY:Sommerfest\r\n\
+DTSTART;TZID=Customized Time Zone:20260701T180000\r\n\
+DTEND;TZID=Customized Time Zone:20260701T220000\r\n\
+END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let events = parse_calendar_data(body, "cal").unwrap();
+        assert_eq!(events[0].start, instant("2026-07-01T16:00:00Z"));
+        assert_eq!(events[0].end, instant("2026-07-01T20:00:00Z"));
     }
 
     /// RFC 6638 §7.1: `SCHEDULE-AGENT` says who sends the scheduling
