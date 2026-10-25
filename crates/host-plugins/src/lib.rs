@@ -125,7 +125,7 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     #[cfg(feature = "caldav")]
     register!(adapter_caldav_plugin);
     #[cfg(feature = "ical")]
-    register!(adapter_ical_plugin);
+    register!(adapter_ical_plugin, import_file);
     #[cfg(feature = "google")]
     register!(adapter_google_plugin, interactive_auth);
     #[cfg(feature = "microsoft-graph")]

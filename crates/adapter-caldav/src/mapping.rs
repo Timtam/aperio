@@ -104,6 +104,100 @@ pub fn parse_calendar_data_as(
     Ok(out)
 }
 
+/// A whole calendar file, as an import reads it (DESIGN-file-import.md).
+#[derive(Debug, Clone, Default)]
+pub struct CalendarFile {
+    /// The calendar's `METHOD` (`REQUEST`, `PUBLISH`, `CANCEL`, `REPLY`, …),
+    /// upper-cased, when it names one.
+    pub method: Option<String>,
+    /// Its events, read as [`parse_calendar_data`] reads them: a changed
+    /// occurrence as an event of its own, with an override id.
+    pub events: Vec<Event>,
+    /// The events that could not be read, by their `SUMMARY`.
+    pub unreadable: Vec<Option<String>>,
+    /// Every other top-level component but a `VTIMEZONE`, by its name
+    /// (`VTODO`, `VJOURNAL`, …) and `SUMMARY`.
+    pub others: Vec<(String, Option<String>)>,
+}
+
+/// Read a whole calendar file: [`parse_calendar_data`]'s events, and what
+/// the file holds besides them, each named. Zones the file defines itself
+/// resolve by its `VTIMEZONE`s.
+pub fn read_calendar_file(body: &str) -> CaldavResult<CalendarFile> {
+    let parsed: ICalendar = body
+        .parse()
+        .map_err(|err: String| CaldavError::Protocol(format!("ical: {err}")))?;
+    let zones = ZoneDefinitions::from_body(body);
+    let mut file = CalendarFile::default();
+    for comp in parsed.components {
+        if let icalendar::CalendarComponent::Event(ev) = comp {
+            match map_event(&ev, "", None, &OwnIdentity::default(), &zones) {
+                Ok(event) => file.events.push(event),
+                Err(err) => {
+                    tracing::warn!(?err, "skipping an unreadable VEVENT of the file");
+                    file.unreadable.push(
+                        ev.get_summary()
+                            .map(str::to_string)
+                            .filter(|s| !s.is_empty()),
+                    );
+                }
+            }
+        }
+    }
+    // The rest from the text itself: what icalendar keeps of a component it
+    // does not model is not worth relying on for a name.
+    let mut depth = 0usize;
+    let mut other: Option<(String, Option<String>)> = None;
+    for (name, _params, value) in crate::ical_raw::all_lines(body) {
+        match name.as_str() {
+            "BEGIN" => {
+                depth += 1;
+                let kind = value.trim().to_ascii_uppercase();
+                if depth == 2 && kind != "VEVENT" && kind != "VTIMEZONE" {
+                    other = Some((kind, None));
+                }
+            }
+            "END" => {
+                if depth == 2 {
+                    if let Some(part) = other.take() {
+                        file.others.push(part);
+                    }
+                }
+                depth = depth.saturating_sub(1);
+            }
+            "METHOD" if depth == 1 => {
+                file.method = Some(value.trim().to_ascii_uppercase());
+            }
+            "SUMMARY" if depth == 2 => {
+                if let Some((_, summary)) = other.as_mut() {
+                    let text = unescape_text(&value);
+                    *summary = (!text.trim().is_empty()).then_some(text);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(file)
+}
+
+/// An iCalendar TEXT value as written, unescaped (RFC 5545 §3.3.11).
+fn unescape_text(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n' | 'N') => out.push('\n'),
+            Some(other) => out.push(other),
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
 /// Split an event id into `(Some(href), uid)` for the composite
 /// `{href}|{uid}` shape, or `(None, id)` for a bare UID (freshly created
 /// events before refetch, plus rows persisted by older Aperio versions).

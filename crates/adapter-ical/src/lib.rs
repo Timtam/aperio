@@ -70,6 +70,8 @@ pub mod error {
 
 pub use error::{IcalError, IcalResult};
 
+pub mod import;
+
 /// Account configuration persisted in `accounts.config_json`.
 /// `feed_url` is the public `.ics` URL; the optional username covers
 /// the rare case of a private feed behind Basic auth (the password

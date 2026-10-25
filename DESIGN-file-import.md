@@ -112,16 +112,21 @@ annimmt. Die Liste prüft das Ziel über den Zeitraum der Termine.
   `read_import_file`; am Handy `fileImportFormatsJson`,
   `readImportFileJson`). Die Typen `FileImport`, `ImportedEvent`,
   `SkippedPart`, `ImportFormat` kommen generiert nach TS.
-- **I2 ICS im iCal-Adapter**, in drei Teilen:
+- **I2 ICS im iCal-Adapter** (gebaut), in drei Teilen:
   - **I2a** Die CLDR-Tabelle Windows → tzdata zieht aus dem Exchange-Adapter
     in den Kern; Exchange liest sie von dort.
   - **I2b** Der iCal-Leser (auch CalDAV) löst eine Zone wie Outlooks „W.
     Europe Standard Time“ über die Tabelle auf und, wo sie fehlt, über die
     VTIMEZONE der Datei. Bisher las er solche Zeiten als UTC.
-  - **I2c** Der Import selbst: Einzeltermine und Serien, geänderte Termine
-    als eigene Termine mit Lücke in der Serie, abgesagte übersprungen,
-    Erinnerungen, Teilnehmer, Organisator. Proben echter Dateien (Outlook-,
-    Teams-, Google-, Apple-Einladungen und -Exporte).
+  - **I2c** Der Import selbst (`adapter_ical::import::import_ics`, über
+    `mapping::read_calendar_file`): Einzeltermine und Serien, geänderte
+    Termine als eigene Termine ohne UID mit Lücke in der Serie, ein
+    abgesagtes Vorkommen nur als Lücke; ein abgesagter Termin
+    (`STATUS:CANCELLED`, `METHOD:CANCEL`) und eine Antwort (`METHOD:REPLY`,
+    `COUNTER`) fügen nichts hinzu und werden benannt, ebenso Aufgaben,
+    Notizen, Frei/Belegt und Unlesbares. Proben in
+    `crates/adapter-ical/tests/fixtures/` (Outlook-Einladung, Teams-Serie,
+    Google-Einladung, Apple-Export, Absage, Antwort).
 - **I3 Desktop.** „Importieren …“ und Strg+O, Dateidialog mit dem Filter der
   Registry, eine aufs Fenster gezogene Datei; ein Termin im Editor (der Tag
   reist mit), mehrere als Liste.

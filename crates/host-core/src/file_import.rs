@@ -267,4 +267,37 @@ mod tests {
             Err(Error::Internal(_))
         ));
     }
+
+    /// The shipped iCal plugin end to end, registered as the phone registers
+    /// it: its own manifest declares the format, its own export reads it.
+    #[tokio::test]
+    async fn the_ical_plugin_reads_a_calendar_file_end_to_end() {
+        let manager = PluginManager::new("0.1.0");
+        let manifest =
+            plugin_core::manifest::PluginManifest::from_bytes(adapter_ical_plugin::MANIFEST)
+                .expect("the shipped iCal manifest parses");
+        let descriptor = unsafe { adapter_ical_plugin::build_descriptor() };
+        manager
+            .register_static_with_hooks(
+                manifest,
+                descriptor,
+                adapter_ical_plugin::DESTROY_FN,
+                plugin_core::manager::StaticHooks {
+                    import_file_fn: Some(adapter_ical_plugin::__aperio_import_file_impl),
+                    ..Default::default()
+                },
+            )
+            .expect("register the static iCal plugin");
+        let formats = import_formats(&manager, "de");
+        assert_eq!(formats.len(), 1);
+        assert_eq!(formats[0].name, "iCalendar-Datei (.ics)");
+        assert!(formats[0].mime_types.contains(&"text/calendar".to_string()));
+
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../adapter-ical/tests/fixtures/teams-series.ics");
+        let import = import_file(&manager, &file).await.unwrap();
+        assert_eq!(import.events.len(), 2);
+        assert_eq!(import.events[0].title, "Jour fixe");
+        assert_eq!(import.events[1].title, "Jour fixe (verschoben)");
+    }
 }

@@ -3,4 +3,4 @@
 /**
  * What kind of part was left out.
  */
-export type SkippedKind = "task" | "journal" | "free_busy" | "unreadable";
+export type SkippedKind = "task" | "journal" | "free_busy" | "cancelled" | "reply" | "unreadable";

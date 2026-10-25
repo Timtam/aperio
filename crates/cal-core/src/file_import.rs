@@ -84,6 +84,12 @@ pub enum SkippedKind {
     Journal,
     /// Busy times (`VFREEBUSY`).
     FreeBusy,
+    /// An appointment the file cancels (`STATUS:CANCELLED`, or a cancellation
+    /// such as `METHOD:CANCEL`): nothing to add.
+    Cancelled,
+    /// An answer to an invitation (`METHOD:REPLY`, `COUNTER`): it changes an
+    /// invitation of the organizer's, and adds no appointment.
+    Reply,
     /// A part that could not be read.
     Unreadable,
 }

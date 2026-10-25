@@ -250,6 +250,7 @@ name = "adapter-ical-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-ical",
+ "base64 0.22.1",
  "plugin-sdk",
  "serde",
  "serde_json",
