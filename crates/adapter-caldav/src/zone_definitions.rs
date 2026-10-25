@@ -96,6 +96,7 @@ impl ZoneDefinitions {
     }
 
     /// Whether `tzid` is defined here.
+    #[cfg(test)]
     pub fn defines(&self, tzid: &str) -> bool {
         self.0.contains_key(tzid)
     }
