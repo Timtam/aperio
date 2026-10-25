@@ -1490,9 +1490,12 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     wurde, ist ein Lesen: Scheitert es, zeigt die Auswahl, was geschrieben
     wurde — bei einer Liste, deren Abschnitte nie gelesen wurden, neben dem
     Lesestand (`sectionsWritten`), damit die Ansichten sie weiter als
-    ungelesen fragen —, und die Abschnittsauswahl sagt, warum die übrigen
-    fehlen (`sectionsReadFailure`). Die Farbe eines Abschnitts ist ein
-    eigener Schritt nach ihm (`sectionColorAfterLanded`).
+    ungelesen fragen —, und am Desktop sagt die Abschnittsauswahl, warum die
+    übrigen fehlen (`sectionsReadFailure`). Am Handy legt der Speicher das
+    Geschriebene über die Zeilen, die der Host bis zur Aktualisierung noch
+    liefert; deren Push `sections` liest die gehaltenen Listen neu. Die Farbe
+    eines Abschnitts ist ein eigener, lokaler Schritt nach ihm
+    (`sectionColorAfterLanded`).
   - Jede Oberfläche liest Fehler nur über die geteilten Helfer (273):
     `writeErrorMessage` und `eventWriteErrorMessage` beim Schreiben,
     `readErrorMessage` und `readFailureSentence` beim Lesen,

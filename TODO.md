@@ -541,7 +541,11 @@ Siehe DESIGN §4.2.
         neuen Unteraufgabe; ein unter Verschieben/Kopieren neu angelegter
         Abschnitt steht in der Auswahl und ist gewählt, sein Fehler steht am
         Feld und geht beim nächsten Versuch; scheitert beim Umbenennen eines
-        Abschnitts nur die Farbe, heißt es „nur zum Teil gespeichert“.
+        Abschnitts nur die Farbe, sagt VoiceOver den Fehler ganz, nachdem der
+        Fokus auf die Zeile zurückging; ein in der Listenbearbeitung einer
+        Todoist- oder Vikunja-Liste angelegter, umbenannter oder gelöschter
+        Abschnitt zeigt sich sofort und bleibt so, wenn die Aktualisierung
+        kommt.
       - ↻ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
         274): CalDAV liest 429 und beim Lesen 503 mit `Retry-After` als
         ausgelasteten Anbieter, Todoist und Vikunja 429. Ob iCloud so
@@ -1797,9 +1801,19 @@ Vorschläge sind nicht aufgenommen.
       Aufgabenansicht, Rückstau und Kalenderansichten zeigen eine Liste,
       deren Abschnitte nie gelesen wurden, ohne Wort ungegliedert; die eigene
       Person fällt ohne Wort weg. Am Handy laufen sie über den
-      Zwischenspeicher (letzter Stand und die Warnung des Kontos).
+      Zwischenspeicher: Der letzte Stand bleibt, aber ein ausgelastetes
+      Aktualisieren einer Ansicht zählt nicht als Warnung des Kontos.
       Angleichen. Aus der Planung von PR 7 (2026-10-23), berichtigt in
-      Prüfrunde 13.
+      Prüfrunde 13 und 14.
+- [ ] **Handy: Abschnittsauswahl ohne Wort, wenn nie Abschnitte kamen.**
+      Wurden die Abschnitte einer Liste nie geladen (der Anbieter war
+      ausgelastet), liefert der Zwischenspeicher am Handy keine, und die
+      Abschnittsauswahl im Aufgaben-Editor und unter Verschieben/Kopieren
+      zeigt nur „Kein Abschnitt“: kein Satz wie am Desktop, und der
+      eigene Abschnitt einer Aufgabe steht nicht als „Bisheriger Abschnitt
+      (nicht geladen)“ darin (Speichern behält ihn trotzdem). Dafür muss
+      der Host sagen, dass das Lesen eines Behälters scheiterte. Aus
+      Prüfrunde 14 von PR 7 (2026-10-25).
 - [ ] **Gleichzeitige Schreibvorgänge drosseln den Anbieter selbst.** Die
       Sammelknöpfe des Tagesstarts (`writeAll`), sein automatischer Übertrag
       (`DayStartReviewChecker`) und das Anheften fälliger Fristen

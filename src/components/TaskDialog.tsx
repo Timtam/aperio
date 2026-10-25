@@ -670,6 +670,18 @@ export function TaskDialog({
     form.listId in sectionsReadFailure && !(form.listId in sectionsByList)
       ? readFailureSentence('dialogs.task.section.unread', sectionsReadFailure[form.listId], t)
       : null;
+  // The edited task's own section, while its list's sections could not be
+  // read: offered by id alone, since its name is not known.
+  const ownSectionUnread =
+    sectionsUnread &&
+    task?.section_id &&
+    form.listId === task.list_id &&
+    !sectionsForList.some((s) => s.id === task.section_id)
+      ? task.section_id
+      : null;
+  // The section picked is one whose name is known: only that one can be
+  // renamed or deleted here.
+  const sectionKnown = sectionsForList.some((s) => s.id === form.sectionId);
   // The day presets for the per-task early-reminder override, plus the
   // current value spliced in (sorted) when it's a non-null override that
   // isn't one of the presets — e.g. a `10` synced from another device. Keeps
@@ -1708,6 +1720,10 @@ export function TaskDialog({
               // The user has answered the question the note asked.
               setPrefillListNote(null);
               update('listId', e.target.value);
+              // A section belongs to its list: the one picked here never
+              // follows to another, even while that list's sections are
+              // still being read, or could not be.
+              update('sectionId', '');
             }}
             required
             // Subtasks must live in the same list as their parent
@@ -1846,16 +1862,14 @@ export function TaskDialog({
                     {section.name}
                   </option>
                 ))}
-                {/* The task's own section, where its list could not be read:
-                    without it the picker would read "No section" while the
-                    save keeps the section. */}
-                {sectionsUnread &&
-                  form.sectionId &&
-                  !sectionsForList.some((s) => s.id === form.sectionId) && (
-                    <option value={form.sectionId}>
-                      {t('dialogs.task.section.unreadCurrent')}
-                    </option>
-                  )}
+                {/* The task's own section, in its own list, where that list
+                    could not be read: without it the picker would read "No
+                    section" while the save keeps the section. */}
+                {ownSectionUnread && (
+                  <option value={ownSectionUnread}>
+                    {t('dialogs.task.section.unreadCurrent')}
+                  </option>
+                )}
               </select>
               {/* Manage buttons — local lists only. Hidden while the
                   inline name editor is open. */}
@@ -1872,7 +1886,7 @@ export function TaskDialog({
                   >
                     {t('dialogs.task.section.add')}
                   </button>
-                  {form.sectionId && (
+                  {form.sectionId && sectionKnown && (
                     <>
                       <button
                         type="button"

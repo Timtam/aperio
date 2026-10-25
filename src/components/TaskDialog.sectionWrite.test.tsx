@@ -46,6 +46,9 @@ const LIST: TaskList = {
   task_capabilities: { ...DEFAULT_TASK_CAPABILITIES, sections: true, manageable_sections: true },
 } as unknown as TaskList;
 
+/** A second list, to move to. */
+const OTHER = { ...LIST, id: 'L2', name: 'Arbeit' } as TaskList;
+
 const VIEW_STATE = { showHiddenTaskListTargets: false, timeStepMinutes: 15 };
 const CASCADE = {
   enabled: false,
@@ -81,6 +84,8 @@ const BUSY = { code: 'forbidden', message: 'provider-busy: http-429' };
 const SAID_BUSY =
   'Der Anbieter ist gerade ausgelastet. Es wurde nichts geändert. Versuche es später noch einmal.';
 const EINKAUF = { id: 's1', list_id: 'L1', name: 'Einkauf', position: 0, color_label: null };
+/** A local write's failure: a section's colour never reaches a provider. */
+const LOCKED = { code: 'internal', message: 'database is locked' };
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -129,7 +134,7 @@ describe('TaskDialog → a section written where none could be read', () => {
   it("says the sections could not be read, and keeps the task's own section", async () => {
     // A task filed in "Einkauf", its list's sections turned away: the picker
     // must not read "No section" while the save keeps the section.
-    answers.list_task_lists = [() => Promise.resolve([LIST])];
+    answers.list_task_lists = [() => Promise.resolve([LIST, OTHER])];
     answers.get_sections = [() => Promise.reject(BUSY)];
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const task = {
@@ -159,6 +164,60 @@ describe('TaskDialog → a section written where none could be read', () => {
     );
     expect(picker.value).toBe('s1');
     expect(picker.selectedOptions[0]?.textContent).toBe('Bisheriger Abschnitt (nicht geladen)');
+    // Its name is not known: it is neither renamed nor deleted from here.
+    const field = within(picker.closest('.form__field') as HTMLElement);
+    expect(field.getByRole('button', { name: '+ Abschnitt' })).toBeTruthy();
+    expect(field.queryByRole('button', { name: 'Umbenennen' })).toBeNull();
+    expect(field.queryByRole('button', { name: 'Löschen' })).toBeNull();
+    // In another list it is no place at all.
+    const lists = screen.getByLabelText('Liste') as HTMLSelectElement;
+    await waitFor(() => expect(lists.querySelector('option[value="L2"]')).not.toBeNull());
+    fireEvent.change(lists, { target: { value: 'L2' } });
+    await waitFor(() => expect(picker.querySelector('option[value="s1"]')).toBeNull());
+    expect(screen.queryByText('Bisheriger Abschnitt (nicht geladen)')).toBeNull();
+    warn.mockRestore();
+  });
+
+  it('carries no section to another list, even one whose sections could not be read', async () => {
+    // "Einkauf" was picked in "Haushalt"; the list then changes to one whose
+    // sections are turned away. The old section is no place in it.
+    answers.list_task_lists = [() => Promise.resolve([LIST, OTHER])];
+    answers.get_sections = [
+      (args) =>
+        (args as { listId: string }).listId === 'L1'
+          ? Promise.resolve([EINKAUF])
+          : Promise.reject(BUSY),
+    ];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { TaskDialog } = await import('./TaskDialog');
+    render(
+      <CalendarStoreProvider>
+        <TaskDialog isOpen onClose={() => {}} task={null} defaultListId="L1" />
+      </CalendarStoreProvider>,
+    );
+    const picker = (await screen.findByLabelText('Abschnitt')) as HTMLSelectElement;
+    await waitFor(() => expect(picker.querySelector('option[value="s1"]')).not.toBeNull());
+    fireEvent.change(picker, { target: { value: 's1' } });
+    const lists = screen.getByLabelText('Liste') as HTMLSelectElement;
+    await waitFor(() => expect(lists.querySelector('option[value="L2"]')).not.toBeNull());
+    fireEvent.change(lists, { target: { value: 'L2' } });
+    await waitFor(() => expect(picker).toHaveAccessibleDescription(/nicht geladen werden/));
+    expect(picker.value).toBe('');
+    expect(screen.queryByText('Bisheriger Abschnitt (nicht geladen)')).toBeNull();
+    // And the save sends what the picker says: no section.
+    answers.create_task = [(args) => Promise.resolve({ ...(args as { request: object }).request, id: 't9' })];
+    fireEvent.change(screen.getByRole('combobox', { name: /^titel$/i }), {
+      target: { value: 'Milch' },
+    });
+    const dialogForm = within(picker.closest('form') as HTMLElement);
+    fireEvent.click(dialogForm.getAllByRole('button', { name: 'Anlegen' }).at(-1) as HTMLElement);
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'create_task')).toBe(true),
+    );
+    const sent = invokeMock.mock.calls.find(([cmd]) => cmd === 'create_task')?.[1] as {
+      request: { list_id: string; section_id: string | null };
+    };
+    expect(sent.request).toMatchObject({ list_id: 'L2', section_id: null });
     warn.mockRestore();
   });
 
@@ -174,15 +233,16 @@ describe('TaskDialog → a section written where none could be read', () => {
     expect(screen.queryByText(SAID_BUSY)).toBeNull();
   });
 
-  it('says a colour turned away after the section landed as partly saved', async () => {
-    // The section stands; only its colour did not follow. "Nothing was
-    // changed" would be false, and creating it again would make two.
+  it('never says "nothing was changed" when the colour fails after the section landed', async () => {
+    // The section stands; only its colour — a local write, no provider's —
+    // did not follow. "Nothing was changed" would be false, and creating it
+    // again would make two.
     answers.list_color_labels = [
       () => Promise.resolve([{ id: 'red', name: 'Rot', color: '#ff0000', position: 0 }]),
     ];
     answers.get_sections = [() => Promise.resolve([]), () => Promise.resolve([EINKAUF])];
     answers.create_section = [() => Promise.resolve(EINKAUF)];
-    answers.set_section_color = [() => Promise.reject(BUSY)];
+    answers.set_section_color = [() => Promise.reject(LOCKED)];
     const picker = await openNew();
     fireEvent.click(screen.getByRole('button', { name: '+ Abschnitt' }));
     fireEvent.change(screen.getByLabelText('Name des neuen Abschnitts'), {
@@ -195,8 +255,7 @@ describe('TaskDialog → a section written where none could be read', () => {
     fireEvent.click(within(editor).getByRole('button', { name: 'Anlegen' }));
     await waitFor(() => expect(picker.value).toBe('s1'));
     expect((await screen.findByRole('alert')).textContent).toBe(
-      'Die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist. ' +
-        'Prüfe sie und versuche den Rest später noch einmal.',
+      'network: section-color: internal error: database is locked',
     );
     expect(screen.queryByLabelText('Name des neuen Abschnitts')).toBeNull();
   });

@@ -347,9 +347,9 @@ When many requests come in a short time, some providers turn further ones
 away for a while. Aperio then says "The provider is busy right now": with
 "Nothing was changed" when saving, without it when loading, checking
 availability and for meetings. In an editor, what you entered stays; the
-views show what was loaded last. Where a list's sections could not be loaded
-yet, the section picker of the task editor and of Move/Copy says so; a
-section you create there still shows in it. Aperio does not say how long the
+views show what was loaded last. On the desktop, where a list's sections
+could not be loaded yet, the section picker of the task editor and of
+Move/Copy says so; a section you create there still shows in it. Aperio does not say how long the
 provider asks to wait; the log does.
 
 What you can do: wait a moment and try again.
@@ -357,8 +357,8 @@ What you can do: wait a moment and try again.
 ## A change was only partly saved
 
 Some providers save a task, an appointment or a contact in several steps:
-first the item, then, for example, its assignees, its photo, a section's
-colour or a group's members. When the provider is busy after the first step, the item stands, but
+first the item, then, for example, its assignees, its photo or a group's
+members. When the provider is busy after the first step, the item stands, but
 not everything about it. Aperio then says the change was only partly saved,
 and the message only closes: saving again would create the item a second
 time. The view reloads and shows what the provider holds.

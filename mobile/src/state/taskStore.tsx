@@ -23,6 +23,14 @@ import {
   type SelectionSlice,
 } from './selection';
 
+/** A section write that landed, for the read after it (`loadSections`'
+ *  `afterWrite`): the section as written, or the one removed. The desktop's
+ *  twin is `CalendarStore`'s. */
+export interface SectionWrite {
+  upsert?: Section;
+  remove?: string;
+}
+
 /**
  * The mobile task store — the single context every task screen consumes.
  *
@@ -41,7 +49,10 @@ export interface TaskStoreState {
   /** Cached sections per list id, populated lazily by `loadSections`. Empty in
    *  2b (the flat list doesn't group yet); the grouped screen (sub-3) fills it. */
   sectionsByList: Record<string, Section[]>;
-  loadSections: (listId: string) => Promise<Section[]>;
+  /** Read one list's sections into the cache. After a section write that
+   *  landed, `afterWrite` names it, and it shows until the list's refresh
+   *  brings the provider's rows. */
+  loadSections: (listId: string, afterWrite?: SectionWrite) => Promise<Section[]>;
   /** The app-wide colour-label palette (named + ad-hoc), so editors can offer a
    *  picker and rows can resolve a `color_label` id → its name. */
   colorLabels: ColorLabel[];
@@ -96,14 +107,43 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
     setTaskListSel((prev) => reconcileSelectionTracked(prev, list));
   }, []);
 
-  const loadSections = useCallback(async (listId: string) => {
+  const sectionsRef = useRef(sectionsByList);
+  sectionsRef.current = sectionsByList;
+  const loadSections = useCallback(async (listId: string, afterWrite?: SectionWrite) => {
     // Sorted HERE, once — every screen that renders sections reads this cache
     // (the tasks screen, the task editor, the list editor), so a comparator
     // repeated per screen is one that ends up applied in most of them.
-    const secs = sortSections(await getSections(listId));
+    let read: Section[];
+    try {
+      read = await getSections(listId);
+    } catch (err) {
+      if (!afterWrite) throw err;
+      read = sectionsRef.current[listId] ?? [];
+    }
+    // After a section write the host only invalidates an external list: its
+    // read serves the rows from before until the refresh it starts lands (the
+    // `sections` push below reads again). What was written shows meanwhile,
+    // as on the desktop (277).
+    if (afterWrite) {
+      read = read.filter(
+        (s) => s.id !== afterWrite.upsert?.id && s.id !== afterWrite.remove,
+      );
+      if (afterWrite.upsert) read = [...read, afterWrite.upsert];
+    }
+    const secs = sortSections(read);
     setSectionsByList((prev) => ({ ...prev, [listId]: secs }));
     return secs;
   }, []);
+
+  // A list's sections refreshed in the background: every list held is read
+  // again, so a section written here, or elsewhere, shows as the provider
+  // keeps it.
+  const reloadSections = useCallback(() => {
+    for (const listId of Object.keys(sectionsRef.current)) {
+      void loadSections(listId).catch(() => {});
+    }
+  }, [loadSections]);
+  useCacheReload('sections', reloadSections);
 
   const refreshColorLabels = useCallback(async () => {
     setColorLabels(await listColorLabels());

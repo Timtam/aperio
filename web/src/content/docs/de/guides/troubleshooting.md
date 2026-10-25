@@ -374,10 +374,10 @@ Kommen in kurzer Zeit viele Anfragen, weisen manche Anbieter weitere eine
 Weile ab. Aperio sagt dann „Der Anbieter ist gerade ausgelastet“: beim
 Speichern mit „Es wurde nichts geändert“, beim Laden, bei der Verfügbarkeit
 und bei Meetings ohne. In einem Editor bleibt deine Eingabe stehen; die
-Ansichten zeigen, was zuletzt geladen wurde. Konnten die Abschnitte einer
-Liste noch nicht geladen werden, sagt das die Abschnittsauswahl im
-Aufgaben-Editor und unter Verschieben/Kopieren; ein Abschnitt, den du dort
-anlegst, steht trotzdem darin. Wie lange der
+Ansichten zeigen, was zuletzt geladen wurde. Konnten am Desktop die
+Abschnitte einer Liste noch nicht geladen werden, sagt das die
+Abschnittsauswahl im Aufgaben-Editor und unter Verschieben/Kopieren; ein
+Abschnitt, den du dort anlegst, steht trotzdem darin. Wie lange der
 Anbieter warten lässt, sagt Aperio nicht, es steht im Protokoll.
 
 Was du tun kannst: Warte einen Moment und versuche es noch einmal.
@@ -386,7 +386,7 @@ Was du tun kannst: Warte einen Moment und versuche es noch einmal.
 
 Manche Anbieter speichern eine Aufgabe, einen Termin oder einen Kontakt in
 mehreren Schritten: erst das Element, dann zum Beispiel die Zuständigen, das
-Foto, die Farbe eines Abschnitts oder die Mitglieder einer Gruppe. Ist der Anbieter nach dem ersten
+Foto oder die Mitglieder einer Gruppe. Ist der Anbieter nach dem ersten
 Schritt ausgelastet, steht das Element, aber nicht alles daran. Aperio sagt
 dann, dass die Änderung nur zum Teil gespeichert ist, und die Meldung lässt
 sich nur schließen: Erneutes Speichern legte das Element ein zweites Mal an.

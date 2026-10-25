@@ -40,6 +40,7 @@ import {
 import { useSoundPref } from '../state/useSoundPref';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useTaskStore } from '../state/taskStoreContext';
+import type { SectionWrite } from '../state/taskStore';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 /** Tri-state mapping for a per-list boolean override: undefined = inherit the
@@ -132,6 +133,9 @@ export default function ListEditorModal({
   // manager's count-keyed effect won't fire on its own).
   const renameIndex = useRef<number | null>(null);
   const pendingRenameFocus = useRef<number | null>(null);
+  // A sentence for after that focus move: said first, the row's read-out
+  // would cut it off on iOS, so it is queued behind it.
+  const pendingRenameSay = useRef<string | null>(null);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -295,14 +299,20 @@ export default function ListEditorModal({
     if (i == null) return;
     pendingRenameFocus.current = null;
     focus.focusRow(i);
+    const say = pendingRenameSay.current;
+    pendingRenameSay.current = null;
+    if (say != null) {
+      AccessibilityInfo.announceForAccessibilityWithOptions(say, { queue: true });
+    }
   }, [editingId, focus]);
 
-  // The read after a section write that landed is a read (decision 277): its
-  // failure says the sections could not be read, never that the write failed,
-  // and a sentence the write left stays.
+  // The read after a section write that landed is a read (decision 277): what
+  // was written shows until the list's refresh brings the provider's rows (the
+  // host serves the rows from before until then), its failure is never said
+  // as the write's, and a sentence the write left stays.
   const reloadAfterWrite = useCallback(
-    () =>
-      loadSections(listId).then(
+    (written: SectionWrite) =>
+      loadSections(listId, written).then(
         () => undefined,
         (err: unknown) => setError((prev) => prev ?? readErrorMessage(err, t)),
       ),
@@ -319,11 +329,11 @@ export default function ListEditorModal({
       // Append after the current last section.
       const position = sections.reduce((max, s) => Math.max(max, s.order + 1), 0);
       focus.onAdd();
-      await createSection({ list_id: listId, name, position });
+      const created = await createSection({ list_id: listId, name, position });
       setNewSectionName('');
       invalidateData();
       announce(t('dialogs.task.section.created', { name }));
-      await reloadAfterWrite();
+      await reloadAfterWrite({ upsert: created });
     } catch (err) {
       const message = writeErrorMessage(err, t);
       setError(message);
@@ -367,11 +377,22 @@ export default function ListEditorModal({
       if (colorFailure) {
         const message = writeErrorMessage(colorFailure, t);
         setError(message);
-        announce(t('mobile.error', { message }));
+        // Focus goes back to the row first; the sentence waits behind it.
+        if (pendingRenameFocus.current != null) {
+          pendingRenameSay.current = t('mobile.error', { message });
+        } else {
+          announce(t('mobile.error', { message }));
+        }
       } else {
         announce(t('dialogs.task.section.renamed', { name }));
       }
-      await reloadAfterWrite();
+      await reloadAfterWrite({
+        upsert: {
+          ...section,
+          name,
+          color_label: colorFailure ? section.color_label : editingColor || null,
+        },
+      });
     } catch (err) {
       const message = writeErrorMessage(err, t);
       setError(message);
@@ -409,7 +430,7 @@ export default function ListEditorModal({
         await deleteSection(sectionId, listId);
         invalidateData();
         announce(t('dialogs.task.section.deleted', { name: sectionName }));
-        await reloadAfterWrite();
+        await reloadAfterWrite({ remove: sectionId });
       } catch (err) {
         const message = writeErrorMessage(err, t);
         setError(message);
