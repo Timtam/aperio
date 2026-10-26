@@ -122,6 +122,9 @@ async function openImport(onImported = () => {}, importFrom: ImportedEvent = SER
       />
     </StrictMode>,
   );
+  // What the editor loads beside the form (sounds, the signature, the
+  // calendar's answers) lands inside act; a pending answer stays out.
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 }
 
 describe('EventDialog → an appointment from a file', () => {

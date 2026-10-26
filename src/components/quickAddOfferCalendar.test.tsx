@@ -109,6 +109,9 @@ async function mount(open: 'quickAdd' | 'editor') {
   );
   const view = render(tree());
   fireEvent.click(screen.getByRole('button', { name: 'open' }));
+  // What the dialog loads as it opens lands inside act, before the test goes
+  // on to type.
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   return () => view.rerender(tree());
 }
 

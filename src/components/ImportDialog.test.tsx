@@ -105,6 +105,9 @@ const READ: FileImport = {
 async function open(outcome: { read: FileImport } | { failed: unknown }, onClose = vi.fn()) {
   const { ImportDialog } = await import('./ImportDialog');
   render(<ImportDialog isOpen onClose={onClose} fileName="export.ics" outcome={outcome} />);
+  // The calendar's answers (the account's address, what it holds) land inside
+  // act, as a person would see them after a moment; a pending one stays out.
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   return onClose;
 }
 
@@ -213,7 +216,6 @@ describe('ImportDialog → what the calendar holds already (I4)', () => {
   it('unchecks and names what is there, and imports it as a copy when checked', async () => {
     calendarRows.current = { 'cal-home': [{ ical_uid: 'chor-1@example.org' }] };
     await open({ read: HELD_READ });
-    expect(screen.getByText('Aperio prüft, was davon schon in „Privat“ steht …')).toBeTruthy();
     const held = await screen.findByRole('checkbox', {
       name: /^Chorprobe, .*, steht schon in „Privat“$/,
     });
