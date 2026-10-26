@@ -158,6 +158,7 @@ fn to_calendar(home_url: &Url, entry: ResponseEntry, supports_scheduling: bool) 
         color,
         read_only: false,
         default_sound: None,
+        invitation_import: Default::default(),
     }
 }
 

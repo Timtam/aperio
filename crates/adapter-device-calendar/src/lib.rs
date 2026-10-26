@@ -337,6 +337,7 @@ fn map_calendar(d: DeviceCalendar) -> Calendar {
         invitations_reply_only: false,
         stores_occurrence_exceptions: false,
         notifier_name: None,
+        invitation_import: Default::default(),
     }
 }
 
@@ -1172,6 +1173,7 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 

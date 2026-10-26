@@ -2635,8 +2635,16 @@
       "notOpened": "The file could not be opened. The log has the details."
     },
     "nothing": "“{{file}}” holds no appointment that can be imported.",
-    "invitationSetAside": "Aperio does not take over this invitation's attendees and organizer yet; the appointment becomes your own, without attendees.",
-    "invitationsSetAside": "Aperio does not take over the attendees and organizer of invitations yet; such appointments become your own, without attendees.",
+    "invitation": {
+      "kept": "An invitation from {{organizer}}: the organizer and the attendees stay, and nobody is notified.",
+      "keptTentative": "An invitation from {{organizer}}: the organizer and the attendees stay, and nobody is notified. Your answer then reads “tentative”; you can accept or decline as with any invitation.",
+      "setAside": "An invitation from {{organizer}}: “{{calendar}}” cannot take the organizer and the attendees without notifying someone. The appointment becomes your own, without attendees.",
+      "stillChecking": "Aperio is still checking whether you organize this appointment yourself. Try again in a moment.",
+      "listKept": "Invitations from others keep their organizer and attendees in “{{calendar}}”, and nobody is notified.",
+      "listKeptTentative": "Invitations from others keep their organizer and attendees in “{{calendar}}”, and nobody is notified. Your answer then reads “tentative”.",
+      "listSetAside": "“{{calendar}}” cannot take the organizer and the attendees of invitations without notifying someone; such appointments become your own, without attendees.",
+      "listStillChecking": "Aperio is still checking which of these appointments you organize yourself. Try again in a moment."
+    },
     "skipped": {
       "sentence": "Not taken over: {{parts}}.",
       "task": {

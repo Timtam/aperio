@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   alreadyHeld,
-  importedForEditor,
   importFailureSentence,
+  importInto,
+  importIntoSentence,
+  importOwner,
+  importPeople,
   importSpan,
   skippedSentence,
   type ImportedEvent,
@@ -28,20 +31,77 @@ const invitation: ImportedEvent = {
   organizer: 'erika@example.org',
 };
 
-describe('importedForEditor', () => {
-  it('sets an invitation aside until each provider keeps it quietly', () => {
-    const { event, invitationSetAside } = importedForEditor(invitation);
-    expect(invitationSetAside).toBe(true);
-    expect(event.attendees).toEqual([]);
-    expect('organizer' in event).toBe(false);
-    expect(event.title).toBe('Projektbesprechung');
+describe('importOwner', () => {
+  it('tells nobody, the account and someone else apart, and waits for the address', () => {
+    const { organizer: _organizer, ...noOrganizer } = invitation;
+    expect(importOwner(noOrganizer, 'toni@example.org')).toBe('none');
+    expect(importOwner(invitation, undefined)).toBe('checking');
+    expect(importOwner(invitation, 'MAILTO:Erika@Example.org')).toBe('me');
+    expect(importOwner(invitation, 'toni@example.org')).toBe('someone-else');
+    expect(importOwner(invitation, null)).toBe('someone-else');
   });
+});
 
-  it('keeps the invitees of an appointment without an organizer', () => {
-    const own = { ...invitation, organizer: undefined };
-    const { event, invitationSetAside } = importedForEditor(own);
-    expect(invitationSetAside).toBe(false);
-    expect(event.attendees).toEqual(['Max <max@example.org>']);
+describe('importInto', () => {
+  it('keeps an invitation where the calendar keeps invitations, and sets it aside elsewhere', () => {
+    expect(importInto('someone-else', { invitation_import: 'kept' })).toEqual({
+      kind: 'invitation',
+      tentative: false,
+    });
+    expect(importInto('someone-else', { invitation_import: 'kept-tentative' })).toEqual({
+      kind: 'invitation',
+      tentative: true,
+    });
+    expect(importInto('someone-else', { invitation_import: 'not-kept' })).toEqual({
+      kind: 'set-aside',
+    });
+    // A listing from before the flag existed keeps nothing.
+    expect(importInto('someone-else', {})).toEqual({ kind: 'set-aside' });
+    expect(importInto('me', { invitation_import: 'not-kept' })).toEqual({ kind: 'new' });
+    expect(importInto('none', { invitation_import: 'kept' })).toEqual({ kind: 'new' });
+    expect(importInto('checking', { invitation_import: 'kept' })).toEqual({ kind: 'checking' });
+  });
+});
+
+describe('importPeople', () => {
+  it('writes an invitation as someone else’s, a set-aside one without people, an own one as new', () => {
+    expect(importPeople(invitation, { kind: 'invitation', tentative: false })).toEqual({
+      attendees: ['Max <max@example.org>'],
+      organizer: 'erika@example.org',
+      organized_elsewhere: true,
+      keeps_invitation: true,
+    });
+    expect(importPeople(invitation, { kind: 'set-aside' })).toEqual({
+      attendees: [],
+      organizer: null,
+      organized_elsewhere: false,
+      keeps_invitation: false,
+    });
+    // The account's own meeting names itself as organizer, so the host keeps
+    // the account out of its invitees.
+    expect(importPeople(invitation, { kind: 'new' })).toEqual({
+      attendees: ['Max <max@example.org>'],
+      organizer: 'erika@example.org',
+      organized_elsewhere: false,
+      keeps_invitation: false,
+    });
+  });
+});
+
+describe('importIntoSentence', () => {
+  it('says what happens to an invitation in the calendar, and nothing for a new one', () => {
+    expect(importIntoSentence(invitation, { kind: 'invitation', tentative: false }, 'Arbeit', t)).toBe(
+      'Eine Einladung von erika@example.org: Organisator und Teilnehmer bleiben, und niemand wird benachrichtigt.',
+    );
+    expect(importIntoSentence(invitation, { kind: 'invitation', tentative: true }, 'Arbeit', t)).toMatch(
+      /Deine Antwort steht danach auf „Mit Vorbehalt“/,
+    );
+    expect(importIntoSentence(invitation, { kind: 'set-aside' }, 'Arbeit', t)).toBe(
+      'Eine Einladung von erika@example.org: In „Arbeit“ lassen sich Organisator und Teilnehmer ' +
+        'nicht übernehmen, ohne dass jemand benachrichtigt wird. Der Termin wird deshalb dein ' +
+        'eigener, ohne Teilnehmer.',
+    );
+    expect(importIntoSentence(invitation, { kind: 'new' }, 'Arbeit', t)).toBeNull();
   });
 });
 

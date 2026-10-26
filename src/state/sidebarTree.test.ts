@@ -39,6 +39,7 @@ const makeCalendar = (
   always_notifies_attendees: false,
 invitations_reply_only: false,
 stores_occurrence_exceptions: false,
+invitation_import: 'not-kept',
 });
 
 const makeTaskList = (

@@ -27,8 +27,8 @@ Ein Bogen zwischen PR 7 (#128, pausiert) und PR 9. Er bringt Termine aus einer
    Handy „Termine importieren …“ in der Kalenderliste neben „Neuer Kalender“.
 7. **Adapter melden Dateiformate an** (Toni): Der Host verdrahtet keinen
    Parser. Ein Adapter sagt im Manifest, welche Dateien er lesen kann, und
-   liest sie selbst; `.ics` meldet der iCal-Adapter an, der den Parser des
-   CalDAV-Adapters schon teilt.
+   liest sie selbst; `.ics` meldet der iCal-Adapter an, der die Abbildung aus
+   `ical-mapping` mit dem CalDAV-Adapter teilt.
 
 8. **Reihenfolge** (Toni, 2026-10-26): erst der Desktop (I3) mit einer
    vorläufigen Regel, dann I4, I6, dann das Handy. Bis I6 kommt eine
@@ -45,6 +45,18 @@ Ein Bogen zwischen PR 7 (#128, pausiert) und PR 9. Er bringt Termine aus einer
   Organisator und `NONE` an der eigenen Zeile; iCloud schickte dann weder die
   Antwort auf eine Zusage noch die Absage beim Löschen (Live-Runde 6). Ob das
   Anlegen selbst still bleibt, ist ungemessen; RFC 6638 §7.1 sagt ja.
+- iCloud (Live-Lauf 100518, 2026-10-26, Kalender „Privat“; Organisator =
+  Tonis Exchange-Adresse, damit jede Antwort dort ankäme): Eine fremde
+  Einladung per `PUT` legt iCloud an (201) und speichert sie wörtlich, mit
+  `SCHEDULE-AGENT=CLIENT` am Organisator und `NONE` an der eigenen Zeile wie
+  ohne. Nichts wurde verschickt, auch nicht bei Aperios Zusage mit Antwort
+  und beim Löschen mit Absage, und auch nicht in den Gegenproben ohne
+  Marker (kein `SCHEDULE-STATUS`, keine Mail bei Exchange, gmx oder am
+  iPhone). iCloud verschickt für eine Kopie, die ein Client anlegt, offenbar
+  gar nichts. Aperio liest beide als fremd organisiert; mit Markern als
+  still (`scheduling_silenced`). Aperio schreibt die Marker trotzdem: Sie
+  sind der Weg des Standards (RFC 6638 §7.1), Apple setzt sie selbst beim
+  Import, und die Dialoge versprechen dann keine Mail.
 - Google hat `events.import`, das Organisator und Teilnehmer behält und nichts
   verschickt — laut Dokumentation, ungemessen (kein Google-Konto).
 - Exchange (I0, Live-Lauf 231133, 2026-10-25, Exchange der Hochschule;
@@ -232,7 +244,12 @@ Zielkalender über den Zeitraum der Termine.
   (erst der Umzug ohne neues Verhalten), damit kein Adapter am anderen
   hängt; iCloud wird vor dem Bau live gemessen (bleibt das Anlegen mit
   `SCHEDULE-AGENT` still?); Google wird nach Doku über `events.import`
-  gebaut, ungemessen. Unter dem Crate bleibt `icalendar`; `calcard` wird
+  gebaut, ungemessen. Steht das Konto nicht unter den Teilnehmern (eine
+  Einladung an eine andere Adresse), trägt Aperio es ein, nur in der eigenen
+  Kopie (Toni, 2026-10-26). Im Editor ist eine fremde Einladung wie eine
+  empfangene: Titel, Zeit, Ort, Beschreibung und Teilnehmer nur lesbar,
+  Kalender, Erinnerungen und Farbe wählbar (Toni, 2026-10-26). Unter dem
+  Crate bleibt `icalendar`; `calcard` wird
   später geprüft (TODO.md). Warum Exchange überhaupt iCal braucht: Eine
   Einladung, die jemand anderes organisiert, nimmt Exchange nur so an, wie sie
   per Mail kommt (`METHOD:REQUEST`); das gewöhnliche Anlegen lehnt einen
@@ -242,4 +259,18 @@ Zielkalender über den Zeitraum der Termine.
     Schreiben, VTIMEZONE, Zonendefinitionen, rohe Zeilen, die eigene
     Identität), umgezogen ohne neues Verhalten; CalDAV behält die Pfade
     (`adapter_caldav::mapping`), der iCal-Adapter hängt nicht mehr an CalDAV.
+  - **I6b** (gebaut, Desktop) Kern und Oberfläche: `Calendar::invitation_import`
+    (`not-kept`, `kept`, `kept-tentative`) sagt der Adapter;
+    `NewEvent::keeps_invitation` markiert die fremde Einladung, und beide
+    Hosts lassen vor dem Anlegen `attendee::guard_invitation_import` laufen:
+    behält der Kalender nicht, gehen Organisator und Teilnehmer weg, und der
+    Termin wird der eigene. Die Oberfläche unterscheidet je Zielkalender:
+    ohne Organisator ein neuer Termin; mit dem Konto als Organisator
+    (`calendarCurrentUserEmail`) das eigene Meeting, wie ein neuer Termin;
+    sonst die fremde Einladung, gesperrt wie eine empfangene, mit dem Satz
+    des Kalenders. Erkennt die Oberfläche das Konto nicht (eine andere
+    Schreibweise), prüft der Adapter beim Anlegen mit allen Adressen des
+    Kontos. Bis I6c-I6f sagen alle Adapter `not-kept`: Verhalten wie die
+    vorläufige Regel, außer dass ein eigenes Meeting jetzt seine Teilnehmer
+    behält.
 - **I7 Aufgaben** aus VTODO, später.

@@ -52,6 +52,14 @@ vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE 
 vi.mock('../state/viewStateContext', () => ({ useViewState: () => VIEW_STATE }));
 vi.mock('../state/dialogStateContext', () => ({ useDialogState: () => DIALOG_STATE }));
 vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => () => {} }));
+/** The account's address in the calendar, or an answer that does not come. */
+const ownAddress = vi.hoisted(() => ({ current: null as string | null | 'pending' }));
+vi.mock('../state/currentUserEmail', () => ({
+  resolveCalendarUserEmail: () =>
+    ownAddress.current === 'pending'
+      ? new Promise(() => {})
+      : Promise.resolve(ownAddress.current),
+}));
 vi.mock('../state/useCalendarDefaultReminders', () => ({
   useCalendarDefaultReminders: () => REMINDERS,
 }));
@@ -66,6 +74,8 @@ afterEach(() => {
   document.body.innerHTML = '';
   invokeMock.mockClear();
   calendarRows.current = [];
+  ownAddress.current = null;
+  delete (CALENDARS[0] as { invitation_import?: string }).invitation_import;
 });
 
 /** Once the calendar was asked whether it holds the appointment already. */
@@ -98,7 +108,7 @@ const SERIES: ImportedEvent = {
   attendees: [],
 };
 
-async function openImport(onImported = () => {}) {
+async function openImport(onImported = () => {}, importFrom: ImportedEvent = SERIES) {
   const { EventDialog } = await import('./EventDialog');
   render(
     <StrictMode>
@@ -106,7 +116,7 @@ async function openImport(onImported = () => {}) {
         isOpen
         onClose={() => {}}
         event={null}
-        importFrom={SERIES}
+        importFrom={importFrom}
         importNote="Nicht übernommen: die Aufgabe „Geschenke besorgen“."
         onImported={onImported}
       />
@@ -188,6 +198,93 @@ describe('EventDialog → an appointment from a file', () => {
     expect(
       await screen.findByText(
         'Aperio prüft noch, ob dieser Termin schon in „Kalender“ steht. Versuche es gleich noch einmal.',
+      ),
+    ).toBeTruthy();
+    expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(false);
+  });
+});
+
+describe('EventDialog → an invitation from a file, as the calendar takes it (I6)', () => {
+  const INVITATION: ImportedEvent = {
+    ...SERIES,
+    organizer: 'boss@example.org',
+    attendees: ['Toni <toni@example.org>', 'gast@example.org'],
+  };
+
+  it('keeps someone else’s invitation where the calendar keeps invitations, locked as received', async () => {
+    (CALENDARS[0] as { invitation_import?: string }).invitation_import = 'kept';
+    ownAddress.current = 'toni@example.org';
+    await openImport(() => {}, INVITATION);
+    expect(
+      await screen.findByText(
+        'Eine Einladung von boss@example.org: Organisator und Teilnehmer bleiben, und niemand wird benachrichtigt.',
+      ),
+    ).toBeTruthy();
+    // The content as the organizer sent it: no field to type into.
+    expect(screen.queryByRole('combobox', { name: /^titel$/i })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /benachrichtigen/i })).toBeNull();
+    await asked();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(true),
+    );
+    expect(createRequest()).toMatchObject({
+      title: 'Jour fixe',
+      organizer: 'boss@example.org',
+      organized_elsewhere: true,
+      keeps_invitation: true,
+      attendees: ['Toni <toni@example.org>', 'gast@example.org'],
+      send_invitations: false,
+    });
+  });
+
+  it('sets it aside where the calendar cannot keep it quietly, as the account’s own', async () => {
+    ownAddress.current = 'toni@example.org';
+    await openImport(() => {}, INVITATION);
+    expect(
+      await screen.findByText(/In „Kalender“ lassen sich Organisator und Teilnehmer nicht übernehmen/),
+    ).toBeTruthy();
+    // The account's own appointment: its content can be changed.
+    expect(screen.getByRole('combobox', { name: /^titel$/i })).toBeTruthy();
+    await asked();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(true),
+    );
+    expect(createRequest()).toMatchObject({
+      attendees: [],
+      organizer: null,
+      organized_elsewhere: false,
+      keeps_invitation: false,
+    });
+  });
+
+  it('takes the account’s own meeting as a new appointment, with its invitees', async () => {
+    ownAddress.current = 'MAILTO:Boss@Example.org';
+    await openImport(() => {}, INVITATION);
+    expect(await screen.findByRole('combobox', { name: /^titel$/i })).toBeTruthy();
+    expect(screen.queryByText(/Eine Einladung von/)).toBeNull();
+    await asked();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(true),
+    );
+    expect(createRequest()).toMatchObject({
+      attendees: ['Toni <toni@example.org>', 'gast@example.org'],
+      organizer: 'boss@example.org',
+      organized_elsewhere: false,
+      keeps_invitation: false,
+    });
+  });
+
+  it('creates nothing while it still asks whose it is', async () => {
+    ownAddress.current = 'pending';
+    await openImport(() => {}, INVITATION);
+    await asked();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
+    expect(
+      await screen.findByText(
+        'Aperio prüft noch, ob du diesen Termin selbst organisierst. Versuche es gleich noch einmal.',
       ),
     ).toBeTruthy();
     expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(false);

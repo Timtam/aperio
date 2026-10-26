@@ -210,9 +210,10 @@ pub use task_status::{
 pub use types::{
     AttendeeResponse, AttendeeStatus, Calendar, Contact, ContactAddress, ContactList, ContactPhoto,
     ContactValue, DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember,
-    MemberRight, MonthDay, NewContact, NewEvent, NewTask, RecurrenceAnchor, RecurrenceEnd,
-    RecurrenceFrequency, RecurrencePlacement, Section, Task, TaskAssignment, TaskEffort, TaskList,
-    TaskListShare, TaskPriority, TaskRecurrence, TaskStatus, TaskUser, Weekday,
+    InvitationImport, MemberRight, MonthDay, NewContact, NewEvent, NewTask, RecurrenceAnchor,
+    RecurrenceEnd, RecurrenceFrequency, RecurrencePlacement, Section, Task, TaskAssignment,
+    TaskEffort, TaskList, TaskListShare, TaskPriority, TaskRecurrence, TaskStatus, TaskUser,
+    Weekday,
 };
 pub use write_leftover::WriteLeftover;
 pub use write_refusal::{SeriesRewrite, WriteRefusal};

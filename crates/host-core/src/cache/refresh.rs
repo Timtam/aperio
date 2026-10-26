@@ -1028,6 +1028,7 @@ mod tests {
                     color: None,
                     read_only: false,
                     default_sound: None,
+                    invitation_import: Default::default(),
                 })
                 .collect())
         }

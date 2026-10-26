@@ -758,6 +758,7 @@ mod tests {
                 color: None,
                 read_only: true,
                 default_sound: None,
+                invitation_import: Default::default(),
             },
             cal_core::Calendar {
                 color_label: None,
@@ -772,6 +773,7 @@ mod tests {
                 color: None,
                 read_only: false,
                 default_sound: None,
+                invitation_import: Default::default(),
             },
         ];
         apply_to_calendars(&repo, &mut cals);
@@ -816,6 +818,7 @@ mod tests {
                 color: Some(cal_core::ContainerColor::native("#4285f4")),
                 read_only: false,
                 default_sound: None,
+                invitation_import: Default::default(),
             },
             cal_core::Calendar {
                 color_label: None,
@@ -830,6 +833,7 @@ mod tests {
                 color: None,
                 read_only: false,
                 default_sound: None,
+                invitation_import: Default::default(),
             },
         ];
         apply_color_to_calendars(&repo, &mut cals);

@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
-import { importedForEditor, skippedSentence } from '@aperio/shared';
+import { skippedSentence } from '@aperio/shared';
 
 import { fileImportFormats, readImportContent, readImportFile } from '../api/client';
 import type { FileImportOutcome } from './DialogState';
@@ -12,8 +12,9 @@ import { useDialogState } from './dialogStateContext';
  * (the toolbar's "Import …", Ctrl+O) or dropped on the window.
  *
  * What a plugin read decides what opens: one appointment fills the event
- * editor, as it stands, with the import's note as its first stop; more than
- * one, none, or a failure open the import dialog.
+ * editor, as it stands, with the import's note as its first stop — the editor
+ * itself decides, per calendar, whether an invitation keeps its people (I6);
+ * more than one, none, or a failure open the import dialog.
  */
 export function useFileImport(): {
   importFromDisk: () => Promise<void>;
@@ -25,14 +26,10 @@ export function useFileImport(): {
   const present = useCallback(
     (fileName: string, outcome: FileImportOutcome) => {
       if ('read' in outcome && outcome.read.events.length === 1) {
-        const { event, invitationSetAside } = importedForEditor(outcome.read.events[0]);
-        const note = [
-          skippedSentence(outcome.read.skipped, t),
-          invitationSetAside ? t('fileImport.invitationSetAside') : null,
-        ]
-          .filter(Boolean)
-          .join(' ');
-        openEventDialog(null, { importFrom: event, importNote: note || null });
+        openEventDialog(null, {
+          importFrom: outcome.read.events[0],
+          importNote: skippedSentence(outcome.read.skipped, t),
+        });
         return;
       }
       if ('failed' in outcome) {

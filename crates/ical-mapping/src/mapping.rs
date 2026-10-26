@@ -1155,6 +1155,7 @@ pub fn event_to_ical_preserving(event: &Event, mut prior: PriorAlarms) -> String
         send_invitations: event.send_invitations,
         // Only the rendering reads this; the UID comes from the id below.
         uid_to_keep: None,
+        keeps_invitation: false,
     };
     // The iCalendar `UID` must be the bare provider UID — NOT our composite
     // `{href}|{uid}` row id. Writing the composite changes the event's UID
@@ -2372,6 +2373,7 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let uid = "abcdef-12345@aperio";
         let body = new_event_to_ical(uid, &event);
@@ -2419,6 +2421,7 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_ical("bday-uid", &event);
         assert!(
@@ -2454,6 +2457,7 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_ical("conf-uid", &event);
         assert!(body.contains("DTSTART;VALUE=DATE:20260610"), "{body}");
@@ -2484,6 +2488,7 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 
@@ -2638,6 +2643,7 @@ END:VCALENDAR\r
             attendees: vec!["Alice <alice@example.com>".into(), "bob@example.com".into()],
             send_invitations: true,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_ical("uid-1", &event);
         assert!(!body.contains("ORGANIZER"), "{body}");
@@ -2803,6 +2809,7 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_ical("round-trip-uid", &event);
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();
@@ -3340,6 +3347,7 @@ END:VCALENDAR\r
                 attendees: Vec::new(),
                 send_invitations: false,
                 uid_to_keep: None,
+                keeps_invitation: false,
             }
         }
 
@@ -3416,6 +3424,7 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 

@@ -140,6 +140,11 @@ export interface NewEvent {
    *  apart from `CalendarEvent.ical_uid` on purpose: a create spread from an
    *  existing event (a copy, a split's tail) must never take its UID. */
   uid_to_keep?: string | null;
+  /** A meeting someone else organizes, from a file: created as theirs with
+   *  `organizer` and the invitees, nobody told, where the calendar keeps
+   *  invitations (`Calendar.invitation_import`); the host drops the people
+   *  elsewhere. */
+  keeps_invitation?: boolean;
 }
 
 /** One busy time block (ISO 8601 timestamps) from a free/busy query. */

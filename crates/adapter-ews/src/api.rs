@@ -1394,6 +1394,7 @@ async fn detach_exception(
         attendees: event.attendees.clone(),
         send_invitations: event.send_invitations,
         uid_to_keep: None,
+        keeps_invitation: false,
     };
     cal_core::attendee::guard_create(&mut single);
     let created = create_event(client, &event.calendar_id, single, server_zones).await?;
@@ -2428,6 +2429,7 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 

@@ -208,6 +208,7 @@ impl LocalAdapter {
                 color: color?,
                 read_only: read_only?,
                 default_sound: sound?,
+                invitation_import: Default::default(),
             });
         }
         Ok(out)
@@ -861,6 +862,7 @@ mod tests {
             color: Some(container("#112233")),
             read_only: false,
             default_sound: None,
+            invitation_import: Default::default(),
         }
     }
 

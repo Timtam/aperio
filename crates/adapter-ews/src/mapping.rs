@@ -181,6 +181,7 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
         color: None,
         read_only,
         default_sound: None,
+        invitation_import: Default::default(),
     }
 }
 
@@ -5178,6 +5179,7 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 
@@ -6245,6 +6247,7 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         })
         .unwrap();
         assert!(
@@ -9784,6 +9787,7 @@ mod tests {
             organizer: None,
             organized_elsewhere: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let xml = new_event_to_calendar_item_xml(&new).unwrap();
         assert!(!xml.contains("<t:RequiredAttendees>"), "{xml}");

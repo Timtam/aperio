@@ -16,6 +16,10 @@ const failTitles = vi.hoisted(() => ({ current: new Set<string>() }));
 const calendarRows = vi.hoisted(() => ({
   current: {} as Record<string, Array<{ ical_uid?: string }> | 'fail' | 'pending'>,
 }));
+/** The account's address in each calendar (`calendar_current_user_email`). */
+const ownAddress = vi.hoisted(() => ({
+  current: {} as Record<string, string | null | 'pending'>,
+}));
 const invokeMock = vi.hoisted(() =>
   vi.fn((command: string, payload?: unknown) => {
     if (command === 'get_events') {
@@ -56,6 +60,13 @@ vi.mock('../state/dialogStateContext', () => ({
   useDialogState: () => ({ openEventDialog, invalidateData }),
 }));
 vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => announce }));
+// Its own answers per test: the real one keeps them for the page's life.
+vi.mock('../state/currentUserEmail', () => ({
+  resolveCalendarUserEmail: (calendarId: string) =>
+    ownAddress.current[calendarId] === 'pending'
+      ? new Promise(() => {})
+      : Promise.resolve(ownAddress.current[calendarId] ?? null),
+}));
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -65,6 +76,8 @@ afterEach(() => {
   announce.mockClear();
   failTitles.current = new Set();
   calendarRows.current = {};
+  ownAddress.current = {};
+  for (const calendar of CALENDARS) delete (calendar as { invitation_import?: string }).invitation_import;
   localStorage.clear();
 });
 
@@ -105,10 +118,10 @@ describe('ImportDialog → several appointments', () => {
   it('says what the file holds and what it leaves out, first', async () => {
     await open({ read: READ });
     expect(
-      screen.getByText(
+      await screen.findByText(
         'In „export.ics“ stehen 2 Termine. Nicht übernommen: die Aufgabe „Geschenke besorgen“. ' +
-          'Teilnehmer und Organisator von Einladungen übernimmt Aperio noch nicht; solche Termine ' +
-          'werden deine eigenen, ohne Teilnehmer.',
+          'In „Privat“ lassen sich Organisator und Teilnehmer von Einladungen nicht übernehmen, ' +
+          'ohne dass jemand benachrichtigt wird; solche Termine werden deine eigenen, ohne Teilnehmer.',
       ),
     ).toBeTruthy();
     expect(screen.getAllByRole('checkbox')).toHaveLength(2);
@@ -117,12 +130,16 @@ describe('ImportDialog → several appointments', () => {
   it('writes the chosen ones to the chosen calendar, an invitation without its people', async () => {
     const onClose = await open({ read: READ });
     fireEvent.change(screen.getByLabelText('In Kalender'), { target: { value: 'cal-work' } });
+    // Whose the invitation is decides what it keeps.
+    await screen.findByText(/In „Arbeit“ lassen sich Organisator und Teilnehmer/);
     fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     const requests = createRequests();
     expect(requests.map((r) => r.title)).toEqual(['Chorprobe', 'Projektbesprechung']);
     expect(requests.every((r) => r.calendar_id === 'cal-work')).toBe(true);
     expect(requests[1].attendees).toEqual([]);
+    expect(requests[1].organizer).toBeNull();
+    expect(requests[1].keeps_invitation).toBe(false);
     expect(requests.every((r) => r.send_invitations === false)).toBe(true);
     expect(announce).toHaveBeenCalledWith('2 Termine in „Arbeit“ importiert.');
     expect(invalidateData).toHaveBeenCalled();
@@ -153,6 +170,7 @@ describe('ImportDialog → several appointments', () => {
   it('says which did not arrive and keeps the rest marked', async () => {
     failTitles.current = new Set(['Projektbesprechung']);
     const onClose = await open({ read: READ });
+    await screen.findByText(/In „Privat“ lassen sich Organisator und Teilnehmer/);
     fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
     expect(
       await screen.findByText(
@@ -173,10 +191,11 @@ describe('ImportDialog → several appointments', () => {
     expect(openEventDialog).toHaveBeenCalledTimes(1);
     const [, options] = openEventDialog.mock.calls[0];
     expect(options.calendarId).toBe('cal-home');
+    // As the file has it: the editor decides what the calendar keeps (I6).
     expect(options.importFrom.title).toBe('Projektbesprechung');
-    expect(options.importFrom.attendees).toEqual([]);
-    expect(options.importFrom.organizer).toBeUndefined();
-    expect(options.importNote).toMatch(/noch nicht/);
+    expect(options.importFrom.attendees).toEqual(['Max <max@example.org>']);
+    expect(options.importFrom.organizer).toBe('erika@example.org');
+    expect(options.importNote).toBeNull();
     act(() => options.onImported());
     expect(screen.getByText(/Projektbesprechung, .*, importiert/)).toBeTruthy();
   });
@@ -276,6 +295,62 @@ describe('ImportDialog → what the calendar holds already (I4)', () => {
     await open({ read: READ });
     expect(invokeMock.mock.calls.some(([command]) => command === 'get_events')).toBe(false);
     expect(screen.queryByText(/schon in „Privat“/)).toBeNull();
+  });
+});
+
+describe('ImportDialog → invitations, as the calendar takes them (I6)', () => {
+  it('keeps an invitation as someone else’s where the calendar keeps invitations', async () => {
+    (CALENDARS[0] as { invitation_import?: string }).invitation_import = 'kept-tentative';
+    await open({ read: READ });
+    expect(
+      await screen.findByText(
+        /Einladungen von anderen behalten in „Privat“ Organisator und Teilnehmer, und niemand wird benachrichtigt\. Deine Antwort steht danach auf „Mit Vorbehalt“\./,
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    await waitFor(() => expect(createRequests()).toHaveLength(2));
+    const [plain, invitation] = createRequests();
+    expect(plain.keeps_invitation).toBe(false);
+    expect(invitation).toMatchObject({
+      attendees: ['Max <max@example.org>'],
+      organizer: 'erika@example.org',
+      organized_elsewhere: true,
+      keeps_invitation: true,
+      send_invitations: false,
+    });
+  });
+
+  it('imports nothing while it still asks whose they are', async () => {
+    ownAddress.current = { 'cal-home': 'pending' };
+    await open({ read: READ });
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    expect(
+      await screen.findByText(
+        'Aperio prüft noch, welche dieser Termine du selbst organisierst. Versuche es gleich noch einmal.',
+      ),
+    ).toBeTruthy();
+    expect(createRequests()).toHaveLength(0);
+  });
+
+  it('takes the account’s own meeting as a new appointment, with its invitees', async () => {
+    ownAddress.current = { 'cal-home': 'Erika@Example.org' };
+    await open({ read: READ });
+    await waitFor(() =>
+      expect(screen.queryByText(/Organisator und Teilnehmer/)).toBeNull(),
+    );
+    // Nothing is said about invitations: there is none of someone else's.
+    expect(
+      await screen.findByText(
+        'In „export.ics“ stehen 2 Termine. Nicht übernommen: die Aufgabe „Geschenke besorgen“.',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    await waitFor(() => expect(createRequests()).toHaveLength(2));
+    expect(createRequests()[1]).toMatchObject({
+      attendees: ['Max <max@example.org>'],
+      organized_elsewhere: false,
+      keeps_invitation: false,
+    });
   });
 });
 

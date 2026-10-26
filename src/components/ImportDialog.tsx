@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  importedForEditor,
+  importInto,
+  importOwner,
+  importPeople,
   importFailureSentence,
   joinNames,
   selectableEventCalendars,
@@ -17,6 +19,7 @@ import { useDateFormat } from '../intl/dateFormat';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import type { FileImportOutcome } from '../state/DialogState';
 import { useDialogState } from '../state/dialogStateContext';
+import { useCalendarOwnAddress } from '../state/useCalendarOwnAddress';
 import { useHeldOnImport } from '../state/useHeldOnImport';
 import { useViewState } from '../state/viewStateContext';
 import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar';
@@ -207,11 +210,31 @@ function ImportList({
     setImported((prev) => new Set(prev).add(index));
   }, []);
 
-  const setAside = events.some((event) => importedForEditor(event).invitationSetAside);
+  // Whose each one is, as the chosen calendar tells: the account's own meeting
+  // is a new appointment, someone else's an invitation the calendar keeps or
+  // cannot keep quietly (I6).
+  const calendar = targets.find((c) => c.id === calendarId);
+  const own = useCalendarOwnAddress(
+    calendarId,
+    events.some((event) => event.organizer?.trim()),
+  );
+  const intoOf = (event: ImportedEvent) => importInto(importOwner(event, own), calendar);
+  const invitations = events.map(intoOf).filter((into) => into.kind !== 'new');
+  const invitationSentence =
+    invitations.length === 0 || invitations.some((into) => into.kind === 'checking')
+      ? null
+      : invitations[0].kind === 'set-aside'
+        ? t('fileImport.invitation.listSetAside', { calendar: calendarName })
+        : t(
+            invitations[0].kind === 'invitation' && invitations[0].tentative
+              ? 'fileImport.invitation.listKeptTentative'
+              : 'fileImport.invitation.listKept',
+            { calendar: calendarName },
+          );
   const summary = [
     t('fileImport.list.summary', { file: fileName, count: events.length }),
     skippedSentence(read.skipped, t),
-    setAside ? t('fileImport.invitationsSetAside') : null,
+    invitationSentence,
   ]
     .filter(Boolean)
     .join(' ');
@@ -227,12 +250,13 @@ function ImportList({
     return event.recurrence ? `${text}, ${t('fileImport.list.series')}` : text;
   };
 
+  // As the file has it: the editor decides, for the calendar it ends up in,
+  // whether an invitation keeps its people.
   const edit = (event: ImportedEvent, index: number) => {
-    const { event: forEditor, invitationSetAside } = importedForEditor(event);
     openEventDialog(null, {
       calendarId,
-      importFrom: forEditor,
-      importNote: invitationSetAside ? t('fileImport.invitationSetAside') : null,
+      importFrom: event,
+      importNote: null,
       onImported: () => markImported(index),
     });
   };
@@ -248,14 +272,18 @@ function ImportList({
       setNotice(t('fileImport.held.stillChecking', { calendar: calendarName }));
       return;
     }
+    // Whose they are decides which keep their people.
+    if (toImport.some(({ event }) => intoOf(event).kind === 'checking')) {
+      setNotice(t('fileImport.invitation.listStillChecking'));
+      return;
+    }
     setBusy(true);
     setNotice(null);
     const failed: { title: string; err: unknown }[] = [];
     let done = 0;
     // One after the other: a provider asked many times at once may turn the
     // rest away as busy.
-    for (const { event, index } of toImport) {
-      const { event: entry } = importedForEditor(event);
+    for (const { event: entry, index } of toImport) {
       try {
         await apiCreateEvent(
           {
@@ -270,7 +298,7 @@ function ImportList({
             color_label: null,
             reminders: entry.reminders,
             sound: null,
-            attendees: entry.attendees,
+            ...importPeople(entry, intoOf(entry)),
             send_invitations: false,
             // No alarm in the file: the calendar's defaults, as for a new
             // appointment nobody chose reminders for.
@@ -284,7 +312,7 @@ function ImportList({
         done += 1;
         markImported(index);
       } catch (err) {
-        failed.push({ title: event.title, err });
+        failed.push({ title: entry.title, err });
       }
     }
     setBusy(false);

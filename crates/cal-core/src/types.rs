@@ -107,12 +107,40 @@ pub struct Calendar {
     /// address.
     #[serde(default)]
     pub stores_occurrence_exceptions: bool,
+    /// What creating a meeting someone else organizes does in this calendar —
+    /// an invitation imported from a file (DESIGN-file-import.md, I6): kept
+    /// with its organizer and invitees and nobody told; kept so, with the
+    /// account's answer reading "tentative" afterwards (Exchange's way in is a
+    /// tentative reply, saved and not sent); or not kept, where the provider
+    /// has no quiet way, and then it is created as the account's own
+    /// appointment without invitees. The adapter says it; the host and the
+    /// editors act on it. `#[serde(default)]` reads older payloads and stored
+    /// listings as not kept, the direction in which nobody is told anything.
+    #[serde(default)]
+    pub invitation_import: InvitationImport,
     /// The service the editors name when they say so ("iCloud informs the
     /// attendees …"), as the adapter knows it; `None` reads as "the calendar
     /// server". A display string only: no rule looks at it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-export", ts(optional))]
     pub notifier_name: Option<String>,
+}
+
+/// What creating a meeting someone else organizes does in a calendar — see
+/// [`Calendar::invitation_import`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum InvitationImport {
+    /// Not kept: the provider has no quiet way, so the create is the
+    /// account's own appointment, without the organizer and the invitees.
+    #[default]
+    NotKept,
+    /// Kept with its organizer and invitees; nobody is told.
+    Kept,
+    /// Kept, nobody told, and the account's answer reads "tentative"
+    /// afterwards.
+    KeptTentative,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -365,6 +393,15 @@ pub struct NewEvent {
     /// the source's UID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uid_to_keep: Option<String>,
+    /// Transient write-only signal: this create is a meeting someone else
+    /// organizes, imported from a file (DESIGN-file-import.md, I6) — written
+    /// with its [`organizer`](Self::organizer) and invitees as they are, and
+    /// nobody told. The host keeps it only where the calendar keeps
+    /// invitations ([`Calendar::invitation_import`]) and elsewhere drops it,
+    /// and the organizer and the invitees with it
+    /// (`attendee::guard_invitation_import`). NOT persisted.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub keeps_invitation: bool,
 }
 
 /// serde `skip_serializing_if` predicate: keep a `false` flag off the wire.

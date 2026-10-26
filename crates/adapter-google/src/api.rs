@@ -1601,6 +1601,7 @@ mod tests {
             attendees: vec![],
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let ev = create_event(&state, "primary", new).await.unwrap();
         assert_eq!(ev.id, "abc123");
@@ -1707,6 +1708,7 @@ mod tests {
             attendees: vec!["Alice <alice@example.com>".into()],
             send_invitations: true,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         create_event(&state, "primary", new).await.unwrap();
         m.assert_async().await;

@@ -11,6 +11,10 @@ import { useTranslation } from 'react-i18next';
 
 import {
   applySignature,
+  importInto,
+  importIntoSentence,
+  importOwner,
+  importPeople,
   madeNoReminderChoice,
   attendeeNotice,
   notifierSentence,
@@ -102,6 +106,7 @@ import { deleteThisAndFuture } from '../state/deleteSeriesFromOccurrence';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { useEventLocalReminders } from '../state/useEventLocalReminders';
 import { useCancellationChoice } from '../state/useCancellationChoice';
+import { useCalendarOwnAddress } from '../state/useCalendarOwnAddress';
 import { useHeldOnImport } from '../state/useHeldOnImport';
 import { useViewState } from '../state/viewStateContext';
 import { AttendeePicker } from './AttendeePicker';
@@ -565,6 +570,35 @@ export function EventDialog({
     if (importHeldNote && saidHeldNote.current !== importHeldNote) announce(importHeldNote);
     saidHeldNote.current = importHeldNote;
   }, [importHeldNote, announce]);
+  // Whose the imported appointment is, as the calendar picked tells (I6): the
+  // account's own meeting is a new appointment; someone else's an invitation
+  // the calendar keeps — shown as the file has it, locked like a received one,
+  // and locked too while it is still asked — or sets aside, the account's own
+  // without its people.
+  const importOwn = useCalendarOwnAddress(form.calendarId, !!imported?.organizer?.trim());
+  const importCalendar = calendars.find((c) => c.id === form.calendarId);
+  const importAs = useMemo(
+    () => (imported ? importInto(importOwner(imported, importOwn), importCalendar) : null),
+    [imported, importOwn, importCalendar],
+  );
+  const importLocked = importAs?.kind === 'invitation' || importAs?.kind === 'checking';
+  // The content as it came: the invitation lock adds to the provider's own.
+  const fieldsLocked = locked || importLocked;
+  const importAsNote =
+    imported && importAs ? importIntoSentence(imported, importAs, importCalendarName, t) : null;
+  const saidImportAsNote = useRef<string | null>(null);
+  useEffect(() => {
+    if (importAsNote && saidImportAsNote.current !== importAsNote) announce(importAsNote);
+    saidImportAsNote.current = importAsNote;
+  }, [importAsNote, announce]);
+  // Someone else's meeting, as the notice rules read it: nobody to offer to
+  // tell, as for a received invitation.
+  const noticeOriginal = useMemo(
+    () => event ?? (importLocked ? { organized_elsewhere: true } : null),
+    [event, importLocked],
+  );
+  /** The way in the form last followed (`importAs`). */
+  const importAsApplied = useRef<string | null>(null);
   // The defaults of the calendar a NEW appointment is heading for. A second
   // read, because the one above is keyed to the OPENED event and has to exist
   // before `initialState` does — while this one follows the calendar picker.
@@ -913,6 +947,26 @@ export function EventDialog({
     t,
     i18n.language,
   ]);
+  // The same words for an invitation from a file, which there are no controls
+  // for either (I6).
+  const importRepeatSentence = useMemo(() => {
+    if (!imported) return '';
+    const rrule = imported.recurrence?.rrule?.trim();
+    if (!rrule) return t('dialogs.event.recurrence.none');
+    return recurrenceSummaryText(
+      describeRecurrence({
+        rrule,
+        start: seriesDayKey(imported.start, imported.recurrence?.tzid, imported.all_day),
+        // The series from the file, under no id of any calendar's.
+        last_day: lastOccurrenceDayKey({
+          ...imported,
+          id: '',
+          recurrence: imported.recurrence ?? null,
+        }),
+      }),
+      { t, language: i18n.language },
+    );
+  }, [imported, t, i18n.language]);
 
   // Live mirror of the form for the pristine check below — a ref, so the reset
   // effect reads the CURRENT form without listing it as a dep (which would
@@ -1077,6 +1131,29 @@ export function EventDialog({
     announce,
     t,
   ]);
+
+  // The form follows the way an import goes in (I6): an invitation kept as the
+  // file has it, one set aside without its people, a new appointment with them.
+  // Declared under the reset, as the prefill is (reference: effect order vs.
+  // the first hydrate); whose the appointment is arrives after the first
+  // commit, so the reset's first run never lands on top of it.
+  const importAsKind = importAs?.kind;
+  useEffect(() => {
+    if (!isOpen || !imported || !importAsKind || importAsKind === 'checking') return;
+    if (importAsApplied.current === importAsKind) return;
+    importAsApplied.current = importAsKind;
+    setForm((prev) => {
+      if (importAsKind === 'invitation') {
+        return {
+          ...formFromImport(imported, prev.calendarId),
+          reminders: prev.reminders,
+          colorLabel: prev.colorLabel,
+        };
+      }
+      if (importAsKind === 'set-aside') return { ...prev, attendees: [] };
+      return { ...prev, attendees: imported.attendees };
+    });
+  }, [isOpen, imported, importAsKind]);
 
   /**
    * The calendar's own signature, put on a NEW appointment by itself.
@@ -1444,7 +1521,7 @@ export function EventDialog({
           attendeeNotice({
             calendar: targetCal,
             attendees: form.attendees,
-            original: event ?? null,
+            original: noticeOriginal,
           }),
           notifyAttendees,
         );
@@ -2131,6 +2208,22 @@ export function EventDialog({
             setError(t('fileImport.held.editorStillChecking', { calendar: importCalendarName }));
             return;
           }
+          // Whose it is decides what it keeps (I6).
+          if (importAs?.kind === 'checking') {
+            setError(t('fileImport.invitation.stillChecking'));
+            return;
+          }
+          // Someone else's meeting the calendar keeps goes in as theirs, as the
+          // file has it; anything else carries what the form holds.
+          const people =
+            imported && importAs?.kind === 'invitation'
+              ? importPeople(imported, importAs)
+              : {
+                  attendees: form.attendees,
+                  organizer: importAs?.kind === 'new' ? (imported?.organizer ?? null) : null,
+                  organized_elsewhere: false,
+                  keeps_invitation: false,
+                };
           const created = await apiCreateEvent({
             calendar_id: form.calendarId,
             title: trimmedTitle,
@@ -2143,7 +2236,7 @@ export function EventDialog({
             color_label: form.colorLabel,
             reminders: remindersForWire,
             sound: null,
-            attendees: form.attendees,
+            ...people,
             send_invitations: sendInvitations,
             // An untouched editor made no reminder choice: the calendar's
             // "attach" mode may then write its defaults into the new event.
@@ -2219,6 +2312,8 @@ export function EventDialog({
       event,
       imported,
       importIsHeld,
+      importAs,
+      noticeOriginal,
       importHeld.status,
       importCalendarName,
       onImported,
@@ -2383,7 +2478,7 @@ export function EventDialog({
   // both editors share (decisions 70a, 74a, 76a).
   const noticeFor = (calendarId: string, attendees: string[]) => {
     const calendar = calendars.find((c) => c.id === calendarId);
-    const notice = attendeeNotice({ calendar, attendees, original: event ?? null });
+    const notice = attendeeNotice({ calendar, attendees, original: noticeOriginal });
     // Two sentences, one place they can appear: who informs the attendees, or
     // that nobody will (`scheduling_silenced`, decision 98).
     const spec =
@@ -2583,6 +2678,7 @@ export function EventDialog({
         {imported && importNote && (
           <FocusableNote className="form__hint">{importNote}</FocusableNote>
         )}
+        {importAsNote && <FocusableNote className="form__hint">{importAsNote}</FocusableNote>}
         {importHeldNote && <FocusableNote className="form__hint">{importHeldNote}</FocusableNote>}
         {isEdit && event && (
           <EventRsvp
@@ -2593,7 +2689,7 @@ export function EventDialog({
             onResponded={locked ? invalidateData : onClose}
           />
         )}
-        {locked ? (
+        {fieldsLocked ? (
           <ReadOnlyField label={t('dialogs.event.fields.title')} value={form.title} />
         ) : (
           <TitleSuggestBox
@@ -2651,7 +2747,7 @@ export function EventDialog({
         </label>
         )}
 
-        {!locked && (
+        {!fieldsLocked && (
           <label className="form__field form__field--inline">
             <input
               type="checkbox"
@@ -2662,7 +2758,7 @@ export function EventDialog({
           </label>
         )}
 
-        {locked ? (
+        {fieldsLocked ? (
           <>
             {/* The same labels as the editable form, so the dialog reads the
                 same way whoever organizes the meeting. An all-day invitation
@@ -2748,7 +2844,7 @@ export function EventDialog({
           </>
         )}
 
-        {locked ? (
+        {fieldsLocked ? (
           form.location.trim() !== '' && (
             <ReadOnlyField
               label={t('dialogs.event.fields.location')}
@@ -2769,7 +2865,7 @@ export function EventDialog({
         </label>
         )}
 
-        {locked ? (
+        {fieldsLocked ? (
           form.description.trim() !== '' && (
             <label className="form__field">
               <span className="form__label">
@@ -2811,7 +2907,7 @@ export function EventDialog({
             Remove here, because it is not ours to delete. */}
         {/* Making one, as opposed to joining one: not on a meeting the
             account does not organize. */}
-        {!locked && (
+        {!fieldsLocked && (
           <MeetingControls
             event={event ?? null}
             onEventChanged={(saved) => {
@@ -2821,7 +2917,7 @@ export function EventDialog({
           />
         )}
 
-        {locked ? (
+        {fieldsLocked ? (
           form.attendees.map((attendee, index) => (
             <ReadOnlyField
               key={`${attendee}-${index}`}
@@ -2952,10 +3048,10 @@ export function EventDialog({
           </label>
         )}
 
-        {locked ? (
+        {fieldsLocked ? (
           <ReadOnlyField
             label={t('dialogs.event.recurrence.label')}
-            value={repeatSentence}
+            value={locked ? repeatSentence : importRepeatSentence}
           />
         ) : (
           <>

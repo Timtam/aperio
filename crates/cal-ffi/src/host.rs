@@ -3369,6 +3369,26 @@ impl Host {
         // The organizer is never an invitee, and only an event the account
         // organizes may notify (decisions 67a, 72a). Mirrors the desktop.
         host_core::event_write::guard_create(&mut event);
+        // An imported invitation keeps its organizer and invitees only where
+        // the calendar keeps invitations quietly (I6). Mirrors the desktop.
+        if event.keeps_invitation {
+            let calendars = if self.is_local_calendar(&req.calendar_id) {
+                self.runtime
+                    .block_on(self.adapter.list_calendars())
+                    .map_err(map_store_err)?
+            } else {
+                let account = self
+                    .registry
+                    .account_for_calendar(&req.calendar_id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
+                self.cache.read_calendars(&account).unwrap_or_default()
+            };
+            host_core::event_write::guard_invitation_import(
+                &mut event,
+                &calendars,
+                &req.calendar_id,
+            );
+        }
         // Same rule as the desktop command: a calendar set to "attach" writes
         // its default reminders into a new appointment left without any.
         host_core::reminders::apply_default_reminder_policy(
@@ -3537,6 +3557,7 @@ impl Host {
                 // which nobody measured a server to accept (matches the
                 // desktop).
                 uid_to_keep: None,
+                keeps_invitation: false,
             };
             host_core::event_write::guard_create(&mut new_payload);
             // A copy in another calendar of somebody else's meeting invites
@@ -10536,6 +10557,33 @@ mod tests {
         format!(
             r#"{{"calendar_id":"{cal}","start":"2026-06-01T00:00:00Z","end":"2026-07-01T00:00:00Z"}}"#
         )
+    }
+
+    /// An imported invitation (I6) keeps its organizer and invitees only
+    /// where the calendar says it keeps invitations. A local calendar keeps
+    /// none yet (until I6c), so it gets the account's own appointment,
+    /// without them, from the phone as from the desktop.
+    #[test]
+    fn an_imported_invitation_is_kept_only_where_the_calendar_keeps_it() {
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        let request = new_event_json(&cal, "Jour fixe").replace(
+            r#""attendees":[]"#,
+            r#""attendees":["bob@example.org"],"organizer":"boss@example.org","keeps_invitation":true,"send_invitations":true"#,
+        );
+        let created: serde_json::Value =
+            serde_json::from_str(&host.create_event_json(request).unwrap()).unwrap();
+        assert_eq!(created["attendees"], serde_json::json!([]), "{created}");
+        assert!(
+            created.get("organizer").is_none_or(|o| o.is_null()),
+            "{created}"
+        );
+        assert!(
+            created
+                .get("organized_elsewhere")
+                .is_none_or(|o| o == false),
+            "{created}"
+        );
     }
 
     /// The MOBILE half of the calendar-default-reminder chain, driven by the

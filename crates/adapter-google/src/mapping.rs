@@ -78,6 +78,7 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         color,
         read_only,
         default_sound: None,
+        invitation_import: Default::default(),
     }
 }
 
@@ -1515,6 +1516,7 @@ mod tests {
             attendees: vec![],
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_body(&new);
         let json = serde_json::to_value(&body).unwrap();
@@ -1561,6 +1563,7 @@ mod tests {
             attendees: vec![],
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_body(&new);
         let json = serde_json::to_value(&body).unwrap();
@@ -1649,6 +1652,7 @@ mod tests {
             attendees: vec![],
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_body(&new);
         let json = serde_json::to_value(&body).unwrap();

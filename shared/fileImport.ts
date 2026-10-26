@@ -6,6 +6,7 @@ import { codedError, errorMessageText } from './eventWriteError';
 import { errorMessage } from './errors';
 import { joinNames } from './listWords';
 import type { ImportedEvent } from './generated/ImportedEvent';
+import type { InvitationImport } from './generated/InvitationImport';
 import type { SkippedPart } from './generated/SkippedPart';
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
@@ -34,24 +35,113 @@ export function importFailureSentence(fileName: string, err: unknown, t: Transla
   return t('fileImport.failed', { file: fileName, reason });
 }
 
+/** Who organizes an appointment read from a file, as far as the calendar it
+ *  goes to can tell: nobody named, the account itself, someone else — or not
+ *  known yet, while the calendar is asked for the account's address. */
+export type ImportOwner = 'none' | 'me' | 'someone-else' | 'checking';
+
 /**
- * The appointment the editor is filled with, and whether an invitation was
- * set aside.
- *
- * Until each provider has its own quiet way to keep an invitation someone
- * else organizes (I6), an appointment the file names an organizer for comes
- * without its organizer and invitees (Toni, 2026-10-26): written as they are,
- * Exchange would make it the account's own meeting, and iCloud would mail
- * every invitee. One without an organizer keeps its invitees, as a new
- * appointment does.
+ * Who organizes `event`, given the account's address in the target calendar
+ * (`undefined` while it is asked, `null` when the calendar has none to give).
+ * Addresses compare as `cal_core::attendee::normalize_address` does: no
+ * `mailto:`, no case. The adapter asks again with every address the account
+ * has when it creates the appointment, so an alias the surface cannot know
+ * still reads as the account's own there.
  */
-export function importedForEditor(event: ImportedEvent): {
-  event: ImportedEvent;
-  invitationSetAside: boolean;
+export function importOwner(event: ImportedEvent, own: string | null | undefined): ImportOwner {
+  if (!event.organizer?.trim()) return 'none';
+  if (own === undefined) return 'checking';
+  const normalized = (address: string) => address.trim().replace(/^mailto:/i, '').trim().toLowerCase();
+  return own && normalized(own) === normalized(event.organizer) ? 'me' : 'someone-else';
+}
+
+/**
+ * How an appointment read from a file goes into one calendar
+ * (DESIGN-file-import.md, I6):
+ *
+ * - `new`: nobody organizes it, or the account does — a new appointment, its
+ *   invitees kept, editable as any, notified by the usual rules;
+ * - `invitation`: someone else organizes it and the calendar keeps
+ *   invitations — created as theirs, as the file has it, nobody told
+ *   (`tentative`: the account's answer reads "tentative" afterwards);
+ * - `set-aside`: someone else organizes it and the calendar has no quiet way
+ *   — the account's own appointment, without the organizer and the invitees;
+ * - `checking`: not known yet whose it is.
+ */
+export type ImportInto =
+  | { kind: 'new' }
+  | { kind: 'invitation'; tentative: boolean }
+  | { kind: 'set-aside' }
+  | { kind: 'checking' };
+
+export function importInto(
+  owner: ImportOwner,
+  calendar: { invitation_import?: InvitationImport } | undefined,
+): ImportInto {
+  if (owner === 'checking') return { kind: 'checking' };
+  if (owner !== 'someone-else') return { kind: 'new' };
+  const keeps = calendar?.invitation_import ?? 'not-kept';
+  return keeps === 'not-kept'
+    ? { kind: 'set-aside' }
+    : { kind: 'invitation', tentative: keeps === 'kept-tentative' };
+}
+
+/**
+ * The create an appointment from a file makes in a calendar it goes into as
+ * `into` says: the fields the provider keeps for an invitation, and the
+ * people. The surfaces add their calendar, the UID and the content.
+ */
+export function importPeople(
+  event: ImportedEvent,
+  into: ImportInto,
+): {
+  attendees: string[];
+  organizer: string | null;
+  organized_elsewhere: boolean;
+  keeps_invitation: boolean;
 } {
-  if (!event.organizer) return { event, invitationSetAside: false };
-  const { organizer: _organizer, ...rest } = event;
-  return { event: { ...rest, attendees: [] }, invitationSetAside: true };
+  switch (into.kind) {
+    case 'invitation':
+      return {
+        attendees: event.attendees,
+        organizer: event.organizer ?? null,
+        organized_elsewhere: true,
+        keeps_invitation: true,
+      };
+    case 'set-aside':
+      return { attendees: [], organizer: null, organized_elsewhere: false, keeps_invitation: false };
+    default:
+      // The account's own meeting names its organizer so the host keeps the
+      // account out of its invitees (decision 72a); nobody else is told
+      // anything the usual rules do not tell them.
+      return {
+        attendees: event.attendees,
+        organizer: event.organizer ?? null,
+        organized_elsewhere: false,
+        keeps_invitation: false,
+      };
+  }
+}
+
+/** What the editor says about an appointment going into `calendar` as
+ *  `into` says, or `null` when there is nothing to say. */
+export function importIntoSentence(
+  event: ImportedEvent,
+  into: ImportInto,
+  calendar: string,
+  t: Translate,
+): string | null {
+  const organizer = event.organizer?.trim() ?? '';
+  switch (into.kind) {
+    case 'invitation':
+      return t(into.tentative ? 'fileImport.invitation.keptTentative' : 'fileImport.invitation.kept', {
+        organizer,
+      });
+    case 'set-aside':
+      return t('fileImport.invitation.setAside', { organizer, calendar });
+    default:
+      return null;
+  }
 }
 
 /** One part a file held that is not imported, in words. */

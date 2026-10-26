@@ -71,6 +71,7 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         color,
         read_only: !entry.can_edit.unwrap_or(true),
         default_sound: None,
+        invitation_import: Default::default(),
     }
 }
 
@@ -2323,6 +2324,7 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
         assert_eq!(json["start"]["timeZone"], "America/New_York");
@@ -2355,6 +2357,7 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
         for side in ["start", "end"] {
@@ -2444,6 +2447,7 @@ mod tests {
             attendees: Vec::new(),
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_body(&new).unwrap();
         let json = serde_json::to_value(&body).unwrap();
@@ -2476,6 +2480,7 @@ mod tests {
             attendees: vec!["Alice <alice@example.com>".into()],
             send_invitations: true,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
         assert_eq!(

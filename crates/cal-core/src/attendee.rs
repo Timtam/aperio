@@ -32,7 +32,7 @@
 //!
 //! [`Event::organized_elsewhere`]: crate::Event::organized_elsewhere
 
-use crate::{AttendeeResponse, AttendeeStatus, Event, NewEvent};
+use crate::{AttendeeResponse, AttendeeStatus, Event, InvitationImport, NewEvent};
 
 /// An address in the one spelling comparisons use: trimmed, without a
 /// leading `mailto:` in any case, and lower-cased.
@@ -258,6 +258,31 @@ pub fn guard_update(event: &mut Event, read: Option<&Event>) {
 pub fn guard_create(event: &mut NewEvent) {
     event.attendees = without_organizer(&event.attendees, event.organizer.as_deref());
     event.send_invitations &= !event.organized_elsewhere && !event.attendees.is_empty();
+}
+
+/// The write rule for an imported invitation (DESIGN-file-import.md, I6), run
+/// by the host before the adapter sees the create: a meeting someone else
+/// organizes, marked [`NewEvent::keeps_invitation`]. A calendar that keeps
+/// invitations takes it as it is, someone else's and telling nobody. One that
+/// does not ([`InvitationImport::NotKept`]) gets the account's own appointment,
+/// without the organizer and the invitees, which it could not keep without
+/// telling them.
+pub fn guard_invitation_import(event: &mut NewEvent, import: InvitationImport) {
+    if !event.keeps_invitation {
+        return;
+    }
+    event.send_invitations = false;
+    match import {
+        InvitationImport::Kept | InvitationImport::KeptTentative => {
+            event.organized_elsewhere = true;
+        }
+        InvitationImport::NotKept => {
+            event.keeps_invitation = false;
+            event.organizer = None;
+            event.organized_elsewhere = false;
+            event.attendees.clear();
+        }
+    }
 }
 
 /// The invitees a copy in ANOTHER calendar gets: none, when the event it was
@@ -636,6 +661,7 @@ mod tests {
                 organizer: Some("mailto:toni@x".into()),
                 organized_elsewhere: false,
                 uid_to_keep: None,
+                keeps_invitation: false,
             };
             guard_create(&mut new);
             assert!(new.attendees.is_empty());
@@ -669,6 +695,68 @@ mod tests {
             guard_create(&mut new);
             assert_eq!(new.attendees, ["bob@x"]);
             assert!(new.send_invitations);
+        }
+
+        /// An imported invitation (I6) is someone else's and tells nobody
+        /// where the calendar keeps invitations; elsewhere it becomes the
+        /// account's own appointment, without the people it could not keep
+        /// quietly. A create that is no imported invitation is left alone.
+        #[test]
+        fn an_imported_invitation_is_kept_only_where_the_calendar_keeps_it() {
+            let at = Utc.with_ymd_and_hms(2026, 11, 2, 9, 0, 0).unwrap();
+            let invitation = NewEvent {
+                title: "Jour fixe".into(),
+                description: None,
+                location: None,
+                start: at,
+                end: at,
+                all_day: false,
+                recurrence: None,
+                color_label: None,
+                color_hex: None,
+                reminders: Vec::new(),
+                sound: None,
+                attendees: vec!["Toni <toni@x>".into(), "bob@x".into()],
+                send_invitations: true,
+                organizer: Some("boss@x".into()),
+                organized_elsewhere: false,
+                uid_to_keep: Some("jf-1@x".into()),
+                keeps_invitation: true,
+            };
+            for import in [InvitationImport::Kept, InvitationImport::KeptTentative] {
+                let mut kept = invitation.clone();
+                guard_invitation_import(&mut kept, import);
+                assert!(
+                    kept.keeps_invitation && kept.organized_elsewhere,
+                    "{import:?}"
+                );
+                assert_eq!(kept.organizer.as_deref(), Some("boss@x"));
+                assert_eq!(kept.attendees, invitation.attendees);
+                assert!(!kept.send_invitations, "{import:?}: nobody is told");
+            }
+
+            let mut own = invitation.clone();
+            guard_invitation_import(&mut own, InvitationImport::NotKept);
+            assert!(!own.keeps_invitation && !own.organized_elsewhere);
+            assert_eq!(own.organizer, None);
+            assert!(own.attendees.is_empty());
+            assert!(!own.send_invitations);
+            assert_eq!(
+                own.uid_to_keep.as_deref(),
+                Some("jf-1@x"),
+                "still the same appointment"
+            );
+
+            let mut plain = NewEvent {
+                keeps_invitation: false,
+                ..invitation.clone()
+            };
+            guard_invitation_import(&mut plain, InvitationImport::NotKept);
+            assert_eq!(
+                plain.attendees, invitation.attendees,
+                "not an import: untouched"
+            );
+            assert!(plain.send_invitations);
         }
     }
 }

@@ -404,9 +404,16 @@ Aperio itself registers for no file type; it imports only while it runs.
   cancellation, an answer to an invitation — is named and left out.
 - **A changed occurrence of a series** becomes an appointment of its own, and
   the series skips the slot it took.
-- **An invitation someone else organizes** comes, for now, without its
-  attendees and organizer, and the editor says so: the appointment becomes your
-  own. Keeping the invitation as it is, quietly, follows.
+- **An invitation someone else organizes** stays theirs in a calendar that
+  can keep it without telling anyone: its organizer and attendees stay, nobody
+  is notified, and the editor shows it as you received it — title, time,
+  place, description and attendees as sent; the calendar, the reminders and
+  the colour are yours to choose. In a calendar that cannot — for now every
+  one; the providers follow one by one — it becomes your own appointment,
+  without attendees. The editor and the list say which, for the calendar you
+  picked.
+- **A meeting you organize yourself** comes in as a new appointment, with
+  its attendees, as if you had just made it.
 
 Times keep their zone, including the Windows zone names Outlook writes.
 

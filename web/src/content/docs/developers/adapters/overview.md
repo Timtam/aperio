@@ -144,6 +144,17 @@ when caching:
 > `CACHE_GENERATION` bump (`host_core::cache`), or unchanged rows never get it
 > (generation 8 did this for the UID).
 
+> **Invitations from a file.** `Calendar::invitation_import` says what
+> creating a meeting someone else organizes does in a calendar: `kept`
+> (organizer and invitees stay, nobody is told), `kept-tentative` (so, with
+> the account's answer reading tentative afterwards) or `not-kept`, the
+> default. The import marks such a create `NewEvent::keeps_invitation` with
+> the `organizer`; both hosts run `cal_core::attendee::guard_invitation_import`
+> before the adapter sees it, which drops the organizer and the invitees where
+> the calendar keeps nothing. An adapter that says `kept` writes the
+> invitation as someone else's without a word to anyone, and treats one whose
+> organizer is the account itself as the account's own meeting.
+
 > **And some take only an attendee's own changes.** On a scheduling CalDAV
 > server (iCloud), a meeting somebody else organizes accepts the attendee's
 > reply and the attendee's own alarms and refuses everything else (RFC 6638

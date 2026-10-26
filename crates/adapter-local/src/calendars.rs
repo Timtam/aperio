@@ -73,6 +73,7 @@ impl LocalAdapter {
             invitations_reply_only: false,
             stores_occurrence_exceptions: false,
             notifier_name: None,
+            invitation_import: Default::default(),
         })
     }
 
@@ -196,6 +197,7 @@ impl LocalAdapter {
             invitations_reply_only: false,
             stores_occurrence_exceptions: false,
             notifier_name: None,
+            invitation_import: Default::default(),
         }))
     }
 
@@ -297,6 +299,7 @@ impl CalendarFeature for LocalAdapter {
                     color_label: color_label?.map(ColorLabelId),
                     read_only: read_only?,
                     default_sound: sound?,
+                    invitation_import: Default::default(),
                 });
             }
             Ok(out)
@@ -739,6 +742,7 @@ mod tests {
                 attendees: vec![],
                 send_invitations: false,
                 uid_to_keep: None,
+                keeps_invitation: false,
             },
         )
         .await
@@ -808,6 +812,7 @@ mod tests {
             attendees: vec![],
             send_invitations: false,
             uid_to_keep: None,
+            keeps_invitation: false,
         };
         for h in [0, 5, 24] {
             a.create_event(&cal.id, mk(h)).await.unwrap();
@@ -852,6 +857,7 @@ mod tests {
                     attendees: vec![],
                     send_invitations: false,
                     uid_to_keep: Some("imported-1@example.test".into()),
+                    keeps_invitation: false,
                 },
             )
             .await
@@ -929,6 +935,7 @@ mod tests {
                     attendees: vec![],
                     send_invitations: false,
                     uid_to_keep: None,
+                    keeps_invitation: false,
                 },
             )
             .await
@@ -978,6 +985,7 @@ mod tests {
                 attendees: vec![],
                 send_invitations: false,
                 uid_to_keep: None,
+                keeps_invitation: false,
             },
         )
         .await
@@ -1003,6 +1011,7 @@ mod tests {
                 attendees: vec![],
                 send_invitations: false,
                 uid_to_keep: None,
+                keeps_invitation: false,
             },
         )
         .await
@@ -1048,6 +1057,7 @@ mod tests {
                     attendees: vec![],
                     send_invitations: false,
                     uid_to_keep: None,
+                    keeps_invitation: false,
                 },
             )
             .await
@@ -1100,6 +1110,7 @@ mod tests {
                     attendees: vec![],
                     send_invitations: false,
                     uid_to_keep: None,
+                    keeps_invitation: false,
                 },
             )
             .await
@@ -1146,6 +1157,7 @@ mod tests {
                     attendees: vec![],
                     send_invitations: false,
                     uid_to_keep: None,
+                    keeps_invitation: false,
                 },
             )
             .await

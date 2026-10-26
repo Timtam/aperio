@@ -82,13 +82,12 @@ describe('useFileImport', () => {
     });
     expect(openEventDialog).toHaveBeenCalledTimes(1);
     const [, opened] = openEventDialog.mock.calls[0];
+    // The appointment as the file has it: the editor decides, per calendar,
+    // whether an invitation keeps its people (I6).
     expect(opened.importFrom.title).toBe('Projektbesprechung');
-    // The invitation is set aside until each provider keeps it quietly (I6).
-    expect(opened.importFrom.attendees).toEqual([]);
-    expect(opened.importNote).toBe(
-      'Nicht übernommen: die Aufgabe „Geschenke besorgen“. Teilnehmer und Organisator dieser ' +
-        'Einladung übernimmt Aperio noch nicht; der Termin wird dein eigener, ohne Teilnehmer.',
-    );
+    expect(opened.importFrom.organizer).toBe('erika@example.org');
+    expect(opened.importFrom.attendees).toEqual(['a@b.de']);
+    expect(opened.importNote).toBe('Nicht übernommen: die Aufgabe „Geschenke besorgen“.');
     expect(openFileImport).not.toHaveBeenCalled();
   });
 

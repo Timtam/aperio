@@ -2635,8 +2635,16 @@
       "notOpened": "Die Datei ließ sich nicht öffnen. Einzelheiten stehen im Protokoll."
     },
     "nothing": "In „{{file}}“ steht kein Termin, der sich importieren lässt.",
-    "invitationSetAside": "Teilnehmer und Organisator dieser Einladung übernimmt Aperio noch nicht; der Termin wird dein eigener, ohne Teilnehmer.",
-    "invitationsSetAside": "Teilnehmer und Organisator von Einladungen übernimmt Aperio noch nicht; solche Termine werden deine eigenen, ohne Teilnehmer.",
+    "invitation": {
+      "kept": "Eine Einladung von {{organizer}}: Organisator und Teilnehmer bleiben, und niemand wird benachrichtigt.",
+      "keptTentative": "Eine Einladung von {{organizer}}: Organisator und Teilnehmer bleiben, und niemand wird benachrichtigt. Deine Antwort steht danach auf „Mit Vorbehalt“; zu- oder absagen kannst du wie bei jeder Einladung.",
+      "setAside": "Eine Einladung von {{organizer}}: In „{{calendar}}“ lassen sich Organisator und Teilnehmer nicht übernehmen, ohne dass jemand benachrichtigt wird. Der Termin wird deshalb dein eigener, ohne Teilnehmer.",
+      "stillChecking": "Aperio prüft noch, ob du diesen Termin selbst organisierst. Versuche es gleich noch einmal.",
+      "listKept": "Einladungen von anderen behalten in „{{calendar}}“ Organisator und Teilnehmer, und niemand wird benachrichtigt.",
+      "listKeptTentative": "Einladungen von anderen behalten in „{{calendar}}“ Organisator und Teilnehmer, und niemand wird benachrichtigt. Deine Antwort steht danach auf „Mit Vorbehalt“.",
+      "listSetAside": "In „{{calendar}}“ lassen sich Organisator und Teilnehmer von Einladungen nicht übernehmen, ohne dass jemand benachrichtigt wird; solche Termine werden deine eigenen, ohne Teilnehmer.",
+      "listStillChecking": "Aperio prüft noch, welche dieser Termine du selbst organisierst. Versuche es gleich noch einmal."
+    },
     "skipped": {
       "sentence": "Nicht übernommen: {{parts}}.",
       "task": {

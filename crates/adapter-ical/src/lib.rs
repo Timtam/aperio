@@ -373,6 +373,7 @@ impl CalendarFeature for IcalAdapter {
             invitations_reply_only: false,
             stores_occurrence_exceptions: false,
             notifier_name: None,
+            invitation_import: Default::default(),
         }])
     }
 
