@@ -16,6 +16,7 @@ import i18n from '../i18n';
  */
 const FLOW_MODULE = '../../mobile/src/state/fileImportFlow';
 const PROGRESS_MODULE = '../../mobile/src/state/importProgress';
+const ROUTE_ID_MODULE = '../../mobile/src/navigation/importRouteId';
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
 
@@ -181,9 +182,7 @@ describe('importTarget', () => {
 
 describe('importRouteId', () => {
   it('gives an editor on a file a route of its own, and every other the default', async () => {
-    const { importRouteId } = (await import(
-      /* @vite-ignore */ '../../mobile/src/navigation/importRouteId'
-    )) as {
+    const { importRouteId } = (await import(/* @vite-ignore */ ROUTE_ID_MODULE)) as {
       importRouteId: (route: { params: Record<string, unknown> }) => string | undefined;
     };
     expect(importRouteId({ params: { eventId: null, calendarId: 'c' } })).toBeUndefined();
