@@ -395,6 +395,7 @@ fn map_event(
         attendee_responses: people.attendee_responses,
         cancelled,
         scheduling_silenced,
+        ical_uid: Some(uid.to_string()),
     })
 }
 
@@ -1152,6 +1153,8 @@ pub fn event_to_ical_preserving(event: &Event, mut prior: PriorAlarms) -> String
         sound: event.sound.clone(),
         attendees: event.attendees.clone(),
         send_invitations: event.send_invitations,
+        // Only the rendering reads this; the UID comes from the id below.
+        uid_to_keep: None,
     };
     // The iCalendar `UID` must be the bare provider UID — NOT our composite
     // `{href}|{uid}` row id. Writing the composite changes the event's UID
@@ -2051,6 +2054,46 @@ END:VCALENDAR\r
     }
 
     #[test]
+    fn the_series_uid_is_read_for_the_master_and_its_override() {
+        // An import finds what a calendar already holds by the UID (I4), and a
+        // changed occurrence belongs to its series: both rows carry the one UID.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:series-1@example.test\r
+SUMMARY:Daily standup\r
+DTSTART:20260519T090000Z\r
+DTEND:20260519T093000Z\r
+RRULE:FREQ=DAILY;COUNT=5\r
+END:VEVENT\r
+BEGIN:VEVENT\r
+UID:series-1@example.test\r
+RECURRENCE-ID:20260520T090000Z\r
+SUMMARY:Daily standup (moved)\r
+DTSTART:20260520T140000Z\r
+DTEND:20260520T143000Z\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data_with_href(
+            body,
+            "https://example.test/calendars/home/",
+            Some("/calendars/home/other-name.ics"),
+        )
+        .unwrap();
+        assert_eq!(events.len(), 2);
+        for event in &events {
+            assert_eq!(
+                event.ical_uid.as_deref(),
+                Some("series-1@example.test"),
+                "{}: the UID, not the resource name",
+                event.id
+            );
+        }
+    }
+
+    #[test]
     fn master_and_recurrence_id_override_get_distinct_ids() {
         // A recurring series whose 2nd occurrence was edited: iCloud sends the
         // master (RRULE) and the override (RECURRENCE-ID) as TWO VEVENTs sharing
@@ -2481,6 +2524,7 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         };
         let uid = "abcdef-12345@aperio";
         let body = new_event_to_ical(uid, &event);
@@ -2527,6 +2571,7 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         };
         let body = new_event_to_ical("bday-uid", &event);
         assert!(
@@ -2561,6 +2606,7 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         };
         let body = new_event_to_ical("conf-uid", &event);
         assert!(body.contains("DTSTART;VALUE=DATE:20260610"), "{body}");
@@ -2590,6 +2636,7 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         }
     }
 
@@ -2743,6 +2790,7 @@ END:VCALENDAR\r
             sound: None,
             attendees: vec!["Alice <alice@example.com>".into(), "bob@example.com".into()],
             send_invitations: true,
+            uid_to_keep: None,
         };
         let body = new_event_to_ical("uid-1", &event);
         assert!(!body.contains("ORGANIZER"), "{body}");
@@ -2907,6 +2955,7 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         };
         let body = new_event_to_ical("round-trip-uid", &event);
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();
@@ -3443,6 +3492,7 @@ END:VCALENDAR\r
                 sound: None,
                 attendees: Vec::new(),
                 send_invitations: false,
+                uid_to_keep: None,
             }
         }
 
@@ -3518,6 +3568,7 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         }
     }
 

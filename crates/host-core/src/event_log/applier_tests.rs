@@ -75,6 +75,7 @@ fn fixture_event(id: &str, calendar_id: &str) -> Event {
         attendee_responses: Vec::new(),
         cancelled: false,
         scheduling_silenced: false,
+        ical_uid: None,
     }
 }
 

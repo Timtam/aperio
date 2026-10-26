@@ -212,6 +212,7 @@ pub fn events_for_contacts(
                 attendee_responses: Vec::new(),
                 cancelled: false,
                 scheduling_silenced: false,
+                ical_uid: None,
             });
         }
     }

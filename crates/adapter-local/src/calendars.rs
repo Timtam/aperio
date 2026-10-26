@@ -139,7 +139,7 @@ impl LocalAdapter {
                     "SELECT id, calendar_id, title, description, location,
                             start_utc, end_utc, all_day, rrule, rrule_exceptions,
                             color_label_id, reminders, sound, attendees,
-                            created_at, updated_at, etag, rrule_tzid
+                            created_at, updated_at, etag, rrule_tzid, ical_uid
                        FROM events WHERE id = ?",
                 )
                 .map_err(map_sql_err)?;
@@ -482,7 +482,7 @@ impl CalendarFeature for LocalAdapter {
 const EVENT_SELECT_PREFIX: &str =
     "SELECT id, calendar_id, title, description, location, start_utc, end_utc,
             all_day, rrule, rrule_exceptions, color_label_id, reminders, sound,
-            attendees, created_at, updated_at, etag, rrule_tzid
+            attendees, created_at, updated_at, etag, rrule_tzid, ical_uid
        FROM events
       WHERE calendar_id = ?
         AND ( (start_utc < ? AND end_utc > ?)
@@ -544,8 +544,8 @@ fn persist_new_event(
                 id, calendar_id, title, description, location, start_utc,
                 end_utc, all_day, rrule, rrule_exceptions, rrule_tzid,
                 color_label_id, reminders, sound, attendees, created_at,
-                updated_at, etag
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                updated_at, etag, ical_uid
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
             params![
                 id,
                 calendar_id,
@@ -564,6 +564,7 @@ fn persist_new_event(
                 attendees_json,
                 now_s,
                 now_s,
+                event.uid_to_keep,
             ],
         )
         .map_err(map_sql_err)?;
@@ -600,6 +601,7 @@ fn persist_new_event(
         attendee_responses: Vec::new(),
         cancelled: false,
         scheduling_silenced: false,
+        ical_uid: event.uid_to_keep,
     })
 }
 
@@ -626,6 +628,7 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
     let updated_at = parse_utc(&req_text(row, 15)?)?;
     let etag = opt_text(row, 16)?;
     let rrule_tzid = opt_text(row, 17)?;
+    let ical_uid = opt_text(row, 18)?;
     let recurrence = combine_recurrence(rrule, exceptions, rrule_tzid)?;
 
     Ok(Event {
@@ -663,6 +666,7 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
         attendee_responses: Vec::new(),
         cancelled: false,
         scheduling_silenced: false,
+        ical_uid,
     })
 }
 
@@ -734,6 +738,7 @@ mod tests {
                 sound: None,
                 attendees: vec![],
                 send_invitations: false,
+                uid_to_keep: None,
             },
         )
         .await
@@ -802,6 +807,7 @@ mod tests {
             sound: None,
             attendees: vec![],
             send_invitations: false,
+            uid_to_keep: None,
         };
         for h in [0, 5, 24] {
             a.create_event(&cal.id, mk(h)).await.unwrap();
@@ -816,6 +822,79 @@ mod tests {
         assert_eq!(evs.len(), 2);
         assert_eq!(evs[0].title, "E0");
         assert_eq!(evs[1].title, "E5");
+    }
+
+    /// An imported appointment keeps its file's UID (I4) on every read, on an
+    /// edit, in the snapshot another device starts from, and through a sync
+    /// update that does not carry it.
+    #[tokio::test]
+    async fn an_imported_uid_is_kept_read_and_synced() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
+        let base = "2026-05-19T10:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let created = a
+            .create_event(
+                &cal.id,
+                NewEvent {
+                    organized_elsewhere: false,
+                    organizer: None,
+                    title: "Imported".into(),
+                    description: None,
+                    location: None,
+                    start: base,
+                    end: base + Duration::hours(1),
+                    all_day: false,
+                    recurrence: None,
+                    color_label: None,
+                    color_hex: None,
+                    reminders: vec![],
+                    sound: None,
+                    attendees: vec![],
+                    send_invitations: false,
+                    uid_to_keep: Some("imported-1@example.test".into()),
+                },
+            )
+            .await
+            .unwrap();
+        let uid = Some("imported-1@example.test");
+        assert_eq!(created.ical_uid.as_deref(), uid);
+        let range = DateRange {
+            start: base - Duration::hours(1),
+            end: base + Duration::hours(2),
+        };
+        assert_eq!(
+            a.get_events(&cal.id, range).await.unwrap()[0]
+                .ical_uid
+                .as_deref(),
+            uid
+        );
+
+        // An edit whose copy never read the UID leaves it.
+        let mut edit = created.clone();
+        edit.title = "Imported, renamed".into();
+        edit.ical_uid = None;
+        a.update_event(edit).await.unwrap();
+        let read = a.get_event_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(
+            (read.title.as_str(), read.ical_uid.as_deref()),
+            ("Imported, renamed", uid)
+        );
+
+        // Another device starts from the snapshot, then takes updates.
+        let dumped = a.dump_events_for_snapshot().unwrap();
+        assert_eq!(dumped[0].ical_uid.as_deref(), uid);
+        let other = make_adapter();
+        other.upsert_calendar_from_sync(&cal).unwrap();
+        other.upsert_event_from_sync(&dumped[0]).unwrap();
+        let mut update = dumped[0].clone();
+        update.title = "Renamed elsewhere".into();
+        update.ical_uid = None;
+        other.upsert_event_from_sync(&update).unwrap();
+        let there = other.get_event_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(
+            (there.title.as_str(), there.ical_uid.as_deref()),
+            ("Renamed elsewhere", uid)
+        );
     }
 
     #[tokio::test]
@@ -849,6 +928,7 @@ mod tests {
                     sound: None,
                     attendees: vec![],
                     send_invitations: false,
+                    uid_to_keep: None,
                 },
             )
             .await
@@ -897,6 +977,7 @@ mod tests {
                 sound: None,
                 attendees: vec![],
                 send_invitations: false,
+                uid_to_keep: None,
             },
         )
         .await
@@ -921,6 +1002,7 @@ mod tests {
                 sound: None,
                 attendees: vec![],
                 send_invitations: false,
+                uid_to_keep: None,
             },
         )
         .await
@@ -965,6 +1047,7 @@ mod tests {
                     sound: None,
                     attendees: vec![],
                     send_invitations: false,
+                    uid_to_keep: None,
                 },
             )
             .await
@@ -1016,6 +1099,7 @@ mod tests {
                     sound: None,
                     attendees: vec![],
                     send_invitations: false,
+                    uid_to_keep: None,
                 },
             )
             .await
@@ -1061,6 +1145,7 @@ mod tests {
                     sound: None,
                     attendees: vec![],
                     send_invitations: false,
+                    uid_to_keep: None,
                 },
             )
             .await

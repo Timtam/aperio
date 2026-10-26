@@ -3532,6 +3532,11 @@ impl Host {
                 reminders: event.reminders.clone(),
                 sound: event.sound.clone(),
                 attendees: event.attendees.clone(),
+                // A new UID at the target: created before the source is gone,
+                // the same one would stand twice at the provider for a moment,
+                // which nobody measured a server to accept (matches the
+                // desktop).
+                uid_to_keep: None,
             };
             host_core::event_write::guard_create(&mut new_payload);
             // A copy in another calendar of somebody else's meeting invites
@@ -10816,6 +10821,7 @@ mod tests {
                 attendee_responses: Vec::new(),
                 cancelled,
                 scheduling_silenced: false,
+                ical_uid: None,
             }
         };
         let mut events = vec![

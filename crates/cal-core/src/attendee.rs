@@ -394,6 +394,7 @@ mod tests {
                 attendee_responses: Vec::new(),
                 cancelled: false,
                 scheduling_silenced: false,
+                ical_uid: None,
             }
         }
 
@@ -634,6 +635,7 @@ mod tests {
                 send_invitations: true,
                 organizer: Some("mailto:toni@x".into()),
                 organized_elsewhere: false,
+                uid_to_keep: None,
             };
             guard_create(&mut new);
             assert!(new.attendees.is_empty());

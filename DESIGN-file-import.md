@@ -120,10 +120,25 @@ sich nicht lesen ließ), nicht nur gezählt.
 Handy fragen sie nach dem Dateifilter und reichen eine Datei an das Plugin,
 dessen Format sie trägt. Kein Adapter-Name im Host.
 
-**Doppelte.** `cal_core::Event` kennt keine UID. I4 gibt `Event` und
-`NewEvent` ein `ical_uid`: gelesen, wo der Anbieter sie kennt (CalDAV, Google
-`iCalUID`, Graph `iCalUId`, Exchange `UID`, lokal), geschrieben, wo er sie
-annimmt. Die Liste prüft das Ziel über den Zeitraum der Termine.
+**Doppelte.** `Event::ical_uid` trägt die UID, wo der Anbieter sie kennt:
+CalDAV `UID`, Exchange `calendar:UID` (nur über GetItem, das der Live-Lauf
+bestätigt; der Abgleich über SyncFolderItems fragt nicht danach), Google
+`iCalUID`, Graph `uid` für alle Zeilen einer Serie und `iCalUId` nur für einen
+Einzeltermin (`iCalUId` ist je Vorkommen eine andere), lokal eine Spalte
+(Migration 47). Ein geändertes Vorkommen trägt die UID seiner Serie. Gelesen
+wird sie auf jedem Weg, auch beim Abgleich zwischen Geräten: Ein lokales
+Update, das sie nicht mitbringt, lässt die gespeicherte stehen, und eine UID,
+die eine Seite hat und die andere nicht, ist nie ein Konflikt. Beim Anlegen
+heißt das Feld `NewEvent::uid_to_keep`, mit Absicht anders: Ein Anlegen, das
+aus einem gelesenen Termin zusammengesetzt wird (Kopie, Rest einer geteilten
+Serie, herausgelöstes Vorkommen), nimmt so nie dessen UID mit. Nur der Import
+setzt es. Ein Verschieben in einen anderen Kalender legt im Ziel an, bevor es
+die Quelle löscht; mit derselben UID stünde sie einen Moment zweimal beim
+Anbieter, und ob iCloud oder Exchange das zulassen, ist ungemessen: Es bekommt
+eine neue. Geschrieben wird die UID, wo der Anbieter sie annimmt: CalDAV,
+Exchange (`t:UID`, gemessen), lokal. Google nimmt sie nur über
+`events.import` (I6), Graph gar nicht. Die Liste und der Editor fragen den
+Zielkalender über den Zeitraum der Termine.
 
 ## Schritte
 
@@ -172,7 +187,12 @@ annimmt. Die Liste prüft das Ziel über den Zeitraum der Termine.
   (`importFailureSentence`, ein zu großer Datei am Marker
   `import-too-large`). Die vorläufige Regel `importedForEditor` gilt in
   Editor und Liste.
-- **I4 UID.** `ical_uid` lesen und schreiben, Doppelte in Liste und Editor.
+- **I4 UID**, in drei Teilen:
+  - **I4a** Lesen (gebaut): `Event::ical_uid` bei CalDAV, Exchange, Google,
+    Graph und lokal, durch Abgleich, Schnappschuss und Zwischenspeicher
+    (Generation 8, Exchange-Parser 6).
+  - **I4b** Schreiben: `NewEvent::uid_to_keep` bei CalDAV, Exchange und lokal.
+  - **I4c** Doppelte in Liste und Editor.
 - **I5 Handy.** „Termine importieren …“ in der Kalenderliste mit
   Dokumentwähler; „Teilen“ und „Öffnen in“: iOS als
   Dokumenttyp mit Rang `Alternate` (Aperio wird angeboten, nicht Standard),

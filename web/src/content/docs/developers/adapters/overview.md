@@ -130,6 +130,18 @@ when caching:
 >   existing event carries that event's `organizer` and
 >   `organized_elsewhere` (never sent) so it applies there too.
 
+> **The iCalendar UID.** `Event::ical_uid` carries the appointment's RFC 5545
+> UID where the provider keeps one; an occurrence and a changed occurrence
+> carry their series'. A file import finds by it what the target calendar
+> already holds. It is never written on an update. A create asks for one
+> through `NewEvent::uid_to_keep`, named apart on purpose: the surfaces build
+> creates by spreading a read event, and a copy, a split's tail or a carved-out
+> occurrence must never take the source's UID. Only an import sets it; a move
+> to another calendar gets a new one. So far the local store keeps it. An
+> adapter that starts reading a field the cache holds needs a
+> `CACHE_GENERATION` bump (`host_core::cache`), or unchanged rows never get it
+> (generation 8 did this for the UID).
+
 > **And some take only an attendee's own changes.** On a scheduling CalDAV
 > server (iCloud), a meeting somebody else organizes accepts the attendee's
 > reply and the attendee's own alarms and refuses everything else (RFC 6638

@@ -202,6 +202,10 @@ The endpoint is discovered or user-supplied.
   `REFUSED_UPDATE_CODES` (also in an HTTP 500 fault) is `server-refused`, as
   for an update. Plain creates too: a create refused while Exchange throttles
   said a protocol error before.
+- **The iCalendar UID comes with the details.** The detail `GetItem` asks for
+  `calendar:UID` (live rounds ICS to ICS-4 read it there); `SyncFolderItems`
+  does not, as nobody measured whether it may. A row has its `ical_uid` once
+  enriched, and a changed occurrence takes its series'.
 - **The organizer is listed as an attendee.** Exchange puts the organizer
   into `RequiredAttendees` with `ResponseType` "Organizer"; for an appointment
   made in Outlook it is the only row. The adapter drops that row by its flag
@@ -412,7 +416,9 @@ the iCalendar reader):
   did not read (the end zone) cannot be re-read from the cache. The folder
   state records `ITEM_PARSER` (`api.rs`); a state from an older parser is
   dropped and the folder drained again from scratch, once. Bump it whenever
-  the item parser starts reading a field the read rule uses.
+  the item parser starts reading a field the read rule uses, or a field the
+  detail enrichment fills (6: the UID): an item already enriched is never
+  asked again.
 
 ## Testing
 

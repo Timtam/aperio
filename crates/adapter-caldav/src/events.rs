@@ -205,7 +205,7 @@ pub async fn create_event(
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
         deletions_not_restored: Vec::new(),
-        id: uid,
+        id: uid.clone(),
         calendar_id: calendar_url.to_string(),
         title: event.title,
         description: event.description,
@@ -229,6 +229,7 @@ pub async fn create_event(
         // Freshly created by us — never a cancellation.
         cancelled: false,
         scheduling_silenced: false,
+        ical_uid: Some(uid),
     })
 }
 
@@ -1738,6 +1739,7 @@ END:VCALENDAR</c:calendar-data>
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         }
     }
 
@@ -1766,6 +1768,8 @@ END:VCALENDAR</c:calendar-data>
         .unwrap();
         m.assert_async().await;
         assert!(created.id.contains("@aperio"));
+        // The UID it wrote, which the next read gives as well.
+        assert_eq!(created.ical_uid.as_deref(), Some(created.id.as_str()));
         assert_eq!(created.etag.as_deref(), Some("\"server-etag-1\""));
         assert_eq!(created.calendar_id, cal_url.to_string());
     }
@@ -2255,6 +2259,7 @@ END:VCALENDAR\r
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 
@@ -3257,6 +3262,7 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let master_vcal = event_to_ical(&master);
         let until = rrule_until_instant(&master.recurrence.as_ref().unwrap().rrule).unwrap();

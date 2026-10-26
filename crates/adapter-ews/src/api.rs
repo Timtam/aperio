@@ -215,7 +215,10 @@ pub struct SyncedFolderState {
 /// 5: items carry their zones' full definitions (`start_zone_definition`,
 ///    `end_zone_definition`, decision 232), which the all-day read uses for a
 ///    zone the CLDR table does not know (decision 239).
-pub const ITEM_PARSER: u32 = 5;
+/// 6: items carry their iCalendar UID (`uid`, file import I4), which only the
+///    detail enrichment reads; a parser-5 row is enriched already and would
+///    never be asked again.
+pub const ITEM_PARSER: u32 = 6;
 
 /// How many changes to ask for per `SyncFolderItems` request.
 /// Exchange Online caps at 512 per call; smaller is fine but means
@@ -527,6 +530,9 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
             cached.organizer = fresh.organizer;
             cached.my_response_type = fresh.my_response_type;
             cached.attendees = fresh.attendees;
+            // The iCalendar UID, by which an import finds what is already
+            // here: detail-only as well.
+            cached.uid = fresh.uid;
             cached.detail_fetched = true;
             // Refresh the ChangeKey if GetItem returned a newer one
             // — detail reads don't bump it server-side typically,
@@ -1387,6 +1393,7 @@ async fn detach_exception(
         sound: event.sound.clone(),
         attendees: event.attendees.clone(),
         send_invitations: event.send_invitations,
+        uid_to_keep: None,
     };
     cal_core::attendee::guard_create(&mut single);
     let created = create_event(client, &event.calendar_id, single, server_zones).await?;
@@ -2018,6 +2025,7 @@ pub(crate) fn build_event_from_new(
         // Freshly created/updated by us — never a cancellation.
         cancelled: false,
         scheduling_silenced: false,
+        ical_uid: None,
     }
 }
 
@@ -2412,6 +2420,7 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         }
     }
 
@@ -2532,6 +2541,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let updated = update_event(&client_for(&server), &starting, None)
             .await
@@ -2620,6 +2630,7 @@ mod tests {
               <t:ResponseType>Accept</t:ResponseType>
             </t:Attendee>
           </t:RequiredAttendees>
+          <t:UID>MTG-UID@example.test</t:UID>
         </t:CalendarItem>
       </m:Items>
     </m:GetItemResponseMessage>
@@ -2648,6 +2659,8 @@ mod tests {
         assert_eq!(item.attendees.len(), 1);
         assert_eq!(item.attendees[0].email, "me@example.com");
         assert_eq!(item.attendees[0].response_type.as_deref(), Some("Accept"));
+        // The UID is detail-only too (I4).
+        assert_eq!(item.uid.as_deref(), Some("MTG-UID@example.test"));
     }
 
     /// Decision 58a, end to end: a cold drain reads a series with one changed
@@ -3017,6 +3030,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let updated = update_event(&client_for(&server), &starting, None)
             .await
@@ -3144,6 +3158,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let updated = update_event(&client_for(&server), &edit, None)
             .await
@@ -3327,6 +3342,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         update_event(&client_for(&server), &edit, None)
             .await
@@ -3464,6 +3480,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         update_event(&client_for(&server), &edit, None)
             .await
@@ -3616,6 +3633,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 
@@ -3806,6 +3824,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 

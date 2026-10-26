@@ -227,6 +227,16 @@ pub struct Event {
     pub updated_at: DateTime<Utc>,
     /// Provider ETag / sync tag, used for optimistic-concurrency on push.
     pub etag: Option<String>,
+    /// The appointment's iCalendar UID (RFC 5545 `UID`), where the provider
+    /// keeps one: CalDAV's `UID`, Exchange's `calendar:UID`, Google's
+    /// `iCalUID`, Graph's `iCalUId`, the local store's column. A calendar file
+    /// carries it along, so an import finds by it what the target calendar
+    /// already holds (DESIGN-file-import.md, I4). An occurrence and a changed
+    /// occurrence carry their series' UID. Never written on an update; a
+    /// create asks for one through [`NewEvent::uid_to_keep`]. `None` where the
+    /// provider has none to give (a device calendar, a synthesised one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ical_uid: Option<String>,
     /// The organizer's address (RFC 5545 `ORGANIZER`, `mailto:` stripped),
     /// when the provider exposes it on read. Lets the host decide "is the
     /// connected account an *attendee* of this meeting rather than its
@@ -342,6 +352,19 @@ pub struct NewEvent {
     /// [`Event::organized_elsewhere`]. The host then clears the send intent.
     #[serde(default, skip_serializing_if = "is_false")]
     pub organized_elsewhere: bool,
+    /// The iCalendar UID this create asks the provider to keep — see
+    /// [`Event::ical_uid`]. An appointment imported from a file keeps the
+    /// file's, so importing it again finds it. `None` lets the provider mint
+    /// one, as for an appointment made in Aperio, a copy and a move. Kept
+    /// where the provider takes a UID on create (CalDAV, Exchange, the local
+    /// store); Google and Microsoft Graph mint their own.
+    ///
+    /// Named apart from [`Event::ical_uid`] on purpose: the surfaces build
+    /// many creates by spreading a read event (a copy, the tail of a split, a
+    /// carved-out occurrence), and that must never hand the new appointment
+    /// the source's UID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid_to_keep: Option<String>,
 }
 
 /// serde `skip_serializing_if` predicate: keep a `false` flag off the wire.

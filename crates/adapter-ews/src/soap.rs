@@ -602,6 +602,7 @@ pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> S
           <t:FieldURI FieldURI="calendar:MyResponseType"/>
           <t:FieldURI FieldURI="calendar:RequiredAttendees"/>
           <t:FieldURI FieldURI="calendar:OptionalAttendees"/>
+          <t:FieldURI FieldURI="calendar:UID"/>
         </t:AdditionalProperties>
       </m:ItemShape>
       <m:ItemIds>
@@ -1302,6 +1303,14 @@ mod tests {
                 "{field} must be asked for: {body}"
             );
         }
+    }
+
+    /// The iCalendar UID rides the detail read, which GetItem answers (live
+    /// rounds ICS, ICS-3, ICS-4), so an import can find what is already here.
+    #[test]
+    fn the_detail_request_asks_for_the_uid() {
+        let body = get_calendar_items_with_recurrence(&[("M".into(), None)]);
+        assert!(body.contains(r#"FieldURI="calendar:UID""#), "{body}");
     }
 
     /// Both requests that fill the item cache ask for the end zone as well as

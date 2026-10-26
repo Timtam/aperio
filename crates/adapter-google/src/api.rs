@@ -1600,6 +1600,7 @@ mod tests {
             sound: None,
             attendees: vec![],
             send_invitations: false,
+            uid_to_keep: None,
         };
         let ev = create_event(&state, "primary", new).await.unwrap();
         assert_eq!(ev.id, "abc123");
@@ -1705,6 +1706,7 @@ mod tests {
             sound: None,
             attendees: vec!["Alice <alice@example.com>".into()],
             send_invitations: true,
+            uid_to_keep: None,
         };
         create_event(&state, "primary", new).await.unwrap();
         m.assert_async().await;
@@ -2123,6 +2125,7 @@ mod tests {
             deletions_not_restored: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 

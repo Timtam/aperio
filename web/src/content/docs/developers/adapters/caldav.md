@@ -57,7 +57,9 @@ Apple's well-known endpoints.
   permanently empty (a one-time `cache.contactsMultigetHealV2` heal clears
   those poisoned tokens so books re-bootstrap).
 - **Stable ids.** A resource is keyed by `{href}|{uid}` so renames/moves
-  and per-resource deletions resolve correctly.
+  and per-resource deletions resolve correctly. The bare `UID` is also the
+  event's `ical_uid`, the override's included, whatever the resource is
+  called.
 - **Subtasks ride `RELATED-TO`.** A VTODO's parameter-less `RELATED-TO`
   (RELTYPE defaults to PARENT; CHILD/SIBLING entries are ignored) carries
   the parent's **bare UID** on the wire; the read path resolves it to the

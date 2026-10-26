@@ -498,6 +498,11 @@ pub struct ParsedItem {
     /// detail-fetch caveat as `organizer`.
     #[serde(default)]
     pub my_response_type: Option<String>,
+    /// `<t:UID>` — the appointment's iCalendar UID, which a series' occurrences
+    /// share. Same detail-fetch caveat as `organizer`: only the master
+    /// enrichment asks for it, and a changed occurrence takes its series'.
+    #[serde(default)]
+    pub uid: Option<String>,
     /// `<t:RequiredAttendees>` + `<t:OptionalAttendees>` — the invitees
     /// with their `<t:ResponseType>`. Same detail-fetch caveat as
     /// `organizer`.
@@ -1417,6 +1422,9 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     b"myresponsetype" if inside_item && !inside_modified_occurrence => {
                         text_target = Some("my_response_type");
                     }
+                    b"uid" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("uid");
+                    }
                     b"requiredattendees" | b"optionalattendees" if inside_item => {
                         inside_attendees = true;
                     }
@@ -1579,6 +1587,7 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                             .get_or_insert_with(String::new)
                             .push_str(s);
                     }
+                    Some("uid") => current.uid.get_or_insert_with(String::new).push_str(s),
                     Some("subject") => current.subject.push_str(s),
                     Some("body") => {
                         let acc = current.body.get_or_insert_with(String::new);
@@ -1980,6 +1989,10 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         attendee_responses: people.attendee_responses,
         cancelled,
         scheduling_silenced: false,
+        ical_uid: item
+            .uid
+            .map(|uid| uid.trim().to_string())
+            .filter(|uid| !uid.is_empty()),
     })
 }
 
@@ -2984,8 +2997,10 @@ pub fn override_event(
     // the whole series is gone.
     row.cancelled = master_ev.cancelled || ov.cancelled || row.cancelled;
     // Device-local or series-owned, and never stored per occurrence: EWS keeps
-    // no colour at all, and the calendar is the master's.
+    // no colour at all, and the calendar is the master's. The occurrence's
+    // own item is read without its UID, which is the series' anyway.
     row.calendar_id = master_ev.calendar_id.clone();
+    row.ical_uid = master_ev.ical_uid.clone();
     row.color_label = master_ev.color_label.clone();
     row.color_hex = master_ev.color_hex.clone();
     row.scheduling_silenced = master_ev.scheduling_silenced;
@@ -5004,6 +5019,7 @@ mod tests {
     fn to_event_maps_reminder_and_etag() {
         let item = ParsedItem {
             my_response_type: None,
+            uid: None,
             item_id: "IID".into(),
             change_key: Some("ICK".into()),
             subject: "Lunch".into(),
@@ -5150,6 +5166,7 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         }
     }
 
@@ -5236,6 +5253,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 
@@ -6103,6 +6121,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let (set, _del) = event_to_update_field_xml(&ev).unwrap();
         assert!(
@@ -6187,6 +6206,7 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         })
         .unwrap();
         assert!(
@@ -6383,6 +6403,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let (set, del) = event_to_update_field_xml(&ev).unwrap();
         assert!(set.contains("<t:Subject>Updated</t:Subject>"));
@@ -7565,6 +7586,7 @@ mod tests {
     fn to_event_picks_kind_from_calendar_item_type() {
         let mk = |item_type: Option<&str>| ParsedItem {
             my_response_type: None,
+            uid: None,
             item_id: "IID".into(),
             change_key: Some("ICK".into()),
             subject: "X".into(),
@@ -9606,6 +9628,80 @@ mod tests {
         assert!(ev.organized_elsewhere);
     }
 
+    /// The iCalendar UID comes with the detail read (I4): an import finds by it
+    /// what the calendar already holds. A changed occurrence's own item is read
+    /// without it and takes its series'.
+    #[test]
+    fn the_detail_read_carries_the_uid_and_an_occurrence_takes_its_series() {
+        let xml = r#"<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <soap:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="M" ChangeKey="CK"/>
+              <t:Subject>Weekly</t:Subject>
+              <t:UID> imported-1@example.test </t:UID>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let parsed = parse_get_calendar_items_response(xml).unwrap();
+        assert_eq!(
+            parsed[0].uid.as_deref().map(str::trim),
+            Some("imported-1@example.test")
+        );
+
+        let mut item = ParsedItem {
+            item_id: "M".into(),
+            subject: "Weekly".into(),
+            start: Some("2026-05-20T08:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T09:00:00Z".parse().unwrap()),
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            uid: parsed[0].uid.clone(),
+            ..ParsedItem::default()
+        };
+        item.recurrence = Some(EwsRecurrence {
+            pattern: EwsRecurrencePattern::Daily { interval: 7 },
+            range: EwsRecurrenceRange::Numbered { occurrences: 5 },
+        });
+        let own = ParsedItem {
+            item_id: "OCC".into(),
+            subject: "Weekly, moved".into(),
+            start: Some("2026-05-27T10:00:00Z".parse().unwrap()),
+            end: Some("2026-05-27T11:00:00Z".parse().unwrap()),
+            item_type: Some("Exception".into()),
+            ..ParsedItem::default()
+        };
+        let ov = ModifiedOccurrence {
+            item_id: "OCC".into(),
+            change_key: None,
+            start: "2026-05-27T10:00:00Z".parse().unwrap(),
+            end: "2026-05-27T11:00:00Z".parse().unwrap(),
+            original_start: "2026-05-27T08:00:00Z".parse().unwrap(),
+            cancelled: false,
+            own: Some(Box::new(own)),
+        };
+        item.modified_occurrences = vec![ov.clone()];
+        let master = to_event(item.clone(), "cal").unwrap();
+        assert_eq!(master.ical_uid.as_deref(), Some("imported-1@example.test"));
+        let row = override_event(&master, &item, &ov, "cal").unwrap();
+        assert_eq!(row.title, "Weekly, moved", "the occurrence's own item");
+        assert_eq!(row.ical_uid.as_deref(), Some("imported-1@example.test"));
+
+        // A row read without the detail has none, rather than an empty one.
+        item.uid = Some("  ".into());
+        assert_eq!(to_event(item, "cal").unwrap().ical_uid, None);
+    }
+
     /// An appointment made in Outlook: Exchange lists its organizer, the
     /// mailbox itself, as the only attendee (live round 4, D6-D8). It has no
     /// invitees, so an update writes no attendee list and a detach creates a
@@ -9649,6 +9745,7 @@ mod tests {
             send_invitations: false,
             organizer: None,
             organized_elsewhere: false,
+            uid_to_keep: None,
         };
         let xml = new_event_to_calendar_item_xml(&new).unwrap();
         assert!(!xml.contains("<t:RequiredAttendees>"), "{xml}");

@@ -18,6 +18,7 @@ adapter just sends a `Bearer` token.
   **masters** come through with their `recurrence` (RRULE/EXDATE) intact —
   the frontend expands occurrences. Incremental updates use a `syncToken`
   (no time bound); a `410 Gone` means the token expired → full resync.
+  `iCalUID`, which a series' instances share, is the event's `ical_uid`.
 - **Tasks:** the Tasks API per task list.
 - **Contacts:** the People API, including *Other Contacts* via its own
   `syncToken`.

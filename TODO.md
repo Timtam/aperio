@@ -46,6 +46,12 @@
   `DESIGN-file-import.md`, Branch `feat/ics-import`. Adapter melden ihre
   Formate an; ein Termin öffnet den Editor vorausgefüllt, mehrere eine
   Liste. Die Verknüpfung an Mac und Windows kommt später.
+  ↳ Offen aus I4 (UID): Der Gerätekalender liest keine UID (iOS
+  `calendarItemExternalIdentifier`, Android `UID_2445`), dort erkennt der
+  Import keine Doppelten. Graph `uid` ist ungemessen (ohne sie hat eine
+  Serie bei Graph keine UID). Ein Verschieben in einen anderen Kalender
+  bekommt eine neue UID, weil ungemessen ist, ob iCloud oder Exchange
+  dieselbe UID kurz zweimal annehmen.
 - [~] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)  
   ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)

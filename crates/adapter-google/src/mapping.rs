@@ -460,6 +460,10 @@ pub struct EventEntry {
     /// appears on is theirs, the connected account's own (decision 70a).
     #[serde(default)]
     pub organizer: Option<EventOrganizer>,
+    /// The iCalendar UID (RFC 5545), which a series' instances share. Google
+    /// sends it by default; Aperio asks for no field list.
+    #[serde(default, rename = "iCalUID")]
+    pub ical_uid: Option<String>,
 }
 
 /// One attendee row on a read Google event (`event.attendees[]`).
@@ -731,6 +735,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         // `None` above).
         cancelled,
         scheduling_silenced: false,
+        ical_uid: entry.ical_uid.filter(|uid| !uid.trim().is_empty()),
     }))
 }
 
@@ -1047,6 +1052,35 @@ mod tests {
         assert!(ev.recurrence.is_none());
     }
 
+    /// Google's `iCalUID` is the appointment's iCalendar UID, which a series'
+    /// instances share (I4); an empty one is none.
+    #[test]
+    fn map_event_reads_the_ical_uid() {
+        let raw = r#"{
+            "id": "master-1_20260614T100000Z",
+            "iCalUID": "imported-1@example.test",
+            "summary": "Standup (moved)",
+            "start": { "dateTime": "2026-06-14T14:00:00Z" },
+            "end":   { "dateTime": "2026-06-14T14:30:00Z" },
+            "status": "confirmed",
+            "recurringEventId": "master-1",
+            "originalStartTime": { "dateTime": "2026-06-14T10:00:00Z" }
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert_eq!(ev.ical_uid.as_deref(), Some("imported-1@example.test"));
+
+        let raw = r#"{
+            "id": "ev-1",
+            "iCalUID": " ",
+            "summary": "Lunch",
+            "start": { "dateTime": "2026-06-14T12:00:00Z" },
+            "end":   { "dateTime": "2026-06-14T13:00:00Z" }
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        assert_eq!(map_event(entry, "primary").unwrap().unwrap().ical_uid, None);
+    }
+
     #[test]
     fn modified_instance_original_start_normalises_to_utc() {
         // originalStartTime with an offset must resolve to the same UTC instant
@@ -1319,6 +1353,7 @@ mod tests {
             deletions_not_restored: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let json = serde_json::to_value(event_to_body(&ev)).unwrap();
         assert_eq!(json["start"]["timeZone"], "America/New_York");
@@ -1364,6 +1399,7 @@ mod tests {
             deletions_not_restored: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let json = serde_json::to_value(event_to_body(&ev)).unwrap();
         for side in ["start", "end"] {
@@ -1478,6 +1514,7 @@ mod tests {
             sound: None,
             attendees: vec![],
             send_invitations: false,
+            uid_to_keep: None,
         };
         let body = new_event_to_body(&new);
         let json = serde_json::to_value(&body).unwrap();
@@ -1523,6 +1560,7 @@ mod tests {
             sound: None,
             attendees: vec![],
             send_invitations: false,
+            uid_to_keep: None,
         };
         let body = new_event_to_body(&new);
         let json = serde_json::to_value(&body).unwrap();
@@ -1569,6 +1607,7 @@ mod tests {
             attendee_responses: vec![],
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let body = event_to_body(&ev);
         let json = serde_json::to_value(&body).unwrap();
@@ -1609,6 +1648,7 @@ mod tests {
             sound: None,
             attendees: vec![],
             send_invitations: false,
+            uid_to_keep: None,
         };
         let body = new_event_to_body(&new);
         let json = serde_json::to_value(&body).unwrap();

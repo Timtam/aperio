@@ -2925,6 +2925,7 @@ mod server_zone_tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         }
     }
 
@@ -3219,6 +3220,7 @@ mod server_zone_tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         adapter.update_event(series).await.expect("update");
         assert_eq!(
@@ -3307,6 +3309,7 @@ mod server_zone_tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 

@@ -384,6 +384,7 @@ fn map_event(d: DeviceEvent) -> Result<Event> {
         // their reminders), so cancellation is moot here for now.
         cancelled: false,
         scheduling_silenced: false,
+        ical_uid: None,
     })
 }
 
@@ -1170,6 +1171,7 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
         }
     }
 
