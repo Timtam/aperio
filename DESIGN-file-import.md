@@ -472,10 +472,38 @@ Fünf Prüfer (Kern, Adapter, Desktop, Handy, Doku), je mit einem Gegenprüfer:
   dass es das dort nicht erkennen kann. Cache-Generation 9, weil gespeicherte
   Kalenderlisten weder diese Angabe noch `invitation_import` tragen.
 - **Exchange, zweiter Kalenderordner** (Toni, 2026-10-26: erst live
-  messen). Exchange legt den Termin einer vorläufigen Zusage vermutlich
-  immer im Standardkalender ab; gemessen ist nur dieser. Die Runde ICS-6
-  des EWS-Testprogramms importiert in einen eigenen Ordner der Runde und
-  sagt, wo der Termin landet. Bis dahin bleibt es, wie es ist.
+  messen). Runde ICS-6 (Lauf 170846): Aperio schrieb die Anfrage in einen
+  eigenen Kalenderordner der Runde (`SavedItemFolderId` = dieser Ordner),
+  aber Exchange legte den Termin der vorläufigen Zusage in den
+  Standardkalender; der neue Ordner blieb leer. Aperio meldete trotzdem
+  den neuen Ordner. Nichts verschickt, nichts in Entwürfen, nichts in
+  Gelöschten Elementen. Toni: **danach verschieben** — der Termin geht nach
+  der Zusage in den gewählten Ordner (`MoveItem`); eine weitere Runde misst,
+  ob Organisator, Teilnehmer, die vorläufige Antwort und die UID das
+  Verschieben überstehen und ob dabei etwas hinausgeht.
 - Doku: was CalDAV beim eigenen Meeting über die Liste tut, Zonen nur aus
   der Datei, wer `uid-taken` sagt, wer die Kern-Regeln nutzt, der Fehlertext
   eines Plugins.
+
+## Nach Prüfrunde 1 (Toni, 2026-10-26)
+
+- **Signatur.** Ein importierter Termin bekommt nie von selbst die Signatur
+  des Kalenders, auch der eigene nicht: Er behält die Beschreibung aus der
+  Datei, eine Regel für jeden Import. Von Hand fügt der Knopf „Signatur“
+  sie bei einem eigenen Termin weiter ein.
+- **Exchange verschiebt in den gewählten Ordner.** Nach der Zusage fragt der
+  Adapter, wo der Termin liegt (`item:ParentFolderId`); liegt er nicht im
+  gewählten Ordner, verschiebt `MoveItem` ihn dorthin (der Ordner ohne
+  ChangeKey, der bei jeder Änderung des Inhalts veraltet). Scheitert das
+  Verschieben, löscht der Adapter den Termin wieder (Gelöschte Elemente,
+  `SendToNone`; als Teilnehmer schickt Löschen nie etwas, ICS-4), und das
+  Anlegen scheitert: Der Import landet, wo er hin sollte, oder gar nicht.
+  Runde ICS-7 (Lauf 172507) bestanden: In einen eigenen Ordner importiert,
+  fragte der Adapter, verschob einmal (`MoveItem` Success), und der Termin
+  stand dort mit Organisator, beiden Teilnehmern, „vorläufig“, der UID und
+  der Erinnerung; im Standardkalender nichts. In den Standardkalender
+  importiert, fragte er und verschob nichts (die Ordner-Ids gleichen sich).
+  Nichts verschickt, nichts in Entwürfen oder Gelöschten Elementen.
+  Ungemessen bleibt, wohin Exchange eine spätere
+  Aktualisierung des Organisators legt (die Testadressen enden auf
+  `.invalid`).

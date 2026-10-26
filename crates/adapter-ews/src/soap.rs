@@ -912,6 +912,45 @@ pub fn soft_delete_item(item_id: &str) -> String {
     wrap(&body)
 }
 
+/// SOAP body for `GetItem` asking only which folder an item is in.
+pub fn get_item_parent_folder(item_id: &str) -> String {
+    let body = format!(
+        r#"    <m:GetItem>
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="item:ParentFolderId"/>
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:ItemIds>
+        <t:ItemId Id="{}"/>
+      </m:ItemIds>
+    </m:GetItem>"#,
+        escape_xml(item_id),
+    );
+    wrap(&body)
+}
+
+/// SOAP body for `MoveItem`: one item into `folder_id`. The folder goes
+/// without its change key, which goes stale whenever the folder's content
+/// changes and is no precondition of a move. The answer names the item by the
+/// id it has in its new folder.
+pub fn move_item(item_id: &str, folder_id: &str) -> String {
+    let body = format!(
+        r#"    <m:MoveItem>
+      <m:ToFolderId>
+        <t:FolderId Id="{}"/>
+      </m:ToFolderId>
+      <m:ItemIds>
+        <t:ItemId Id="{}"/>
+      </m:ItemIds>
+    </m:MoveItem>"#,
+        escape_xml(folder_id),
+        escape_xml(item_id),
+    );
+    wrap(&body)
+}
+
 /// SOAP body for an RSVP response object — `AcceptItem`, `DeclineItem`
 /// or `TentativelyAcceptItem`. EWS models a meeting reply as a *new*
 /// item created against the meeting via `<t:ReferenceItemId>`; the
@@ -1231,6 +1270,21 @@ mod tests {
         let decline = respond_to_meeting("I", None, "DeclineItem", false);
         assert!(decline.contains("<t:DeclineItem>"));
         assert!(decline.contains(r#"MessageDisposition="SaveOnly""#));
+    }
+
+    #[test]
+    fn a_move_names_the_folder_without_its_change_key() {
+        let body = move_item("ITEM&1", "FOLDER<2");
+        assert!(body.contains("<m:MoveItem>"));
+        assert!(body.contains(
+            r#"<m:ToFolderId>
+        <t:FolderId Id="FOLDER&lt;2"/>
+      </m:ToFolderId>"#
+        ));
+        assert!(body.contains(r#"<t:ItemId Id="ITEM&amp;1"/>"#));
+        let parent = get_item_parent_folder("ITEM&1");
+        assert!(parent.contains(r#"FieldURI="item:ParentFolderId""#));
+        assert!(parent.contains(r#"<t:ItemId Id="ITEM&amp;1"/>"#));
     }
 
     #[test]

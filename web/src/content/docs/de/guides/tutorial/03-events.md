@@ -459,7 +459,9 @@ Ankreuzfeld; **Bearbeiten …** ist eine ihrer Aktionen (unter iOS im Rotor).
   wählst du. Lokale, iCloud- und andere CalDAV-Kalender behalten Einladungen
   so, und Exchange auch: Dort steht deine Antwort danach auf „Mit Vorbehalt“,
   ohne dass es jemand erfährt, und zu- oder absagen kannst du wie bei jeder
-  Einladung. Google behält sie in deinem Hauptkalender, nicht in deinen
+  Einladung. In einem anderen Exchange-Kalender als deinem Hauptkalender legt
+  Exchange den Termin zuerst in den Hauptkalender, und Aperio verschiebt ihn
+  dann in den gewählten. Google behält sie in deinem Hauptkalender, nicht in deinen
   anderen Google-Kalendern. In einem Kalender, der das nicht kann, wird sie dein eigener
   Termin, ohne Teilnehmer. Editor und Liste sagen, was davon für den gewählten Kalender
   gilt.
@@ -495,7 +497,9 @@ Abteilung. Unter **Einstellungen → Signaturen** — am Telefon über
 **Signaturen** in den Einstellungen — schreibst du sie. WELCHE ein Kalender
 trägt, legst du am Kalender selbst fest, neben seinen Standard-Erinnerungen,
 und ein Kalender mit Signatur setzt sie **von selbst auf neue Termine**: im
-Normalfall kein einziger Druck.
+Normalfall kein einziger Druck. Ein Termin aus einer Datei bekommt keine von
+selbst: Er behält die Beschreibung, die er mitbringt. Bei deinem eigenen
+Termin aus einer Datei fügt der Knopf **Signatur** trotzdem eine ein.
 
 Die Bindung ist ein Standard, keine Einschränkung. Jede Signatur bleibt im
 Editor wählbar, egal auf welchem Kalender der Termin liegt, und der Knopf

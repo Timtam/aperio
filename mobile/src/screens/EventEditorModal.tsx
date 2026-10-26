@@ -1031,16 +1031,17 @@ function EventEditorScreen({
   // a block they deleted, is theirs. Mail clients behave the same way when the
   // sending account changes.
   //
-  // Someone else's invitation from a file, kept as received (I6), carries no
-  // signature of the account's: while it is locked the calendar counts as one
-  // without, and a block put in before the lock comes out again. The block
-  // waits for the load, which seeds an imported description and would wipe it.
+  // An appointment from a file gets none (Toni, 2026-10-26): it keeps the
+  // description it came with, someone else's invitation and the account's own
+  // alike. The Signature button still adds one by hand. The block waits for
+  // the load, which seeds a description and would wipe it.
+  const fromFile = imported !== null;
   useEffect(() => {
     if (editing || !calendarId || loading) return;
     let cancelled = false;
     void signatureForCalendar(calendarId, signatures).then((sig) => {
       if (cancelled) return;
-      const target = importLocked ? null : sig?.body?.trim() || null;
+      const target = fromFile ? null : sig?.body?.trim() || null;
       setDescription((prev) => {
         const current = signatureIn(prev);
         const mine = autoSignature.current;
@@ -1058,7 +1059,7 @@ function EventEditorScreen({
     return () => {
       cancelled = true;
     };
-  }, [editing, calendarId, signatures, loading, importLocked]);
+  }, [editing, calendarId, signatures, loading, fromFile]);
   // The rule "this and all following" writes, shown in the repeat field as it
   // will be saved (decision 197): moved with a new date (decisions 189,
   // 192-194) — from the occurrence the editor was opened on, or from the start

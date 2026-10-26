@@ -166,7 +166,8 @@ when caching:
 > 48) and reads such an event as organized elsewhere. CalDAV says `kept`
 > (scheduling markers, see the CalDAV page); Exchange says `kept-tentative`:
 > the meeting goes in as its organizer's request, made an appointment by a
-> tentative reply that is saved, not sent (see the EWS page). Google says
+> tentative reply that is saved, not sent, and moved into the calendar asked
+> for where Exchange filed it in the default one (see the EWS page). Google says
 > `kept` for the primary calendar only and imports the meeting as a private
 > copy (`events.import`, see the Google page). Exchange and Google share two
 > rules in the core: whose meeting a marked create is

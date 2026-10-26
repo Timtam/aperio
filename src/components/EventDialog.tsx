@@ -1191,13 +1191,14 @@ export function EventDialog({
    * block they deleted, is theirs: mail clients behave the same way when the
    * sending account changes.
    *
-   * Someone else's invitation from a file, kept as received (I6), carries no
-   * signature of the account's: while it is locked the calendar counts as one
-   * without, so a block put in before the lock comes out again.
+   * An appointment from a file gets none (Toni, 2026-10-26): it keeps the
+   * description it came with, someone else's invitation and the account's
+   * own alike. The Signature button still adds one by hand.
    */
+  const fromFile = imported !== null;
   useEffect(() => {
     if (!isOpen || isEdit) return;
-    const target = importLocked ? null : boundSignature?.body?.trim() || null;
+    const target = fromFile ? null : boundSignature?.body?.trim() || null;
     setForm((prev) => {
       const current = signatureIn(prev.description);
       const mine = autoSignature.current;
@@ -1212,7 +1213,7 @@ export function EventDialog({
       autoSignature.current = target;
       return { ...prev, description: applySignature(prev.description, target) };
     });
-  }, [isOpen, isEdit, boundSignature, importLocked]);
+  }, [isOpen, isEdit, boundSignature, fromFile]);
 
   /**
    * The calendar's ATTACHED default reminders, put on a NEW appointment by

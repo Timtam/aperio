@@ -421,7 +421,9 @@ checkbox; **Edit …** is one of its actions (on iOS in the rotor).
   the colour are yours to choose. Local, iCloud and other CalDAV calendars
   keep invitations so, and Exchange too: there your answer then reads
   “tentative”, without anyone being told, and you can accept or decline as
-  with any invitation. Google keeps them in your primary calendar, not in
+  with any invitation. In an Exchange calendar other than your main one,
+  Exchange first puts it in the main calendar, and Aperio then moves it to
+  the one you picked. Google keeps them in your primary calendar, not in
   your other Google calendars. In a calendar that cannot, it becomes your own
   appointment, without attendees. The editor and the list say which, for the calendar you
   picked.
@@ -455,7 +457,10 @@ A signature is a named block of text that goes at the **end** of a description
 **Settings → Signatures** — on the phone via **Signatures** in Settings — you
 write them. WHICH one a calendar carries is set on the calendar itself, beside
 its default reminders, and a calendar that has one puts it on **new
-appointments by itself**: no press at all in the ordinary case.
+appointments by itself**: no press at all in the ordinary case. An
+appointment imported from a file gets none by itself: it keeps the
+description it came with. On your own appointment from a file, the
+**Signature** button still adds one.
 
 The binding is a default, not a restriction. Every signature stays pickable in
 the editor whichever calendar the appointment is on, and the **Signature**

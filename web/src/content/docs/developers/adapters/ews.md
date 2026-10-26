@@ -207,7 +207,7 @@ The endpoint is discovered or user-supplied.
   does not, as nobody measured whether it may. A row has its `ical_uid` once
   enriched, and a changed occurrence takes its series'. A create with
   `uid_to_keep` (an import) writes `<t:UID>` before `<t:Start>`, which
-  Exchange keeps (live round ICS, ICS-6). Whether it refuses a UID the
+  Exchange keeps (live round ICS, its step ICS-6). Whether it refuses a UID the
   calendar already holds is unmeasured; the import marks those first.
 - **An invitation from a file goes in as its organizer's request.** Calendars
   say `invitation_import: kept-tentative`. `CreateItem` refuses an
@@ -224,8 +224,17 @@ The endpoint is discovered or user-supplied.
   the appointment — their organizer, the invitees, the file's UID, the
   mailbox's answer tentative — sends nothing, leaves no draft, and moves the
   request to Deleted Items (ICS-3, ICS-4). The adapter soft-deletes it from
-  there, recoverably (a failure only logs; the appointment stands), and reads
-  the appointment back. The mailbox's address is the login where that is an
+  there, recoverably (a failure only logs; the appointment stands). Exchange
+  files the appointment in the default calendar, whichever folder the request
+  went to (live round ICS-6, run 170846), so the adapter asks where it is
+  (`item:ParentFolderId`) and, in any other folder, moves it there
+  (`MoveItem`, the folder without its change key). A move that fails deletes
+  the appointment again, telling nobody, and fails the create: the import
+  lands where it was asked to or not at all. Then the adapter reads the
+  appointment back. Live round ICS-7 (run 172507) moved one into a folder of
+  its own, keeping its organizer, invitees, tentative answer, UID and
+  reminder, with nothing sent; one imported into the default calendar was
+  not moved. The mailbox's address is the login where that is an
   email (`own_address`); a `DOMAIN\user` login names none, and then every
   marked create counts as someone else's. Live round ICS-5 (run 130307) made
   a single, one whose file did not name the mailbox, a series with a gap, an

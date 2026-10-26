@@ -300,17 +300,21 @@ describe('EventDialog → an invitation from a file, as the calendar takes it (I
     expect(createRequest().description).toBe('Teams-Besprechung');
   });
 
-  it('gives the account’s own meeting from a file its signature, as a new one', async () => {
+  it('gives the account’s own meeting from a file no signature either', async () => {
+    // One rule for every import (Toni, 2026-10-26): the description stays as
+    // the file gave it, though the calendar carries a signature and the
+    // fields are open.
     ownAddress.current = 'boss@example.org';
     boundSignature.current = { id: 'sig-1', name: 'Büro', body: 'Grüße, Toni' };
     boundSignature.calendarId = 'cal-local';
     await openImport(() => {}, INVITATION);
     await asked();
+    screen.getByRole('combobox', { name: /^titel$/i });
     fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
     await waitFor(() =>
       expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(true),
     );
-    expect(String(createRequest().description)).toMatch(/^Teams-Besprechung[\s\S]*Grüße, Toni/);
+    expect(createRequest().description).toBe('Teams-Besprechung');
   });
 
   it('keeps focus on the title when the fields open after the owner check', async () => {

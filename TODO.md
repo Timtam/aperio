@@ -63,15 +63,12 @@
   schon vorhandenen UID, und klappt er wirklich nur im Hauptkalender?
   Danach entscheiden, ob gewöhnliche Importe bei Google auch über
   `events.import` gehen, damit ihre UID bleibt und Doppelte erkannt werden.
-  ↳ Live messen (Toni, 2026-10-26): Runde ICS-6 des EWS-Testprogramms —
-  landet eine Einladung, in einen zweiten Kalenderordner importiert, dort
-  oder im Standardkalender? Danach entscheiden, ob nur der Standardkalender
-  Einladungen behält (wie bei Google der Hauptkalender).
-  ↳ Entscheiden (gefunden bei I5c): Beide Editoren hängen die Signatur des
-  Kalenders auch an einen importierten Termin, wie an jeden neuen. Bei einer
-  fremden Einladung kommt sie seit Prüfrunde 1 nie (auch nicht nach einem
-  Kalenderwechsel). Offen: Soll ein eigener importierter Termin sie
-  bekommen, wie heute, oder nie?
+  ↳ Ungemessen: Eine fremde Einladung, in einen zweiten Exchange-Ordner
+  importiert, verschiebt Aperio aus dem Standardkalender dorthin (ICS-6/7,
+  Läufe 170846 und 172507). Wohin legt Exchange eine spätere Aktualisierung
+  des Organisators — zum verschobenen Termin oder als neuen in den
+  Standardkalender? Braucht einen echten Organisator (z. B. iCloud-Konto im
+  iCloud-Testprogramm, das die Exchange-Adresse einlädt).
 - [~] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)  
   ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)
