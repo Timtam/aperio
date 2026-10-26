@@ -109,8 +109,8 @@ impl LocalAdapter {
                 id, calendar_id, title, description, location,
                 start_utc, end_utc, all_day, rrule, rrule_exceptions, rrule_tzid,
                 color_label_id, reminders, sound, attendees,
-                created_at, updated_at, etag, ical_uid
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, etag, ical_uid, organizer
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                  calendar_id      = excluded.calendar_id,
                  title            = excluded.title,
@@ -131,7 +131,9 @@ impl LocalAdapter {
                  -- Set once at the create; an update a device sends without
                  -- it (a build before 0047, an edit that never read it)
                  -- keeps the stored one.
-                 ical_uid         = COALESCE(excluded.ical_uid, events.ical_uid)",
+                 ical_uid         = COALESCE(excluded.ical_uid, events.ical_uid),
+                 -- The same for an imported invitation's organizer (I6).
+                 organizer        = COALESCE(excluded.organizer, events.organizer)",
             params![
                 event.id,
                 event.calendar_id,
@@ -152,6 +154,7 @@ impl LocalAdapter {
                 fmt_utc(&event.updated_at),
                 event.etag,
                 event.ical_uid,
+                event.organizer,
             ],
         )
         .map_err(map_sql_err)?;

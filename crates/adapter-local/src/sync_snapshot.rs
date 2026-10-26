@@ -208,7 +208,9 @@ impl LocalAdapter {
                 color: color?,
                 read_only: read_only?,
                 default_sound: sound?,
-                invitation_import: Default::default(),
+                // A capability, as `list_calendars` says it: local calendars
+                // keep invitations from a file (I6).
+                invitation_import: cal_core::InvitationImport::Kept,
             });
         }
         Ok(out)
@@ -225,7 +227,7 @@ impl LocalAdapter {
                 "SELECT id, calendar_id, title, description, location,
                         start_utc, end_utc, all_day, rrule, rrule_exceptions,
                         color_label_id, reminders, sound, attendees,
-                        created_at, updated_at, etag, rrule_tzid, ical_uid
+                        created_at, updated_at, etag, rrule_tzid, ical_uid, organizer
                    FROM events",
             )
             .map_err(map_sql_err)?;

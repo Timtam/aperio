@@ -153,7 +153,9 @@ when caching:
 > before the adapter sees it, which drops the organizer and the invitees where
 > the calendar keeps nothing. An adapter that says `kept` writes the
 > invitation as someone else's without a word to anyone, and treats one whose
-> organizer is the account itself as the account's own meeting.
+> organizer is the account itself as the account's own meeting. The local
+> store says `kept`: it keeps the organizer in a column of its own (migration
+> 48) and reads such an event as organized elsewhere.
 
 > **And some take only an attendee's own changes.** On a scheduling CalDAV
 > server (iCloud), a meeting somebody else organizes accepts the attendee's

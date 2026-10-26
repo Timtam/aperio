@@ -9,7 +9,7 @@
 use async_trait::async_trait;
 use cal_core::{
     Calendar, CalendarFeature, ColorLabelId, ContainerColor, DateRange, Event, EventRecurrence,
-    FreeBusy, NewEvent, Reminder, SoundConfig,
+    FreeBusy, InvitationImport, NewEvent, Reminder, SoundConfig,
 };
 use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension};
@@ -73,7 +73,9 @@ impl LocalAdapter {
             invitations_reply_only: false,
             stores_occurrence_exceptions: false,
             notifier_name: None,
-            invitation_import: Default::default(),
+            // Nothing here tells anyone: an invitation from a file is kept as
+            // it is (I6).
+            invitation_import: InvitationImport::Kept,
         })
     }
 
@@ -140,7 +142,7 @@ impl LocalAdapter {
                     "SELECT id, calendar_id, title, description, location,
                             start_utc, end_utc, all_day, rrule, rrule_exceptions,
                             color_label_id, reminders, sound, attendees,
-                            created_at, updated_at, etag, rrule_tzid, ical_uid
+                            created_at, updated_at, etag, rrule_tzid, ical_uid, organizer
                        FROM events WHERE id = ?",
                 )
                 .map_err(map_sql_err)?;
@@ -197,7 +199,9 @@ impl LocalAdapter {
             invitations_reply_only: false,
             stores_occurrence_exceptions: false,
             notifier_name: None,
-            invitation_import: Default::default(),
+            // Nothing here tells anyone: an invitation from a file is kept as
+            // it is (I6).
+            invitation_import: InvitationImport::Kept,
         }))
     }
 
@@ -299,7 +303,9 @@ impl CalendarFeature for LocalAdapter {
                     color_label: color_label?.map(ColorLabelId),
                     read_only: read_only?,
                     default_sound: sound?,
-                    invitation_import: Default::default(),
+                    // Nothing here tells anyone: an invitation from a file is kept as
+                    // it is (I6).
+                    invitation_import: InvitationImport::Kept,
                 });
             }
             Ok(out)
@@ -485,7 +491,7 @@ impl CalendarFeature for LocalAdapter {
 const EVENT_SELECT_PREFIX: &str =
     "SELECT id, calendar_id, title, description, location, start_utc, end_utc,
             all_day, rrule, rrule_exceptions, color_label_id, reminders, sound,
-            attendees, created_at, updated_at, etag, rrule_tzid, ical_uid
+            attendees, created_at, updated_at, etag, rrule_tzid, ical_uid, organizer
        FROM events
       WHERE calendar_id = ?
         AND ( (start_utc < ? AND end_utc > ?)
@@ -536,6 +542,12 @@ fn persist_new_event(
     let attendees_json = encode_json(&event.attendees)?;
     let sound_json = write_sound(&event.sound)?;
     let (rrule, exceptions, rrule_tzid) = split_recurrence(&event.recurrence)?;
+    // Someone else's meeting, kept as the file has it (I6); every other
+    // appointment here is the account's own and names no organizer.
+    let organizer = event
+        .keeps_invitation
+        .then(|| event.organizer.clone())
+        .flatten();
 
     let now_s = fmt_utc(&now);
     adapter
@@ -547,8 +559,8 @@ fn persist_new_event(
                 id, calendar_id, title, description, location, start_utc,
                 end_utc, all_day, rrule, rrule_exceptions, rrule_tzid,
                 color_label_id, reminders, sound, attendees, created_at,
-                updated_at, etag, ical_uid
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+                updated_at, etag, ical_uid, organizer
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
             params![
                 id,
                 calendar_id,
@@ -568,6 +580,7 @@ fn persist_new_event(
                 now_s,
                 now_s,
                 event.uid_to_keep,
+                organizer,
             ],
         )
         .map_err(map_sql_err)?;
@@ -576,7 +589,6 @@ fn persist_new_event(
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
-        organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
@@ -600,7 +612,8 @@ fn persist_new_event(
         created_at: now,
         updated_at: now,
         etag: None,
-        organizer: None,
+        organized_elsewhere: organizer.is_some(),
+        organizer,
         attendee_responses: Vec::new(),
         cancelled: false,
         scheduling_silenced: false,
@@ -632,13 +645,16 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
     let etag = opt_text(row, 16)?;
     let rrule_tzid = opt_text(row, 17)?;
     let ical_uid = opt_text(row, 18)?;
+    let organizer = opt_text(row, 19)?;
     let recurrence = combine_recurrence(rrule, exceptions, rrule_tzid)?;
 
     Ok(Event {
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
-        organized_elsewhere: false,
+        // Someone else's meeting kept from a file (I6) is the only kind with
+        // an organizer here.
+        organized_elsewhere: organizer.is_some(),
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
@@ -662,10 +678,9 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
         created_at,
         updated_at,
         etag,
-        // Local events have no organizer/RSVP metadata; those are
-        // read-only fields populated only by external providers. Local events
-        // are never cancelled (there's no cancel action — you delete them).
-        organizer: None,
+        // No RSVP state: nothing here answers anyone. Local events are never
+        // cancelled (there's no cancel action — you delete them).
+        organizer,
         attendee_responses: Vec::new(),
         cancelled: false,
         scheduling_silenced: false,
@@ -901,6 +916,69 @@ mod tests {
             (there.title.as_str(), there.ical_uid.as_deref()),
             ("Renamed elsewhere", uid)
         );
+    }
+
+    /// A local calendar keeps an invitation from a file as it is (I6c): its
+    /// organizer stays on every read, through an edit and through the sync to
+    /// another device, and the event reads as someone else's.
+    #[tokio::test]
+    async fn an_imported_invitation_keeps_its_organizer() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
+        assert_eq!(
+            a.list_calendars().await.unwrap()[0].invitation_import,
+            InvitationImport::Kept
+        );
+        let base = "2026-05-19T10:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let new = |keeps_invitation: bool| NewEvent {
+            organized_elsewhere: true,
+            organizer: Some("boss@example.org".into()),
+            title: "Jour fixe".into(),
+            description: None,
+            location: None,
+            start: base,
+            end: base + Duration::hours(1),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec!["bob@example.org".into()],
+            send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation,
+        };
+        let created = a.create_event(&cal.id, new(true)).await.unwrap();
+        assert_eq!(created.organizer.as_deref(), Some("boss@example.org"));
+        assert!(created.organized_elsewhere);
+        let read = a.get_event_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(read.organizer.as_deref(), Some("boss@example.org"));
+        assert!(read.organized_elsewhere);
+        assert_eq!(read.attendees, ["bob@example.org"]);
+
+        // Not marked: the account's own, whatever the create names.
+        let copy = a.create_event(&cal.id, new(false)).await.unwrap();
+        let copy = a.get_event_by_id(&copy.id).unwrap().unwrap();
+        assert_eq!((copy.organizer, copy.organized_elsewhere), (None, false));
+
+        // Another device starts from the snapshot, then takes an update that
+        // does not carry the organizer.
+        let dumped = a
+            .dump_events_for_snapshot()
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id == created.id)
+            .unwrap();
+        assert_eq!(dumped.organizer.as_deref(), Some("boss@example.org"));
+        let other = make_adapter();
+        other.upsert_calendar_from_sync(&cal).unwrap();
+        other.upsert_event_from_sync(&dumped).unwrap();
+        let mut update = dumped.clone();
+        update.organizer = None;
+        other.upsert_event_from_sync(&update).unwrap();
+        let there = other.get_event_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(there.organizer.as_deref(), Some("boss@example.org"));
     }
 
     #[tokio::test]

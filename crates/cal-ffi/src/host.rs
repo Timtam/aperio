@@ -10559,10 +10559,10 @@ mod tests {
         )
     }
 
-    /// An imported invitation (I6) keeps its organizer and invitees only
-    /// where the calendar says it keeps invitations. A local calendar keeps
-    /// none yet (until I6c), so it gets the account's own appointment,
-    /// without them, from the phone as from the desktop.
+    /// An imported invitation (I6) keeps its organizer and invitees where the
+    /// calendar says it keeps invitations, as a local calendar does (I6c):
+    /// someone else's meeting, nobody told, from the phone as from the
+    /// desktop. A create that is no import is the account's own, as before.
     #[test]
     fn an_imported_invitation_is_kept_only_where_the_calendar_keeps_it() {
         let (_dir, host, _kc) = open_host();
@@ -10573,16 +10573,29 @@ mod tests {
         );
         let created: serde_json::Value =
             serde_json::from_str(&host.create_event_json(request).unwrap()).unwrap();
-        assert_eq!(created["attendees"], serde_json::json!([]), "{created}");
-        assert!(
-            created.get("organizer").is_none_or(|o| o.is_null()),
+        assert_eq!(
+            created["attendees"],
+            serde_json::json!(["bob@example.org"]),
             "{created}"
         );
+        assert_eq!(created["organizer"], "boss@example.org", "{created}");
+        assert_eq!(created["organized_elsewhere"], true, "{created}");
+
+        // The same people without the mark: a copy of someone else's meeting
+        // names its organizer only to keep it out of the invitees (72a).
+        let plain = new_event_json(&cal, "Kopie").replace(
+            r#""attendees":[]"#,
+            r#""attendees":["bob@example.org"],"organizer":"boss@example.org","organized_elsewhere":true"#,
+        );
+        let copied: serde_json::Value =
+            serde_json::from_str(&host.create_event_json(plain).unwrap()).unwrap();
         assert!(
-            created
-                .get("organized_elsewhere")
-                .is_none_or(|o| o == false),
-            "{created}"
+            copied.get("organizer").is_none_or(|o| o.is_null()),
+            "{copied}"
+        );
+        assert!(
+            copied.get("organized_elsewhere").is_none_or(|o| o == false),
+            "{copied}"
         );
     }
 

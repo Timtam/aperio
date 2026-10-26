@@ -446,9 +446,9 @@ Dateityp an; es importiert nur, solange es läuft.
   benachrichtigen: Organisator und Teilnehmer bleiben, niemand bekommt
   etwas, und der Editor zeigt sie wie empfangen — Titel, Zeit, Ort,
   Beschreibung und Teilnehmer wie geschickt; Kalender, Erinnerungen und Farbe
-  wählst du. In einem Kalender, der das nicht kann — vorerst jeder; die
-  Anbieter folgen nach und nach —, wird sie dein eigener Termin, ohne
-  Teilnehmer. Editor und Liste sagen, was davon für den gewählten Kalender
+  wählst du. Lokale Kalender behalten Einladungen so; die Anbieter folgen nach
+  und nach. In einem Kalender, der das nicht kann, wird sie dein eigener
+  Termin, ohne Teilnehmer. Editor und Liste sagen, was davon für den gewählten Kalender
   gilt.
 - **Ein Meeting, das du selbst organisierst,** kommt als neuer Termin, mit
   seinen Teilnehmern, als hättest du ihn gerade angelegt.

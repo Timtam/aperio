@@ -273,4 +273,11 @@ Zielkalender über den Zeitraum der Termine.
     Kontos. Bis I6c-I6f sagen alle Adapter `not-kept`: Verhalten wie die
     vorläufige Regel, außer dass ein eigenes Meeting jetzt seine Teilnehmer
     behält.
+  - **I6c** (gebaut) lokal: `kept`; der Organisator einer behaltenen
+    Einladung steht in einer eigenen Spalte (Migration 48), wird gelesen
+    (`organized_elsewhere`) und beim Abgleich zwischen Geräten mitgetragen; ein
+    Update ohne ihn lässt ihn stehen. Alles andere, was lokal angelegt wird,
+    nennt keinen Organisator. Antworten kann ein lokaler Kalender niemandem:
+    Zusagen und Absagen erscheinen dort nicht (keine eigene Adresse, keine
+    Antworten der Teilnehmer).
 - **I7 Aufgaben** aus VTODO, später.
