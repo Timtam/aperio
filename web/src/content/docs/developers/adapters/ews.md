@@ -213,9 +213,11 @@ The endpoint is discovered or user-supplied.
   say `invitation_import: kept-tentative`. `CreateItem` refuses an
   `Organizer` field (live round ICS), and a meeting it makes with invitees is
   the mailbox's own. So a create marked `keeps_invitation` whose organizer is
-  not the mailbox (`kept_invitation.rs`) writes the request that organizer
-  would have sent: `MimeContent` with `METHOD:REQUEST`
-  (`ical_mapping::mapping::invitation_request`: the file's invitees without
+  not the mailbox (`cal_core::attendee::invitation_organizer`,
+  `kept_invitation.rs`) writes the request that organizer would have sent:
+  `MimeContent` with `METHOD:REQUEST`
+  (`ical_mapping::mapping::invitation_request`, naming
+  `cal_core::attendee::invitation_attendees`: the file's invitees without
   the organizer, and the mailbox where the file did not name it), with
   `SendToNone`. Exchange stores that as a meeting request message, not an
   appointment (ICS-2). `TentativelyAcceptItem` with `SaveOnly` on it makes

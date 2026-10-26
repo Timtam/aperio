@@ -52,6 +52,9 @@ pub struct CalendarListEntry {
     /// treat anything < writer as read-only.
     #[serde(default, rename = "accessRole")]
     pub access_role: Option<String>,
+    /// The account's primary calendar, whose id is the account's address.
+    #[serde(default)]
+    pub primary: bool,
 }
 
 /// Convert one CalendarListEntry to cal_core::Calendar.
@@ -78,7 +81,17 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         color,
         read_only,
         default_sound: None,
-        invitation_import: Default::default(),
+        // Someone else's meeting from a file goes in through `events.import`,
+        // which Google takes only where the calendar's owner is the organizer
+        // or an attendee: the account in its primary calendar. Another
+        // calendar's id is an address of its own, which no invitation names,
+        // and there the import becomes the account's own appointment (Toni,
+        // 2026-10-26; Google's documentation, not measured).
+        invitation_import: if entry.primary {
+            cal_core::InvitationImport::Kept
+        } else {
+            cal_core::InvitationImport::NotKept
+        },
     }
 }
 
@@ -794,6 +807,44 @@ pub struct EventWriteBody {
     pub attendees: Option<Vec<EventAttendeeWrite>>,
 }
 
+/// JSON payload for `POST /events/import`: a create's fields with the two an
+/// import adds, the iCalendar UID it requires and the organizer, which Google
+/// lets a client set only here.
+#[derive(Debug, Serialize)]
+pub struct EventImportBody {
+    #[serde(flatten)]
+    pub event: EventWriteBody,
+    #[serde(rename = "iCalUID")]
+    pub ical_uid: String,
+    pub organizer: EventOrganizerWrite,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EventOrganizerWrite {
+    pub email: String,
+}
+
+/// The import of a meeting someone else organizes (I6f): `new` as a create
+/// writes it, under `uid`, with `organizer` and `attendees` (the invitees
+/// [`cal_core::attendee::invitation_attendees`] names, the account among
+/// them) in place of the create's own.
+pub fn invitation_import_body(
+    new: &NewEvent,
+    uid: &str,
+    organizer: &str,
+    attendees: &[String],
+) -> EventImportBody {
+    let mut event = new_event_to_body(new);
+    event.attendees = Some(attendees_to_write(attendees)).filter(|list| !list.is_empty());
+    EventImportBody {
+        event,
+        ical_uid: uid.to_string(),
+        organizer: EventOrganizerWrite {
+            email: organizer.to_string(),
+        },
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct EventAttendeeWrite {
     pub email: String,
@@ -987,6 +1038,7 @@ mod tests {
             summary: "My Calendar".into(),
             background_color: Some("#1e88e5".into()),
             access_role: Some("owner".into()),
+            primary: false,
         };
         let cal = map_calendar(entry);
         assert_eq!(cal.id, "primary");
@@ -1002,9 +1054,85 @@ mod tests {
             summary: "Holidays in Germany".into(),
             background_color: Some("#3f51b5".into()),
             access_role: Some("reader".into()),
+            primary: false,
         };
         let cal = map_calendar(entry);
         assert!(cal.read_only);
+    }
+
+    /// Only the primary calendar keeps someone else's meeting from a file:
+    /// Google imports one only where the calendar's owner is invited, and
+    /// another calendar's id is an address no invitation names.
+    #[test]
+    fn only_the_primary_calendar_keeps_invitations() {
+        let entry: CalendarListEntry = serde_json::from_value(serde_json::json!({
+            "id": "toni@gmail.com", "summary": "Toni", "accessRole": "owner", "primary": true
+        }))
+        .unwrap();
+        assert_eq!(
+            map_calendar(entry).invitation_import,
+            cal_core::InvitationImport::Kept
+        );
+        let entry: CalendarListEntry = serde_json::from_value(serde_json::json!({
+            "id": "abc@group.calendar.google.com", "summary": "Verein", "accessRole": "owner"
+        }))
+        .unwrap();
+        assert_eq!(
+            map_calendar(entry).invitation_import,
+            cal_core::InvitationImport::NotKept
+        );
+    }
+
+    /// An import is a create's body with the UID and the organizer, and the
+    /// invitees it is handed in place of the create's own.
+    #[test]
+    fn an_import_carries_the_uid_the_organizer_and_its_invitees() {
+        let new = NewEvent {
+            organized_elsewhere: true,
+            organizer: Some("mailto:boss@example.net".into()),
+            title: "Jour fixe".into(),
+            description: None,
+            location: Some("Raum 3.14".into()),
+            start: Utc.with_ymd_and_hms(2026, 11, 2, 9, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 11, 2, 10, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: Some(cal_core::EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+                exceptions: vec![],
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec!["boss@example.net".into()],
+            send_invitations: false,
+            uid_to_keep: Some("jf-1@example.net".into()),
+            keeps_invitation: true,
+        };
+        let body = invitation_import_body(
+            &new,
+            "jf-1@example.net",
+            "boss@example.net",
+            &["Gast <gast@example.net>".into(), "toni@gmail.com".into()],
+        );
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(json["iCalUID"], "jf-1@example.net");
+        assert_eq!(
+            json["organizer"],
+            serde_json::json!({ "email": "boss@example.net" })
+        );
+        assert_eq!(
+            json["attendees"],
+            serde_json::json!([
+                { "email": "gast@example.net", "displayName": "Gast" },
+                { "email": "toni@gmail.com" }
+            ])
+        );
+        assert_eq!(json["summary"], "Jour fixe");
+        assert_eq!(json["location"], "Raum 3.14");
+        assert_eq!(json["start"]["timeZone"], "Europe/Berlin");
+        assert_eq!(json["recurrence"][0], "RRULE:FREQ=WEEKLY;BYDAY=MO");
     }
 
     #[test]
@@ -1456,6 +1584,7 @@ mod tests {
             summary: "X".into(),
             background_color: Some("not-a-color".into()),
             access_role: Some("owner".into()),
+            primary: false,
         };
         let cal = map_calendar(entry);
         assert!(cal.color.is_none());

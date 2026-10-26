@@ -285,6 +285,57 @@ pub fn guard_invitation_import(event: &mut NewEvent, import: InvitationImport) {
     }
 }
 
+/// The organizer of a create marked [`NewEvent::keeps_invitation`] when it is
+/// someone else: their address, without `mailto:`. `None` for an unmarked
+/// create, for one without an organizer, and for one the account (`own`)
+/// organizes itself, which is the account's own meeting and goes the ordinary
+/// way. An adapter that writes an imported invitation its own way (Exchange's
+/// request, Google's import) asks this.
+pub fn invitation_organizer(event: &NewEvent, own: Option<&str>) -> Option<String> {
+    if !event.keeps_invitation {
+        return None;
+    }
+    let organizer = event.organizer.as_deref()?.trim();
+    let organizer = match organizer.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("mailto:") => organizer[7..].trim(),
+        _ => organizer,
+    };
+    if organizer.is_empty() || own.is_some_and(|own| same_address(own, organizer)) {
+        return None;
+    }
+    Some(organizer.to_string())
+}
+
+/// The invitees an imported invitation names at the provider: the file's,
+/// never the organizer, and the account (`own`) where the file named it under
+/// another address or not at all (Toni, 2026-10-26). A provider takes the
+/// meeting as the account's copy only with the account among them: Exchange's
+/// reply answers for the account's own row, and Google refuses an import its
+/// calendar's owner is neither organizer nor attendee of.
+pub fn invitation_attendees(
+    attendees: &[String],
+    organizer: &str,
+    own: Option<&str>,
+) -> Vec<String> {
+    let mut invitees: Vec<String> = attendees
+        .iter()
+        .filter(|entry| {
+            let address = parse(entry).1;
+            !address.trim().is_empty() && !same_address(&address, organizer)
+        })
+        .cloned()
+        .collect();
+    if let Some(own) = own.map(str::trim).filter(|own| !own.is_empty()) {
+        if !invitees
+            .iter()
+            .any(|entry| same_address(&parse(entry).1, own))
+        {
+            invitees.push(own.to_string());
+        }
+    }
+    invitees
+}
+
 /// The invitees a copy in ANOTHER calendar gets: none, when the event it was
 /// copied from is somebody else's meeting (decision 81b).
 ///
@@ -757,6 +808,90 @@ mod tests {
                 "not an import: untouched"
             );
             assert!(plain.send_invitations);
+        }
+
+        fn kept_invitation(organizer: &str) -> NewEvent {
+            let at = Utc.with_ymd_and_hms(2026, 11, 24, 9, 0, 0).unwrap();
+            NewEvent {
+                title: "Jour fixe".into(),
+                description: None,
+                location: None,
+                start: at,
+                end: at,
+                all_day: false,
+                recurrence: None,
+                color_label: None,
+                color_hex: None,
+                reminders: Vec::new(),
+                sound: None,
+                attendees: Vec::new(),
+                send_invitations: false,
+                organizer: Some(organizer.into()),
+                organized_elsewhere: true,
+                uid_to_keep: Some("jf-1@example.net".into()),
+                keeps_invitation: true,
+            }
+        }
+
+        /// Only a marked create is someone else's, and only while somebody
+        /// else organizes it: the account's own meeting goes the ordinary
+        /// way. The address loses its `mailto:`, in any case, and keeps its
+        /// spelling.
+        #[test]
+        fn an_invitation_is_someone_elses_only_when_marked_and_foreign() {
+            let event = kept_invitation("mailto:Boss@Example.net");
+            assert_eq!(
+                invitation_organizer(&event, Some("toni@example.org")).as_deref(),
+                Some("Boss@Example.net")
+            );
+            assert_eq!(
+                invitation_organizer(&event, None).as_deref(),
+                Some("Boss@Example.net")
+            );
+            assert_eq!(
+                invitation_organizer(&kept_invitation(" MAILTO:boss@example.net "), None)
+                    .as_deref(),
+                Some("boss@example.net")
+            );
+            assert_eq!(invitation_organizer(&event, Some("boss@example.net")), None);
+            let unmarked = NewEvent {
+                keeps_invitation: false,
+                ..event.clone()
+            };
+            assert_eq!(invitation_organizer(&unmarked, None), None);
+            assert_eq!(invitation_organizer(&kept_invitation("  "), None), None);
+            let nobody = NewEvent {
+                organizer: None,
+                ..event
+            };
+            assert_eq!(invitation_organizer(&nobody, None), None);
+        }
+
+        /// The provider is handed the file's invitees, never the organizer,
+        /// and the account where the file did not name it.
+        #[test]
+        fn an_invitation_names_the_account_and_never_the_organizer() {
+            let file = [
+                "boss@example.net".to_string(),
+                "Gast <gast@example.net>".into(),
+            ];
+            assert_eq!(
+                invitation_attendees(&file, "Boss@Example.net", Some("toni@example.org")),
+                ["Gast <gast@example.net>", "toni@example.org"]
+            );
+            let named = ["Toni <TONI@example.org>".to_string()];
+            assert_eq!(
+                invitation_attendees(&named, "boss@example.net", Some("toni@example.org")),
+                ["Toni <TONI@example.org>"]
+            );
+            assert_eq!(
+                invitation_attendees(&named, "boss@example.net", None),
+                ["Toni <TONI@example.org>"]
+            );
+            assert_eq!(
+                invitation_attendees(&[" ".to_string()], "boss@example.net", Some(" ")),
+                Vec::<String>::new()
+            );
         }
     }
 }

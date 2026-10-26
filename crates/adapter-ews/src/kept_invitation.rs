@@ -13,7 +13,6 @@
 //! 2026-10-26), and the appointment is read back as it now stands.
 
 use base64::Engine as _;
-use cal_core::attendee::{parse, same_address};
 use cal_core::{Event, NewEvent};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader;
@@ -25,55 +24,24 @@ use crate::soap::{
     create_calendar_item, get_calendar_items_with_recurrence, respond_to_meeting, soft_delete_item,
 };
 
-/// The organizer of a create marked [`NewEvent::keeps_invitation`] when it is
-/// someone else — `None` for an unmarked create, and for one the mailbox
-/// (`own`) organizes itself, which is the mailbox's own meeting.
-pub(crate) fn foreign_organizer(event: &NewEvent, own: Option<&str>) -> Option<String> {
-    if !event.keeps_invitation {
-        return None;
-    }
-    let organizer = event.organizer.as_deref()?.trim();
-    let organizer = organizer
-        .strip_prefix("mailto:")
-        .or_else(|| organizer.strip_prefix("MAILTO:"))
-        .unwrap_or(organizer)
-        .trim();
-    if organizer.is_empty() || own.is_some_and(|own| same_address(own, organizer)) {
-        return None;
-    }
-    Some(organizer.to_string())
-}
-
-/// The invitees the request names: the file's, never the organizer, and the
-/// mailbox among them where the file named it under another address or not at
-/// all (Toni, 2026-10-26) — the reply that makes the appointment answers for
-/// the mailbox's own row.
-pub(crate) fn request_attendees(
-    event: &NewEvent,
-    organizer: &str,
-    own: Option<&str>,
-) -> Vec<String> {
-    let mut attendees: Vec<String> = event
-        .attendees
-        .iter()
-        .filter(|entry| {
-            let address = parse(entry).1;
-            !address.trim().is_empty() && !same_address(&address, organizer)
-        })
-        .cloned()
-        .collect();
-    if let Some(own) = own.map(str::trim).filter(|own| !own.is_empty()) {
-        if !attendees
-            .iter()
-            .any(|entry| same_address(&parse(entry).1, own))
-        {
-            attendees.push(own.to_string());
-        }
-    }
-    attendees
+/// The request `organizer` would have sent for `event`: under the file's UID,
+/// or one of its own for a copy imported without it, naming
+/// [`cal_core::attendee::invitation_attendees`] — the mailbox among them, as
+/// the reply that makes the appointment answers for its row.
+pub(crate) fn request_of(event: &NewEvent, organizer: &str, own: Option<&str>) -> String {
+    let uid = event
+        .uid_to_keep
+        .as_deref()
+        .map(str::trim)
+        .filter(|uid| !uid.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{}@aperio", uuid::Uuid::new_v4()));
+    let attendees = cal_core::attendee::invitation_attendees(&event.attendees, organizer, own);
+    ical_mapping::mapping::invitation_request(&uid, event, organizer, &attendees)
 }
 
 /// Create someone else's meeting in `calendar_id` the way Exchange takes one.
+/// `organizer` is [`cal_core::attendee::invitation_organizer`]'s answer.
 pub(crate) async fn create(
     client: &EwsClient,
     calendar_id: &str,
@@ -82,15 +50,7 @@ pub(crate) async fn create(
     own: Option<&str>,
 ) -> EwsResult<Event> {
     let (folder_id, folder_change_key) = split_calendar_id(calendar_id);
-    let uid = event
-        .uid_to_keep
-        .as_deref()
-        .map(str::trim)
-        .filter(|uid| !uid.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("{}@aperio", uuid::Uuid::new_v4()));
-    let attendees = request_attendees(event, organizer, own);
-    let request = ical_mapping::mapping::invitation_request(&uid, event, organizer, &attendees);
+    let request = request_of(event, organizer, own);
     let mime = base64::engine::general_purpose::STANDARD.encode(request.as_bytes());
     let item = format!(
         "        <t:CalendarItem>\n          <t:MimeContent CharacterSet=\"UTF-8\">{mime}</t:MimeContent>\n        </t:CalendarItem>\n"
@@ -230,49 +190,35 @@ mod tests {
         }
     }
 
-    /// Only a marked create is someone else's, and only while somebody else
-    /// organizes it: the mailbox's own meeting goes in as its own.
+    /// The request carries the file's UID, its organizer, and the invitees
+    /// without the organizer, the mailbox added; a copy imported without the
+    /// UID gets one of its own.
     #[test]
-    fn an_invitation_is_someone_elses_only_when_marked_and_foreign() {
-        let event = invitation(&[]);
-        assert_eq!(
-            foreign_organizer(&event, Some("toni@example.org")).as_deref(),
-            Some("Boss@Example.net")
-        );
-        assert_eq!(
-            foreign_organizer(&event, None).as_deref(),
-            Some("Boss@Example.net")
-        );
-        assert_eq!(foreign_organizer(&event, Some("boss@example.net")), None);
-        let unmarked = NewEvent {
-            keeps_invitation: false,
-            ..event.clone()
-        };
-        assert_eq!(foreign_organizer(&unmarked, None), None);
-        let nobody = NewEvent {
-            organizer: Some("  ".into()),
-            ..event
-        };
-        assert_eq!(foreign_organizer(&nobody, None), None);
-    }
-
-    /// The request names the file's invitees, never the organizer, and the
-    /// mailbox where the file did not.
-    #[test]
-    fn the_request_names_the_mailbox_and_never_the_organizer() {
+    fn the_request_names_the_mailbox_under_the_files_uid() {
         let event = invitation(&["boss@example.net", "Gast <gast@example.net>"]);
+        let text = request_of(&event, "Boss@Example.net", Some("toni@example.org"));
+        let file = ical_mapping::mapping::read_calendar_file(&text).unwrap();
+        assert_eq!(file.method.as_deref(), Some("REQUEST"));
+        let [read] = file.events.as_slice() else {
+            panic!("{text}")
+        };
+        assert_eq!(read.ical_uid.as_deref(), Some("jf-1@example.net"));
+        assert_eq!(read.organizer.as_deref(), Some("Boss@Example.net"));
         assert_eq!(
-            request_attendees(&event, "Boss@Example.net", Some("toni@example.org")),
+            read.attendees,
             ["Gast <gast@example.net>", "toni@example.org"]
         );
-        let named = invitation(&["Toni <TONI@example.org>"]);
-        assert_eq!(
-            request_attendees(&named, "boss@example.net", Some("toni@example.org")),
-            ["Toni <TONI@example.org>"]
-        );
-        assert_eq!(
-            request_attendees(&named, "boss@example.net", None),
-            ["Toni <TONI@example.org>"]
+
+        let copy = NewEvent {
+            uid_to_keep: None,
+            ..event
+        };
+        let text = request_of(&copy, "Boss@Example.net", None);
+        let file = ical_mapping::mapping::read_calendar_file(&text).unwrap();
+        let uid = file.events[0].ical_uid.clone().unwrap();
+        assert!(
+            uid.ends_with("@aperio") && uid != "jf-1@example.net",
+            "{uid}"
         );
     }
 

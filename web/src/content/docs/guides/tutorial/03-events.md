@@ -411,7 +411,8 @@ Aperio itself registers for no file type; it imports only while it runs.
   the colour are yours to choose. Local, iCloud and other CalDAV calendars
   keep invitations so, and Exchange too: there your answer then reads
   “tentative”, without anyone being told, and you can accept or decline as
-  with any invitation. Google follows. In a calendar that cannot, it becomes your own
+  with any invitation. Google keeps them in your primary calendar, not in
+  your other Google calendars. In a calendar that cannot, it becomes your own
   appointment, without attendees. The editor and the list say which, for the calendar you
   picked.
 - **A meeting you organize yourself** comes in as a new appointment, with

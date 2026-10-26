@@ -138,7 +138,8 @@ when caching:
 > creates by spreading a read event, and a copy, a split's tail or a carved-out
 > occurrence must never take the source's UID. Only an import sets it; a move
 > to another calendar gets a new one. CalDAV, Exchange and the local store
-> keep it; Google and Graph mint their own. Where the calendar already holds
+> keep it; Google keeps it only for an imported invitation (`events.import`),
+> and otherwise Google and Graph mint their own. Where the calendar already holds
 > the UID, the create is refused with `cal_core::WriteRefusal::UidTaken`. An
 > adapter that starts reading a field the cache holds needs a
 > `CACHE_GENERATION` bump (`host_core::cache`), or unchanged rows never get it
@@ -158,7 +159,13 @@ when caching:
 > 48) and reads such an event as organized elsewhere. CalDAV says `kept`
 > (scheduling markers, see the CalDAV page); Exchange says `kept-tentative`:
 > the meeting goes in as its organizer's request, made an appointment by a
-> tentative reply that is saved, not sent (see the EWS page).
+> tentative reply that is saved, not sent (see the EWS page). Google says
+> `kept` for the primary calendar only and imports the meeting as a private
+> copy (`events.import`, see the Google page). The two rules every such
+> adapter applies live in the core: whose meeting a marked create is
+> (`cal_core::attendee::invitation_organizer`) and whom it names
+> (`invitation_attendees`: the file's invitees without the organizer, the
+> account added).
 
 > **And some take only an attendee's own changes.** On a scheduling CalDAV
 > server (iCloud), a meeting somebody else organizes accepts the attendee's

@@ -716,7 +716,7 @@ pub async fn create_event(
     // Someone else's meeting from a file goes in the way Exchange takes one:
     // as their request, made an appointment by a tentative reply (I6).
     let own = own_address(client);
-    if let Some(organizer) = crate::kept_invitation::foreign_organizer(&event, own.as_deref()) {
+    if let Some(organizer) = cal_core::attendee::invitation_organizer(&event, own.as_deref()) {
         return crate::kept_invitation::create(
             client,
             calendar_id,
@@ -2508,6 +2508,50 @@ mod tests {
         assert_eq!(event.title, "Lunch");
         assert_eq!(event.calendar_id, "FOLDER-ID|FCK");
         assert_eq!(event.etag.as_deref(), Some("NEW-CK"));
+    }
+
+    /// The mailbox's own meeting from a file is no invitation: whatever the
+    /// import marked, it goes in as an ordinary create, never as somebody's
+    /// request (live round ICS-5, ICS5-5).
+    #[tokio::test]
+    async fn the_mailboxs_own_meeting_from_a_file_goes_the_ordinary_way() {
+        let mut server = Server::new_async().await;
+        let request = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("<t:MimeContent".into()))
+            .expect(0)
+            .create_async()
+            .await;
+        let ordinary = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                "<t:Subject>Jour fixe</t:Subject>".into(),
+            ))
+            .with_status(200)
+            .with_body(create_item_success_body())
+            .expect(1)
+            .create_async()
+            .await;
+        let client = EwsClient::new(
+            server.url(),
+            BasicCredentials {
+                username: "boss@example.net".into(),
+                password: "pw".into(),
+            },
+            reqwest::Client::builder().build().unwrap(),
+        );
+        let own_meeting = NewEvent {
+            organizer: Some("mailto:Boss@Example.net".into()),
+            organized_elsewhere: true,
+            uid_to_keep: Some("jf-1@example.net".into()),
+            keeps_invitation: true,
+            ..new_event("Jour fixe")
+        };
+        create_event(&client, "FOLDER-ID|FCK", own_meeting, None)
+            .await
+            .unwrap();
+        request.assert_async().await;
+        ordinary.assert_async().await;
     }
 
     #[tokio::test]

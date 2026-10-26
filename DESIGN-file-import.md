@@ -172,7 +172,8 @@ die Quelle löscht; mit derselben UID stünde sie einen Moment zweimal beim
 Anbieter, und ob iCloud oder Exchange das zulassen, ist ungemessen: Es bekommt
 eine neue. Geschrieben wird die UID, wo der Anbieter sie annimmt: CalDAV,
 Exchange (`t:UID`, gemessen), lokal. Google nimmt sie nur über
-`events.import` (I6), Graph gar nicht. Die Liste und der Editor fragen den
+`events.import`, das Aperio für fremde Einladungen nutzt (I6f), Graph gar
+nicht. Die Liste und der Editor fragen den
 Zielkalender über den Zeitraum der Termine.
 
 ## Schritte
@@ -257,7 +258,8 @@ Zielkalender über den Zeitraum der Termine.
   Organisator erfährt nichts (Toni, 2026-10-26). iCloud mit
   `SCHEDULE-AGENT=CLIENT` am
   Organisator und `NONE` an der eigenen Zeile (gemessen, Lauf 100518),
-  Google über `events.import` (ungemessen), lokal behält alles. Ein Anbieter ohne stillen Weg legt
+  Google über `events.import` im Hauptkalender (ungemessen, I6f), lokal
+  behält alles. Ein Anbieter ohne stillen Weg legt
   den Termin ohne Teilnehmer an, und der Editor sagt es. Vorher Exchange live:
   Der zweite Lauf (ICS-2, 075306) fand keinen Termin, nur die Nachricht; die
   Runde ICS-3 misst drei Wege zum Termin und danach zusagen, absagen und
@@ -327,4 +329,32 @@ Zielkalender über den Zeitraum der Termine.
     eigener Name ist, gilt jetzt auch für die Zone einer Serie, nicht nur für
     ganztägige Grenzen (236). Exchange-Parser 7 und Leseregel 5 lesen den
     Zwischenspeicher neu.
+  - **I6f** (gebaut, nach Doku, ungemessen) Google: `events.import`, das
+    einzige Anlegen, das einen Organisator annimmt; es verlangt die
+    `iCalUID` und kennt kein `sendUpdates` (eine so importierte Kopie eines
+    Teilnehmers bekommt keine Einladungs-Mail, sagt Google). Google nimmt sie
+    nur an, wo der Besitzer des Kalenders Organisator oder Teilnehmer ist;
+    laut Berichten klappt das nur im Hauptkalender, dessen Kennung die
+    Adresse des Kontos ist. Darum sagt nur der Hauptkalender `kept`
+    (`primary` aus der Kalenderliste), jeder andere `not-kept`, und dort wird
+    die Einladung der eigene Termin ohne Teilnehmer (Toni, 2026-10-26). Das
+    Konto kommt aus `GET /calendars/primary`, nur bei einem markierten
+    Anlegen. Google sagt nicht, was ein Import mit einer UID tut, die schon
+    im Kalender steht: Aperio fragt vorher (`events.list?iCalUID=`) und lehnt
+    eine vorhandene als `uid-taken` ab (Toni, 2026-10-26). Eine Kopie ohne
+    die UID der Datei bekommt `{uuid}@aperio`. Ein Bericht (GAM) sagt, Google
+    übernehme den Organisator beim Import nicht; liest Aperio den Termin mit
+    dem Konto als Organisator zurück, bleibt er so, wie Google ihn gemacht
+    hat, als eigenes Meeting mit Teilnehmern, und Aperio vermerkt es im
+    Protokoll (Toni, 2026-10-26: behalten). Verschickt wurde dabei nichts.
+    Mit I6f ziehen die beiden Regeln, die Exchange und Google teilen, in den
+    Kern: wessen Meeting ein markiertes Anlegen ist
+    (`attendee::invitation_organizer`) und wen es nennt
+    (`attendee::invitation_attendees`). CalDAV prüft gegen alle Adressen
+    seiner Identität und behält seinen eigenen Weg. Quellen:
+    Google-Referenz `events.import`, „Invite users to an event“ (dieselbe
+    `iCalUID`, Organisator in der Kopie des Teilnehmers), eine Frage auf
+    Stack Overflow (Besitzer muss Organisator oder Teilnehmer sein; mit
+    Teilnehmern nur im Hauptkalender) und das GAM-Wiki (Organisator nicht
+    übernommen).
 - **I7 Aufgaben** aus VTODO, später.

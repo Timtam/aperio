@@ -57,6 +57,12 @@
   Proben (Outlook-Einladung, Teams-Serie, Google, Apple-Export, iCloud),
   Windows-Zonennamen, eigene VTIMEZONE, fremde Teile ganz oder gar nicht.
   Die Abbildung auf Aperios Termine bleibt in jedem Fall unsere.
+  ↳ Offen aus I6f (Google, nach Doku gebaut, ungemessen): live messen,
+  sobald ein Google-Konto zum Testen da ist — bleibt der Organisator beim
+  `events.import`, geht keine Mail hinaus, was tut ein Import mit einer
+  schon vorhandenen UID, und klappt er wirklich nur im Hauptkalender?
+  Danach entscheiden, ob gewöhnliche Importe bei Google auch über
+  `events.import` gehen, damit ihre UID bleibt und Doppelte erkannt werden.
 - [~] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)  
   ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)
