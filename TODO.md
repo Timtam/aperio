@@ -52,6 +52,11 @@
   Serie bei Graph keine UID). Ein Verschieben in einen anderen Kalender
   bekommt eine neue UID, weil ungemessen ist, ob iCloud oder Exchange
   dieselbe UID kurz zweimal annehmen.
+  ↳ Prüfen (Toni, 2026-10-26): `calcard` (Stalwart, MIT/Apache) als
+  Grundschicht statt `icalendar` unter `crates/ical-mapping` — gegen unsere
+  Proben (Outlook-Einladung, Teams-Serie, Google, Apple-Export, iCloud),
+  Windows-Zonennamen, eigene VTIMEZONE, fremde Teile ganz oder gar nicht.
+  Die Abbildung auf Aperios Termine bleibt in jedem Fall unsere.
 - [~] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)  
   ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)
@@ -1717,7 +1722,7 @@ Vorschläge sind nicht aufgenommen.
 - [ ] **Zonennamen in CalDAV und Microsoft 365 über den Kern auflösen.**
       CalDAV und Microsoft 365 geben gespeicherte Zonennamen weiter direkt an
       chrono-tz, das Groß- und Kleinschreibung unterscheidet. Betroffen sind
-      crates/adapter-caldav/src/mapping.rs (resolve_with_tzid ~874,
+      crates/ical-mapping/src/mapping.rs (resolve_with_tzid ~874,
       RECURRENCE-ID ~1347, zoned_datetime ~1375), tasks.rs ~1063, vtimezone.rs
       ~43 und crates/adapter-microsoft-graph/src/mapping.rs (write_datetime
       ~1033). Eine Serie mit „europe/berlin“ wiederholt sich in Aperio nach

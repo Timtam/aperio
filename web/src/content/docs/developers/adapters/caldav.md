@@ -26,9 +26,11 @@ iCloud is just CalDAV with Apple's endpoints.
   unbounded window. Later views are served from cache and only a background
   `sync-collection` delta touches the network. Servers without
   `sync-collection` fall back to a windowed, range-scoped read.
-- **Bodies** are iCalendar (`VEVENT`/`VTODO`) and vCard, parsed in
-  `mapping.rs` into `cal-core` types. `RRULE`/`EXDATE` are carried through;
-  occurrences are expanded on the frontend.
+- **Bodies** are iCalendar (`VEVENT`/`VTODO`) and vCard. Events are read
+  and written by `ical-mapping` (`crates/ical-mapping`), the mapping the
+  iCal feeds and file import, and Exchange's invitations share; it stays
+  reachable here as `adapter_caldav::mapping`. `RRULE`/`EXDATE` are carried
+  through; occurrences are expanded on the frontend.
 
 ## Authentication
 
@@ -209,5 +211,7 @@ Apple's well-known endpoints.
 
 `mockito` serves canned `PROPFIND`/`REPORT`/multiget XML. Tests assert the
 sync-collection token round-trip, per-resource deletions, the
-`{href}|{uid}` id scheme, and the iCalendar → `cal-core` mapping. For a
+`{href}|{uid}` id scheme, and the iCalendar → `cal-core` mapping (whose own
+tests live in `ical-mapping`, with the provider samples both crates read under
+its `test-fixtures` feature). For a
 live smoke test, an iCloud account with an app-specific password works.

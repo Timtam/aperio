@@ -799,8 +799,8 @@ export function exceptionsAtSeriesTime<
  * Marker in an override instance's id, separating the recurring series'
  * `{href}|{uid}` from the RECURRENCE-ID instant it replaces (e.g.
  * `…|uid::rid::2026-06-14T13:00:00Z`). Mirrors `RECURRENCE_ID_MARKER` in the
- * CalDAV adapter (`crates/adapter-caldav/src/mapping.rs`), which mints these
- * ids — keep the two in sync.
+ * CalDAV adapter's iCalendar mapping (`crates/ical-mapping/src/mapping.rs`),
+ * which mints these ids — keep the two in sync.
  */
 const RECURRENCE_ID_MARKER = '::rid::';
 

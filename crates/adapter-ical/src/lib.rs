@@ -16,7 +16,7 @@
 //!     edit events the user needs a CalDAV account or the local
 //!     adapter).
 //!
-//! Parsing reuses [`adapter_caldav::mapping::parse_calendar_data`]
+//! Parsing reuses [`ical_mapping::mapping::parse_calendar_data`]
 //! — the iCal feed body and a CalDAV REPORT's CALDATA blob are the
 //! same syntax (VCALENDAR with VEVENTs), so a single parser covers
 //! both.
@@ -24,13 +24,13 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use adapter_caldav::mapping;
 use async_trait::async_trait;
 use base64::Engine;
 use cal_core::{
     Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor,
     Credentials as CoreCredentials, DateRange, Error, Event, FreeBusy, NewEvent, Result,
 };
+use ical_mapping::mapping;
 use reqwest::header::{
     HeaderValue, ACCEPT, AUTHORIZATION, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
 };

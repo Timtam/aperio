@@ -2530,10 +2530,10 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// The iCloud meeting of live round 5 (E1), as the account read it.
     fn icloud_meeting(cal_url: &Url) -> Event {
         crate::mapping::parse_calendar_data_as(
-            crate::mapping::tests::ICLOUD_MEETING,
+            ical_mapping::fixtures::ICLOUD_MEETING,
             cal_url.as_str(),
             Some("/calendars/alice/work/series.ics"),
-            &crate::mapping::tests::icloud_identity(),
+            &ical_mapping::fixtures::icloud_identity(),
         )
         .unwrap()
         .remove(0)
@@ -2541,7 +2541,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 
     fn icloud_ctx() -> WriteCtx {
         WriteCtx {
-            identity: Some(crate::mapping::tests::icloud_identity()),
+            identity: Some(ical_mapping::fixtures::icloud_identity()),
             schedules: true,
             organizer_address: Some("mailto:toni@example.org".into()),
             writes_color: false,
@@ -2557,7 +2557,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let mut server = Server::new_async().await;
         let (seen, get, put) = serve_series(
             &mut server,
-            crate::mapping::tests::ICLOUD_MEETING,
+            ical_mapping::fixtures::ICLOUD_MEETING,
             "\"server-etag\"",
             1,
         )
@@ -2591,7 +2591,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let mut server = Server::new_async().await;
         let (seen, _get, put) = serve_series(
             &mut server,
-            crate::mapping::tests::ICLOUD_MEETING,
+            ical_mapping::fixtures::ICLOUD_MEETING,
             "\"server-etag\"",
             1,
         )
@@ -2656,7 +2656,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// the alarm, Apple's own properties.
     #[tokio::test]
     async fn skipping_an_occurrence_splices_only_the_exdate() {
-        let recurring = crate::mapping::tests::ICLOUD_MEETING.replacen(
+        let recurring = ical_mapping::fixtures::ICLOUD_MEETING.replacen(
             "SEQUENCE:0\r\n",
             "RRULE:FREQ=WEEKLY;COUNT=3\r\nSEQUENCE:0\r\n",
             1,
@@ -2692,7 +2692,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// scheduling message either.
     #[tokio::test]
     async fn skipping_a_skipped_occurrence_sends_nothing() {
-        let recurring = crate::mapping::tests::ICLOUD_MEETING.replacen(
+        let recurring = ical_mapping::fixtures::ICLOUD_MEETING.replacen(
             "SEQUENCE:0\r\n",
             "RRULE:FREQ=WEEKLY;COUNT=3\r\nEXDATE:20261116T150000Z\r\nSEQUENCE:0\r\n",
             1,
@@ -2721,7 +2721,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
             body,
             cal_url.as_str(),
             Some("/calendars/alice/work/series.ics"),
-            &crate::mapping::tests::icloud_identity(),
+            &ical_mapping::fixtures::icloud_identity(),
         )
         .unwrap()
     }
@@ -2738,7 +2738,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// properties, even DTSTAMP — goes back byte for byte.
     #[tokio::test]
     async fn an_invitation_reminder_edit_changes_only_its_alarms() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
@@ -2820,7 +2820,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// save from a second device would quietly drop the alarm the first set.
     #[tokio::test]
     async fn an_invitation_reminder_edit_is_guarded_by_the_callers_version() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         // The resource moved on since this copy was read: the GET answers
         // "server-etag", and only "caller-etag" is accepted on the PUT.
@@ -2846,7 +2846,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// reminder would multiply on every save.
     #[tokio::test]
     async fn an_audio_or_end_related_alarm_is_claimed_not_duplicated() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
@@ -2890,7 +2890,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// A reminder the user removed goes; one Aperio never showed stays.
     #[tokio::test]
     async fn a_removed_reminder_goes_and_an_unshown_alarm_stays() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
@@ -2921,7 +2921,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// refusal names the field and nothing is sent.
     #[tokio::test]
     async fn an_invitation_title_edit_is_refused_before_any_put() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (_seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
@@ -2943,7 +2943,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// The same for a series the user tried to end early.
     #[tokio::test]
     async fn an_invitation_series_truncation_is_refused() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (_seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
@@ -2968,7 +2968,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// not do.
     #[tokio::test]
     async fn a_guest_the_organizer_added_is_a_conflict_not_a_refusal() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (_seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
@@ -2991,7 +2991,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// "unchanged".
     #[tokio::test]
     async fn an_invitation_edit_without_an_etag_is_a_conflict_not_a_refusal() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (_seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
@@ -3014,7 +3014,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// server sent back is no change either, because iCloud stores none.
     #[tokio::test]
     async fn an_invitation_save_that_changes_nothing_puts_nothing() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (_seen, get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
@@ -3035,7 +3035,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// alarms, and the master and the other blocks are untouched.
     #[tokio::test]
     async fn an_invitation_occurrence_reminder_edit_touches_only_its_block() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
@@ -3073,7 +3073,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// never be sent.
     #[tokio::test]
     async fn an_all_day_occurrence_is_excluded_by_a_date_exdate() {
-        use crate::mapping::tests::ICLOUD_ALL_DAY_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_ALL_DAY_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, _get, put) =
             serve_series(&mut server, ICLOUD_ALL_DAY_INVITATION, "\"server-etag\"", 1).await;
@@ -3104,7 +3104,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// an address that merely contains the account's is somebody else.
     #[tokio::test]
     async fn an_answer_leaves_an_email_alarms_attendee_alone() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;

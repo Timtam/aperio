@@ -14,6 +14,7 @@ cal-core.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 icalendar.workspace = true
+ical-mapping.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true
 serde.workspace = true
@@ -24,12 +25,10 @@ url = "2"
 base64 = "0.22"
 
 [dev-dependencies]
+# The provider samples the mapping's tests share.
+ical-mapping = { workspace = true, features = ["test-fixtures"] }
 tokio = { workspace = true }
 mockito = "1"
-# Reading `shared/contracts/calendarDefaultReminders.json`, the fixture this
-# crate shares with host-core and the TypeScript suite so the calendar
-# default-reminder chain is pinned end to end rather than half at each end.
-serde_json.workspace = true
 
 [lints]
 workspace = true

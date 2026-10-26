@@ -421,7 +421,7 @@ pub fn attendee_line(entry: &str, ending: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mapping::tests::{icloud_identity, ICLOUD_MEETING};
+    use ical_mapping::fixtures::{icloud_identity, ICLOUD_MEETING};
 
     fn master_block() -> &'static str {
         let from = ICLOUD_MEETING.find("BEGIN:VEVENT").unwrap();

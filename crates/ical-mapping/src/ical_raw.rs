@@ -15,7 +15,7 @@ use std::ops::Range;
 /// to the end of its last continuation line, line ending included), its name,
 /// its parameters and its value, unfolded.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ContentLine {
+pub struct ContentLine {
     pub range: Range<usize>,
     /// Upper-cased.
     pub name: String,
@@ -38,7 +38,7 @@ impl ContentLine {
 /// never those of a component nested inside it: an ATTENDEE inside a VALARM
 /// is the recipient of an email alarm, not a guest. BEGIN and END lines are
 /// not properties.
-pub(crate) fn component_lines(block: &str) -> Vec<ContentLine> {
+pub fn component_lines(block: &str) -> Vec<ContentLine> {
     let mut out = Vec::new();
     let mut depth: usize = 0;
     for (range, unfolded) in logical_lines(block) {
@@ -93,7 +93,7 @@ fn logical_lines(text: &str) -> Vec<(Range<usize>, String)> {
 /// Every content line of `text`, BEGIN and END included, unfolded and split
 /// into its name, parameters and value, at whatever depth it sits. A line
 /// without a colon is left out.
-pub(crate) fn all_lines(text: &str) -> Vec<(String, Vec<(String, String)>, String)> {
+pub fn all_lines(text: &str) -> Vec<(String, Vec<(String, String)>, String)> {
     logical_lines(text)
         .into_iter()
         .filter_map(|(_, unfolded)| split_line(&unfolded))
@@ -145,7 +145,7 @@ fn split_line(line: &str) -> Option<(String, Vec<(String, String)>, String)> {
 }
 
 /// The line ending `block` uses: CRLF unless it has only bare LFs.
-pub(crate) fn line_ending(block: &str) -> &'static str {
+pub fn line_ending(block: &str) -> &'static str {
     if block.contains("\r\n") || !block.contains('\n') {
         "\r\n"
     } else {
@@ -156,7 +156,7 @@ pub(crate) fn line_ending(block: &str) -> &'static str {
 /// One content line's text as it reads, with its folding undone: the
 /// continuation lines joined and their leading space dropped (RFC 5545 §3.1).
 /// The inverse of [`fold`].
-pub(crate) fn unfold(raw: &str) -> String {
+pub fn unfold(raw: &str) -> String {
     let mut out = String::new();
     for (index, physical) in raw.split_inclusive('\n').enumerate() {
         let content = physical.trim_end_matches(['\r', '\n']);
@@ -172,7 +172,7 @@ pub(crate) fn unfold(raw: &str) -> String {
 /// `line` (without an ending) as physical lines of at most 75 octets each,
 /// every one ending in `ending`; a continuation starts with a space. Never
 /// splits a UTF-8 character (RFC 5545 §3.1).
-pub(crate) fn fold(line: &str, ending: &str) -> String {
+pub fn fold(line: &str, ending: &str) -> String {
     let mut out = String::with_capacity(line.len() + line.len() / 70 * 3 + 2);
     let mut width = 0;
     let mut first = true;
@@ -194,7 +194,7 @@ pub(crate) fn fold(line: &str, ending: &str) -> String {
 /// A parameter value as RFC 5545 §3.2 wants it: in double quotes when it
 /// holds a colon, a semicolon or a comma. A double quote cannot be written
 /// inside one, so it becomes a single quote.
-pub(crate) fn param_value(value: &str) -> String {
+pub fn param_value(value: &str) -> String {
     let cleaned = value.replace('"', "'");
     if cleaned.contains([':', ';', ',']) {
         format!("\"{cleaned}\"")
@@ -206,7 +206,7 @@ pub(crate) fn param_value(value: &str) -> String {
 /// `block` with `lines` inserted right after its head: the BEGIN line and,
 /// for an override, its RECURRENCE-ID property. Properties must come before
 /// any nested component (RFC 5545 §3.6.1).
-pub(crate) fn insert_after_head(block: &str, lines: &str) -> String {
+pub fn insert_after_head(block: &str, lines: &str) -> String {
     if lines.is_empty() {
         return block.to_string();
     }
@@ -229,7 +229,7 @@ pub(crate) fn insert_after_head(block: &str, lines: &str) -> String {
 /// `block` with `text` inserted right before its own closing `END:` line, so
 /// a new sub-component (a VALARM) lands after the properties and inside the
 /// component (RFC 5545 §3.6.1). The block's last physical line is its end.
-pub(crate) fn insert_before_end(block: &str, text: &str) -> String {
+pub fn insert_before_end(block: &str, text: &str) -> String {
     if text.is_empty() {
         return block.to_string();
     }
@@ -246,7 +246,7 @@ pub(crate) fn insert_before_end(block: &str, text: &str) -> String {
 }
 
 /// `block` without the text in `drop`.
-pub(crate) fn without_ranges(block: &str, drop: &[Range<usize>]) -> String {
+pub fn without_ranges(block: &str, drop: &[Range<usize>]) -> String {
     let mut sorted: Vec<&Range<usize>> = drop.iter().collect();
     sorted.sort_by_key(|r| r.start);
     let mut out = String::with_capacity(block.len());

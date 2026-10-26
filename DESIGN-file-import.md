@@ -227,4 +227,19 @@ Zielkalender über den Zeitraum der Termine.
   Der zweite Lauf (ICS-2, 075306) fand keinen Termin, nur die Nachricht; die
   Runde ICS-3 misst drei Wege zum Termin und danach zusagen, absagen und
   löschen über Aperios eigenen Weg, und was hinausgeht.
+  Entscheidungen (Toni, 2026-10-26): Lesen und Schreiben von iCal ziehen in
+  ein gemeinsames Crate, das CalDAV, der iCal-Adapter und Exchange nutzen
+  (erst der Umzug ohne neues Verhalten), damit kein Adapter am anderen
+  hängt; iCloud wird vor dem Bau live gemessen (bleibt das Anlegen mit
+  `SCHEDULE-AGENT` still?); Google wird nach Doku über `events.import`
+  gebaut, ungemessen. Unter dem Crate bleibt `icalendar`; `calcard` wird
+  später geprüft (TODO.md). Warum Exchange überhaupt iCal braucht: Eine
+  Einladung, die jemand anderes organisiert, nimmt Exchange nur so an, wie sie
+  per Mail kommt (`METHOD:REQUEST`); das gewöhnliche Anlegen lehnt einen
+  fremden Organisator ab (ICS-5) und macht mit Teilnehmern ein eigenes Meeting
+  (ICS-3). Alles andere legt der Import als gewöhnlichen Exchange-Termin an.
+  - **I6a** (gebaut): `crates/ical-mapping` hält die Abbildung (Lesen,
+    Schreiben, VTIMEZONE, Zonendefinitionen, rohe Zeilen, die eigene
+    Identität), umgezogen ohne neues Verhalten; CalDAV behält die Pfade
+    (`adapter_caldav::mapping`), der iCal-Adapter hängt nicht mehr an CalDAV.
 - **I7 Aufgaben** aus VTODO, später.

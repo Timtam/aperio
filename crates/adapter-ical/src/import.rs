@@ -1,6 +1,6 @@
 //! An `.ics` file read for an import (DESIGN-file-import.md).
 //!
-//! The same reader as the feeds and CalDAV (`adapter_caldav::mapping`), so a
+//! The same reader as the feeds and CalDAV (`ical_mapping::mapping`), so a
 //! file reads the way a server's copy of the same event does: zones (tzdata,
 //! Windows ids, the file's own `VTIMEZONE`), all-day dates, rules and their
 //! deletions, alarms, the organizer and the invitees. On top of it, what only
@@ -18,9 +18,9 @@
 
 use std::collections::HashMap;
 
-use adapter_caldav::mapping;
 use cal_core::{Event, FileImport, ImportedEvent, SkippedKind, SkippedPart};
 use chrono::{DateTime, Utc};
+use ical_mapping::mapping;
 
 /// Read `content`, the bytes of a calendar file. The `Err` is a sentence for
 /// a file that is no calendar at all.
