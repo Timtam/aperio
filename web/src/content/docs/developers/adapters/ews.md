@@ -209,6 +209,29 @@ The endpoint is discovered or user-supplied.
   `uid_to_keep` (an import) writes `<t:UID>` before `<t:Start>`, which
   Exchange keeps (live round ICS, ICS-6). Whether it refuses a UID the
   calendar already holds is unmeasured; the import marks those first.
+- **An invitation from a file goes in as its organizer's request.** Calendars
+  say `invitation_import: kept-tentative`. `CreateItem` refuses an
+  `Organizer` field (live round ICS), and a meeting it makes with invitees is
+  the mailbox's own. So a create marked `keeps_invitation` whose organizer is
+  not the mailbox (`kept_invitation.rs`) writes the request that organizer
+  would have sent: `MimeContent` with `METHOD:REQUEST`
+  (`ical_mapping::mapping::invitation_request`: the file's invitees without
+  the organizer, and the mailbox where the file did not name it), with
+  `SendToNone`. Exchange stores that as a meeting request message, not an
+  appointment (ICS-2). `TentativelyAcceptItem` with `SaveOnly` on it makes
+  the appointment — their organizer, the invitees, the file's UID, the
+  mailbox's answer tentative — sends nothing, leaves no draft, and moves the
+  request to Deleted Items (ICS-3, ICS-4). The adapter soft-deletes it from
+  there, recoverably (a failure only logs; the appointment stands), and reads
+  the appointment back. The mailbox's address is the login where that is an
+  email (`own_address`); a `DOMAIN\user` login names none, and then every
+  marked create counts as someone else's. Live round ICS-5 (run 130307) made
+  a single, one whose file did not name the mailbox, a series with a gap, an
+  all-day one and the mailbox's own meeting that way: nothing in the Inbox,
+  Drafts or Deleted Items, nothing sent, and the own meeting stayed the
+  mailbox's own. Exchange stored the all-day one in UTC
+  (`tzone://Microsoft/Utc`, midnight to midnight), which reads as its day,
+  and the series' zone under the file's TZID (see Reading below).
 - **The organizer is listed as an attendee.** Exchange puts the organizer
   into `RequiredAttendees` with `ResponseType` "Organizer"; for an appointment
   made in Outlook it is the only row. The adapter drops that row by its flag
@@ -245,11 +268,16 @@ the iCalendar reader):
   zone means no zone. Otherwise the start zone's id reads as the zone of its
   default ("001") row, in tzdata's canonical spelling (`India Standard Time` →
   `Asia/Kolkata`). Exchange keeps one id for a group of cities on one clock, so
-  a Vienna series reads back as Berlin. `UTC`, and an id the table does not
-  know (custom definitions, registry-only ids), mean no zone; the series
-  repeats in UTC. An all-day boundary reads in more zones than a series'
-  clock does: an id that is tzdata's own name and a full definition count
-  there (see the all-day quirk above).
+  a Vienna series reads back as Berlin. An id the table does not know that is
+  tzdata's own name reads as that zone (decision 236). Exchange stores an
+  imported invitation's series that way, under the file's TZID: the start
+  zone as `Name="Europe/Berlin"` beside an empty `Id`, the end zone the other
+  way round (live round ICS-5), so a zone with an empty `Id` is named by its
+  `Name` (`zone_definition::element_zone_id`). `UTC`, a UTC name, and an id
+  that is neither (custom definitions, registry-only ids) mean no zone; the
+  series repeats in UTC. An all-day boundary reads in more zones than a
+  series' clock does: a full definition counts there (see the all-day quirk
+  above).
 - **Ids the server knows.** A server refuses a save naming an id it does not
   know (`ErrorTimeZone`, and the whole save fails); Exchange 2019 does not know
   `Sao Tome Standard Time`. The adapter asks each server once
@@ -412,7 +440,8 @@ the iCalendar reader):
   `TABLE_ID` (hashed from the table's rows) plus `READ_RULE` in
   `windows_tz.rs`. Bump `READ_RULE` whenever an id becomes a series' zone
   differently without the table changing, or a cached item otherwise turns
-  into a different event (3: the range's date). A delta whose token names another
+  into a different event (3: the range's date; 5: a series' zone named by
+  tzdata). A delta whose token names another
   translation emits every cached item again, without re-reading Exchange, so
   no view keeps a zone the old translation read.
 - **Cached items follow the parser.** A zone that needs a field older builds
@@ -421,7 +450,7 @@ the iCalendar reader):
   dropped and the folder drained again from scratch, once. Bump it whenever
   the item parser starts reading a field the read rule uses, or a field the
   detail enrichment fills (6: the UID): an item already enriched is never
-  asked again.
+  asked again. 7: a zone with an empty `Id` is named by its `Name`.
 
 ## Testing
 

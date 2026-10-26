@@ -218,7 +218,10 @@ pub struct SyncedFolderState {
 /// 6: items carry their iCalendar UID (`uid`, file import I4), which only the
 ///    detail enrichment reads; a parser-5 row is enriched already and would
 ///    never be asked again.
-pub const ITEM_PARSER: u32 = 6;
+/// 7: a zone with an empty id is named by its `Name` (`element_zone_id`),
+///    where Exchange keeps an imported file's TZID (I6); a parser-6 row holds
+///    the empty id, and its series repeats in UTC.
+pub const ITEM_PARSER: u32 = 7;
 
 /// How many changes to ask for per `SyncFolderItems` request.
 /// Exchange Online caps at 512 per call; smaller is fine but means
@@ -710,6 +713,19 @@ pub async fn create_event(
     event: NewEvent,
     server_zones: Option<&ServerTimeZones>,
 ) -> EwsResult<Event> {
+    // Someone else's meeting from a file goes in the way Exchange takes one:
+    // as their request, made an appointment by a tentative reply (I6).
+    let own = own_address(client);
+    if let Some(organizer) = crate::kept_invitation::foreign_organizer(&event, own.as_deref()) {
+        return crate::kept_invitation::create(
+            client,
+            calendar_id,
+            &event,
+            &organizer,
+            own.as_deref(),
+        )
+        .await;
+    }
     // Exchange takes a series' rule but not its deleted occurrences: such a
     // series is created bare and they are deleted again one by one (decisions
     // 202-213, 225, 263-266).
@@ -755,6 +771,18 @@ pub async fn create_event(
         &item_ref.id,
         item_ref.change_key,
     ))
+}
+
+/// The mailbox's own SMTP address, as far as the account says it.
+///
+/// EWS has no cheap "who am I" call (Autodiscover/GetUserSettings is
+/// heavyweight). The configured login is the SMTP address on the vast majority
+/// of Exchange/Outlook setups; when it isn't an email (e.g. `DOMAIN\user`), it
+/// cannot be matched against attendee addresses, so it is `None` rather than a
+/// guess.
+pub fn own_address(client: &EwsClient) -> Option<String> {
+    let username = client.credentials.username.trim();
+    (username.contains('@') && !username.contains('\\')).then(|| username.to_string())
 }
 
 /// Update an existing calendar item with the supplied event payload.
@@ -2057,6 +2085,29 @@ mod tests {
         )
     }
 
+    /// The login is the mailbox's address only where it is an email: a
+    /// `DOMAIN\user` login or a bare name is never matched against attendees.
+    #[test]
+    fn the_own_address_is_the_login_only_where_it_is_an_email() {
+        let own = |username: &str| {
+            own_address(&EwsClient::new(
+                "https://ews.invalid/EWS/Exchange.asmx".into(),
+                BasicCredentials {
+                    username: username.into(),
+                    password: "pw".into(),
+                },
+                reqwest::Client::builder().build().unwrap(),
+            ))
+        };
+        assert_eq!(
+            own(" toni@example.org ").as_deref(),
+            Some("toni@example.org")
+        );
+        assert_eq!(own(r"EXAMPLE\toni"), None);
+        assert_eq!(own(r"EXAMPLE\toni@example.org"), None);
+        assert_eq!(own("toni"), None);
+    }
+
     #[tokio::test]
     async fn list_calendars_parses_two_folders() {
         let mut server = Server::new_async().await;
@@ -2101,6 +2152,11 @@ mod tests {
         assert_eq!(cals[0].id, "FA");
         assert_eq!(cals[0].name, "Calendar");
         assert!(!cals[0].read_only); // 6f.1b made EWS calendars writable
+                                     // Someone else's meeting from a file goes in, the answer tentative (I6).
+        assert_eq!(
+            cals[0].invitation_import,
+            cal_core::InvitationImport::KeptTentative
+        );
         assert_eq!(cals[1].id, "FB");
     }
 

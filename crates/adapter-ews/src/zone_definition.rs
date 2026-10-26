@@ -234,6 +234,24 @@ fn attribute(e: &quick_xml::events::BytesStart<'_>, name: &[u8]) -> Option<Strin
         .map(|a| attribute_text(&a))
 }
 
+/// The id a `StartTimeZone` / `EndTimeZone` element names its zone by: its
+/// `Id`, or its `Name` where the `Id` is empty. Exchange 2019 stores the
+/// start zone of an item that came in as an iCalendar file — an imported
+/// invitation (I6) — under the file's TZID as its name beside an empty id,
+/// and the end zone the other way round (live run 130307:
+/// `<t:StartTimeZone Name="Europe/Berlin" Id="">`, `<t:EndTimeZone Name=""
+/// Id="Europe/Berlin">`). The name of a zone Exchange knows by its id is a
+/// display name and never read. `None` where the element carries neither.
+pub(crate) fn element_zone_id(e: &quick_xml::events::BytesStart<'_>) -> Option<String> {
+    let id = attribute(e, b"Id");
+    if id.as_deref().is_some_and(|id| !id.trim().is_empty()) {
+        return id;
+    }
+    attribute(e, b"Name")
+        .filter(|name| !name.trim().is_empty())
+        .or(id)
+}
+
 /// An attribute's value as text, its entities decoded: the parsers decode a
 /// `<To>` target's text, so a period or group id holding `&amp;` matches it
 /// only decoded too. A value that does not decode is kept as written.

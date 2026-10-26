@@ -155,7 +155,10 @@ when caching:
 > invitation as someone else's without a word to anyone, and treats one whose
 > organizer is the account itself as the account's own meeting. The local
 > store says `kept`: it keeps the organizer in a column of its own (migration
-> 48) and reads such an event as organized elsewhere.
+> 48) and reads such an event as organized elsewhere. CalDAV says `kept`
+> (scheduling markers, see the CalDAV page); Exchange says `kept-tentative`:
+> the meeting goes in as its organizer's request, made an appointment by a
+> tentative reply that is saved, not sent (see the EWS page).
 
 > **And some take only an attendee's own changes.** On a scheduling CalDAV
 > server (iCloud), a meeting somebody else organizes accepts the attendee's

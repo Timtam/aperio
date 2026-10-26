@@ -84,7 +84,7 @@ Pick the layer that matches your interest:
 | The host: Tauri commands, DB, sync, plugin host | `src-tauri/src` |
 | The UI | `src/` (React/TS) |
 | A specific provider (Google, iCloud, …) | `crates/adapter-*` — see [Adapters](/developers/adapters/overview/) |
-| iCalendar text ↔ events (CalDAV, feeds, file import) | `crates/ical-mapping` |
+| iCalendar text ↔ events (CalDAV, feeds, file import, Exchange's imported invitations) | `crates/ical-mapping` |
 | The sync engine (event log, CRDT-ish merge) | `crates/sync-core`, `src-tauri/src/event_log`, `src-tauri/src/sync` |
 | Writing a *new* provider as a plugin | the [Plugin Developer docs](/plugins/) |
 

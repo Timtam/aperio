@@ -181,7 +181,10 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
         color: None,
         read_only,
         default_sound: None,
-        invitation_import: Default::default(),
+        // Someone else's meeting from a file goes in as their request, made
+        // an appointment by a tentative reply: the mailbox's answer reads
+        // tentative afterwards (I6, live rounds ICS-3 and ICS-4).
+        invitation_import: cal_core::InvitationImport::KeptTentative,
     }
 }
 
@@ -949,23 +952,13 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                             ));
                         }
                         // Simple form: <t:StartTimeZone Id="Eastern Standard Time" .../>.
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.start_time_zone =
-                                    Some(crate::zone_definition::attribute_text(&a));
-                            }
-                        }
+                        current.start_time_zone = crate::zone_definition::element_zone_id(&e);
                     }
                     // The end zone's own id, where Exchange marks a series
                     // created without a zone as `tzone://Microsoft/Utc`
                     // (decision 43b), and its own definition (decision 233).
                     b"endtimezone" if inside_item => {
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.end_time_zone =
-                                    Some(crate::zone_definition::attribute_text(&a));
-                            }
-                        }
+                        current.end_time_zone = crate::zone_definition::element_zone_id(&e);
                         if !empty {
                             zone_walker = Some((
                                 false,
@@ -1455,22 +1448,12 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                                 crate::zone_definition::ZoneDefinitionWalker::default(),
                             ));
                         }
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.start_time_zone =
-                                    Some(crate::zone_definition::attribute_text(&a));
-                            }
-                        }
+                        current.start_time_zone = crate::zone_definition::element_zone_id(&e);
                     }
                     // As in the sync parser: the end zone's own id and
                     // definition.
                     b"endtimezone" if inside_item => {
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.end_time_zone =
-                                    Some(crate::zone_definition::attribute_text(&a));
-                            }
-                        }
+                        current.end_time_zone = crate::zone_definition::element_zone_id(&e);
                         if !empty {
                             zone_walker = Some((
                                 false,
@@ -8591,6 +8574,64 @@ mod tests {
                 Some("Customized Time Zone")
             );
             assert!(item.start_zone_definition.is_some());
+        }
+    }
+
+    /// The zones of an imported invitation's series as Exchange 2019 stored
+    /// them (live run 130307): the start zone under the file's TZID as its
+    /// name beside an empty id, the end zone the other way round. Both read as
+    /// tzdata's `Europe/Berlin`, and the series repeats in it, not in UTC.
+    #[test]
+    fn an_imported_series_reads_its_zone_from_the_name() {
+        let series = |start: &str, end: &str| {
+            format!(
+                r#"<t:CalendarItem>
+                <t:ItemId Id="SERIES" ChangeKey="CK"/>
+                <t:Subject>Jour fixe</t:Subject>
+                <t:Start>2026-11-02T09:00:00Z</t:Start>
+                <t:End>2026-11-02T10:00:00Z</t:End>
+                <t:IsAllDayEvent>false</t:IsAllDayEvent>
+                <t:IsRecurring>true</t:IsRecurring>
+                <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+                <t:Recurrence><t:WeeklyRecurrence><t:Interval>1</t:Interval><t:DaysOfWeek>Monday</t:DaysOfWeek><t:FirstDayOfWeek>Monday</t:FirstDayOfWeek></t:WeeklyRecurrence><t:NumberedRecurrence><t:StartDate>2026-11-02+01:00</t:StartDate><t:NumberOfOccurrences>4</t:NumberOfOccurrences></t:NumberedRecurrence></t:Recurrence>
+                {start}
+                {end}
+              </t:CalendarItem>"#
+            )
+        };
+        let imported = series(
+            &format!(
+                r#"<t:StartTimeZone Name="Europe/Berlin" Id="">{CUSTOM_ZONE_BODY}</t:StartTimeZone>"#
+            ),
+            &format!(
+                r#"<t:EndTimeZone Name="" Id="Europe/Berlin">{CUSTOM_ZONE_BODY}</t:EndTimeZone>"#
+            ),
+        );
+        for parse in [in_sync_response, in_get_item_response] {
+            let item = parse(&imported);
+            assert_eq!(item.start_time_zone.as_deref(), Some("Europe/Berlin"));
+            assert_eq!(item.end_time_zone.as_deref(), Some("Europe/Berlin"));
+            // A name that is a clock by itself keeps no definition either.
+            assert_eq!(item.start_zone_definition, None);
+            let event = to_event(item, "FID|CK").unwrap();
+            let recurrence = event.recurrence.expect("the series' rule");
+            assert_eq!(recurrence.rrule, "FREQ=WEEKLY;BYDAY=MO;COUNT=4");
+            assert_eq!(recurrence.tzid.as_deref(), Some("Europe/Berlin"));
+        }
+
+        // A zone Exchange knows by its id keeps it; the display name beside
+        // it is never read. An empty id with no name stays empty, as before.
+        let registry = series(
+            r#"<t:StartTimeZone Id="W. Europe Standard Time" Name="(UTC+01:00) Amsterdam, Berlin, Bern, Rom, Stockholm, Wien"/>"#,
+            r#"<t:EndTimeZone Id="" Name=""/>"#,
+        );
+        for parse in [in_sync_response, in_get_item_response] {
+            let item = parse(&registry);
+            assert_eq!(
+                item.start_time_zone.as_deref(),
+                Some("W. Europe Standard Time")
+            );
+            assert_eq!(item.end_time_zone.as_deref(), Some(""));
         }
     }
 

@@ -1085,6 +1085,38 @@ pub fn new_event_to_ical(uid: &str, event: &NewEvent) -> String {
     with_vtimezone(cal.to_string(), event)
 }
 
+/// A meeting someone else organizes, as the request its organizer would have
+/// sent (`METHOD:REQUEST`, RFC 5546): the way Exchange takes an imported
+/// invitation in as theirs (DESIGN-file-import.md, I6; live rounds ICS-3 and
+/// ICS-4). The appointment as [`new_event_to_ical`] writes it — its series,
+/// zone and alarms included —, with `organizer` (an address) and one
+/// not-yet-answered ATTENDEE row per entry of `attendees` (`Name <address>` or
+/// a bare address).
+pub fn invitation_request(
+    uid: &str,
+    event: &NewEvent,
+    organizer: &str,
+    attendees: &[String],
+) -> String {
+    let ical = new_event_to_ical(uid, event);
+    let ending = crate::ical_raw::line_ending(&ical);
+    let mut people = fold(&format!("ORGANIZER:mailto:{}", organizer.trim()), ending);
+    for entry in attendees {
+        people.push_str(&crate::people::attendee_line(entry, ending));
+    }
+    // METHOD belongs to the calendar, before its components; the people to the
+    // event, before its alarms.
+    let ical = crate::ical_raw::insert_after_head(&ical, &fold("METHOD:REQUEST", ending));
+    match ical.find("BEGIN:VEVENT") {
+        Some(at) => format!(
+            "{}{}",
+            &ical[..at],
+            crate::ical_raw::insert_after_head(&ical[at..], &people)
+        ),
+        None => ical,
+    }
+}
+
 /// Inject the `VTIMEZONE` that `apply_common` implies. When the event is a
 /// zoned recurring master we emit `DTSTART;TZID=<zone>` — and RFC 5545 §3.6.5
 /// requires the referenced `TZID` to be DEFINED by a `VTIMEZONE` in the same
@@ -1899,6 +1931,76 @@ END:VCALENDAR\r
         );
         assert_eq!(ev.end, Utc.with_ymd_and_hms(2026, 5, 20, 8, 30, 0).unwrap());
         assert!(!ev.all_day);
+    }
+
+    /// Someone else's meeting as its organizer's request (I6): `METHOD:REQUEST`
+    /// on the calendar, their ORGANIZER and the invitees on the event, and the
+    /// appointment as any create writes it — a series in its zone with its
+    /// gap, its alarm and the file's UID — which reads back as it went in.
+    #[test]
+    fn an_invitation_request_carries_the_meeting_as_its_organizer_sent_it() {
+        let start = Utc.with_ymd_and_hms(2026, 11, 2, 9, 0, 0).unwrap();
+        let gap = Utc.with_ymd_and_hms(2026, 11, 9, 9, 0, 0).unwrap();
+        let event = NewEvent {
+            title: "Jour fixe".into(),
+            description: None,
+            location: Some("Raum 3.14".into()),
+            start,
+            end: start + chrono::Duration::minutes(30),
+            all_day: false,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+                exceptions: vec![gap],
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![Reminder {
+                kind: ReminderKind::Relative { minutes_before: 15 },
+                sound: None,
+            }],
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            organizer: None,
+            organized_elsewhere: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
+        };
+        let text = invitation_request(
+            "jf-1@example.net",
+            &event,
+            " boss@example.net ",
+            &["Toni <toni@example.org>".into(), "gast@example.net".into()],
+        );
+        let unfolded = text.replace("\r\n ", "");
+        let method = unfolded.find("\r\nMETHOD:REQUEST\r\n").expect("METHOD");
+        let vevent = unfolded.find("BEGIN:VEVENT").unwrap();
+        assert!(method < vevent && method < unfolded.find("BEGIN:VTIMEZONE").unwrap());
+        assert!(
+            unfolded.contains("\r\nORGANIZER:mailto:boss@example.net\r\n"),
+            "{text}"
+        );
+        assert!(unfolded.contains(
+            "\r\nATTENDEE;CN=Toni;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:toni@example.org\r\n"
+        ));
+
+        let file = read_calendar_file(&text).unwrap();
+        assert_eq!(file.method.as_deref(), Some("REQUEST"));
+        let [read] = file.events.as_slice() else {
+            panic!("{text}")
+        };
+        assert_eq!(read.ical_uid.as_deref(), Some("jf-1@example.net"));
+        assert_eq!(read.organizer.as_deref(), Some("boss@example.net"));
+        assert_eq!(
+            read.attendees,
+            ["Toni <toni@example.org>", "gast@example.net"]
+        );
+        assert_eq!(read.start, start);
+        let recurrence = read.recurrence.as_ref().unwrap();
+        assert_eq!(recurrence.tzid.as_deref(), Some("Europe/Berlin"));
+        assert_eq!(recurrence.exceptions, [gap]);
+        assert_eq!(read.reminders.len(), 1);
     }
 
     #[test]

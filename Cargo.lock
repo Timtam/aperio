@@ -107,6 +107,7 @@ dependencies = [
  "chrono-tz",
  "futures",
  "iana-time-zone",
+ "ical-mapping",
  "mockito",
  "quick-xml 0.36.2",
  "reqwest 0.12.28",
@@ -117,6 +118,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]

@@ -1106,7 +1106,12 @@ Handy im selben PR.
      lang (232, 239). Ein Termin mit der Zone „Europe/Berlin“ ebenso auf
      Berliner Mitternacht (236). Ein Termin vom iPhone oder aus einer
      Einladung und die Ablehnung nach 237 sind nicht gemessen; Schritt 6 war
-     ohne Exchange im Apple-Kalender nicht machbar.
+     ohne Exchange im Apple-Kalender nicht machbar. Später gemessen (Datei-
+     Import, Runde ICS-5, Lauf 130307): Die Serie einer importierten
+     Einladung speichert Exchange mit der Startzone `Name="Europe/Berlin"`
+     neben leerer `Id` und der Endzone `Id="Europe/Berlin"`. Seit I6e
+     (DESIGN-file-import.md) nennt der Name die Zone, wo die Kennung leer
+     ist, und tzdatas Name gilt auch für die Zone einer Serie.
    - Ein Termin mit Uhrzeit in der Zone W. Europe, wie Outlook ihn speichert
      (vom Programm per EWS angelegt), in Aperio ganztägig gemacht, liegt einen
      Tag auf Berliner Mitternacht.

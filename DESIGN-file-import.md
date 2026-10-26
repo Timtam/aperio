@@ -98,6 +98,29 @@ Ein Bogen zwischen PR 7 (#128, pausiert) und PR 9. Er bringt Termine aus einer
       schickt nichts; Löschen schickt nichts, auch mit
       `send_cancellations` — wie die Oberfläche es für die Kopie eines
       Teilnehmers schon sagt (ein schlichtes Löschen).
+  - Runde ICS-5 (Lauf 130307, 2026-10-26), Aperios eigener Weg aus I6e
+    (`create_event` mit `keeps_invitation`): ein Einzeltermin, einer, dessen
+    Datei das Konto nicht nennt, eine Serie mit Lücke in Europe/Berlin, ein
+    ganztägiger und das eigene Meeting des Kontos.
+    - Jeder fremde wurde ein `IPM.Appointment` mit dem fremden Organisator,
+      `MyResponseType` Tentative, der UID der Datei und der Erinnerung;
+      Aperio liest ihn als fremd organisiert. Das Konto steht unter den
+      Teilnehmern, auch wo die Datei es nicht nannte. Posteingang, Entwürfe
+      und „Gelöschte Elemente“ blieben leer, nichts wurde verschickt.
+    - Die Serie zeigt Outlooks Kalenderansicht am 2., 16. und 23.11. um
+      10:00 Berliner Zeit, der 9.11. fehlt. Die Zone speichert Exchange unter
+      dem TZID der Datei: den Beginn als `Name="Europe/Berlin"` neben leerer
+      `Id`, das Ende umgekehrt (`Id="Europe/Berlin"`, leerer Name). Aperio las
+      die leere Kennung als keine Zone; die Serie hätte sich bei Aperio in
+      UTC wiederholt und wäre über die Zeitumstellung eine Stunde gewandert.
+      Behoben in I6e (siehe dort).
+    - Den ganztägigen Termin speichert Exchange in UTC
+      (`tzone://Microsoft/Utc`, 26.11. 00:00Z bis 27.11. 00:00Z,
+      `IsAllDayEvent`); Aperio liest den 26.11. Outlook zeigt einen
+      ganztägigen Termin in seiner gespeicherten Zone (Tokio, dritte Runde
+      der Serienzonen), also am 26.11.; in diesem Lauf nicht nachgesehen.
+    - Das eigene Meeting wurde das des Kontos (`MyResponseType` Organizer),
+      nichts verschickt.
 
 ## Bauweise
 
@@ -233,8 +256,8 @@ Zielkalender über den Zeitraum der Termine.
   steht danach auf „Mit Vorbehalt“, und der Hinweis im Editor sagt das: der
   Organisator erfährt nichts (Toni, 2026-10-26). iCloud mit
   `SCHEDULE-AGENT=CLIENT` am
-  Organisator und `NONE` an der eigenen Zeile, Google über `events.import`
-  (beides ungemessen), lokal behält alles. Ein Anbieter ohne stillen Weg legt
+  Organisator und `NONE` an der eigenen Zeile (gemessen, Lauf 100518),
+  Google über `events.import` (ungemessen), lokal behält alles. Ein Anbieter ohne stillen Weg legt
   den Termin ohne Teilnehmer an, und der Editor sagt es. Vorher Exchange live:
   Der zweite Lauf (ICS-2, 075306) fand keinen Termin, nur die Nachricht; die
   Runde ICS-3 misst drei Wege zum Termin und danach zusagen, absagen und
@@ -253,7 +276,7 @@ Zielkalender über den Zeitraum der Termine.
   später geprüft (TODO.md). Warum Exchange überhaupt iCal braucht: Eine
   Einladung, die jemand anderes organisiert, nimmt Exchange nur so an, wie sie
   per Mail kommt (`METHOD:REQUEST`); das gewöhnliche Anlegen lehnt einen
-  fremden Organisator ab (ICS-5) und macht mit Teilnehmern ein eigenes Meeting
+  fremden Organisator ab (I0) und macht mit Teilnehmern ein eigenes Meeting
   (ICS-3). Alles andere legt der Import als gewöhnlichen Exchange-Termin an.
   - **I6a** (gebaut): `crates/ical-mapping` hält die Abbildung (Lesen,
     Schreiben, VTIMEZONE, Zonendefinitionen, rohe Zeilen, die eigene
@@ -286,4 +309,22 @@ Zielkalender über den Zeitraum der Termine.
     Organisator, den die Identität des Kontos nennt, macht das eigene Meeting
     (ohne Benachrichtigen also ohne Teilnehmer, wie jedes eigene Meeting auf
     einem einladenden Server).
+  - **I6e** (gebaut) Exchange: `kept-tentative` für jeden Kalender. Eine
+    fremde Einladung geht als Anfrage ihres Organisators hinein
+    (`ical_mapping::mapping::invitation_request`: `METHOD:REQUEST`, der
+    Organisator, die Teilnehmer der Datei ohne ihn und das Konto, wo die
+    Datei es nicht nennt) mit `SendToNone`; dann `TentativelyAcceptItem` mit
+    `SaveOnly`, die verschobene Anfrage mit `SoftDelete` aus „Gelöschte
+    Elemente“ (scheitert das, bleibt der Termin, und Aperio vermerkt es im
+    Protokoll), und der Termin wird zurückgelesen
+    (`adapter-ews/src/kept_invitation.rs`). Das Konto ist der Anmeldename,
+    wo er eine Mail-Adresse ist (`api::own_address`); ein Organisator mit
+    dieser Adresse macht das eigene Meeting auf dem gewöhnlichen Weg. Bei
+    einer Anmeldung als `DOMÄNE\Name` kennt Aperio keine Adresse, und jede
+    markierte Einladung gilt als fremd. Live bestanden in Runde ICS-5. Dazu
+    das Lesen der Serienzone: Eine Zone mit leerer `Id` nennt ihr `Name`
+    (`zone_definition::element_zone_id`), und eine Kennung, die tzdatas
+    eigener Name ist, gilt jetzt auch für die Zone einer Serie, nicht nur für
+    ganztägige Grenzen (236). Exchange-Parser 7 und Leseregel 5 lesen den
+    Zwischenspeicher neu.
 - **I7 Aufgaben** aus VTODO, später.

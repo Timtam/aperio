@@ -447,7 +447,9 @@ Dateityp an; es importiert nur, solange es läuft.
   etwas, und der Editor zeigt sie wie empfangen — Titel, Zeit, Ort,
   Beschreibung und Teilnehmer wie geschickt; Kalender, Erinnerungen und Farbe
   wählst du. Lokale, iCloud- und andere CalDAV-Kalender behalten Einladungen
-  so; Exchange und Google folgen. In einem Kalender, der das nicht kann, wird sie dein eigener
+  so, und Exchange auch: Dort steht deine Antwort danach auf „Mit Vorbehalt“,
+  ohne dass es jemand erfährt, und zu- oder absagen kannst du wie bei jeder
+  Einladung. Google folgt. In einem Kalender, der das nicht kann, wird sie dein eigener
   Termin, ohne Teilnehmer. Editor und Liste sagen, was davon für den gewählten Kalender
   gilt.
 - **Ein Meeting, das du selbst organisierst,** kommt als neuer Termin, mit

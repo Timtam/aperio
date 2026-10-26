@@ -897,6 +897,21 @@ pub fn delete_task_item(item_id: &str, change_key: Option<&str>) -> String {
     wrap(&body)
 }
 
+/// SOAP body for `DeleteItem` that takes an item out of view recoverably: to
+/// the mailbox's Recoverable Items, not Deleted Items. Only for an item Aperio
+/// itself left there — the request an imported invitation was made from (I6).
+pub fn soft_delete_item(item_id: &str) -> String {
+    let body = format!(
+        r#"    <m:DeleteItem DeleteType="SoftDelete">
+      <m:ItemIds>
+        <t:ItemId Id="{}"/>
+      </m:ItemIds>
+    </m:DeleteItem>"#,
+        escape_xml(item_id),
+    );
+    wrap(&body)
+}
+
 /// SOAP body for an RSVP response object — `AcceptItem`, `DeclineItem`
 /// or `TentativelyAcceptItem`. EWS models a meeting reply as a *new*
 /// item created against the meeting via `<t:ReferenceItemId>`; the

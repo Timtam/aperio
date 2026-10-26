@@ -15,6 +15,7 @@ pub mod fixtures;
 pub mod ical_raw;
 pub mod identity;
 pub mod mapping;
+pub mod people;
 pub mod vtimezone;
 pub mod zone_definitions;
 

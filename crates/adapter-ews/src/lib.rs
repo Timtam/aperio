@@ -33,6 +33,7 @@ pub mod auth;
 pub mod autodiscover;
 pub mod contacts;
 pub mod error;
+mod kept_invitation;
 pub mod mapping;
 mod series_create;
 pub mod soap;
@@ -1045,14 +1046,9 @@ impl CalendarFeature for EwsAdapter {
     }
 
     async fn current_user_email(&self) -> CoreResult<Option<String>> {
-        // EWS has no cheap "who am I" call (Autodiscover/GetUserSettings
-        // is heavyweight). The configured login is the SMTP address on
-        // the vast majority of Exchange/Outlook setups; when it isn't an
-        // email (e.g. DOMAIN\user), we can't safely match it against
-        // attendee SMTP addresses, so we report None and the RSVP UI
-        // stays hidden rather than guessing wrong.
-        let username = self.client.credentials.username.trim();
-        Ok((username.contains('@') && !username.contains('\\')).then(|| username.to_string()))
+        // Not an email (`DOMAIN\user`): None, and the RSVP UI stays hidden
+        // rather than guessing wrong.
+        Ok(api::own_address(&self.client))
     }
 
     async fn respond_to_event(

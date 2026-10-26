@@ -66,7 +66,10 @@ use cal_core::windows_zone::{
 /// 4: an all-day boundary reads in its own zone (the end in the end zone,
 /// decision 233), in a zone whose id is tzdata's own name (236), and in a
 /// zone Exchange defines in full (232, 239).
-pub const READ_RULE: u32 = 4;
+/// 5: a series' start zone whose id is tzdata's own name (236) reads as that
+/// zone, as Exchange keeps an imported file's TZID (I6, live run 130307).
+/// Before, such a series repeated in UTC.
+pub const READ_RULE: u32 = 5;
 
 /// The end zone Exchange stores for a series created without a zone.
 const NO_ZONE_END: &str = "tzone://Microsoft/Utc";
@@ -85,9 +88,9 @@ pub enum WindowsZoneRead {
     /// No zone, so the series repeats in UTC: the id `UTC`, or a series
     /// Exchange marks as created without a zone.
     Utc,
-    /// An id the table does not know: empty, a custom definition, an id only a
-    /// server's registry has (`Kamchatka Standard Time`), or an invented one.
-    /// No zone either.
+    /// An id the table does not know and that is not tzdata's own name either:
+    /// empty, a custom definition, an id only a server's registry has
+    /// (`Kamchatka Standard Time`), or an invented one. No zone either.
     Unknown,
 }
 
@@ -161,13 +164,28 @@ pub fn read_windows_zone(id: &str) -> WindowsZoneRead {
 
 /// A series' zone from the StartTimeZone and EndTimeZone ids Exchange reports.
 /// The end zone `tzone://Microsoft/Utc`, in any ASCII case, means no zone
-/// whatever the start zone is (43b); otherwise the start id is read, and
-/// `None` means Exchange reported no start zone.
+/// whatever the start zone is (43b); otherwise the start id is read — a
+/// Windows id through the table, else an id that is tzdata's own name (236),
+/// as Exchange keeps the TZID of an imported file's series (I6) — and `None`
+/// means Exchange reported no start zone.
 pub fn read_series_zone(start: Option<&str>, end: Option<&str>) -> Option<WindowsZoneRead> {
     if end.is_some_and(|end| end.eq_ignore_ascii_case(NO_ZONE_END)) {
         return Some(WindowsZoneRead::Utc);
     }
-    start.map(read_windows_zone)
+    start.map(|id| match read_windows_zone(id) {
+        WindowsZoneRead::Unknown => read_tzdata_name(id),
+        read => read,
+    })
+}
+
+/// An id that is tzdata's own name, in any ASCII case, as its canonical zone;
+/// a UTC name is no zone.
+fn read_tzdata_name(id: &str) -> WindowsZoneRead {
+    match cal_core::canonical_zone(id.trim()) {
+        Some(zone) if cal_core::series_clock_zone(Some(zone)).is_none() => WindowsZoneRead::Utc,
+        Some(zone) => WindowsZoneRead::Zone(zone),
+        None => WindowsZoneRead::Unknown,
+    }
 }
 
 /// The Windows id Exchange gets for a series' stored zone. `server` is the
@@ -260,6 +278,10 @@ mod tests {
         "lebanon-not-an-id",
         "custom-definition",
         "empty-id",
+        "tzdata-name-berlin",
+        "tzdata-name-any-case",
+        "tzdata-name-link",
+        "tzdata-name-utc",
     ];
 
     fn written(write: WindowsZoneWrite) -> Value {
