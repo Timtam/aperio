@@ -47,21 +47,45 @@ Ein Bogen zwischen PR 7 (#128, pausiert) und PR 9. Er bringt Termine aus einer
   Anlegen selbst still bleibt, ist ungemessen; RFC 6638 §7.1 sagt ja.
 - Google hat `events.import`, das Organisator und Teilnehmer behält und nichts
   verschickt — laut Dokumentation, ungemessen (kein Google-Konto).
-- Exchange (I0, Live-Lauf 231133, 2026-10-25, Exchange der Hochschule):
-  - `CreateItem` mit `MimeContent` und `METHOD:REQUEST` legt eine fremde
-    Einladung an, roh als iCal-Text wie als MIME-Nachricht: Organisator,
-    Teilnehmer und UID bleiben, Exchange führt den Organisator auch unter den
-    Teilnehmern. `MeetingRequestWasSent` false, nichts in „Gesendete
-    Elemente“, keine Unzustellbar-Meldung an die `.invalid`-Adressen.
-    `MyResponseType` fehlt beim Lesen.
-  - Ohne `METHOD` wird derselbe Text ein eigenes Meeting des Kontos
-    (`MyResponseType` Organizer): Der fremde Organisator geht verloren.
-  - Ein eigener Termin (`ORGANIZER` = Konto) bleibt ein eigenes Meeting mit
-    dem Gast; nichts verschickt.
+- Exchange (I0, Live-Lauf 231133, 2026-10-25, Exchange der Hochschule;
+  berichtigt nach Lauf 075306, 2026-10-26):
+  - `CreateItem` mit `MimeContent` und `METHOD:REQUEST` im Kalenderordner
+    legt **keinen Termin** an, sondern eine Einladungs-*Nachricht*
+    (`t:MeetingRequest`), roh als iCal-Text wie als MIME-Nachricht, auch für
+    einen eigenen Termin (`ORGANIZER` = Konto). Sie trägt Organisator,
+    Teilnehmer und UID (darum las I0 sie als Termin; `MyResponseType` fehlte,
+    weil eine Nachricht keinen hat), nichts wird verschickt. Aperio sieht sie
+    nicht: Der Abgleich liest nur `t:CalendarItem`, Outlooks Kalenderansicht
+    ebenso. Lauf 075306 (ICS-2) brach darum bei jeder Prüfung ab.
+  - Ohne `METHOD` wird derselbe Text ein Termin, aber ein eigenes Meeting des
+    Kontos (`MyResponseType` Organizer): Der fremde Organisator geht verloren.
   - Das gewöhnliche `CreateItem` lehnt ein `Organizer`-Feld ab
     (`ErrorInvalidPropertySet`), behält aber eine mitgegebene `UID`.
-  - Ungemessen: ob Zusagen, Absagen und Löschen an so einem Termin sich
-    verhalten wie an einer empfangenen Einladung.
+  - Runde ICS-3 (Lauf 080508, 2026-10-26): Liegt die Einladungs-Nachricht im
+    Posteingang, macht Exchanges Kalender-Assistent in 90 s keinen Termin
+    daraus (er arbeitet nur an zugestellten Nachrichten). Eine vorläufige
+    Zusage auf die Nachricht (`TentativelyAcceptItem`, `SaveOnly`) macht
+    sofort einen Termin, aus dem Posteingang wie aus dem Kalenderordner:
+    fremder Organisator, alle Teilnehmer, die UID der Datei, `MyResponseType`
+    Tentative, nichts verschickt, kein Entwurf; die Nachricht zieht Exchange
+    selbst weg (in einen anderen Ordner, vermutlich „Gelöschte Elemente“).
+    Aperio liest den Termin als fremd organisiert (`organized_elsewhere`).
+  - Runde ICS-4 (Lauf 081527, 2026-10-26), der Weg über den Kalenderordner:
+    - Nach der vorläufigen Zusage liegt im Kalenderordner nur der Termin
+      (`IPM.Appointment`), die Nachricht in „Gelöschte Elemente“
+      (`IPM.Schedule.Meeting.Request`, mit dem Titel des Termins). Der
+      Posteingang bleibt leer, nichts verschickt, kein Entwurf.
+    - Die eigene Antwort lässt sich nicht auf „nicht beantwortet“
+      zurücksetzen: `PidLidResponseStatus` (0x8218) = 5 lehnt Exchange ab
+      (`ErrorInvalidExtendedPropertyValue`).
+    - Aperios eigene Wege an diesem Termin: Zusagen mit Antwort schickt
+      „Akzeptiert: …“ an den Organisator (die Unzustellbar-Meldung kam);
+      Zusagen ohne Antwort setzt Accept und schickt nichts, ohne Entwurf
+      (der Verdacht, stilles Antworten lasse Entwürfe liegen, ist
+      widerlegt); Absagen ohne Antwort nimmt den Termin aus dem Kalender und
+      schickt nichts; Löschen schickt nichts, auch mit
+      `send_cancellations` — wie die Oberfläche es für die Kopie eines
+      Teilnehmers schon sagt (ein schlichtes Löschen).
 
 ## Bauweise
 
@@ -154,11 +178,18 @@ annimmt. Die Liste prüft das Ziel über den Zeitraum der Termine.
   Dokumenttyp mit Rang `Alternate` (Aperio wird angeboten, nicht Standard),
   Android mit Intent-Filtern `VIEW` und `SEND` für `text/calendar`.
 - **I6 Fremde Einladungen** (Toni, nach I0): Organisator und Teilnehmer
-  bleiben, niemand bekommt etwas. Exchange schreibt sie über `MimeContent`
-  mit `METHOD:REQUEST` (gemessen), iCloud mit `SCHEDULE-AGENT=CLIENT` am
+  bleiben, niemand bekommt etwas. Exchange (gemessen, ICS-3/ICS-4): die
+  Einladungs-Nachricht über `MimeContent` mit `METHOD:REQUEST` in den
+  Kalenderordner, dann `TentativelyAcceptItem` mit `SaveOnly`; die Nachricht,
+  die Exchange dabei nach „Gelöschte Elemente“ legt, entfernt Aperio mit
+  `SoftDelete`, wiederherstellbar (Toni, 2026-10-26). Die eigene Antwort
+  steht danach auf „Mit Vorbehalt“, und der Hinweis im Editor sagt das: der
+  Organisator erfährt nichts (Toni, 2026-10-26). iCloud mit
+  `SCHEDULE-AGENT=CLIENT` am
   Organisator und `NONE` an der eigenen Zeile, Google über `events.import`
   (beides ungemessen), lokal behält alles. Ein Anbieter ohne stillen Weg legt
-  den Termin ohne Teilnehmer an, und der Editor sagt es. Vorher ein zweiter
-  Exchange-Live-Lauf: importieren, dann zusagen, absagen und löschen über
-  Aperios eigenen Weg, und messen, was hinausgeht.
+  den Termin ohne Teilnehmer an, und der Editor sagt es. Vorher Exchange live:
+  Der zweite Lauf (ICS-2, 075306) fand keinen Termin, nur die Nachricht; die
+  Runde ICS-3 misst drei Wege zum Termin und danach zusagen, absagen und
+  löschen über Aperios eigenen Weg, und was hinausgeht.
 - **I7 Aufgaben** aus VTODO, später.
