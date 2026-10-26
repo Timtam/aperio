@@ -339,6 +339,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  the desktop's codes: `unsupported`, `invalid_input` (a too large file's
    *  message starts with `import-too-large`), `internal`. */
   readImportFileJson(path: string): Promise<string>;
+  /** Android only: the calendar file a share or an "open with" brought,
+   *  copied into the cache, as JSON `{path, name}` — `null` when there is
+   *  none, or it was taken already. iOS hands an opened file to `Linking` as
+   *  a `file://` URL instead. */
+  takeIncomingFileJson(): Promise<string | null>;
   /** Create an event from `{calendar_id, …NewEvent}`; returns the created
    *  `Event` as JSON. */
   createEventJson(requestJson: string): Promise<string>;

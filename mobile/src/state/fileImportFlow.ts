@@ -74,6 +74,16 @@ export function pathOfPicked(uri: string): string {
   return uri.startsWith('file://') ? decodeURIComponent(uri.replace(/^file:\/\//, '')) : uri;
 }
 
+/** The file an "Open in" handed over as a URL (iOS): its path and the name
+ *  the person knows it by — `null` for any URL that is no file, such as the
+ *  OAuth callback. */
+export function incomingFileOfUrl(url: string): { path: string; name: string } | null {
+  if (!url.startsWith('file://')) return null;
+  const path = pathOfPicked(url);
+  const name = path.split('/').filter(Boolean).pop() ?? '';
+  return name ? { path, name } : null;
+}
+
 /** The calendar an import goes to first: the one last created on, where it
  *  still takes new appointments and is offered, else the first offered — the
  *  writable, shown ones (`selectableEventCalendars`), as the editor's picker

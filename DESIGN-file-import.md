@@ -284,7 +284,25 @@ Zielkalender über den Zeitraum der Termine.
     geprüft“, sonst läse ein Kalender, der Einladungen behält, kurz als
     einer, der es nicht tut. Kein Test rendert die Bildschirme des Handys;
     geprüft sind die Regeln (vitest) und `tsc`.
-  - **I5d** „Teilen“ und „Öffnen in“.
+  - **I5d** (gebaut, am Gerät ungemessen) „Teilen“ und „Öffnen in“. iOS:
+    ein Dokumenttyp für `com.apple.ical.ics` mit Rang `Alternate` (Aperio
+    wird angeboten, nicht Standard) und `LSSupportsOpeningDocumentsInPlace`
+    aus, also eine Kopie in der Inbox der App; die Datei kommt über
+    `Linking` als `file://`-Adresse, beim Start (`getInitialURL`) wie im
+    laufenden Betrieb (`url`), und `incomingFileOfUrl` nimmt nur Dateien,
+    nicht den OAuth-Rückweg. Android: Intent-Filter `VIEW` und `SEND` für
+    `text/calendar` an der Hauptaktivität; `takeIncomingFileJson` (nur
+    Android, `ONLY_ON`) liest den Intent — den Start-Intent einmal, einen
+    späteren aus `OnNewIntent` —, nimmt den Strom aus den Daten oder dem
+    `ClipData` eines Teilens und kopiert ihn in den Cache, höchstens ein
+    Byte über die Grenze des Imports, damit das Lesen eine zu große Datei
+    ablehnt, ohne sie ganz zu kopieren. Gefragt wird beim Start und bei
+    jeder Rückkehr in den Vordergrund. Beides öffnet über `readAndPresent`
+    Editor oder Liste im Kalender-Tab (`IncomingFileImport`, neben den
+    anderen App-weiten Hosts), ein Satz erscheint als Dialog über allem.
+    Ungemessen: ob Expos AppDelegate ein geöffnetes Dokument an `Linking`
+    weitergibt, welche Apps Aperio anbieten, und die Kopien in der Inbox
+    bleiben liegen.
 - **I6 Fremde Einladungen** (Toni, nach I0): Organisator und Teilnehmer
   bleiben, niemand bekommt etwas. Exchange (gemessen, ICS-3/ICS-4): die
   Einladungs-Nachricht über `MimeContent` mit `METHOD:REQUEST` in den

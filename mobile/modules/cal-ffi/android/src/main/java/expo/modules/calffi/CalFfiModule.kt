@@ -5,7 +5,9 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.content.FileProvider
 // An extension function on GlanceAppWidget — see AperioWidget.kt.
@@ -14,6 +16,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.modules.ModuleDefinitionBuilder
 import java.io.File
+import org.json.JSONObject
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -71,6 +74,10 @@ import uniffi.cal_ffi.priorityRank as uniffiPriorityRank
 import uniffi.cal_ffi.parseAttendee as uniffiParseAttendee
 import uniffi.cal_ffi.suggestGroupMate as uniffiSuggestGroupMate
 import uniffi.cal_ffi.withoutDuplicateMeetings as uniffiWithoutDuplicateMeetings
+
+/** One byte past the most an import reads (`host_core::file_import::
+ *  MAX_IMPORT_BYTES`, 25 MiB): enough for the read to call a file too large. */
+private const val INCOMING_CAP: Long = 25L * 1024 * 1024 + 1
 
 class CalFfiModule : Module() {
   // Expo runs EVERY AsyncFunction body on ONE single-threaded HandlerThread
@@ -819,7 +826,84 @@ class CalFfiModule : Module() {
     AsyncFunction("readImportFileJson") { path: String ->
       importCoded { host.readImportFileJson(path) }
     }
+
+    // A calendar file shared ("Send") or opened ("Open with") into Aperio while
+    // it runs; one that started it is the activity's own intent.
+    OnNewIntent { intent ->
+      incomingIntent = intent
+    }
+
+    AsyncFunction("takeIncomingFileJson") {
+      takeIncomingFile()
+    }
   }
+
+  /** The intent a share or an "open with" brought while the app ran. */
+  @Volatile private var incomingIntent: Intent? = null
+
+  /** The intents already read, by identity (`Intent` has no equals of its
+   *  own), so the activity's launch intent is taken once, not on every return
+   *  to the foreground. */
+  private val takenIntents: MutableSet<Intent> =
+    java.util.Collections.synchronizedSet(
+      java.util.Collections.newSetFromMap(java.util.WeakHashMap<Intent, Boolean>()),
+    )
+
+  /**
+   * The calendar file a share or an "open with" brought (DESIGN-file-import.md,
+   * I5), copied into the cache, as JSON `{path, name}` — or `null` when there
+   * is none, or it was taken already.
+   *
+   * Android hands a `content://` URI, a stream without a path (a share puts it
+   * in `EXTRA_STREAM`, an "open with" in the intent's data), and the plugin
+   * reads a path with `std::fs`. So the bytes are copied first, at most one
+   * past the import's limit (`host_core::file_import::MAX_IMPORT_BYTES`): the
+   * read then refuses a larger file as too large without the whole of it on
+   * disk. A VIEW intent of another scheme (the OAuth callback) is not a file.
+   */
+  private fun takeIncomingFile(): String? {
+    val intent = incomingIntent ?: appContext.currentActivity?.intent ?: return null
+    incomingIntent = null
+    val uri: Uri = when (intent.action) {
+      Intent.ACTION_VIEW -> intent.data
+      // Android puts a share's EXTRA_STREAM into the intent's ClipData as it
+      // starts the activity (Intent.migrateExtraStreamToClipData), readable
+      // without the getParcelableExtra this androidx.core does not wrap.
+      Intent.ACTION_SEND -> intent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+      else -> null
+    } ?: return null
+    if (uri.scheme != "content" && uri.scheme != "file") return null
+    if (!takenIntents.add(intent)) return null
+    val context = appContext.reactContext?.applicationContext ?: return null
+    val name = displayName(context, uri)
+      ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+      ?: "import.ics"
+    val dir = File(context.cacheDir, "incoming").apply { mkdirs() }
+    val target = File(dir, name.replace('/', '_').replace('\\', '_'))
+    val copied = context.contentResolver.openInputStream(uri)?.use { input ->
+      target.outputStream().use { output ->
+        val buffer = ByteArray(64 * 1024)
+        var total = 0L
+        while (total <= INCOMING_CAP) {
+          val read = input.read(buffer)
+          if (read < 0) break
+          output.write(buffer, 0, read)
+          total += read
+        }
+      }
+      true
+    } ?: false
+    if (!copied) return null
+    return JSONObject().put("path", target.absolutePath).put("name", name).toString()
+  }
+
+  /** The name the sending app gives the file, where it gives one. */
+  private fun displayName(context: Context, uri: Uri): String? =
+    runCatching {
+      context.contentResolver
+        .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+    }.getOrNull()?.takeIf { it.isNotBlank() }
 
   /** Lifted out of `definition()` — see the note there. User preferences, colour labels, day markers, search and what sits with them. */
   private fun ModuleDefinitionBuilder.preferenceFunctions() {

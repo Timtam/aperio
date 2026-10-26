@@ -588,6 +588,10 @@ const ONLY_ON = new Map([
   ['enableBackgroundRefresh', ['ios', 'the short BGAppRefreshTask wake-up exists only on iOS']],
   ['disableBackgroundRefresh', ['ios', 'cancels that iOS-only wake-up']],
   ['writeVoicePickers', ['ios', 'feeds the Siri intents, which exist only on iOS']],
+  [
+    'takeIncomingFileJson',
+    ['android', 'a shared or opened file arrives as an Android intent; iOS hands it to Linking'],
+  ],
 ]);
 
 /** What JavaScript can call and what the native modules register, kept apart

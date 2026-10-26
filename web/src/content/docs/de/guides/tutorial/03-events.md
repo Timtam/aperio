@@ -422,10 +422,12 @@ Verdacht zu entscheiden steht Aperio nicht zu.
 Ein Termin, den dir jemand als `.ics`-Datei geschickt hat — eine Einladung aus
 Outlook, Teams oder Google, ein Export aus einem anderen Kalender —, kommt über
 **Importieren …** in der Werkzeugleiste (oder `Strg+O`) nach Aperio, oder indem
-du die Datei auf das Fenster ziehst. Aperio meldet sich selbst für keinen
-Dateityp an; es importiert nur, solange es läuft. Am Handy öffnet **Termine
+du die Datei auf das Fenster ziehst. Am Desktop meldet sich Aperio für
+keinen Dateityp an; es importiert nur, solange es läuft. Am Handy öffnet **Termine
 importieren …** in der Kalenderliste (neben **Neuer Kalender**) die
-Dateiauswahl. In der Liste mehrerer Termine ist jede Zeile ein
+Dateiauswahl; eine `.ics`-Datei lässt sich auch aus einer anderen App (Mail,
+Dateien) an Aperio teilen oder darin öffnen, wobei Aperio angeboten wird, ohne
+Standard zu werden. In der Liste mehrerer Termine ist jede Zeile ein
 Ankreuzfeld; **Bearbeiten …** ist eine ihrer Aktionen (unter iOS im Rotor).
 
 - **Ein Termin** öffnet den Editor, ausgefüllt aus der Datei: Tag und Uhrzeit,

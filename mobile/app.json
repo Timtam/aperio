@@ -18,12 +18,33 @@
         "NSCalendarsUsageDescription": "Aperio shows and edits the events in your device calendars alongside your other accounts.",
         "NSCalendarsFullAccessUsageDescription": "Aperio shows and edits the events in your device calendars alongside your other accounts.",
         "NSRemindersUsageDescription": "Aperio shows and edits your Reminders lists as tasks alongside your other accounts.",
-        "NSRemindersFullAccessUsageDescription": "Aperio shows and edits your Reminders lists as tasks alongside your other accounts."
+        "NSRemindersFullAccessUsageDescription": "Aperio shows and edits your Reminders lists as tasks alongside your other accounts.",
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Calendar file",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": ["com.apple.ical.ics"]
+          }
+        ],
+        "LSSupportsOpeningDocumentsInPlace": false
       }
     },
     "android": {
       "package": "com.aperio.mobile",
       "allowBackup": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT"],
+          "data": [{ "mimeType": "text/calendar" }]
+        },
+        {
+          "action": "SEND",
+          "category": ["DEFAULT"],
+          "data": [{ "mimeType": "text/calendar" }]
+        }
+      ],
       "permissions": [
         "android.permission.READ_CALENDAR",
         "android.permission.WRITE_CALENDAR",

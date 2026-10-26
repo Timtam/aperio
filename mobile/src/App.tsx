@@ -37,6 +37,7 @@ import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import { loadThemeModePref } from './theme/themeMode';
 import { readStartOnToday } from './settings/startOnToday';
 import { navigationRef } from './navigation/navigationRef';
+import { IncomingFileImport } from './state/IncomingFileImport';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
 import { useAppBadge } from './state/useAppBadge';
@@ -750,6 +751,10 @@ function AppContent() {
               all following / whole series"). App-global so the row handlers can
               open it imperatively; overlays whatever tab/editor is focused. */}
           <EventScopeDialogHost />
+          {/* A calendar file shared into Aperio or opened in it from another
+              app (DESIGN-file-import.md, I5): opens the editor or the import
+              list in the calendar tab, over whatever is focused. */}
+          <IncomingFileImport />
           {/* The root sync-status poll feeds the per-screen header indicator
               (the native tab bar has no slot for an extra custom control). */}
           <SyncStatusContext.Provider value={sync}>{tabs}</SyncStatusContext.Provider>

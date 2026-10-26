@@ -32,6 +32,7 @@ interface Presenter {
 interface Flow {
   readAndPresent: (fileName: string, path: string, p: Presenter) => Promise<void>;
   pathOfPicked: (uri: string) => string;
+  incomingFileOfUrl: (url: string) => { path: string; name: string } | null;
   importTarget: (
     calendars: readonly { id: string; read_only: boolean }[],
     lastUsed: string | null,
@@ -141,6 +142,21 @@ describe('pathOfPicked', () => {
     const { pathOfPicked } = await flow();
     expect(pathOfPicked('file:///data/cache/Mein%20Export.ics')).toBe('/data/cache/Mein Export.ics');
     expect(pathOfPicked('/already/a/path.ics')).toBe('/already/a/path.ics');
+  });
+});
+
+describe('incomingFileOfUrl', () => {
+  it('takes a file an "Open in" handed over, and nothing else', async () => {
+    const { incomingFileOfUrl } = await flow();
+    expect(
+      incomingFileOfUrl('file:///private/var/mobile/Containers/Data/Inbox/Jour%20fixe.ics'),
+    ).toEqual({
+      path: '/private/var/mobile/Containers/Data/Inbox/Jour fixe.ics',
+      name: 'Jour fixe.ics',
+    });
+    // The OAuth callback comes the same way, and is no file.
+    expect(incomingFileOfUrl('aperio://oauth-callback?code=1')).toBeNull();
+    expect(incomingFileOfUrl('file:///')).toBeNull();
   });
 });
 
