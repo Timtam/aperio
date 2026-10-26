@@ -2681,6 +2681,18 @@
       "done_other": "{{count}} Termine in „{{calendar}}“ importiert.",
       "partly": "{{done}} von {{count}} Terminen in „{{calendar}}“ importiert. Nicht importiert: {{titles}}. {{reason}}",
       "quoted": "„{{title}}“"
+    },
+    "held": {
+      "checking": "Aperio prüft, was davon schon in „{{calendar}}“ steht …",
+      "stillChecking": "Aperio prüft noch, was davon schon in „{{calendar}}“ steht. Versuche es gleich noch einmal.",
+      "checkFailed": "Aperio konnte nicht prüfen, was davon schon in „{{calendar}}“ steht.",
+      "none": "Nichts davon steht schon in „{{calendar}}“.",
+      "some": "Schon in „{{calendar}}“: {{titles}}. Abgewählt; wer einen anwählt, importiert ihn als Kopie.",
+      "row": "steht schon in „{{calendar}}“",
+      "rowCopy": "steht schon in „{{calendar}}“, wird als Kopie importiert",
+      "editor": "Dieser Termin steht schon in „{{calendar}}“. Anlegen legt eine Kopie an.",
+      "editorFailed": "Aperio konnte nicht prüfen, ob dieser Termin schon in „{{calendar}}“ steht.",
+      "editorStillChecking": "Aperio prüft noch, ob dieser Termin schon in „{{calendar}}“ steht. Versuche es gleich noch einmal."
     }
   }
 }

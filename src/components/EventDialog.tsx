@@ -102,6 +102,7 @@ import { deleteThisAndFuture } from '../state/deleteSeriesFromOccurrence';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { useEventLocalReminders } from '../state/useEventLocalReminders';
 import { useCancellationChoice } from '../state/useCancellationChoice';
+import { useHeldOnImport } from '../state/useHeldOnImport';
 import { useViewState } from '../state/viewStateContext';
 import { AttendeePicker } from './AttendeePicker';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -545,6 +546,25 @@ export function EventDialog({
   const [form, setForm] = useState<FormState>(initialState);
   const formRef = useRef(form);
   formRef.current = form;
+  // Whether the calendar picked holds the imported appointment already (I4),
+  // asked again whenever the pick changes: then it is created as a copy.
+  const importedAlone = useMemo(() => (imported ? [imported] : []), [imported]);
+  const importHeld = useHeldOnImport(imported ? form.calendarId : '', importedAlone);
+  const importIsHeld = importHeld.status === 'known' && importHeld.held.has(0);
+  const importCalendarName = calendars.find((c) => c.id === form.calendarId)?.name ?? '';
+  const importHeldNote = !imported
+    ? null
+    : importIsHeld
+      ? t('fileImport.held.editor', { calendar: importCalendarName })
+      : importHeld.status === 'failed'
+        ? t('fileImport.held.editorFailed', { calendar: importCalendarName })
+        : null;
+  // Said once when it appears: the note comes after the dialog opened.
+  const saidHeldNote = useRef<string | null>(null);
+  useEffect(() => {
+    if (importHeldNote && saidHeldNote.current !== importHeldNote) announce(importHeldNote);
+    saidHeldNote.current = importHeldNote;
+  }, [importHeldNote, announce]);
   // The defaults of the calendar a NEW appointment is heading for. A second
   // read, because the one above is keyed to the OPENED event and has to exist
   // before `initialState` does — while this one follows the calendar picker.
@@ -2105,6 +2125,12 @@ export function EventDialog({
           );
           carriedToGroup = await carry();
         } else {
+          // Whether the calendar holds it already decides whether it keeps
+          // its UID (I4).
+          if (imported && importHeld.status === 'checking') {
+            setError(t('fileImport.held.editorStillChecking', { calendar: importCalendarName }));
+            return;
+          }
           const created = await apiCreateEvent({
             calendar_id: form.calendarId,
             title: trimmedTitle,
@@ -2126,8 +2152,9 @@ export function EventDialog({
               remindersForWire,
             ),
             // An imported appointment keeps its file's UID, so importing it
-            // again finds it (I4).
-            uid_to_keep: imported?.uid ?? null,
+            // again finds it (I4); one the calendar holds already is a copy,
+            // with a UID of its own.
+            uid_to_keep: importIsHeld ? null : (imported?.uid ?? null),
             // An imported series keeps the file's zone, or none, as a copy
             // does (decision 262).
           }, { preserveRecurrenceZone: imported != null });
@@ -2191,6 +2218,9 @@ export function EventDialog({
       isEdit,
       event,
       imported,
+      importIsHeld,
+      importHeld.status,
+      importCalendarName,
       onImported,
       locked,
       isOccurrence,
@@ -2553,6 +2583,7 @@ export function EventDialog({
         {imported && importNote && (
           <FocusableNote className="form__hint">{importNote}</FocusableNote>
         )}
+        {importHeldNote && <FocusableNote className="form__hint">{importHeldNote}</FocusableNote>}
         {isEdit && event && (
           <EventRsvp
             event={event}

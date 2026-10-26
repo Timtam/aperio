@@ -431,6 +431,12 @@ Dateityp an; es importiert nur, solange es läuft.
   mit **Anlegen**.
 - **Mehrere** öffnen eine Liste. Jeder lässt sich im Editor öffnen, oder alle
   angehakten auf einmal in einen Kalender schreiben.
+- **Ein Termin, der schon im Kalender steht** — derselbe, früher importiert
+  oder doppelt geschickt —, wird an der Kennung erkannt, die ihm die Datei
+  gibt. Die Liste nennt ihn und hakt ihn ab; wer ihn wieder anhakt, importiert
+  ihn als Kopie. Der Editor sagt es, bevor du anlegst, und **Anlegen** legt
+  dann eine Kopie an. Aperio fragt den gewählten Kalender, und wieder, wenn du
+  einen anderen wählst.
 - **Was die Datei außer Terminen enthält** — Aufgaben, Notizen, eine Absage,
   eine Antwort auf eine Einladung —, wird genannt und nicht übernommen.
 - **Ein geänderter Termin einer Serie** wird ein eigener Termin, und die Serie

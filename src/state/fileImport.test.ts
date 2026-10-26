@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  alreadyHeld,
   importedForEditor,
   importFailureSentence,
+  importSpan,
   skippedSentence,
   type ImportedEvent,
 } from '@aperio/shared';
@@ -79,5 +81,32 @@ describe('importFailureSentence', () => {
       '„a.ics“ ließ sich nicht importieren: Die Datei ließ sich nicht öffnen. Einzelheiten ' +
         'stehen im Protokoll.',
     );
+  });
+});
+
+describe('importSpan', () => {
+  it('runs from the earliest start to the latest end, a minute wider', () => {
+    const at = (start: string, end: string): ImportedEvent => ({ ...invitation, start, end });
+    expect(
+      importSpan([
+        at('2026-11-18T13:00:00Z', '2026-11-18T14:00:00Z'),
+        // An offset is read as the instant it is, never compared as text.
+        at('2026-11-18T10:00:00+01:00', '2026-11-18T10:00:00+01:00'),
+      ]),
+    ).toEqual({ start: '2026-11-18T08:59:00.000Z', end: '2026-11-18T14:01:00.000Z' });
+    expect(importSpan([])).toBeNull();
+  });
+});
+
+describe('alreadyHeld', () => {
+  it('finds what the calendar holds by the UID, and nothing without one', () => {
+    const events: ImportedEvent[] = [
+      { ...invitation, uid: 'kept@example.org' },
+      { ...invitation, uid: 'new@example.org' },
+      { ...invitation },
+      { ...invitation, uid: '  ' },
+    ];
+    const rows = [{ ical_uid: ' kept@example.org ' }, { ical_uid: null }, {}, { ical_uid: '  ' }];
+    expect([...alreadyHeld(events, rows)]).toEqual([0]);
   });
 });

@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import type { Calendar, CalendarEvent, ImportedEvent } from '../api/types';
 
@@ -12,8 +12,17 @@ import type { Calendar, CalendarEvent, ImportedEvent } from '../api/types';
  * calendar is the editor's own default: the picker is where it goes.
  */
 
+/** What the calendar holds when asked (`get_events`), or an answer that does
+ *  not come. */
+const calendarRows = vi.hoisted(() => ({
+  current: [] as Array<{ ical_uid?: string }> | 'pending',
+}));
 const invokeMock = vi.hoisted(() =>
   vi.fn((command: string, payload?: unknown) => {
+    if (command === 'get_events') {
+      const rows = calendarRows.current;
+      return rows === 'pending' ? new Promise(() => {}) : Promise.resolve(rows);
+    }
     if (command === 'create_event') {
       const request = (payload as { request: Record<string, unknown> }).request;
       return Promise.resolve({ ...request, id: 'created-1' } as unknown as CalendarEvent);
@@ -56,7 +65,21 @@ vi.mock('../state/useTitleSuggestions', async () => {
 afterEach(() => {
   document.body.innerHTML = '';
   invokeMock.mockClear();
+  calendarRows.current = [];
 });
+
+/** Once the calendar was asked whether it holds the appointment already. */
+async function asked() {
+  await waitFor(() =>
+    expect(invokeMock.mock.calls.some(([command]) => command === 'get_events')).toBe(true),
+  );
+  await act(async () => {});
+}
+
+function createRequest(): Record<string, unknown> {
+  const create = invokeMock.mock.calls.find(([command]) => command === 'create_event');
+  return (create?.[1] as { request: Record<string, unknown> }).request;
+}
 
 const SERIES: ImportedEvent = {
   uid: 'teams-series-0001@example.org',
@@ -110,6 +133,7 @@ describe('EventDialog → an appointment from a file', () => {
   it('creates the series with the file’s gaps and zone, and says so', async () => {
     const onImported = vi.fn();
     await openImport(onImported);
+    await asked();
     fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
     await waitFor(() =>
       expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(true),
@@ -132,6 +156,7 @@ describe('EventDialog → an appointment from a file', () => {
       recurrence: { rrule: 'FREQ=DAILY;COUNT=3', exceptions: [] },
     };
     render(<EventDialog isOpen onClose={() => {}} event={null} importFrom={utcSeries} />);
+    await asked();
     fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
     await waitFor(() =>
       expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(true),
@@ -139,5 +164,32 @@ describe('EventDialog → an appointment from a file', () => {
     const create = invokeMock.mock.calls.find(([command]) => command === 'create_event');
     const request = (create?.[1] as { request: { recurrence: Record<string, unknown> } }).request;
     expect(request.recurrence).toEqual({ rrule: 'FREQ=DAILY;COUNT=3', exceptions: [] });
+  });
+
+  it('creates a copy when the calendar holds it already, and says so first', async () => {
+    calendarRows.current = [{ ical_uid: 'teams-series-0001@example.org' }];
+    await openImport();
+    expect(
+      await screen.findByText(
+        'Dieser Termin steht schon in „Kalender“. Anlegen legt eine Kopie an.',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(true),
+    );
+    expect(createRequest().uid_to_keep).toBeNull();
+  });
+
+  it('creates nothing while it still asks', async () => {
+    calendarRows.current = 'pending';
+    await openImport();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
+    expect(
+      await screen.findByText(
+        'Aperio prüft noch, ob dieser Termin schon in „Kalender“ steht. Versuche es gleich noch einmal.',
+      ),
+    ).toBeTruthy();
+    expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(false);
   });
 });

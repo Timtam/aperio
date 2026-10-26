@@ -395,6 +395,11 @@ Aperio itself registers for no file type; it imports only while it runs.
   written until you press **Create**.
 - **Several** open a list. Each one can be opened in the editor, or every
   checked one written to one calendar at once.
+- **An appointment the calendar already holds** — the same one, imported
+  before or sent twice — is found by the identity the file gives it. The list
+  names it and leaves it unchecked; checked again, it is imported as a copy.
+  The editor says so before you create it, and creating it then makes a copy.
+  Aperio asks the calendar you picked, and asks again when you pick another.
 - **What the file holds besides appointments** — tasks, notes, a
   cancellation, an answer to an invitation — is named and left out.
 - **A changed occurrence of a series** becomes an appointment of its own, and

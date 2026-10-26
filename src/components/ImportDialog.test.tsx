@@ -11,8 +11,20 @@ import type { Calendar, FileImport, ImportedEvent } from '../api/types';
  */
 
 const failTitles = vi.hoisted(() => ({ current: new Set<string>() }));
+/** What each calendar holds when asked (`get_events`): rows, a failure, or an
+ *  answer that does not come. */
+const calendarRows = vi.hoisted(() => ({
+  current: {} as Record<string, Array<{ ical_uid?: string }> | 'fail' | 'pending'>,
+}));
 const invokeMock = vi.hoisted(() =>
   vi.fn((command: string, payload?: unknown) => {
+    if (command === 'get_events') {
+      const request = (payload as { request: { calendar_id: string } }).request;
+      const rows = calendarRows.current[request.calendar_id] ?? [];
+      if (rows === 'fail') return Promise.reject({ code: 'network', message: 'offline' });
+      if (rows === 'pending') return new Promise(() => {});
+      return Promise.resolve(rows);
+    }
     if (command === 'create_event') {
       const request = (payload as { request: { title: string } }).request;
       if (failTitles.current.has(request.title)) {
@@ -52,6 +64,7 @@ afterEach(() => {
   invalidateData.mockClear();
   announce.mockClear();
   failTitles.current = new Set();
+  calendarRows.current = {};
   localStorage.clear();
 });
 
@@ -122,6 +135,8 @@ describe('ImportDialog → several appointments', () => {
         skipped: [],
       },
     });
+    // Which ones are there already decides which keep their UID.
+    expect(await screen.findByText('Nichts davon steht schon in „Privat“.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
     await waitFor(() => expect(createRequests()).toHaveLength(2));
     expect(createRequests().map((r) => r.uid_to_keep)).toEqual(['chor-1@example.org', null]);
@@ -164,6 +179,103 @@ describe('ImportDialog → several appointments', () => {
     expect(options.importNote).toMatch(/noch nicht/);
     act(() => options.onImported());
     expect(screen.getByText(/Projektbesprechung, .*, importiert/)).toBeTruthy();
+  });
+});
+
+describe('ImportDialog → what the calendar holds already (I4)', () => {
+  const HELD_READ: FileImport = {
+    events: [
+      event('Chorprobe', { uid: 'chor-1@example.org' }),
+      event('Kassenprüfung', { uid: 'kasse-1@example.org' }),
+    ],
+    skipped: [],
+  };
+
+  it('unchecks and names what is there, and imports it as a copy when checked', async () => {
+    calendarRows.current = { 'cal-home': [{ ical_uid: 'chor-1@example.org' }] };
+    await open({ read: HELD_READ });
+    expect(screen.getByText('Aperio prüft, was davon schon in „Privat“ steht …')).toBeTruthy();
+    const held = await screen.findByRole('checkbox', {
+      name: /^Chorprobe, .*, steht schon in „Privat“$/,
+    });
+    expect((held as HTMLInputElement).checked).toBe(false);
+    const sentence =
+      'Schon in „Privat“: „Chorprobe“. Abgewählt; wer einen anwählt, importiert ihn als Kopie.';
+    expect(screen.getByText(sentence)).toBeTruthy();
+    expect(announce).toHaveBeenCalledWith(sentence);
+
+    fireEvent.click(held);
+    expect(
+      screen.getByRole('checkbox', {
+        name: /^Chorprobe, .*, steht schon in „Privat“, wird als Kopie importiert$/,
+      }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    await waitFor(() => expect(createRequests()).toHaveLength(2));
+    expect(createRequests().map((r) => [r.title, r.uid_to_keep])).toEqual([
+      ['Chorprobe', null],
+      ['Kassenprüfung', 'kasse-1@example.org'],
+    ]);
+  });
+
+  it('checks a row again in a calendar that does not hold it', async () => {
+    calendarRows.current = {
+      'cal-home': [{ ical_uid: 'chor-1@example.org' }],
+      'cal-work': [{ ical_uid: 'kasse-1@example.org' }],
+    };
+    await open({ read: HELD_READ });
+    await screen.findByRole('checkbox', { name: /^Chorprobe, .*, steht schon in „Privat“$/ });
+    fireEvent.change(screen.getByLabelText('In Kalender'), { target: { value: 'cal-work' } });
+    const kasse = await screen.findByRole('checkbox', {
+      name: /^Kassenprüfung, .*, steht schon in „Arbeit“$/,
+    });
+    expect((kasse as HTMLInputElement).checked).toBe(false);
+    const chor = screen.getByRole('checkbox', { name: /^Chorprobe, [^,]*, [^,]*$/ });
+    expect((chor as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('never lets an answer about one calendar stand for another', async () => {
+    calendarRows.current = {
+      'cal-home': [{ ical_uid: 'chor-1@example.org' }],
+      'cal-work': 'pending',
+    };
+    await open({ read: HELD_READ });
+    await screen.findByRole('checkbox', { name: /^Chorprobe, .*, steht schon in „Privat“$/ });
+    fireEvent.change(screen.getByLabelText('In Kalender'), { target: { value: 'cal-work' } });
+    expect(await screen.findByText('Aperio prüft, was davon schon in „Arbeit“ steht …')).toBeTruthy();
+    expect(screen.queryByText(/steht schon in „Arbeit“/)).toBeNull();
+  });
+
+  it('says when it could not ask, and keeps every UID', async () => {
+    calendarRows.current = { 'cal-home': 'fail' };
+    await open({ read: HELD_READ });
+    const failed = 'Aperio konnte nicht prüfen, was davon schon in „Privat“ steht.';
+    expect(await screen.findByText(failed)).toBeTruthy();
+    expect(announce).toHaveBeenCalledWith(failed);
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    await waitFor(() => expect(createRequests()).toHaveLength(2));
+    expect(createRequests().map((r) => r.uid_to_keep)).toEqual([
+      'chor-1@example.org',
+      'kasse-1@example.org',
+    ]);
+  });
+
+  it('imports nothing while it still asks', async () => {
+    calendarRows.current = { 'cal-home': 'pending' };
+    await open({ read: HELD_READ });
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    expect(
+      await screen.findByText(
+        'Aperio prüft noch, was davon schon in „Privat“ steht. Versuche es gleich noch einmal.',
+      ),
+    ).toBeTruthy();
+    expect(createRequests()).toHaveLength(0);
+  });
+
+  it('asks nothing and says nothing for a file without UIDs', async () => {
+    await open({ read: READ });
+    expect(invokeMock.mock.calls.some(([command]) => command === 'get_events')).toBe(false);
+    expect(screen.queryByText(/schon in „Privat“/)).toBeNull();
   });
 });
 

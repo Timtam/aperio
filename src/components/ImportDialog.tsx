@@ -17,6 +17,7 @@ import { useDateFormat } from '../intl/dateFormat';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import type { FileImportOutcome } from '../state/DialogState';
 import { useDialogState } from '../state/dialogStateContext';
+import { useHeldOnImport } from '../state/useHeldOnImport';
 import { useViewState } from '../state/viewStateContext';
 import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar';
 import { Modal } from './Modal';
@@ -148,6 +149,56 @@ function ImportList({
     if (notice) noticeRef.current?.focus();
   }, [notice]);
 
+  // What the chosen calendar holds already (I4): unchecked when the answer
+  // comes, and imported as a copy, under a UID of its own, when checked again.
+  const held = useHeldOnImport(calendarId, events);
+  const isHeld = (index: number) => held.status === 'known' && held.held.has(index);
+  const askedAny = events.some((event) => event.uid?.trim());
+  const heldSentence = useCallback(
+    (rows: ReadonlySet<number>): string =>
+      t('fileImport.held.some', {
+        calendar: calendarName,
+        titles: joinNames(
+          events
+            .filter((_, index) => rows.has(index))
+            .map((event) => t('fileImport.list.quoted', { title: event.title })),
+          t,
+        ),
+      }),
+    [t, calendarName, events],
+  );
+  // Each answer is taken once: its rows unchecked, and the rows unchecked for
+  // the calendar asked before checked again where this one does not hold them.
+  const lastAnswer = useRef<typeof held | null>(null);
+  const uncheckedRows = useRef<ReadonlySet<number>>(new Set());
+  useEffect(() => {
+    if (held.status === 'checking' || lastAnswer.current === held) return;
+    lastAnswer.current = held;
+    if (held.status === 'failed') {
+      announce(t('fileImport.held.checkFailed', { calendar: calendarName }));
+      return;
+    }
+    const before = uncheckedRows.current;
+    uncheckedRows.current = held.held;
+    setChosen((prev) => {
+      const next = new Set(prev);
+      for (const index of before) if (!held.held.has(index)) next.add(index);
+      for (const index of held.held) next.delete(index);
+      return next;
+    });
+    if (held.held.size > 0) announce(heldSentence(held.held));
+  }, [held, announce, calendarName, heldSentence, t]);
+
+  const heldStatus: string | null = !askedAny
+    ? null
+    : held.status === 'checking'
+      ? t('fileImport.held.checking', { calendar: calendarName })
+      : held.status === 'failed'
+        ? t('fileImport.held.checkFailed', { calendar: calendarName })
+        : held.held.size === 0
+          ? t('fileImport.held.none', { calendar: calendarName })
+          : heldSentence(held.held);
+
   const toImport = events
     .map((event, index) => ({ event, index }))
     .filter(({ index }) => chosen.has(index) && !imported.has(index));
@@ -192,6 +243,11 @@ function ImportList({
       setNotice(t('fileImport.list.noneChosen'));
       return;
     }
+    // Which are there already decides which keep their UID.
+    if (held.status === 'checking') {
+      setNotice(t('fileImport.held.stillChecking', { calendar: calendarName }));
+      return;
+    }
     setBusy(true);
     setNotice(null);
     const failed: { title: string; err: unknown }[] = [];
@@ -219,8 +275,9 @@ function ImportList({
             // No alarm in the file: the calendar's defaults, as for a new
             // appointment nobody chose reminders for.
             use_calendar_defaults: entry.reminders.length === 0,
-            // The file's UID, so importing it again finds it (I4).
-            uid_to_keep: entry.uid ?? null,
+            // The file's UID, so importing it again finds it (I4); one the
+            // calendar holds already is a copy, with a UID of its own.
+            uid_to_keep: isHeld(index) ? null : (entry.uid ?? null),
           },
           { preserveRecurrenceZone: true },
         );
@@ -288,6 +345,7 @@ function ImportList({
             ))}
           </select>
         </div>
+        {heldStatus && <FocusableNote className="form__hint">{heldStatus}</FocusableNote>}
         <ul className="import-list" aria-label={t('fileImport.list.listLabel')}>
           {events.map((event, index) => {
             const boxId = `import-${index}`;
@@ -311,7 +369,19 @@ function ImportList({
                         setChosen(next);
                       }}
                     />
-                    <label htmlFor={boxId}>{`${event.title}, ${when(event)}`}</label>
+                    <label htmlFor={boxId}>
+                      {[
+                        event.title,
+                        when(event),
+                        isHeld(index)
+                          ? t(chosen.has(index) ? 'fileImport.held.rowCopy' : 'fileImport.held.row', {
+                              calendar: calendarName,
+                            })
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(', ')}
+                    </label>
                     <button
                       type="button"
                       className="section-field__button"

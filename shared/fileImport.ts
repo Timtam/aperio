@@ -72,3 +72,48 @@ export function skippedSentence(skipped: readonly SkippedPart[], t: Translate): 
   const parts = skipped.map((part) => skippedPartText(part, t));
   return t('fileImport.skipped.sentence', { parts: joinNames(parts, t) });
 }
+
+/** A minute, in milliseconds. */
+const MINUTE = 60_000;
+
+/**
+ * The stretch to ask a calendar about before an import (I4): from the
+ * earliest start to the latest end of the file's appointments, a minute wider
+ * either side so one that takes no time is found too; `null` for none. A
+ * calendar lists a series it holds by an occurrence in the stretch, and the
+ * same series starts where the file's does.
+ */
+export function importSpan(events: readonly ImportedEvent[]): { start: string; end: string } | null {
+  let start = Infinity;
+  let end = -Infinity;
+  for (const event of events) {
+    start = Math.min(start, Date.parse(event.start));
+    end = Math.max(end, Date.parse(event.end));
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return {
+    start: new Date(start - MINUTE).toISOString(),
+    end: new Date(end + MINUTE).toISOString(),
+  };
+}
+
+/**
+ * Which of a file's appointments a calendar already holds, by their place in
+ * the file: those whose UID one of the calendar's rows carries (I4). One
+ * without a UID — a changed occurrence the file gave as an appointment of its
+ * own, a file that names none — never is: nothing says it is the same one.
+ */
+export function alreadyHeld(
+  events: readonly ImportedEvent[],
+  rows: readonly { ical_uid?: string | null }[],
+): Set<number> {
+  const held = new Set(
+    rows.map((row) => row.ical_uid?.trim()).filter((uid): uid is string => !!uid),
+  );
+  const out = new Set<number>();
+  events.forEach((event, index) => {
+    const uid = event.uid?.trim();
+    if (uid && held.has(uid)) out.add(index);
+  });
+  return out;
+}

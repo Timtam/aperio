@@ -2681,6 +2681,18 @@
       "done_other": "{{count}} appointments imported into “{{calendar}}”.",
       "partly": "{{done}} of {{count}} appointments imported into “{{calendar}}”. Not imported: {{titles}}. {{reason}}",
       "quoted": "“{{title}}”"
+    },
+    "held": {
+      "checking": "Aperio is checking what of this is already in “{{calendar}}” …",
+      "stillChecking": "Aperio is still checking what of this is already in “{{calendar}}”. Try again in a moment.",
+      "checkFailed": "Aperio could not check what of this is already in “{{calendar}}”.",
+      "none": "None of this is in “{{calendar}}” yet.",
+      "some": "Already in “{{calendar}}”: {{titles}}. Unchecked; check one to import it as a copy.",
+      "row": "already in “{{calendar}}”",
+      "rowCopy": "already in “{{calendar}}”, imported as a copy",
+      "editor": "This appointment is already in “{{calendar}}”. Creating it makes a copy.",
+      "editorFailed": "Aperio could not check whether this appointment is already in “{{calendar}}”.",
+      "editorStillChecking": "Aperio is still checking whether this appointment is already in “{{calendar}}”. Try again in a moment."
     }
   }
 }

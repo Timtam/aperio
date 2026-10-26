@@ -197,7 +197,17 @@ Zielkalender über den Zeitraum der Termine.
     mit. Steht sie schon im Kalender, lehnt CalDAV ab, und Aperio sagt es:
     `WriteRefusal::UidTaken` („Dieser Termin steht schon in diesem
     Kalender“).
-  - **I4c** Doppelte in Liste und Editor.
+  - **I4c** Doppelte in Liste und Editor (gebaut, Desktop): Beide fragen den
+    gewählten Kalender über den Zeitraum der Termine (`importSpan`, eine
+    Minute weiter) und vergleichen die UIDs (`alreadyHeld`, beides in
+    `shared/fileImport.ts`), wieder bei jedem Kalenderwechsel; eine Antwort
+    trägt ihren Kalender (`useHeldOnImport`). Die Liste hakt Vorhandene ab,
+    nennt sie mit Titel in einem Satz und an der Zeile („steht schon in
+    „Arbeit““), angehakt „wird als Kopie importiert“, ohne UID; ein anderer
+    Kalender hakt wieder an, was er nicht hat. Der Editor sagt „Dieser Termin
+    steht schon in …“ und legt dann eine Kopie an. Solange gefragt wird,
+    schreibt keiner von beiden und sagt warum; wer nicht fragen konnte, sagt
+    es und importiert mit UID (CalDAV lehnt ein Doppel dann ab).
 - **I5 Handy.** „Termine importieren …“ in der Kalenderliste mit
   Dokumentwähler; „Teilen“ und „Öffnen in“: iOS als
   Dokumenttyp mit Rang `Alternate` (Aperio wird angeboten, nicht Standard),
