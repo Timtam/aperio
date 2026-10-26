@@ -143,8 +143,9 @@ plugin_sdk::declare_import_file! {
 }
 ```
 
-It is synchronous: no account, no network, only the file. The `Err` string is
-what the person reads, so make it a sentence. The companion `-cdylib` crate
+It is synchronous: no account, no network, only the file. The `Err` string
+goes to the log; the person hears the host's own sentence that the file could
+not be read. The companion `-cdylib` crate
 opts in with `import_file: yes` in `declare_cdylib_exports!`, and a statically
 linked build registers the hook with `register!(your_crate, import_file)`.
 

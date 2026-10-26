@@ -76,6 +76,7 @@ impl LocalAdapter {
             // Nothing here tells anyone: an invitation from a file is kept as
             // it is (I6).
             invitation_import: InvitationImport::Kept,
+            keeps_uid: true,
         })
     }
 
@@ -202,6 +203,7 @@ impl LocalAdapter {
             // Nothing here tells anyone: an invitation from a file is kept as
             // it is (I6).
             invitation_import: InvitationImport::Kept,
+            keeps_uid: true,
         }))
     }
 
@@ -306,6 +308,7 @@ impl CalendarFeature for LocalAdapter {
                     // Nothing here tells anyone: an invitation from a file is kept as
                     // it is (I6).
                     invitation_import: InvitationImport::Kept,
+                    keeps_uid: true,
                 });
             }
             Ok(out)
@@ -925,10 +928,10 @@ mod tests {
     async fn an_imported_invitation_keeps_its_organizer() {
         let a = make_adapter();
         let cal = a.create_calendar("Work", None, None, None).unwrap();
-        assert_eq!(
-            a.list_calendars().await.unwrap()[0].invitation_import,
-            InvitationImport::Kept
-        );
+        let listed = &a.list_calendars().await.unwrap()[0];
+        assert_eq!(listed.invitation_import, InvitationImport::Kept);
+        // The column keeps the file's UID: an import finds it again.
+        assert!(listed.keeps_uid);
         let base = "2026-05-19T10:00:00Z".parse::<DateTime<Utc>>().unwrap();
         let new = |keeps_invitation: bool| NewEvent {
             organized_elsewhere: true,

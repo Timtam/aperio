@@ -138,15 +138,18 @@ export type RootStackParamList = {
     // held besides and was left out. Create only.
     importFrom?: ImportedEvent;
     importNote?: string | null;
-    // The import list this appointment came from and its place in the file:
-    // the editor tells the list once it is created (`importProgress`).
+    // The import this appointment came from: a list's token and the row's
+    // place in the file — the editor tells the list once it is created
+    // (`importProgress`) —, or a token of its own for a file of one. Either
+    // makes the editor a route of its own (App.tsx, `importRouteId`).
     importToken?: string;
     importIndex?: number;
   };
   // The appointments of a calendar file with more than one (DESIGN-file-
   // import.md): each to open in the editor, or all chosen ones written to one
-  // calendar.
-  FileImport: { fileName: string; read: FileImport };
+  // calendar. `token` names this list (`newImportToken`): its route's id, so
+  // a second file opens a list of its own, and what the editor tells it.
+  FileImport: { fileName: string; read: FileImport; token: string };
   Calendars: undefined;
   CalendarEditor: { calendarId: string };
   Sync: undefined;

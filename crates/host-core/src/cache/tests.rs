@@ -167,6 +167,7 @@ fn calendar(id: &str) -> Calendar {
         read_only: false,
         default_sound: None,
         invitation_import: Default::default(),
+        keeps_uid: false,
     }
 }
 

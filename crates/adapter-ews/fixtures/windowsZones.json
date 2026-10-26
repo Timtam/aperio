@@ -3,7 +3,7 @@
   "why": "Exchange names a series' zone by a Windows id, the rest of Aperio by tzdata. The translation decides whether a series reaches Exchange with its clock, with another city's, or with none, and what a series from Outlook repeats on. A hand-kept table had drifted: three wrong rows, and 174 of the 312 listed zones written without a zone.",
   "decidedBy": "DESIGN-series-time-zone.md, stage 4, and decisions 14a (no zone repeats in UTC), 22a (zones Exchange cannot store), 25b (a merged place is stored as its target), 26a (one rule for zones) and 236 (an id that is tzdata's own name); DESIGN-file-import.md, I6 (an imported file's series keeps its TZID).",
   "writtenBy": [
-    "By hand, from the CLDR release-48-2 windowsZones.xml pinned in crates/adapter-ews/cldr/ and from tzdata 2025b. Chosen, not measured: each row pins one reason the rule exists. The generated table they are checked against is crates/adapter-ews/src/windows_tz/windows_zones.rs."
+    "By hand, from the CLDR release-48-2 windowsZones.xml pinned in crates/cal-core/cldr/ and from tzdata 2025b. Chosen, not measured: each row pins one reason the rule exists. The generated table they are checked against is crates/cal-core/src/windows_zone/table.rs."
   ],
   "readBy": [
     "crates/adapter-ews/src/windows_tz.rs (the `every_contract_row_holds` test; its MUST_RUN list names every row)"

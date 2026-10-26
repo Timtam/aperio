@@ -338,6 +338,8 @@ fn map_calendar(d: DeviceCalendar) -> Calendar {
         stores_occurrence_exceptions: false,
         notifier_name: None,
         invitation_import: Default::default(),
+        // The device calendar reads no UID at all: nothing could be found by it.
+        keeps_uid: false,
     }
 }
 

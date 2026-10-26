@@ -10,11 +10,10 @@ import {
   importRowLabel,
   importWhen,
   invitationListSentence,
-  joinNames,
+  partlyImportedSentence,
   rechosenForHeld,
   selectableEventCalendars,
   skippedSentence,
-  writeErrorMessage,
 } from '@aperio/shared';
 
 import { FocusableNote } from '../a11y/FocusableNote';
@@ -105,6 +104,40 @@ function ImportNotice({
   );
 }
 
+/**
+ * What a list has done with a file so far: the rows chosen and imported, the
+ * calendar, and the answer about what that calendar holds that was taken. It
+ * outlives the list: "Edit …" puts the editor on top of the dialog stack,
+ * which unmounts the list, and the editor tells it here which row it created.
+ * Keyed by the file's read, which the dialog stack keeps.
+ */
+interface ListProgress {
+  chosen: Set<number>;
+  imported: Set<number>;
+  calendarId: string | null;
+  /** The answer taken last, so it is not taken again on the way back. */
+  answered: { calendarId: string; held: ReadonlySet<number> } | null;
+}
+
+const listProgress = new WeakMap<FileImport, ListProgress>();
+
+function progressOf(read: FileImport): ListProgress {
+  let progress = listProgress.get(read);
+  if (!progress) {
+    progress = {
+      chosen: new Set(read.events.map((_, i) => i)),
+      imported: new Set(),
+      calendarId: null,
+      answered: null,
+    };
+    listProgress.set(read, progress);
+  }
+  return progress;
+}
+
+const sameRows = (a: ReadonlySet<number>, b: ReadonlySet<number>) =>
+  a.size === b.size && [...a].every((index) => b.has(index));
+
 function ImportList({
   isOpen,
   onClose,
@@ -126,6 +159,7 @@ function ImportList({
   const { showHiddenCalendarTargets } = useViewState();
   const calendarFieldId = useId();
   const noticeRef = useRef<HTMLParagraphElement>(null);
+  const progress = progressOf(read);
 
   const targets = useMemo(
     () =>
@@ -135,70 +169,117 @@ function ImportList({
       }),
     [calendars, selectedCalendarIds, showHiddenCalendarTargets],
   );
-  const [calendarId, setCalendarId] = useState<string>(() => {
-    const last = readLastUsedCalendar();
-    return targets.some((c) => c.id === last) ? (last as string) : (targets[0]?.id ?? '');
+  const [calendarId, setCalendarIdState] = useState<string>(() => {
+    const kept = progress.calendarId ?? readLastUsedCalendar();
+    return targets.some((c) => c.id === kept) ? (kept as string) : (targets[0]?.id ?? '');
   });
+  const setCalendarId = useCallback(
+    (id: string) => {
+      progress.calendarId = id;
+      setCalendarIdState(id);
+    },
+    [progress],
+  );
   // The catalog may arrive after the dialog: keep a target that exists.
   useEffect(() => {
     if (!targets.some((c) => c.id === calendarId) && targets[0]) {
       setCalendarId(targets[0].id);
     }
-  }, [targets, calendarId]);
+  }, [targets, calendarId, setCalendarId]);
   const calendarName = targets.find((c) => c.id === calendarId)?.name ?? '';
 
   const events = read.events;
-  const [chosen, setChosen] = useState<ReadonlySet<number>>(
-    () => new Set(events.map((_, i) => i)),
+  const [chosen, setChosenState] = useState<ReadonlySet<number>>(() => new Set(progress.chosen));
+  const setChosen = useCallback(
+    (next: (prev: ReadonlySet<number>) => ReadonlySet<number>) => {
+      setChosenState((prev) => {
+        const value = next(prev);
+        progress.chosen = new Set(value);
+        return value;
+      });
+    },
+    [progress],
   );
-  const [imported, setImported] = useState<ReadonlySet<number>>(() => new Set());
+  const [imported, setImported] = useState<ReadonlySet<number>>(
+    () => new Set(progress.imported),
+  );
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  // Each notice is a value of its own: the same sentence for a second press
+  // is focused and said again.
+  const [notice, setNoticeState] = useState<{ text: string; seq: number } | null>(null);
+  const setNotice = useCallback((text: string | null) => {
+    setNoticeState((prev) => (text == null ? null : { text, seq: (prev?.seq ?? 0) + 1 }));
+  }, []);
   useEffect(() => {
     if (notice) noticeRef.current?.focus();
   }, [notice]);
 
   // What the chosen calendar holds already (I4): unchecked when the answer
   // comes, and imported as a copy, under a UID of its own, when checked again.
-  const held = useHeldOnImport(calendarId, events);
+  const calendar = targets.find((c) => c.id === calendarId);
+  const held = useHeldOnImport(calendarId, events, calendar?.keeps_uid);
   const isHeld = (index: number) => held.status === 'known' && held.held.has(index);
-  // Each answer is taken once: its rows unchecked, and the rows unchecked for
-  // the calendar asked before checked again where this one does not hold them.
-  const lastAnswer = useRef<typeof held | null>(null);
-  const uncheckedRows = useRef<ReadonlySet<number>>(new Set());
-  useEffect(() => {
-    if (held.status === 'checking' || lastAnswer.current === held) return;
-    lastAnswer.current = held;
-    if (held.status === 'failed') {
-      announce(t('fileImport.held.checkFailed', { calendar: calendarName }));
-      return;
-    }
-    const before = uncheckedRows.current;
-    uncheckedRows.current = held.held;
-    setChosen((prev) => rechosenForHeld(prev, before, held.held));
-    if (held.held.size > 0) announce(heldSentence(events, held.held, calendarName, t));
-  }, [held, announce, calendarName, events, t]);
-
-  const heldStatus = heldStatusSentence(events, held, calendarName, t);
-
-  const toImport = events
-    .map((event, index) => ({ event, index }))
-    .filter(({ index }) => chosen.has(index) && !imported.has(index));
-
-  const markImported = useCallback((index: number) => {
-    setImported((prev) => new Set(prev).add(index));
-  }, []);
 
   // Whose each one is, as the chosen calendar tells: the account's own meeting
   // is a new appointment, someone else's an invitation the calendar keeps or
   // cannot keep quietly (I6).
-  const calendar = targets.find((c) => c.id === calendarId);
   const own = useCalendarOwnAddress(
     calendarId,
     events.some((event) => event.organizer?.trim()),
   );
   const intoOf = (event: ImportedEvent) => importInto(importOwner(event, own), calendar);
-  const invitationSentence = invitationListSentence(events.map(intoOf), calendarName, t);
+  const invitationSentence = calendarId
+    ? invitationListSentence(events.map(intoOf), calendarName, t)
+    : null;
+
+  // Each held answer is taken once: its rows unchecked, and the rows unchecked
+  // for the calendar asked before checked again where this one does not hold
+  // them. An answer taken before the list was unmounted is not taken again.
+  // What changed is said in one announcement: a second one in the same frame
+  // would replace the first.
+  // A calendar that cannot tell answers with one and the same value for
+  // every calendar: an answer is told apart by its calendar too.
+  const lastAnswer = useRef<{ calendarId: string; held: typeof held } | null>(null);
+  const uncheckedRows = useRef<ReadonlySet<number>>(progress.answered?.held ?? new Set());
+  const saidInvitation = useRef<string | null>(null);
+  useEffect(() => {
+    const said: string[] = [];
+    const fresh =
+      lastAnswer.current?.held !== held || lastAnswer.current?.calendarId !== calendarId;
+    if (held.status !== 'checking' && fresh) {
+      const first = lastAnswer.current === null;
+      lastAnswer.current = { calendarId, held };
+      if (held.status === 'failed') {
+        said.push(t('fileImport.held.checkFailed', { calendar: calendarName }));
+      } else if (held.status === 'unknowable') {
+        // Nothing found, nothing to uncheck: the rows another calendar held
+        // are checked again. Said where a change of calendar brought it; on
+        // open the note under the picker says it.
+        const before = uncheckedRows.current;
+        uncheckedRows.current = new Set();
+        setChosen((prev) => rechosenForHeld(prev, before, new Set()));
+        if (!first) said.push(t('fileImport.held.unknowable', { calendar: calendarName }));
+      } else {
+        const before = uncheckedRows.current;
+        uncheckedRows.current = held.held;
+        const taken =
+          progress.answered?.calendarId === calendarId &&
+          sameRows(progress.answered.held, held.held);
+        progress.answered = { calendarId, held: held.held };
+        if (!taken) {
+          setChosen((prev) => rechosenForHeld(prev, before, held.held));
+          if (held.held.size > 0) said.push(heldSentence(events, held.held, calendarName, t));
+        }
+      }
+    }
+    if (invitationSentence && saidInvitation.current !== invitationSentence) {
+      said.push(invitationSentence);
+    }
+    saidInvitation.current = invitationSentence;
+    if (said.length > 0) announce(said.join(' '));
+  }, [held, invitationSentence, announce, calendarId, calendarName, events, progress, setChosen, t]);
+
+  const heldStatus = calendarId ? heldStatusSentence(events, held, calendarName, t) : null;
   const summary = [
     t('fileImport.list.summary', { file: fileName, count: events.length }),
     skippedSentence(read.skipped, t),
@@ -206,6 +287,20 @@ function ImportList({
   ]
     .filter(Boolean)
     .join(' ');
+
+  const toImport = events
+    .map((event, index) => ({ event, index }))
+    .filter(({ index }) => chosen.has(index) && !imported.has(index));
+
+  // Into the progress too: the editor's word arrives while the list is
+  // unmounted under it.
+  const markImported = useCallback(
+    (index: number) => {
+      progress.imported.add(index);
+      setImported((prev) => new Set(prev).add(index));
+    },
+    [progress],
+  );
 
   const when = (event: ImportedEvent): string =>
     importWhen(
@@ -227,6 +322,10 @@ function ImportList({
 
   const importChosen = async () => {
     if (busy) return;
+    if (!calendarId) {
+      setNotice(t('fileImport.noCalendar'));
+      return;
+    }
     if (toImport.length === 0) {
       setNotice(t('fileImport.list.noneChosen'));
       return;
@@ -268,18 +367,7 @@ function ImportList({
       onClose();
       return;
     }
-    setNotice(
-      t('fileImport.list.partly', {
-        done,
-        count: toImport.length,
-        calendar: calendarName,
-        titles: joinNames(
-          failed.map((f) => t('fileImport.list.quoted', { title: f.title })),
-          t,
-        ),
-        reason: writeErrorMessage(failed[0].err, t),
-      }),
-    );
+    setNotice(partlyImportedSentence(failed, done, toImport.length, calendarName, t));
   };
 
   return (
@@ -296,8 +384,12 @@ function ImportList({
       <div className="form">
         <FocusableNote className="form__hint">{summary}</FocusableNote>
         {notice && (
-          <FocusableNote ref={noticeRef} className="form__hint form__hint--warning">
-            {notice}
+          <FocusableNote
+            key={notice.seq}
+            ref={noticeRef}
+            className="form__hint form__hint--warning"
+          >
+            {notice.text}
           </FocusableNote>
         )}
         <div className="form__field">
@@ -307,7 +399,12 @@ function ImportList({
           <select
             id={calendarFieldId}
             value={calendarId}
-            onChange={(e) => setCalendarId(e.target.value)}
+            // Held while it writes, without native disabled, which strands
+            // focus: controlled, the value snaps back.
+            aria-disabled={busy || undefined}
+            onChange={(e) => {
+              if (!busy) setCalendarId(e.target.value);
+            }}
           >
             {targets.map((c) => (
               <option key={c.id} value={c.id}>
@@ -324,20 +421,26 @@ function ImportList({
             return (
               <li key={boxId} className="import-list__row">
                 {done ? (
-                  <span className="import-list__done">
+                  // A stop of its own, so the reader reaches it in the dialog.
+                  <FocusableNote className="import-list__done">
                     {`${event.title}, ${when(event)}, ${t('fileImport.list.imported')}`}
-                  </span>
+                  </FocusableNote>
                 ) : (
                   <>
                     <input
                       id={boxId}
                       type="checkbox"
                       checked={chosen.has(index)}
+                      aria-disabled={busy || undefined}
                       onChange={(e) => {
-                        const next = new Set(chosen);
-                        if (e.target.checked) next.add(index);
-                        else next.delete(index);
-                        setChosen(next);
+                        if (busy) return;
+                        const checked = e.target.checked;
+                        setChosen((prev) => {
+                          const next = new Set(prev);
+                          if (checked) next.add(index);
+                          else next.delete(index);
+                          return next;
+                        });
                       }}
                     />
                     <label htmlFor={boxId}>

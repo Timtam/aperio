@@ -72,6 +72,8 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         read_only: !entry.can_edit.unwrap_or(true),
         default_sound: None,
         invitation_import: Default::default(),
+        // Graph mints its own `uid` on a create: a file's is not kept.
+        keeps_uid: false,
     }
 }
 

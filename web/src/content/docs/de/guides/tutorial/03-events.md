@@ -438,10 +438,15 @@ Ankreuzfeld; **Bearbeiten …** ist eine ihrer Aktionen (unter iOS im Rotor).
   angehakten auf einmal in einen Kalender schreiben.
 - **Ein Termin, der schon im Kalender steht** — derselbe, früher importiert
   oder doppelt geschickt —, wird an der Kennung erkannt, die ihm die Datei
-  gibt. Die Liste nennt ihn und hakt ihn ab; wer ihn wieder anhakt, importiert
-  ihn als Kopie. Der Editor sagt es, bevor du anlegst, und **Anlegen** legt
-  dann eine Kopie an. Aperio fragt den gewählten Kalender, und wieder, wenn du
-  einen anderen wählst.
+  gibt, in einem lokalen, iCloud-, anderen CalDAV- oder Exchange-Kalender.
+  Die Liste nennt ihn und lässt ihn abgewählt; wer ihn anhakt, importiert ihn
+  als Kopie. Der Editor sagt es, bevor du anlegst, und **Anlegen** legt dann
+  eine Kopie an. Aperio fragt den gewählten Kalender, und wieder, wenn du
+  einen anderen wählst. Google (außer bei einer Einladung, die es in deinem
+  Hauptkalender behält), Microsoft 365 und die Kalender des Handys behalten
+  keine solche Kennung, und ein geänderter Termin, der als eigener Termin
+  kommt, hat keine: Die werden nicht erkannt und kommen erneut, und Liste
+  und Editor sagen das für einen solchen Kalender.
 - **Was die Datei außer Terminen enthält** — Aufgaben, Notizen, eine Absage,
   eine Antwort auf eine Einladung —, wird genannt und nicht übernommen.
 - **Ein geänderter Termin einer Serie** wird ein eigener Termin, und die Serie
@@ -459,9 +464,15 @@ Ankreuzfeld; **Bearbeiten …** ist eine ihrer Aktionen (unter iOS im Rotor).
   Termin, ohne Teilnehmer. Editor und Liste sagen, was davon für den gewählten Kalender
   gilt.
 - **Ein Meeting, das du selbst organisierst,** kommt als neuer Termin, mit
-  seinen Teilnehmern, als hättest du ihn gerade angelegt.
+  seinen Teilnehmern, als hättest du ihn gerade angelegt. iCloud- und andere
+  CalDAV-Kalender schreiben Teilnehmer nur zusammen mit ihren Einladungen;
+  die Liste, die niemanden benachrichtigt, bringt ein solches Meeting dort
+  deshalb ohne sie. Im Editor bleiben sie, und sie werden eingeladen.
 
 Zeiten behalten ihre Zone, auch die Windows-Zonennamen, die Outlook schreibt.
+Eine Zone, die nur die Datei selbst festlegt (Outlooks „Customized Time
+Zone“), ergibt die richtigen Zeiten, aber eine Serie darin wiederholt sich
+vorerst in UTC und liegt nach einer Zeitumstellung eine Stunde daneben.
 
 ## Zeitschritte
 

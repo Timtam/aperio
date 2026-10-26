@@ -59,6 +59,7 @@ import AgendaScreen from './screens/AgendaScreen';
 import CalendarEditorModal from './screens/CalendarEditorModal';
 import CalendarsScreen from './screens/CalendarsScreen';
 import FileImportScreen from './screens/FileImportScreen';
+import { importRouteId } from './navigation/importRouteId';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import GeneralSettingsScreen from './screens/GeneralSettingsScreen';
@@ -280,6 +281,7 @@ function TasksStackNav() {
         name="EventEditor"
         component={EventEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+        getId={importRouteId}
       />
     </TasksStack.Navigator>
   );
@@ -324,6 +326,7 @@ function CalendarStackNav() {
         name="FileImport"
         component={FileImportScreen}
         options={{ presentation: 'modal', title: t('fileImport.dialogTitle') }}
+        getId={({ params }) => params.token}
       />
       <CalendarStack.Screen
         name="CalendarEditor"
@@ -334,6 +337,7 @@ function CalendarStackNav() {
         name="EventEditor"
         component={EventEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+        getId={importRouteId}
       />
       {/* Quick-adds reachable from the calendar create affordances (header
           "New Event", per-day "+ new event / + new task", day activation) so
@@ -454,6 +458,7 @@ function SettingsStackNav() {
         name="EventEditor"
         component={EventEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+        getId={importRouteId}
       />
       <SettingsStack.Screen
         name="ColorLabels"
@@ -501,6 +506,7 @@ function SettingsStackNav() {
         name="FileImport"
         component={FileImportScreen}
         options={{ presentation: 'modal', title: t('fileImport.dialogTitle') }}
+        getId={({ params }) => params.token}
       />
       <SettingsStack.Screen
         name="CalendarEditor"

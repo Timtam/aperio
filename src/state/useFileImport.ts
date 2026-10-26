@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
-import { skippedSentence } from '@aperio/shared';
+import { IMPORT_MAX_BYTES, skippedSentence } from '@aperio/shared';
 
 import { fileImportFormats, readImportContent, readImportFile } from '../api/client';
 import type { FileImportOutcome } from './DialogState';
@@ -79,7 +79,10 @@ export function useFileImport(): {
   const importDropped = useCallback(
     async (file: File) => {
       try {
-        const content = toBase64(await readBytes(file));
+        // At most one byte past what an import reads: the host still calls a
+        // larger file too large, or not a kind it reads, without the whole of
+        // it read, inflated and sent first.
+        const content = toBase64(await readBytes(file.slice(0, IMPORT_MAX_BYTES + 1)));
         present(file.name, { read: await readImportContent(file.name, content) });
       } catch (err) {
         present(file.name, { failed: err });

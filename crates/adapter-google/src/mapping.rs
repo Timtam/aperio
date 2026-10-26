@@ -92,6 +92,10 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         } else {
             cal_core::InvitationImport::NotKept
         },
+        // An ordinary create gets an iCalUID of Google's own; only an
+        // invitation imported into the primary calendar keeps the file's, and
+        // that import asks Google itself first (I6f).
+        keeps_uid: false,
     }
 }
 
@@ -1069,10 +1073,10 @@ mod tests {
             "id": "toni@gmail.com", "summary": "Toni", "accessRole": "owner", "primary": true
         }))
         .unwrap();
-        assert_eq!(
-            map_calendar(entry).invitation_import,
-            cal_core::InvitationImport::Kept
-        );
+        let primary = map_calendar(entry);
+        assert_eq!(primary.invitation_import, cal_core::InvitationImport::Kept);
+        // An ordinary create gets Google's own iCalUID: no file's UID is kept.
+        assert!(!primary.keeps_uid);
         let entry: CalendarListEntry = serde_json::from_value(serde_json::json!({
             "id": "abc@group.calendar.google.com", "summary": "Verein", "accessRole": "owner"
         }))

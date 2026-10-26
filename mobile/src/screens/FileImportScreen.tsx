@@ -19,11 +19,10 @@ import {
   importRowLabel,
   importWhen,
   invitationListSentence,
-  joinNames,
+  partlyImportedSentence,
   rechosenForHeld,
   selectableEventCalendars,
   skippedSentence,
-  writeErrorMessage,
   type ImportedEvent,
   type ImportInto,
 } from '@aperio/shared';
@@ -37,7 +36,7 @@ import type { RootStackScreenProps } from '../navigation/types';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { importTarget } from '../state/fileImportFlow';
-import { newImportToken, onImportedFromEditor } from '../state/importProgress';
+import { onImportedFromEditor } from '../state/importProgress';
 import { readLastUsedCalendar, writeLastUsedCalendar } from '../state/lastUsedCalendar';
 import { useCalendarOwnAddress } from '../state/useCalendarOwnAddress';
 import { useHeldOnImport } from '../state/useHeldOnImport';
@@ -59,34 +58,24 @@ export default function FileImportScreen({
   route,
   navigation,
 }: RootStackScreenProps<'FileImport'>) {
-  const { fileName, read } = route.params;
+  const { fileName, read, token } = route.params;
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { hidden } = useCalendarVisibility();
   const includeHidden = useShowHiddenCalendarTargets();
 
   const [busy, setBusyState] = useState(false);
-  // Read where a render may not have caught up yet: the list closes itself
-  // right after its writes end, in the same turn.
+  // Read where a render may not have caught up yet: a second tap before the
+  // render that holds the controls starts nothing twice.
   const busyRef = useRef(false);
   const setBusy = useCallback((value: boolean) => {
     busyRef.current = value;
     setBusyState(value);
   }, []);
-  // Not while it writes: the outcome has to be said where it is seen.
-  useCancelHeader(navigation, 'mobile.cancel', {
-    writing: busy,
-    close: () => {
-      if (!busyRef.current) navigation.goBack();
-    },
-  });
-  useEffect(
-    () =>
-      navigation.addListener('beforeRemove', (event) => {
-        if (busyRef.current) event.preventDefault();
-      }),
-    [navigation],
-  );
+  // Close; not while it writes, when the button is marked unavailable and the
+  // swipe and the back button are held: the outcome has to be said where it
+  // is seen.
+  useCancelHeader(navigation, 'dialogs.close', { writing: busy });
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [calendarId, setCalendarId] = useState('');
@@ -133,10 +122,14 @@ export default function FileImportScreen({
     setImported((prev) => new Set(prev).add(index));
   }, []);
   // The editor tells this list which of its rows it created.
-  const [token] = useState(newImportToken);
   useEffect(() => onImportedFromEditor(token, markImported), [token, markImported]);
 
-  const [notice, setNotice] = useState<string | null>(null);
+  // Each notice is a value of its own: the same sentence for a second press
+  // is focused and said again.
+  const [notice, setNoticeState] = useState<{ text: string; seq: number } | null>(null);
+  const setNotice = useCallback((text: string | null) => {
+    setNoticeState((prev) => (text == null ? null : { text, seq: (prev?.seq ?? 0) + 1 }));
+  }, []);
   const noticeRef = useRef<Text>(null);
   useEffect(() => {
     if (notice == null) return;
@@ -148,25 +141,19 @@ export default function FileImportScreen({
 
   // What the chosen calendar holds already (I4): unchecked when the answer
   // comes, and imported as a copy, under a UID of its own, when checked again.
-  const held = useHeldOnImport(calendarId, events);
+  const held = useHeldOnImport(
+    calendarId,
+    events,
+    calendars.length === 0 ? undefined : calendar?.keeps_uid,
+  );
   const isHeld = (index: number) => held.status === 'known' && held.held.has(index);
   // Each answer is taken once: its rows unchecked, and the rows unchecked for
   // the calendar asked before checked again where this one does not hold them.
-  const lastAnswer = useRef<typeof held | null>(null);
+  // A calendar that cannot tell answers with one and the same value for
+  // every calendar: an answer is told apart by its calendar too.
+  const lastAnswer = useRef<{ calendarId: string; held: typeof held } | null>(null);
   const uncheckedRows = useRef<ReadonlySet<number>>(new Set());
-  useEffect(() => {
-    if (held.status === 'checking' || lastAnswer.current === held) return;
-    lastAnswer.current = held;
-    if (held.status === 'failed') {
-      announce(t('fileImport.held.checkFailed', { calendar: calendarName }));
-      return;
-    }
-    const before = uncheckedRows.current;
-    uncheckedRows.current = held.held;
-    setChosen((prev) => rechosenForHeld(prev, before, held.held));
-    if (held.held.size > 0) announce(heldSentence(events, held.held, calendarName, t));
-  }, [held, calendarName, events, t]);
-  const heldStatus = heldStatusSentence(events, held, calendarName, t);
+  const heldStatus = calendarId ? heldStatusSentence(events, held, calendarName, t) : null;
 
   // Whose each one is, as the chosen calendar tells: the account's own meeting
   // is a new appointment, someone else's an invitation the calendar keeps or
@@ -179,13 +166,50 @@ export default function FileImportScreen({
   // invitations would read as one that does not.
   const intoOf = (event: ImportedEvent): ImportInto =>
     calendars.length === 0 ? { kind: 'checking' } : importInto(importOwner(event, own), calendar);
+  const invitationSentence = calendarId
+    ? invitationListSentence(events.map(intoOf), calendarName, t)
+    : null;
   const summary = [
     t('fileImport.list.summary', { file: fileName, count: events.length }),
     skippedSentence(read.skipped, t),
-    invitationListSentence(events.map(intoOf), calendarName, t),
+    invitationSentence,
   ]
     .filter(Boolean)
     .join(' ');
+  // What a calendar's answers change is said once, in one announcement: the
+  // rows it holds, and how it takes the invitations — on a change of calendar
+  // the summary above changes where nobody is reading.
+  const saidInvitation = useRef<string | null>(null);
+  useEffect(() => {
+    const said: string[] = [];
+    const fresh =
+      lastAnswer.current?.held !== held || lastAnswer.current?.calendarId !== calendarId;
+    if (held.status !== 'checking' && fresh) {
+      const first = lastAnswer.current === null;
+      lastAnswer.current = { calendarId, held };
+      if (held.status === 'failed') {
+        said.push(t('fileImport.held.checkFailed', { calendar: calendarName }));
+      } else if (held.status === 'unknowable') {
+        // Nothing found, nothing to uncheck: the rows another calendar held
+        // are checked again. Said where a change of calendar brought it; on
+        // open the note under the picker says it.
+        const before = uncheckedRows.current;
+        uncheckedRows.current = new Set();
+        setChosen((prev) => rechosenForHeld(prev, before, new Set()));
+        if (!first) said.push(t('fileImport.held.unknowable', { calendar: calendarName }));
+      } else {
+        const before = uncheckedRows.current;
+        uncheckedRows.current = held.held;
+        setChosen((prev) => rechosenForHeld(prev, before, held.held));
+        if (held.held.size > 0) said.push(heldSentence(events, held.held, calendarName, t));
+      }
+    }
+    if (invitationSentence && saidInvitation.current !== invitationSentence) {
+      said.push(invitationSentence);
+    }
+    saidInvitation.current = invitationSentence;
+    if (said.length > 0) announce(said.join(' '));
+  }, [held, invitationSentence, calendarId, calendarName, events, t]);
 
   const time = useMemo(
     () => new Intl.DateTimeFormat(i18n.language, { timeStyle: 'short' }),
@@ -205,7 +229,11 @@ export default function FileImportScreen({
   // As the file has it: the editor decides, for the calendar it ends up in,
   // whether an invitation keeps its people.
   const edit = (event: ImportedEvent, index: number) => {
-    if (busyRef.current || !calendarId) return;
+    if (busyRef.current) return;
+    if (!calendarId) {
+      setNotice(t('fileImport.noCalendar'));
+      return;
+    }
     navigation.navigate('EventEditor', {
       eventId: null,
       calendarId,
@@ -260,18 +288,7 @@ export default function FileImportScreen({
       navigation.goBack();
       return;
     }
-    setNotice(
-      t('fileImport.list.partly', {
-        done,
-        count: toImport.length,
-        calendar: calendarName,
-        titles: joinNames(
-          failed.map((f) => t('fileImport.list.quoted', { title: f.title })),
-          t,
-        ),
-        reason: writeErrorMessage(failed[0].err, t),
-      }),
-    );
+    setNotice(partlyImportedSentence(failed, done, toImport.length, calendarName, t));
   };
 
   return (
@@ -281,12 +298,13 @@ export default function FileImportScreen({
       </Text>
       {notice != null && (
         <Text
+          key={notice.seq}
           ref={noticeRef}
           style={styles.notice}
           accessibilityRole="text"
           accessibilityLiveRegion="assertive"
         >
-          {notice}
+          {notice.text}
         </Text>
       )}
       {targets.length > 0 && (

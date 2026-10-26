@@ -211,6 +211,7 @@ impl LocalAdapter {
                 // A capability, as `list_calendars` says it: local calendars
                 // keep invitations from a file (I6).
                 invitation_import: cal_core::InvitationImport::Kept,
+                keeps_uid: true,
             });
         }
         Ok(out)
@@ -865,6 +866,7 @@ mod tests {
             read_only: false,
             default_sound: None,
             invitation_import: Default::default(),
+            keeps_uid: false,
         }
     }
 

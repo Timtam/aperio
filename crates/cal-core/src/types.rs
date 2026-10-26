@@ -118,6 +118,14 @@ pub struct Calendar {
     /// listings as not kept, the direction in which nobody is told anything.
     #[serde(default)]
     pub invitation_import: InvitationImport,
+    /// Whether a create keeps the UID it asks for (`NewEvent::uid_to_keep`),
+    /// so a file imported here again is found by it (DESIGN-file-import.md,
+    /// I4). Where not — Google's ordinary create, Microsoft Graph, a device
+    /// calendar — an import's held check is not asked, as no answer could
+    /// find anything, and the surfaces say so. `#[serde(default)]` reads
+    /// older payloads as not keeping it: nothing claimed that is not known.
+    #[serde(default)]
+    pub keeps_uid: bool,
     /// The service the editors name when they say so ("iCloud informs the
     /// attendees …"), as the adapter knows it; `None` reads as "the calendar
     /// server". A display string only: no rule looks at it.
@@ -257,7 +265,8 @@ pub struct Event {
     pub etag: Option<String>,
     /// The appointment's iCalendar UID (RFC 5545 `UID`), where the provider
     /// keeps one: CalDAV's `UID`, Exchange's `calendar:UID`, Google's
-    /// `iCalUID`, Graph's `iCalUId`, the local store's column. A calendar file
+    /// `iCalUID`, Graph's `uid` (its `iCalUId` only for a single appointment),
+    /// the local store's column. A calendar file
     /// carries it along, so an import finds by it what the target calendar
     /// already holds (DESIGN-file-import.md, I4). An occurrence and a changed
     /// occurrence carry their series' UID. Never written on an update; a
@@ -385,7 +394,8 @@ pub struct NewEvent {
     /// file's, so importing it again finds it. `None` lets the provider mint
     /// one, as for an appointment made in Aperio, a copy and a move. Kept
     /// where the provider takes a UID on create (CalDAV, Exchange, the local
-    /// store); Google and Microsoft Graph mint their own.
+    /// store, and Google for an invitation it imports through
+    /// `events.import`); otherwise Google and Microsoft Graph mint their own.
     ///
     /// Named apart from [`Event::ical_uid`] on purpose: the surfaces build
     /// many creates by spreading a read event (a copy, the tail of a split, a

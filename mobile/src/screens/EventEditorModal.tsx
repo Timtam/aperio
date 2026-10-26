@@ -517,40 +517,8 @@ function EventEditorScreen({
   }, [editing, prefillFrom, loading, targetPinned, applyEventPrefill]);
   const [description, setDescription] = useState('');
 
-  // The calendar's own signature, put on a NEW appointment by itself. A
-  // binding is a default, not a button: a calendar that carries one should not
-  // need a press per appointment. An existing event is never touched.
-  //
-  // On a calendar change the block is SWAPPED rather than stacked, and only
-  // while it is still the one this editor put there — text the user wrote, or
-  // a block they deleted, is theirs. Mail clients behave the same way when the
-  // sending account changes.
   const { signatures } = useSignatures();
   const autoSignature = useRef<string | null>(null);
-  useEffect(() => {
-    if (editing || !calendarId) return;
-    let cancelled = false;
-    void signatureForCalendar(calendarId, signatures).then((sig) => {
-      if (cancelled) return;
-      const target = sig?.body?.trim() || null;
-      setDescription((prev) => {
-        const current = signatureIn(prev);
-        const mine = autoSignature.current;
-        if (target === null) {
-          if (current === null || current !== mine) return prev;
-          autoSignature.current = null;
-          return applySignature(prev, '');
-        }
-        if (current === target) return prev;
-        if (current !== null && current !== mine) return prev;
-        autoSignature.current = target;
-        return applySignature(prev, target);
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [editing, calendarId, signatures]);
   // The bound colour-label id ('' = none). Only LOCAL events carry it on their
   // own row; on an external calendar the colour is a host-local override (the
   // OverridesRepo path, deferred on mobile), so the picker is gated to local.
@@ -979,9 +947,14 @@ function EventEditorScreen({
   // Whether the calendar picked holds the imported appointment already (I4),
   // asked again whenever the pick changes: then it is created as a copy.
   const importedAlone = useMemo(() => (imported ? [imported] : []), [imported]);
-  const importHeld = useHeldOnImport(imported ? calId : '', importedAlone);
-  const importIsHeld = importHeld.status === 'known' && importHeld.held.has(0);
   const importCalendar = calendars.find((c) => c.id === calId);
+  // Not known before the calendars are: asked once they load.
+  const importHeld = useHeldOnImport(
+    imported ? calId : '',
+    importedAlone,
+    calendars.length === 0 ? undefined : importCalendar?.keeps_uid,
+  );
+  const importIsHeld = importHeld.status === 'known' && importHeld.held.has(0);
   const importCalendarName = importCalendar?.name ?? '';
   const importHeldNote = !imported
     ? null
@@ -989,7 +962,9 @@ function EventEditorScreen({
       ? t('fileImport.held.editor', { calendar: importCalendarName })
       : importHeld.status === 'failed'
         ? t('fileImport.held.editorFailed', { calendar: importCalendarName })
-        : null;
+        : importHeld.status === 'unknowable'
+          ? t('fileImport.held.editorUnknowable', { calendar: importCalendarName })
+          : null;
   // Whose the imported appointment is, as the calendar picked tells (I6): the
   // account's own meeting is a new appointment; someone else's an invitation
   // the calendar keeps — shown as the file has it, locked like a received one,
@@ -1046,6 +1021,44 @@ function EventEditorScreen({
     else if (importAsKind === 'set-aside') setAttendees([]);
     else setAttendees(imported.attendees);
   }, [imported, importAsKind, loading, seedFromImport]);
+
+  // The calendar's own signature, put on a NEW appointment by itself. A
+  // binding is a default, not a button: a calendar that carries one should not
+  // need a press per appointment. An existing event is never touched.
+  //
+  // On a calendar change the block is SWAPPED rather than stacked, and only
+  // while it is still the one this editor put there — text the user wrote, or
+  // a block they deleted, is theirs. Mail clients behave the same way when the
+  // sending account changes.
+  //
+  // Someone else's invitation from a file, kept as received (I6), carries no
+  // signature of the account's: while it is locked the calendar counts as one
+  // without, and a block put in before the lock comes out again. The block
+  // waits for the load, which seeds an imported description and would wipe it.
+  useEffect(() => {
+    if (editing || !calendarId || loading) return;
+    let cancelled = false;
+    void signatureForCalendar(calendarId, signatures).then((sig) => {
+      if (cancelled) return;
+      const target = importLocked ? null : sig?.body?.trim() || null;
+      setDescription((prev) => {
+        const current = signatureIn(prev);
+        const mine = autoSignature.current;
+        if (target === null) {
+          if (current === null || current !== mine) return prev;
+          autoSignature.current = null;
+          return applySignature(prev, '');
+        }
+        if (current === target) return prev;
+        if (current !== null && current !== mine) return prev;
+        autoSignature.current = target;
+        return applySignature(prev, target);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [editing, calendarId, signatures, loading, importLocked]);
   // The rule "this and all following" writes, shown in the repeat field as it
   // will be saved (decision 197): moved with a new date (decisions 189,
   // 192-194) — from the occurrence the editor was opened on, or from the start

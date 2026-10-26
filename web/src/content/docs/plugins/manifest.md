@@ -176,7 +176,9 @@ is all there is.
 The call gets `{"format": "<id>", "file_name": "…", "content": "<base64>"}` and
 answers a JSON `cal_core::FileImport`: the events read, and every part it left
 out, named (a task, a note, a part it could not read). A file you cannot read
-answers `PLUGIN_CALL_ERR_INVALID` with your own sentence; the host shows it.
+answers `PLUGIN_CALL_ERR_INVALID` with a short reason: the host says in the
+person's language that the file could not be read, and writes your reason to
+the log.
 
 A manifest that declares formats without the export offers none of them, and
 the host logs a warning at load: a file type in the open dialog that fails on

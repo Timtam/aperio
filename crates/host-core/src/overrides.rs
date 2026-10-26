@@ -759,6 +759,7 @@ mod tests {
                 read_only: true,
                 default_sound: None,
                 invitation_import: Default::default(),
+                keeps_uid: false,
             },
             cal_core::Calendar {
                 color_label: None,
@@ -774,6 +775,7 @@ mod tests {
                 read_only: false,
                 default_sound: None,
                 invitation_import: Default::default(),
+                keeps_uid: false,
             },
         ];
         apply_to_calendars(&repo, &mut cals);
@@ -819,6 +821,7 @@ mod tests {
                 read_only: false,
                 default_sound: None,
                 invitation_import: Default::default(),
+                keeps_uid: false,
             },
             cal_core::Calendar {
                 color_label: None,
@@ -834,6 +837,7 @@ mod tests {
                 read_only: false,
                 default_sound: None,
                 invitation_import: Default::default(),
+                keeps_uid: false,
             },
         ];
         apply_color_to_calendars(&repo, &mut cals);

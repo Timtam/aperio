@@ -2,7 +2,7 @@
 // plugin has read a file — which appointment the editor gets, and how what
 // was left out is said.
 
-import { codedError, errorMessageText } from './eventWriteError';
+import { codedError, errorMessageText, eventWriteFailureReason } from './eventWriteError';
 import { errorMessage } from './errors';
 import { joinNames } from './listWords';
 import type { ImportedEvent } from './generated/ImportedEvent';
@@ -13,6 +13,12 @@ type Translate = (key: string, values?: Record<string, unknown>) => string;
 
 /** The token a too large file's error starts with (`host_core::file_import::TOO_LARGE`). */
 const TOO_LARGE = 'import-too-large';
+
+/** The most an import reads, in bytes (`host_core::file_import::
+ *  MAX_IMPORT_BYTES`). A surface that hands the host a file's bytes hands at
+ *  most one past it: enough for the host to call the file too large, without
+ *  reading the rest of a large one. */
+export const IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 
 /**
  * Why a file could not be imported, in the reader's words. The host says
@@ -236,10 +242,13 @@ export function alreadyHeld(
 }
 
 /** What a calendar already holds of a file's appointments (I4): still being
- *  asked, could not be asked, or which ones, by their place in the file. */
+ *  asked, could not be asked, which ones, by their place in the file — or not
+ *  to be told at all: a calendar that keeps no file's UID
+ *  (`Calendar.keeps_uid`) is not asked, as no answer could find anything. */
 export type HeldCheck =
   | { status: 'checking' }
   | { status: 'failed' }
+  | { status: 'unknowable' }
   | { status: 'known'; held: ReadonlySet<number> };
 
 /**
@@ -292,6 +301,8 @@ export function heldStatusSentence(
       return t('fileImport.held.checking', { calendar });
     case 'failed':
       return t('fileImport.held.checkFailed', { calendar });
+    case 'unknowable':
+      return t('fileImport.held.unknowable', { calendar });
     default:
       return check.held.size === 0
         ? t('fileImport.held.none', { calendar })
@@ -359,6 +370,35 @@ export function importRowLabel(
   ]
     .filter(Boolean)
     .join(', ');
+}
+
+/**
+ * What an import list says when some of the chosen appointments did not
+ * arrive: how many did, of how many, and each one that did not by its title,
+ * with its own reason — never a sentence that says nothing was created after
+ * some were.
+ */
+export function partlyImportedSentence(
+  failed: readonly { title: string; err: unknown }[],
+  done: number,
+  count: number,
+  calendar: string,
+  t: Translate,
+): string {
+  return t('fileImport.list.partly', {
+    done,
+    count,
+    calendar,
+    titles: joinNames(
+      failed.map((f) =>
+        t('fileImport.list.failedTitle', {
+          title: f.title,
+          reason: eventWriteFailureReason(f.err, t),
+        }),
+      ),
+      t,
+    ),
+  });
 }
 
 /**

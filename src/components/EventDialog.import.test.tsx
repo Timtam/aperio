@@ -37,12 +37,18 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 
 const CALENDARS: Calendar[] = [
-  { id: 'cal-local', name: 'Kalender', read_only: false, account_id: 'local' } as unknown as Calendar,
+  {
+    id: 'cal-local',
+    name: 'Kalender',
+    read_only: false,
+    account_id: 'local',
+    keeps_uid: true,
+  } as unknown as Calendar,
 ];
 const STORE = {
   calendars: CALENDARS as Calendar[],
   colorLabels: [],
-  selectedCalendarIds: new Set(['cal-local']),
+  selectedCalendarIds: new Set(['cal-local']) as ReadonlySet<string>,
 };
 const VIEW_STATE = { showHiddenCalendarTargets: false, anchor: new Date() };
 const DIALOG_STATE = { openEventGroupCarry: () => {}, invalidateData: () => {} };
@@ -52,14 +58,43 @@ vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE 
 vi.mock('../state/viewStateContext', () => ({ useViewState: () => VIEW_STATE }));
 vi.mock('../state/dialogStateContext', () => ({ useDialogState: () => DIALOG_STATE }));
 vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => () => {} }));
-/** The account's address in the calendar, or an answer that does not come. */
-const ownAddress = vi.hoisted(() => ({ current: null as string | null | 'pending' }));
+/** The account's address in the calendar, an answer that does not come, or
+ *  one the test gives when it chooses (`answerOwn`). */
+const ownAddress = vi.hoisted(() => ({
+  current: null as string | null | 'pending' | 'later',
+  answer: null as null | ((address: string | null) => void),
+}));
 vi.mock('../state/currentUserEmail', () => ({
   resolveCalendarUserEmail: () =>
     ownAddress.current === 'pending'
       ? new Promise(() => {})
-      : Promise.resolve(ownAddress.current),
+      : ownAddress.current === 'later'
+        ? new Promise((resolve) => {
+            ownAddress.answer = resolve;
+          })
+        : Promise.resolve(ownAddress.current),
 }));
+/** The signature bound to the calendar, the same object on every read. */
+const boundSignature = vi.hoisted(() => ({
+  current: null as null | { id: string; name: string; body: string },
+  calendarId: 'cal-local',
+}));
+vi.mock('../state/useSignatures', async () => {
+  const actual = await vi.importActual<typeof import('../state/useSignatures')>(
+    '../state/useSignatures',
+  );
+  return {
+    ...actual,
+    useSignatures: () => ({
+      signatures: boundSignature.current ? [boundSignature.current] : [],
+      loading: false,
+      save: async () => {},
+      forCalendar: (calendarId: string) =>
+        calendarId === boundSignature.calendarId ? boundSignature.current : null,
+      bind: async () => {},
+    }),
+  };
+});
 vi.mock('../state/useCalendarDefaultReminders', () => ({
   useCalendarDefaultReminders: () => REMINDERS,
 }));
@@ -75,7 +110,13 @@ afterEach(() => {
   invokeMock.mockClear();
   calendarRows.current = [];
   ownAddress.current = null;
+  ownAddress.answer = null;
+  boundSignature.current = null;
+  boundSignature.calendarId = 'cal-local';
+  CALENDARS.splice(1);
+  STORE.selectedCalendarIds = new Set(['cal-local']);
   delete (CALENDARS[0] as { invitation_import?: string }).invitation_import;
+  (CALENDARS[0] as { keeps_uid?: boolean }).keeps_uid = true;
 });
 
 /** Once the calendar was asked whether it holds the appointment already. */
@@ -162,6 +203,20 @@ describe('EventDialog → an appointment from a file', () => {
     await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
   });
 
+  it('says when the calendar cannot tell whether it holds the appointment', async () => {
+    (CALENDARS[0] as { keeps_uid?: boolean }).keeps_uid = false;
+    await openImport();
+    expect(
+      await screen.findByText(
+        '„Kalender“ behält die Kennung einer Datei nicht: Aperio kann dort nicht erkennen, ob ' +
+          'dieser Termin schon da ist.',
+      ),
+    ).toBeTruthy();
+    expect(invokeMock.mock.calls.some(([command]) => command === 'get_events')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
+    await waitFor(() => expect(createRequest()).toBeTruthy());
+  });
+
   it('gives a series the file keeps in UTC no zone of the device', async () => {
     const { EventDialog } = await import('./EventDialog');
     const utcSeries: ImportedEvent = {
@@ -213,6 +268,71 @@ describe('EventDialog → an invitation from a file, as the calendar takes it (I
     organizer: 'boss@example.org',
     attendees: ['Toni <toni@example.org>', 'gast@example.org'],
   };
+
+  it('keeps the account’s signature out of someone else’s invitation', async () => {
+    // Moved from one calendar that keeps invitations to another that carries
+    // a signature: the form is not filled from the file again, so only the
+    // lock keeps the block out.
+    (CALENDARS[0] as { invitation_import?: string }).invitation_import = 'kept';
+    CALENDARS.push({
+      id: 'cal-office',
+      name: 'Büro',
+      read_only: false,
+      account_id: 'local',
+      invitation_import: 'kept',
+      keeps_uid: true,
+    } as unknown as Calendar);
+    STORE.selectedCalendarIds = new Set(['cal-local', 'cal-office']);
+    ownAddress.current = 'toni@example.org';
+    boundSignature.current = { id: 'sig-1', name: 'Büro', body: 'Grüße, Toni' };
+    boundSignature.calendarId = 'cal-office';
+    await openImport(() => {}, INVITATION);
+    await screen.findByText(/Eine Einladung von boss@example\.org/);
+    fireEvent.change(screen.getByRole('combobox', { name: /^kalender$/i }), {
+      target: { value: 'cal-office' },
+    });
+    await screen.findByText(/Eine Einladung von boss@example\.org/);
+    await asked();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(true),
+    );
+    expect(createRequest().description).toBe('Teams-Besprechung');
+  });
+
+  it('gives the account’s own meeting from a file its signature, as a new one', async () => {
+    ownAddress.current = 'boss@example.org';
+    boundSignature.current = { id: 'sig-1', name: 'Büro', body: 'Grüße, Toni' };
+    boundSignature.calendarId = 'cal-local';
+    await openImport(() => {}, INVITATION);
+    await asked();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some(([command]) => command === 'create_event')).toBe(true),
+    );
+    expect(String(createRequest().description)).toMatch(/^Teams-Besprechung[\s\S]*Grüße, Toni/);
+  });
+
+  it('keeps focus on the title when the fields open after the owner check', async () => {
+    // Nothing before the title: it is the first stop, locked while it is
+    // asked whose the meeting is.
+    ownAddress.current = 'later';
+    const { EventDialog } = await import('./EventDialog');
+    render(
+      <EventDialog isOpen onClose={() => {}} event={null} importFrom={INVITATION} importNote={null} />,
+    );
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    const locked = screen.getByDisplayValue('Jour fixe');
+    locked.focus();
+    expect(document.activeElement).toBe(locked);
+    // The account's own meeting: the title becomes a field to type into.
+    await act(async () => {
+      ownAddress.answer?.('boss@example.org');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const title = screen.getByRole('combobox', { name: /^titel$/i });
+    expect(document.activeElement).toBe(title);
+  });
 
   it('keeps someone else’s invitation where the calendar keeps invitations, locked as received', async () => {
     (CALENDARS[0] as { invitation_import?: string }).invitation_import = 'kept';

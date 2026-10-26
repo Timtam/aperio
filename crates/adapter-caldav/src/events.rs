@@ -211,8 +211,11 @@ pub async fn create_event(
         },
         Err(err) => return Err(err.into()),
     };
-    let etag = if retried && response.status() == StatusCode::PRECONDITION_FAILED {
+    let etag = if retried && given.is_none() && response.status() == StatusCode::PRECONDITION_FAILED
+    {
         // First PUT landed; a 412 carries no ETag — the next read refreshes it.
+        // Only for a minted UID: a kept one may be the calendar's own copy of
+        // the appointment, refused as taken below, replay or not.
         None
     } else if given.is_some() && response.status() == StatusCode::PRECONDITION_FAILED {
         // Not a minted UID: the resource named by it is there already, so the
@@ -2260,6 +2263,38 @@ END:VCALENDAR</c:calendar-data>
             }
         });
         base
+    }
+
+    /// A kept UID is no UID only this create can own: a 412 on the replay may
+    /// be the calendar's own copy of the appointment, so it is refused as
+    /// taken, as without the replay — never reported as created.
+    #[tokio::test]
+    async fn a_kept_uid_answering_412_after_a_retry_is_taken() {
+        let base = first_attempt_lost_then(
+            b"HTTP/1.1 412 Precondition Failed\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let cal_url = Url::parse(&format!("{base}/calendars/alice/work/")).unwrap();
+        let event = NewEvent {
+            uid_to_keep: Some("jf-1@example.net".into()),
+            ..sample_new_event()
+        };
+        let err = create_event(
+            &client(),
+            &cal_url,
+            event,
+            &creds(&base),
+            &WriteCtx::default(),
+        )
+        .await
+        .expect_err("the calendar may hold this UID");
+        match err {
+            CaldavError::Http {
+                status: 412,
+                message,
+            } => assert!(message.starts_with("uid-taken"), "{message}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     /// A guarded PUT whose first attempt may have landed: the replay's 412 is

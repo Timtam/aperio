@@ -133,12 +133,14 @@ Ein Bogen zwischen PR 7 (#128, pausiert) und PR 9. Er bringt Termine aus einer
     "extensions": ["ics", "ical", "ifb"],
     "mime_types": ["text/calendar"],
     "yields": ["events"],
+    "name": "iCalendar file",
     "name_key": "import.ics.name"
   }
 ]
 ```
 
-Der Name kommt wie die übrigen Texte des Manifests aus `strings` (de, en).
+Der Name steht wörtlich in `name` (Pflicht, beim Laden geprüft); `name_key`
+übersetzt ihn wie die übrigen Texte des Manifests aus `strings` (de, en).
 
 **Einstieg.** Ein optionaler C-ABI-Einstieg `aperio_plugin_import_file`, wie
 `discover` ohne Konto: Er bekommt das Format und den Inhalt und gibt die Teile
@@ -221,7 +223,8 @@ Zielkalender über den Zeitraum der Termine.
   ankam, wird mit Titel und Grund genannt, was ankam, als „importiert“
   markiert. Kein Termin, oder ein Fehler, ist ein Satz mit Schließen
   (`importFailureSentence`, ein zu großer Datei am Marker
-  `import-too-large`). Die vorläufige Regel `importedForEditor` gilt in
+  `import-too-large`). Die vorläufige Regel `importedForEditor` galt bis I6;
+  seit I6b gelten `importInto`, `importPeople` und `importEditorPeople` in
   Editor und Liste.
 - **I4 UID**, in drei Teilen:
   - **I4a** Lesen (gebaut): `Event::ical_uid` bei CalDAV, Exchange, Google,
@@ -237,8 +240,8 @@ Zielkalender über den Zeitraum der Termine.
     gewählten Kalender über den Zeitraum der Termine (`importSpan`, eine
     Minute weiter) und vergleichen die UIDs (`alreadyHeld`, beides in
     `shared/fileImport.ts`), wieder bei jedem Kalenderwechsel; eine Antwort
-    trägt ihren Kalender (`useHeldOnImport`). Die Liste hakt Vorhandene ab,
-    nennt sie mit Titel in einem Satz und an der Zeile („steht schon in
+    trägt ihren Kalender (`useHeldOnImport`). Die Liste lässt Vorhandene
+    abgewählt, nennt sie mit Titel in einem Satz und an der Zeile („steht schon in
     „Arbeit““), angehakt „wird als Kopie importiert“, ohne UID; ein anderer
     Kalender hakt wieder an, was er nicht hat. Der Editor sagt „Dieser Termin
     steht schon in …“ und legt dann eine Kopie an. Solange gefragt wird,
@@ -296,10 +299,25 @@ Zielkalender über den Zeitraum der Termine.
     späteren aus `OnNewIntent` —, nimmt den Strom aus den Daten oder dem
     `ClipData` eines Teilens und kopiert ihn in den Cache, höchstens ein
     Byte über die Grenze des Imports, damit das Lesen eine zu große Datei
-    ablehnt, ohne sie ganz zu kopieren. Gefragt wird beim Start und bei
-    jeder Rückkehr in den Vordergrund. Beides öffnet über `readAndPresent`
-    Editor oder Liste im Kalender-Tab (`IncomingFileImport`, neben den
-    anderen App-weiten Hosts), ein Satz erscheint als Dialog über allem.
+    ablehnt, ohne sie ganz zu kopieren. Der Start-Intent bleibt der der
+    Aktivität, wenn Android sie nach dem Ende des Prozesses neu anlegt (aus
+    den letzten Apps, oder wenn die Aufgabe zurückgeholt wird): Ein
+    genommener bleibt deshalb über Prozesse hinweg gemerkt, an seiner
+    Aufgabe und seiner Adresse, und einer aus den letzten Apps
+    (`FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY`) zählt nie. Ohne Dateinamen heißt
+    die Kopie „import“, mit der Endung ihres MIME-Typs, weil der Import das
+    Plugin an der Endung findet; der letzte Teil einer `content://`-Adresse
+    ist eine Kennung, kein Name. Eine Datei, die sich nicht öffnen oder
+    kopieren lässt, ist ein Fehler mit ihrem Namen (`internal`), also ein
+    Satz. Gefragt wird beim Start und bei jeder Rückkehr in den Vordergrund.
+    Beides öffnet über `readAndPresent` Editor oder Liste im Kalender-Tab
+    (`IncomingFileImport`, neben den anderen App-weiten Hosts), jeder Import
+    eine eigene Route (`getId` am Token), damit eine Datei nie einen
+    offenen Editor oder eine offene Liste übernimmt. Ein Satz ist eine
+    native Meldung (`Alert`), die sich auch über einem offenen Blatt zeigt,
+    wo ein Modal an der App-Wurzel es unter iOS nicht kann. iOS nimmt die
+    Start-Adresse einmal je Lauf; ein Wechsel der Sprache öffnet die Datei
+    nicht noch einmal.
     Ungemessen: ob Expos AppDelegate ein geöffnetes Dokument an `Linking`
     weitergibt, welche Apps Aperio anbieten, und die Kopien in der Inbox
     bleiben liegen.
@@ -317,8 +335,9 @@ Zielkalender über den Zeitraum der Termine.
   behält alles. Ein Anbieter ohne stillen Weg legt
   den Termin ohne Teilnehmer an, und der Editor sagt es. Vorher Exchange live:
   Der zweite Lauf (ICS-2, 075306) fand keinen Termin, nur die Nachricht; die
-  Runde ICS-3 misst drei Wege zum Termin und danach zusagen, absagen und
-  löschen über Aperios eigenen Weg, und was hinausgeht.
+  Runde ICS-3 (Lauf 080508) maß die Wege zum Termin, ICS-4 (Lauf 081527)
+  danach zusagen, absagen und löschen über Aperios eigenen Weg, und was
+  hinausgeht.
   Entscheidungen (Toni, 2026-10-26): Lesen und Schreiben von iCal ziehen in
   ein gemeinsames Crate, das CalDAV, der iCal-Adapter und Exchange nutzen
   (erst der Umzug ohne neues Verhalten), damit kein Adapter am anderen
@@ -413,3 +432,50 @@ Zielkalender über den Zeitraum der Termine.
     Teilnehmern nur im Hauptkalender) und das GAM-Wiki (Organisator nicht
     übernommen).
 - **I7 Aufgaben** aus VTODO, später.
+
+## Prüfrunde 1 (PR #129, 2026-10-26)
+
+Fünf Prüfer (Kern, Adapter, Desktop, Handy, Doku), je mit einem Gegenprüfer:
+45 bestätigte Funde, einige doppelt. Behoben:
+
+- **Liste am Desktop.** „Bearbeiten …“ legt den Editor über die Liste, und
+  der Dialogstapel hängt sie dabei aus: Was sie getan hatte, ging verloren,
+  und ein im Editor angelegter Termin kam beim Import erneut. Der Fortschritt
+  hängt jetzt am Leseergebnis der Datei (`listProgress`), das der Stapel
+  hält. Dazu: eine gleiche Meldung wird erneut fokussiert und gesagt; der
+  Satz zu Einladungen wird bei einem Kalenderwechsel gesagt; ohne
+  beschreibbaren Kalender schreibt die Liste nichts; ein angekommener Termin
+  ist ein eigener Halt; beim Schreiben sind Kalender und Zeilen gesperrt;
+  der Satz zum Teilerfolg nennt jeden Termin mit eigenem Grund
+  (`partlyImportedSentence`, Plural).
+- **Editor.** Wird die Sperre nach der Prüfung des Organisators aufgehoben,
+  fiel der Fokus auf die Seite; er geht jetzt zum Titel. Eine fremde
+  Einladung bekommt nie die Signatur des Kontos, auch nicht nach einem
+  Kalenderwechsel; das Handy hängt sie an einen eigenen importierten Termin
+  wie der Desktop.
+- **Ablegen am Desktop** liest höchstens ein Byte über die Grenze
+  (`IMPORT_MAX_BYTES`, gegen `MAX_IMPORT_BYTES` getestet).
+- **Handy.** Jeder Import ist eine eigene Route (`importRouteId`, ein Token
+  für die Liste); iOS nimmt die Start-Adresse einmal; Sätze als native
+  Meldung; Android merkt sich einen genommenen Start-Intent über Prozesse,
+  benennt eine Kopie ohne Namen mit der Endung ihres MIME-Typs und sagt
+  einen Kopierfehler; der Schließen-Knopf der Liste ist beim Schreiben
+  nicht verfügbar; „Bearbeiten …“ ohne Kalender sagt es.
+- **CalDAV.** Ein 412 nach einer Wiederholung gilt nur bei einer selbst
+  vergebenen UID als gelandet; eine behaltene ist `uid-taken`.
+- **iCal.** Die Absage eines einzelnen Termins ohne seine Serie in der Datei
+  wird genannt.
+- **Doppelte ehrlich** (Toni, 2026-10-26): `Calendar::keeps_uid` sagt, ob
+  ein Anlegen die UID der Datei behält (CalDAV, Exchange, lokal). Wo nicht
+  (Google beim gewöhnlichen Anlegen, Microsoft 365, Gerätekalender), fragt
+  Aperio nicht, was der Kalender schon hält, und sagt in Liste und Editor,
+  dass es das dort nicht erkennen kann. Cache-Generation 9, weil gespeicherte
+  Kalenderlisten weder diese Angabe noch `invitation_import` tragen.
+- **Exchange, zweiter Kalenderordner** (Toni, 2026-10-26: erst live
+  messen). Exchange legt den Termin einer vorläufigen Zusage vermutlich
+  immer im Standardkalender ab; gemessen ist nur dieser. Die Runde ICS-6
+  des EWS-Testprogramms importiert in einen eigenen Ordner der Runde und
+  sagt, wo der Termin landet. Bis dahin bleibt es, wie es ist.
+- Doku: was CalDAV beim eigenen Meeting über die Liste tut, Zonen nur aus
+  der Datei, wer `uid-taken` sagt, wer die Kern-Regeln nutzt, der Fehlertext
+  eines Plugins.

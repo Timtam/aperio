@@ -482,6 +482,7 @@ mod tests {
                 read_only: false,
                 default_sound: None,
                 invitation_import: Default::default(),
+                keeps_uid: false,
             },
             Calendar {
                 color_label: None,
@@ -497,6 +498,7 @@ mod tests {
                 read_only: true,
                 default_sound: None,
                 invitation_import: Default::default(),
+                keeps_uid: false,
             },
         ];
         let json = serde_json::to_vec(&cals).expect("serialise");

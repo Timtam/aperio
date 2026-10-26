@@ -12,11 +12,12 @@
 //!   read as the same appointment.
 //! - A cancelled appointment (`STATUS:CANCELLED`, or a file whose `METHOD` is
 //!   `CANCEL`) adds nothing and is named as left out; a cancelled occurrence
-//!   is only the gap it leaves.
+//!   is only the gap it leaves in its series — and, where the file holds no
+//!   series for it (Outlook cancelling one occurrence), named as left out.
 //! - An answer to an invitation (`METHOD:REPLY`, `COUNTER`) adds nothing.
 //! - Tasks, notes and busy times are left out, each named.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cal_core::{Event, FileImport, ImportedEvent, SkippedKind, SkippedPart};
 use chrono::{DateTime, Utc};
@@ -40,11 +41,17 @@ pub fn import_ics(content: &[u8]) -> Result<FileImport, String> {
     );
     let cancels = file.method.as_deref() == Some("CANCEL");
 
-    // The slots each series' changed occurrences stand in for.
+    // The slots each series' changed occurrences stand in for, and the
+    // series the file holds.
     let mut gaps: HashMap<String, Vec<DateTime<Utc>>> = HashMap::new();
+    let mut series_held: HashSet<String> = HashSet::new();
     for event in &file.events {
-        if let Ok(Some((series, slot))) = cal_core::split_override_id(&event.id) {
-            gaps.entry(series.to_string()).or_default().push(slot);
+        match cal_core::split_override_id(&event.id) {
+            Ok(Some((series, slot))) => gaps.entry(series.to_string()).or_default().push(slot),
+            Ok(None) => {
+                series_held.insert(event.id.clone());
+            }
+            Err(_) => {}
         }
     }
 
@@ -59,10 +66,17 @@ pub fn import_ics(content: &[u8]) -> Result<FileImport, String> {
             continue;
         }
         match cal_core::split_override_id(&event.id) {
-            Ok(Some(_)) => {
+            Ok(Some((series, _))) => {
                 // A changed occurrence: its own appointment, unless it was
-                // cancelled, which leaves only the gap.
+                // cancelled, which leaves only the gap — said where the file
+                // holds no series to leave it in.
                 if event.cancelled || cancels {
+                    if !series_held.contains(series) {
+                        skipped.push(SkippedPart {
+                            kind: SkippedKind::Cancelled,
+                            title,
+                        });
+                    }
                     continue;
                 }
                 events.push(imported(event, None));
@@ -284,6 +298,16 @@ mod tests {
             [SkippedPart {
                 kind: SkippedKind::Cancelled,
                 title: Some("Abgesagt: Projektbesprechung".to_string())
+            }]
+        );
+        // One occurrence cancelled, its series not in the file: named too.
+        let occurrence = fixture("occurrence-cancellation.ics");
+        assert!(occurrence.events.is_empty());
+        assert_eq!(
+            occurrence.skipped,
+            [SkippedPart {
+                kind: SkippedKind::Cancelled,
+                title: Some("Abgesagt: Jour fixe".to_string())
             }]
         );
         let reply = fixture("reply.ics");

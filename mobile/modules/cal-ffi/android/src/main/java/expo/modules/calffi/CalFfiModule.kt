@@ -8,6 +8,7 @@ import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import android.util.Log
 import androidx.core.content.FileProvider
 // An extension function on GlanceAppWidget — see AperioWidget.kt.
@@ -78,6 +79,10 @@ import uniffi.cal_ffi.withoutDuplicateMeetings as uniffiWithoutDuplicateMeetings
 /** One byte past the most an import reads (`host_core::file_import::
  *  MAX_IMPORT_BYTES`, 25 MiB): enough for the read to call a file too large. */
 private const val INCOMING_CAP: Long = 25L * 1024 * 1024 + 1
+
+/** Where the launch intent last taken is remembered, across processes. */
+private const val INCOMING_PREFS = "aperio_incoming_file"
+private const val TAKEN_LAUNCH = "taken_launch"
 
 class CalFfiModule : Module() {
   // Expo runs EVERY AsyncFunction body on ONE single-threaded HandlerThread
@@ -841,9 +846,9 @@ class CalFfiModule : Module() {
   /** The intent a share or an "open with" brought while the app ran. */
   @Volatile private var incomingIntent: Intent? = null
 
-  /** The intents already read, by identity (`Intent` has no equals of its
-   *  own), so the activity's launch intent is taken once, not on every return
-   *  to the foreground. */
+  /** The intents already read in this process, by identity (`Intent` has no
+   *  equals of its own), so the activity's launch intent is taken once, not on
+   *  every return to the foreground. */
   private val takenIntents: MutableSet<Intent> =
     java.util.Collections.synchronizedSet(
       java.util.Collections.newSetFromMap(java.util.WeakHashMap<Intent, Boolean>()),
@@ -852,7 +857,9 @@ class CalFfiModule : Module() {
   /**
    * The calendar file a share or an "open with" brought (DESIGN-file-import.md,
    * I5), copied into the cache, as JSON `{path, name}` — or `null` when there
-   * is none, or it was taken already.
+   * is none, or it was taken already. A file that cannot be read or copied is
+   * an `internal` error carrying the file's name, so the person hears that it
+   * could not be opened rather than nothing.
    *
    * Android hands a `content://` URI, a stream without a path (a share puts it
    * in `EXTRA_STREAM`, an "open with" in the intent's data), and the plugin
@@ -860,10 +867,19 @@ class CalFfiModule : Module() {
    * past the import's limit (`host_core::file_import::MAX_IMPORT_BYTES`): the
    * read then refuses a larger file as too large without the whole of it on
    * disk. A VIEW intent of another scheme (the OAuth callback) is not a file.
+   *
+   * The activity's own intent is the file that started the app. It stays the
+   * activity's intent when Android recreates the activity after the process
+   * was ended — from Recents (`FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY`), or when
+   * the task is brought back — so a launch intent once taken is remembered by
+   * its task and URI across processes; a new share that starts the app makes
+   * a new task.
    */
   private fun takeIncomingFile(): String? {
-    val intent = incomingIntent ?: appContext.currentActivity?.intent ?: return null
+    val fresh = incomingIntent
     incomingIntent = null
+    val activity = appContext.currentActivity
+    val intent = fresh ?: activity?.intent ?: return null
     val uri: Uri = when (intent.action) {
       Intent.ACTION_VIEW -> intent.data
       // Android puts a share's EXTRA_STREAM into the intent's ClipData as it
@@ -875,26 +891,54 @@ class CalFfiModule : Module() {
     if (uri.scheme != "content" && uri.scheme != "file") return null
     if (!takenIntents.add(intent)) return null
     val context = appContext.reactContext?.applicationContext ?: return null
-    val name = displayName(context, uri)
-      ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
-      ?: "import.ics"
-    val dir = File(context.cacheDir, "incoming").apply { mkdirs() }
-    val target = File(dir, name.replace('/', '_').replace('\\', '_'))
-    val copied = context.contentResolver.openInputStream(uri)?.use { input ->
-      target.outputStream().use { output ->
-        val buffer = ByteArray(64 * 1024)
-        var total = 0L
-        while (total <= INCOMING_CAP) {
-          val read = input.read(buffer)
-          if (read < 0) break
-          output.write(buffer, 0, read)
-          total += read
+    if (fresh == null) {
+      if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return null
+      val launch = "${activity?.taskId}|$uri"
+      val taken = context.getSharedPreferences(INCOMING_PREFS, Context.MODE_PRIVATE)
+      if (taken.getString(TAKEN_LAUNCH, null) == launch) return null
+      taken.edit().putString(TAKEN_LAUNCH, launch).apply()
+    }
+    val name = incomingName(context, intent, uri)
+    try {
+      val dir = File(context.cacheDir, "incoming").apply { mkdirs() }
+      val target = File(dir, name.replace('/', '_').replace('\\', '_'))
+      val input = context.contentResolver.openInputStream(uri)
+        ?: throw CodedException("internal", name, null)
+      input.use {
+        target.outputStream().use { output ->
+          val buffer = ByteArray(64 * 1024)
+          var left = INCOMING_CAP
+          while (left > 0) {
+            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), left).toInt())
+            if (read < 0) break
+            output.write(buffer, 0, read)
+            left -= read
+          }
         }
       }
-      true
-    } ?: false
-    if (!copied) return null
-    return JSONObject().put("path", target.absolutePath).put("name", name).toString()
+      return JSONObject().put("path", target.absolutePath).put("name", name).toString()
+    } catch (e: CodedException) {
+      throw e
+    } catch (e: Exception) {
+      // Not opened (no permission, gone, not a file): said with its name.
+      throw CodedException("internal", name, e)
+    }
+  }
+
+  /**
+   * The name the file is known by: the one the sending app gives, else, for a
+   * plain file, its own; with the extension of its MIME type where it has
+   * none, since the import finds the plugin for a file by its extension. A
+   * content URI's last segment is an opaque id, never a name.
+   */
+  private fun incomingName(context: Context, intent: Intent, uri: Uri): String {
+    val given = displayName(context, uri)
+      ?: (if (uri.scheme == "file") uri.lastPathSegment else null)?.takeIf { it.isNotBlank() }
+      ?: "import"
+    if (given.substringAfterLast('.', "").isNotEmpty()) return given
+    val type = runCatching { context.contentResolver.getType(uri) }.getOrNull() ?: intent.type
+    val extension = type?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
+    return if (extension.isNullOrEmpty()) given else "$given.$extension"
   }
 
   /** The name the sending app gives the file, where it gives one. */

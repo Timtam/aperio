@@ -125,6 +125,15 @@ stores_occurrence_exceptions: boolean,
  */
 invitation_import: InvitationImport, 
 /**
+ * Whether a create keeps the UID it asks for (`NewEvent::uid_to_keep`),
+ * so a file imported here again is found by it (DESIGN-file-import.md,
+ * I4). Where not — Google's ordinary create, Microsoft Graph, a device
+ * calendar — an import's held check is not asked, as no answer could
+ * find anything, and the surfaces say so. `#[serde(default)]` reads
+ * older payloads as not keeping it: nothing claimed that is not known.
+ */
+keeps_uid: boolean, 
+/**
  * The service the editors name when they say so ("iCloud informs the
  * attendees …"), as the adapter knows it; `None` reads as "the calendar
  * server". A display string only: no rule looks at it.

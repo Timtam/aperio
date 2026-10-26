@@ -185,6 +185,7 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
         // an appointment by a tentative reply: the mailbox's answer reads
         // tentative afterwards (I6, live rounds ICS-3 and ICS-4).
         invitation_import: cal_core::InvitationImport::KeptTentative,
+        keeps_uid: true,
     }
 }
 

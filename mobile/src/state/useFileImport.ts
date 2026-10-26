@@ -10,6 +10,7 @@ import type { RootStackScreenProps } from '../navigation/types';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from './calendarVisibility';
 import { importTarget, pathOfPicked, readAndPresent } from './fileImportFlow';
+import { newImportToken } from './importProgress';
 import { readLastUsedCalendar } from './lastUsedCalendar';
 
 type Navigation = RootStackScreenProps<'Calendars'>['navigation'];
@@ -73,8 +74,10 @@ export function useFileImport(navigation: Navigation): {
             calendarId,
             importFrom: event,
             importNote: note,
+            importToken: newImportToken(),
           }),
-        openList: (fileName, read) => navigation.navigate('FileImport', { fileName, read }),
+        openList: (fileName, read) =>
+          navigation.navigate('FileImport', { fileName, read, token: newImportToken() }),
         say: setNotice,
         log: (message) => void logLine('warn', message),
       });

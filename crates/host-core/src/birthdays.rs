@@ -88,6 +88,7 @@ pub fn synthesise_calendar(contact_list_id: &str, list_name: &str) -> Calendar {
         read_only: true,
         default_sound: None,
         invitation_import: Default::default(),
+        keeps_uid: false,
     }
 }
 

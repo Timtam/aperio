@@ -401,10 +401,15 @@ checkbox; **Edit …** is one of its actions (on iOS in the rotor).
 - **Several** open a list. Each one can be opened in the editor, or every
   checked one written to one calendar at once.
 - **An appointment the calendar already holds** — the same one, imported
-  before or sent twice — is found by the identity the file gives it. The list
-  names it and leaves it unchecked; checked again, it is imported as a copy.
-  The editor says so before you create it, and creating it then makes a copy.
-  Aperio asks the calendar you picked, and asks again when you pick another.
+  before or sent twice — is found by the identity the file gives it, in a
+  local, iCloud or other CalDAV, or Exchange calendar. The list names it and
+  leaves it unchecked; checked again, it is imported as a copy. The editor
+  says so before you create it, and creating it then makes a copy. Aperio
+  asks the calendar you picked, and asks again when you pick another. Google
+  (except an invitation it keeps in your primary calendar), Microsoft 365 and
+  the phone's own calendars keep no such identity, and a changed occurrence
+  imported as its own appointment has none: those are not recognised, come
+  in again, and the list and the editor say so for such a calendar.
 - **What the file holds besides appointments** — tasks, notes, a
   cancellation, an answer to an invitation — is named and left out.
 - **A changed occurrence of a series** becomes an appointment of its own, and
@@ -421,9 +426,15 @@ checkbox; **Edit …** is one of its actions (on iOS in the rotor).
   appointment, without attendees. The editor and the list say which, for the calendar you
   picked.
 - **A meeting you organize yourself** comes in as a new appointment, with
-  its attendees, as if you had just made it.
+  its attendees, as if you had just made it. iCloud and other CalDAV
+  calendars write attendees only along with their invitations, so the list,
+  which tells nobody, brings such a meeting there without them. In the editor
+  they stay, and are invited.
 
-Times keep their zone, including the Windows zone names Outlook writes.
+Times keep their zone, including the Windows zone names Outlook writes. A
+zone only the file itself defines (Outlook's "Customized Time Zone") gives
+the right times, but for now a series in it repeats in UTC, an hour off after
+a clock change.
 
 ## Time steps
 

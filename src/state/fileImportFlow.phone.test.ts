@@ -179,6 +179,25 @@ describe('importTarget', () => {
   });
 });
 
+describe('importRouteId', () => {
+  it('gives an editor on a file a route of its own, and every other the default', async () => {
+    const { importRouteId } = (await import(
+      /* @vite-ignore */ '../../mobile/src/navigation/importRouteId'
+    )) as {
+      importRouteId: (route: { params: Record<string, unknown> }) => string | undefined;
+    };
+    expect(importRouteId({ params: { eventId: null, calendarId: 'c' } })).toBeUndefined();
+    expect(
+      importRouteId({ params: { eventId: null, calendarId: 'c', importToken: 'import-1' } }),
+    ).toBe('import-1:');
+    expect(
+      importRouteId({
+        params: { eventId: null, calendarId: 'c', importToken: 'import-1', importIndex: 2 },
+      }),
+    ).toBe('import-1:2');
+  });
+});
+
 describe('importProgress', () => {
   it('tells the list behind a token which rows the editor created, until it stops listening', async () => {
     const { markImportedFromEditor, onImportedFromEditor, newImportToken } = await progress();

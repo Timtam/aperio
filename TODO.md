@@ -63,12 +63,15 @@
   schon vorhandenen UID, und klappt er wirklich nur im Hauptkalender?
   Danach entscheiden, ob gewöhnliche Importe bei Google auch über
   `events.import` gehen, damit ihre UID bleibt und Doppelte erkannt werden.
+  ↳ Live messen (Toni, 2026-10-26): Runde ICS-6 des EWS-Testprogramms —
+  landet eine Einladung, in einen zweiten Kalenderordner importiert, dort
+  oder im Standardkalender? Danach entscheiden, ob nur der Standardkalender
+  Einladungen behält (wie bei Google der Hauptkalender).
   ↳ Entscheiden (gefunden bei I5c): Beide Editoren hängen die Signatur des
   Kalenders auch an einen importierten Termin, wie an jeden neuen. Bei einer
-  fremden Einladung ersetzt das Formular die Beschreibung danach wieder durch
-  die der Datei; ein Kalenderwechsel kann sie erneut anhängen. Soll ein
-  importierter Termin die Signatur bekommen — nie, nur ein eigener, wie
-  heute?
+  fremden Einladung kommt sie seit Prüfrunde 1 nie (auch nicht nach einem
+  Kalenderwechsel). Offen: Soll ein eigener importierter Termin sie
+  bekommen, wie heute, oder nie?
 - [~] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)  
   ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)
@@ -1734,10 +1737,10 @@ Vorschläge sind nicht aufgenommen.
 - [ ] **Zonennamen in CalDAV und Microsoft 365 über den Kern auflösen.**
       CalDAV und Microsoft 365 geben gespeicherte Zonennamen weiter direkt an
       chrono-tz, das Groß- und Kleinschreibung unterscheidet. Betroffen sind
-      crates/ical-mapping/src/mapping.rs (resolve_with_tzid ~874,
-      RECURRENCE-ID ~1347, zoned_datetime ~1375), tasks.rs ~1063, vtimezone.rs
-      ~43 und crates/adapter-microsoft-graph/src/mapping.rs (write_datetime
-      ~1033). Eine Serie mit „europe/berlin“ wiederholt sich in Aperio nach
+      crates/ical-mapping/src/mapping.rs (resolve_with_tzid ~990,
+      RECURRENCE-ID ~1510, zoned_datetime ~1537), crates/adapter-caldav/src/tasks.rs
+      (resolve_in_zone ~1063), crates/ical-mapping/src/vtimezone.rs ~43 und
+      crates/adapter-microsoft-graph/src/mapping.rs (write_datetime ~1043). Eine Serie mit „europe/berlin“ wiederholt sich in Aperio nach
       Berlin, wird aber als UTC gelesen bzw. geschrieben. Wie bei Google und
       EWS über `cal_core::series_clock_zone`/`canonical_zone` auflösen, mit
       der kanonischen Zone rechnen und die gespeicherte Schreibweise senden.

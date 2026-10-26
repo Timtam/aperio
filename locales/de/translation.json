@@ -2689,7 +2689,9 @@
       "noneChosen": "Kein Termin ausgewählt.",
       "done_one": "{{count}} Termin in „{{calendar}}“ importiert.",
       "done_other": "{{count}} Termine in „{{calendar}}“ importiert.",
-      "partly": "{{done}} von {{count}} Terminen in „{{calendar}}“ importiert. Nicht importiert: {{titles}}. {{reason}}",
+      "partly_one": "{{done}} von {{count}} Termin in „{{calendar}}“ importiert. Nicht importiert: {{titles}}.",
+      "partly_other": "{{done}} von {{count}} Terminen in „{{calendar}}“ importiert. Nicht importiert: {{titles}}.",
+      "failedTitle": "„{{title}}“ ({{reason}})",
       "quoted": "„{{title}}“"
     },
     "held": {
@@ -2702,6 +2704,8 @@
       "rowCopy": "steht schon in „{{calendar}}“, wird als Kopie importiert",
       "editor": "Dieser Termin steht schon in „{{calendar}}“. Anlegen legt eine Kopie an.",
       "editorFailed": "Aperio konnte nicht prüfen, ob dieser Termin schon in „{{calendar}}“ steht.",
+      "unknowable": "„{{calendar}}“ behält die Kennung einer Datei nicht: Aperio kann dort nicht erkennen, was davon schon da ist.",
+      "editorUnknowable": "„{{calendar}}“ behält die Kennung einer Datei nicht: Aperio kann dort nicht erkennen, ob dieser Termin schon da ist.",
       "editorStillChecking": "Aperio prüft noch, ob dieser Termin schon in „{{calendar}}“ steht. Versuche es gleich noch einmal."
     }
   }

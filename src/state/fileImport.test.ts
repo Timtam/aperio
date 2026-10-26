@@ -14,6 +14,7 @@ import {
   importSpan,
   importWhen,
   invitationListSentence,
+  partlyImportedSentence,
   rechosenForHeld,
   skippedSentence,
   type ImportedEvent,
@@ -213,6 +214,32 @@ describe('importEditorPeople', () => {
   });
 });
 
+describe('partlyImportedSentence', () => {
+  it('names each one that did not arrive with its own reason, and nothing after', () => {
+    // As the host hands it over: CalDAV's 412, a conflict, with the token.
+    const taken = { code: 'conflict', message: 'uid-taken: jf-1@example.org' };
+    const sentence = partlyImportedSentence(
+      [
+        { title: 'Jour fixe', err: taken },
+        { title: 'Budget', err: { code: 'conflict', message: 'etag' } },
+      ],
+      1,
+      3,
+      'Arbeit',
+      t,
+    );
+    expect(sentence).toBe(
+      `1 von 3 Terminen in „Arbeit“ importiert. Nicht importiert: „Jour fixe“ (${t(
+        'dialogs.event.writeError.reason.uidTaken',
+        { detail: 'jf-1@example.org' },
+      )}) und „Budget“ (${t('dialogs.event.writeError.reason.changedOnServer')}).`,
+    );
+    expect(partlyImportedSentence([{ title: 'A', err: taken }], 0, 1, 'Arbeit', t)).toMatch(
+      /^0 von 1 Termin in „Arbeit“ importiert\./,
+    );
+  });
+});
+
 describe('rechosenForHeld', () => {
   it('unchecks what the calendar holds and checks again what only the one before held', () => {
     // Rows 0-3 chosen; row 3 unchecked by the person. The calendar asked before
@@ -238,6 +265,11 @@ describe('heldStatusSentence', () => {
     );
     expect(heldStatusSentence(events, { status: 'known', held: new Set() }, 'Arbeit', t)).toBe(
       'Nichts davon steht schon in „Arbeit“.',
+    );
+    // A calendar that keeps no file's UID is not asked, and says why.
+    expect(heldStatusSentence(events, { status: 'unknowable' }, 'Google', t)).toBe(
+      '„Google“ behält die Kennung einer Datei nicht: Aperio kann dort nicht erkennen, was ' +
+        'davon schon da ist.',
     );
     expect(
       heldStatusSentence(events, { status: 'known', held: new Set([0, 1]) }, 'Arbeit', t),

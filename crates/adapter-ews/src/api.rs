@@ -2157,6 +2157,8 @@ mod tests {
             cals[0].invitation_import,
             cal_core::InvitationImport::KeptTentative
         );
+        // A create keeps the file's UID (`t:UID`), so an import finds it again.
+        assert!(cals[0].keeps_uid);
         assert_eq!(cals[1].id, "FB");
     }
 

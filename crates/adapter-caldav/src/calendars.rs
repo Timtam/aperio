@@ -161,6 +161,7 @@ fn to_calendar(home_url: &Url, entry: ResponseEntry, supports_scheduling: bool) 
         // Someone else's meeting from a file goes in as theirs, the server
         // told to stay out (`SCHEDULE-AGENT`, I6).
         invitation_import: InvitationImport::Kept,
+        keeps_uid: true,
     }
 }
 
@@ -334,6 +335,8 @@ mod tests {
         assert_eq!(color.source, ColorSource::Native);
         // Someone else's meeting from a file goes in as theirs (I6).
         assert_eq!(cals[0].invitation_import, InvitationImport::Kept);
+        // The UID names the resource: an import finds it again.
+        assert!(cals[0].keeps_uid);
     }
 
     #[tokio::test]

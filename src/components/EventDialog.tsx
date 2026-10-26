@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -554,16 +555,23 @@ export function EventDialog({
   // Whether the calendar picked holds the imported appointment already (I4),
   // asked again whenever the pick changes: then it is created as a copy.
   const importedAlone = useMemo(() => (imported ? [imported] : []), [imported]);
-  const importHeld = useHeldOnImport(imported ? form.calendarId : '', importedAlone);
+  const importCalendar = calendars.find((c) => c.id === form.calendarId);
+  const importHeld = useHeldOnImport(
+    imported ? form.calendarId : '',
+    importedAlone,
+    importCalendar?.keeps_uid,
+  );
   const importIsHeld = importHeld.status === 'known' && importHeld.held.has(0);
-  const importCalendarName = calendars.find((c) => c.id === form.calendarId)?.name ?? '';
+  const importCalendarName = importCalendar?.name ?? '';
   const importHeldNote = !imported
     ? null
     : importIsHeld
       ? t('fileImport.held.editor', { calendar: importCalendarName })
       : importHeld.status === 'failed'
         ? t('fileImport.held.editorFailed', { calendar: importCalendarName })
-        : null;
+        : importHeld.status === 'unknowable'
+          ? t('fileImport.held.editorUnknowable', { calendar: importCalendarName })
+          : null;
   // Said once when it appears: the note comes after the dialog opened.
   const saidHeldNote = useRef<string | null>(null);
   useEffect(() => {
@@ -576,7 +584,6 @@ export function EventDialog({
   // and locked too while it is still asked — or sets aside, the account's own
   // without its people.
   const importOwn = useCalendarOwnAddress(form.calendarId, !!imported?.organizer?.trim());
-  const importCalendar = calendars.find((c) => c.id === form.calendarId);
   const importAs = useMemo(
     () => (imported ? importInto(importOwner(imported, importOwn), importCalendar) : null),
     [imported, importOwn, importCalendar],
@@ -591,6 +598,23 @@ export function EventDialog({
     if (importAsNote && saidImportAsNote.current !== importAsNote) announce(importAsNote);
     saidImportAsNote.current = importAsNote;
   }, [importAsNote, announce]);
+  // Where the lock comes on or off after the editor opened (the owner check
+  // answers after the first render), each locked field is replaced by its
+  // editable twin or back: the one that had focus leaves the page, and focus
+  // would fall out of the dialog onto the body, where the screen reader
+  // leaves the dialog's application mode. It goes to the title instead, the
+  // first field, which every such swap replaces.
+  const titleArea = useRef<HTMLDivElement>(null);
+  const lockedBefore = useRef(fieldsLocked);
+  useLayoutEffect(() => {
+    if (lockedBefore.current === fieldsLocked) return;
+    lockedBefore.current = fieldsLocked;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    titleArea.current
+      ?.querySelector<HTMLElement>('input, textarea, select, [tabindex="0"]')
+      ?.focus({ preventScroll: true });
+  }, [fieldsLocked]);
   // Someone else's meeting, as the notice rules read it: nobody to offer to
   // tell, as for a received invitation.
   const noticeOriginal = useMemo(
@@ -1166,10 +1190,14 @@ export function EventDialog({
    * when it is still the one this editor put there. Text the user wrote, or a
    * block they deleted, is theirs: mail clients behave the same way when the
    * sending account changes.
+   *
+   * Someone else's invitation from a file, kept as received (I6), carries no
+   * signature of the account's: while it is locked the calendar counts as one
+   * without, so a block put in before the lock comes out again.
    */
   useEffect(() => {
     if (!isOpen || isEdit) return;
-    const target = boundSignature?.body?.trim() || null;
+    const target = importLocked ? null : boundSignature?.body?.trim() || null;
     setForm((prev) => {
       const current = signatureIn(prev.description);
       const mine = autoSignature.current;
@@ -1184,7 +1212,7 @@ export function EventDialog({
       autoSignature.current = target;
       return { ...prev, description: applySignature(prev.description, target) };
     });
-  }, [isOpen, isEdit, boundSignature]);
+  }, [isOpen, isEdit, boundSignature, importLocked]);
 
   /**
    * The calendar's ATTACHED default reminders, put on a NEW appointment by
@@ -2681,18 +2709,20 @@ export function EventDialog({
             onResponded={locked ? invalidateData : onClose}
           />
         )}
-        {fieldsLocked ? (
-          <ReadOnlyField label={t('dialogs.event.fields.title')} value={form.title} />
-        ) : (
-          <TitleSuggestBox
-            label={t('dialogs.event.fields.title')}
-            value={form.title}
-            onChange={(v) => update('title', v)}
-            options={titleOptions}
-            onAccept={acceptTitleSuggestion}
-            required
-          />
-        )}
+        <div ref={titleArea} style={{ display: 'contents' }}>
+          {fieldsLocked ? (
+            <ReadOnlyField label={t('dialogs.event.fields.title')} value={form.title} />
+          ) : (
+            <TitleSuggestBox
+              label={t('dialogs.event.fields.title')}
+              value={form.title}
+              onChange={(v) => update('title', v)}
+              options={titleOptions}
+              onAccept={acceptTitleSuggestion}
+              required
+            />
+          )}
+        </div>
 
         {locked ? (
           <ReadOnlyField

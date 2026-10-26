@@ -16,8 +16,11 @@
 //! default ("001") row, in tzdata's canonical spelling: `India Standard Time`
 //! is `Asia/Kolkata`, not CLDR's `Asia/Calcutta`. Exchange keeps one id for a
 //! group of cities on one clock, so a Vienna series reads back as Berlin. The
-//! id `UTC`, and an id the table does not know — a custom definition, an id
-//! only a server's registry has — mean no zone: the series repeats in UTC.
+//! id `UTC` and a UTC name of tzdata mean no zone. An id the table does not
+//! know that is tzdata's own name (236) — the TZID Exchange keeps for an
+//! imported file's series (I6) — reads as that zone. Any other unknown id (a
+//! custom definition, an id only a server's registry has) means no zone: the
+//! series repeats in UTC.
 //!
 //! ## Writing a zone
 //!

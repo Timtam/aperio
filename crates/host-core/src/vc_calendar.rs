@@ -166,6 +166,7 @@ impl CalendarFeature for VcCalendar {
             stores_occurrence_exceptions: false,
             notifier_name: None,
             invitation_import: Default::default(),
+            keeps_uid: false,
         }])
     }
 

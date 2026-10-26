@@ -140,10 +140,17 @@ when caching:
 > to another calendar gets a new one. CalDAV, Exchange and the local store
 > keep it; Google keeps it only for an imported invitation (`events.import`),
 > and otherwise Google and Graph mint their own. Where the calendar already holds
-> the UID, the create is refused with `cal_core::WriteRefusal::UidTaken`. An
+> the UID, CalDAV refuses the create and Google is asked first
+> (`events.list?iCalUID=`); both answer `cal_core::WriteRefusal::UidTaken`. The
+> local store and Exchange do not check: there the import's own held check
+> (`alreadyHeld`) is the only guard. `Calendar::keeps_uid` says whether a
+> create keeps the UID it asks for (CalDAV, Exchange, the local store); where
+> not (Google's ordinary create, Graph, a device calendar), the import does
+> not ask what the calendar holds, as nothing could be found, and says so. An
 > adapter that starts reading a field the cache holds needs a
 > `CACHE_GENERATION` bump (`host_core::cache`), or unchanged rows never get it
-> (generation 8 did this for the UID).
+> (generation 8 did this for the UID; 9 for the calendars' `invitation_import`
+> and `keeps_uid`).
 
 > **Invitations from a file.** `Calendar::invitation_import` says what
 > creating a meeting someone else organizes does in a calendar: `kept`
@@ -161,11 +168,13 @@ when caching:
 > the meeting goes in as its organizer's request, made an appointment by a
 > tentative reply that is saved, not sent (see the EWS page). Google says
 > `kept` for the primary calendar only and imports the meeting as a private
-> copy (`events.import`, see the Google page). The two rules every such
-> adapter applies live in the core: whose meeting a marked create is
+> copy (`events.import`, see the Google page). Exchange and Google share two
+> rules in the core: whose meeting a marked create is
 > (`cal_core::attendee::invitation_organizer`) and whom it names
 > (`invitation_attendees`: the file's invitees without the organizer, the
-> account added).
+> account added). CalDAV checks the organizer against every address of its
+> identity in its own code, and the local store keeps the organizer as the
+> file gives it.
 
 > **And some take only an attendee's own changes.** On a scheduling CalDAV
 > server (iCloud), a meeting somebody else organizes accepts the attendee's

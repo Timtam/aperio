@@ -2689,7 +2689,9 @@
       "noneChosen": "No appointment chosen.",
       "done_one": "{{count}} appointment imported into “{{calendar}}”.",
       "done_other": "{{count}} appointments imported into “{{calendar}}”.",
-      "partly": "{{done}} of {{count}} appointments imported into “{{calendar}}”. Not imported: {{titles}}. {{reason}}",
+      "partly_one": "{{done}} of {{count}} appointment imported into “{{calendar}}”. Not imported: {{titles}}.",
+      "partly_other": "{{done}} of {{count}} appointments imported into “{{calendar}}”. Not imported: {{titles}}.",
+      "failedTitle": "“{{title}}” ({{reason}})",
       "quoted": "“{{title}}”"
     },
     "held": {
@@ -2702,6 +2704,8 @@
       "rowCopy": "already in “{{calendar}}”, imported as a copy",
       "editor": "This appointment is already in “{{calendar}}”. Creating it makes a copy.",
       "editorFailed": "Aperio could not check whether this appointment is already in “{{calendar}}”.",
+      "unknowable": "“{{calendar}}” does not keep a file's identity, so Aperio cannot tell what of this is already there.",
+      "editorUnknowable": "“{{calendar}}” does not keep a file's identity, so Aperio cannot tell whether this appointment is already there.",
       "editorStillChecking": "Aperio is still checking whether this appointment is already in “{{calendar}}”. Try again in a moment."
     }
   }

@@ -21,6 +21,7 @@ function calendar(id: string, hex: string | null): Calendar {
   invitations_reply_only: false,
   stores_occurrence_exceptions: false,
   invitation_import: 'not-kept',
+  keeps_uid: false,
   };
 }
 

@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import type { Calendar, FileImport, ImportedEvent } from '../api/types';
+import i18n from '../i18n';
+
+const t = (key: string, values?: Record<string, unknown>) => i18n.t(key, values);
 
 /**
  * The import dialog (DESIGN-file-import.md): a file of several appointments
@@ -11,6 +14,8 @@ import type { Calendar, FileImport, ImportedEvent } from '../api/types';
  */
 
 const failTitles = vi.hoisted(() => ({ current: new Set<string>() }));
+/** Creates held open until the test lets them go: a list that is writing. */
+const heldCreates = vi.hoisted(() => ({ on: false, release: [] as Array<() => void> }));
 /** What each calendar holds when asked (`get_events`): rows, a failure, or an
  *  answer that does not come. */
 const calendarRows = vi.hoisted(() => ({
@@ -34,6 +39,11 @@ const invokeMock = vi.hoisted(() =>
       if (failTitles.current.has(request.title)) {
         return Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' });
       }
+      if (heldCreates.on) {
+        return new Promise((resolve) =>
+          heldCreates.release.push(() => resolve({ ...request, id: `id-${request.title}` })),
+        );
+      }
       return Promise.resolve({ ...request, id: `id-${request.title}` });
     }
     return Promise.resolve([]);
@@ -46,10 +56,13 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 
 const CALENDARS = [
-  { id: 'cal-home', name: 'Privat', read_only: false, account_id: 'local' },
-  { id: 'cal-work', name: 'Arbeit', read_only: false, account_id: 'local' },
+  { id: 'cal-home', name: 'Privat', read_only: false, account_id: 'local', keeps_uid: true },
+  { id: 'cal-work', name: 'Arbeit', read_only: false, account_id: 'local', keeps_uid: true },
 ] as unknown as Calendar[];
-const STORE = { calendars: CALENDARS, selectedCalendarIds: new Set(['cal-home', 'cal-work']) };
+const STORE = {
+  calendars: CALENDARS,
+  selectedCalendarIds: new Set(['cal-home', 'cal-work']) as ReadonlySet<string>,
+};
 const VIEW_STATE = { showHiddenCalendarTargets: false };
 const openEventDialog = vi.fn();
 const invalidateData = vi.fn();
@@ -75,9 +88,15 @@ afterEach(() => {
   invalidateData.mockClear();
   announce.mockClear();
   failTitles.current = new Set();
+  heldCreates.on = false;
+  heldCreates.release = [];
+  STORE.selectedCalendarIds = new Set(['cal-home', 'cal-work']);
   calendarRows.current = {};
   ownAddress.current = {};
-  for (const calendar of CALENDARS) delete (calendar as { invitation_import?: string }).invitation_import;
+  for (const calendar of CALENDARS) {
+    delete (calendar as { invitation_import?: string }).invitation_import;
+    (calendar as { keeps_uid?: boolean }).keeps_uid = true;
+  }
   localStorage.clear();
 });
 
@@ -103,6 +122,16 @@ const READ: FileImport = {
 };
 
 async function open(outcome: { read: FileImport } | { failed: unknown }, onClose = vi.fn()) {
+  // A read of its own, as every file read is: the list keeps its progress by
+  // the read, and the cases here share their files.
+  const fresh = 'read' in outcome ? { read: structuredClone(outcome.read) } : outcome;
+  await openSame(fresh, onClose);
+  return onClose;
+}
+
+/** Open the list on exactly this outcome, as the dialog stack does when it
+ *  shows a frame again. */
+async function openSame(outcome: { read: FileImport } | { failed: unknown }, onClose = vi.fn()) {
   const { ImportDialog } = await import('./ImportDialog');
   render(<ImportDialog isOpen onClose={onClose} fileName="export.ics" outcome={outcome} />);
   // The calendar's answers (the account's address, what it holds) land inside
@@ -176,8 +205,11 @@ describe('ImportDialog → several appointments', () => {
     await screen.findByText(/In „Privat“ lassen sich Organisator und Teilnehmer/);
     fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
     expect(
+      // Each one that did not arrive with its own reason; nothing after that
+      // would say nothing was created.
       await screen.findByText(
-        /^1 von 2 Terminen in „Privat“ importiert\. Nicht importiert: „Projektbesprechung“\./,
+        '1 von 2 Terminen in „Privat“ importiert. Nicht importiert: „Projektbesprechung“ ' +
+          '(der Anbieter erlaubt es nicht (provider-busy: http-429)).',
       ),
     ).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
@@ -201,6 +233,88 @@ describe('ImportDialog → several appointments', () => {
     expect(options.importNote).toBeNull();
     act(() => options.onImported());
     expect(screen.getByText(/Projektbesprechung, .*, importiert/)).toBeTruthy();
+  });
+
+  it('keeps what it did while the editor sits on top of it', async () => {
+    // The dialog stack shows only its top frame: "Edit …" unmounts the list,
+    // and it comes back on the same read when the editor closes.
+    const outcome = { read: structuredClone(READ) };
+    await openSame(outcome);
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Chorprobe, / }));
+    fireEvent.change(screen.getByLabelText('In Kalender'), { target: { value: 'cal-work' } });
+    fireEvent.click(screen.getByRole('button', { name: '„Projektbesprechung“ im Editor öffnen' }));
+    const [, options] = openEventDialog.mock.calls[0];
+    cleanup();
+    act(() => options.onImported());
+
+    await openSame(outcome);
+    expect(screen.getByText(/Projektbesprechung, .*, importiert/)).toBeTruthy();
+    expect((screen.getByRole('checkbox', { name: /^Chorprobe, / }) as HTMLInputElement).checked).toBe(
+      false,
+    );
+    expect((screen.getByLabelText('In Kalender') as HTMLSelectElement).value).toBe('cal-work');
+    // Nothing left to import: the one created is not written again, the one
+    // unchecked stays out.
+    fireEvent.click(screen.getByRole('button', { name: '0 Termine importieren' }));
+    expect(await screen.findByText('Kein Termin ausgewählt.')).toBeTruthy();
+    expect(createRequests()).toEqual([]);
+  });
+
+  it('marks an arrived row as a stop of its own', async () => {
+    await open({ read: READ });
+    fireEvent.click(screen.getByRole('button', { name: '„Projektbesprechung“ im Editor öffnen' }));
+    const [, options] = openEventDialog.mock.calls[0];
+    act(() => options.onImported());
+    const done = screen.getByText(/Projektbesprechung, .*, importiert/);
+    expect(done.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('holds the calendar and the rows while it writes', async () => {
+    heldCreates.on = true;
+    await open({ read: READ });
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    await waitFor(() => expect(createRequests()).toHaveLength(1));
+    const picker = screen.getByLabelText('In Kalender') as HTMLSelectElement;
+    expect(picker.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.change(picker, { target: { value: 'cal-work' } });
+    expect(picker.value).toBe('cal-home');
+    const row = screen.getByRole('checkbox', { name: /^Projektbesprechung, / }) as HTMLInputElement;
+    expect(row.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(row);
+    expect(row.checked).toBe(true);
+    await act(async () => {
+      while (heldCreates.release.length > 0) heldCreates.release.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(createRequests()).toHaveLength(2));
+    await act(async () => {
+      while (heldCreates.release.length > 0) heldCreates.release.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  });
+
+  it('says there is no calendar to write to, and writes nothing', async () => {
+    STORE.selectedCalendarIds = new Set();
+    await open({ read: READ });
+    expect(screen.queryByText(/„“/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    expect(
+      await screen.findByText('Es gibt keinen Kalender, in den Aperio Termine schreiben kann.'),
+    ).toBeTruthy();
+    expect(createRequests()).toEqual([]);
+  });
+
+  it('focuses and says the same notice again for a second press', async () => {
+    await open({ read: READ });
+    for (const row of screen.getAllByRole('checkbox')) fireEvent.click(row);
+    const button = screen.getByRole('button', { name: '0 Termine importieren' });
+    fireEvent.click(button);
+    const first = await screen.findByText('Kein Termin ausgewählt.');
+    expect(document.activeElement).toBe(first);
+    button.focus();
+    fireEvent.click(button);
+    const second = await screen.findByText('Kein Termin ausgewählt.');
+    await waitFor(() => expect(document.activeElement).toBe(second));
   });
 });
 
@@ -237,6 +351,58 @@ describe('ImportDialog → what the calendar holds already (I4)', () => {
       ['Chorprobe', null],
       ['Kassenprüfung', 'kasse-1@example.org'],
     ]);
+  });
+
+  it('keeps a held row checked as a copy when the list comes back from the editor', async () => {
+    calendarRows.current = { 'cal-home': [{ ical_uid: 'chor-1@example.org' }] };
+    const outcome = { read: structuredClone(HELD_READ) };
+    await openSame(outcome);
+    const held = await screen.findByRole('checkbox', {
+      name: /^Chorprobe, .*, steht schon in „Privat“$/,
+    });
+    fireEvent.click(held);
+    fireEvent.click(screen.getByRole('button', { name: '„Kassenprüfung“ im Editor öffnen' }));
+    cleanup();
+    // The same answer comes again on the way back: taken once, it does not
+    // uncheck what the person checked since.
+    await openSame(outcome);
+    const again = await screen.findByRole('checkbox', {
+      name: /^Chorprobe, .*, steht schon in „Privat“, wird als Kopie importiert$/,
+    });
+    expect((again as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('asks nothing of a calendar that keeps no file’s identity, and says so', async () => {
+    (CALENDARS[0] as { keeps_uid?: boolean }).keeps_uid = false;
+    await open({ read: HELD_READ });
+    expect(
+      await screen.findByText(
+        '„Privat“ behält die Kennung einer Datei nicht: Aperio kann dort nicht erkennen, was ' +
+          'davon schon da ist.',
+      ),
+    ).toBeTruthy();
+    expect(invokeMock.mock.calls.some(([command]) => command === 'get_events')).toBe(false);
+    // Nothing waits for an answer that never comes: the import goes on.
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    await waitFor(() => expect(createRequests()).toHaveLength(2));
+  });
+
+  it('checks rows again and says so when the calendar chosen cannot tell', async () => {
+    calendarRows.current = { 'cal-home': [{ ical_uid: 'chor-1@example.org' }] };
+    (CALENDARS[1] as { keeps_uid?: boolean }).keeps_uid = false;
+    await open({ read: HELD_READ });
+    const chor = await screen.findByRole('checkbox', {
+      name: /^Chorprobe, .*, steht schon in „Privat“$/,
+    });
+    expect((chor as HTMLInputElement).checked).toBe(false);
+    announce.mockClear();
+    fireEvent.change(screen.getByLabelText('In Kalender'), { target: { value: 'cal-work' } });
+    const again = await screen.findByRole('checkbox', { name: /^Chorprobe, [^,]*, [^,]*$/ });
+    expect((again as HTMLInputElement).checked).toBe(true);
+    expect(announce).toHaveBeenCalledWith(
+      '„Arbeit“ behält die Kennung einer Datei nicht: Aperio kann dort nicht erkennen, was ' +
+        'davon schon da ist.',
+    );
   });
 
   it('checks a row again in a calendar that does not hold it', async () => {
@@ -320,6 +486,20 @@ describe('ImportDialog → invitations, as the calendar takes them (I6)', () => 
       keeps_invitation: true,
       send_invitations: false,
     });
+  });
+
+  it('says how a calendar takes the invitations when another is chosen', async () => {
+    (CALENDARS[1] as { invitation_import?: string }).invitation_import = 'kept';
+    await open({ read: READ });
+    const setAside = t('fileImport.invitation.listSetAside', { calendar: 'Privat' });
+    await waitFor(() => expect(announce).toHaveBeenCalledWith(setAside));
+    announce.mockClear();
+    fireEvent.change(screen.getByLabelText('In Kalender'), { target: { value: 'cal-work' } });
+    await waitFor(() =>
+      expect(announce).toHaveBeenCalledWith(
+        t('fileImport.invitation.listKept', { calendar: 'Arbeit' }),
+      ),
+    );
   });
 
   it('imports nothing while it still asks whose they are', async () => {

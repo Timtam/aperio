@@ -125,6 +125,27 @@ describe('useFileImport', () => {
     });
     expect(openFileImport).toHaveBeenCalledWith('drop.ics', { read: answers.read });
   });
+
+  it('hands the host at most one byte past what an import reads', async () => {
+    const { IMPORT_MAX_BYTES } = await import('@aperio/shared');
+    answers.read = { events: [], skipped: [] };
+    const { importDropped } = await hook();
+    const file = new File([new Uint8Array(IMPORT_MAX_BYTES + 4096)], 'film.ics');
+    await importDropped(file);
+    const call = invokeMock.mock.calls.find(([command]) => command === 'read_import_content');
+    const content = (call as unknown as [string, { content: string }])[1].content;
+    expect(atob(content).length).toBe(IMPORT_MAX_BYTES + 1);
+  });
+
+  it('knows the host’s limit', async () => {
+    const { IMPORT_MAX_BYTES } = await import('@aperio/shared');
+    const { readFileSync } = await import('node:fs');
+    const host = readFileSync('crates/host-core/src/file_import.rs', 'utf8');
+    const limit = /pub const MAX_IMPORT_BYTES: u64 = (\d+) \* (\d+) \* (\d+);/.exec(host);
+    expect(limit).not.toBeNull();
+    const [, a, b, c] = limit ?? [];
+    expect(Number(a) * Number(b) * Number(c)).toBe(IMPORT_MAX_BYTES);
+  });
 });
 
 describe('toBase64', () => {
