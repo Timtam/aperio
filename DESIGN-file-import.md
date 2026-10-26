@@ -256,9 +256,34 @@ Zielkalender über den Zeitraum der Termine.
     `invalid_input`, `internal`; `importCoded`), damit
     `importFailureSentence` ihn in der Sprache der Person sagt. Die
     Kotlin-Bindings waren älter als I1 und sind neu erzeugt.
-  - **I5b** Einstieg, Dokumentwähler und Liste (Doppelte, Einladungen).
-  - **I5c** der Editor vorausgefüllt, eine fremde Einladung gesperrt wie
-    eine empfangene.
+  - **I5b** (gebaut) Einstieg, Dokumentwähler und Liste: „Termine
+    importieren …“ unter „Neuer Kalender“ in der Kalenderliste
+    (`useFileImport`); der Dokumentwähler filtert nach den MIME-Typen der
+    Formate (ungemessen, ob jeder Dateimanager `.ics` als `text/calendar`
+    meldet). Was gelesen wurde, entscheidet `readAndPresent`
+    (`mobile/src/state/fileImportFlow.ts`): ein Termin den Editor, im
+    zuletzt benutzten Kalender, sonst im ersten angebotenen; mehrere den
+    Bildschirm `FileImport`; ein Fehler, eine leere Datei oder kein
+    beschreibbarer Kalender einen Satz. Der Bildschirm ist die Liste des
+    Desktops: Kalenderwahl, Doppelte (I4) und Einladungen (I6), eine Zeile
+    als Ankreuzfeld mit „Bearbeiten …“ als Aktion (für Sehende ein Knopf
+    daneben, wie „Verwalten“ in der Kalenderliste). Was der Editor aus der
+    Liste anlegt, meldet er ihr über `importProgress`, weil eine Route keine
+    Rückruffunktion trägt. Die Regeln beider Listen stehen jetzt einmal in
+    `shared/fileImport.ts` (`importedCreate`, `rechosenForHeld`,
+    `heldStatusSentence`, `invitationListSentence`, `importWhen`,
+    `importRowLabel`).
+  - **I5c** (gebaut) der Editor: `importFrom`, `importNote` und die Liste
+    (`importToken`, `importIndex`) als Route-Parameter; Titel „Termin aus
+    Datei“, die Hinweise vor dem ersten Feld, eine fremde Einladung
+    gesperrt wie eine empfangene (`fieldsLocked`; Kalender, Erinnerungen
+    und Farbe bleiben wählbar), die Personen beim Anlegen aus
+    `importEditorPeople` (gemeinsam mit dem Desktop), die UID der Datei,
+    die Zone der Datei. Anders als am Desktop lädt das Handy die Kalender
+    erst nach dem Öffnen: Bis dahin gilt eine fremde Einladung als „wird
+    geprüft“, sonst läse ein Kalender, der Einladungen behält, kurz als
+    einer, der es nicht tut. Kein Test rendert die Bildschirme des Handys;
+    geprüft sind die Regeln (vitest) und `tsc`.
   - **I5d** „Teilen“ und „Öffnen in“.
 - **I6 Fremde Einladungen** (Toni, nach I0): Organisator und Teilnehmer
   bleiben, niemand bekommt etwas. Exchange (gemessen, ICS-3/ICS-4): die

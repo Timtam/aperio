@@ -14,7 +14,7 @@ import {
   importInto,
   importIntoSentence,
   importOwner,
-  importPeople,
+  importEditorPeople,
   madeNoReminderChoice,
   attendeeNotice,
   notifierSentence,
@@ -2215,15 +2215,7 @@ export function EventDialog({
           }
           // Someone else's meeting the calendar keeps goes in as theirs, as the
           // file has it; anything else carries what the form holds.
-          const people =
-            imported && importAs?.kind === 'invitation'
-              ? importPeople(imported, importAs)
-              : {
-                  attendees: form.attendees,
-                  organizer: importAs?.kind === 'new' ? (imported?.organizer ?? null) : null,
-                  organized_elsewhere: false,
-                  keeps_invitation: false,
-                };
+          const people = importEditorPeople(imported, importAs, form.attendees);
           const created = await apiCreateEvent({
             calendar_id: form.calendarId,
             title: trimmedTitle,

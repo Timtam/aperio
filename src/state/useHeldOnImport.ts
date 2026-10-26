@@ -1,14 +1,7 @@
 import { useEffect, useState } from 'react';
-import { alreadyHeld, importSpan, type ImportedEvent } from '@aperio/shared';
+import { alreadyHeld, importSpan, type HeldCheck, type ImportedEvent } from '@aperio/shared';
 
 import { getEvents } from '../api/client';
-
-/** What a calendar already holds of a file's appointments (I4): still being
- *  asked, could not be asked, or which ones, by their place in the file. */
-export type HeldCheck =
-  | { status: 'checking' }
-  | { status: 'failed' }
-  | { status: 'known'; held: ReadonlySet<number> };
 
 const NOTHING_HELD: HeldCheck = { status: 'known', held: new Set() };
 

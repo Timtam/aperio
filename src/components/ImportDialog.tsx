@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  heldSentence,
+  heldStatusSentence,
+  importedCreate,
+  importFailureSentence,
   importInto,
   importOwner,
-  importPeople,
-  importFailureSentence,
+  importRowLabel,
+  importWhen,
+  invitationListSentence,
   joinNames,
+  rechosenForHeld,
   selectableEventCalendars,
   skippedSentence,
   writeErrorMessage,
@@ -156,20 +162,6 @@ function ImportList({
   // comes, and imported as a copy, under a UID of its own, when checked again.
   const held = useHeldOnImport(calendarId, events);
   const isHeld = (index: number) => held.status === 'known' && held.held.has(index);
-  const askedAny = events.some((event) => event.uid?.trim());
-  const heldSentence = useCallback(
-    (rows: ReadonlySet<number>): string =>
-      t('fileImport.held.some', {
-        calendar: calendarName,
-        titles: joinNames(
-          events
-            .filter((_, index) => rows.has(index))
-            .map((event) => t('fileImport.list.quoted', { title: event.title })),
-          t,
-        ),
-      }),
-    [t, calendarName, events],
-  );
   // Each answer is taken once: its rows unchecked, and the rows unchecked for
   // the calendar asked before checked again where this one does not hold them.
   const lastAnswer = useRef<typeof held | null>(null);
@@ -183,24 +175,11 @@ function ImportList({
     }
     const before = uncheckedRows.current;
     uncheckedRows.current = held.held;
-    setChosen((prev) => {
-      const next = new Set(prev);
-      for (const index of before) if (!held.held.has(index)) next.add(index);
-      for (const index of held.held) next.delete(index);
-      return next;
-    });
-    if (held.held.size > 0) announce(heldSentence(held.held));
-  }, [held, announce, calendarName, heldSentence, t]);
+    setChosen((prev) => rechosenForHeld(prev, before, held.held));
+    if (held.held.size > 0) announce(heldSentence(events, held.held, calendarName, t));
+  }, [held, announce, calendarName, events, t]);
 
-  const heldStatus: string | null = !askedAny
-    ? null
-    : held.status === 'checking'
-      ? t('fileImport.held.checking', { calendar: calendarName })
-      : held.status === 'failed'
-        ? t('fileImport.held.checkFailed', { calendar: calendarName })
-        : held.held.size === 0
-          ? t('fileImport.held.none', { calendar: calendarName })
-          : heldSentence(held.held);
+  const heldStatus = heldStatusSentence(events, held, calendarName, t);
 
   const toImport = events
     .map((event, index) => ({ event, index }))
@@ -219,18 +198,7 @@ function ImportList({
     events.some((event) => event.organizer?.trim()),
   );
   const intoOf = (event: ImportedEvent) => importInto(importOwner(event, own), calendar);
-  const invitations = events.map(intoOf).filter((into) => into.kind !== 'new');
-  const invitationSentence =
-    invitations.length === 0 || invitations.some((into) => into.kind === 'checking')
-      ? null
-      : invitations[0].kind === 'set-aside'
-        ? t('fileImport.invitation.listSetAside', { calendar: calendarName })
-        : t(
-            invitations[0].kind === 'invitation' && invitations[0].tentative
-              ? 'fileImport.invitation.listKeptTentative'
-              : 'fileImport.invitation.listKept',
-            { calendar: calendarName },
-          );
+  const invitationSentence = invitationListSentence(events.map(intoOf), calendarName, t);
   const summary = [
     t('fileImport.list.summary', { file: fileName, count: events.length }),
     skippedSentence(read.skipped, t),
@@ -239,16 +207,12 @@ function ImportList({
     .filter(Boolean)
     .join(' ');
 
-  const when = (event: ImportedEvent): string => {
-    const start = new Date(event.start);
-    const text = event.all_day
-      ? t('fileImport.list.allDay', { date: fmt.format(start, 'PPP') })
-      : t('fileImport.list.timed', {
-          date: fmt.format(start, 'PPP'),
-          time: `${fmt.format(start, 'p')}–${fmt.format(new Date(event.end), 'p')}`,
-        });
-    return event.recurrence ? `${text}, ${t('fileImport.list.series')}` : text;
-  };
+  const when = (event: ImportedEvent): string =>
+    importWhen(
+      event,
+      { date: (at) => fmt.format(at, 'PPP'), time: (at) => fmt.format(at, 'p') },
+      t,
+    );
 
   // As the file has it: the editor decides, for the calendar it ends up in,
   // whether an invitation keeps its people.
@@ -285,30 +249,9 @@ function ImportList({
     // rest away as busy.
     for (const { event: entry, index } of toImport) {
       try {
-        await apiCreateEvent(
-          {
-            calendar_id: calendarId,
-            title: entry.title,
-            description: entry.description ?? null,
-            location: entry.location ?? null,
-            start: entry.start,
-            end: entry.end,
-            all_day: entry.all_day,
-            recurrence: entry.recurrence ?? null,
-            color_label: null,
-            reminders: entry.reminders,
-            sound: null,
-            ...importPeople(entry, intoOf(entry)),
-            send_invitations: false,
-            // No alarm in the file: the calendar's defaults, as for a new
-            // appointment nobody chose reminders for.
-            use_calendar_defaults: entry.reminders.length === 0,
-            // The file's UID, so importing it again finds it (I4); one the
-            // calendar holds already is a copy, with a UID of its own.
-            uid_to_keep: isHeld(index) ? null : (entry.uid ?? null),
-          },
-          { preserveRecurrenceZone: true },
-        );
+        await apiCreateEvent(importedCreate(entry, intoOf(entry), calendarId, isHeld(index)), {
+          preserveRecurrenceZone: true,
+        });
         done += 1;
         markImported(index);
       } catch (err) {
@@ -398,17 +341,14 @@ function ImportList({
                       }}
                     />
                     <label htmlFor={boxId}>
-                      {[
-                        event.title,
+                      {importRowLabel(
+                        event,
                         when(event),
-                        isHeld(index)
-                          ? t(chosen.has(index) ? 'fileImport.held.rowCopy' : 'fileImport.held.row', {
-                              calendar: calendarName,
-                            })
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(', ')}
+                        isHeld(index),
+                        chosen.has(index),
+                        calendarName,
+                        t,
+                      )}
                     </label>
                     <button
                       type="button"

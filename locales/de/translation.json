@@ -2624,6 +2624,8 @@
   },
   "fileImport": {
     "toolbarButton": "Importieren …",
+    "calendarListButton": "Termine importieren …",
+    "noCalendar": "Es gibt keinen Kalender, in den Aperio Termine schreiben kann.",
     "dialogTitle": "Termine importieren",
     "editorTitle": "Termin aus Datei",
     "filterAll": "Kalenderdateien",

@@ -63,6 +63,12 @@
   schon vorhandenen UID, und klappt er wirklich nur im Hauptkalender?
   Danach entscheiden, ob gewöhnliche Importe bei Google auch über
   `events.import` gehen, damit ihre UID bleibt und Doppelte erkannt werden.
+  ↳ Entscheiden (gefunden bei I5c): Beide Editoren hängen die Signatur des
+  Kalenders auch an einen importierten Termin, wie an jeden neuen. Bei einer
+  fremden Einladung ersetzt das Formular die Beschreibung danach wieder durch
+  die der Datei; ein Kalenderwechsel kann sie erneut anhängen. Soll ein
+  importierter Termin die Signatur bekommen — nie, nur ein eigener, wie
+  heute?
 - [~] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)  
   ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)

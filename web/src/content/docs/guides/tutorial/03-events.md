@@ -387,7 +387,10 @@ dropping it on suspicion is not Aperio's call.
 An appointment someone sent you as a `.ics` file — an invitation from Outlook,
 Teams or Google, an export from another calendar — comes into Aperio from the
 toolbar's **Import …** (or `Ctrl+O`), or by dropping the file onto the window.
-Aperio itself registers for no file type; it imports only while it runs.
+Aperio itself registers for no file type; it imports only while it runs. On
+the phone, **Import appointments …** in the calendar list (next to **New
+calendar**) opens the file picker. In the list of several, each row is a
+checkbox; **Edit …** is one of its actions (on iOS in the rotor).
 
 - **One appointment** opens the editor, filled in from the file: its day and
   time, its place and description, its reminders, a series with the

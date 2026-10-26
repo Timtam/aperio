@@ -57,6 +57,7 @@ import ContactsSettingsScreen from './screens/ContactsSettingsScreen';
 import AgendaScreen from './screens/AgendaScreen';
 import CalendarEditorModal from './screens/CalendarEditorModal';
 import CalendarsScreen from './screens/CalendarsScreen';
+import FileImportScreen from './screens/FileImportScreen';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import GeneralSettingsScreen from './screens/GeneralSettingsScreen';
@@ -319,6 +320,11 @@ function CalendarStackNav() {
         options={{ title: t('sidebar.calendars') }}
       />
       <CalendarStack.Screen
+        name="FileImport"
+        component={FileImportScreen}
+        options={{ presentation: 'modal', title: t('fileImport.dialogTitle') }}
+      />
+      <CalendarStack.Screen
         name="CalendarEditor"
         component={CalendarEditorModal}
         options={{ presentation: 'modal', title: t('sidebar.calendars') }}
@@ -489,6 +495,11 @@ function SettingsStackNav() {
         name="Calendars"
         component={CalendarsScreen}
         options={{ title: t('sidebar.calendars') }}
+      />
+      <SettingsStack.Screen
+        name="FileImport"
+        component={FileImportScreen}
+        options={{ presentation: 'modal', title: t('fileImport.dialogTitle') }}
       />
       <SettingsStack.Screen
         name="CalendarEditor"

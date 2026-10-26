@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   alreadyHeld,
+  heldSentence,
+  heldStatusSentence,
+  importedCreate,
+  importEditorPeople,
   importFailureSentence,
   importInto,
   importIntoSentence,
   importOwner,
   importPeople,
+  importRowLabel,
   importSpan,
+  importWhen,
+  invitationListSentence,
+  rechosenForHeld,
   skippedSentence,
   type ImportedEvent,
 } from '@aperio/shared';
@@ -168,5 +176,156 @@ describe('alreadyHeld', () => {
     ];
     const rows = [{ ical_uid: ' kept@example.org ' }, { ical_uid: null }, {}, { ical_uid: '  ' }];
     expect([...alreadyHeld(events, rows)]).toEqual([0]);
+  });
+});
+
+describe('importEditorPeople', () => {
+  const form = ['Max <max@example.org>', 'neu@example.org'];
+  it('writes a kept invitation as the file has it, whatever the form holds', () => {
+    expect(
+      importEditorPeople(invitation, { kind: 'invitation', tentative: true }, form),
+    ).toEqual({
+      attendees: ['Max <max@example.org>'],
+      organizer: 'erika@example.org',
+      organized_elsewhere: true,
+      keeps_invitation: true,
+    });
+  });
+  it('carries the form, and names the organizer of the account’s own meeting', () => {
+    expect(importEditorPeople(invitation, { kind: 'new' }, form)).toEqual({
+      attendees: form,
+      organizer: 'erika@example.org',
+      organized_elsewhere: false,
+      keeps_invitation: false,
+    });
+    expect(importEditorPeople(invitation, { kind: 'set-aside' }, [])).toEqual({
+      attendees: [],
+      organizer: null,
+      organized_elsewhere: false,
+      keeps_invitation: false,
+    });
+    expect(importEditorPeople(null, null, form)).toEqual({
+      attendees: form,
+      organizer: null,
+      organized_elsewhere: false,
+      keeps_invitation: false,
+    });
+  });
+});
+
+describe('rechosenForHeld', () => {
+  it('unchecks what the calendar holds and checks again what only the one before held', () => {
+    // Rows 0-3 chosen; row 3 unchecked by the person. The calendar asked before
+    // held rows 1 and 2 (unchecked then); this one holds 2 and 3.
+    const next = rechosenForHeld(new Set([0]), new Set([1, 2]), new Set([2, 3]));
+    expect([...next].sort()).toEqual([0, 1]);
+    // Nothing held: every choice stays.
+    expect([...rechosenForHeld(new Set([0, 2]), new Set(), new Set())].sort()).toEqual([0, 2]);
+  });
+});
+
+describe('heldStatusSentence', () => {
+  const events: ImportedEvent[] = [
+    { ...invitation, title: 'Jour fixe', uid: 'jf@example.org' },
+    { ...invitation, title: 'Budget', uid: 'b@example.org' },
+  ];
+  it('says what is asked, what failed, and names what the calendar holds', () => {
+    expect(heldStatusSentence(events, { status: 'checking' }, 'Arbeit', t)).toBe(
+      'Aperio prüft, was davon schon in „Arbeit“ steht …',
+    );
+    expect(heldStatusSentence(events, { status: 'failed' }, 'Arbeit', t)).toBe(
+      'Aperio konnte nicht prüfen, was davon schon in „Arbeit“ steht.',
+    );
+    expect(heldStatusSentence(events, { status: 'known', held: new Set() }, 'Arbeit', t)).toBe(
+      'Nichts davon steht schon in „Arbeit“.',
+    );
+    expect(
+      heldStatusSentence(events, { status: 'known', held: new Set([0, 1]) }, 'Arbeit', t),
+    ).toBe(
+      'Schon in „Arbeit“: „Jour fixe“ und „Budget“. Abgewählt; wer einen anwählt, importiert ' +
+        'ihn als Kopie.',
+    );
+    expect(heldSentence(events, new Set([1]), 'Arbeit', t)).toMatch(/^Schon in „Arbeit“: „Budget“\./);
+  });
+  it('says nothing for a file that names no UID', () => {
+    const noUid = events.map(({ uid: _uid, ...event }) => event);
+    expect(heldStatusSentence(noUid, { status: 'checking' }, 'Arbeit', t)).toBeNull();
+  });
+});
+
+describe('invitationListSentence', () => {
+  it('says how the calendar takes the invitations, once whose they are is known', () => {
+    const newOne = { kind: 'new' } as const;
+    expect(invitationListSentence([newOne], 'Arbeit', t)).toBeNull();
+    expect(
+      invitationListSentence([newOne, { kind: 'checking' }], 'Arbeit', t),
+    ).toBeNull();
+    expect(
+      invitationListSentence([newOne, { kind: 'invitation', tentative: false }], 'Arbeit', t),
+    ).toBe(t('fileImport.invitation.listKept', { calendar: 'Arbeit' }));
+    expect(
+      invitationListSentence([{ kind: 'invitation', tentative: true }], 'Arbeit', t),
+    ).toBe(t('fileImport.invitation.listKeptTentative', { calendar: 'Arbeit' }));
+    expect(invitationListSentence([{ kind: 'set-aside' }], 'Arbeit', t)).toBe(
+      t('fileImport.invitation.listSetAside', { calendar: 'Arbeit' }),
+    );
+  });
+});
+
+describe('importWhen and importRowLabel', () => {
+  const format = {
+    date: (at: Date) => at.toISOString().slice(0, 10),
+    time: (at: Date) => at.toISOString().slice(11, 16),
+  };
+  it('says the day, the times or all day, and a series', () => {
+    expect(importWhen(invitation, format, t)).toBe('2026-11-18, 13:00–14:00');
+    expect(importWhen({ ...invitation, all_day: true }, format, t)).toBe('2026-11-18, ganztägig');
+    expect(
+      importWhen(
+        { ...invitation, recurrence: { rrule: 'FREQ=WEEKLY', exceptions: [] } },
+        format,
+        t,
+      ),
+    ).toBe('2026-11-18, 13:00–14:00, Serie');
+  });
+  it('names a held row, and the copy it becomes while checked', () => {
+    expect(importRowLabel(invitation, 'morgen', false, true, 'Arbeit', t)).toBe(
+      'Projektbesprechung, morgen',
+    );
+    expect(importRowLabel(invitation, 'morgen', true, false, 'Arbeit', t)).toBe(
+      'Projektbesprechung, morgen, steht schon in „Arbeit“',
+    );
+    expect(importRowLabel(invitation, 'morgen', true, true, 'Arbeit', t)).toBe(
+      'Projektbesprechung, morgen, steht schon in „Arbeit“, wird als Kopie importiert',
+    );
+  });
+});
+
+describe('importedCreate', () => {
+  const entry: ImportedEvent = { ...invitation, uid: 'pb@example.org' };
+  it('writes an invitation as theirs, telling nobody, under the file’s UID', () => {
+    const create = importedCreate(entry, { kind: 'invitation', tentative: false }, 'cal-1', false);
+    expect(create).toMatchObject({
+      calendar_id: 'cal-1',
+      title: 'Projektbesprechung',
+      organizer: 'erika@example.org',
+      organized_elsewhere: true,
+      keeps_invitation: true,
+      attendees: ['Max <max@example.org>'],
+      send_invitations: false,
+      uid_to_keep: 'pb@example.org',
+      use_calendar_defaults: true,
+    });
+  });
+  it('makes a held one a copy, and keeps the file’s alarms as the choice', () => {
+    const withAlarm: ImportedEvent = {
+      ...entry,
+      reminders: [{ kind: { type: 'relative', minutes_before: 15 }, sound: null }],
+    };
+    const create = importedCreate(withAlarm, { kind: 'set-aside' }, 'cal-1', true);
+    expect(create.uid_to_keep).toBeNull();
+    expect(create.use_calendar_defaults).toBe(false);
+    expect(create.attendees).toEqual([]);
+    expect(create.keeps_invitation).toBe(false);
   });
 });

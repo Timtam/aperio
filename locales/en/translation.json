@@ -2624,6 +2624,8 @@
   },
   "fileImport": {
     "toolbarButton": "Import …",
+    "calendarListButton": "Import appointments …",
+    "noCalendar": "There is no calendar Aperio can write appointments to.",
     "dialogTitle": "Import appointments",
     "editorTitle": "Appointment from a file",
     "filterAll": "Calendar files",

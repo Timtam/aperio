@@ -15,9 +15,15 @@ import type {
   ColorLabel,
   EventTimes,
   ExpandedOccurrence,
+  ImportedEvent,
+  ImportInto,
   Reminder,
 } from '@aperio/shared';
 import {
+  importEditorPeople,
+  importInto,
+  importIntoSentence,
+  importOwner,
   allDayFormEndDate,
   applySignature,
   madeNoReminderChoice,
@@ -72,6 +78,9 @@ import {
 } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
+import { markImportedFromEditor } from '../state/importProgress';
+import { useCalendarOwnAddress } from '../state/useCalendarOwnAddress';
+import { useHeldOnImport } from '../state/useHeldOnImport';
 import { TitleField } from '../components/TitleField';
 import { TitleSuggestions } from '../components/TitleSuggestions';
 import {
@@ -231,8 +240,15 @@ function EventEditorScreen({
     initialScope,
     prefillFrom,
     targetPinned,
+    importFrom,
+    importNote,
+    importToken,
+    importIndex,
   } = route.params;
   const editing = eventId != null;
+  // An appointment read from a file (DESIGN-file-import.md, I5): read once,
+  // the editor is not reopened on another file without leaving.
+  const imported = !editing ? (importFrom ?? null) : null;
   // A single occurrence of a recurring series was opened (occurrence = its
   // instant) — offer the edit scope + seed the dates from the occurrence.
   const isOccurrence = occurrence != null;
@@ -250,12 +266,14 @@ function EventEditorScreen({
         eventId != null && isBirthdayEventId(eventId)
           ? t('dialogs.event.birthdayTitle')
           : !editing
-            ? t('dialogs.event.newTitle')
+            ? imported
+              ? t('fileImport.editorTitle')
+              : t('dialogs.event.newTitle')
             : initialScope != null
               ? t(SCOPE_TITLE_KEY[editScope])
               : t('dialogs.event.editTitle'),
     });
-  }, [editScope, editing, eventId, initialScope, navigation, t]);
+  }, [editScope, editing, eventId, imported, initialScope, navigation, t]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -448,6 +466,29 @@ function EventEditorScreen({
     },
     [calendars, calId, t],
   );
+
+  /**
+   * The form an appointment read from a file fills (DESIGN-file-import.md),
+   * all but the calendar and the reminders: its day and time, its series'
+   * rule (the gaps and zone travel with `importFrom` to the save), and its
+   * invitees. Mirrors the desktop's `formFromImport`.
+   */
+  const seedFromImport = useCallback((from: ImportedEvent) => {
+    const start = new Date(from.start);
+    const end = new Date(from.end);
+    setTimes({
+      startDate: dateInput(start),
+      startTime: timeInput(start),
+      endDate: from.all_day ? allDayFormEndDate(start, end) : dateInput(end),
+      endTime: timeInput(end),
+      allDay: from.all_day,
+    });
+    setTitle(from.title);
+    setLocation(from.location ?? '');
+    setDescription(from.description ?? '');
+    setRecurrence(from.recurrence?.rrule ?? null);
+    setAttendees(from.attendees);
+  }, []);
 
   const acceptTitleSuggestion = useCallback(
     (key: string) => {
@@ -744,6 +785,11 @@ function EventEditorScreen({
             setRecurrence(ev.recurrence?.rrule ?? null);
             setAttendees(ev.attendees ?? []);
           }
+        } else if (imported) {
+          // An appointment from a file is the form, all but the calendar; its
+          // alarms are the user's own choice, as on the desktop.
+          seedFromImport(imported);
+          setReminders(imported.reminders.map((r) => ({ ...r, attach: true })));
         } else {
           // New event: a ONE-HOUR slot whose time-of-day adapts to context —
           // anchored on today → the next :00/:30 slot, on another day → 09:00,
@@ -788,6 +834,8 @@ function EventEditorScreen({
     anchor,
     initialTitle,
     initialTime,
+    imported,
+    seedFromImport,
     t,
   ]);
 
@@ -928,6 +976,76 @@ function EventEditorScreen({
     calendars.find((c) => c.id === original?.calendar_id),
     original ?? null,
   );
+  // Whether the calendar picked holds the imported appointment already (I4),
+  // asked again whenever the pick changes: then it is created as a copy.
+  const importedAlone = useMemo(() => (imported ? [imported] : []), [imported]);
+  const importHeld = useHeldOnImport(imported ? calId : '', importedAlone);
+  const importIsHeld = importHeld.status === 'known' && importHeld.held.has(0);
+  const importCalendar = calendars.find((c) => c.id === calId);
+  const importCalendarName = importCalendar?.name ?? '';
+  const importHeldNote = !imported
+    ? null
+    : importIsHeld
+      ? t('fileImport.held.editor', { calendar: importCalendarName })
+      : importHeld.status === 'failed'
+        ? t('fileImport.held.editorFailed', { calendar: importCalendarName })
+        : null;
+  // Whose the imported appointment is, as the calendar picked tells (I6): the
+  // account's own meeting is a new appointment; someone else's an invitation
+  // the calendar keeps — shown as the file has it, locked like a received one,
+  // and locked too while it is still asked — or sets aside, the account's own
+  // without its people.
+  const importOwn = useCalendarOwnAddress(calId, !!imported?.organizer?.trim());
+  const importAs = useMemo((): ImportInto | null => {
+    if (!imported) return null;
+    // Not known before the calendars are: until they load, a calendar that
+    // keeps invitations would read as one that does not, and its sentence
+    // would be said first.
+    if (calendars.length === 0) return { kind: 'checking' };
+    return importInto(importOwner(imported, importOwn), importCalendar);
+  }, [imported, importOwn, importCalendar, calendars.length]);
+  const importLocked = importAs?.kind === 'invitation' || importAs?.kind === 'checking';
+  // The content as it came: the invitation lock adds to the provider's own.
+  // The calendar, the reminders and the colour stay the person's to choose.
+  const fieldsLocked = locked || importLocked;
+  const importAsNote =
+    imported && importAs ? importIntoSentence(imported, importAs, importCalendarName, t) : null;
+  // Each said once when it appears: they come after the editor opened.
+  const saidImportNotes = useRef<{ as: string | null; held: string | null }>({
+    as: null,
+    held: null,
+  });
+  useEffect(() => {
+    if (importAsNote && saidImportNotes.current.as !== importAsNote) {
+      AccessibilityInfo.announceForAccessibilityWithOptions(importAsNote, { queue: true });
+    }
+    saidImportNotes.current.as = importAsNote;
+  }, [importAsNote]);
+  useEffect(() => {
+    if (importHeldNote && saidImportNotes.current.held !== importHeldNote) {
+      AccessibilityInfo.announceForAccessibilityWithOptions(importHeldNote, { queue: true });
+    }
+    saidImportNotes.current.held = importHeldNote;
+  }, [importHeldNote]);
+  // Someone else's meeting, as the notice rules read it: nobody to offer to
+  // tell, as for a received invitation.
+  const noticeOriginal = useMemo(
+    () => original ?? (importLocked ? { organized_elsewhere: true } : null),
+    [original, importLocked],
+  );
+  // The form follows the way an import goes in (I6): an invitation kept as the
+  // file has it, one set aside without its people, a new appointment with
+  // them. After the load, which seeds the form first.
+  const importAsKind = importAs?.kind;
+  const importAsApplied = useRef<string | null>(null);
+  useEffect(() => {
+    if (!imported || loading || !importAsKind || importAsKind === 'checking') return;
+    if (importAsApplied.current === importAsKind) return;
+    importAsApplied.current = importAsKind;
+    if (importAsKind === 'invitation') seedFromImport(imported);
+    else if (importAsKind === 'set-aside') setAttendees([]);
+    else setAttendees(imported.attendees);
+  }, [imported, importAsKind, loading, seedFromImport]);
   // The rule "this and all following" writes, shown in the repeat field as it
   // will be saved (decision 197): moved with a new date (decisions 189,
   // 192-194) — from the occurrence the editor was opened on, or from the start
@@ -1032,6 +1150,26 @@ function EventEditorScreen({
       { t, language: i18n.language },
     );
   })();
+  // The same words for an invitation from a file, which there are no controls
+  // for either (I6).
+  const importRepeatSentence = useMemo(() => {
+    if (!imported) return '';
+    const rrule = imported.recurrence?.rrule?.trim();
+    if (!rrule) return t('dialogs.event.recurrence.none');
+    return recurrenceSummaryText(
+      describeRecurrence({
+        rrule,
+        start: seriesDayKey(imported.start, imported.recurrence?.tzid, imported.all_day),
+        // The series from the file, under no id of any calendar's.
+        last_day: lastOccurrenceDayKey({
+          ...imported,
+          id: '',
+          recurrence: imported.recurrence ?? null,
+        }),
+      }),
+      { t, language: i18n.language },
+    );
+  }, [imported, t, i18n.language]);
   // A day of a locked invitation, written out, as the desktop writes it.
   const readOnlyDay = (dayKey: string): string => {
     const date = new Date(`${dayKey}T00:00:00`);
@@ -1050,6 +1188,18 @@ function EventEditorScreen({
     if (calId.trim().length === 0) {
       setError(t('dialogs.event.calendarRequired'));
       return;
+    }
+    if (imported) {
+      // Whether the calendar holds it already decides whether it keeps its
+      // UID (I4); whose it is decides what it keeps (I6).
+      if (importHeld.status === 'checking') {
+        setError(t('fileImport.held.editorStillChecking', { calendar: importCalendarName }));
+        return;
+      }
+      if (importAs?.kind === 'checking') {
+        setError(t('fileImport.invitation.stillChecking'));
+        return;
+      }
     }
     // All-day: start = local midnight of the start day; end = local midnight of
     // the day AFTER the last picked day (END-EXCLUSIVE, the view convention —
@@ -1085,7 +1235,7 @@ function EventEditorScreen({
     // (76a): `attendeeNotice`, the rule the desktop shares. The host applies
     // it again before it writes.
     const sendInvitations = sendsInvitationsFor(
-      attendeeNotice({ calendar: cal, attendees, original: original ?? null }),
+      attendeeNotice({ calendar: cal, attendees, original: noticeOriginal }),
       notifyAttendees,
     );
     // Reminders for the wire: while `keepRemindersAsDefault` holds, the rows on
@@ -1149,7 +1299,13 @@ function EventEditorScreen({
     };
     // Keep the series' EXDATE exceptions and its zone when editing; an event
     // that becomes a series here gets the device's zone, as a new one does.
-    const recurrenceToSend = editedRecurrence(recurrence, original?.recurrence, allDay);
+    // An imported series keeps the file's gaps and zone, as a series edited
+    // here keeps its own.
+    const recurrenceToSend = editedRecurrence(
+      recurrence,
+      original?.recurrence ?? imported?.recurrence,
+      allDay,
+    );
     setError(null);
     setSaving(true);
     // Only the series' own write asks (decisions 246, 247): a split's cut
@@ -1787,27 +1943,39 @@ function EventEditorScreen({
           return;
         }
       } else {
-        const created = await createEvent({
-          calendar_id: calId,
-          title: trimmedTitle,
-          description: description.trim() || null,
-          location: location.trim() || null,
-          start,
-          end,
-          all_day: allDay,
-          recurrence: recurrenceToSend,
-          color_label: colorToSend,
-          reminders: remindersForWire,
-          sound: null,
-          attendees,
-          send_invitations: sendInvitations,
-          // An untouched editor made no reminder choice: the calendar's
-          // "attach" mode may then write its defaults into the new event.
-          use_calendar_defaults: madeNoReminderChoice(
-            remindersTouchedRef.current,
-            remindersForWire,
-          ),
-        });
+        // Someone else's meeting the calendar keeps goes in as theirs, as the
+        // file has it; anything else carries what the form holds.
+        const people = importEditorPeople(imported, importAs, attendees);
+        const created = await createEvent(
+          {
+            calendar_id: calId,
+            title: trimmedTitle,
+            description: description.trim() || null,
+            location: location.trim() || null,
+            start,
+            end,
+            all_day: allDay,
+            recurrence: recurrenceToSend,
+            color_label: colorToSend,
+            reminders: remindersForWire,
+            sound: null,
+            ...people,
+            send_invitations: sendInvitations,
+            // An untouched editor made no reminder choice: the calendar's
+            // "attach" mode may then write its defaults into the new event.
+            use_calendar_defaults: madeNoReminderChoice(
+              remindersTouchedRef.current,
+              remindersForWire,
+            ),
+            // An imported appointment keeps its file's UID, so importing it
+            // again finds it (I4); one the calendar holds already is a copy,
+            // with a UID of its own.
+            uid_to_keep: importIsHeld ? null : (imported?.uid ?? null),
+          },
+          // An imported series keeps the file's zone, or none, as a copy does
+          // (decision 262).
+          { preserveRecurrenceZone: imported != null },
+        );
         await savePrivate(created);
         if (!isLocalCal) {
           await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
@@ -1816,6 +1984,10 @@ function EventEditorScreen({
         // an edit shouldn't bias future picks, since the user might have just
         // touched a series in a calendar they never write to.
         void writeLastUsedCalendar(calId);
+        // The import list this came from marks its row.
+        if (importToken != null && importIndex != null) {
+          markImportedFromEditor(importToken, importIndex);
+        }
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.created', { title: created.title }),
         );
@@ -1903,6 +2075,14 @@ function EventEditorScreen({
     t,
     i18n.language,
     title,
+    imported,
+    importAs,
+    importHeld.status,
+    importIsHeld,
+    importCalendarName,
+    importToken,
+    importIndex,
+    noticeOriginal,
   ]);
   // The question's yes saves again through the save of the latest render.
   saveRef.current = save;
@@ -1946,7 +2126,7 @@ function EventEditorScreen({
   // the desktop shares (decisions 70a, 74a, 76a).
   const noticeFor = (calendarId: string, people: string[]) => {
     const calendar = calendars.find((c) => c.id === calendarId);
-    const notice = attendeeNotice({ calendar, attendees: people, original: original ?? null });
+    const notice = attendeeNotice({ calendar, attendees: people, original: noticeOriginal });
     // Two sentences, one place they can appear: who informs the attendees, or
     // that nobody will (`scheduling_silenced`, decision 98).
     const spec =
@@ -2048,6 +2228,24 @@ function EventEditorScreen({
         </Text>
       )}
 
+      {/* What the import left out, how the calendar takes it, and whether it
+          holds it already — before the first field, so they are met first. */}
+      {imported && importNote != null && importNote !== '' && (
+        <Text style={styles.hint} accessibilityRole="text">
+          {importNote}
+        </Text>
+      )}
+      {importAsNote != null && (
+        <Text style={styles.hint} accessibilityRole="text">
+          {importAsNote}
+        </Text>
+      )}
+      {importHeldNote != null && (
+        <Text style={styles.hint} accessibilityRole="text">
+          {importHeldNote}
+        </Text>
+      )}
+
       {/* Why the fields below cannot be changed, before the first of them. */}
       {locked && (
         <Text style={styles.invitationHint} accessibilityRole="text">
@@ -2055,7 +2253,7 @@ function EventEditorScreen({
         </Text>
       )}
 
-      {locked ? (
+      {fieldsLocked ? (
         <ReadOnlyField label={t('dialogs.event.fields.title')} value={title} />
       ) : (
         <View style={styles.field}>
@@ -2106,7 +2304,7 @@ function EventEditorScreen({
         </Text>
       )}
 
-      {locked ? (
+      {fieldsLocked ? (
         <>
           {/* The same labels as the editable editor, and an all-day
               invitation has no times, exactly as there. */}
@@ -2232,7 +2430,7 @@ function EventEditorScreen({
         </>
       )}
 
-      {locked ? (
+      {fieldsLocked ? (
         location.trim() !== '' && (
           <ReadOnlyField label={t('dialogs.event.fields.location')} value={location} />
         )
@@ -2248,7 +2446,7 @@ function EventEditorScreen({
         </View>
       )}
 
-      {locked ? (
+      {fieldsLocked ? (
         <>
           {description.trim() !== '' && (
             <ReadOnlyField
@@ -2287,7 +2485,7 @@ function EventEditorScreen({
       {/* Creating one, as opposed to joining one. Only for a meeting Aperio
           owns — an event carrying someone else's link gets Join above and no
           Remove here. */}
-      {!locked && (
+      {!fieldsLocked && (
         <MeetingControls
           event={original}
           onEventChanged={(saved) => {
@@ -2366,10 +2564,10 @@ function EventEditorScreen({
       {/* Recurrence — RRULE builder (freq / interval / weekly days / monthly
           mode / end). Hidden when editing a single occurrence (the standalone
           it becomes is non-recurring); shown for new events + whole-series edits. */}
-      {locked ? (
+      {fieldsLocked ? (
         <ReadOnlyField
           label={t('dialogs.event.recurrence.label')}
-          value={repeatSentence}
+          value={locked ? repeatSentence : importRepeatSentence}
         />
       ) : (
         !(isOccurrence && editScope === 'occurrence') && (
@@ -2456,7 +2654,7 @@ function EventEditorScreen({
           (`attendeeNotice`): a calendar that can invite, an event the account
           organizes, and someone to tell. */}
       <AttendeesEditor
-        readOnly={locked}
+        readOnly={fieldsLocked}
         value={attendees}
         onChange={setAttendees}
         notify={notifyAttendees}
