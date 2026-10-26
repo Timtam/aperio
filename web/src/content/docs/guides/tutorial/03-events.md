@@ -408,8 +408,8 @@ Aperio itself registers for no file type; it imports only while it runs.
   can keep it without telling anyone: its organizer and attendees stay, nobody
   is notified, and the editor shows it as you received it — title, time,
   place, description and attendees as sent; the calendar, the reminders and
-  the colour are yours to choose. Local calendars keep invitations so; the
-  providers follow one by one. In a calendar that cannot, it becomes your own
+  the colour are yours to choose. Local, iCloud and other CalDAV calendars
+  keep invitations so; Exchange and Google follow. In a calendar that cannot, it becomes your own
   appointment, without attendees. The editor and the list say which, for the calendar you
   picked.
 - **A meeting you organize yourself** comes in as a new appointment, with

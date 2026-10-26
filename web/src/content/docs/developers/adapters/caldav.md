@@ -62,6 +62,15 @@ Apple's well-known endpoints.
   and per-resource deletions resolve correctly. The bare `UID` is also the
   event's `ical_uid`, the override's included, whatever the resource is
   called.
+- **An invitation from a file is written as someone else's.** Calendars say
+  `invitation_import: kept`. A create marked `keeps_invitation` writes the
+  file's ORGANIZER with `SCHEDULE-AGENT=CLIENT` and the account's own ATTENDEE
+  row with `SCHEDULE-AGENT=NONE` (RFC 6638 §7.1), adding that row where the
+  file named the account under another address or not at all; the event
+  reads back organized elsewhere and silenced. iCloud sent nothing for such a
+  create, nor for Aperio's reply and delete on it, even without the markers
+  (live run 100518). One whose organizer is the account itself is the
+  account's own meeting.
 - **A kept UID names the resource.** A create with `uid_to_keep` (an import)
   writes that UID and, as for a minted one, names the resource after it, so
   a 412 on `If-None-Match: *` means the calendar holds the appointment. A UID

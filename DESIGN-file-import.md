@@ -280,4 +280,10 @@ Zielkalender über den Zeitraum der Termine.
     nennt keinen Organisator. Antworten kann ein lokaler Kalender niemandem:
     Zusagen und Absagen erscheinen dort nicht (keine eigene Adresse, keine
     Antworten der Teilnehmer).
+  - **I6d** (gebaut) CalDAV: `kept` für jeden Kalender; der Organisator der
+    Datei mit `SCHEDULE-AGENT=CLIENT`, die eigene Zeile mit `NONE`, ergänzt,
+    wo die Datei das Konto nicht nennt; gelesen als fremd und still. Ein
+    Organisator, den die Identität des Kontos nennt, macht das eigene Meeting
+    (ohne Benachrichtigen also ohne Teilnehmer, wie jedes eigene Meeting auf
+    einem einladenden Server).
 - **I7 Aufgaben** aus VTODO, später.

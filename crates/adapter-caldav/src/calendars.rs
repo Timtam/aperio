@@ -18,7 +18,7 @@
 //! how to render events. The VTODO half lives behind the
 //! `TasksFeature` trait and arrives in 6b.3.
 
-use cal_core::{Calendar, ColorSource, ContainerColor};
+use cal_core::{Calendar, ColorSource, ContainerColor, InvitationImport};
 use reqwest::{
     header::{HeaderName, HeaderValue, CONTENT_TYPE},
     Client, Method, StatusCode,
@@ -158,7 +158,9 @@ fn to_calendar(home_url: &Url, entry: ResponseEntry, supports_scheduling: bool) 
         color,
         read_only: false,
         default_sound: None,
-        invitation_import: Default::default(),
+        // Someone else's meeting from a file goes in as theirs, the server
+        // told to stay out (`SCHEDULE-AGENT`, I6).
+        invitation_import: InvitationImport::Kept,
     }
 }
 
@@ -330,6 +332,8 @@ mod tests {
         let color = cals[0].color.as_ref().unwrap();
         assert_eq!(color.hex, "#1e88e5");
         assert_eq!(color.source, ColorSource::Native);
+        // Someone else's meeting from a file goes in as theirs (I6).
+        assert_eq!(cals[0].invitation_import, InvitationImport::Kept);
     }
 
     #[tokio::test]

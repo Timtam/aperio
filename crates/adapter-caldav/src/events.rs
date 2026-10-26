@@ -36,7 +36,8 @@ use crate::mapping::{
     same_calendar_user, strip_mailto_scheme, PriorAlarms, SlotRefusal,
 };
 use crate::scheduling::{
-    apply_to_block, attendee_copy, attendee_line, invitees_of, plan_block, PeopleChange, WriteCtx,
+    apply_to_block, attendee_copy, attendee_line, invitees_of, plan_block,
+    unscheduled_attendee_line, PeopleChange, WriteCtx,
 };
 use crate::xml::{parse_multistatus, ResponseEntry};
 use cal_core::attendee::same_address;
@@ -180,7 +181,12 @@ pub async fn create_event(
     } else {
         resource_url(calendar_url, &Uuid::new_v4().to_string())?
     };
-    let (body, written, organizer) = new_event_body(&uid, &event, ctx);
+    let NewBody {
+        body,
+        written,
+        organizer,
+        someone_elses,
+    } = new_event_body(&uid, &event, ctx);
 
     let mut headers = auth_header(credentials)?;
     headers.insert(
@@ -229,7 +235,7 @@ pub async fn create_event(
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
-        organized_elsewhere: false,
+        organized_elsewhere: someone_elses,
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
@@ -257,20 +263,47 @@ pub async fn create_event(
         attendee_responses: Vec::new(),
         // Freshly created by us — never a cancellation.
         cancelled: false,
-        scheduling_silenced: false,
+        // A kept invitation tells the server to stay out (`SCHEDULE-AGENT`).
+        scheduling_silenced: someone_elses,
         ical_uid: Some(uid),
     })
 }
 
+/// A new event's resource and what it says about the meeting.
+struct NewBody {
+    body: String,
+    /// The invitees it names.
+    written: Vec<String>,
+    /// Its organizer as Aperio shows it, when it is a meeting.
+    organizer: Option<String>,
+    /// It is a meeting someone else organizes, kept from a file (I6).
+    someone_elses: bool,
+}
+
 /// A new event's body, the invitees it names, and its organizer as Aperio
 /// shows it when it is a meeting.
-fn new_event_body(
-    uid: &str,
-    event: &NewEvent,
-    ctx: &WriteCtx,
-) -> (String, Vec<String>, Option<String>) {
+///
+/// The account's own meeting names the account as its ORGANIZER and its
+/// invitees only where the server schedules and the create asks it to tell
+/// them; otherwise it is a plain appointment. A meeting someone else
+/// organizes, imported from a file ([`NewEvent::keeps_invitation`], I6), is
+/// written as theirs: their ORGANIZER with `SCHEDULE-AGENT=CLIENT` and the
+/// account's own row with `SCHEDULE-AGENT=NONE` (RFC 6638 §7.1), so the server
+/// tells nobody — iCloud told nobody even without them (live run 100518).
+/// One whose organizer is the account itself is the account's own meeting.
+fn new_event_body(uid: &str, event: &NewEvent, ctx: &WriteCtx) -> NewBody {
     let vcal = new_event_to_ical(uid, event);
     let own = ctx.identity.clone().unwrap_or_default();
+    if event.keeps_invitation {
+        let organizer = event
+            .organizer
+            .as_deref()
+            .map(|o| strip_mailto_scheme(o).unwrap_or(o).trim())
+            .filter(|o| !o.is_empty());
+        if let Some(organizer) = organizer.filter(|o| !own.names(o, None)) {
+            return kept_invitation_body(&vcal, organizer, event, &own, ctx);
+        }
+    }
     let invitees = invitees_of(&event.attendees, &own);
     match ctx.organizer_address.as_deref() {
         Some(organizer) if ctx.schedules && event.send_invitations && !invitees.is_empty() => {
@@ -283,9 +316,68 @@ fn new_event_body(
                 .unwrap_or(organizer)
                 .trim()
                 .to_string();
-            (splice_into_vevent(&vcal, &lines), invitees, Some(shown))
+            NewBody {
+                body: splice_into_vevent(&vcal, &lines),
+                written: invitees,
+                organizer: Some(shown),
+                someone_elses: false,
+            }
         }
-        _ => (vcal, Vec::new(), None),
+        _ => NewBody {
+            body: vcal,
+            written: Vec::new(),
+            organizer: None,
+            someone_elses: false,
+        },
+    }
+}
+
+/// [`new_event_body`] for someone else's meeting: their ORGANIZER, the
+/// invitees as the file has them, and the account among them — added when the
+/// file named it under another address or not at all (Toni, 2026-10-26).
+fn kept_invitation_body(
+    vcal: &str,
+    organizer: &str,
+    event: &NewEvent,
+    own: &OwnIdentity,
+    ctx: &WriteCtx,
+) -> NewBody {
+    let ending = line_ending(vcal);
+    let mut lines = fold(
+        &format!("ORGANIZER;SCHEDULE-AGENT=CLIENT:mailto:{organizer}"),
+        ending,
+    );
+    let mut written = Vec::new();
+    let mut named_own = false;
+    for entry in &event.attendees {
+        let address = cal_core::attendee::parse(entry).1;
+        if address.trim().is_empty() || same_address(&address, organizer) {
+            continue;
+        }
+        if own.names(&address, None) {
+            named_own = true;
+            lines.push_str(&unscheduled_attendee_line(entry, ending));
+        } else {
+            lines.push_str(&attendee_line(entry, ending));
+        }
+        written.push(entry.clone());
+    }
+    if !named_own {
+        if let Some(own_address) = ctx
+            .organizer_address
+            .as_deref()
+            .map(|a| strip_mailto_scheme(a).unwrap_or(a).trim())
+            .filter(|a| !a.is_empty())
+        {
+            lines.push_str(&unscheduled_attendee_line(own_address, ending));
+            written.push(own_address.to_string());
+        }
+    }
+    NewBody {
+        body: splice_into_vevent(vcal, &lines),
+        written,
+        organizer: Some(organizer.to_string()),
+        someone_elses: true,
     }
 }
 
@@ -1936,6 +2028,122 @@ END:VCALENDAR</c:calendar-data>
             };
             assert!(message.starts_with("uid-taken"), "{status}: {message}");
         }
+    }
+
+    /// The write context of an iCloud account (M1, anonymised).
+    fn kept_ctx() -> WriteCtx {
+        WriteCtx {
+            identity: Some(ical_mapping::fixtures::icloud_identity()),
+            schedules: true,
+            organizer_address: Some("mailto:toni@example.org".into()),
+            writes_color: false,
+        }
+    }
+
+    fn kept_invitation(attendees: &[&str], organizer: &str) -> NewEvent {
+        NewEvent {
+            organizer: Some(organizer.into()),
+            organized_elsewhere: true,
+            keeps_invitation: true,
+            attendees: attendees.iter().map(|a| a.to_string()).collect(),
+            ..sample_new_event()
+        }
+    }
+
+    /// The lines of a body, unfolded (RFC 5545 §3.1), ORGANIZER and ATTENDEE
+    /// only.
+    fn people_lines(body: &str) -> Vec<String> {
+        body.replace("\r\n ", "")
+            .lines()
+            .filter(|l| l.starts_with("ORGANIZER") || l.starts_with("ATTENDEE"))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Someone else's meeting from a file (I6) goes in as theirs: their
+    /// ORGANIZER marked `SCHEDULE-AGENT=CLIENT`, the account's own row `NONE`,
+    /// so the server tells nobody; never the organizer among the invitees.
+    #[test]
+    fn a_kept_invitation_is_written_as_someone_elses() {
+        let made = new_event_body(
+            "uid-1",
+            &kept_invitation(
+                &[
+                    "Toni <toni@example.org>",
+                    "gast@example.net",
+                    "boss@example.net",
+                ],
+                "mailto:boss@example.net",
+            ),
+            &kept_ctx(),
+        );
+        assert_eq!(
+            people_lines(&made.body),
+            [
+                "ORGANIZER;SCHEDULE-AGENT=CLIENT:mailto:boss@example.net",
+                "ATTENDEE;CN=Toni;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;SCHEDULE-AGENT=NONE:mailto:toni@example.org",
+                "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:gast@example.net",
+            ]
+        );
+        assert_eq!(
+            made.written,
+            ["Toni <toni@example.org>", "gast@example.net"]
+        );
+        assert_eq!(made.organizer.as_deref(), Some("boss@example.net"));
+        assert!(made.someone_elses);
+    }
+
+    /// An invitation sent to another address of the account's goes in with
+    /// the account added, so it can answer it (Toni, 2026-10-26).
+    #[test]
+    fn a_kept_invitation_names_the_account_where_the_file_does_not() {
+        let made = new_event_body(
+            "uid-1",
+            &kept_invitation(&["toni@work.example"], "boss@example.net"),
+            &kept_ctx(),
+        );
+        assert_eq!(
+            people_lines(&made.body)[2],
+            "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;SCHEDULE-AGENT=NONE:mailto:toni@example.org"
+        );
+        assert_eq!(made.written, ["toni@work.example", "toni@example.org"]);
+    }
+
+    /// A meeting the account organizes itself is its own, whatever the mark:
+    /// no foreign ORGANIZER, and nobody is told without asking.
+    #[test]
+    fn the_accounts_own_meeting_is_not_kept_as_an_invitation() {
+        let made = new_event_body(
+            "uid-1",
+            &kept_invitation(&["gast@example.net"], "Toni@Example.org"),
+            &kept_ctx(),
+        );
+        assert!(people_lines(&made.body).is_empty(), "{}", made.body);
+        assert!(!made.someone_elses);
+    }
+
+    /// The create hands back what it wrote: someone else's meeting, silenced.
+    #[tokio::test]
+    async fn a_created_kept_invitation_reads_as_someone_elses() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("PUT", mockito::Matcher::Any)
+            .with_status(201)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let created = create_event(
+            &client(),
+            &cal_url,
+            kept_invitation(&["gast@example.net"], "boss@example.net"),
+            &creds(&server.url()),
+            &kept_ctx(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.organizer.as_deref(), Some("boss@example.net"));
+        assert!(created.organized_elsewhere && created.scheduling_silenced);
+        assert_eq!(created.attendees, ["gast@example.net", "toni@example.org"]);
     }
 
     /// A minted UID cannot be taken: a 412 on the first attempt is the plain
