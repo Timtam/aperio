@@ -205,7 +205,10 @@ The endpoint is discovered or user-supplied.
 - **The iCalendar UID comes with the details.** The detail `GetItem` asks for
   `calendar:UID` (live rounds ICS to ICS-4 read it there); `SyncFolderItems`
   does not, as nobody measured whether it may. A row has its `ical_uid` once
-  enriched, and a changed occurrence takes its series'.
+  enriched, and a changed occurrence takes its series'. A create with
+  `uid_to_keep` (an import) writes `<t:UID>` before `<t:Start>`, which
+  Exchange keeps (live round ICS, ICS-6). Whether it refuses a UID the
+  calendar already holds is unmeasured; the import marks those first.
 - **The organizer is listed as an attendee.** Exchange puts the organizer
   into `RequiredAttendees` with `ResponseType` "Organizer"; for an appointment
   made in Outlook it is the only row. The adapter drops that row by its flag

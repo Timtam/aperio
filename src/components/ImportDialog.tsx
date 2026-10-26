@@ -219,6 +219,8 @@ function ImportList({
             // No alarm in the file: the calendar's defaults, as for a new
             // appointment nobody chose reminders for.
             use_calendar_defaults: entry.reminders.length === 0,
+            // The file's UID, so importing it again finds it (I4).
+            uid_to_keep: entry.uid ?? null,
           },
           { preserveRecurrenceZone: true },
         );

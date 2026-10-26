@@ -2104,6 +2104,17 @@ pub(crate) fn new_event_to_calendar_item_xml_in<D: TimeZone>(
     } else {
         out.push_str("          <t:ReminderIsSet>false</t:ReminderIsSet>\n");
     }
+    // An imported appointment keeps its file's UID (I4); Exchange keeps one
+    // given on create (live round ICS, ICS-6). Its place is the first of the
+    // calendar fields, before Start.
+    if let Some(uid) = event
+        .uid_to_keep
+        .as_deref()
+        .map(str::trim)
+        .filter(|uid| !uid.is_empty())
+    {
+        out.push_str(&format!("          <t:UID>{}</t:UID>\n", escape_xml(uid)));
+    }
     // An all-day event goes out as UTC midnights of the device's days: Aperio
     // creates it without a zone, so Exchange stores it in UTC
     // ([`all_day_boundary`] in UTC). Timed events write the instant verbatim.
@@ -5182,6 +5193,33 @@ mod tests {
         assert!(!xml.contains("<t:Body"));
         assert!(!xml.contains("<t:Location>"));
         assert!(xml.contains("<t:ReminderIsSet>false</t:ReminderIsSet>"));
+    }
+
+    /// An imported appointment keeps its file's UID (I4), written before Start
+    /// as the schema orders it; a create without one writes none, and the
+    /// event the create hands back carries the one written.
+    #[test]
+    fn a_kept_uid_is_written_before_the_start() {
+        let mut ev = new_event_min("Imported");
+        let xml = new_event_to_calendar_item_xml(&ev).unwrap();
+        assert!(!xml.contains("<t:UID>"), "{xml}");
+        ev.uid_to_keep = Some("  ".into());
+        let xml = new_event_to_calendar_item_xml(&ev).unwrap();
+        assert!(!xml.contains("<t:UID>"), "a blank one is none: {xml}");
+        ev.uid_to_keep = Some(" a&b@example.test ".into());
+        let xml = new_event_to_calendar_item_xml(&ev).unwrap();
+        let uid = xml
+            .find("<t:UID>a&amp;b@example.test</t:UID>")
+            .expect("the UID");
+        assert!(uid < xml.find("<t:Start>").unwrap(), "{xml}");
+        let created = crate::api::build_event_from_new(
+            &ev,
+            "cal",
+            EventIdKind::Single,
+            "ITEM",
+            Some("CK".into()),
+        );
+        assert_eq!(created.ical_uid.as_deref(), Some("a&b@example.test"));
     }
 
     #[test]

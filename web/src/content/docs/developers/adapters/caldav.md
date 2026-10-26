@@ -60,6 +60,13 @@ Apple's well-known endpoints.
   and per-resource deletions resolve correctly. The bare `UID` is also the
   event's `ical_uid`, the override's included, whatever the resource is
   called.
+- **A kept UID names the resource.** A create with `uid_to_keep` (an import)
+  writes that UID and, as for a minted one, names the resource after it, so
+  a 412 on `If-None-Match: *` means the calendar holds the appointment. A UID
+  that is no plain name (anything but letters, digits, `-_.~@`, or longer
+  than 200 bytes) goes into a fresh `{uuid}.ics` instead, and the id is the
+  composite `{href}|{uid}`. The server's own `no-uid-conflict` (RFC 4791, 403
+  or 409) says the same. Each is refused as `uid-taken`.
 - **Subtasks ride `RELATED-TO`.** A VTODO's parameter-less `RELATED-TO`
   (RELTYPE defaults to PARENT; CHILD/SIBLING entries are ignored) carries
   the parent's **bare UID** on the wire; the read path resolves it to the

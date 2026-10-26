@@ -191,7 +191,12 @@ Zielkalender über den Zeitraum der Termine.
   - **I4a** Lesen (gebaut): `Event::ical_uid` bei CalDAV, Exchange, Google,
     Graph und lokal, durch Abgleich, Schnappschuss und Zwischenspeicher
     (Generation 8, Exchange-Parser 6).
-  - **I4b** Schreiben: `NewEvent::uid_to_keep` bei CalDAV, Exchange und lokal.
+  - **I4b** Schreiben (gebaut): `NewEvent::uid_to_keep` bei CalDAV (die UID
+    benennt die Ressource; eine ungewöhnliche bekommt eine eigene),
+    Exchange (`t:UID`) und lokal; Editor und Liste geben die UID der Datei
+    mit. Steht sie schon im Kalender, lehnt CalDAV ab, und Aperio sagt es:
+    `WriteRefusal::UidTaken` („Dieser Termin steht schon in diesem
+    Kalender“).
   - **I4c** Doppelte in Liste und Editor.
 - **I5 Handy.** „Termine importieren …“ in der Kalenderliste mit
   Dokumentwähler; „Teilen“ und „Öffnen in“: iOS als

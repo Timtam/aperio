@@ -1744,6 +1744,7 @@
         "changedOnServer": "Dieser Termin wurde auf dem Server geändert, seit du ihn geöffnet hast. Es wurde nichts geändert. Öffne ihn erneut, um den aktuellen Stand zu sehen.",
         "deletionsNotKept": "Der Kalender hat die neue Serie nicht mit ihren gelöschten Terminen übernommen, deshalb hat Aperio sie wieder entfernt. Es wurde nichts geändert.",
         "deletionsNotKeptTime": "Die gelöschten Termine der neuen Serie einzeln wieder zu löschen, hat zu lange gedauert, deshalb hat Aperio die Serie wieder entfernt. Es wurde nichts geändert.",
+        "uidTaken": "Dieser Termin steht schon in diesem Kalender. Es wurde nichts angelegt.",
         "invitationsCancelledToo": "Falls Einladungen verschickt wurden, haben die Eingeladenen auch die Absage bekommen.",
         "createdMayStand": "Im Kalender wurde eine neue Serie angelegt, ließ sich aber nicht fertigstellen, und Aperio konnte sie nicht wieder entfernen. Sie steht dort möglicherweise zusätzlich. Bitte prüfe den Kalender.",
         "invitationsMayHaveGone": "Möglicherweise haben die Eingeladenen eine Einladung bekommen.",
@@ -1761,6 +1762,7 @@
           "changedOnServer": "sie wurde auf dem Server geändert, seit du sie geöffnet hast",
           "deletionsNotKeptTime": "ihre gelöschten Termine einzeln wieder zu löschen, hat zu lange gedauert",
           "deletionsNotKept": "der Kalender hat ihre gelöschten Termine nicht übernommen",
+          "uidTaken": "er steht schon in diesem Kalender",
           "createdMayStand": "eine neue Serie wurde angelegt, ließ sich aber weder fertigstellen noch wieder entfernen"
         }
       },

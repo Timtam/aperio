@@ -115,6 +115,18 @@ describe('ImportDialog → several appointments', () => {
     expect(invalidateData).toHaveBeenCalled();
   });
 
+  it("keeps each appointment's UID from the file, so importing it again finds it", async () => {
+    await open({
+      read: {
+        events: [event('Chorprobe', { uid: 'chor-1@example.org' }), event('Ohne Kennung')],
+        skipped: [],
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    await waitFor(() => expect(createRequests()).toHaveLength(2));
+    expect(createRequests().map((r) => r.uid_to_keep)).toEqual(['chor-1@example.org', null]);
+  });
+
   it('leaves out what was unchecked', async () => {
     await open({ read: READ });
     fireEvent.click(screen.getByRole('checkbox', { name: /Chorprobe/ }));

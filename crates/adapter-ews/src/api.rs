@@ -2025,7 +2025,14 @@ pub(crate) fn build_event_from_new(
         // Freshly created/updated by us — never a cancellation.
         cancelled: false,
         scheduling_silenced: false,
-        ical_uid: None,
+        // The UID a create wrote (`new_event_to_calendar_item_xml_in`); a
+        // minted one comes with the next read.
+        ical_uid: new
+            .uid_to_keep
+            .as_deref()
+            .map(str::trim)
+            .filter(|uid| !uid.is_empty())
+            .map(str::to_string),
     }
 }
 

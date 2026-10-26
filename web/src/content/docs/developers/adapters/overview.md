@@ -137,7 +137,9 @@ when caching:
 > through `NewEvent::uid_to_keep`, named apart on purpose: the surfaces build
 > creates by spreading a read event, and a copy, a split's tail or a carved-out
 > occurrence must never take the source's UID. Only an import sets it; a move
-> to another calendar gets a new one. So far the local store keeps it. An
+> to another calendar gets a new one. CalDAV, Exchange and the local store
+> keep it; Google and Graph mint their own. Where the calendar already holds
+> the UID, the create is refused with `cal_core::WriteRefusal::UidTaken`. An
 > adapter that starts reading a field the cache holds needs a
 > `CACHE_GENERATION` bump (`host_core::cache`), or unchanged rows never get it
 > (generation 8 did this for the UID).

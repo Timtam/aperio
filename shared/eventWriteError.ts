@@ -29,6 +29,7 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
   'copy-unreadable': 'dialogs.event.writeError.copyUnreadable',
   'exceptions-would-be-lost': 'dialogs.event.writeError.exceptionsWouldBeLost',
   'deletions-not-kept': 'dialogs.event.writeError.deletionsNotKept',
+  'uid-taken': 'dialogs.event.writeError.uidTaken',
 };
 
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];
@@ -46,6 +47,7 @@ const REFUSAL_REASON_KEYS: Record<WriteRefusal, string> = {
   'copy-unreadable': 'dialogs.event.writeError.reason.copyUnreadable',
   'exceptions-would-be-lost': 'dialogs.event.writeError.reason.exceptionsWouldBeLost',
   'deletions-not-kept': 'dialogs.event.writeError.reason.deletionsNotKept',
+  'uid-taken': 'dialogs.event.writeError.reason.uidTaken',
 };
 
 /** The sentence each leftover reads as (`cal_core::WriteLeftover`): something

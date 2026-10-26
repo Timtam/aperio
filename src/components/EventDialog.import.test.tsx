@@ -120,6 +120,8 @@ describe('EventDialog → an appointment from a file', () => {
     expect(request.start).toBe('2026-11-02T09:00:00.000Z');
     expect(request.calendar_id).toBe('cal-local');
     expect(request.reminders).toEqual(SERIES.reminders);
+    // The file's UID, so importing it again finds it (I4).
+    expect(request.uid_to_keep).toBe('teams-series-0001@example.org');
     await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
   });
 

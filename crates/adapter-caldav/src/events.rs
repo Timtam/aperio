@@ -161,8 +161,25 @@ pub async fn create_event(
     credentials: &Credentials,
     ctx: &WriteCtx,
 ) -> CaldavResult<Event> {
-    let uid = format!("{}@aperio", Uuid::new_v4());
-    let resource = resource_url(calendar_url, &uid)?;
+    // An imported appointment keeps its file's UID (I4); every other create
+    // mints one. A UID that is not a plain slug — a `/` some servers refuse
+    // encoded in a path, a `|` the id would split at — names a fresh resource
+    // instead, and the id then says which.
+    let given = event
+        .uid_to_keep
+        .as_deref()
+        .map(str::trim)
+        .filter(|uid| !uid.is_empty())
+        .map(str::to_string);
+    let uid = given
+        .clone()
+        .unwrap_or_else(|| format!("{}@aperio", Uuid::new_v4()));
+    let own_slug = given.as_deref().is_none_or(is_plain_slug);
+    let resource = if own_slug {
+        resource_url(calendar_url, &uid)?
+    } else {
+        resource_url(calendar_url, &Uuid::new_v4().to_string())?
+    };
     let (body, written, organizer) = new_event_body(&uid, &event, ctx);
 
     let mut headers = auth_header(credentials)?;
@@ -191,10 +208,22 @@ pub async fn create_event(
     let etag = if retried && response.status() == StatusCode::PRECONDITION_FAILED {
         // First PUT landed; a 412 carries no ETag — the next read refreshes it.
         None
+    } else if given.is_some() && response.status() == StatusCode::PRECONDITION_FAILED {
+        // Not a minted UID: the resource named by it is there already, so the
+        // calendar holds this appointment.
+        return Err(CaldavError::Http {
+            status: StatusCode::PRECONDITION_FAILED.as_u16(),
+            message: cal_core::WriteRefusal::UidTaken.message(&uid),
+        });
     } else {
         check_write(response).await?
     };
     let now = Utc::now();
+    let id = if own_slug {
+        uid.clone()
+    } else {
+        format!("{}|{uid}", resource.path())
+    };
 
     Ok(Event {
         keep_attendees: false,
@@ -205,7 +234,7 @@ pub async fn create_event(
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
         deletions_not_restored: Vec::new(),
-        id: uid.clone(),
+        id,
         calendar_id: calendar_url.to_string(),
         title: event.title,
         description: event.description,
@@ -1539,6 +1568,17 @@ fn resource_url_for_event(calendar_url: &Url, event_id: &str) -> CaldavResult<Ur
     resource_url(calendar_url, uid)
 }
 
+/// Whether a UID makes a resource name of its own: the characters a minted
+/// one uses, and short enough for any server's path. The id of a resource
+/// named by its UID is the bare UID, which must not hold the `|` the
+/// composite id splits at.
+fn is_plain_slug(uid: &str) -> bool {
+    uid.len() <= 200
+        && uid
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'@'))
+}
+
 /// Tiny percent-encoder for slug characters. We avoid pulling in
 /// `percent-encoding` for one call site — only `@`, `:` and a few
 /// other ASCII punctuation marks are at risk in practical UIDs.
@@ -1582,10 +1622,25 @@ async fn check_write(response: reqwest::Response) -> CaldavResult<Option<String>
                 Some(condition) if condition == "allowed-attendee-scheduling-object-change" => {
                     format!("reply-only-invitation: {condition}")
                 }
+                // RFC 4791 §5.3.2.1: another resource in the calendar holds
+                // the UID a create asked to keep (an import).
+                Some(condition) if condition == "no-uid-conflict" => {
+                    cal_core::WriteRefusal::UidTaken.message(&condition)
+                }
                 Some(condition) => format!("server-refused: {condition}"),
                 None => "server-refused: HTTP 403".to_string(),
             },
         ));
+    }
+    // The same precondition answered as 409, which RFC 4791 allows too.
+    if status == StatusCode::CONFLICT {
+        let head: String = body.chars().take(4096).collect();
+        if crate::xml::dav_error_condition(&head).as_deref() == Some("no-uid-conflict") {
+            return Err(CaldavError::Http {
+                status: status.as_u16(),
+                message: cal_core::WriteRefusal::UidTaken.message("no-uid-conflict"),
+            });
+        }
     }
     Err(CaldavError::Http {
         status: status.as_u16(),
@@ -1772,6 +1827,145 @@ END:VCALENDAR</c:calendar-data>
         assert_eq!(created.ical_uid.as_deref(), Some(created.id.as_str()));
         assert_eq!(created.etag.as_deref(), Some("\"server-etag-1\""));
         assert_eq!(created.calendar_id, cal_url.to_string());
+    }
+
+    fn imported(uid: &str) -> NewEvent {
+        NewEvent {
+            uid_to_keep: Some(uid.into()),
+            ..sample_new_event()
+        }
+    }
+
+    /// An imported appointment keeps its file's UID (I4): it names the
+    /// resource, as a minted one does, and the event.
+    #[tokio::test]
+    async fn create_event_keeps_a_given_uid() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("PUT", "/calendars/alice/work/imported-1%40example.test.ics")
+            .match_header("if-none-match", "*")
+            .match_body(mockito::Matcher::Regex(
+                "UID:imported-1@example.test\r\n".into(),
+            ))
+            .with_status(201)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let created = create_event(
+            &client(),
+            &cal_url,
+            imported(" imported-1@example.test "),
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap();
+        m.assert_async().await;
+        assert_eq!(created.id, "imported-1@example.test");
+        assert_eq!(created.ical_uid.as_deref(), Some("imported-1@example.test"));
+    }
+
+    /// A UID that is no plain resource name — a `/`, which some servers refuse
+    /// encoded in a path, a `|` the id splits at — goes into a resource of its
+    /// own name, and the id says which.
+    #[tokio::test]
+    async fn create_event_puts_an_odd_uid_into_a_fresh_resource() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/[0-9a-f-]{36}\.ics$".into()),
+            )
+            .match_body(mockito::Matcher::Regex("UID:outlook/1|2\r\n".into()))
+            .with_status(201)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let created = create_event(
+            &client(),
+            &cal_url,
+            imported("outlook/1|2"),
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap();
+        m.assert_async().await;
+        let (href, uid) = decode_event_id(&created.id);
+        assert!(
+            href.is_some_and(|h| h.starts_with("/calendars/alice/work/") && h.ends_with(".ics")),
+            "{}",
+            created.id
+        );
+        assert_eq!(uid, "outlook/1|2");
+        assert_eq!(created.ical_uid.as_deref(), Some("outlook/1|2"));
+    }
+
+    /// The calendar holds the appointment already: the resource its UID names
+    /// is there (412), or the server finds the UID in another one (RFC 4791
+    /// `no-uid-conflict`, as 403 or 409). Each says so, in the core's words.
+    #[tokio::test]
+    async fn create_event_says_when_the_kept_uid_is_taken() {
+        let condition = r#"<?xml version="1.0"?><d:error xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><c:no-uid-conflict><d:href>/calendars/alice/work/other.ics</d:href></c:no-uid-conflict></d:error>"#;
+        for (status, body, uid) in [
+            (412, "", "imported-1@example.test"),
+            (403, condition, "outlook/1|2"),
+            (409, condition, "outlook/1|2"),
+        ] {
+            let mut server = Server::new_async().await;
+            server
+                .mock("PUT", mockito::Matcher::Any)
+                .with_status(status)
+                .with_body(body)
+                .create_async()
+                .await;
+            let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+            let err = create_event(
+                &client(),
+                &cal_url,
+                imported(uid),
+                &creds(&server.url()),
+                &WriteCtx::default(),
+            )
+            .await
+            .unwrap_err();
+            let message = match &err {
+                CaldavError::Http { message, .. } | CaldavError::Forbidden(message) => message,
+                other => panic!("{status}: {other:?}"),
+            };
+            assert!(message.starts_with("uid-taken"), "{status}: {message}");
+        }
+    }
+
+    /// A minted UID cannot be taken: a 412 on the first attempt is the plain
+    /// precondition failure it always was.
+    #[tokio::test]
+    async fn a_minted_uid_is_never_said_to_be_taken() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("PUT", mockito::Matcher::Any)
+            .with_status(412)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let err = create_event(
+            &client(),
+            &cal_url,
+            sample_new_event(),
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap_err();
+        match err {
+            CaldavError::Http {
+                status: 412,
+                message,
+            } => {
+                assert!(!message.starts_with("uid-taken"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     /// The iCloud stale-keep-alive shape: the first PUT's connection dies

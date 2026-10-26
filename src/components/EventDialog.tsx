@@ -2125,6 +2125,9 @@ export function EventDialog({
               remindersTouchedRef.current,
               remindersForWire,
             ),
+            // An imported appointment keeps its file's UID, so importing it
+            // again finds it (I4).
+            uid_to_keep: imported?.uid ?? null,
             // An imported series keeps the file's zone, or none, as a copy
             // does (decision 262).
           }, { preserveRecurrenceZone: imported != null });
