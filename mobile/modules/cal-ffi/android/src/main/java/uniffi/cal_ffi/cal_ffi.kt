@@ -1072,6 +1072,8 @@ external fun uniffi_cal_ffi_checksum_method_host_event_local_reminders_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_event_meeting_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_file_import_formats_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_forget_sync_device(
@@ -1143,6 +1145,8 @@ external fun uniffi_cal_ffi_checksum_method_host_preview_sync_target_values_json
 external fun uniffi_cal_ffi_checksum_method_host_push_now(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_query_free_busy_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_read_import_file_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_errors_json(
 ): Short
@@ -1476,6 +1480,8 @@ external fun uniffi_cal_ffi_fn_method_host_event_local_reminders_json(`ptr`: Lon
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_event_meeting_json(`ptr`: Long,`eventId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_file_import_formats_json(`ptr`: Long,`lang`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_forget_sync_device(`ptr`: Long,`deviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1547,6 +1553,8 @@ external fun uniffi_cal_ffi_fn_method_host_preview_sync_target_values_json(`ptr`
 external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,`trigger`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
 external fun uniffi_cal_ffi_fn_method_host_query_free_busy_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_read_import_file_json(`ptr`: Long,`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_refresh_errors_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -2271,6 +2279,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_event_meeting_json() != 34444.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_file_import_formats_json() != 15224.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2377,6 +2388,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_query_free_busy_json() != 44096.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_read_import_file_json() != 17526.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_errors_json() != 55989.toShort()) {
@@ -5109,6 +5123,13 @@ public interface HostInterface {
     fun `eventMeetingJson`(`eventId`: kotlin.String, `calendarId`: kotlin.String?): kotlin.String
     
     /**
+     * The formats the enabled plugins read, named in `lang`, as JSON
+     * (`host_core::file_import::ImportFormat` rows): the document picker's
+     * filter. Mirrors the desktop `file_import_formats` command.
+     */
+    fun `fileImportFormatsJson`(`lang`: kotlin.String): kotlin.String
+    
+    /**
      * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
      * gesture; the next connect re-runs the first-use trust dialog).
      */
@@ -5439,6 +5460,14 @@ public interface HostInterface {
      * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
      */
     fun `queryFreeBusyJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
+     * Read the file at `path` — a filesystem path: the document picker's
+     * copy, or a shared file copied into the app — through the plugin that
+     * reads its format, as a JSON `cal_core::FileImport`. Nothing is written.
+     * Mirrors the desktop `read_import_file` command.
+     */
+    fun `readImportFileJson`(`path`: kotlin.String): kotlin.String
     
     /**
      * Every account's currently-failing containers as a JSON
@@ -7438,6 +7467,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * The formats the enabled plugins read, named in `lang`, as JSON
+     * (`host_core::file_import::ImportFormat` rows): the document picker's
+     * filter. Mirrors the desktop `file_import_formats` command.
+     */
+    @Throws(StoreException::class)override fun `fileImportFormatsJson`(`lang`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_file_import_formats_json(
+        it,
+        FfiConverterString.lower(`lang`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
      * gesture; the next connect re-runs the first-use trust dialog).
      */
@@ -8189,6 +8237,26 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_query_free_busy_json(
         it,
         FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Read the file at `path` — a filesystem path: the document picker's
+     * copy, or a shared file copied into the app — through the plugin that
+     * reads its format, as a JSON `cal_core::FileImport`. Nothing is written.
+     * Mirrors the desktop `read_import_file` command.
+     */
+    @Throws(StoreException::class)override fun `readImportFileJson`(`path`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_read_import_file_json(
+        it,
+        FfiConverterString.lower(`path`),_status)
 }
     }
     )

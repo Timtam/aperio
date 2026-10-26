@@ -331,6 +331,14 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  calendar, as a JSON `FreeBusy[]`. `{calendar_id, emails, range_start,
    *  range_end}`; best-effort → `[]` for local/unroutable/can't-answer. */
   queryFreeBusyJson(requestJson: string): Promise<string>;
+  /** The formats the enabled plugins read, named in `lang`, as a JSON
+   *  `ImportFormat[]`: the document picker's filter (DESIGN-file-import.md). */
+  fileImportFormatsJson(lang: string): Promise<string>;
+  /** Read the file at `path` (a filesystem path, not a URI) through the plugin
+   *  for its format, as a JSON `FileImport`. Nothing is written. Rejects with
+   *  the desktop's codes: `unsupported`, `invalid_input` (a too large file's
+   *  message starts with `import-too-large`), `internal`. */
+  readImportFileJson(path: string): Promise<string>;
   /** Create an event from `{calendar_id, …NewEvent}`; returns the created
    *  `Event` as JSON. */
   createEventJson(requestJson: string): Promise<string>;

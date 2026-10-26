@@ -247,7 +247,19 @@ Zielkalender über den Zeitraum der Termine.
 - **I5 Handy.** „Termine importieren …“ in der Kalenderliste mit
   Dokumentwähler; „Teilen“ und „Öffnen in“: iOS als
   Dokumenttyp mit Rang `Alternate` (Aperio wird angeboten, nicht Standard),
-  Android mit Intent-Filtern `VIEW` und `SEND` für `text/calendar`.
+  Android mit Intent-Filtern `VIEW` und `SEND` für `text/calendar`. In vier
+  Teilen, wie am Desktop:
+  - **I5a** Brücke (gebaut): `fileImportFormatsJson` und
+    `readImportFileJson` in beiden nativen Modulen (Android in einer eigenen
+    Gruppe `fileImportFunctions`), `mobile/src/api/fileImport.ts`. Ein
+    Lesefehler kommt mit den Codes des Desktops (`unsupported`,
+    `invalid_input`, `internal`; `importCoded`), damit
+    `importFailureSentence` ihn in der Sprache der Person sagt. Die
+    Kotlin-Bindings waren älter als I1 und sind neu erzeugt.
+  - **I5b** Einstieg, Dokumentwähler und Liste (Doppelte, Einladungen).
+  - **I5c** der Editor vorausgefüllt, eine fremde Einladung gesperrt wie
+    eine empfangene.
+  - **I5d** „Teilen“ und „Öffnen in“.
 - **I6 Fremde Einladungen** (Toni, nach I0): Organisator und Teilnehmer
   bleiben, niemand bekommt etwas. Exchange (gemessen, ICS-3/ICS-4): die
   Einladungs-Nachricht über `MimeContent` mit `METHOD:REQUEST` in den

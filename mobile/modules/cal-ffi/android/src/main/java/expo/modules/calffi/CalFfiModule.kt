@@ -237,6 +237,24 @@ class CalFfiModule : Module() {
       throw CodedException("event_group_conflict", e.detail, e)
     }
 
+  /**
+   * Re-throw a file that could not be read for an import with the desktop's
+   * code (DESIGN-file-import.md, I5): `unsupported` (no plugin reads it),
+   * `invalid_input` (unreadable, or too large: the detail then starts with
+   * `import-too-large`), `internal` (not opened). The shared
+   * `importFailureSentence` says why from these, in the reader's language.
+   */
+  private inline fun <T> importCoded(block: () -> T): T =
+    try {
+      block()
+    } catch (e: StoreException.Unsupported) {
+      throw CodedException("unsupported", e.detail, e)
+    } catch (e: StoreException.InvalidField) {
+      throw CodedException("invalid_input", e.detail, e)
+    } catch (e: StoreException.Storage) {
+      throw CodedException("internal", e.detail, e)
+    }
+
   // Split across several `ModuleDefinitionBuilder` extensions rather than one
   // lambda. The JVM caps a single method's bytecode at 64 KB, and every
   // registration is inlined into the method it sits in: 140 went past it once
@@ -301,6 +319,8 @@ class CalFfiModule : Module() {
     accountFunctions()
 
     calendarFunctions()
+
+    fileImportFunctions()
 
     syncFunctions()
 
@@ -784,6 +804,20 @@ class CalFfiModule : Module() {
 
     AsyncFunction("addEventExdateJson") { id: String, occurrence: String, calendarId: String?, sendCancellations: Boolean ->
       eventCoded { host.addEventExdateJson(id, occurrence, calendarId, sendCancellations) }
+    }
+  }
+
+  /** Lifted out of `definition()` — see the note there. Importing a file (DESIGN-file-import.md). */
+  private fun ModuleDefinitionBuilder.fileImportFunctions() {
+    // The formats the enabled plugins read (the document picker's filter), and
+    // one file read through the plugin for its format. Nothing is written.
+
+    AsyncFunction("fileImportFormatsJson") { lang: String ->
+      host.fileImportFormatsJson(lang)
+    }
+
+    AsyncFunction("readImportFileJson") { path: String ->
+      importCoded { host.readImportFileJson(path) }
     }
   }
 
