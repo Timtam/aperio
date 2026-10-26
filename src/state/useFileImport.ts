@@ -3,9 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { IMPORT_MAX_BYTES, skippedSentence } from '@aperio/shared';
 
+import { traceFocus } from '../a11y/focusTrace';
 import { fileImportFormats, readImportContent, readImportFile } from '../api/client';
 import type { FileImportOutcome } from './DialogState';
 import { useDialogState } from './dialogStateContext';
+
+/** How long a file import's focus trace runs: through the file picker, the
+ *  editor or list, and back to the view. */
+const FOCUS_TRACE_MS = 3 * 60 * 1000;
 
 /**
  * Bring a calendar file in (DESIGN-file-import.md): from the open dialog
@@ -44,6 +49,7 @@ export function useFileImport(): {
   );
 
   const importFromDisk = useCallback(async () => {
+    traceFocus('import', FOCUS_TRACE_MS);
     let path: string | string[] | null;
     try {
       const formats = await fileImportFormats();
@@ -78,6 +84,7 @@ export function useFileImport(): {
 
   const importDropped = useCallback(
     async (file: File) => {
+      traceFocus('import', FOCUS_TRACE_MS);
       try {
         // At most one byte past what an import reads: the host still calls a
         // larger file too large, or not a kind it reads, without the whole of

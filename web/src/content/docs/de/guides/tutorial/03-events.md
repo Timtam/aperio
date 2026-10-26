@@ -103,7 +103,9 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > Aperio so eine Besprechung schreibgeschützt: Titel, Kalender, Zeiten, Ort,
 > Beschreibung und die Gästeliste stehen alle da, jedes als eigener Halt für
 > den Screenreader, aber keines lässt sich ändern. Eine Zeile über den Feldern
-> sagt, warum.
+> sagt, warum. Die Beschreibung ist ein eigenes Dokument: Am Desktop wechselt
+> NVDA dort in den Lesemodus, die Pfeiltasten lesen sie Zeile für Zeile, und
+> `Tab` führt weiter zum nächsten Feld.
 >
 > Was du weiter tun kannst: antworten (Zusagen, Vorläufig, Absagen), eigene
 > Erinnerungen setzen – angehängte, die der Kalender behält, oder eigene, die

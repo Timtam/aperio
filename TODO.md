@@ -69,6 +69,13 @@
   des Organisators — zum verschobenen Termin oder als neuen in den
   Standardkalender? Braucht einen echten Organisator (z. B. iCloud-Konto im
   iCloud-Testprogramm, das die Exchange-Adresse einlädt).
+  ↳ Offen (Toni, 2026-10-26): Nach einem Import mit Strg+O aus der
+  Kalenderansicht hing NVDA zwischen Fokus- und Lesemodus; im Code keine
+  Ursache gefunden (der Editor schließt wie beim gewöhnlichen Anlegen, wry
+  gibt WebView2 den Fokus beim Aktivieren zurück). Eine Fokus-Spur
+  (`src/a11y/focusTrace.ts`, drei Minuten ab dem Import, `[focus import …]`
+  im Protokoll) misst den nächsten Durchlauf. Danach beheben und die Spur
+  wieder entfernen.
 - [~] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)  
   ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)

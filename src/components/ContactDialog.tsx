@@ -36,6 +36,7 @@ import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
+import { ReadOnlyText } from './ReadOnlyText';
 
 /** File-size cap for an uploaded avatar. Five megabytes is what
  *  every CardDAV / Exchange server we target accepts comfortably
@@ -938,19 +939,22 @@ export function ContactDialog({
             </label>
           )}
 
-          <label className="form__field">
-            <span className="form__label">
-              {t('dialogs.contact.notesLabel')}
-            </span>
-            <textarea
-              value={form.notes}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, notes: e.target.value }))
-              }
-              rows={3}
-              readOnly={viewOnly}
-            />
-          </label>
+          {viewOnly ? (
+            <ReadOnlyText label={t('dialogs.contact.notesLabel')} value={form.notes} />
+          ) : (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.contact.notesLabel')}
+              </span>
+              <textarea
+                value={form.notes}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, notes: e.target.value }))
+                }
+                rows={3}
+              />
+            </label>
+          )}
 
           {!form.isGroup && (
             <fieldset className="form__field">
@@ -1028,26 +1032,31 @@ export function ContactDialog({
             </span>
           </label>
 
-          {form.isGroup && (
-            <label className="form__field">
-              <span className="form__label">
-                {t('dialogs.contact.membersLabel')}
-              </span>
-              <textarea
+          {form.isGroup &&
+            (viewOnly ? (
+              <ReadOnlyText
+                label={t('dialogs.contact.membersLabel')}
                 value={form.membersText}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, membersText: e.target.value }))
-                }
-                placeholder={t('dialogs.contact.membersPlaceholder')}
-                rows={5}
-                spellCheck={false}
-                readOnly={viewOnly}
               />
-              <span className="form__hint">
-                {t('dialogs.contact.membersHint')}
-              </span>
-            </label>
-          )}
+            ) : (
+              <label className="form__field">
+                <span className="form__label">
+                  {t('dialogs.contact.membersLabel')}
+                </span>
+                <textarea
+                  value={form.membersText}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, membersText: e.target.value }))
+                  }
+                  placeholder={t('dialogs.contact.membersPlaceholder')}
+                  rows={5}
+                  spellCheck={false}
+                />
+                <span className="form__hint">
+                  {t('dialogs.contact.membersHint')}
+                </span>
+              </label>
+            ))}
 
           <label className="form__field">
             <span className="form__label">
@@ -1457,17 +1466,20 @@ function AddressRow({
           </button>
         )}
       </div>
-      <label className="form__field">
-        <span className="form__label">
-          {t('dialogs.contact.addressStreet')}
-        </span>
-        <textarea
-          value={address.street ?? ''}
-          onChange={(e) => update('street', e.target.value)}
-          rows={2}
-          readOnly={viewOnly}
-        />
-      </label>
+      {viewOnly ? (
+        <ReadOnlyText label={t('dialogs.contact.addressStreet')} value={address.street ?? ''} />
+      ) : (
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.contact.addressStreet')}
+          </span>
+          <textarea
+            value={address.street ?? ''}
+            onChange={(e) => update('street', e.target.value)}
+            rows={2}
+          />
+        </label>
+      )}
       <div className="form__address-row-grid">
         <label className="form__field">
           <span className="form__label">

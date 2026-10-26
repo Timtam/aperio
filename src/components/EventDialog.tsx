@@ -137,6 +137,7 @@ import {
 } from '../state/useTitleSuggestions';
 import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar';
 import { Modal } from './Modal';
+import { ReadOnlyText } from './ReadOnlyText';
 import { RecurrenceSelector } from './RecurrenceSelector';
 import { RemindersEditor, type EditableReminder } from './RemindersEditor';
 import { SoundPrefField } from './SoundPrefField';
@@ -2890,12 +2891,10 @@ export function EventDialog({
 
         {fieldsLocked ? (
           form.description.trim() !== '' && (
-            <label className="form__field">
-              <span className="form__label">
-                {t('dialogs.event.fields.description')}
-              </span>
-              <textarea readOnly value={form.description} rows={4} />
-            </label>
+            <ReadOnlyText
+              label={t('dialogs.event.fields.description')}
+              value={form.description}
+            />
           )
         ) : (
         <label className="form__field">

@@ -36,6 +36,9 @@ const invokeMock = vi.hoisted(() =>
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 const openDialog = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: openDialog }));
+// Its own test covers the focus trace; here it would only write to the output.
+const traceFocus = vi.hoisted(() => vi.fn());
+vi.mock('../a11y/focusTrace', () => ({ traceFocus }));
 const openEventDialog = vi.fn();
 const openFileImport = vi.fn();
 vi.mock('./dialogStateContext', () => ({
@@ -43,6 +46,7 @@ vi.mock('./dialogStateContext', () => ({
 }));
 
 afterEach(() => {
+  traceFocus.mockClear();
   invokeMock.mockClear();
   openDialog.mockReset();
   openEventDialog.mockClear();
@@ -89,6 +93,8 @@ describe('useFileImport', () => {
     expect(opened.importFrom.attendees).toEqual(['a@b.de']);
     expect(opened.importNote).toBe('Nicht übernommen: die Aufgabe „Geschenke besorgen“.');
     expect(openFileImport).not.toHaveBeenCalled();
+    // Where focus goes from here is traced into the log (TODO: remove).
+    expect(traceFocus).toHaveBeenCalledWith('import', 3 * 60 * 1000);
   });
 
   it('lists several appointments, and a failure, in the import dialog', async () => {
@@ -124,6 +130,7 @@ describe('useFileImport', () => {
       content: btoa('BEGIN:VCALENDAR'),
     });
     expect(openFileImport).toHaveBeenCalledWith('drop.ics', { read: answers.read });
+    expect(traceFocus).toHaveBeenCalledWith('import', 3 * 60 * 1000);
   });
 
   it('hands the host at most one byte past what an import reads', async () => {

@@ -507,3 +507,17 @@ Fünf Prüfer (Kern, Adapter, Desktop, Handy, Doku), je mit einem Gegenprüfer:
   Ungemessen bleibt, wohin Exchange eine spätere
   Aktualisierung des Organisators legt (die Testadressen enden auf
   `.invalid`).
+- **Gesperrte Beschreibung lesbar** (Toni, 2026-10-26, NVDA am Desktop): Ein
+  `<textarea readOnly>` ist für Chromium kein bearbeitbarer Text; NVDA
+  folgte darin keinem Cursor und sagte nur die erste Zeile. Die Beschreibung
+  einer gesperrten Einladung ist jetzt ein fokussierbares Dokument
+  (`ReadOnlyText`, `role="document"`, eine Zeile je Block): NVDA wechselt
+  dort in den Lesemodus, `Tab` führt hinaus. Ebenso die mehrzeiligen Felder
+  eines schreibgeschützten Adressbuchs (Notizen, Mitglieder, Straße).
+- **Fokus nach dem Import** (Toni, 2026-10-26: Strg+O aus der
+  Kalenderansicht, danach hing NVDA zwischen Fokus- und Lesemodus). Im Code
+  keine Ursache: Der Editor schließt wie beim gewöhnlichen Anlegen, und wry
+  gibt WebView2 den Fokus beim Aktivieren des Fensters zurück (`MoveFocus`
+  bei `WM_SETFOCUS`). Sein Protokoll enthielt keine Zeile aus der Webansicht.
+  Eine vorübergehende Fokus-Spur (`traceFocus`, drei Minuten ab dem Import,
+  ohne Inhalte) misst den nächsten Durchlauf; danach beheben und entfernen.
