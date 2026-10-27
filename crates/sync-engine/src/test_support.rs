@@ -103,6 +103,19 @@ impl SyncStore for FakeStore {
         Ok(())
     }
 
+    fn clear_applied_events(&self) -> Result<(), StoreError> {
+        self.applied.lock().unwrap().clear();
+        Ok(())
+    }
+
+    fn forget_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError> {
+        let mut applied = self.applied.lock().unwrap();
+        for id in event_ids {
+            applied.remove(id);
+        }
+        Ok(())
+    }
+
     fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError> {
         self.conflicts.lock().unwrap().push(conflict.clone());
         Ok(())

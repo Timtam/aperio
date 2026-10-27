@@ -1124,6 +1124,20 @@ impl EventLogApplier {
             .mark_event_applied(event_id)
             .map_err(store_to_sync)
     }
+
+    /// Forget every applied event, so the next pass applies all it is
+    /// handed again — the rebuild's first local step
+    /// (DESIGN-sync-snapshot-coverage.md).
+    pub fn forget_all_applied(&self) -> SyncResult<()> {
+        self.store.clear_applied_events().map_err(store_to_sync)
+    }
+
+    /// Forget these applied events, so the next pass applies them again.
+    pub fn forget_applied(&self, event_ids: &[String]) -> SyncResult<()> {
+        self.store
+            .forget_events_applied(event_ids)
+            .map_err(store_to_sync)
+    }
 }
 
 /// Map a store-seam error into the apply path's `SyncError`. The store

@@ -50,15 +50,15 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sync_core::{
-    DeviceCursor, DeviceId, DeviceRecord, LogFile, LogFileName, MetaJson, SyncAdapter, SyncError,
-    SyncResult,
+    DeviceCursor, DeviceId, DeviceRecord, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
+    SyncError, SyncResult,
 };
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
 use crate::event_log::{
-    ApplyReport, EventLogApplier, SnapshotBuilder, SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
-    SYNC_CURSOR_PREF_KEY,
+    AperioSnapshotBody, ApplyReport, EventLogApplier, SnapshotBuilder,
+    SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, SYNC_CURSOR_PREF_KEY,
 };
 use crate::user_prefs::UserPrefsRepo;
 
@@ -431,6 +431,9 @@ impl OnboardingService {
         // may have grown after it — skipping it by name lost those events
         // (Toni's laptop, 2026-10-27).
         let mut covered_from: Option<DateTime<Utc>> = None;
+        // Whatever this device knew of another dataset says nothing here;
+        // only a snapshot that names its events makes the record exact again.
+        self.clear_coverage_exact()?;
         match adapter.fetch_snapshot().await? {
             Some(snapshot) => {
                 info!(
@@ -632,7 +635,19 @@ impl OnboardingService {
         // wedge). The alternative — erroring here — left the device
         // permanently stuck, since the inline compaction that mints a
         // snapshot sits behind the bailing round.
-        let mut starting_cursor = match adapter.fetch_snapshot().await? {
+        let snapshot = adapter.fetch_snapshot().await?;
+        // A snapshot that names the events it holds rebuilds this device
+        // instead (DESIGN-sync-snapshot-coverage.md): every file, deletes the
+        // snapshot reflects only as absent rows, and what this device applied
+        // before but the snapshot does not hold.
+        if let Some(snapshot) = &snapshot {
+            let body: AperioSnapshotBody = serde_json::from_value(snapshot.body.clone())
+                .map_err(|err| SyncError::internal(format!("stale resume snapshot body: {err}")))?;
+            if body.covered_event_ids.is_some() {
+                return self.rebuild(adapter, meta, snapshot, &body).await;
+            }
+        }
+        let mut starting_cursor = match snapshot {
             Some(snapshot) => {
                 info!(
                     snapshot_ts = %snapshot.metadata.snapshot_timestamp,
@@ -641,6 +656,10 @@ impl OnboardingService {
                 self.snapshot_builder.apply(&snapshot).map_err(|err| {
                     SyncError::internal(format!("stale resume snapshot apply: {err}"))
                 })?;
+                // Its rows now hold events this device's record does not
+                // name; the rebuild makes it exact again once a snapshot
+                // names them.
+                self.clear_coverage_exact()?;
                 snapshot.metadata.snapshot_timestamp
             }
             None => {
@@ -761,6 +780,153 @@ impl OnboardingService {
             applied = report.applied,
             devices = report.device_count,
             "stale resume complete",
+        );
+        Ok(report)
+    }
+
+    /// Rebuild this device once from the current snapshot
+    /// (DESIGN-sync-snapshot-coverage.md), which must name the events it
+    /// holds: the round calls this while meta.json says it does and this
+    /// device's record is not exact. A snapshot that names nothing — a
+    /// concurrent compaction wrote one after the meta — is refused, so the
+    /// round goes on and retries rather than running the old resume.
+    pub async fn rebuild_from_snapshot(
+        &self,
+        adapter: &dyn SyncAdapter,
+    ) -> SyncResult<OnboardingReport> {
+        adapter.test_connection().await?;
+        let meta = adapter.fetch_meta().await?.ok_or_else(|| {
+            SyncError::not_found("remote meta.json disappeared before the rebuild")
+        })?;
+        sync_core::ensure_compatible(&meta, &self.app_version)?;
+        let snapshot = adapter
+            .fetch_snapshot()
+            .await?
+            .ok_or_else(|| SyncError::not_found("no snapshot to rebuild from"))?;
+        let body: AperioSnapshotBody = serde_json::from_value(snapshot.body.clone())
+            .map_err(|err| SyncError::internal(format!("rebuild snapshot body: {err}")))?;
+        if body.covered_event_ids.is_none() {
+            return Err(SyncError::not_found(
+                "the snapshot names nothing it holds; nothing to rebuild from",
+            ));
+        }
+        self.rebuild(adapter, meta, &snapshot, &body).await
+    }
+
+    /// Rebuild this device from a snapshot that names the events it holds
+    /// (DESIGN-sync-snapshot-coverage.md; Toni, 2026-10-27: every device once,
+    /// since one that joined or resumed before the snapshots named anything
+    /// cannot be told apart). Everything is fetched first, so a failed fetch
+    /// leaves the device as it was; the local steps that follow only touch
+    /// SQLite.
+    ///
+    /// Not everything the snapshot lacks is cleared: local appointments and
+    /// calendars are not re-emitted at launch, so a device can hold rows that
+    /// never reached a log, and clearing them would lose them. Only a named
+    /// delete whose row the snapshot no longer holds is applied again.
+    async fn rebuild(
+        &self,
+        adapter: &dyn SyncAdapter,
+        mut meta: MetaJson,
+        snapshot: &Snapshot,
+        body: &AperioSnapshotBody,
+    ) -> SyncResult<OnboardingReport> {
+        let snapshot_ts = snapshot.metadata.snapshot_timestamp;
+        info!(
+            snapshot_ts = %snapshot_ts,
+            "rebuilding from a snapshot that names the events it holds",
+        );
+
+        // 1. Every file, our own included: an own event the snapshot does not
+        //    hold is ours to bring back.
+        let mut logs = adapter
+            .fetch_new_logs(&DeviceCursor {
+                last_seen_log: DateTime::<Utc>::MIN_UTC,
+                exclude_device: None,
+                known_lengths: Vec::new(),
+            })
+            .await?;
+        sort_logs_chronologically(&mut logs);
+        let deletes = body.deletes_to_replay(&logs);
+
+        // 2. What this device applied before is applied again where the
+        //    snapshot does not hold it — the snapshot may come from a device
+        //    that was behind this one on some row.
+        self.applier.forget_all_applied()?;
+        // 3. The snapshot, recording what it names as applied.
+        self.snapshot_builder
+            .apply(snapshot)
+            .map_err(|err| SyncError::internal(format!("rebuild snapshot apply: {err}")))?;
+        // 4. A named delete whose row the snapshot no longer holds is applied
+        //    again: it removes a row this device kept, and does nothing where
+        //    the row is gone.
+        self.applier.forget_applied(&deletes)?;
+
+        // 5. Every event in every file, own ones included, oldest first; the
+        //    named ones are skipped as applied.
+        let mut report = OnboardingReport {
+            remote_was_empty: false,
+            ..Default::default()
+        };
+        let mut cursor = snapshot_ts;
+        let mut envelopes = Vec::new();
+        let mut applied_lengths: Vec<(String, u64)> = Vec::new();
+        for log in &logs {
+            let foreign = log.name.device_id != self.local_device_id;
+            if foreign {
+                report.fetched_logs += 1;
+                cursor = cursor.max(log.name.timestamp);
+            }
+            match log.into_envelopes() {
+                Ok(mut parsed) => {
+                    envelopes.append(&mut parsed);
+                    if foreign {
+                        applied_lengths.push((log.name.to_filename(), log.bytes.len() as u64));
+                    }
+                }
+                Err(err) => {
+                    warn!(
+                        log = %log.name.to_filename(),
+                        ?err,
+                        "unreadable log during rebuild",
+                    );
+                    report.apply_failures += 1;
+                    if foreign {
+                        applied_lengths.push((log.name.to_filename(), 0));
+                    }
+                }
+            }
+        }
+        report.merge_apply(self.applier.apply_envelopes_force_own(envelopes)?);
+        self.record_applied_lengths(&applied_lengths);
+        self.replay_pending_logs(&mut report).await;
+
+        // 6. The cursor (foreign files only, as everywhere), and this
+        //    device's record is exact from the snapshot on.
+        self.save_cursor(cursor)?;
+        self.save_coverage_exact_since(snapshot_ts)?;
+
+        if let Some(entry) = meta.devices.get_mut(self.local_device_id.as_str()) {
+            entry.stale = false;
+            entry.last_seen_log = cursor;
+        }
+        adapter.push_meta(&meta).await?;
+        report.device_count = meta.devices.len();
+
+        match crate::sound_assets::sync_assets(&self.db, &self.sounds_dir, adapter).await {
+            Ok(asset_report) => info!(
+                pushed = asset_report.pushed,
+                fetched = asset_report.fetched,
+                "rebuild sound asset sync",
+            ),
+            Err(err) => warn!(?err, "rebuild sound asset sync failed"),
+        }
+
+        info!(
+            applied = report.applied,
+            replayed_deletes = deletes.len(),
+            devices = report.device_count,
+            "rebuild complete",
         );
         Ok(report)
     }
@@ -913,6 +1079,9 @@ impl OnboardingService {
             self.save_device_name(name)?;
         }
         self.mark_onboarded()?;
+        // Not marked exact here: the folder may still hold another dataset's
+        // logs. Its first compaction that holds every event marks it.
+        self.clear_coverage_exact()?;
 
         Ok(OnboardingReport {
             remote_was_empty,
@@ -1063,6 +1232,16 @@ impl OnboardingService {
         UserPrefsRepo::new(&self.db)
             .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &ts.to_rfc3339())
             .map_err(|err| SyncError::internal(format!("save coverage mark: {err}")))?;
+        Ok(())
+    }
+
+    /// This device's record is no longer known to be exact: it takes a
+    /// snapshot that names nothing (its rows then hold events the record
+    /// does not), or joins another dataset.
+    fn clear_coverage_exact(&self) -> SyncResult<()> {
+        UserPrefsRepo::new(&self.db)
+            .delete(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+            .map_err(|err| SyncError::internal(format!("clear coverage mark: {err}")))?;
         Ok(())
     }
 
@@ -1911,6 +2090,10 @@ mod tests {
         // once a naming snapshot exists.
         let (_tmp, db) = fresh_db();
         let svc = build_service(db.shared());
+        // Exact in the dataset it left: says nothing about this one.
+        UserPrefsRepo::new(&db.shared())
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
         let start: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
         let (log, snapshot_ts, _held) = grown_session(start);
         let adapter = FakeAdapter::with_logs(vec![log]);
@@ -1922,6 +2105,246 @@ mod tests {
         svc.accept_remote(&adapter, None).await.unwrap();
 
         assert_eq!(interval(&db).as_deref(), Some("30"));
+        assert_eq!(
+            UserPrefsRepo::new(&db.shared())
+                .get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+                .unwrap(),
+            None,
+        );
+    }
+
+    fn envelope(
+        id: &str,
+        device: &str,
+        at: DateTime<Utc>,
+        event: sync_core::SyncEvent,
+    ) -> sync_core::EventEnvelope {
+        sync_core::EventEnvelope {
+            id: id.into(),
+            device_id: DeviceId::from_string(device.into()),
+            timestamp: at,
+            event,
+        }
+    }
+
+    fn file_of(
+        device: &str,
+        named: DateTime<Utc>,
+        envelopes: &[&sync_core::EventEnvelope],
+    ) -> LogFile {
+        LogFile {
+            name: LogFileName::new(named, DeviceId::from_string(device.into())),
+            bytes: envelopes
+                .iter()
+                .map(|e| serde_json::to_string(e).unwrap())
+                .collect::<Vec<_>>()
+                .join("\n")
+                .into_bytes(),
+        }
+    }
+
+    fn set_interval(value: &str) -> sync_core::SyncEvent {
+        sync_core::SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+            key: "sync.intervalMinutes".into(),
+            value: serde_json::json!(value),
+        })
+    }
+
+    fn label_count(db: &DbHandle, id: &str) -> i64 {
+        let shared = db.shared();
+        let conn = shared.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM color_labels WHERE id = ?",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    /// The laptop before the rebuild: it took a snapshot that named nothing,
+    /// holding label `lbl-1` and interval 30, and skipped the peer's session
+    /// file by name. On the remote now: that file, which also deleted the
+    /// label and set 45, and a naming snapshot from the peer that holds all
+    /// of it. Returns the service, the adapter and the new snapshot's time.
+    async fn laptop_before_rebuild(
+        db: &DbHandle,
+    ) -> (OnboardingService, FakeAdapter, DateTime<Utc>) {
+        let svc = build_service(db.shared());
+        let start: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let minutes = |m: i64| start + chrono::Duration::minutes(m);
+        let label = envelope(
+            "ev-label",
+            "dev-other",
+            minutes(5),
+            sync_core::SyncEvent::ColorLabelCreated(sync_core::EventPayload {
+                id: "lbl-1".into(),
+                fields: serde_json::json!({ "id": "lbl-1", "name": "Rot", "hex": "#e53935" }),
+            }),
+        );
+        let thirty = envelope("ev-30", "dev-other", minutes(10), set_interval("30"));
+        let forty_five = envelope("ev-45", "dev-other", minutes(120), set_interval("45"));
+        let deleted = envelope(
+            "ev-del",
+            "dev-other",
+            minutes(180),
+            sync_core::SyncEvent::ColorLabelDeleted(sync_core::IdPayload { id: "lbl-1".into() }),
+        );
+        svc.applier
+            .apply_envelopes(vec![label.clone(), thirty.clone()])
+            .unwrap();
+        assert_eq!(label_count(db, "lbl-1"), 1);
+
+        let snapshot_ts = minutes(240);
+        let adapter = FakeAdapter::with_logs(vec![file_of(
+            "dev-other",
+            start,
+            &[&label, &thirty, &forty_five, &deleted],
+        )]);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = snapshot_ts;
+        meta.snapshot_coverage = true;
+        adapter.install_meta(meta);
+        let body = sync_engine::AperioSnapshotBody {
+            settings: std::collections::BTreeMap::from([(
+                "sync.intervalMinutes".to_string(),
+                "45".to_string(),
+            )]),
+            covered_event_ids: Some(vec![
+                "ev-label".into(),
+                "ev-30".into(),
+                "ev-45".into(),
+                "ev-del".into(),
+            ]),
+            ..Default::default()
+        };
+        adapter.install_snapshot(Snapshot::new(
+            snapshot_ts,
+            "1.0.0",
+            serde_json::to_value(body).unwrap(),
+        ));
+        (svc, adapter, snapshot_ts)
+    }
+
+    #[tokio::test]
+    async fn the_rebuild_heals_a_device_that_joined_by_name() {
+        // DESIGN-sync-snapshot-coverage.md (Toni, 2026-10-27): the change it
+        // skipped arrives, and the label the peer deleted goes — a snapshot
+        // reflects a delete only as an absent row.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_rebuild(&db).await;
+
+        svc.rebuild_from_snapshot(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
+        assert_eq!(label_count(&db, "lbl-1"), 0, "the deleted label goes");
+        let exact = UserPrefsRepo::new(&db.shared())
+            .get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+            .unwrap()
+            .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
+            .map(|ts| ts.with_timezone(&Utc));
+        assert_eq!(exact, Some(snapshot_ts));
+    }
+
+    #[tokio::test]
+    async fn the_rebuild_applies_again_what_the_snapshot_lacks() {
+        // The snapshot can come from a device that was behind this one: a
+        // change this device applied before, in a file after the snapshot,
+        // must win over the snapshot's older value again — its record is
+        // forgotten first.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_rebuild(&db).await;
+        let sixty = envelope(
+            "ev-60",
+            "dev-other",
+            snapshot_ts + chrono::Duration::minutes(30),
+            set_interval("60"),
+        );
+        svc.applier.apply_envelopes(vec![sixty.clone()]).unwrap();
+        adapter.logs.lock().unwrap().push(file_of(
+            "dev-other",
+            snapshot_ts + chrono::Duration::minutes(20),
+            &[&sixty],
+        ));
+
+        svc.rebuild_from_snapshot(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("60"));
+    }
+
+    #[tokio::test]
+    async fn the_rebuild_brings_back_this_devices_own_changes() {
+        // This device's own change after the snapshot, already pushed: the
+        // snapshot does not hold it, so the rebuild applies it from its own
+        // file — own events are not skipped here.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_rebuild(&db).await;
+        let own = envelope(
+            "ev-own",
+            "dev-this",
+            snapshot_ts + chrono::Duration::minutes(30),
+            set_interval("70"),
+        );
+        adapter.logs.lock().unwrap().push(file_of(
+            "dev-this",
+            snapshot_ts + chrono::Duration::minutes(25),
+            &[&own],
+        ));
+
+        svc.rebuild_from_snapshot(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_stale_resume_from_a_naming_snapshot_is_the_rebuild() {
+        // One way for both: a device back from a long pause rebuilds too
+        // when the snapshot names its events, and keeps no deleted row.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_rebuild(&db).await;
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
+        assert_eq!(label_count(&db, "lbl-1"), 0);
+        assert!(UserPrefsRepo::new(&db.shared())
+            .get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+            .unwrap()
+            .is_some_and(|raw| raw == snapshot_ts.to_rfc3339()));
+    }
+
+    #[tokio::test]
+    async fn a_stale_resume_from_a_snapshot_naming_nothing_leaves_the_record_inexact() {
+        // Its rows then hold events its record does not name: an exact mark
+        // from before must go, or re-fetching older files would re-apply them.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_rebuild(&db).await;
+        adapter.install_snapshot(snapshot_at(snapshot_ts, None));
+        UserPrefsRepo::new(&db.shared())
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        assert_eq!(
+            UserPrefsRepo::new(&db.shared())
+                .get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+                .unwrap(),
+            None,
+        );
+    }
+
+    #[tokio::test]
+    async fn rebuilding_refuses_a_snapshot_that_names_nothing() {
+        // A concurrent compaction can leave meta saying "names its events"
+        // over a snapshot that does not: refused, the device untouched, and
+        // the round retries.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_rebuild(&db).await;
+        adapter.install_snapshot(snapshot_at(snapshot_ts, None));
+
+        assert!(svc.rebuild_from_snapshot(&adapter).await.is_err());
+        assert_eq!(interval(&db).as_deref(), Some("30"));
+        assert_eq!(label_count(&db, "lbl-1"), 1);
         assert_eq!(
             UserPrefsRepo::new(&db.shared())
                 .get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)

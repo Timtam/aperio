@@ -35,6 +35,8 @@ mod compactor;
 // shared local-FS remote) — test-only, so a plain `mod tests` inside a
 // single component file can't host them.
 #[cfg(test)]
+mod coverage_round_tests;
+#[cfg(test)]
 mod growth_refetch_tests;
 mod orchestrator;
 mod snapshot;
@@ -375,6 +377,13 @@ pub trait SyncStore: Send + Sync {
     /// per snapshot. All or none: a half-recorded batch would let a later
     /// pass re-apply events the snapshot's rows already hold.
     fn mark_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError>;
+    /// Forget every applied event — the rebuild's first local step
+    /// (DESIGN-sync-snapshot-coverage.md): what the snapshot does not name
+    /// must be applied again over its rows.
+    fn clear_applied_events(&self) -> Result<(), StoreError>;
+    /// Forget these applied events, so a later pass applies them again —
+    /// the named deletes whose row the snapshot no longer holds.
+    fn forget_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError>;
     /// Persist a field-level conflict the applier couldn't auto-merge,
     /// superseding any prior unresolved conflict on the same
     /// (kind, row, field) (DESIGN.md §19.3).

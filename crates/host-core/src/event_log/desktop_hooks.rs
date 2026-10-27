@@ -62,6 +62,13 @@ impl SyncRoundHooks for DesktopSyncRoundHooks {
         self.onboarding.resume_from_stale(adapter).await.map(|_| ())
     }
 
+    async fn rebuild_from_snapshot(&self, adapter: &dyn SyncAdapter) -> SyncResult<()> {
+        self.onboarding
+            .rebuild_from_snapshot(adapter)
+            .await
+            .map(|_| ())
+    }
+
     async fn sync_sound_assets(&self, adapter: &dyn SyncAdapter) -> SyncResult<()> {
         let report = crate::sound_assets::sync_assets(&self.db, &self.sounds_dir, adapter).await?;
         if report.pushed > 0 || report.fetched > 0 || report.missing_on_remote > 0 {

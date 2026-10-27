@@ -119,22 +119,34 @@ Bei Toni ist das der Desktop. Gibt es kein vollständiges Gerät mehr (Gründer
 weg, alle über alte Schnappschüsse beigetreten), bleibt der Datensatz beim
 alten Verhalten — sagen, nicht still.
 
-**Der Neuaufbau** (einmal je Gerät; danach `sync.coverage.rebuiltFrom`):
+**Der Neuaufbau** (einmal je Gerät; danach ist es „genau“,
+`sync.cursor.coverageExactSince`). Erst alles holen, dann lokal arbeiten — ein
+abgebrochener Abruf lässt den Bestand unberührt:
 
-1. Synchronisierte Zeilen des lokalen Speichers leeren (genau die Tabellen,
-   die der Schnappschuss enthält).
-2. Schnappschuss anwenden.
-3. `sync_applied_events` **ersetzen** durch die abgedeckten Kennungen (nicht
-   ergänzen: Was das Gerät früher angewendet hat, ist mit Schritt 1 weg und
-   muss erneut angewendet werden, wenn der Schnappschuss es nicht enthält).
-4. Alle Protokolldateien holen, auch die eigenen; fremde und eigene nicht
-   abgedeckte Ereignisse zeitlich sortiert anwenden, dann die eigenen noch
-   nicht hochgeladenen (`pending/`).
-5. Längen merken, Cursor setzen.
+1. Schnappschuss (er muss Kennungen tragen) und **alle** Protokolldateien
+   holen, auch die eigenen.
+2. `sync_applied_events` leeren. Was das Gerät früher angewendet hat und der
+   Schnappschuss nicht enthält, muss erneut angewendet werden: Der Schnappschuss
+   kann von einem Gerät stammen, das in einer Zeile hinter diesem lag.
+3. Schnappschuss anwenden (Upsert, wie bisher) — das trägt seine Kennungen ein.
+4. **Gelöschtes:** Eine abgedeckte Lösch-Änderung (`*.deleted`,
+   `event_group.dissolved`, `account.deleted`), deren Zeile der Schnappschuss
+   nicht enthält, wird wieder als nicht angewendet geführt
+   (`AperioSnapshotBody::deletes_to_replay`). So entfernt Schritt 5 eine
+   übrig gebliebene Zeile; wo sie fehlt, tut die Löschung nichts.
+   **Nicht** alles leeren, was der Schnappschuss nicht enthält: Lokale Termine
+   und Kalender werden beim Start nicht nachgetragen; ein Gerät kann Zeilen
+   haben, die nie ins Protokoll kamen, und die wären verloren.
+5. Alle Ereignisse aller Dateien anwenden, eigene eingeschlossen
+   (`apply_envelopes_force_own`, zeitlich sortiert, die Idempotenz überspringt
+   das Abgedeckte); dann die eigenen noch nicht hochgeladenen (`pending/`).
+6. Längen der fremden Dateien merken, Cursor = max(Schnappschuss, neueste
+   fremde Datei), „genau“ ab dem Schnappschuss.
 
-Damit verschwindet Gelöschtes, und dem Laptop kommt die Desktop-Sitzung vom
-19.10. zu. `resume_from_stale` wird derselbe Neuaufbau (ein Weg statt zwei);
-damit behält auch ein Gerät nach langer Pause kein Gelöschtes mehr.
+Dem Laptop kommt so die Desktop-Sitzung vom 19.10. zu, Löschungen
+eingeschlossen. `resume_from_stale` wird derselbe Neuaufbau, wenn der
+Schnappschuss Kennungen trägt (sonst wie bisher). Grenze: Eine Löschung, deren
+Datei schon aufgeräumt ist, kann nicht mehr nachgeholt werden.
 
 **Aufräumen wird genau.** Der Compactor löscht eine fremde Datei nur noch,
 wenn jedes Ereignis darin abgedeckt ist (bisher: Name bis zum Cursor). Ein

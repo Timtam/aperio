@@ -276,6 +276,29 @@ impl SyncStore for DesktopSyncStore {
         tx.commit().map_err(backend)
     }
 
+    fn clear_applied_events(&self) -> Result<(), StoreError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute("DELETE FROM sync_applied_events", [])
+            .map_err(|err| StoreError::Backend(format!("clear_applied_events: {err}")))?;
+        Ok(())
+    }
+
+    fn forget_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError> {
+        let mut conn = self.db.lock().expect("db mutex poisoned");
+        let backend =
+            |err: rusqlite::Error| StoreError::Backend(format!("forget_events_applied: {err}"));
+        let tx = conn.transaction().map_err(backend)?;
+        {
+            let mut stmt = tx
+                .prepare("DELETE FROM sync_applied_events WHERE event_id = ?")
+                .map_err(backend)?;
+            for event_id in event_ids {
+                stmt.execute(params![event_id]).map_err(backend)?;
+            }
+        }
+        tx.commit().map_err(backend)
+    }
+
     fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError> {
         ConflictsRepo::new(&self.db)
             .record(conflict.clone())

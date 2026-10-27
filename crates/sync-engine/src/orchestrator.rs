@@ -217,6 +217,17 @@ pub trait SyncRoundHooks: Send + Sync {
             "auto-resume not supported on this platform",
         ))
     }
+    /// Rebuild this device once from the current snapshot, which must name
+    /// the events it holds (DESIGN-sync-snapshot-coverage.md). Invoked by the
+    /// round while meta.json says it does and this device's record is not
+    /// exact yet; errors when the snapshot names nothing (a concurrent
+    /// compaction), so the round goes on and retries. The default errors: the
+    /// device keeps its state, as before.
+    async fn rebuild_from_snapshot(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
+        Err(SyncError::internal(
+            "rebuild not supported on this platform",
+        ))
+    }
     /// Cache the device names announced in `meta.json` locally so a UI
     /// (the §20.8 Plugins panel's "Used on: <Name>") can render them
     /// without a round-trip. Best-effort; default no-op.
@@ -607,6 +618,26 @@ impl SyncOrchestrator {
                 }
             }
 
+            // DESIGN-sync-snapshot-coverage.md (Toni, 2026-10-27): once a
+            // snapshot names the events it holds, a device whose record is
+            // not exact yet rebuilds from it once — it joined or resumed from
+            // a snapshot that named nothing, so a file it skipped by name may
+            // hold events it never applied, and which devices that hit cannot
+            // be told. A failure leaves the device as it was, and the next
+            // round retries.
+            if !resumed && meta.snapshot_coverage && !self.coverage_exact() {
+                match self.hooks.rebuild_from_snapshot(adapter.as_ref()).await {
+                    Ok(()) => {
+                        info!("rebuilt once from the first snapshot that names its events");
+                        resumed = true;
+                    }
+                    Err(err) => warn!(
+                        ?err,
+                        "rebuild from the snapshot that names its events failed; retrying next round",
+                    ),
+                }
+            }
+
             // §19.7 encryption gate. The dataset is end-to-end encrypted but
             // this device isn't in E2E mode — i.e. another device flipped
             // encryption on after we onboarded in plaintext. Refuse the round
@@ -977,6 +1008,20 @@ impl SyncOrchestrator {
             }
         }
         Ok(pushed)
+    }
+
+    /// Whether this device's applied record is exact
+    /// ([`SYNC_COVERAGE_EXACT_SINCE_PREF_KEY`]). An unreadable record counts
+    /// as exact: guessing "not exact" would rebuild the device every round
+    /// for as long as the read fails.
+    fn coverage_exact(&self) -> bool {
+        match self.store.get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY) {
+            Ok(mark) => mark.is_some(),
+            Err(err) => {
+                warn!(?err, "couldn't read whether this device's record is exact");
+                true
+            }
+        }
     }
 
     /// This device's held horizon: the newest point up to which it holds

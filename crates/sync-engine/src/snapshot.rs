@@ -34,13 +34,13 @@
 //! Aperio adding a new section doesn't sink older readers — they
 //! ignore the unknown section and keep going.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use adapter_local::SnapshotDump;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sync_core::{Snapshot, SyncError, SyncResult};
+use sync_core::{LogFile, Snapshot, SyncError, SyncEvent, SyncResult};
 use tracing::warn;
 
 use crate::whitelist::is_synced_key;
@@ -88,6 +88,63 @@ pub struct AperioSnapshotBody {
     /// for its applied record — a snapshot as before, by timestamp only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub covered_event_ids: Option<Vec<String>>,
+}
+
+impl AperioSnapshotBody {
+    /// The named deletes in `logs` whose row this snapshot does not hold
+    /// (DESIGN-sync-snapshot-coverage.md, the rebuild). A snapshot reflects
+    /// a delete as an absent row, and applying it only upserts, so a device
+    /// still holding the row would keep it. Taken out of the applied record,
+    /// such a delete is applied again: it removes the leftover row, and where
+    /// the row is already gone it does nothing. A delete whose row the
+    /// snapshot does hold stays applied — the row came back after it. Empty
+    /// for a snapshot that names nothing.
+    pub fn deletes_to_replay(&self, logs: &[LogFile]) -> Vec<String> {
+        let Some(covered) = &self.covered_event_ids else {
+            return Vec::new();
+        };
+        let covered: HashSet<&str> = covered.iter().map(String::as_str).collect();
+        fn ids<'a, T>(rows: &'a [T], id: impl Fn(&'a T) -> &'a str) -> HashSet<&'a str> {
+            rows.iter().map(id).collect()
+        }
+        let dump = &self.dump;
+        let events = ids(&dump.events, |r| r.id.as_str());
+        let groups = ids(&dump.event_groups, |r| r.id.as_str());
+        let tasks = ids(&dump.tasks, |r| r.id.as_str());
+        let lists = ids(&dump.task_lists, |r| r.id.as_str());
+        let sections = ids(&dump.sections, |r| r.id.as_str());
+        let calendars = ids(&dump.calendars, |r| r.id.as_str());
+        let labels = ids(&dump.color_labels, |r| r.id.as_str());
+        let markers = ids(&dump.day_markers, |r| r.id.as_str());
+        let accounts = ids(&self.accounts, |r| r.id.as_str());
+        let mut replay = Vec::new();
+        for log in logs {
+            let Ok(envelopes) = log.into_envelopes() else {
+                continue;
+            };
+            for envelope in envelopes {
+                if !covered.contains(envelope.id.as_str()) {
+                    continue;
+                }
+                let held = match &envelope.event {
+                    SyncEvent::EventDeleted(p) => events.contains(p.id.as_str()),
+                    SyncEvent::EventGroupDissolved(p) => groups.contains(p.id.as_str()),
+                    SyncEvent::TaskDeleted(p) => tasks.contains(p.id.as_str()),
+                    SyncEvent::TaskListDeleted(p) => lists.contains(p.id.as_str()),
+                    SyncEvent::SectionDeleted(p) => sections.contains(p.id.as_str()),
+                    SyncEvent::CalendarDeleted(p) => calendars.contains(p.id.as_str()),
+                    SyncEvent::ColorLabelDeleted(p) => labels.contains(p.id.as_str()),
+                    SyncEvent::DayMarkerDeleted(p) => markers.contains(p.id.as_str()),
+                    SyncEvent::AccountDeleted(p) => accounts.contains(p.id.as_str()),
+                    _ => continue,
+                };
+                if !held {
+                    replay.push(envelope.id);
+                }
+            }
+        }
+        replay
+    }
 }
 
 /// One account secret carried in [`AperioSnapshotBody::credentials`].
@@ -439,6 +496,52 @@ mod tests {
         let outcome = builder(Arc::clone(&plain), secrets).apply(&snap).unwrap();
         assert_eq!(outcome.covered_events, None);
         assert!(plain.applied.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn replays_a_named_delete_only_where_the_snapshot_no_longer_holds_the_row() {
+        // DESIGN-sync-snapshot-coverage.md, the rebuild: a snapshot reflects
+        // a delete as an absent row and applying it only upserts, so a named
+        // delete of a row the snapshot lacks must be applied again; one whose
+        // row it holds (it came back) stays applied; an unnamed delete is
+        // applied anyway, and a snapshot naming nothing replays nothing.
+        let device = sync_core::DeviceId::from_string("dev-other".into());
+        let delete = |id: &str, target: &str| sync_core::EventEnvelope {
+            id: id.into(),
+            device_id: device.clone(),
+            timestamp: Utc::now(),
+            event: SyncEvent::ColorLabelDeleted(sync_core::IdPayload { id: target.into() }),
+        };
+        let lines = [
+            delete("ev-gone", "lbl-gone"),
+            delete("ev-back", "lbl-back"),
+            delete("ev-unnamed", "lbl-other"),
+        ]
+        .iter()
+        .map(|e| serde_json::to_string(e).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+        let log = LogFile {
+            name: sync_core::LogFileName::new(Utc::now(), device),
+            bytes: lines.into_bytes(),
+        };
+        let mut body = AperioSnapshotBody {
+            covered_event_ids: Some(vec!["ev-gone".into(), "ev-back".into()]),
+            ..Default::default()
+        };
+        body.dump.color_labels.push(cal_core::ColorLabel {
+            id: cal_core::ColorLabelId::new("lbl-back"),
+            name: "Wieder da".into(),
+            hex: "#e53935".into(),
+            ad_hoc: false,
+        });
+        assert_eq!(
+            body.deletes_to_replay(std::slice::from_ref(&log)),
+            vec!["ev-gone"]
+        );
+
+        body.covered_event_ids = None;
+        assert!(body.deletes_to_replay(&[log]).is_empty());
     }
 
     #[test]
