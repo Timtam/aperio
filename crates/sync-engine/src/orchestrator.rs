@@ -104,6 +104,16 @@ pub const SYNC_APPLIED_LOG_LENGTHS_PREF_KEY: &str = "sync.cursor.appliedLogLengt
 /// still grow while keeping the pref bounded.
 pub const APPLIED_LOG_LENGTHS_CAP: usize = 64;
 
+/// RFC 3339 timestamp of the snapshot from which this device's applied
+/// record became EXACT (DESIGN-sync-snapshot-coverage.md): every event still
+/// in a log file that its state reflects is its own or in
+/// `sync_applied_events`. Set when the device wrote a snapshot that names its
+/// events, or took or rebuilt from one. Absent on a device that joined or
+/// resumed from a snapshot without them — its state holds events its record
+/// does not name, so re-fetching older files would re-apply them.
+/// Device-local, like every `sync.cursor.*` key.
+pub const SYNC_COVERAGE_EXACT_SINCE_PREF_KEY: &str = "sync.cursor.coverageExactSince";
+
 /// Merge freshly applied `(filename, byte length)` records into the
 /// serialized map [`SYNC_APPLIED_LOG_LENGTHS_PREF_KEY`] holds, applying
 /// the cap (filenames sort chronologically — the timestamp prefix is

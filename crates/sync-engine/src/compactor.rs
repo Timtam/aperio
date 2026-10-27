@@ -32,10 +32,13 @@
 //!    but at/above gc_horizon is left alone: the retained logs let it
 //!    catch up incrementally (the over-fire fix keys staleness on what
 //!    was deleted, not on snapshot content).
-//! 5. Delete every log with timestamp STRICTLY < safe_cutoff that the
-//!    snapshot covers (own logs always; foreign logs only up to our
-//!    cursor — a foreign log past the cursor is unapplied, so not in the
-//!    snapshot). Strict `<` spares the freshest covered log one round.
+//!    The snapshot names the events still in log files that it holds
+//!    (own or applied), when this device holds every readable one
+//!    (DESIGN-sync-snapshot-coverage.md); meta.json says whether it does.
+//! 5. Delete every log with timestamp STRICTLY < safe_cutoff whose every
+//!    event the snapshot holds (a file that does not parse: own, or
+//!    foreign up to our cursor, as before). Strict `<` spares the
+//!    freshest covered log one round.
 //! 6. Reset the local "bytes/logs since snapshot" counters so the
 //!    threshold check doesn't immediately re-fire.
 //! ```
@@ -64,19 +67,21 @@
 //! reasonably often on its own without needing to walk every
 //! remote log to count events exactly.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration as ChronoDuration, Timelike, Utc};
 use serde::Serialize;
 use sync_core::{
-    DeviceCursor, DeviceId, DeviceRecord, LogFileName, MetaJson, SyncAdapter, SyncResult,
+    DeviceCursor, DeviceId, DeviceRecord, LogFile, LogFileName, MetaJson, SyncAdapter, SyncResult,
 };
 use tracing::{debug, info, warn};
 
 use crate::{
     AperioSnapshotBody, EventLogWriter, SnapshotApplyOutcome, SnapshotBuilder, SyncStore,
-    PREF_DEVICE_NAME, SYNC_CURSOR_PREF_KEY, SYNC_OWN_NEWEST_LOG_PREF_KEY,
+    PREF_DEVICE_NAME, SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, SYNC_CURSOR_PREF_KEY,
+    SYNC_OWN_NEWEST_LOG_PREF_KEY,
 };
 
 /// `user_prefs` keys the compactor reads + writes.
@@ -125,6 +130,60 @@ pub struct CompactionReport {
     /// the Settings dialog.
     pub snapshot_rows: usize,
     pub snapshot_settings: usize,
+    /// Whether the snapshot names the events it holds — false when this
+    /// device could not vouch for its applied record.
+    pub snapshot_coverage: bool,
+}
+
+/// What the log files on the remote hold that this device's state reflects
+/// (DESIGN-sync-snapshot-coverage.md). An event is HELD when it is this
+/// device's own (its database has every own change) or recorded as applied.
+struct Coverage {
+    /// Every held event's id, in file order.
+    held: Vec<String>,
+    /// False when a readable foreign event is neither own nor applied: this
+    /// device cannot vouch for its record then, and the snapshot names
+    /// nothing.
+    complete: bool,
+    /// Per file: whether every event in it is held. Absent for a file that
+    /// does not parse — no device of this version can apply it, so it is
+    /// neither in this state nor a gap in it, and the GC keeps its old rule.
+    files: HashMap<String, bool>,
+}
+
+impl Coverage {
+    fn of(
+        logs: &[LogFile],
+        local_device: &DeviceId,
+        store: &dyn SyncStore,
+    ) -> SyncResult<Coverage> {
+        let mut coverage = Coverage {
+            held: Vec::new(),
+            complete: true,
+            files: HashMap::new(),
+        };
+        for log in logs {
+            let Ok(envelopes) = log.into_envelopes() else {
+                continue;
+            };
+            let mut all_held = true;
+            for envelope in envelopes {
+                let id = envelope.id;
+                let held = envelope.device_id == *local_device
+                    || store.is_event_applied(&id).map_err(|err| {
+                        sync_core::SyncError::internal(format!("read applied events: {err}"))
+                    })?;
+                if held {
+                    coverage.held.push(id);
+                } else {
+                    all_held = false;
+                    coverage.complete = false;
+                }
+            }
+            coverage.files.insert(log.name.to_filename(), all_held);
+        }
+        Ok(coverage)
+    }
 }
 
 impl CompactionReport {
@@ -327,7 +386,18 @@ impl Compactor {
         }
 
         // 1. Build + push the snapshot, stamped just before the new file.
-        let snapshot = self.builder.build_at(snapshot_ts)?;
+        //    It names the events it holds that are still in log files, so a
+        //    device taking it can fetch every file and apply only the rest —
+        //    but only when this device can vouch for its record: an event in
+        //    a file it neither wrote nor applied (it joined from a snapshot
+        //    that named nothing, or a peer's file grew since its last fetch)
+        //    makes it name nothing. The same listing serves the GC below.
+        let all_logs = adapter.fetch_new_logs(&DeviceCursor::epoch()).await?;
+        let coverage = Coverage::of(&all_logs, &self.local_device_id, self.store.as_ref())?;
+        let snapshot = self.builder.build_at(
+            snapshot_ts,
+            coverage.complete.then(|| coverage.held.clone()),
+        )?;
         adapter.push_snapshot(&snapshot).await?;
 
         // The snapshot is now durable on the remote, so every LOCAL pending
@@ -365,6 +435,7 @@ impl Compactor {
             meta.min_app_version = self.app_version.clone();
         }
         meta.snapshot_timestamp = snapshot_ts;
+        meta.snapshot_coverage = coverage.complete;
         let device_name = self.store.get_pref(PREF_DEVICE_NAME).ok().flatten();
         meta.upsert_device(
             &self.local_device_id,
@@ -453,22 +524,40 @@ impl Compactor {
         }
 
         adapter.push_meta(&meta).await?;
+        report.snapshot_coverage = coverage.complete;
+        // A device that named everything it holds has an exact record from
+        // here on: re-fetching older files can no longer re-apply something
+        // its state already reflects.
+        if coverage.complete {
+            if let Err(err) = self.store.set_pref(
+                SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
+                &snapshot_ts.to_rfc3339(),
+            ) {
+                warn!(
+                    ?err,
+                    "couldn't record that this device's applied record is exact"
+                );
+            }
+        }
 
-        // 6. GC the now-redundant logs. Fetch with `epoch()` so we see every
-        //    file, then delete one only when BOTH hold:
+        // 6. GC the now-redundant logs, from the listing taken before the
+        //    snapshot (a file pushed since is not in it, so it stays). Delete
+        //    one only when BOTH hold:
         //      - its timestamp is STRICTLY below `safe_cutoff`. Strict `<`
         //        spares the freshest covered log for one round.
-        //      - the snapshot actually COVERS it: our own logs always (their
-        //        events are in the snapshot we just built); foreign logs only up
-        //        to our fetch cursor. A foreign log newer than the cursor is one
-        //        we never applied (e.g. a delayed push that landed after this
-        //        round's fetch), so it is NOT in the snapshot — deleting it
-        //        would lose those events for the whole dataset. Leave it for a
-        //        later round to fetch and fold in.
-        let all_logs = adapter.fetch_new_logs(&DeviceCursor::epoch()).await?;
+        //      - the snapshot actually COVERS it: every event in it is held —
+        //        our own, or applied. Not its name against our cursor: a
+        //        session file named before the cursor may have grown after
+        //        our last fetch, or never been applied here at all (we joined
+        //        from a snapshot that named nothing), and deleting it would
+        //        lose those events for the whole dataset. A file that does not
+        //        parse keeps the rule by name — nobody on this version can
+        //        apply it either way.
         for log in all_logs {
-            let covered =
-                log.name.device_id == self.local_device_id || log.name.timestamp <= cursor;
+            let covered = match coverage.files.get(&log.name.to_filename()) {
+                Some(all_held) => *all_held,
+                None => log.name.device_id == self.local_device_id || log.name.timestamp <= cursor,
+            };
             if log.name.timestamp < safe_cutoff && covered {
                 match adapter.delete_log(&log.name).await {
                     Ok(()) => report.deleted_logs += 1,
@@ -495,6 +584,8 @@ impl Compactor {
             gc_horizon = %gc_horizon,
             deleted = report.deleted_logs,
             stale = report.stale_devices,
+            coverage = coverage.complete,
+            held = coverage.held.len(),
             "compaction complete",
         );
         Ok(report)
@@ -1033,6 +1124,165 @@ mod tests {
             "a foreign log newer than our cursor is unapplied → not in the snapshot → must survive",
         );
         assert_eq!(adapter.logs.lock().unwrap().len(), 1);
+    }
+
+    /// A log file of `count` real events minted by `device`, and their ids.
+    fn log_of(ts: DateTime<Utc>, device: &str, count: usize) -> (LogFile, Vec<String>) {
+        let device_id = DeviceId::from_string(device.into());
+        let envelopes: Vec<sync_core::EventEnvelope> = (0..count)
+            .map(|i| {
+                sync_core::EventEnvelope::new(
+                    device_id.clone(),
+                    sync_core::SyncEvent::TaskUpdated(sync_core::EventPayload {
+                        id: format!("task-{i}"),
+                        fields: serde_json::json!({ "status": "completed" }),
+                    }),
+                )
+            })
+            .collect();
+        let ids = envelopes.iter().map(|e| e.id.clone()).collect();
+        let bytes = envelopes
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes();
+        (
+            LogFile {
+                name: LogFileName::new(ts, device_id),
+                bytes,
+            },
+            ids,
+        )
+    }
+
+    fn body_of(adapter: &FakeAdapter) -> AperioSnapshotBody {
+        let snapshot = adapter.snapshot.lock().unwrap().clone().unwrap();
+        serde_json::from_value(snapshot.body).unwrap()
+    }
+
+    /// A peer that has seen everything up to now, so the GC cutoff is not
+    /// held back by it.
+    fn meta_with_caught_up_peer() -> MetaJson {
+        let mut meta = MetaJson::fresh("1.0.0-test");
+        meta.upsert_device(
+            &DeviceId::from_string("dev-other".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now(),
+                last_seen: None,
+                app_version: "1.0.0".into(),
+                stale: false,
+            },
+        );
+        meta
+    }
+
+    #[tokio::test]
+    async fn names_the_events_it_holds_when_it_holds_every_one() {
+        // DESIGN-sync-snapshot-coverage.md: own events and applied foreign
+        // ones are held; holding every readable one, the snapshot names them,
+        // meta says so, and this device's record is exact from here on.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        store
+            .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+        let recent = Utc::now() - ChronoDuration::hours(2);
+        let (own, own_ids) = log_of(recent, "dev-this", 2);
+        let (peer, peer_ids) = log_of(recent + ChronoDuration::minutes(5), "dev-other", 2);
+        for id in &peer_ids {
+            store.mark_event_applied(id).unwrap();
+        }
+        adapter.logs.lock().unwrap().extend([own, peer]);
+        *adapter.meta.lock().unwrap() = Some(meta_with_caught_up_peer());
+
+        let report = compactor.compact_now(&adapter).await.unwrap();
+
+        let mut named = body_of(&adapter)
+            .covered_event_ids
+            .expect("names its events");
+        named.sort();
+        let mut expected: Vec<String> = own_ids.into_iter().chain(peer_ids).collect();
+        expected.sort();
+        assert_eq!(named, expected);
+        assert!(report.snapshot_coverage);
+        let meta = adapter.meta.lock().unwrap().clone().unwrap();
+        assert!(meta.snapshot_coverage);
+        assert_eq!(
+            store
+                .get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+                .unwrap()
+                .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
+                .map(|ts| ts.with_timezone(&Utc)),
+            Some(meta.snapshot_timestamp),
+        );
+    }
+
+    #[tokio::test]
+    async fn names_nothing_when_a_peers_event_was_never_applied() {
+        // A peer's file holding an event this device never applied — it
+        // joined from a snapshot that named nothing, or the file grew since
+        // the last fetch: the device cannot vouch for its record, so the
+        // snapshot names nothing and its record stays inexact.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        store
+            .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+        let (peer, peer_ids) = log_of(Utc::now() - ChronoDuration::hours(1), "dev-other", 2);
+        store.mark_event_applied(&peer_ids[0]).unwrap();
+        adapter.logs.lock().unwrap().push(peer);
+        *adapter.meta.lock().unwrap() = Some(meta_with_caught_up_peer());
+
+        let report = compactor.compact_now(&adapter).await.unwrap();
+
+        assert_eq!(body_of(&adapter).covered_event_ids, None);
+        assert!(!report.snapshot_coverage);
+        assert!(
+            !adapter
+                .meta
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap()
+                .snapshot_coverage
+        );
+        assert_eq!(
+            store.get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY).unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn gc_keeps_a_file_named_before_the_cursor_whose_rest_was_never_applied() {
+        // The laptop's case (Toni, 2026-10-27): a peer's session file named
+        // long before this device's cursor, whose later events it never
+        // applied. By name it looked covered and was deleted, losing those
+        // events for the whole dataset; now only a file whose every event is
+        // held goes.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        store
+            .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+        let old: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
+        let (grown, grown_ids) = log_of(old, "dev-other", 2);
+        store.mark_event_applied(&grown_ids[0]).unwrap();
+        let (applied, applied_ids) = log_of(old + ChronoDuration::hours(1), "dev-other", 1);
+        store.mark_event_applied(&applied_ids[0]).unwrap();
+        adapter.logs.lock().unwrap().extend([grown, applied]);
+        *adapter.meta.lock().unwrap() = Some(meta_with_caught_up_peer());
+
+        let report = compactor.compact_now(&adapter).await.unwrap();
+
+        assert_eq!(report.deleted_logs, 1);
+        let remaining = adapter.logs.lock().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(
+            remaining[0].name.timestamp, old,
+            "the file with an unapplied event stays"
+        );
     }
 
     #[tokio::test]

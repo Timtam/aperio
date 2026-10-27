@@ -80,6 +80,14 @@ pub struct AperioSnapshotBody {
     /// strips it before any plaintext re-upload.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub credentials: Vec<SnapshotCredential>,
+    /// The ids of the events still in log files that this snapshot already
+    /// reflects (DESIGN-sync-snapshot-coverage.md). A device that takes the
+    /// snapshot records them as applied and can then fetch every log file
+    /// and apply only the rest: a session file named before the snapshot
+    /// may have grown after it. `None` when the compactor could not vouch
+    /// for its applied record — a snapshot as before, by timestamp only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub covered_event_ids: Option<Vec<String>>,
 }
 
 /// One account secret carried in [`AperioSnapshotBody::credentials`].
@@ -162,7 +170,7 @@ impl SnapshotBuilder {
     /// responsible for atomically updating `meta.json.snapshot_timestamp`
     /// to match after a successful `push_snapshot`.
     pub fn build(&self) -> SyncResult<Snapshot> {
-        self.build_at(Utc::now())
+        self.build_at(Utc::now(), None)
     }
 
     /// Like [`build`](Self::build) but stamps the snapshot with a
@@ -173,8 +181,14 @@ impl SnapshotBuilder {
     /// land in a file whose timestamp is strictly newer than the
     /// snapshot — so a device that consumes the snapshot (and advances
     /// its cursor to `snapshot_at`) still fetches them instead of
-    /// skipping them as "older than the snapshot".
-    pub fn build_at(&self, snapshot_at: DateTime<Utc>) -> SyncResult<Snapshot> {
+    /// skipping them as "older than the snapshot". `covered_event_ids` is
+    /// what the compactor can vouch the snapshot holds
+    /// ([`AperioSnapshotBody::covered_event_ids`]).
+    pub fn build_at(
+        &self,
+        snapshot_at: DateTime<Utc>,
+        covered_event_ids: Option<Vec<String>>,
+    ) -> SyncResult<Snapshot> {
         let dump = self
             .store
             .dump_for_snapshot()
@@ -193,6 +207,7 @@ impl SnapshotBuilder {
             settings,
             accounts,
             credentials,
+            covered_event_ids,
         };
         let body_value = serde_json::to_value(&body)?;
         Ok(Snapshot::new(

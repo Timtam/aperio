@@ -47,7 +47,8 @@ pub use compactor::{
 };
 pub use orchestrator::{
     merge_applied_log_lengths, SyncOrchestrator, SyncRoundHooks, SYNC_APPLIED_LOG_LENGTHS_PREF_KEY,
-    SYNC_CURSOR_PREF_KEY, SYNC_LAST_ROUND_PREF_KEY, SYNC_OWN_NEWEST_LOG_PREF_KEY,
+    SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, SYNC_CURSOR_PREF_KEY, SYNC_LAST_ROUND_PREF_KEY,
+    SYNC_OWN_NEWEST_LOG_PREF_KEY,
 };
 pub use snapshot::{
     AperioSnapshotBody, SnapshotAccount, SnapshotApplyOutcome, SnapshotBuilder, SnapshotCredential,
