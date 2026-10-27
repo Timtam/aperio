@@ -79,6 +79,20 @@ it over a share on the local network.
   next reconciliation, no restart. If the settings page happens to be open, the
   change is announced.
 
+## A new device, and catching up
+
+Every so often a device folds the change log into a **snapshot**, so a new
+device does not have to replay months of changes. A new device takes that
+snapshot and then every change made since — including those another device
+wrote in a session that had already begun before the snapshot. A change a
+device made offline and uploads late arrives at the others too.
+
+After the update that brought this, the first device that holds every change
+writes such a snapshot on its own, within a day. Every other device then
+rebuilds its local data from it **once**: changes it had missed arrive, and
+entries deleted elsewhere disappear. That one round can take a little longer.
+Nothing that exists only on this device is removed.
+
 ## Your devices
 
 Every device that connects to your dataset registers itself there. **Settings →

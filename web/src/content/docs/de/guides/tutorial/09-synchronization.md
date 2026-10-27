@@ -80,6 +80,22 @@ selben Netz auf denselben Datensatz zugreifen.
   Desktop-Fenster sie beim nächsten Abgleich, ohne Neustart. Steht die
   Einstellungsseite gerade offen, wird die Änderung angesagt.
 
+## Ein neues Gerät, und Nachholen
+
+Von Zeit zu Zeit fasst ein Gerät das Änderungsprotokoll zu einem
+**Schnappschuss** zusammen, damit ein neues Gerät nicht Monate an Änderungen
+nachspielen muss. Ein neues Gerät übernimmt diesen Schnappschuss und danach
+jede Änderung seitdem — auch solche, die ein anderes Gerät in einer Sitzung
+geschrieben hat, die schon vor dem Schnappschuss begann. Eine Änderung, die ein
+Gerät offline gemacht und erst später hochgeladen hat, kommt ebenfalls bei den
+anderen an.
+
+Nach dem Update, das dies mitbringt, schreibt das erste Gerät, das jede Änderung
+hält, innerhalb eines Tages von selbst so einen Schnappschuss. Jedes andere Gerät
+baut daraus **einmal** seine lokalen Daten neu auf: Verpasste Änderungen kommen
+an, und anderswo Gelöschtes verschwindet. Diese eine Runde kann etwas länger
+dauern. Was es nur auf diesem Gerät gibt, wird nicht entfernt.
+
 ## Deine Geräte
 
 Jedes Gerät, das sich mit deinem Datensatz verbindet, trägt sich dort ein. Unter

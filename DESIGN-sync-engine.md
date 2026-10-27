@@ -58,7 +58,7 @@ Fünf Traits kapseln die plattformspezifischen Abhängigkeiten. Desktop und Mobi
 
 Die größte Nahtstelle. Kapselt sowohl die sync-eigenen Tabellen als auch den lokalen Datenspeicher. **DB-Methoden bleiben synchron** (die `SharedConn` ist single-threaded mit `Mutex`); nur Adapter/Dateisystem sind async.
 
-- **Idempotenz:** `is_event_applied(id)`, `mark_event_applied(id, now)` (Tabelle `sync_applied_events`).
+- **Idempotenz:** `is_event_applied(id)`, `mark_event_applied(id, now)` (Tabelle `sync_applied_events`); dazu `mark_events_applied`, `clear_applied_events`, `forget_events_applied` für Schnappschüsse, die ihre Ereignisse nennen, und den einmaligen Neuaufbau (DESIGN-sync-snapshot-coverage.md, 2026-10-27).
 - **Cursor/Watermark:** `get/set_sync_cursor`, `get/set_last_round_timestamp`.
 - **Geräte-ID:** `load_or_mint_device_id`, `set_device_id` (in `user_prefs`).
 - **Einstellungen:** `get/set/delete_user_pref`, `dump_synced_prefs` (Whitelist, §19.2.1).
