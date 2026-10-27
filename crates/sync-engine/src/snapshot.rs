@@ -128,6 +128,10 @@ pub struct SnapshotApplyOutcome {
     pub settings_failed: usize,
     pub accounts_applied: usize,
     pub accounts_failed: usize,
+    /// How many events the snapshot named as held and were recorded as
+    /// applied — `None` for a snapshot that names nothing
+    /// (DESIGN-sync-snapshot-coverage.md).
+    pub covered_events: Option<usize>,
 }
 
 impl SnapshotApplyOutcome {
@@ -310,6 +314,19 @@ impl SnapshotBuilder {
                 "snapshot carried credentials but E2E is off locally; ignoring them",
             );
         }
+
+        // The events this snapshot holds that are still in log files
+        // (DESIGN-sync-snapshot-coverage.md), recorded as applied: their
+        // effect is in the rows above now, so a device taking the snapshot
+        // can fetch every log file and apply only the rest. A failure fails
+        // the apply — without the record, that fetch would re-apply what the
+        // rows hold and report false conflicts.
+        if let Some(ids) = &body.covered_event_ids {
+            self.store
+                .mark_events_applied(ids)
+                .map_err(|err| SyncError::internal(format!("record covered events: {err}")))?;
+            outcome.covered_events = Some(ids.len());
+        }
         Ok(outcome)
     }
 
@@ -387,6 +404,41 @@ mod tests {
             prefs.get("appearance.darkMode").map(String::as_str),
             Some("true")
         );
+    }
+
+    #[test]
+    fn apply_records_the_events_the_snapshot_names_as_applied() {
+        // DESIGN-sync-snapshot-coverage.md: the named events' effect is in
+        // the applied rows, so they are recorded as applied with them — a
+        // device taking the snapshot then fetches every file and applies
+        // only the rest. A snapshot that names nothing records nothing.
+        let store = Arc::new(FakeStore::default());
+        let secrets = Arc::new(FakeSecrets::default());
+        let body = AperioSnapshotBody {
+            covered_event_ids: Some(vec!["ev-1".into(), "ev-2".into()]),
+            ..Default::default()
+        };
+        let snap = Snapshot::new(
+            Utc::now(),
+            "1.0.0-test",
+            serde_json::to_value(&body).unwrap(),
+        );
+        let outcome = builder(Arc::clone(&store), Arc::clone(&secrets))
+            .apply(&snap)
+            .unwrap();
+        assert_eq!(outcome.covered_events, Some(2));
+        let applied = store.applied.lock().unwrap().clone();
+        assert!(applied.contains("ev-1") && applied.contains("ev-2"));
+
+        let plain = Arc::new(FakeStore::default());
+        let snap = Snapshot::new(
+            Utc::now(),
+            "1.0.0-test",
+            serde_json::to_value(AperioSnapshotBody::default()).unwrap(),
+        );
+        let outcome = builder(Arc::clone(&plain), secrets).apply(&snap).unwrap();
+        assert_eq!(outcome.covered_events, None);
+        assert!(plain.applied.lock().unwrap().is_empty());
     }
 
     #[test]

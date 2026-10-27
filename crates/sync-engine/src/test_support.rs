@@ -95,6 +95,14 @@ impl SyncStore for FakeStore {
         Ok(())
     }
 
+    fn mark_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError> {
+        self.applied
+            .lock()
+            .unwrap()
+            .extend(event_ids.iter().cloned());
+        Ok(())
+    }
+
     fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError> {
         self.conflicts.lock().unwrap().push(conflict.clone());
         Ok(())

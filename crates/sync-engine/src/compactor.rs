@@ -690,6 +690,7 @@ impl Compactor {
             settings_failed: 0,
             accounts_applied: body.accounts.len(),
             accounts_failed: 0,
+            covered_events: body.covered_event_ids.as_ref().map(Vec::len),
         }
     }
 }

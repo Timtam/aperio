@@ -56,7 +56,10 @@ use sync_core::{
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
-use crate::event_log::{ApplyReport, EventLogApplier, SnapshotBuilder, SYNC_CURSOR_PREF_KEY};
+use crate::event_log::{
+    ApplyReport, EventLogApplier, SnapshotBuilder, SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
+    SYNC_CURSOR_PREF_KEY,
+};
 use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` key holding the user-chosen device name. Surfaces in
@@ -422,6 +425,12 @@ impl OnboardingService {
         // bumps it to the snapshot's own timestamp.
         let mut starting_cursor: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
         let mut snapshot_applied = false;
+        // A snapshot that names the events it holds lets us fetch EVERY log
+        // file (DESIGN-sync-snapshot-coverage.md): the named ones are now
+        // recorded as applied, and a session file named before the snapshot
+        // may have grown after it — skipping it by name lost those events
+        // (Toni's laptop, 2026-10-27).
+        let mut covered_from: Option<DateTime<Utc>> = None;
         match adapter.fetch_snapshot().await? {
             Some(snapshot) => {
                 info!(
@@ -429,9 +438,13 @@ impl OnboardingService {
                     "consuming remote snapshot during onboarding",
                 );
                 match self.snapshot_builder.apply(&snapshot) {
-                    Ok(_outcome) => {
+                    Ok(outcome) => {
                         starting_cursor = snapshot.metadata.snapshot_timestamp;
                         snapshot_applied = true;
+                        if let Some(count) = outcome.covered_events {
+                            info!(count, "the snapshot names the events it holds");
+                            covered_from = Some(starting_cursor);
+                        }
                     }
                     Err(err) => {
                         // Refuse to silently fall back to log-only
@@ -456,7 +469,11 @@ impl OnboardingService {
         crate::sound_assets::reset_missing_cache();
         let logs = adapter
             .fetch_new_logs(&DeviceCursor {
-                last_seen_log: starting_cursor,
+                last_seen_log: if covered_from.is_some() {
+                    DateTime::<Utc>::MIN_UTC
+                } else {
+                    starting_cursor
+                },
                 // Own files are discarded by the filter below anyway —
                 // let the adapter skip fetching their bytes.
                 exclude_device: Some(self.local_device_id.clone()),
@@ -531,6 +548,11 @@ impl OnboardingService {
         // don't touch the existing cursor.
         if newest > DateTime::<Utc>::MIN_UTC {
             self.save_cursor(newest)?;
+        }
+        // Taken from a snapshot that names what it holds, and with every file
+        // applied on top, this device's record is exact.
+        if let Some(snapshot_ts) = covered_from {
+            self.save_coverage_exact_since(snapshot_ts)?;
         }
 
         // Persist + push the device registration.
@@ -1035,6 +1057,15 @@ impl OnboardingService {
         Ok(())
     }
 
+    /// Record that this device's applied record is exact from the snapshot
+    /// stamped `ts` on (`sync_engine::SYNC_COVERAGE_EXACT_SINCE_PREF_KEY`).
+    fn save_coverage_exact_since(&self, ts: DateTime<Utc>) -> SyncResult<()> {
+        UserPrefsRepo::new(&self.db)
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &ts.to_rfc3339())
+            .map_err(|err| SyncError::internal(format!("save coverage mark: {err}")))?;
+        Ok(())
+    }
+
     /// Merge freshly applied log byte lengths into the shared
     /// growth-refetch map (same pref + semantics as the sync round —
     /// `sync_engine::merge_applied_log_lengths`). Best-effort: a failed
@@ -1133,25 +1164,28 @@ mod tests {
     struct FakeAdapter {
         meta: Mutex<Option<MetaJson>>,
         logs: Mutex<Vec<LogFile>>,
+        snapshot: Mutex<Option<Snapshot>>,
     }
 
     impl FakeAdapter {
         fn new() -> Self {
-            Self {
-                meta: Mutex::new(None),
-                logs: Mutex::new(Vec::new()),
-            }
+            Self::with_logs(Vec::new())
         }
 
         fn with_logs(logs: Vec<LogFile>) -> Self {
             Self {
                 meta: Mutex::new(None),
                 logs: Mutex::new(logs),
+                snapshot: Mutex::new(None),
             }
         }
 
         fn install_meta(&self, meta: MetaJson) {
             *self.meta.lock().unwrap() = Some(meta);
+        }
+
+        fn install_snapshot(&self, snapshot: Snapshot) {
+            *self.snapshot.lock().unwrap() = Some(snapshot);
         }
     }
 
@@ -1182,7 +1216,7 @@ mod tests {
             Ok(())
         }
         async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
-            Ok(None)
+            Ok(self.snapshot.lock().unwrap().clone())
         }
         async fn push_snapshot(&self, _snapshot: &Snapshot) -> SyncResult<()> {
             Ok(())
@@ -1778,6 +1812,121 @@ mod tests {
         assert!(
             !after.device(svc.device_id()).unwrap().stale,
             "resume must clear the stale flag even without a snapshot",
+        );
+    }
+
+    /// The laptop's case (Toni, 2026-10-27): a peer session file named at
+    /// `start`, before the snapshot at `start + 1h`, holding a change the
+    /// snapshot folded in (`held`, interval 30) and one the peer appended
+    /// after it (`appended`, interval 45). Returns the file, the snapshot's
+    /// time and the held event's id.
+    fn grown_session(start: DateTime<Utc>) -> (LogFile, DateTime<Utc>, String) {
+        let peer = DeviceId::from_string("dev-other".into());
+        let change = |minutes: i64, value: &str| sync_core::EventEnvelope {
+            id: format!("ev-{minutes}"),
+            device_id: peer.clone(),
+            timestamp: start + chrono::Duration::minutes(minutes),
+            event: sync_core::SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+                key: "sync.intervalMinutes".into(),
+                value: serde_json::json!(value),
+            }),
+        };
+        let held = change(10, "30");
+        let appended = change(120, "45");
+        let bytes = [&held, &appended]
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes();
+        let log = LogFile {
+            name: LogFileName::new(start, peer),
+            bytes,
+        };
+        (log, start + chrono::Duration::hours(1), held.id)
+    }
+
+    /// The snapshot at `at`, holding interval 30, naming `covered` (or
+    /// nothing).
+    fn snapshot_at(at: DateTime<Utc>, covered: Option<Vec<String>>) -> Snapshot {
+        let body = sync_engine::AperioSnapshotBody {
+            settings: std::collections::BTreeMap::from([(
+                "sync.intervalMinutes".to_string(),
+                "30".to_string(),
+            )]),
+            covered_event_ids: covered,
+            ..Default::default()
+        };
+        Snapshot::new(at, "1.0.0", serde_json::to_value(body).unwrap())
+    }
+
+    fn interval(db: &DbHandle) -> Option<String> {
+        UserPrefsRepo::new(&db.shared())
+            .get("sync.intervalMinutes")
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn accept_remote_applies_what_a_naming_snapshot_does_not_hold() {
+        // DESIGN-sync-snapshot-coverage.md: a snapshot that names the events
+        // it holds lets a joining device fetch every file, a session file
+        // named before the snapshot included, and apply only the rest.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let start: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (log, snapshot_ts, held) = grown_session(start);
+        let adapter = FakeAdapter::with_logs(vec![log]);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = snapshot_ts;
+        meta.snapshot_coverage = true;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(snapshot_ts, Some(vec![held])));
+
+        let report = svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(
+            interval(&db).as_deref(),
+            Some("45"),
+            "the appended change arrives"
+        );
+        assert_eq!(report.applied, 1, "the held change is not applied again");
+        let exact = UserPrefsRepo::new(&db.shared())
+            .get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+            .unwrap()
+            .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
+            .map(|ts| ts.with_timezone(&Utc));
+        assert_eq!(
+            exact,
+            Some(snapshot_ts),
+            "its record is exact from the snapshot on"
+        );
+    }
+
+    #[tokio::test]
+    async fn accept_remote_from_a_snapshot_naming_nothing_stays_by_name() {
+        // A snapshot that names nothing (written before the fix, or by a
+        // device that could not vouch for its record): the join stays by
+        // file name, as before — re-applying the held change would report a
+        // false conflict — and the record is not exact. The rebuild heals it
+        // once a naming snapshot exists.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let start: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (log, snapshot_ts, _held) = grown_session(start);
+        let adapter = FakeAdapter::with_logs(vec![log]);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = snapshot_ts;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(snapshot_ts, None));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("30"));
+        assert_eq!(
+            UserPrefsRepo::new(&db.shared())
+                .get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+                .unwrap(),
+            None,
         );
     }
 

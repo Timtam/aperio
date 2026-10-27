@@ -370,6 +370,11 @@ pub trait SyncStore: Send + Sync {
     /// Record that the event with this id has been integrated, so a later
     /// pass skips it. Idempotent (INSERT OR IGNORE).
     fn mark_event_applied(&self, event_id: &str) -> Result<(), StoreError>;
+    /// Record a batch of event ids as integrated at once — the events a
+    /// snapshot names as held (DESIGN-sync-snapshot-coverage.md), hundreds
+    /// per snapshot. All or none: a half-recorded batch would let a later
+    /// pass re-apply events the snapshot's rows already hold.
+    fn mark_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError>;
     /// Persist a field-level conflict the applier couldn't auto-merge,
     /// superseding any prior unresolved conflict on the same
     /// (kind, row, field) (DESIGN.md §19.3).

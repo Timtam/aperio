@@ -256,6 +256,26 @@ impl SyncStore for DesktopSyncStore {
         Ok(())
     }
 
+    fn mark_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError> {
+        let mut conn = self.db.lock().expect("db mutex poisoned");
+        let now = Utc::now().to_rfc3339();
+        let backend =
+            |err: rusqlite::Error| StoreError::Backend(format!("mark_events_applied: {err}"));
+        let tx = conn.transaction().map_err(backend)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR IGNORE INTO sync_applied_events
+                        (event_id, applied_at) VALUES (?, ?)",
+                )
+                .map_err(backend)?;
+            for event_id in event_ids {
+                stmt.execute(params![event_id, now]).map_err(backend)?;
+            }
+        }
+        tx.commit().map_err(backend)
+    }
+
     fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError> {
         ConflictsRepo::new(&self.db)
             .record(conflict.clone())
