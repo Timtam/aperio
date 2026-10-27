@@ -3369,6 +3369,26 @@ impl Host {
         // The organizer is never an invitee, and only an event the account
         // organizes may notify (decisions 67a, 72a). Mirrors the desktop.
         host_core::event_write::guard_create(&mut event);
+        // An imported invitation keeps its organizer and invitees only where
+        // the calendar keeps invitations quietly (I6). Mirrors the desktop.
+        if event.keeps_invitation {
+            let calendars = if self.is_local_calendar(&req.calendar_id) {
+                self.runtime
+                    .block_on(self.adapter.list_calendars())
+                    .map_err(map_store_err)?
+            } else {
+                let account = self
+                    .registry
+                    .account_for_calendar(&req.calendar_id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
+                self.cache.read_calendars(&account).unwrap_or_default()
+            };
+            host_core::event_write::guard_invitation_import(
+                &mut event,
+                &calendars,
+                &req.calendar_id,
+            );
+        }
         // Same rule as the desktop command: a calendar set to "attach" writes
         // its default reminders into a new appointment left without any.
         host_core::reminders::apply_default_reminder_policy(
@@ -3532,6 +3552,12 @@ impl Host {
                 reminders: event.reminders.clone(),
                 sound: event.sound.clone(),
                 attendees: event.attendees.clone(),
+                // A new UID at the target: created before the source is gone,
+                // the same one would stand twice at the provider for a moment,
+                // which nobody measured a server to accept (matches the
+                // desktop).
+                uid_to_keep: None,
+                keeps_invitation: false,
             };
             host_core::event_write::guard_create(&mut new_payload);
             // A copy in another calendar of somebody else's meeting invites
@@ -8179,6 +8205,33 @@ impl Host {
         })
     }
 
+    // ── File import (DESIGN-file-import.md) ─────────────────────────────────
+
+    /// The formats the enabled plugins read, named in `lang`, as JSON
+    /// (`host_core::file_import::ImportFormat` rows): the document picker's
+    /// filter. Mirrors the desktop `file_import_formats` command.
+    pub fn file_import_formats_json(&self, lang: String) -> Result<String, StoreError> {
+        to_json(&host_core::file_import::import_formats(
+            &self.plugin_manager,
+            &lang,
+        ))
+    }
+
+    /// Read the file at `path` — a filesystem path: the document picker's
+    /// copy, or a shared file copied into the app — through the plugin that
+    /// reads its format, as a JSON `cal_core::FileImport`. Nothing is written.
+    /// Mirrors the desktop `read_import_file` command.
+    pub fn read_import_file_json(&self, path: String) -> Result<String, StoreError> {
+        let import = self
+            .runtime
+            .block_on(host_core::file_import::import_file(
+                &self.plugin_manager,
+                std::path::Path::new(&path),
+            ))
+            .map_err(map_store_err)?;
+        to_json(&import)
+    }
+
     // ── Schema-driven accounts ───────────────────────────────────────────────
     //
     // The generic path: an adapter publishes an account schema in its
@@ -10506,6 +10559,46 @@ mod tests {
         )
     }
 
+    /// An imported invitation (I6) keeps its organizer and invitees where the
+    /// calendar says it keeps invitations, as a local calendar does (I6c):
+    /// someone else's meeting, nobody told, from the phone as from the
+    /// desktop. A create that is no import is the account's own, as before.
+    #[test]
+    fn an_imported_invitation_is_kept_only_where_the_calendar_keeps_it() {
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        let request = new_event_json(&cal, "Jour fixe").replace(
+            r#""attendees":[]"#,
+            r#""attendees":["bob@example.org"],"organizer":"boss@example.org","keeps_invitation":true,"send_invitations":true"#,
+        );
+        let created: serde_json::Value =
+            serde_json::from_str(&host.create_event_json(request).unwrap()).unwrap();
+        assert_eq!(
+            created["attendees"],
+            serde_json::json!(["bob@example.org"]),
+            "{created}"
+        );
+        assert_eq!(created["organizer"], "boss@example.org", "{created}");
+        assert_eq!(created["organized_elsewhere"], true, "{created}");
+
+        // The same people without the mark: a copy of someone else's meeting
+        // names its organizer only to keep it out of the invitees (72a).
+        let plain = new_event_json(&cal, "Kopie").replace(
+            r#""attendees":[]"#,
+            r#""attendees":["bob@example.org"],"organizer":"boss@example.org","organized_elsewhere":true"#,
+        );
+        let copied: serde_json::Value =
+            serde_json::from_str(&host.create_event_json(plain).unwrap()).unwrap();
+        assert!(
+            copied.get("organizer").is_none_or(|o| o.is_null()),
+            "{copied}"
+        );
+        assert!(
+            copied.get("organized_elsewhere").is_none_or(|o| o == false),
+            "{copied}"
+        );
+    }
+
     /// The MOBILE half of the calendar-default-reminder chain, driven by the
     /// same fixture as host-core and the TypeScript suite
     /// (`shared/contracts/calendarDefaultReminders.json`).
@@ -10789,6 +10882,7 @@ mod tests {
                 attendee_responses: Vec::new(),
                 cancelled,
                 scheduling_silenced: false,
+                ical_uid: None,
             }
         };
         let mut events = vec![

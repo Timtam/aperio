@@ -9,7 +9,7 @@
 //! and the mobile `Host`, call it before any adapter or the local store sees an
 //! event, so neither can forget a path the other covers.
 
-use cal_core::{Event, NewEvent};
+use cal_core::{Calendar, Event, NewEvent};
 
 use crate::cache::CacheStore;
 
@@ -85,4 +85,17 @@ pub fn guard_update(
 /// Before a create: see `cal_core::attendee::guard_create`.
 pub fn guard_create(event: &mut NewEvent) {
     cal_core::attendee::guard_create(event);
+}
+
+/// Before the create of an imported invitation: see
+/// `cal_core::attendee::guard_invitation_import`. `calendars` is the listing
+/// the target calendar is in; one that is not there keeps nothing, the way in
+/// which nobody is told anything.
+pub fn guard_invitation_import(event: &mut NewEvent, calendars: &[Calendar], calendar_id: &str) {
+    let import = calendars
+        .iter()
+        .find(|c| c.id == calendar_id)
+        .map(|c| c.invitation_import)
+        .unwrap_or_default();
+    cal_core::attendee::guard_invitation_import(event, import);
 }

@@ -143,6 +143,7 @@ pub struct StaticHooks {
     pub discover_fn: Option<DiscoverFn>,
     pub probe_host_key_fn: Option<ProbeHostKeyFn>,
     pub strings_fn: Option<StringsFn>,
+    pub import_file_fn: Option<ImportFileFn>,
 }
 
 /// Function-pointer type for the optional
@@ -164,6 +165,19 @@ pub type ProbeHostKeyFn =
 
 /// Canonical symbol name for the probe-host-key entry point.
 pub const SYMBOL_PROBE_HOST_KEY: &[u8] = b"aperio_plugin_probe_host_key";
+
+/// Function-pointer type for the optional `aperio_plugin_import_file` symbol
+/// (DESIGN-file-import.md). A plugin that declares
+/// [`crate::manifest::PluginManifest::file_imports`] exports it and reads the
+/// file itself: no account, no network.
+///
+/// `args_ptr` / `args_len` carry `{"format": "<id>", "file_name": "…",
+/// "content": "<base64>"}`; the payload is a JSON `cal_core::FileImport`.
+pub type ImportFileFn =
+    unsafe extern "C" fn(args_ptr: *const u8, args_len: usize) -> PluginCallResult;
+
+/// Canonical symbol name for the import-file entry point.
+pub const SYMBOL_IMPORT_FILE: &[u8] = b"aperio_plugin_import_file";
 
 /// Host log sink handed to every dlopen'd plugin via
 /// `aperio_plugin_set_log`. A plugin's forwarding subscriber calls
@@ -244,6 +258,11 @@ pub struct LoadedPlugin {
     /// plugin whose strings live in its manifest, which is the
     /// ordinary case.
     strings_fn: Option<StringsFn>,
+
+    /// Cached `aperio_plugin_import_file` fn-pointer. `None` for a plugin
+    /// that reads no files; its `file_imports`, if it declared any, are then
+    /// not offered.
+    import_file_fn: Option<ImportFileFn>,
 
     /// Per-language catalogues already resolved for this plugin.
     ///
@@ -334,6 +353,17 @@ impl LoadedPlugin {
     /// `aperio_plugin_probe_host_key` symbol.
     pub fn has_probe_host_key(&self) -> bool {
         self.probe_host_key_fn.is_some()
+    }
+
+    /// The file formats this plugin reads for an import: its manifest's
+    /// `file_imports`, and none when it exports no
+    /// `aperio_plugin_import_file` to read them with.
+    pub fn file_imports(&self) -> &[crate::manifest::FileImportFormat] {
+        if self.import_file_fn.is_some() {
+            &self.manifest.file_imports
+        } else {
+            &[]
+        }
     }
 
     /// Borrow the in-flight counter. Shim wrappers clone this
@@ -865,6 +895,16 @@ impl PluginManager {
                 .map(|sym| *sym)
         };
 
+        // `aperio_plugin_import_file` is optional too — only plugins that
+        // read files for an import export it.
+        let import_file_fn: Option<ImportFileFn> = unsafe {
+            library
+                .get::<ImportFileFn>(SYMBOL_IMPORT_FILE)
+                .ok()
+                .map(|sym| *sym)
+        };
+        warn_unanswered_imports(&manifest, import_file_fn.is_some());
+
         // ABI cross-check between the manifest's claim + the
         // descriptor's claim. They MUST match — a divergence
         // would mean either the plugin's build hooked up the
@@ -917,6 +957,7 @@ impl PluginManager {
             discover_fn,
             probe_host_key_fn,
             strings_fn,
+            import_file_fn,
             strings_cache: RwLock::new(HashMap::new()),
             in_flight: Arc::new(AtomicUsize::new(0)),
             library: Some(library),
@@ -964,8 +1005,10 @@ impl PluginManager {
             discover_fn,
             probe_host_key_fn,
             strings_fn,
+            import_file_fn,
         } = hooks;
         manifest.compatible_with(&self.app_version)?;
+        warn_unanswered_imports(&manifest, import_file_fn.is_some());
         if descriptor.is_null() {
             return Err(PluginError::Manifest(format!(
                 "static plugin {} descriptor was NULL",
@@ -980,6 +1023,7 @@ impl PluginManager {
             discover_fn,
             probe_host_key_fn,
             strings_fn,
+            import_file_fn,
             strings_cache: RwLock::new(HashMap::new()),
             in_flight: Arc::new(AtomicUsize::new(0)),
             library: None,
@@ -1489,6 +1533,7 @@ impl PluginManager {
             discover_fn: None,
             probe_host_key_fn: None,
             strings_fn: None,
+            import_file_fn: None,
             strings_cache: RwLock::new(HashMap::new()),
             in_flight: Arc::new(AtomicUsize::new(0)),
             library: None,
@@ -1787,6 +1832,99 @@ pub enum ProbeHostKeyError {
     Plugin(String),
 }
 
+impl PluginManager {
+    /// Hand a file to the plugin `plugin_id` for an import in the format
+    /// `format` (one of its manifest's `file_imports`) and return what it read:
+    /// the JSON of a `cal_core::FileImport`. Runs on the blocking pool, since
+    /// a large calendar export takes a moment to parse.
+    ///
+    /// Errors:
+    ///   - [`ImportFileError::PluginMissing`] — no plugin under the id.
+    ///   - [`ImportFileError::Unsupported`] — the plugin does not offer the
+    ///     format: it exports no `aperio_plugin_import_file`, or its manifest
+    ///     declares no format of that id.
+    ///   - [`ImportFileError::Plugin`] — the plugin could not read the file;
+    ///     its own message, verbatim.
+    pub async fn import_file(
+        &self,
+        plugin_id: &str,
+        format: &str,
+        file_name: &str,
+        content: &[u8],
+    ) -> Result<Vec<u8>, ImportFileError> {
+        let plugin = self
+            .get(plugin_id)
+            .ok_or_else(|| ImportFileError::PluginMissing(plugin_id.to_string()))?;
+        let import_fn = plugin
+            .import_file_fn
+            .filter(|_| plugin.file_imports().iter().any(|f| f.id == format))
+            .ok_or_else(|| ImportFileError::Unsupported {
+                plugin: plugin_id.to_string(),
+                format: format.to_string(),
+            })?;
+        use base64::Engine as _;
+        let args = serde_json::json!({
+            "format": format,
+            "file_name": file_name,
+            "content": base64::engine::general_purpose::STANDARD.encode(content),
+        })
+        .to_string()
+        .into_bytes();
+        let plugin_for_drop = plugin.clone();
+        let join = tokio::task::spawn_blocking(move || {
+            // SAFETY: import_fn came out of the same library plugin_for_drop
+            // holds open (or is a statically linked twin); args is a Vec<u8>
+            // we own for the duration of the synchronous call.
+            let result = unsafe { import_fn(args.as_ptr(), args.len()) };
+            // SAFETY: result.payload is owned by the plugin; we copy the bytes
+            // out and free it in place.
+            let bytes = unsafe { result.payload.as_slice().to_vec() };
+            let status = result.status;
+            let mut payload = result.payload;
+            unsafe { payload.free_in_place() };
+            (status, bytes)
+        })
+        .await;
+        drop(plugin_for_drop);
+        let (status, bytes) =
+            join.map_err(|err| ImportFileError::Plugin(format!("plugin task: {err}")))?;
+        if status == PLUGIN_CALL_OK {
+            Ok(bytes)
+        } else {
+            Err(ImportFileError::Plugin(
+                String::from_utf8_lossy(&bytes).into_owned(),
+            ))
+        }
+    }
+}
+
+/// A plugin that declares file formats but cannot read them offers none (see
+/// [`LoadedPlugin::file_imports`]); said once, at load, so the author hears it.
+fn warn_unanswered_imports(manifest: &PluginManifest, answers: bool) {
+    if !answers && !manifest.file_imports.is_empty() {
+        warn!(
+            plugin_id = %manifest.id,
+            "plugin declares file_imports but exports no aperio_plugin_import_file; its formats are not offered",
+        );
+    }
+}
+
+/// Reasons [`PluginManager::import_file`] can fail.
+#[derive(Debug, thiserror::Error)]
+pub enum ImportFileError {
+    /// No plugin loaded under this id.
+    #[error("plugin not installed: {0}")]
+    PluginMissing(String),
+
+    /// The plugin does not offer this format.
+    #[error("plugin {plugin} does not import the format {format}")]
+    Unsupported { plugin: String, format: String },
+
+    /// The plugin could not read the file; its own words.
+    #[error("{0}")]
+    Plugin(String),
+}
+
 /// Default subdir under the data dir / app dir where bundled
 /// plugins are staged. The release build pipeline copies each
 /// adapter's shared library here.
@@ -1890,6 +2028,7 @@ pub mod test_support {
             discover_fn: None,
             probe_host_key_fn: None,
             strings_fn: None,
+            import_file_fn: None,
             strings_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             library: None,
@@ -2042,6 +2181,140 @@ mod tests {
         assert_eq!(en.lookup("join", "en"), Some("from the manifest"));
     }
 
+    /// An `import_file` export that echoes what it was handed: the format,
+    /// the file name and the decoded content, as the payload.
+    unsafe extern "C" fn stub_import(
+        args_ptr: *const u8,
+        args_len: usize,
+    ) -> crate::ffi::PluginCallResult {
+        use base64::Engine as _;
+        let bytes = unsafe { std::slice::from_raw_parts(args_ptr, args_len) };
+        let args: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        let content = base64::engine::general_purpose::STANDARD
+            .decode(args["content"].as_str().unwrap())
+            .unwrap();
+        let (status, payload) = if content == b"broken" {
+            (
+                crate::ffi::PLUGIN_CALL_ERR_INVALID,
+                b"the file is not a calendar".to_vec(),
+            )
+        } else {
+            let echo = serde_json::json!({
+                "format": args["format"],
+                "file_name": args["file_name"],
+                "content": String::from_utf8(content).unwrap(),
+            });
+            (PLUGIN_OK, echo.to_string().into_bytes())
+        };
+        let boxed = payload.into_boxed_slice();
+        let len = boxed.len();
+        let data = Box::into_raw(boxed) as *mut u8;
+        unsafe extern "C" fn noop_free(_: *mut u8, _: usize) {}
+        crate::ffi::PluginCallResult {
+            status,
+            payload: crate::ffi::PluginBytes {
+                data,
+                len,
+                free: Some(noop_free),
+            },
+        }
+    }
+
+    fn ics_format() -> crate::manifest::FileImportFormat {
+        crate::manifest::FileImportFormat {
+            id: "ics".to_string(),
+            name: "iCalendar".to_string(),
+            name_key: None,
+            extensions: vec!["ics".to_string()],
+            mime_types: vec!["text/calendar".to_string()],
+            yields: vec![crate::manifest::ImportYield::Events],
+        }
+    }
+
+    /// A manager holding one plugin that declares the ICS format, with or
+    /// without the export that reads it.
+    fn importing_manager(answers: bool) -> PluginManager {
+        let mut manifest = stub_manifest("com.example.import");
+        manifest.file_imports = vec![ics_format()];
+        unsafe extern "C" fn noop_destroy(_: *mut AperioPlugin) {}
+        let descriptor = Box::into_raw(Box::new(crate::abi::AperioPlugin {
+            abi_version: crate::ABI_VERSION,
+            id: CString::new("com.example.import").unwrap().into_raw(),
+            name: CString::new("Import").unwrap().into_raw(),
+            version: CString::new("0.1.0").unwrap().into_raw(),
+            plugin_type: CString::new("adapter").unwrap().into_raw(),
+            open_instance: None,
+            close_instance: None,
+            vtable: std::ptr::null_mut(),
+        }));
+        let mut plugin = test_support::loaded_plugin_for_tests(manifest, descriptor, noop_destroy);
+        if answers {
+            plugin.import_file_fn = Some(stub_import);
+        }
+        let manager = PluginManager::new("0.1.0");
+        manager
+            .insert("com.example.import".to_string(), Arc::new(plugin))
+            .unwrap();
+        manager
+    }
+
+    #[tokio::test]
+    async fn a_file_reaches_the_plugin_that_reads_its_format() {
+        let manager = importing_manager(true);
+        let plugin = manager.get("com.example.import").unwrap();
+        assert_eq!(plugin.file_imports().len(), 1);
+        let answer = manager
+            .import_file(
+                "com.example.import",
+                "ics",
+                "termin.ics",
+                b"BEGIN:VCALENDAR",
+            )
+            .await
+            .unwrap();
+        let echo: serde_json::Value = serde_json::from_slice(&answer).unwrap();
+        assert_eq!(echo["format"], "ics");
+        assert_eq!(echo["file_name"], "termin.ics");
+        assert_eq!(echo["content"], "BEGIN:VCALENDAR");
+    }
+
+    #[tokio::test]
+    async fn a_file_the_plugin_cannot_read_says_its_own_words() {
+        let manager = importing_manager(true);
+        match manager
+            .import_file("com.example.import", "ics", "x.ics", b"broken")
+            .await
+        {
+            Err(ImportFileError::Plugin(message)) => {
+                assert_eq!(message, "the file is not a calendar")
+            }
+            other => panic!("expected the plugin's own words, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_format_without_the_export_is_not_offered() {
+        // Declared but unanswerable: the open dialog would offer a file type
+        // that fails on every file.
+        let manager = importing_manager(false);
+        let plugin = manager.get("com.example.import").unwrap();
+        assert!(plugin.file_imports().is_empty());
+        assert!(matches!(
+            manager
+                .import_file("com.example.import", "ics", "x.ics", b"")
+                .await,
+            Err(ImportFileError::Unsupported { .. })
+        ));
+        // Nor is a format the manifest does not declare.
+        let manager = importing_manager(true);
+        assert!(matches!(
+            manager
+                .import_file("com.example.import", "vcf", "x.vcf", b"")
+                .await,
+            Err(ImportFileError::Unsupported { .. })
+        ));
+    }
+
     fn stub_manifest(id: &str) -> PluginManifest {
         PluginManifest {
             id: id.to_string(),
@@ -2061,6 +2334,7 @@ mod tests {
             single_instance: false,
             adopts_adapter_kinds: Vec::new(),
             kind_names: Default::default(),
+            file_imports: Vec::new(),
             strings: Default::default(),
         }
     }

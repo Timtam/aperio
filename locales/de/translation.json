@@ -1744,6 +1744,7 @@
         "changedOnServer": "Dieser Termin wurde auf dem Server geändert, seit du ihn geöffnet hast. Es wurde nichts geändert. Öffne ihn erneut, um den aktuellen Stand zu sehen.",
         "deletionsNotKept": "Der Kalender hat die neue Serie nicht mit ihren gelöschten Terminen übernommen, deshalb hat Aperio sie wieder entfernt. Es wurde nichts geändert.",
         "deletionsNotKeptTime": "Die gelöschten Termine der neuen Serie einzeln wieder zu löschen, hat zu lange gedauert, deshalb hat Aperio die Serie wieder entfernt. Es wurde nichts geändert.",
+        "uidTaken": "Dieser Termin steht schon in diesem Kalender. Es wurde nichts angelegt.",
         "invitationsCancelledToo": "Falls Einladungen verschickt wurden, haben die Eingeladenen auch die Absage bekommen.",
         "createdMayStand": "Im Kalender wurde eine neue Serie angelegt, ließ sich aber nicht fertigstellen, und Aperio konnte sie nicht wieder entfernen. Sie steht dort möglicherweise zusätzlich. Bitte prüfe den Kalender.",
         "invitationsMayHaveGone": "Möglicherweise haben die Eingeladenen eine Einladung bekommen.",
@@ -1761,6 +1762,7 @@
           "changedOnServer": "sie wurde auf dem Server geändert, seit du sie geöffnet hast",
           "deletionsNotKeptTime": "ihre gelöschten Termine einzeln wieder zu löschen, hat zu lange gedauert",
           "deletionsNotKept": "der Kalender hat ihre gelöschten Termine nicht übernommen",
+          "uidTaken": "er steht schon in diesem Kalender",
           "createdMayStand": "eine neue Serie wurde angelegt, ließ sich aber weder fertigstellen noch wieder entfernen"
         }
       },
@@ -2618,6 +2620,93 @@
       "week": "wöchentlich",
       "month": "monatlich",
       "year": "jährlich"
+    }
+  },
+  "fileImport": {
+    "toolbarButton": "Importieren …",
+    "calendarListButton": "Termine importieren …",
+    "noCalendar": "Es gibt keinen Kalender, in den Aperio Termine schreiben kann.",
+    "dialogTitle": "Termine importieren",
+    "editorTitle": "Termin aus Datei",
+    "filterAll": "Kalenderdateien",
+    "failed": "„{{file}}“ ließ sich nicht importieren: {{reason}}",
+    "reason": {
+      "unsupported": "Aperio kann Dateien dieser Art nicht importieren.",
+      "unreadable": "Die Datei ist keine Kalenderdatei oder beschädigt. Einzelheiten stehen im Protokoll.",
+      "tooLarge": "Die Datei ist größer als 25 MB.",
+      "notOpened": "Die Datei ließ sich nicht öffnen. Einzelheiten stehen im Protokoll."
+    },
+    "nothing": "In „{{file}}“ steht kein Termin, der sich importieren lässt.",
+    "invitation": {
+      "kept": "Eine Einladung von {{organizer}}: Organisator und Teilnehmer bleiben, und niemand wird benachrichtigt.",
+      "keptTentative": "Eine Einladung von {{organizer}}: Organisator und Teilnehmer bleiben, und niemand wird benachrichtigt. Deine Antwort steht danach auf „Mit Vorbehalt“; zu- oder absagen kannst du wie bei jeder Einladung.",
+      "setAside": "Eine Einladung von {{organizer}}: In „{{calendar}}“ lassen sich Organisator und Teilnehmer nicht übernehmen, ohne dass jemand benachrichtigt wird. Der Termin wird deshalb dein eigener, ohne Teilnehmer.",
+      "stillChecking": "Aperio prüft noch, ob du diesen Termin selbst organisierst. Versuche es gleich noch einmal.",
+      "listKept": "Einladungen von anderen behalten in „{{calendar}}“ Organisator und Teilnehmer, und niemand wird benachrichtigt.",
+      "listKeptTentative": "Einladungen von anderen behalten in „{{calendar}}“ Organisator und Teilnehmer, und niemand wird benachrichtigt. Deine Antwort steht danach auf „Mit Vorbehalt“.",
+      "listSetAside": "In „{{calendar}}“ lassen sich Organisator und Teilnehmer von Einladungen nicht übernehmen, ohne dass jemand benachrichtigt wird; solche Termine werden deine eigenen, ohne Teilnehmer.",
+      "listStillChecking": "Aperio prüft noch, welche dieser Termine du selbst organisierst. Versuche es gleich noch einmal."
+    },
+    "skipped": {
+      "sentence": "Nicht übernommen: {{parts}}.",
+      "task": {
+        "titled": "die Aufgabe „{{title}}“",
+        "untitled": "eine Aufgabe ohne Titel"
+      },
+      "journal": {
+        "titled": "die Notiz „{{title}}“",
+        "untitled": "eine Notiz ohne Titel"
+      },
+      "free_busy": {
+        "titled": "die Frei/Belegt-Zeiten „{{title}}“",
+        "untitled": "Frei/Belegt-Zeiten"
+      },
+      "cancelled": {
+        "titled": "die Absage „{{title}}“",
+        "untitled": "eine Absage"
+      },
+      "reply": {
+        "titled": "die Antwort „{{title}}“",
+        "untitled": "eine Antwort auf eine Einladung"
+      },
+      "unreadable": {
+        "titled": "der unlesbare Teil „{{title}}“",
+        "untitled": "ein unlesbarer Teil"
+      }
+    },
+    "list": {
+      "summary": "In „{{file}}“ stehen {{count}} Termine.",
+      "calendar": "In Kalender",
+      "listLabel": "Termine aus der Datei",
+      "series": "Serie",
+      "allDay": "{{date}}, ganztägig",
+      "timed": "{{date}}, {{time}}",
+      "edit": "Bearbeiten …",
+      "editLabel": "„{{title}}“ im Editor öffnen",
+      "imported": "importiert",
+      "importChosen_one": "{{count}} Termin importieren",
+      "importChosen_other": "{{count}} Termine importieren",
+      "noneChosen": "Kein Termin ausgewählt.",
+      "done_one": "{{count}} Termin in „{{calendar}}“ importiert.",
+      "done_other": "{{count}} Termine in „{{calendar}}“ importiert.",
+      "partly_one": "{{done}} von {{count}} Termin in „{{calendar}}“ importiert. Nicht importiert: {{titles}}.",
+      "partly_other": "{{done}} von {{count}} Terminen in „{{calendar}}“ importiert. Nicht importiert: {{titles}}.",
+      "failedTitle": "„{{title}}“ ({{reason}})",
+      "quoted": "„{{title}}“"
+    },
+    "held": {
+      "checking": "Aperio prüft, was davon schon in „{{calendar}}“ steht …",
+      "stillChecking": "Aperio prüft noch, was davon schon in „{{calendar}}“ steht. Versuche es gleich noch einmal.",
+      "checkFailed": "Aperio konnte nicht prüfen, was davon schon in „{{calendar}}“ steht.",
+      "none": "Nichts davon steht schon in „{{calendar}}“.",
+      "some": "Schon in „{{calendar}}“: {{titles}}. Abgewählt; wer einen anwählt, importiert ihn als Kopie.",
+      "row": "steht schon in „{{calendar}}“",
+      "rowCopy": "steht schon in „{{calendar}}“, wird als Kopie importiert",
+      "editor": "Dieser Termin steht schon in „{{calendar}}“. Anlegen legt eine Kopie an.",
+      "editorFailed": "Aperio konnte nicht prüfen, ob dieser Termin schon in „{{calendar}}“ steht.",
+      "unknowable": "„{{calendar}}“ behält die Kennung einer Datei nicht: Aperio kann dort nicht erkennen, was davon schon da ist.",
+      "editorUnknowable": "„{{calendar}}“ behält die Kennung einer Datei nicht: Aperio kann dort nicht erkennen, ob dieser Termin schon da ist.",
+      "editorStillChecking": "Aperio prüft noch, ob dieser Termin schon in „{{calendar}}“ steht. Versuche es gleich noch einmal."
     }
   }
 }

@@ -18,6 +18,16 @@
     }
   },
   "signed": false,
+  "file_imports": [
+    {
+      "id": "ics",
+      "name": "iCalendar file",
+      "name_key": "import.ics.name",
+      "extensions": ["ics", "ical", "icalendar", "ifb"],
+      "mime_types": ["text/calendar"],
+      "yields": ["events"]
+    }
+  ],
   "account": {
     "fields": [
       {
@@ -55,6 +65,7 @@
       "account.password.label": "Password (optional)",
       "account.username.hint": "Only fill in if the feed requires HTTP Basic auth. Public feeds stay anonymous.",
       "account.username.label": "Username (optional)",
+      "import.ics.name": "iCalendar file (.ics)",
       "kind.ical.name": "iCal (URL / file)",
       "kind.ical.short": "iCal"
     },
@@ -65,6 +76,7 @@
       "account.password.label": "Passwort (optional)",
       "account.username.hint": "Nur ausfüllen, wenn der Feed Basic-Auth verlangt. Öffentliche Feeds bleiben anonym.",
       "account.username.label": "Benutzername (optional)",
+      "import.ics.name": "iCalendar-Datei (.ics)",
       "kind.ical.name": "iCal (URL / Datei)",
       "kind.ical.short": "iCal"
     }

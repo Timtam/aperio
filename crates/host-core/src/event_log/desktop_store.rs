@@ -363,6 +363,8 @@ mod tests {
                 color: Some(ContainerColor::custom("#abcdef")),
                 read_only: false,
                 default_sound: None,
+                invitation_import: Default::default(),
+                keeps_uid: false,
             })
             .unwrap();
         let shared = db.shared();

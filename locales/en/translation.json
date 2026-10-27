@@ -1744,6 +1744,7 @@
         "changedOnServer": "This event changed on the server since you opened it. Nothing was changed. Open it again to see the current version.",
         "deletionsNotKept": "The calendar did not take the new series together with its deleted occurrences, so Aperio removed it again. Nothing was changed.",
         "deletionsNotKeptTime": "Deleting the new series' deleted occurrences again one by one took too long, so Aperio removed the series again. Nothing was changed.",
+        "uidTaken": "This appointment is already in this calendar. Nothing was created.",
         "invitationsCancelledToo": "If invitations were sent, the invitees also received its cancellation.",
         "createdMayStand": "A new series was created in the calendar but could not be completed, and Aperio could not remove it again. It may now stand there as well. Please check the calendar.",
         "invitationsMayHaveGone": "The invitees may have received an invitation.",
@@ -1761,6 +1762,7 @@
           "changedOnServer": "it changed on the server since you opened it",
           "deletionsNotKeptTime": "deleting its deleted occurrences again one by one took too long",
           "deletionsNotKept": "the calendar did not take its deleted occurrences",
+          "uidTaken": "it is already in this calendar",
           "createdMayStand": "a new series was created but could neither be completed nor removed again"
         }
       },
@@ -2618,6 +2620,93 @@
       "week": "weekly",
       "month": "monthly",
       "year": "yearly"
+    }
+  },
+  "fileImport": {
+    "toolbarButton": "Import …",
+    "calendarListButton": "Import appointments …",
+    "noCalendar": "There is no calendar Aperio can write appointments to.",
+    "dialogTitle": "Import appointments",
+    "editorTitle": "Appointment from a file",
+    "filterAll": "Calendar files",
+    "failed": "“{{file}}” could not be imported: {{reason}}",
+    "reason": {
+      "unsupported": "Aperio cannot import files of this kind.",
+      "unreadable": "The file is not a calendar file, or it is damaged. The log has the details.",
+      "tooLarge": "The file is larger than 25 MB.",
+      "notOpened": "The file could not be opened. The log has the details."
+    },
+    "nothing": "“{{file}}” holds no appointment that can be imported.",
+    "invitation": {
+      "kept": "An invitation from {{organizer}}: the organizer and the attendees stay, and nobody is notified.",
+      "keptTentative": "An invitation from {{organizer}}: the organizer and the attendees stay, and nobody is notified. Your answer then reads “tentative”; you can accept or decline as with any invitation.",
+      "setAside": "An invitation from {{organizer}}: “{{calendar}}” cannot take the organizer and the attendees without notifying someone. The appointment becomes your own, without attendees.",
+      "stillChecking": "Aperio is still checking whether you organize this appointment yourself. Try again in a moment.",
+      "listKept": "Invitations from others keep their organizer and attendees in “{{calendar}}”, and nobody is notified.",
+      "listKeptTentative": "Invitations from others keep their organizer and attendees in “{{calendar}}”, and nobody is notified. Your answer then reads “tentative”.",
+      "listSetAside": "“{{calendar}}” cannot take the organizer and the attendees of invitations without notifying someone; such appointments become your own, without attendees.",
+      "listStillChecking": "Aperio is still checking which of these appointments you organize yourself. Try again in a moment."
+    },
+    "skipped": {
+      "sentence": "Not taken over: {{parts}}.",
+      "task": {
+        "titled": "the task “{{title}}”",
+        "untitled": "a task without a title"
+      },
+      "journal": {
+        "titled": "the note “{{title}}”",
+        "untitled": "a note without a title"
+      },
+      "free_busy": {
+        "titled": "the busy times “{{title}}”",
+        "untitled": "busy times"
+      },
+      "cancelled": {
+        "titled": "the cancellation “{{title}}”",
+        "untitled": "a cancellation"
+      },
+      "reply": {
+        "titled": "the reply “{{title}}”",
+        "untitled": "a reply to an invitation"
+      },
+      "unreadable": {
+        "titled": "the unreadable part “{{title}}”",
+        "untitled": "an unreadable part"
+      }
+    },
+    "list": {
+      "summary": "“{{file}}” holds {{count}} appointments.",
+      "calendar": "Into calendar",
+      "listLabel": "Appointments from the file",
+      "series": "Series",
+      "allDay": "{{date}}, all day",
+      "timed": "{{date}}, {{time}}",
+      "edit": "Edit …",
+      "editLabel": "Open “{{title}}” in the editor",
+      "imported": "imported",
+      "importChosen_one": "Import {{count}} appointment",
+      "importChosen_other": "Import {{count}} appointments",
+      "noneChosen": "No appointment chosen.",
+      "done_one": "{{count}} appointment imported into “{{calendar}}”.",
+      "done_other": "{{count}} appointments imported into “{{calendar}}”.",
+      "partly_one": "{{done}} of {{count}} appointment imported into “{{calendar}}”. Not imported: {{titles}}.",
+      "partly_other": "{{done}} of {{count}} appointments imported into “{{calendar}}”. Not imported: {{titles}}.",
+      "failedTitle": "“{{title}}” ({{reason}})",
+      "quoted": "“{{title}}”"
+    },
+    "held": {
+      "checking": "Aperio is checking what of this is already in “{{calendar}}” …",
+      "stillChecking": "Aperio is still checking what of this is already in “{{calendar}}”. Try again in a moment.",
+      "checkFailed": "Aperio could not check what of this is already in “{{calendar}}”.",
+      "none": "None of this is in “{{calendar}}” yet.",
+      "some": "Already in “{{calendar}}”: {{titles}}. Unchecked; check one to import it as a copy.",
+      "row": "already in “{{calendar}}”",
+      "rowCopy": "already in “{{calendar}}”, imported as a copy",
+      "editor": "This appointment is already in “{{calendar}}”. Creating it makes a copy.",
+      "editorFailed": "Aperio could not check whether this appointment is already in “{{calendar}}”.",
+      "unknowable": "“{{calendar}}” does not keep a file's identity, so Aperio cannot tell what of this is already there.",
+      "editorUnknowable": "“{{calendar}}” does not keep a file's identity, so Aperio cannot tell whether this appointment is already there.",
+      "editorStillChecking": "Aperio is still checking whether this appointment is already in “{{calendar}}”. Try again in a moment."
     }
   }
 }

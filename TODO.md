@@ -41,7 +41,41 @@
 - Einstieg: `src-tauri/Cargo.toml`, `.github/workflows/release.yml`, neues `src-tauri/src/commands/update.rs`.
 
 ### A2 · System-Integration: Datei-/URL-Verknüpfungen (§17) — nahezu vollständig offen
-- [ ] `.ics`-Dateiverknüpfung + Import-Dialog (Vorschau Titel/Datum/Beschreibung, Kalenderwahl, Batch- oder Einzelauswahl) (§17.1)
+- [~] `.ics`-Dateiverknüpfung + Import-Dialog (Vorschau Titel/Datum/Beschreibung, Kalenderwahl, Batch- oder Einzelauswahl) (§17.1)
+  ↳ Der Import selbst ist im Bau, ohne Verknüpfung (Toni, 2026-10-25):
+  `DESIGN-file-import.md`, Branch `feat/ics-import`. Adapter melden ihre
+  Formate an; ein Termin öffnet den Editor vorausgefüllt, mehrere eine
+  Liste. Die Verknüpfung an Mac und Windows kommt später.
+  ↳ Offen aus I4 (UID): Der Gerätekalender liest keine UID (iOS
+  `calendarItemExternalIdentifier`, Android `UID_2445`), dort erkennt der
+  Import keine Doppelten. Graph `uid` ist ungemessen (ohne sie hat eine
+  Serie bei Graph keine UID). Ein Verschieben in einen anderen Kalender
+  bekommt eine neue UID, weil ungemessen ist, ob iCloud oder Exchange
+  dieselbe UID kurz zweimal annehmen.
+  ↳ Prüfen (Toni, 2026-10-26): `calcard` (Stalwart, MIT/Apache) als
+  Grundschicht statt `icalendar` unter `crates/ical-mapping` — gegen unsere
+  Proben (Outlook-Einladung, Teams-Serie, Google, Apple-Export, iCloud),
+  Windows-Zonennamen, eigene VTIMEZONE, fremde Teile ganz oder gar nicht.
+  Die Abbildung auf Aperios Termine bleibt in jedem Fall unsere.
+  ↳ Offen aus I6f (Google, nach Doku gebaut, ungemessen): live messen,
+  sobald ein Google-Konto zum Testen da ist — bleibt der Organisator beim
+  `events.import`, geht keine Mail hinaus, was tut ein Import mit einer
+  schon vorhandenen UID, und klappt er wirklich nur im Hauptkalender?
+  Danach entscheiden, ob gewöhnliche Importe bei Google auch über
+  `events.import` gehen, damit ihre UID bleibt und Doppelte erkannt werden.
+  ↳ Ungemessen: Eine fremde Einladung, in einen zweiten Exchange-Ordner
+  importiert, verschiebt Aperio aus dem Standardkalender dorthin (ICS-6/7,
+  Läufe 170846 und 172507). Wohin legt Exchange eine spätere Aktualisierung
+  des Organisators — zum verschobenen Termin oder als neuen in den
+  Standardkalender? Braucht einen echten Organisator (z. B. iCloud-Konto im
+  iCloud-Testprogramm, das die Exchange-Adresse einlädt).
+  ↳ Offen (Toni, 2026-10-26): Nach einem Import mit Strg+O aus der
+  Kalenderansicht hing NVDA zwischen Fokus- und Lesemodus; im Code keine
+  Ursache gefunden (der Editor schließt wie beim gewöhnlichen Anlegen, wry
+  gibt WebView2 den Fokus beim Aktivieren zurück). Eine Fokus-Spur
+  (`src/a11y/focusTrace.ts`, drei Minuten ab dem Import, `[focus import …]`
+  im Protokoll) misst den nächsten Durchlauf. Danach beheben und die Spur
+  wieder entfernen.
 - [~] `.aperio`-Verknüpfung → startet automatisch die Plugin-Installation (§17.1, §20.7)  
   ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)
@@ -1524,6 +1558,14 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Eine Zone, die nur die Datei kennt, wiederholt sich in UTC.** Der
+      iCal-Leser löst eine `TZID`, die weder tzdata noch die Windows-Tabelle
+      kennt (Outlooks „Customized Time Zone“), über die `VTIMEZONE` der Datei
+      auf: Die Zeiten stimmen. Die Serie behält aber den eigenen Namen, den
+      keine Erweiterung kennt, und läuft nach einer Zeitumstellung eine
+      Stunde versetzt. Abhilfe: der Definition eine tzdata-Zone mit denselben
+      Regeln zuordnen, vorhersagbar statt geraten. Aus I2b des Datei-Imports
+      (2026-10-26).
 - [ ] **iPhone: Dialoge an der App-Wurzel über einem Blatt.** Ein RN-Modal
       erscheint auf iOS über dem Bildschirm, in dem es steht
       (`reactViewController`). Die Editoren, Verschieben/Kopieren und das
@@ -1699,10 +1741,10 @@ Vorschläge sind nicht aufgenommen.
 - [ ] **Zonennamen in CalDAV und Microsoft 365 über den Kern auflösen.**
       CalDAV und Microsoft 365 geben gespeicherte Zonennamen weiter direkt an
       chrono-tz, das Groß- und Kleinschreibung unterscheidet. Betroffen sind
-      crates/adapter-caldav/src/mapping.rs (resolve_with_tzid ~874,
-      RECURRENCE-ID ~1347, zoned_datetime ~1375), tasks.rs ~1063, vtimezone.rs
-      ~43 und crates/adapter-microsoft-graph/src/mapping.rs (write_datetime
-      ~1033). Eine Serie mit „europe/berlin“ wiederholt sich in Aperio nach
+      crates/ical-mapping/src/mapping.rs (resolve_with_tzid ~990,
+      RECURRENCE-ID ~1510, zoned_datetime ~1537), crates/adapter-caldav/src/tasks.rs
+      (resolve_in_zone ~1063), crates/ical-mapping/src/vtimezone.rs ~43 und
+      crates/adapter-microsoft-graph/src/mapping.rs (write_datetime ~1043). Eine Serie mit „europe/berlin“ wiederholt sich in Aperio nach
       Berlin, wird aber als UTC gelesen bzw. geschrieben. Wie bei Google und
       EWS über `cal_core::series_clock_zone`/`canonical_zone` auflösen, mit
       der kanonischen Zone rechnen und die gespeicherte Schreibweise senden.

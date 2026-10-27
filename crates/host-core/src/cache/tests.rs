@@ -80,6 +80,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
         attendee_responses: Vec::new(),
         cancelled: false,
         scheduling_silenced: false,
+        ical_uid: None,
     }
 }
 
@@ -165,6 +166,8 @@ fn calendar(id: &str) -> Calendar {
         color: None,
         read_only: false,
         default_sound: None,
+        invitation_import: Default::default(),
+        keeps_uid: false,
     }
 }
 

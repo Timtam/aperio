@@ -27,6 +27,7 @@ always authoritative.
 | New event (full form) | `Ctrl+Shift+N` |
 | Quick add task | `Alt+N` |
 | New task (full form) | `Alt+Shift+N` |
+| Import a calendar file | `Ctrl+O` |
 | Edit entry | `Enter` |
 | Check off / reopen task | `Space` |
 | Delete entry | `Delete` |

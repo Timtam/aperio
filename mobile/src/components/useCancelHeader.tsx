@@ -24,7 +24,8 @@ export interface CancelHeaderHold {
  *
  * `labelKey` names what leaving MEANS here. An editor cancels; a catalogue
  * screen goes back, and calling that "cancel" would suggest the toggles just
- * made are about to be undone.
+ * made are about to be undone; a list whose writes happen only when asked
+ * (the import list) closes.
  *
  * `hold` is the one place a screen changes that: a header set from two places
  * left whichever ran last, not the one that applies.
@@ -37,7 +38,7 @@ export function useCancelHeader(
     }) => void;
     goBack: () => void;
   },
-  labelKey: 'mobile.cancel' | 'mobile.back' = 'mobile.cancel',
+  labelKey: 'mobile.cancel' | 'mobile.back' | 'dialogs.close' = 'mobile.cancel',
   hold: CancelHeaderHold = {},
 ): void {
   const { t } = useTranslation();

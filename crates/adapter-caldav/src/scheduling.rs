@@ -30,11 +30,11 @@ use cal_core::Event;
 use cal_core::WriteRefusal;
 
 use crate::error::{CaldavError, CaldavResult};
-use crate::ical_raw::{
-    component_lines, fold, insert_after_head, line_ending, param_value, ContentLine,
-};
+use crate::ical_raw::{component_lines, fold, insert_after_head, line_ending, ContentLine};
 use crate::identity::OwnIdentity;
 use crate::mapping::{same_calendar_user, strip_mailto_scheme};
+// The rows themselves are the shared mapping's, which Exchange writes too.
+pub use ical_mapping::people::{attendee_line, unscheduled_attendee_line};
 
 /// What a write knows about the account on this server.
 #[derive(Debug, Clone, Default)]
@@ -405,23 +405,10 @@ fn shown_address(row: &ContentLine) -> String {
         .unwrap_or_else(|| row.value.trim().to_string())
 }
 
-/// A new invitee's row: required, not yet answered, asked to answer.
-pub fn attendee_line(entry: &str, ending: &str) -> String {
-    let (name, address) = parse(entry);
-    let mut line = String::from("ATTENDEE");
-    if let Some(name) = name.filter(|n| !n.trim().is_empty()) {
-        line.push_str(";CN=");
-        line.push_str(&param_value(name.trim()));
-    }
-    line.push_str(";ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:");
-    line.push_str(address.trim());
-    fold(&line, ending)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mapping::tests::{icloud_identity, ICLOUD_MEETING};
+    use ical_mapping::fixtures::{icloud_identity, ICLOUD_MEETING};
 
     fn master_block() -> &'static str {
         let from = ICLOUD_MEETING.find("BEGIN:VEVENT").unwrap();

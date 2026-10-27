@@ -71,6 +71,10 @@ export interface CalendarEvent {
   created_at: string;
   updated_at: string;
   etag: string | null;
+  /** The appointment's iCalendar UID (RFC 5545), where the provider keeps one;
+   *  a series' occurrences carry the series'. An import finds by it what the
+   *  calendar already holds (DESIGN-file-import.md, I4). Read-only. */
+  ical_uid?: string | null;
   /** Organizer address (mailto: stripped) when the provider exposes it on
    *  read. Lets the UI tell whether the connected account is an *attendee*
    *  of this meeting rather than its organizer — the gate for RSVP. */
@@ -131,6 +135,16 @@ export interface NewEvent {
    *  decision 72a). Never sent to a provider. */
   organizer?: string | null;
   organized_elsewhere?: boolean;
+  /** The iCalendar UID this create asks the provider to keep — an imported
+   *  appointment's, from its file. Absent: the provider mints one. Named
+   *  apart from `CalendarEvent.ical_uid` on purpose: a create spread from an
+   *  existing event (a copy, a split's tail) must never take its UID. */
+  uid_to_keep?: string | null;
+  /** A meeting someone else organizes, from a file: created as theirs with
+   *  `organizer` and the invitees, nobody told, where the calendar keeps
+   *  invitations (`Calendar.invitation_import`); the host drops the people
+   *  elsewhere. */
+  keeps_invitation?: boolean;
 }
 
 /** One busy time block (ISO 8601 timestamps) from a free/busy query. */

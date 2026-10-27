@@ -64,7 +64,7 @@ describe('QuickAddDialog → creating an appointment', () => {
 
     const title = screen.getByRole('combobox', { name: /titel/i });
     fireEvent.change(title, { target: { value: 'Zahnarzt' } });
-    screen.getByRole('button', { name: /^anlegen$|^create$/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$|^create$/i }));
 
     await waitFor(() =>
       expect(invokeMock.mock.calls.some((c) => c[0] === 'create_event')).toBe(true),

@@ -89,6 +89,13 @@ pub enum WriteRefusal {
     /// after), `time`, `invitation`, `network`, `http-<status>` or
     /// `ews-<code>` (the provider's own).
     DeletionsNotKept,
+    /// The calendar already holds an appointment with the iCalendar UID the
+    /// create asked to keep ([`crate::NewEvent`]'s `uid_to_keep`, a file
+    /// import), so nothing was written: it is the same appointment. The
+    /// surfaces mark such an appointment before anyone imports it; this is
+    /// the server saying so where they could not see it. The detail is the
+    /// UID, or what the server named.
+    UidTaken,
 }
 
 /// What an update writes again that makes a provider drop a series' changed
@@ -159,6 +166,7 @@ impl WriteRefusal {
             Self::CopyUnreadable => "copy-unreadable",
             Self::ExceptionsWouldBeLost => "exceptions-would-be-lost",
             Self::DeletionsNotKept => "deletions-not-kept",
+            Self::UidTaken => "uid-taken",
         }
     }
 
@@ -205,6 +213,7 @@ impl WriteRefusal {
             Self::CopyUnreadable,
             Self::ExceptionsWouldBeLost,
             Self::DeletionsNotKept,
+            Self::UidTaken,
         ] {
             let token = refusal.token();
             let rest = match message.strip_prefix(token) {
@@ -271,6 +280,7 @@ mod tests {
             WriteRefusal::CopyUnreadable,
             WriteRefusal::ExceptionsWouldBeLost,
             WriteRefusal::DeletionsNotKept,
+            WriteRefusal::UidTaken,
         ] {
             let msg = refusal.message("detail");
             assert_eq!(

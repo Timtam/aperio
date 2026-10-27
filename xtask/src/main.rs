@@ -135,9 +135,9 @@ Tasks:
                   release than the one host-core and the adapters parse with.
 
   windows-zones [--check]
-        Regenerate crates/adapter-ews/src/windows_tz/windows_zones.rs — the
-        Windows time-zone ids Exchange speaks — from the CLDR windowsZones.xml
-        pinned in crates/adapter-ews/cldr/ (release, date and sha256 in
+        Regenerate crates/cal-core/src/windows_zone/table.rs — the Windows
+        time-zone ids Exchange and Outlook's files speak — from the CLDR
+        windowsZones.xml pinned in crates/cal-core/cldr/ (release, date and sha256 in
         cldr/SOURCE). Names resolve through cal_core, so run tz-list first after
         a chrono-tz update. Zones CLDR has no Windows id for, and zones whose
         Windows id runs another clock in the five years after the release, are

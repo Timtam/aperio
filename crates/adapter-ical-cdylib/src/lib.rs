@@ -6,4 +6,5 @@
 
 plugin_sdk::declare_cdylib_exports! {
     plugin_crate: adapter_ical_plugin,
+    import_file: yes,
 }

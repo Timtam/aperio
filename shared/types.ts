@@ -200,3 +200,14 @@ export type { TaskListRow as TaskList } from './generated/TaskListRow';
  * listing; the two that exist today discard the answer entirely.
  */
 export type { TaskList as TaskListCore } from './generated/TaskList';
+
+// File import (DESIGN-file-import.md): what a plugin read out of a file, and
+// the formats the plugins read. `ImportedEvent.recurrence` is the core's
+// recurrence shape, the same JSON as `CalendarEvent.recurrence`.
+export type { FileImport } from './generated/FileImport';
+export type { ImportedEvent } from './generated/ImportedEvent';
+export type { SkippedPart } from './generated/SkippedPart';
+// What creating an invitation someone else organizes does in a calendar (I6).
+export type { InvitationImport } from './generated/InvitationImport';
+export type { SkippedKind } from './generated/SkippedKind';
+export type { ImportFormat } from './generated/ImportFormat';

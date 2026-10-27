@@ -33,9 +33,10 @@ use cal_core::{AttendeeStatus, Event, EventRecurrence, NewEvent, Reminder, Remin
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike, Property};
 
-use crate::error::{CaldavError, CaldavResult};
+use crate::error::{IcalError, IcalResult};
 use crate::ical_raw::{component_lines, fold};
 use crate::identity::OwnIdentity;
+use crate::zone_definitions::ZoneDefinitions;
 
 /// The one VALARM property Aperio insists on authoring: it is the event's own
 /// title, so it has to follow the title being written. Everything else on an
@@ -54,7 +55,7 @@ const APPLE_DEFAULT_ALARM: &str = "X-APPLE-DEFAULT-ALARM";
 /// chronologically sorted list of events. One VCALENDAR body may
 /// carry multiple VEVENTs (RFC 5545 allows it); we emit one
 /// `cal_core::Event` per top-level VEVENT.
-pub fn parse_calendar_data(body: &str, calendar_id: &str) -> CaldavResult<Vec<Event>> {
+pub fn parse_calendar_data(body: &str, calendar_id: &str) -> IcalResult<Vec<Event>> {
     parse_calendar_data_with_href(body, calendar_id, None)
 }
 
@@ -69,7 +70,7 @@ pub fn parse_calendar_data_with_href(
     body: &str,
     calendar_id: &str,
     href: Option<&str>,
-) -> CaldavResult<Vec<Event>> {
+) -> IcalResult<Vec<Event>> {
     parse_calendar_data_as(body, calendar_id, href, &OwnIdentity::default())
 }
 
@@ -82,14 +83,17 @@ pub fn parse_calendar_data_as(
     calendar_id: &str,
     href: Option<&str>,
     own: &OwnIdentity,
-) -> CaldavResult<Vec<Event>> {
+) -> IcalResult<Vec<Event>> {
     let parsed: ICalendar = body
         .parse()
-        .map_err(|err: String| CaldavError::Protocol(format!("ical: {err}")))?;
+        .map_err(|err: String| IcalError::Protocol(format!("ical: {err}")))?;
+    // A TZID neither tzdata nor the Windows table knows resolves by the
+    // body's own VTIMEZONE.
+    let zones = ZoneDefinitions::from_body(body);
     let mut out = Vec::new();
     for comp in parsed.components {
         if let icalendar::CalendarComponent::Event(ev) = comp {
-            match map_event(&ev, calendar_id, href, own) {
+            match map_event(&ev, calendar_id, href, own, &zones) {
                 Ok(event) => out.push(event),
                 Err(err) => {
                     tracing::warn!(?err, "skipping unmapped VEVENT");
@@ -98,6 +102,100 @@ pub fn parse_calendar_data_as(
         }
     }
     Ok(out)
+}
+
+/// A whole calendar file, as an import reads it (DESIGN-file-import.md).
+#[derive(Debug, Clone, Default)]
+pub struct CalendarFile {
+    /// The calendar's `METHOD` (`REQUEST`, `PUBLISH`, `CANCEL`, `REPLY`, …),
+    /// upper-cased, when it names one.
+    pub method: Option<String>,
+    /// Its events, read as [`parse_calendar_data`] reads them: a changed
+    /// occurrence as an event of its own, with an override id.
+    pub events: Vec<Event>,
+    /// The events that could not be read, by their `SUMMARY`.
+    pub unreadable: Vec<Option<String>>,
+    /// Every other top-level component but a `VTIMEZONE`, by its name
+    /// (`VTODO`, `VJOURNAL`, …) and `SUMMARY`.
+    pub others: Vec<(String, Option<String>)>,
+}
+
+/// Read a whole calendar file: [`parse_calendar_data`]'s events, and what
+/// the file holds besides them, each named. Zones the file defines itself
+/// resolve by its `VTIMEZONE`s.
+pub fn read_calendar_file(body: &str) -> IcalResult<CalendarFile> {
+    let parsed: ICalendar = body
+        .parse()
+        .map_err(|err: String| IcalError::Protocol(format!("ical: {err}")))?;
+    let zones = ZoneDefinitions::from_body(body);
+    let mut file = CalendarFile::default();
+    for comp in parsed.components {
+        if let icalendar::CalendarComponent::Event(ev) = comp {
+            match map_event(&ev, "", None, &OwnIdentity::default(), &zones) {
+                Ok(event) => file.events.push(event),
+                Err(err) => {
+                    tracing::warn!(?err, "skipping an unreadable VEVENT of the file");
+                    file.unreadable.push(
+                        ev.get_summary()
+                            .map(str::to_string)
+                            .filter(|s| !s.is_empty()),
+                    );
+                }
+            }
+        }
+    }
+    // The rest from the text itself: what icalendar keeps of a component it
+    // does not model is not worth relying on for a name.
+    let mut depth = 0usize;
+    let mut other: Option<(String, Option<String>)> = None;
+    for (name, _params, value) in crate::ical_raw::all_lines(body) {
+        match name.as_str() {
+            "BEGIN" => {
+                depth += 1;
+                let kind = value.trim().to_ascii_uppercase();
+                if depth == 2 && kind != "VEVENT" && kind != "VTIMEZONE" {
+                    other = Some((kind, None));
+                }
+            }
+            "END" => {
+                if depth == 2 {
+                    if let Some(part) = other.take() {
+                        file.others.push(part);
+                    }
+                }
+                depth = depth.saturating_sub(1);
+            }
+            "METHOD" if depth == 1 => {
+                file.method = Some(value.trim().to_ascii_uppercase());
+            }
+            "SUMMARY" if depth == 2 => {
+                if let Some((_, summary)) = other.as_mut() {
+                    let text = unescape_text(&value);
+                    *summary = (!text.trim().is_empty()).then_some(text);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(file)
+}
+
+/// An iCalendar TEXT value as written, unescaped (RFC 5545 §3.3.11).
+fn unescape_text(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n' | 'N') => out.push('\n'),
+            Some(other) => out.push(other),
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 /// Split an event id into `(Some(href), uid)` for the composite
@@ -124,15 +222,16 @@ fn map_event(
     calendar_id: &str,
     href: Option<&str>,
     own: &OwnIdentity,
-) -> CaldavResult<Event> {
+    zones: &ZoneDefinitions,
+) -> IcalResult<Event> {
     let uid = ev
         .get_uid()
-        .ok_or_else(|| CaldavError::Protocol("VEVENT without UID".to_string()))?;
+        .ok_or_else(|| IcalError::Protocol("VEVENT without UID".to_string()))?;
     let summary = ev.get_summary().unwrap_or("").to_string();
     let description = ev.get_description().map(|s| s.to_string());
     let location = ev.get_location().map(|s| s.to_string());
 
-    let (start, end, all_day, start_tzid) = resolve_range(ev)?;
+    let (start, end, all_day, start_tzid) = resolve_range(ev, zones)?;
 
     // RFC 5545 RECURRENCE-ID marks this VEVENT as a single *modified instance*
     // (an override) of a recurring series — not the master. iCloud packs the
@@ -141,7 +240,7 @@ fn map_event(
     // upsert drops one — taking the master's RRULE, and thus the whole series,
     // with it. Parse it like DTSTART (TZID / all-day aware) so the instant lines
     // up with the master's expanded occurrence on the frontend.
-    let recurrence_id = ev.get_recurrence_id().map(|d| datetime_to_utc(d).0);
+    let recurrence_id = ev.get_recurrence_id().map(|d| datetime_to_utc(d, zones).0);
 
     // An override is a single instance, so it must NOT carry a series rule (a
     // server may still send RRULE on it; ignore it). Masters keep rule + EXDATE.
@@ -150,7 +249,7 @@ fn map_event(
     } else {
         ev.property_value("RRULE").map(|r| EventRecurrence {
             rrule: r.to_string(),
-            exceptions: collect_exdates(ev),
+            exceptions: collect_exdates(ev, zones),
             // Carry the master DTSTART's zone so the frontend expands the rule in
             // local wall-clock time (DST-correct). `None` for floating/Z/all-day.
             tzid: start_tzid,
@@ -296,6 +395,7 @@ fn map_event(
         attendee_responses: people.attendee_responses,
         cancelled,
         scheduling_silenced,
+        ical_uid: Some(uid.to_string()),
     })
 }
 
@@ -341,7 +441,7 @@ fn calendar_user_address(prop: &Property) -> String {
 
 /// Whether two calendar-user values name the same user: two `mailto:`s by
 /// address, anything else by its exact text apart from one trailing slash.
-pub(crate) fn same_calendar_user(a: &str, b: &str) -> bool {
+pub fn same_calendar_user(a: &str, b: &str) -> bool {
     let (a, b) = (a.trim(), b.trim());
     match (strip_mailto_scheme(a), strip_mailto_scheme(b)) {
         (Some(a), Some(b)) => cal_core::attendee::same_address(a, b),
@@ -352,7 +452,7 @@ pub(crate) fn same_calendar_user(a: &str, b: &str) -> bool {
 
 /// The address after a `mailto:` scheme in any case, or `None` for another
 /// kind of value.
-pub(crate) fn strip_mailto_scheme(value: &str) -> Option<&str> {
+pub fn strip_mailto_scheme(value: &str) -> Option<&str> {
     value
         .get(..7)
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
@@ -409,7 +509,7 @@ fn parse_valarms(ev: &icalendar::Event) -> Vec<Reminder> {
 ///
 /// `None` for an alarm the read never showed either (no TRIGGER, a duration
 /// Aperio does not model): those stay untouched.
-pub(crate) fn raw_alarm_reminder(raw: &str) -> Option<Reminder> {
+pub fn raw_alarm_reminder(raw: &str) -> Option<Reminder> {
     let body = format!(
         "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Aperio//read//EN\r\n\
 BEGIN:VEVENT\r\nUID:alarm-read\r\nDTSTAMP:20260101T000000Z\r\n{}\r\nEND:VEVENT\r\n\
@@ -491,8 +591,9 @@ impl PriorAlarms {
     /// Read the alarms off the override VEVENT that stands in for the
     /// occurrence at `slot`, for a write of that one occurrence.
     pub fn read_occurrence(body: &str, slot: DateTime<Utc>) -> Self {
+        let zones = ZoneDefinitions::from_body(body);
         Self::read_where(body, |ev| {
-            ev.get_recurrence_id().map(|d| datetime_to_utc(d).0) == Some(slot)
+            ev.get_recurrence_id().map(|d| datetime_to_utc(d, &zones).0) == Some(slot)
         })
     }
 
@@ -687,7 +788,7 @@ fn parse_compact_utc(s: &str) -> Option<DateTime<Utc>> {
 /// master / plain-event id. Reads the instant the mapper already resolved (via
 /// the provider's RECURRENCE-ID, zone-corrected), so it's exact even for a
 /// `TZID`-qualified or all-day RECURRENCE-ID.
-pub(crate) fn override_recurrence_id(event_id: &str) -> Option<DateTime<Utc>> {
+pub fn override_recurrence_id(event_id: &str) -> Option<DateTime<Utc>> {
     cal_core::split_override_id(event_id)
         .ok()
         .flatten()
@@ -760,16 +861,17 @@ fn parse_iso_duration_to_minutes_before(raw: &str) -> Option<i64> {
 ///   - DATE without time — all-day event; we anchor at 00:00 UTC
 fn resolve_range(
     ev: &icalendar::Event,
-) -> CaldavResult<(DateTime<Utc>, DateTime<Utc>, bool, Option<String>)> {
+    zones: &ZoneDefinitions,
+) -> IcalResult<(DateTime<Utc>, DateTime<Utc>, bool, Option<String>)> {
     let start = ev
         .get_start()
-        .ok_or_else(|| CaldavError::Protocol("VEVENT without DTSTART".into()))?;
-    let (start_utc, all_day, start_tzid) = datetime_to_utc(start);
+        .ok_or_else(|| IcalError::Protocol("VEVENT without DTSTART".into()))?;
+    let (start_utc, all_day, start_tzid) = datetime_to_utc(start, zones);
     // Fall back to DTSTART when DTEND is missing — RFC 5545 §3.8.2.2
     // says a missing DTEND means a zero-duration event for date-time
     // and "until end of day" for date. We honour both.
     let end_utc = match ev.get_end() {
-        Some(end) => datetime_to_utc(end).0,
+        Some(end) => datetime_to_utc(end, zones).0,
         None => {
             if all_day {
                 start_utc + chrono::Duration::days(1)
@@ -783,8 +885,14 @@ fn resolve_range(
 
 /// Resolve a DATE/DATE-TIME to a UTC instant, the all-day flag, and — only for
 /// the zoned (`WithTimezone`) shape — the IANA tzid, so a recurring master can
-/// be expanded in its own zone (DST-correct) rather than flattened to UTC.
-fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool, Option<String>) {
+/// be expanded in its own zone (DST-correct) rather than flattened to UTC. A
+/// Windows id ("W. Europe Standard Time") reads as its tzdata zone, and is
+/// the series' zone under that name; a zone only the body defines resolves
+/// by its `VTIMEZONE` and keeps its own name, which no expansion knows.
+fn datetime_to_utc(
+    value: DatePerhapsTime,
+    zones: &ZoneDefinitions,
+) -> (DateTime<Utc>, bool, Option<String>) {
     match value {
         DatePerhapsTime::Date(d) => (naive_date_to_utc(d), true, None),
         DatePerhapsTime::DateTime(dt) => {
@@ -795,9 +903,15 @@ fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool, Option<Strin
             match dt {
                 icalendar::CalendarDateTime::Utc(u) => (u, false, None),
                 icalendar::CalendarDateTime::WithTimezone { date_time, tzid } => {
-                    let resolved = resolve_with_tzid(date_time, &tzid)
+                    let resolved = resolve_with_tzid(date_time, &tzid, zones)
                         .unwrap_or_else(|| Utc.from_utc_datetime(&date_time));
-                    (resolved, false, Some(tzid))
+                    let named = match tzid.parse::<chrono_tz::Tz>() {
+                        Ok(_) => tzid,
+                        Err(_) => cal_core::windows_zone::tzdata_for_windows(&tzid)
+                            .map(str::to_string)
+                            .unwrap_or(tzid),
+                    };
+                    (resolved, false, Some(named))
                 }
                 icalendar::CalendarDateTime::Floating(naive) => {
                     (Utc.from_utc_datetime(&naive), false, None)
@@ -813,7 +927,7 @@ fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool, Option<Strin
 /// the midnight of a zone an hour or two away — sits within hours of it, and
 /// is read as the same day (decision 95). Its plain local date would put
 /// midnight UTC on the day before west of Greenwich.
-pub(crate) fn all_day_date(instant: DateTime<Utc>) -> NaiveDate {
+pub fn all_day_date(instant: DateTime<Utc>) -> NaiveDate {
     (instant + chrono::Duration::hours(12))
         .with_timezone(&Local)
         .date_naive()
@@ -824,7 +938,7 @@ pub(crate) fn all_day_date(instant: DateTime<Utc>) -> NaiveDate {
 /// repeat field writes "until 31 December" as `…1231T235959Z` (decision 200).
 /// The date is the digits', the day the field shows, as every reader of an
 /// all-day series takes it (decision 201). Anything else stays as written.
-pub(crate) fn all_day_rule(rrule: &str) -> String {
+pub fn all_day_rule(rrule: &str) -> String {
     let trimmed = rrule.trim();
     let (prefix, body) = match trimmed.get(..6) {
         Some(p) if p.eq_ignore_ascii_case("RRULE:") => trimmed.split_at(6),
@@ -871,11 +985,26 @@ fn naive_date_to_utc(d: NaiveDate) -> DateTime<Utc> {
         .unwrap_or_else(|| Utc.from_utc_datetime(&midnight))
 }
 
-fn resolve_with_tzid(naive: NaiveDateTime, tzid: &str) -> Option<DateTime<Utc>> {
+/// The instant a wall-clock time names in the zone `tzid`: a tzdata name, a
+/// Windows id through the CLDR table, or else a zone the body defines.
+fn resolve_with_tzid(
+    naive: NaiveDateTime,
+    tzid: &str,
+    zones: &ZoneDefinitions,
+) -> Option<DateTime<Utc>> {
     use chrono_tz::Tz;
-    let tz: Tz = tzid.parse().ok()?;
-    let local = tz.from_local_datetime(&naive).single()?;
-    Some(local.with_timezone(&Utc))
+    let tz: Option<Tz> = tzid.parse().ok().or_else(|| {
+        cal_core::windows_zone::tzdata_for_windows(tzid)?
+            .parse()
+            .ok()
+    });
+    match tz {
+        Some(tz) => {
+            let local = tz.from_local_datetime(&naive).single()?;
+            Some(local.with_timezone(&Utc))
+        }
+        None => zones.resolve(tzid, naive),
+    }
 }
 
 fn read_utc(ev: &icalendar::Event, prop: &str) -> Option<DateTime<Utc>> {
@@ -895,7 +1024,7 @@ fn read_utc(ev: &icalendar::Event, prop: &str) -> Option<DateTime<Utc>> {
     None
 }
 
-fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
+fn collect_exdates(ev: &icalendar::Event, zones: &ZoneDefinitions) -> Vec<DateTime<Utc>> {
     // EXDATE is RFC 5545 a "multi-property": it can appear several
     // times on one VEVENT and each occurrence may carry comma-
     // separated values. icalendar stores those under
@@ -923,7 +1052,7 @@ fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
                 // Naive date-time: resolve in the EXDATE's TZID when present,
                 // else read as UTC (the floating-DTSTART convention).
                 out.push(
-                    tzid.and_then(|tz| resolve_with_tzid(naive, tz))
+                    tzid.and_then(|tz| resolve_with_tzid(naive, tz, zones))
                         .unwrap_or_else(|| Utc.from_utc_datetime(&naive)),
                 );
             } else if let Ok(d) = NaiveDate::parse_from_str(trimmed, "%Y%m%d") {
@@ -944,7 +1073,7 @@ fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
 /// anyway and the next read would silently drop them.
 ///
 /// Writes no ORGANIZER or ATTENDEE: the lines that make an event a meeting
-/// are the write path's to add (see [`crate::scheduling`]).
+/// are the write path's to add (see the CalDAV adapter's `scheduling`).
 pub fn new_event_to_ical(uid: &str, event: &NewEvent) -> String {
     let mut ical_ev = icalendar::Event::new();
     // A brand-new appointment has no previous copy, so there is nothing to
@@ -954,6 +1083,38 @@ pub fn new_event_to_ical(uid: &str, event: &NewEvent) -> String {
     let mut cal = ICalendar::new();
     cal.push(ical_ev.done());
     with_vtimezone(cal.to_string(), event)
+}
+
+/// A meeting someone else organizes, as the request its organizer would have
+/// sent (`METHOD:REQUEST`, RFC 5546): the way Exchange takes an imported
+/// invitation in as theirs (DESIGN-file-import.md, I6; live rounds ICS-3 and
+/// ICS-4). The appointment as [`new_event_to_ical`] writes it — its series,
+/// zone and alarms included —, with `organizer` (an address) and one
+/// not-yet-answered ATTENDEE row per entry of `attendees` (`Name <address>` or
+/// a bare address).
+pub fn invitation_request(
+    uid: &str,
+    event: &NewEvent,
+    organizer: &str,
+    attendees: &[String],
+) -> String {
+    let ical = new_event_to_ical(uid, event);
+    let ending = crate::ical_raw::line_ending(&ical);
+    let mut people = fold(&format!("ORGANIZER:mailto:{}", organizer.trim()), ending);
+    for entry in attendees {
+        people.push_str(&crate::people::attendee_line(entry, ending));
+    }
+    // METHOD belongs to the calendar, before its components; the people to the
+    // event, before its alarms.
+    let ical = crate::ical_raw::insert_after_head(&ical, &fold("METHOD:REQUEST", ending));
+    match ical.find("BEGIN:VEVENT") {
+        Some(at) => format!(
+            "{}{}",
+            &ical[..at],
+            crate::ical_raw::insert_after_head(&ical[at..], &people)
+        ),
+        None => ical,
+    }
 }
 
 /// Inject the `VTIMEZONE` that `apply_common` implies. When the event is a
@@ -1006,7 +1167,7 @@ pub fn event_to_ical(event: &Event) -> String {
 ///
 /// Like every renderer here it writes no ORGANIZER or ATTENDEE: a meeting's
 /// lines are carried from the server's copy by the write path (see
-/// [`crate::scheduling`]).
+/// the CalDAV adapter's `scheduling`).
 pub fn event_to_ical_preserving(event: &Event, mut prior: PriorAlarms) -> String {
     let new = NewEvent {
         organized_elsewhere: false,
@@ -1024,6 +1185,9 @@ pub fn event_to_ical_preserving(event: &Event, mut prior: PriorAlarms) -> String
         sound: event.sound.clone(),
         attendees: event.attendees.clone(),
         send_invitations: event.send_invitations,
+        // Only the rendering reads this; the UID comes from the id below.
+        uid_to_keep: None,
+        keeps_invitation: false,
     };
     // The iCalendar `UID` must be the bare provider UID — NOT our composite
     // `{href}|{uid}` row id. Writing the composite changes the event's UID
@@ -1208,7 +1372,7 @@ fn apply_common(
     }
     // No ORGANIZER or ATTENDEE here. On an RFC 6638 server they are the
     // invitation itself, so the write path carries them from the server's
-    // copy instead of rebuilding them (see `crate::scheduling`).
+    // copy instead of rebuilding them (see `adapter_caldav::scheduling`).
     // RFC 7986 COLOR. `color_hex` is only ever `Some` when the provider is
     // meant to store the color natively: the host resolves the event's color
     // label to a hex for color-capable calendars and leaves it `None` for
@@ -1227,10 +1391,7 @@ fn apply_common(
 /// `AppStart` — that's an Aperio-local concept the server has no
 /// place for, and forging a fake VALARM would mislead the bridge
 /// devices).
-pub(crate) fn reminder_to_alarm(
-    reminder: &Reminder,
-    fallback_summary: &str,
-) -> Option<icalendar::Alarm> {
+pub fn reminder_to_alarm(reminder: &Reminder, fallback_summary: &str) -> Option<icalendar::Alarm> {
     use icalendar::{Alarm, Trigger};
 
     let summary = if fallback_summary.is_empty() {
@@ -1266,7 +1427,7 @@ pub(crate) fn reminder_to_alarm(
 /// value type (RFC 5545 §3.8.4.4), because that is how every client matches
 /// the exception to an occurrence of the rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SlotForm {
+pub enum SlotForm {
     /// `;VALUE=DATE:` — an all-day series. Its days are the reader's calendar
     /// days (48a), and a DATE names one of them on every device.
     Date,
@@ -1282,7 +1443,7 @@ pub(crate) enum SlotForm {
 
 /// Why a slot cannot be named in the master's own form.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SlotRefusal {
+pub enum SlotRefusal {
     /// The master has no `DTSTART` at all.
     NoStart,
     /// Its zone is one this build cannot resolve, so the value would name an
@@ -1295,7 +1456,7 @@ pub(crate) enum SlotRefusal {
 }
 
 /// The `DTSTART` form of the master VEVENT in `master_block`.
-pub(crate) fn dtstart_form(master_block: &str) -> Option<SlotForm> {
+pub fn dtstart_form(master_block: &str) -> Option<SlotForm> {
     let line = component_lines(master_block)
         .into_iter()
         .find(|l| l.name == "DTSTART")?;
@@ -1330,7 +1491,7 @@ pub(crate) fn dtstart_form(master_block: &str) -> Option<SlotForm> {
 /// The minted value is read back the way the reader reads it and must answer
 /// `slot` again; where it cannot, this refuses rather than writing an
 /// exception that names a different occurrence on the next read.
-pub(crate) fn mint_recurrence_id(
+pub fn mint_recurrence_id(
     master_block: &str,
     slot: DateTime<Utc>,
     ending: &str,
@@ -1350,7 +1511,7 @@ pub(crate) fn mint_recurrence_id(
                 .parse()
                 .map_err(|_| SlotRefusal::UnknownZone(tzid.clone()))?;
             let naive = slot.with_timezone(&tz).naive_local();
-            if resolve_with_tzid(naive, &tzid) != Some(slot) {
+            if resolve_with_tzid(naive, &tzid, &ZoneDefinitions::default()) != Some(slot) {
                 return Err(SlotRefusal::AmbiguousLocalTime);
             }
             format!(
@@ -1365,7 +1526,7 @@ pub(crate) fn mint_recurrence_id(
     Ok(fold(&line, ending))
 }
 
-pub(crate) fn format_utc_compact(dt: DateTime<Utc>) -> String {
+pub fn format_utc_compact(dt: DateTime<Utc>) -> String {
     dt.format("%Y%m%dT%H%M%SZ").to_string()
 }
 
@@ -1465,8 +1626,9 @@ fn css3_name_to_hex(name: &str) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
+    use crate::fixtures::*;
 
     #[test]
     fn maps_organizer_and_attendee_partstats() {
@@ -1557,157 +1719,6 @@ END:VCALENDAR\r\n";
         assert!(!events[1].organized_elsewhere);
     }
 
-    /// A meeting the account organizes, the way iCloud stores it (live
-    /// measurement M1, anonymised): ORGANIZER and the account's own CHAIR row
-    /// name a principal path, with the address in EMAIL. Aperio shows the
-    /// organizer by that address, drops the CHAIR row from the invitees, and
-    /// recognises the account by its principal path.
-    pub(crate) const ICLOUD_MEETING: &str = "BEGIN:VCALENDAR\r\n\
-VERSION:2.0\r\n\
-PRODID:-//Apple Inc.//iPhone OS 26.0//EN\r\n\
-BEGIN:VEVENT\r\n\
-ATTENDEE;CN=Toni Barth;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;EMAIL=toni@example\r\n \
-.org;ROLE=CHAIR:/aB1/principal/\r\n\
-ATTENDEE;CN=Bob Guest;CUTYPE=INDIVIDUAL;EMAIL=bob@example.net;SCHEDULE-STATUS=\r\n \
-1.1:mailto:bob@example.net\r\n\
-DTEND;TZID=Europe/Berlin:20261109T163000\r\n\
-DTSTAMP:20260919T184800Z\r\n\
-DTSTART;TZID=Europe/Berlin:20261109T160000\r\n\
-ORGANIZER;CN=Toni Barth;EMAIL=toni@example.org:/aB1/principal/\r\n\
-SEQUENCE:0\r\n\
-SUMMARY:Aperio R6 eigene\r\n\
-UID:EBFB90D1-F3C9-4E8C-B18E-211595E15C22\r\n\
-X-APPLE-TRAVEL-ADVISORY-BEHAVIOR:AUTOMATIC\r\n\
-BEGIN:VALARM\r\n\
-ACTION:DISPLAY\r\n\
-DESCRIPTION:Reminder\r\n\
-TRIGGER:-PT15M\r\n\
-UID:5D446DBE-3179-48F1-AC45-96C95B46851B\r\n\
-END:VALARM\r\n\
-END:VEVENT\r\n\
-END:VCALENDAR\r\n";
-
-    /// An invitation as iCloud stores it on the attendee's side: someone
-    /// else's ORGANIZER, the account's own row spelled as a principal path
-    /// with its EMAIL, a zone, Apple's own properties, and alarms of every
-    /// kind the read shows — a display alarm carrying Apple's default mark,
-    /// an audio alarm, an e-mail alarm with an ATTENDEE line of its own, one
-    /// triggered from the end, and one whose trigger Aperio does not model.
-    /// A weekly series with one changed occurrence.
-    pub(crate) const ICLOUD_INVITATION: &str = "BEGIN:VCALENDAR\r\n\
-VERSION:2.0\r\n\
-PRODID:-//Apple Inc.//iPhone OS 26.0//EN\r\n\
-BEGIN:VTIMEZONE\r\n\
-TZID:Europe/Berlin\r\n\
-BEGIN:STANDARD\r\n\
-DTSTART:19701025T030000\r\n\
-TZOFFSETFROM:+0200\r\n\
-TZOFFSETTO:+0100\r\n\
-END:STANDARD\r\n\
-END:VTIMEZONE\r\n\
-BEGIN:VEVENT\r\n\
-ATTENDEE;CN=Boss;CUTYPE=INDIVIDUAL;EMAIL=boss@example.net;PARTSTAT=ACCEPTED;RO\r\n \
-LE=CHAIR:mailto:boss@example.net\r\n\
-ATTENDEE;CN=Toni Barth;CUTYPE=INDIVIDUAL;EMAIL=toni@example.org;PARTSTAT=NEEDS\r\n \
--ACTION;ROLE=REQ-PARTICIPANT:/aB1/principal/\r\n\
-CREATED:20260901T090000Z\r\n\
-DTEND;TZID=Europe/Berlin:20261109T163000\r\n\
-DTSTAMP:20260919T184800Z\r\n\
-DTSTART;TZID=Europe/Berlin:20261109T160000\r\n\
-LAST-MODIFIED:20260918T101500Z\r\n\
-ORGANIZER;CN=Boss;EMAIL=boss@example.net:mailto:boss@example.net\r\n\
-RRULE:FREQ=WEEKLY;COUNT=4\r\n\
-SEQUENCE:2\r\n\
-STATUS:CONFIRMED\r\n\
-SUMMARY:Aperio R6 fremde\r\n\
-TRANSP:OPAQUE\r\n\
-UID:9C1F6A4E-0B77-4E1E-9F6E-51D2A0C9B7A1\r\n\
-X-APPLE-DEFAULT-ALARM:TRUE\r\n\
-X-APPLE-TRAVEL-ADVISORY-BEHAVIOR:AUTOMATIC\r\n\
-BEGIN:VALARM\r\n\
-ACTION:DISPLAY\r\n\
-DESCRIPTION:Aperio R6 fremde\r\n\
-TRIGGER:-PT15M\r\n\
-UID:11111111-1111-4111-8111-111111111111\r\n\
-X-APPLE-DEFAULT-ALARM:TRUE\r\n\
-END:VALARM\r\n\
-BEGIN:VALARM\r\n\
-ACTION:AUDIO\r\n\
-ATTACH;VALUE=URI:Basso\r\n\
-TRIGGER:-PT30M\r\n\
-UID:22222222-2222-4222-8222-222222222222\r\n\
-END:VALARM\r\n\
-BEGIN:VALARM\r\n\
-ACTION:EMAIL\r\n\
-ATTENDEE:mailto:toni@example.org\r\n\
-DESCRIPTION:By mail\r\n\
-SUMMARY:By mail\r\n\
-TRIGGER:-P1D\r\n\
-UID:33333333-3333-4333-8333-333333333333\r\n\
-END:VALARM\r\n\
-BEGIN:VALARM\r\n\
-ACTION:DISPLAY\r\n\
-DESCRIPTION:After the end\r\n\
-TRIGGER;RELATED=END:-PT5M\r\n\
-UID:44444444-4444-4444-8444-444444444444\r\n\
-END:VALARM\r\n\
-BEGIN:VALARM\r\n\
-ACTION:DISPLAY\r\n\
-DESCRIPTION:A week before\r\n\
-TRIGGER:-P1W\r\n\
-UID:55555555-5555-4555-8555-555555555555\r\n\
-END:VALARM\r\n\
-END:VEVENT\r\n\
-BEGIN:VEVENT\r\n\
-ATTENDEE;CN=Toni Barth;EMAIL=toni@example.org;PARTSTAT=NEEDS-ACTION:/aB1/princ\r\n \
-ipal/\r\n\
-DTEND;TZID=Europe/Berlin:20261116T173000\r\n\
-DTSTAMP:20260919T184800Z\r\n\
-DTSTART;TZID=Europe/Berlin:20261116T170000\r\n\
-ORGANIZER;CN=Boss;EMAIL=boss@example.net:mailto:boss@example.net\r\n\
-RECURRENCE-ID;TZID=Europe/Berlin:20261116T160000\r\n\
-SEQUENCE:3\r\n\
-SUMMARY:Aperio R6 fremde, verschoben\r\n\
-UID:9C1F6A4E-0B77-4E1E-9F6E-51D2A0C9B7A1\r\n\
-BEGIN:VALARM\r\n\
-ACTION:DISPLAY\r\n\
-DESCRIPTION:Aperio R6 fremde\r\n\
-TRIGGER:-PT15M\r\n\
-UID:66666666-6666-4666-8666-666666666666\r\n\
-END:VALARM\r\n\
-END:VEVENT\r\n\
-END:VCALENDAR\r\n";
-
-    /// The same invitation as an all-day series, the way a provider writes
-    /// one: `DTSTART;VALUE=DATE`.
-    pub(crate) const ICLOUD_ALL_DAY_INVITATION: &str = "BEGIN:VCALENDAR\r\n\
-VERSION:2.0\r\n\
-BEGIN:VEVENT\r\n\
-ATTENDEE;CN=Toni Barth;EMAIL=toni@example.org;PARTSTAT=ACCEPTED:/aB1/principal\r\n \
-/\r\n\
-DTEND;VALUE=DATE:20261110\r\n\
-DTSTAMP:20260919T184800Z\r\n\
-DTSTART;VALUE=DATE:20261109\r\n\
-ORGANIZER;CN=Boss;EMAIL=boss@example.net:mailto:boss@example.net\r\n\
-RRULE:FREQ=WEEKLY;COUNT=4\r\n\
-SUMMARY:Ganztags fremd\r\n\
-UID:9C1F6A4E-0B77-4E1E-9F6E-51D2A0C9B7A1\r\n\
-END:VEVENT\r\n\
-END:VCALENDAR\r\n";
-
-    /// The account's addresses as iCloud lists them (M1, anonymised).
-    pub(crate) fn icloud_identity() -> OwnIdentity {
-        OwnIdentity::from_hrefs(
-            &[
-                "/1974/principal".into(),
-                "/aB1/principal/".into(),
-                "urn:uuid:1974".into(),
-                "mailto:toni@example.org".into(),
-            ],
-            &url::Url::parse("https://p42-caldav.icloud.com/1974/principal/").unwrap(),
-        )
-    }
-
     #[test]
     fn a_principal_spelled_organizer_is_the_accounts() {
         let events =
@@ -1749,6 +1760,50 @@ END:VCALENDAR\r\n";
         // Without the account's addresses nothing is known about it.
         let events = parse_calendar_data(&body, "cal-1").unwrap();
         assert!(events[0].organized_elsewhere);
+    }
+
+    fn instant(text: &str) -> DateTime<Utc> {
+        text.parse().unwrap()
+    }
+
+    /// Outlook and Teams name a zone by its Windows id. The reader takes it as
+    /// its tzdata zone, for every instant and as the series' zone; before, it
+    /// read the wall-clock times as UTC, an hour or two off. No VTIMEZONE here:
+    /// a server may keep the event without it, and the table alone answers.
+    #[test]
+    fn a_windows_zone_id_reads_as_its_tzdata_zone() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:teams-1\r\nSUMMARY:Jour fixe\r\n\
+DTSTART;TZID=W. Europe Standard Time:20261116T100000\r\n\
+DTEND;TZID=W. Europe Standard Time:20261116T103000\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\n\
+EXDATE;TZID=W. Europe Standard Time:20261123T100000\r\n\
+END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let events = parse_calendar_data(body, "cal").unwrap();
+        assert_eq!(events[0].start, instant("2026-11-16T09:00:00Z"));
+        assert_eq!(events[0].end, instant("2026-11-16T09:30:00Z"));
+        let recurrence = events[0].recurrence.as_ref().unwrap();
+        assert_eq!(recurrence.tzid.as_deref(), Some("Europe/Berlin"));
+        assert_eq!(recurrence.exceptions, [instant("2026-11-23T09:00:00Z")]);
+    }
+
+    /// A zone only the file defines — Outlook's "Customized Time Zone" —
+    /// resolves by its VTIMEZONE and keeps its own name.
+    #[test]
+    fn a_zone_only_the_body_defines_resolves_by_its_definition() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VTIMEZONE\r\nTZID:Customized Time Zone\r\n\
+BEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\n\
+RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10\r\nEND:STANDARD\r\n\
+BEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\n\
+RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n\
+BEGIN:VEVENT\r\nUID:custom-1\r\nSUMMARY:Sommerfest\r\n\
+DTSTART;TZID=Customized Time Zone:20260701T180000\r\n\
+DTEND;TZID=Customized Time Zone:20260701T220000\r\n\
+END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let events = parse_calendar_data(body, "cal").unwrap();
+        assert_eq!(events[0].start, instant("2026-07-01T16:00:00Z"));
+        assert_eq!(events[0].end, instant("2026-07-01T20:00:00Z"));
     }
 
     /// RFC 6638 §7.1: `SCHEDULE-AGENT` says who sends the scheduling
@@ -1876,6 +1931,116 @@ END:VCALENDAR\r
         );
         assert_eq!(ev.end, Utc.with_ymd_and_hms(2026, 5, 20, 8, 30, 0).unwrap());
         assert!(!ev.all_day);
+    }
+
+    /// Someone else's meeting as its organizer's request (I6): `METHOD:REQUEST`
+    /// on the calendar, their ORGANIZER and the invitees on the event, and the
+    /// appointment as any create writes it — a series in its zone with its
+    /// gap, its alarm and the file's UID — which reads back as it went in.
+    #[test]
+    fn an_invitation_request_carries_the_meeting_as_its_organizer_sent_it() {
+        let start = Utc.with_ymd_and_hms(2026, 11, 2, 9, 0, 0).unwrap();
+        let gap = Utc.with_ymd_and_hms(2026, 11, 9, 9, 0, 0).unwrap();
+        let event = NewEvent {
+            title: "Jour fixe".into(),
+            description: None,
+            location: Some("Raum 3.14".into()),
+            start,
+            end: start + chrono::Duration::minutes(30),
+            all_day: false,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+                exceptions: vec![gap],
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![Reminder {
+                kind: ReminderKind::Relative { minutes_before: 15 },
+                sound: None,
+            }],
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            organizer: None,
+            organized_elsewhere: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
+        };
+        let text = invitation_request(
+            "jf-1@example.net",
+            &event,
+            " boss@example.net ",
+            &["Toni <toni@example.org>".into(), "gast@example.net".into()],
+        );
+        let unfolded = text.replace("\r\n ", "");
+        let method = unfolded.find("\r\nMETHOD:REQUEST\r\n").expect("METHOD");
+        let vevent = unfolded.find("BEGIN:VEVENT").unwrap();
+        assert!(method < vevent && method < unfolded.find("BEGIN:VTIMEZONE").unwrap());
+        assert!(
+            unfolded.contains("\r\nORGANIZER:mailto:boss@example.net\r\n"),
+            "{text}"
+        );
+        assert!(unfolded.contains(
+            "\r\nATTENDEE;CN=Toni;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:toni@example.org\r\n"
+        ));
+
+        let file = read_calendar_file(&text).unwrap();
+        assert_eq!(file.method.as_deref(), Some("REQUEST"));
+        let [read] = file.events.as_slice() else {
+            panic!("{text}")
+        };
+        assert_eq!(read.ical_uid.as_deref(), Some("jf-1@example.net"));
+        assert_eq!(read.organizer.as_deref(), Some("boss@example.net"));
+        assert_eq!(
+            read.attendees,
+            ["Toni <toni@example.org>", "gast@example.net"]
+        );
+        assert_eq!(read.start, start);
+        let recurrence = read.recurrence.as_ref().unwrap();
+        assert_eq!(recurrence.tzid.as_deref(), Some("Europe/Berlin"));
+        assert_eq!(recurrence.exceptions, [gap]);
+        assert_eq!(read.reminders.len(), 1);
+    }
+
+    #[test]
+    fn the_series_uid_is_read_for_the_master_and_its_override() {
+        // An import finds what a calendar already holds by the UID (I4), and a
+        // changed occurrence belongs to its series: both rows carry the one UID.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:series-1@example.test\r
+SUMMARY:Daily standup\r
+DTSTART:20260519T090000Z\r
+DTEND:20260519T093000Z\r
+RRULE:FREQ=DAILY;COUNT=5\r
+END:VEVENT\r
+BEGIN:VEVENT\r
+UID:series-1@example.test\r
+RECURRENCE-ID:20260520T090000Z\r
+SUMMARY:Daily standup (moved)\r
+DTSTART:20260520T140000Z\r
+DTEND:20260520T143000Z\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data_with_href(
+            body,
+            "https://example.test/calendars/home/",
+            Some("/calendars/home/other-name.ics"),
+        )
+        .unwrap();
+        assert_eq!(events.len(), 2);
+        for event in &events {
+            assert_eq!(
+                event.ical_uid.as_deref(),
+                Some("series-1@example.test"),
+                "{}: the UID, not the resource name",
+                event.id
+            );
+        }
     }
 
     #[test]
@@ -2309,6 +2474,8 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let uid = "abcdef-12345@aperio";
         let body = new_event_to_ical(uid, &event);
@@ -2355,6 +2522,8 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_ical("bday-uid", &event);
         assert!(
@@ -2389,6 +2558,8 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_ical("conf-uid", &event);
         assert!(body.contains("DTSTART;VALUE=DATE:20260610"), "{body}");
@@ -2418,6 +2589,8 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 
@@ -2552,7 +2725,7 @@ END:VCALENDAR\r
     }
 
     /// The renderer writes no meeting lines at all, whatever the event asks
-    /// for: they are the write path's to carry or add (`crate::scheduling`).
+    /// for: they are the write path's to carry or add (`adapter_caldav::scheduling`).
     #[test]
     fn the_renderer_writes_no_meeting_lines() {
         let event = NewEvent {
@@ -2571,6 +2744,8 @@ END:VCALENDAR\r
             sound: None,
             attendees: vec!["Alice <alice@example.com>".into(), "bob@example.com".into()],
             send_invitations: true,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_ical("uid-1", &event);
         assert!(!body.contains("ORGANIZER"), "{body}");
@@ -2735,6 +2910,8 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_ical("round-trip-uid", &event);
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();
@@ -3271,6 +3448,8 @@ END:VCALENDAR\r
                 sound: None,
                 attendees: Vec::new(),
                 send_invitations: false,
+                uid_to_keep: None,
+                keeps_invitation: false,
             }
         }
 
@@ -3346,6 +3525,8 @@ END:VCALENDAR\r
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 

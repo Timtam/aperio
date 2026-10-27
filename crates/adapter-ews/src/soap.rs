@@ -602,6 +602,7 @@ pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> S
           <t:FieldURI FieldURI="calendar:MyResponseType"/>
           <t:FieldURI FieldURI="calendar:RequiredAttendees"/>
           <t:FieldURI FieldURI="calendar:OptionalAttendees"/>
+          <t:FieldURI FieldURI="calendar:UID"/>
         </t:AdditionalProperties>
       </m:ItemShape>
       <m:ItemIds>
@@ -892,6 +893,60 @@ pub fn delete_task_item(item_id: &str, change_key: Option<&str>) -> String {
         {id_attr}
       </m:ItemIds>
     </m:DeleteItem>"#,
+    );
+    wrap(&body)
+}
+
+/// SOAP body for `DeleteItem` that takes an item out of view recoverably: to
+/// the mailbox's Recoverable Items, not Deleted Items. Only for an item Aperio
+/// itself left there — the request an imported invitation was made from (I6).
+pub fn soft_delete_item(item_id: &str) -> String {
+    let body = format!(
+        r#"    <m:DeleteItem DeleteType="SoftDelete">
+      <m:ItemIds>
+        <t:ItemId Id="{}"/>
+      </m:ItemIds>
+    </m:DeleteItem>"#,
+        escape_xml(item_id),
+    );
+    wrap(&body)
+}
+
+/// SOAP body for `GetItem` asking only which folder an item is in.
+pub fn get_item_parent_folder(item_id: &str) -> String {
+    let body = format!(
+        r#"    <m:GetItem>
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="item:ParentFolderId"/>
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:ItemIds>
+        <t:ItemId Id="{}"/>
+      </m:ItemIds>
+    </m:GetItem>"#,
+        escape_xml(item_id),
+    );
+    wrap(&body)
+}
+
+/// SOAP body for `MoveItem`: one item into `folder_id`. The folder goes
+/// without its change key, which goes stale whenever the folder's content
+/// changes and is no precondition of a move. The answer names the item by the
+/// id it has in its new folder.
+pub fn move_item(item_id: &str, folder_id: &str) -> String {
+    let body = format!(
+        r#"    <m:MoveItem>
+      <m:ToFolderId>
+        <t:FolderId Id="{}"/>
+      </m:ToFolderId>
+      <m:ItemIds>
+        <t:ItemId Id="{}"/>
+      </m:ItemIds>
+    </m:MoveItem>"#,
+        escape_xml(folder_id),
+        escape_xml(item_id),
     );
     wrap(&body)
 }
@@ -1218,6 +1273,21 @@ mod tests {
     }
 
     #[test]
+    fn a_move_names_the_folder_without_its_change_key() {
+        let body = move_item("ITEM&1", "FOLDER<2");
+        assert!(body.contains("<m:MoveItem>"));
+        assert!(body.contains(
+            r#"<m:ToFolderId>
+        <t:FolderId Id="FOLDER&lt;2"/>
+      </m:ToFolderId>"#
+        ));
+        assert!(body.contains(r#"<t:ItemId Id="ITEM&amp;1"/>"#));
+        let parent = get_item_parent_folder("ITEM&1");
+        assert!(parent.contains(r#"FieldURI="item:ParentFolderId""#));
+        assert!(parent.contains(r#"<t:ItemId Id="ITEM&amp;1"/>"#));
+    }
+
+    #[test]
     fn update_folder_displayname_escapes_xml_in_name() {
         let body = update_folder_displayname("FID", Some("FK"), "Work & Play");
         assert!(body.contains("UpdateFolder"));
@@ -1302,6 +1372,14 @@ mod tests {
                 "{field} must be asked for: {body}"
             );
         }
+    }
+
+    /// The iCalendar UID rides the detail read, which GetItem answers (live
+    /// rounds ICS, ICS-3, ICS-4), so an import can find what is already here.
+    #[test]
+    fn the_detail_request_asks_for_the_uid() {
+        let body = get_calendar_items_with_recurrence(&[("M".into(), None)]);
+        assert!(body.contains(r#"FieldURI="calendar:UID""#), "{body}");
     }
 
     /// Both requests that fill the item cache ask for the end zone as well as

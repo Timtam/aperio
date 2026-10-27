@@ -78,7 +78,14 @@ mod tests;
 ///    under 6 carries the raw "some-zone midnight", which the views and the
 ///    reminders read as the neighbouring day where the mailbox's zone lies more
 ///    than twelve hours from the device's.
-pub const CACHE_GENERATION: u32 = 7;
+/// 8: events carry their iCalendar UID (`ical_uid`, file import I4), by which
+///    an import finds what a calendar already holds. A row cached under 7 has
+///    none, and an unchanged event would never be fetched again to get one.
+/// 9: calendars carry `invitation_import` (file import I6) and `keeps_uid`
+///    (review round 1 of #129), which the import's editor and list read. A
+///    listing stored under 8 has neither and would read every calendar as one
+///    that keeps no invitation and no file's UID until the next re-bootstrap.
+pub const CACHE_GENERATION: u32 = 9;
 
 /// `user_prefs` key holding the cache generation last applied on this device.
 pub const CACHE_GENERATION_KEY: &str = "cache.generation";

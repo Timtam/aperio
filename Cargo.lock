@@ -11,12 +11,12 @@ dependencies = [
  "cal-core",
  "chrono",
  "chrono-tz",
+ "ical-mapping",
  "icalendar",
  "mockito",
  "quick-xml 0.36.2",
  "reqwest 0.12.28",
  "serde",
- "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -107,6 +107,7 @@ dependencies = [
  "chrono-tz",
  "futures",
  "iana-time-zone",
+ "ical-mapping",
  "mockito",
  "quick-xml 0.36.2",
  "reqwest 0.12.28",
@@ -117,6 +118,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -195,6 +197,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -221,12 +224,12 @@ dependencies = [
 name = "adapter-ical"
 version = "0.1.0"
 dependencies = [
- "adapter-caldav",
  "async-trait",
  "base64 0.22.1",
  "cal-core",
  "chrono",
  "hex",
+ "ical-mapping",
  "mockito",
  "reqwest 0.12.28",
  "serde",
@@ -250,6 +253,7 @@ name = "adapter-ical-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-ical",
+ "base64 0.22.1",
  "plugin-sdk",
  "serde",
  "serde_json",
@@ -3264,6 +3268,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ical-mapping"
+version = "0.1.0"
+dependencies = [
+ "cal-core",
+ "chrono",
+ "chrono-tz",
+ "icalendar",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "icalendar"
 version = "0.16.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4951,6 +4969,7 @@ dependencies = [
 name = "plugin-sdk"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "cal-core",
  "plugin-core",
  "serde",

@@ -181,6 +181,11 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
         color: None,
         read_only,
         default_sound: None,
+        // Someone else's meeting from a file goes in as their request, made
+        // an appointment by a tentative reply: the mailbox's answer reads
+        // tentative afterwards (I6, live rounds ICS-3 and ICS-4).
+        invitation_import: cal_core::InvitationImport::KeptTentative,
+        keeps_uid: true,
     }
 }
 
@@ -498,6 +503,11 @@ pub struct ParsedItem {
     /// detail-fetch caveat as `organizer`.
     #[serde(default)]
     pub my_response_type: Option<String>,
+    /// `<t:UID>` — the appointment's iCalendar UID, which a series' occurrences
+    /// share. Same detail-fetch caveat as `organizer`: only the master
+    /// enrichment asks for it, and a changed occurrence takes its series'.
+    #[serde(default)]
+    pub uid: Option<String>,
     /// `<t:RequiredAttendees>` + `<t:OptionalAttendees>` — the invitees
     /// with their `<t:ResponseType>`. Same detail-fetch caveat as
     /// `organizer`.
@@ -943,23 +953,13 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                             ));
                         }
                         // Simple form: <t:StartTimeZone Id="Eastern Standard Time" .../>.
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.start_time_zone =
-                                    Some(crate::zone_definition::attribute_text(&a));
-                            }
-                        }
+                        current.start_time_zone = crate::zone_definition::element_zone_id(&e);
                     }
                     // The end zone's own id, where Exchange marks a series
                     // created without a zone as `tzone://Microsoft/Utc`
                     // (decision 43b), and its own definition (decision 233).
                     b"endtimezone" if inside_item => {
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.end_time_zone =
-                                    Some(crate::zone_definition::attribute_text(&a));
-                            }
-                        }
+                        current.end_time_zone = crate::zone_definition::element_zone_id(&e);
                         if !empty {
                             zone_walker = Some((
                                 false,
@@ -1417,6 +1417,9 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     b"myresponsetype" if inside_item && !inside_modified_occurrence => {
                         text_target = Some("my_response_type");
                     }
+                    b"uid" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("uid");
+                    }
                     b"requiredattendees" | b"optionalattendees" if inside_item => {
                         inside_attendees = true;
                     }
@@ -1446,22 +1449,12 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                                 crate::zone_definition::ZoneDefinitionWalker::default(),
                             ));
                         }
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.start_time_zone =
-                                    Some(crate::zone_definition::attribute_text(&a));
-                            }
-                        }
+                        current.start_time_zone = crate::zone_definition::element_zone_id(&e);
                     }
                     // As in the sync parser: the end zone's own id and
                     // definition.
                     b"endtimezone" if inside_item => {
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.end_time_zone =
-                                    Some(crate::zone_definition::attribute_text(&a));
-                            }
-                        }
+                        current.end_time_zone = crate::zone_definition::element_zone_id(&e);
                         if !empty {
                             zone_walker = Some((
                                 false,
@@ -1579,6 +1572,7 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                             .get_or_insert_with(String::new)
                             .push_str(s);
                     }
+                    Some("uid") => current.uid.get_or_insert_with(String::new).push_str(s),
                     Some("subject") => current.subject.push_str(s),
                     Some("body") => {
                         let acc = current.body.get_or_insert_with(String::new);
@@ -1980,6 +1974,10 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         attendee_responses: people.attendee_responses,
         cancelled,
         scheduling_silenced: false,
+        ical_uid: item
+            .uid
+            .map(|uid| uid.trim().to_string())
+            .filter(|uid| !uid.is_empty()),
     })
 }
 
@@ -2090,6 +2088,17 @@ pub(crate) fn new_event_to_calendar_item_xml_in<D: TimeZone>(
         ));
     } else {
         out.push_str("          <t:ReminderIsSet>false</t:ReminderIsSet>\n");
+    }
+    // An imported appointment keeps its file's UID (I4); Exchange keeps one
+    // given on create (live round ICS, ICS-6). Its place is the first of the
+    // calendar fields, before Start.
+    if let Some(uid) = event
+        .uid_to_keep
+        .as_deref()
+        .map(str::trim)
+        .filter(|uid| !uid.is_empty())
+    {
+        out.push_str(&format!("          <t:UID>{}</t:UID>\n", escape_xml(uid)));
     }
     // An all-day event goes out as UTC midnights of the device's days: Aperio
     // creates it without a zone, so Exchange stores it in UTC
@@ -2984,8 +2993,10 @@ pub fn override_event(
     // the whole series is gone.
     row.cancelled = master_ev.cancelled || ov.cancelled || row.cancelled;
     // Device-local or series-owned, and never stored per occurrence: EWS keeps
-    // no colour at all, and the calendar is the master's.
+    // no colour at all, and the calendar is the master's. The occurrence's
+    // own item is read without its UID, which is the series' anyway.
     row.calendar_id = master_ev.calendar_id.clone();
+    row.ical_uid = master_ev.ical_uid.clone();
     row.color_label = master_ev.color_label.clone();
     row.color_hex = master_ev.color_hex.clone();
     row.scheduling_silenced = master_ev.scheduling_silenced;
@@ -5004,6 +5015,7 @@ mod tests {
     fn to_event_maps_reminder_and_etag() {
         let item = ParsedItem {
             my_response_type: None,
+            uid: None,
             item_id: "IID".into(),
             change_key: Some("ICK".into()),
             subject: "Lunch".into(),
@@ -5150,6 +5162,8 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 
@@ -5165,6 +5179,33 @@ mod tests {
         assert!(!xml.contains("<t:Body"));
         assert!(!xml.contains("<t:Location>"));
         assert!(xml.contains("<t:ReminderIsSet>false</t:ReminderIsSet>"));
+    }
+
+    /// An imported appointment keeps its file's UID (I4), written before Start
+    /// as the schema orders it; a create without one writes none, and the
+    /// event the create hands back carries the one written.
+    #[test]
+    fn a_kept_uid_is_written_before_the_start() {
+        let mut ev = new_event_min("Imported");
+        let xml = new_event_to_calendar_item_xml(&ev).unwrap();
+        assert!(!xml.contains("<t:UID>"), "{xml}");
+        ev.uid_to_keep = Some("  ".into());
+        let xml = new_event_to_calendar_item_xml(&ev).unwrap();
+        assert!(!xml.contains("<t:UID>"), "a blank one is none: {xml}");
+        ev.uid_to_keep = Some(" a&b@example.test ".into());
+        let xml = new_event_to_calendar_item_xml(&ev).unwrap();
+        let uid = xml
+            .find("<t:UID>a&amp;b@example.test</t:UID>")
+            .expect("the UID");
+        assert!(uid < xml.find("<t:Start>").unwrap(), "{xml}");
+        let created = crate::api::build_event_from_new(
+            &ev,
+            "cal",
+            EventIdKind::Single,
+            "ITEM",
+            Some("CK".into()),
+        );
+        assert_eq!(created.ical_uid.as_deref(), Some("a&b@example.test"));
     }
 
     #[test]
@@ -5236,6 +5277,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 
@@ -6103,6 +6145,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let (set, _del) = event_to_update_field_xml(&ev).unwrap();
         assert!(
@@ -6187,6 +6230,8 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         })
         .unwrap();
         assert!(
@@ -6383,6 +6428,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let (set, del) = event_to_update_field_xml(&ev).unwrap();
         assert!(set.contains("<t:Subject>Updated</t:Subject>"));
@@ -7565,6 +7611,7 @@ mod tests {
     fn to_event_picks_kind_from_calendar_item_type() {
         let mk = |item_type: Option<&str>| ParsedItem {
             my_response_type: None,
+            uid: None,
             item_id: "IID".into(),
             change_key: Some("ICK".into()),
             subject: "X".into(),
@@ -8528,6 +8575,64 @@ mod tests {
                 Some("Customized Time Zone")
             );
             assert!(item.start_zone_definition.is_some());
+        }
+    }
+
+    /// The zones of an imported invitation's series as Exchange 2019 stored
+    /// them (live run 130307): the start zone under the file's TZID as its
+    /// name beside an empty id, the end zone the other way round. Both read as
+    /// tzdata's `Europe/Berlin`, and the series repeats in it, not in UTC.
+    #[test]
+    fn an_imported_series_reads_its_zone_from_the_name() {
+        let series = |start: &str, end: &str| {
+            format!(
+                r#"<t:CalendarItem>
+                <t:ItemId Id="SERIES" ChangeKey="CK"/>
+                <t:Subject>Jour fixe</t:Subject>
+                <t:Start>2026-11-02T09:00:00Z</t:Start>
+                <t:End>2026-11-02T10:00:00Z</t:End>
+                <t:IsAllDayEvent>false</t:IsAllDayEvent>
+                <t:IsRecurring>true</t:IsRecurring>
+                <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+                <t:Recurrence><t:WeeklyRecurrence><t:Interval>1</t:Interval><t:DaysOfWeek>Monday</t:DaysOfWeek><t:FirstDayOfWeek>Monday</t:FirstDayOfWeek></t:WeeklyRecurrence><t:NumberedRecurrence><t:StartDate>2026-11-02+01:00</t:StartDate><t:NumberOfOccurrences>4</t:NumberOfOccurrences></t:NumberedRecurrence></t:Recurrence>
+                {start}
+                {end}
+              </t:CalendarItem>"#
+            )
+        };
+        let imported = series(
+            &format!(
+                r#"<t:StartTimeZone Name="Europe/Berlin" Id="">{CUSTOM_ZONE_BODY}</t:StartTimeZone>"#
+            ),
+            &format!(
+                r#"<t:EndTimeZone Name="" Id="Europe/Berlin">{CUSTOM_ZONE_BODY}</t:EndTimeZone>"#
+            ),
+        );
+        for parse in [in_sync_response, in_get_item_response] {
+            let item = parse(&imported);
+            assert_eq!(item.start_time_zone.as_deref(), Some("Europe/Berlin"));
+            assert_eq!(item.end_time_zone.as_deref(), Some("Europe/Berlin"));
+            // A name that is a clock by itself keeps no definition either.
+            assert_eq!(item.start_zone_definition, None);
+            let event = to_event(item, "FID|CK").unwrap();
+            let recurrence = event.recurrence.expect("the series' rule");
+            assert_eq!(recurrence.rrule, "FREQ=WEEKLY;BYDAY=MO;COUNT=4");
+            assert_eq!(recurrence.tzid.as_deref(), Some("Europe/Berlin"));
+        }
+
+        // A zone Exchange knows by its id keeps it; the display name beside
+        // it is never read. An empty id with no name stays empty, as before.
+        let registry = series(
+            r#"<t:StartTimeZone Id="W. Europe Standard Time" Name="(UTC+01:00) Amsterdam, Berlin, Bern, Rom, Stockholm, Wien"/>"#,
+            r#"<t:EndTimeZone Id="" Name=""/>"#,
+        );
+        for parse in [in_sync_response, in_get_item_response] {
+            let item = parse(&registry);
+            assert_eq!(
+                item.start_time_zone.as_deref(),
+                Some("W. Europe Standard Time")
+            );
+            assert_eq!(item.end_time_zone.as_deref(), Some(""));
         }
     }
 
@@ -9606,6 +9711,80 @@ mod tests {
         assert!(ev.organized_elsewhere);
     }
 
+    /// The iCalendar UID comes with the detail read (I4): an import finds by it
+    /// what the calendar already holds. A changed occurrence's own item is read
+    /// without it and takes its series'.
+    #[test]
+    fn the_detail_read_carries_the_uid_and_an_occurrence_takes_its_series() {
+        let xml = r#"<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <soap:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="M" ChangeKey="CK"/>
+              <t:Subject>Weekly</t:Subject>
+              <t:UID> imported-1@example.test </t:UID>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let parsed = parse_get_calendar_items_response(xml).unwrap();
+        assert_eq!(
+            parsed[0].uid.as_deref().map(str::trim),
+            Some("imported-1@example.test")
+        );
+
+        let mut item = ParsedItem {
+            item_id: "M".into(),
+            subject: "Weekly".into(),
+            start: Some("2026-05-20T08:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T09:00:00Z".parse().unwrap()),
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            uid: parsed[0].uid.clone(),
+            ..ParsedItem::default()
+        };
+        item.recurrence = Some(EwsRecurrence {
+            pattern: EwsRecurrencePattern::Daily { interval: 7 },
+            range: EwsRecurrenceRange::Numbered { occurrences: 5 },
+        });
+        let own = ParsedItem {
+            item_id: "OCC".into(),
+            subject: "Weekly, moved".into(),
+            start: Some("2026-05-27T10:00:00Z".parse().unwrap()),
+            end: Some("2026-05-27T11:00:00Z".parse().unwrap()),
+            item_type: Some("Exception".into()),
+            ..ParsedItem::default()
+        };
+        let ov = ModifiedOccurrence {
+            item_id: "OCC".into(),
+            change_key: None,
+            start: "2026-05-27T10:00:00Z".parse().unwrap(),
+            end: "2026-05-27T11:00:00Z".parse().unwrap(),
+            original_start: "2026-05-27T08:00:00Z".parse().unwrap(),
+            cancelled: false,
+            own: Some(Box::new(own)),
+        };
+        item.modified_occurrences = vec![ov.clone()];
+        let master = to_event(item.clone(), "cal").unwrap();
+        assert_eq!(master.ical_uid.as_deref(), Some("imported-1@example.test"));
+        let row = override_event(&master, &item, &ov, "cal").unwrap();
+        assert_eq!(row.title, "Weekly, moved", "the occurrence's own item");
+        assert_eq!(row.ical_uid.as_deref(), Some("imported-1@example.test"));
+
+        // A row read without the detail has none, rather than an empty one.
+        item.uid = Some("  ".into());
+        assert_eq!(to_event(item, "cal").unwrap().ical_uid, None);
+    }
+
     /// An appointment made in Outlook: Exchange lists its organizer, the
     /// mailbox itself, as the only attendee (live round 4, D6-D8). It has no
     /// invitees, so an update writes no attendee list and a detach creates a
@@ -9649,6 +9828,8 @@ mod tests {
             send_invitations: false,
             organizer: None,
             organized_elsewhere: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let xml = new_event_to_calendar_item_xml(&new).unwrap();
         assert!(!xml.contains("<t:RequiredAttendees>"), "{xml}");

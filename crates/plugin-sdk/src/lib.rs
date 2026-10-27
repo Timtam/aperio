@@ -109,6 +109,7 @@ pub mod discover;
 pub mod dispatch;
 pub mod error_map;
 pub mod host_channel;
+pub mod import_file;
 pub mod instance;
 pub mod interactive_auth;
 pub mod log_forward;
@@ -154,6 +155,7 @@ pub use dispatch::{
     vc_dispatch_unit,
 };
 pub use error_map::{cal_error_to_response, sync_error_to_response, vc_error_to_response};
+pub use import_file::{import_file_with, ImportRequest};
 pub use instance::{InitError, PluginInstance};
 pub use interactive_auth::interactive_auth_with;
 pub use open_instance::{error_result, open_instance_with};

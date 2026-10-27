@@ -71,6 +71,9 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         color,
         read_only: !entry.can_edit.unwrap_or(true),
         default_sound: None,
+        invitation_import: Default::default(),
+        // Graph mints its own `uid` on a create: a file's is not kept.
+        keeps_uid: false,
     }
 }
 
@@ -162,6 +165,19 @@ pub struct EventEntry {
     /// the default property set.
     #[serde(default, rename = "isOrganizer")]
     pub is_organizer: Option<bool>,
+    /// `singleInstance`, `occurrence`, `exception` or `seriesMaster`.
+    #[serde(default, rename = "type")]
+    pub event_type: Option<String>,
+    /// The iCalendar UID of the event — but of each OCCURRENCE on its own, so
+    /// `calendarView` rows of a series carry one each (Graph docs). Taken for
+    /// a single appointment only.
+    #[serde(default, rename = "iCalUId")]
+    pub ical_uid: Option<String>,
+    /// The UID a series' master and all its occurrences share (Graph docs).
+    /// Unmeasured whether the default property set carries it; when it does,
+    /// it is the UID for every row.
+    #[serde(default)]
+    pub uid: Option<String>,
 }
 
 /// An event body as Graph returns it: the content plus which of the two
@@ -586,6 +602,15 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
     let created = entry.created_date_time.unwrap_or_else(Utc::now);
     let updated = entry.last_modified_date_time.unwrap_or(created);
 
+    // A series' rows share `uid`; `iCalUId` names one occurrence only, so it
+    // stands for the appointment only when it is a single one.
+    let single = matches!(entry.event_type.as_deref(), None | Some("singleInstance"));
+    let ical_uid = entry.uid.filter(|uid| !uid.trim().is_empty()).or_else(|| {
+        entry
+            .ical_uid
+            .filter(|uid| single && !uid.trim().is_empty())
+    });
+
     // Attendees: the editable flat list ("Name <email>" / bare email) plus
     // per-attendee RSVP state, without the organizer (decision 67a), whose row
     // answers "organizer". `isOrganizer` says whether the signed-in user
@@ -644,6 +669,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         attendee_responses: people.attendee_responses,
         cancelled,
         scheduling_silenced: false,
+        ical_uid,
     }))
 }
 
@@ -2028,6 +2054,40 @@ mod tests {
         }
     }
 
+    /// The UID by which an import finds what is already here (I4). `uid` is
+    /// the series' and wins; `iCalUId` names one occurrence, so it stands for
+    /// a single appointment only.
+    #[test]
+    fn map_event_reads_the_uid_a_series_shares() {
+        let row = |extra: &str| {
+            let raw = format!(
+                r#"{{
+                "id": "ev1",
+                "subject": "Standup",
+                "start": {{ "dateTime": "2026-05-25T10:00:00.0000000", "timeZone": "UTC" }},
+                "end":   {{ "dateTime": "2026-05-25T10:30:00.0000000", "timeZone": "UTC" }}
+                {extra}
+            }}"#
+            );
+            let entry: EventEntry = serde_json::from_str(&raw).unwrap();
+            map_event(entry, "primary").unwrap().unwrap().ical_uid
+        };
+        assert_eq!(
+            row(r#", "type": "singleInstance", "iCalUId": "single-1""#).as_deref(),
+            Some("single-1")
+        );
+        assert_eq!(
+            row(r#", "type": "occurrence", "iCalUId": "occurrence-only""#),
+            None
+        );
+        assert_eq!(
+            row(r#", "type": "occurrence", "iCalUId": "occurrence-only", "uid": "series-1""#)
+                .as_deref(),
+            Some("series-1")
+        );
+        assert_eq!(row(""), None);
+    }
+
     #[test]
     fn map_event_reads_attendees_and_organizer() {
         let raw = r#"{
@@ -2265,6 +2325,8 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
         assert_eq!(json["start"]["timeZone"], "America/New_York");
@@ -2296,6 +2358,8 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
         for side in ["start", "end"] {
@@ -2384,6 +2448,8 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let body = new_event_to_body(&new).unwrap();
         let json = serde_json::to_value(&body).unwrap();
@@ -2415,6 +2481,8 @@ mod tests {
             sound: None,
             attendees: vec!["Alice <alice@example.com>".into()],
             send_invitations: true,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
         assert_eq!(

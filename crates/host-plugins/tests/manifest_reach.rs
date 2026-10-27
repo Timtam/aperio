@@ -122,14 +122,14 @@ fn include_arg(text: &str, start: usize) -> Option<String> {
 /// as it could tell. A guard whose whole subject is passing by scanning nothing
 /// had exactly that shape.
 ///
-/// CalDAV rather than one of the twelve that may leave first: it is the adapter
-/// whose reach into `shared/contracts/` this file already records below, so an
-/// anchor that goes missing here and a `KNOWN_REACHES` entry that goes missing
-/// there are the same event, reported twice.
+/// CalDAV rather than one of the twelve that may leave first: it was the
+/// adapter whose reach into `shared/contracts/` this file records below, until
+/// that reach moved with its iCalendar mapping into `ical-mapping` (file import,
+/// I6). The anchor stays on the adapter, which is what it proves.
 const WALK_ANCHORS: [&str; 3] = [
     "crates/host-plugins/src/lib.rs",
     "src-tauri/src/lib.rs",
-    "crates/adapter-caldav/src/mapping.rs",
+    "crates/adapter-caldav/src/events.rs",
 ];
 
 /// Does this include reach outside the crate that contains the source file?
@@ -365,7 +365,8 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 ///
 /// The last is not, and is recorded here rather than fixed because fixing it
 /// costs different things depending on a decision that has not been made. If
-/// `adapter-caldav` reaches its own repository as a git SUBMODULE it keeps this
+/// `ical-mapping` — which the CalDAV, iCal and Exchange adapters share — reaches
+/// its own repository as a git SUBMODULE it keeps this
 /// relative path and nothing breaks; as a cargo GIT DEPENDENCY the crate is
 /// copied into cargo's checkout directory and this line stops compiling. The
 /// fix — a crate that owns the contracts and hands out their bytes — is the
@@ -444,9 +445,9 @@ const KNOWN_REACHES: [(&str, &str); 11] = [
     ),
     // THE ONE THAT IS DEBT. The far end of the chain — a reminder becoming a
     // VALARM a CalDAV server stores — asserted from the app's own numbers, by
-    // an adapter that is meant to leave this repository.
+    // the iCalendar mapping the adapters meant to leave this repository share.
     (
-        "crates/adapter-caldav/src/mapping.rs",
+        "crates/ical-mapping/src/mapping.rs",
         "shared/contracts/calendarDefaultReminders.json",
     ),
 ];

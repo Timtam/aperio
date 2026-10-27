@@ -153,6 +153,22 @@ public class CalFfiModule: Module {
     }
   }
 
+  /// Re-throw a file that could not be read for an import with the desktop's
+  /// code (DESIGN-file-import.md, I5): `unsupported` (no plugin reads it),
+  /// `invalid_input` (unreadable, or too large: the detail then starts with
+  /// `import-too-large`), `internal` (not opened). Mirrors the Android module.
+  private func importCoded<T>(_ block: () throws -> T) throws -> T {
+    do {
+      return try block()
+    } catch let StoreError.Unsupported(detail) {
+      throw EventCodedError(code: "unsupported", detail: detail)
+    } catch let StoreError.InvalidField(_, detail) {
+      throw EventCodedError(code: "invalid_input", detail: detail)
+    } catch let StoreError.Storage(detail) {
+      throw EventCodedError(code: "internal", detail: detail)
+    }
+  }
+
   /// Run an event write as an iOS background task (decision 229): a new
   /// Exchange series deletes its deleted occurrences again one by one and can
   /// take up to half a minute, and a write the system suspends halfway leaves
@@ -659,6 +675,18 @@ public class CalFfiModule: Module {
           id: id, occurrence: occurrence, calendarId: calendarId,
           sendCancellations: sendCancellations)
       }
+    }
+
+    // ─── Importing a file (DESIGN-file-import.md) ───
+    // The formats the enabled plugins read (the document picker's filter), and
+    // one file read through the plugin for its format. Nothing is written.
+
+    AsyncFunction("fileImportFormatsJson") { (lang: String) -> String in
+      try self.host.fileImportFormatsJson(lang: lang)
+    }
+
+    AsyncFunction("readImportFileJson") { (path: String) -> String in
+      try self.importCoded { try self.host.readImportFileJson(path: path) }
     }
 
     // ─── Sync ───

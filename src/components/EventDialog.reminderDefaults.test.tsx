@@ -242,7 +242,7 @@ describe('EventDialog → creating an appointment', () => {
 
     const title = screen.getByRole('combobox', { name: /^titel$|^title$/i });
     fireEvent.change(title, { target: { value: 'Zahnarzt' } });
-    screen.getByRole('button', { name: /^anlegen$|^create$/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$|^create$/i }));
     await waitFor(() =>
       expect(invokeMock.mock.calls.some((call) => call[0] === 'create_event')).toBe(true),
     );
@@ -258,13 +258,13 @@ describe('EventDialog → creating an appointment', () => {
     savedEvent.current = { ...EVENT, reminders: [] };
     await openCreate([ATTACHED]);
     await waitFor(() => expect(reminderRows()).toHaveLength(1));
-    screen.getByRole('button', { name: /Erinnerung 1 entfernen|Remove reminder 1/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /Erinnerung 1 entfernen|Remove reminder 1/i }));
     await waitFor(() => expect(reminderRows()).toHaveLength(0));
 
     // A title is required, so the save would be refused without one.
     const title = screen.getByRole('combobox', { name: /^titel$|^title$/i });
     fireEvent.change(title, { target: { value: 'Zahnarzt' } });
-    screen.getByRole('button', { name: /^anlegen$|^create$/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$|^create$/i }));
     await waitFor(() =>
       expect(invokeMock.mock.calls.some((call) => call[0] === 'create_event')).toBe(true),
     );
@@ -338,7 +338,7 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     // Two rows: the calendar's attached default, and the private one.
     await waitFor(() => expect(reminderRows()).toHaveLength(2));
 
-    screen.getByRole('button', { name: /speichern|save/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
     // The save is done once the event itself went out; `act` is deliberately
     // not used here — it would keep flushing this dialog's own re-renders.
     await waitFor(() =>
@@ -418,7 +418,7 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     fireEvent.change(screen.getByRole('combobox', { name: /^titel$|^title$/i }), {
       target: { value: 'Zahnarzt Dr. X' },
     });
-    screen.getByRole('button', { name: /speichern|save/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
     await waitFor(() => expect(privateWrites()).toHaveLength(2));
 
     expect(privateWrites()).toEqual([
@@ -441,9 +441,9 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     await openEditor([]);
     await waitFor(() => expect(reminderRows()).toHaveLength(1));
 
-    screen.getByRole('button', { name: /Erinnerung 1 entfernen|Remove reminder 1/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /Erinnerung 1 entfernen|Remove reminder 1/i }));
     await waitFor(() => expect(reminderRows()).toHaveLength(0));
-    screen.getByRole('button', { name: /speichern|save/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
     await waitFor(() => expect(privateWrites()).toHaveLength(1));
 
     expect(privateWrites()).toEqual([
@@ -467,7 +467,7 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     fireEvent.change(screen.getByRole('combobox', { name: /Gilt|Applies/i }), {
       target: { value: 'attach' },
     });
-    screen.getByRole('button', { name: /speichern|save/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
     await waitFor(() => expect(privateWrites()).toHaveLength(1));
 
     expect(privateWrites()).toEqual([
@@ -485,7 +485,7 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     fireEvent.change(screen.getByRole('combobox', { name: /kalender/i }), {
       target: { value: 'cal-home' },
     });
-    screen.getByRole('button', { name: /speichern|save/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
     await waitFor(() =>
       expect(invokeMock.mock.calls.some((call) => call[0] === 'create_event')).toBe(true),
     );
@@ -508,7 +508,7 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     await openEditor([], { event: OCCURRENCE, initialScope: 'this_and_future' });
     await waitFor(() => expect(reminderRows()).toHaveLength(1));
 
-    screen.getByRole('button', { name: /speichern|save/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
     await waitFor(() => expect(privateWrites()).toHaveLength(1));
 
     expect(invokeMock.mock.calls.some((call) => call[0] === 'create_event')).toBe(true);
@@ -524,7 +524,7 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     await openEditor([], { event: OCCURRENCE, initialScope: 'occurrence' });
     await waitFor(() => expect(reminderRows()).toHaveLength(1));
 
-    screen.getByRole('button', { name: /speichern|save/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
     await waitFor(() => expect(privateWrites()).toHaveLength(1));
 
     expect(invokeMock.mock.calls.some((call) => call[0] === 'add_event_exdate')).toBe(true);
@@ -545,7 +545,7 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     fireEvent.change(screen.getByRole('combobox', { name: /kalender/i }), {
       target: { value: 'cal-home' },
     });
-    screen.getByRole('button', { name: /speichern|save/i }).click();
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
     await waitFor(() => expect(privateWrites()).toHaveLength(1));
 
     expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(false);

@@ -1,0 +1,165 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { renderHook } from '@testing-library/react';
+
+import type { FileImport, ImportedEvent } from '../api/types';
+
+/**
+ * Bringing a file in (DESIGN-file-import.md): the open dialog filters by the
+ * formats the plugins read; one appointment opens the editor on it, several,
+ * none or a failure open the import dialog; a dropped file is read from its
+ * bytes.
+ */
+
+const answers = vi.hoisted(() => ({
+  read: null as unknown,
+  readFails: null as unknown,
+}));
+const invokeMock = vi.hoisted(() =>
+  vi.fn((command: string) => {
+    if (command === 'file_import_formats') {
+      return Promise.resolve([
+        {
+          plugin_id: 'com.aperio.cal-adapter-ical',
+          format_id: 'ics',
+          name: 'iCalendar-Datei (.ics)',
+          extensions: ['ics', 'ical'],
+          mime_types: ['text/calendar'],
+        },
+      ]);
+    }
+    if (command === 'read_import_file' || command === 'read_import_content') {
+      return answers.readFails ? Promise.reject(answers.readFails) : Promise.resolve(answers.read);
+    }
+    return Promise.resolve([]);
+  }),
+);
+vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
+const openDialog = vi.hoisted(() => vi.fn());
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: openDialog }));
+// Its own test covers the focus trace; here it would only write to the output.
+const traceFocus = vi.hoisted(() => vi.fn());
+vi.mock('../a11y/focusTrace', () => ({ traceFocus }));
+const openEventDialog = vi.fn();
+const openFileImport = vi.fn();
+vi.mock('./dialogStateContext', () => ({
+  useDialogState: () => ({ openEventDialog, openFileImport }),
+}));
+
+afterEach(() => {
+  traceFocus.mockClear();
+  invokeMock.mockClear();
+  openDialog.mockReset();
+  openEventDialog.mockClear();
+  openFileImport.mockClear();
+  answers.read = null;
+  answers.readFails = null;
+});
+
+const event = (title: string, extra: Partial<ImportedEvent> = {}): ImportedEvent => ({
+  title,
+  start: '2026-11-18T13:00:00Z',
+  end: '2026-11-18T14:00:00Z',
+  all_day: false,
+  reminders: [],
+  attendees: [],
+  ...extra,
+});
+
+async function hook() {
+  const { useFileImport } = await import('./useFileImport');
+  return renderHook(() => useFileImport()).result.current;
+}
+
+describe('useFileImport', () => {
+  it('filters the open dialog by the plugins’ formats and opens the editor on one appointment', async () => {
+    openDialog.mockResolvedValue('C:\\Daten\\Einladung.ics');
+    answers.read = {
+      events: [event('Projektbesprechung', { organizer: 'erika@example.org', attendees: ['a@b.de'] })],
+      skipped: [{ kind: 'task', title: 'Geschenke besorgen' }],
+    } satisfies FileImport;
+    const { importFromDisk } = await hook();
+    await importFromDisk();
+    const options = openDialog.mock.calls[0][0];
+    expect(options.filters[0]).toEqual({ name: 'Kalenderdateien', extensions: ['ics', 'ical'] });
+    expect(invokeMock).toHaveBeenCalledWith('read_import_file', {
+      path: 'C:\\Daten\\Einladung.ics',
+    });
+    expect(openEventDialog).toHaveBeenCalledTimes(1);
+    const [, opened] = openEventDialog.mock.calls[0];
+    // The appointment as the file has it: the editor decides, per calendar,
+    // whether an invitation keeps its people (I6).
+    expect(opened.importFrom.title).toBe('Projektbesprechung');
+    expect(opened.importFrom.organizer).toBe('erika@example.org');
+    expect(opened.importFrom.attendees).toEqual(['a@b.de']);
+    expect(opened.importNote).toBe('Nicht übernommen: die Aufgabe „Geschenke besorgen“.');
+    expect(openFileImport).not.toHaveBeenCalled();
+    // Where focus goes from here is traced into the log (TODO: remove).
+    expect(traceFocus).toHaveBeenCalledWith('import', 3 * 60 * 1000);
+  });
+
+  it('lists several appointments, and a failure, in the import dialog', async () => {
+    openDialog.mockResolvedValue('/home/toni/export.ics');
+    answers.read = { events: [event('A'), event('B')], skipped: [] };
+    const { importFromDisk } = await hook();
+    await importFromDisk();
+    expect(openFileImport).toHaveBeenCalledWith('export.ics', { read: answers.read });
+
+    answers.readFails = { code: 'invalid_input', message: 'the file holds no calendar' };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await importFromDisk();
+    expect(openFileImport).toHaveBeenLastCalledWith('export.ics', { failed: answers.readFails });
+    warn.mockRestore();
+  });
+
+  it('does nothing when the open dialog is cancelled', async () => {
+    openDialog.mockResolvedValue(null);
+    const { importFromDisk } = await hook();
+    await importFromDisk();
+    expect(invokeMock).not.toHaveBeenCalledWith('read_import_file', expect.anything());
+    expect(openEventDialog).not.toHaveBeenCalled();
+    expect(openFileImport).not.toHaveBeenCalled();
+  });
+
+  it('reads a dropped file from its bytes', async () => {
+    answers.read = { events: [event('A'), event('B')], skipped: [] };
+    const { importDropped } = await hook();
+    const file = new File(['BEGIN:VCALENDAR'], 'drop.ics', { type: 'text/calendar' });
+    await importDropped(file);
+    expect(invokeMock).toHaveBeenCalledWith('read_import_content', {
+      fileName: 'drop.ics',
+      content: btoa('BEGIN:VCALENDAR'),
+    });
+    expect(openFileImport).toHaveBeenCalledWith('drop.ics', { read: answers.read });
+    expect(traceFocus).toHaveBeenCalledWith('import', 3 * 60 * 1000);
+  });
+
+  it('hands the host at most one byte past what an import reads', async () => {
+    const { IMPORT_MAX_BYTES } = await import('@aperio/shared');
+    answers.read = { events: [], skipped: [] };
+    const { importDropped } = await hook();
+    const file = new File([new Uint8Array(IMPORT_MAX_BYTES + 4096)], 'film.ics');
+    await importDropped(file);
+    const call = invokeMock.mock.calls.find(([command]) => command === 'read_import_content');
+    const content = (call as unknown as [string, { content: string }])[1].content;
+    expect(atob(content).length).toBe(IMPORT_MAX_BYTES + 1);
+  });
+
+  it('knows the host’s limit', async () => {
+    const { IMPORT_MAX_BYTES } = await import('@aperio/shared');
+    const { readFileSync } = await import('node:fs');
+    const host = readFileSync('crates/host-core/src/file_import.rs', 'utf8');
+    const limit = /pub const MAX_IMPORT_BYTES: u64 = (\d+) \* (\d+) \* (\d+);/.exec(host);
+    expect(limit).not.toBeNull();
+    const [, a, b, c] = limit ?? [];
+    expect(Number(a) * Number(b) * Number(c)).toBe(IMPORT_MAX_BYTES);
+  });
+});
+
+describe('toBase64', () => {
+  it('encodes more bytes than one call may take', async () => {
+    const { toBase64 } = await import('./useFileImport');
+    const bytes = new Uint8Array(100_000).map((_, i) => i % 256);
+    const decoded = Uint8Array.from(atob(toBase64(bytes)), (c) => c.charCodeAt(0));
+    expect(decoded).toEqual(bytes);
+  });
+});

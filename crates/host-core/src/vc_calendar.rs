@@ -127,6 +127,7 @@ impl VcCalendar {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         })
     }
 }
@@ -164,6 +165,8 @@ impl CalendarFeature for VcCalendar {
             invitations_reply_only: false,
             stores_occurrence_exceptions: false,
             notifier_name: None,
+            invitation_import: Default::default(),
+            keeps_uid: false,
         }])
     }
 
@@ -311,6 +314,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 

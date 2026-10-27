@@ -1,14 +1,15 @@
-//! `windows-zones` — the Windows time-zone ids Exchange speaks, generated from
-//! the Unicode CLDR `windowsZones.xml` the EWS adapter carries.
+//! `windows-zones` — the Windows time-zone ids Exchange and Outlook's calendar
+//! files speak, generated from the Unicode CLDR `windowsZones.xml` the core
+//! carries.
 //!
 //! # Why generated, and from what
 //!
 //! Exchange names a series' zone by a Windows id. The mapping to tzdata is
 //! CLDR's; a hand-kept copy of it had drifted to three wrong rows and wrote 174
 //! of the 312 listed zones without a zone. The file is pinned in
-//! `crates/adapter-ews/cldr/` by release tag and sha256, with its licence, and
-//! every name in it resolves through `cal_core` — the rule the adapter asks at
-//! runtime — so the table and the adapter cannot disagree about a spelling.
+//! `crates/cal-core/cldr/` by release tag and sha256, with its licence, and
+//! every name in it resolves through `cal_core` — the rule its readers ask at
+//! runtime — so the table and its readers cannot disagree about a spelling.
 //!
 //! # What it refuses, each by name and line
 //!
@@ -44,10 +45,10 @@ use sha2::{Digest, Sha256};
 use super::{metadata, USAGE};
 
 /// Where the pinned CLDR file lives, relative to the workspace root.
-const CLDR_DIR: &str = "crates/adapter-ews/cldr";
+const CLDR_DIR: &str = "crates/cal-core/cldr";
 
 /// Where the task writes, relative to the workspace root.
-const WINDOWS_ZONES: &str = "crates/adapter-ews/src/windows_tz/windows_zones.rs";
+const WINDOWS_ZONES: &str = "crates/cal-core/src/windows_zone/table.rs";
 
 /// How long the clock guard looks ahead of the pinned release's publication.
 const CLOCK_MONTHS: u32 = 60;
@@ -675,7 +676,7 @@ fn render_windows_zones(
          // common/supplemental/windowsZones.xml (sha256 {sha}),\n\
          // names resolved with cal_core (IANA tzdata {tzdata}), clocks compared {from} to {until}.\n\
          // CLDR data © Unicode, Inc., Unicode License V3: see ../../cldr/LICENSE.\n\
-         // Do not edit: run the task and commit what it writes. See ../windows_tz.rs.\n\
+         // Do not edit: run the task and commit what it writes. See ../windows_zone.rs.\n\
          \n\
          /// The CLDR release the table was generated from.\n\
          pub const CLDR_RELEASE: &str = \"{release}\";\n\

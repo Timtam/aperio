@@ -95,7 +95,10 @@ In the event dialog you can also set:
 > refuses, so Aperio shows such a meeting read-only: the title, the calendar,
 > the times, the place, the description and the guest list are all there to
 > read, each one a stop your screen reader reaches, but none of them can be
-> changed. The dialog says so in a line above the fields.
+> changed. The dialog says so in a line above the fields. The description
+> is a document of its own: on the desktop NVDA switches to browse mode when
+> you reach it, so the arrow keys read it line by line, and `Tab` leaves it
+> for the next field.
 >
 > What you can still do: answer (Accept, Tentative, Decline), set your own
 > reminders — attached ones the calendar keeps, or private ones only Aperio
@@ -382,6 +385,62 @@ resolving the copy is looked for and the group repairs itself silently. If
 nothing matching is there, nothing is changed: it may be a copy you deleted, and
 dropping it on suspicion is not Aperio's call.
 
+## Importing appointments from a file
+
+An appointment someone sent you as a `.ics` file — an invitation from Outlook,
+Teams or Google, an export from another calendar — comes into Aperio from the
+toolbar's **Import …** (or `Ctrl+O`), or by dropping the file onto the window.
+On the desktop, Aperio registers for no file type; it imports only while it runs. On
+the phone, **Import appointments …** in the calendar list (next to **New
+calendar**) opens the file picker; a `.ics` file can also be shared to Aperio
+or opened in it from another app (Mail, Files), where Aperio is offered
+without becoming the default. In the list of several, each row is a
+checkbox; **Edit …** is one of its actions (on iOS in the rotor).
+
+- **One appointment** opens the editor, filled in from the file: its day and
+  time, its place and description, its reminders, a series with the
+  occurrences it skips. The **Calendar** field is where it goes; nothing is
+  written until you press **Create**.
+- **Several** open a list. Each one can be opened in the editor, or every
+  checked one written to one calendar at once.
+- **An appointment the calendar already holds** — the same one, imported
+  before or sent twice — is found by the identity the file gives it, in a
+  local, iCloud or other CalDAV, or Exchange calendar. The list names it and
+  leaves it unchecked; checked again, it is imported as a copy. The editor
+  says so before you create it, and creating it then makes a copy. Aperio
+  asks the calendar you picked, and asks again when you pick another. Google
+  (except an invitation it keeps in your primary calendar), Microsoft 365 and
+  the phone's own calendars keep no such identity, and a changed occurrence
+  imported as its own appointment has none: those are not recognised, come
+  in again, and the list and the editor say so for such a calendar.
+- **What the file holds besides appointments** — tasks, notes, a
+  cancellation, an answer to an invitation — is named and left out.
+- **A changed occurrence of a series** becomes an appointment of its own, and
+  the series skips the slot it took.
+- **An invitation someone else organizes** stays theirs in a calendar that
+  can keep it without telling anyone: its organizer and attendees stay, nobody
+  is notified, and the editor shows it as you received it — title, time,
+  place, description and attendees as sent; the calendar, the reminders and
+  the colour are yours to choose. Local, iCloud and other CalDAV calendars
+  keep invitations so, and Exchange too: there your answer then reads
+  “tentative”, without anyone being told, and you can accept or decline as
+  with any invitation. In an Exchange calendar other than your main one,
+  Exchange first puts it in the main calendar, and Aperio then moves it to
+  the one you picked. Google keeps them in your primary calendar, not in
+  your other Google calendars. In a calendar that cannot, it becomes your own
+  appointment, without attendees. The editor and the list say which, for the calendar you
+  picked.
+- **A meeting you organize yourself** comes in as a new appointment, with
+  its attendees, as if you had just made it. iCloud and other CalDAV
+  calendars write attendees only along with their invitations, so the list,
+  which tells nobody, brings such a meeting there without them. In the editor
+  they stay, and are invited.
+
+Times keep their zone, including the Windows zone names Outlook writes. A
+zone only the file itself defines (Outlook's "Customized Time Zone") gives
+the right times, but for now a series in it repeats in UTC, an hour off after
+a clock change.
+
 ## Time steps
 
 Under **Settings → General**, **Time steps** decides how far one press of the
@@ -401,7 +460,10 @@ A signature is a named block of text that goes at the **end** of a description
 **Settings → Signatures** — on the phone via **Signatures** in Settings — you
 write them. WHICH one a calendar carries is set on the calendar itself, beside
 its default reminders, and a calendar that has one puts it on **new
-appointments by itself**: no press at all in the ordinary case.
+appointments by itself**: no press at all in the ordinary case. An
+appointment imported from a file gets none by itself: it keeps the
+description it came with. On your own appointment from a file, the
+**Signature** button still adds one.
 
 The binding is a default, not a restriction. Every signature stays pickable in
 the editor whichever calendar the appointment is on, and the **Signature**

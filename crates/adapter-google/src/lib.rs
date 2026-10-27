@@ -840,6 +840,7 @@ mod delta_tests {
             deletions_not_restored: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 

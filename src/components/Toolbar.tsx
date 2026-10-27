@@ -5,6 +5,7 @@ import { localDateKey } from '../intl/dateKey';
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/dialogStateContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
+import { useFileImport } from '../state/useFileImport';
 import { useViewState } from '../state/viewStateContext';
 import { VIEWS, type ViewId } from '../state/viewMath';
 import { CacheRefreshIndicator } from './CacheRefreshIndicator';
@@ -41,6 +42,7 @@ export function Toolbar() {
   const { openQuickAdd, openQuickAddTask, openSearch, openReminders } =
     useDialogState();
   const { dayViewMode, setDayViewMode } = useTaskCascadeEnabled();
+  const { importFromDisk } = useFileImport();
 
   // The grid↔list layout toggle is only meaningful on the day + week
   // surfaces (the only views that render the hour-grid / list). It hides
@@ -185,6 +187,13 @@ export function Toolbar() {
           title={t('toolbar.newTask') + ' (Alt+N)'}
         >
           {t('toolbar.newTask')}
+        </button>
+        <button
+          type="button"
+          onClick={() => void importFromDisk()}
+          title={t('fileImport.toolbarButton') + ' (Ctrl+O)'}
+        >
+          {t('fileImport.toolbarButton')}
         </button>
       </div>
 

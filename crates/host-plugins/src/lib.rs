@@ -57,6 +57,7 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     ///   `register!(crate, interactive_auth)`  — OAuth (Google/MS/…)
     ///   `register!(crate, discover)`          — Autodiscover (EWS)
     ///   `register!(crate, probe_host_key)`    — TOFU (SFTP)
+    ///   `register!(crate, import_file)`       — reads files for an import
     macro_rules! register {
         ($plugin_crate:ident) => {{
             let manifest = PluginManifest::from_bytes($plugin_crate::MANIFEST)?;
@@ -92,6 +93,19 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
                 },
             )?;
         }};
+        ($plugin_crate:ident, import_file) => {{
+            let manifest = PluginManifest::from_bytes($plugin_crate::MANIFEST)?;
+            let descriptor = unsafe { $plugin_crate::build_descriptor() };
+            manager.register_static_with_hooks(
+                manifest,
+                descriptor,
+                $plugin_crate::DESTROY_FN,
+                plugin_core::manager::StaticHooks {
+                    import_file_fn: Some($plugin_crate::__aperio_import_file_impl),
+                    ..Default::default()
+                },
+            )?;
+        }};
         ($plugin_crate:ident, probe_host_key) => {{
             let manifest = PluginManifest::from_bytes($plugin_crate::MANIFEST)?;
             let descriptor = unsafe { $plugin_crate::build_descriptor() };
@@ -111,7 +125,7 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     #[cfg(feature = "caldav")]
     register!(adapter_caldav_plugin);
     #[cfg(feature = "ical")]
-    register!(adapter_ical_plugin);
+    register!(adapter_ical_plugin, import_file);
     #[cfg(feature = "google")]
     register!(adapter_google_plugin, interactive_auth);
     #[cfg(feature = "microsoft-graph")]

@@ -19,6 +19,9 @@ sync-core.workspace = true
 vc-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# A file handed over for an import crosses the boundary as base64 inside the
+# JSON args (`import_file`).
+base64 = "0.22"
 # A current-thread tokio runtime drives the plugin's async trait
 # methods inside the synchronous FFI fn pointers. Same one the
 # host uses on its side via spawn_blocking.

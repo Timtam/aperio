@@ -88,6 +88,10 @@ export interface CalendarEvent {
   created_at: string;
   updated_at: string;
   etag: string | null;
+  /** The appointment's iCalendar UID (RFC 5545), where the provider keeps one;
+   *  a series' occurrences carry the series'. An import finds by it what the
+   *  calendar already holds (DESIGN-file-import.md, I4). Read-only. */
+  ical_uid?: string | null;
   organizer?: string | null;
   /** Someone other than the connected account organizes this event, or the
    *  provider cannot confirm that the account does (decision 70a). Read-only;
@@ -125,6 +129,16 @@ export interface NewEvent {
    *  provider. */
   organizer?: string | null;
   organized_elsewhere?: boolean;
+  /** The iCalendar UID this create asks the provider to keep — an imported
+   *  appointment's, from its file. Absent: the provider mints one. Named
+   *  apart from `CalendarEvent.ical_uid` on purpose: a create spread from an
+   *  existing event (a copy, a split's tail) must never take its UID. */
+  uid_to_keep?: string | null;
+  /** A meeting someone else organizes, from a file: created as theirs with
+   *  `organizer` and the invitees, nobody told, where the calendar keeps
+   *  invitations (`Calendar.invitation_import`); the host drops the people
+   *  elsewhere. */
+  keeps_invitation?: boolean;
 }
 
 export interface CreateCalendarRequest {

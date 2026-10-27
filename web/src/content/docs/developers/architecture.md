@@ -43,6 +43,9 @@ The repository is one Cargo workspace. Key members:
   `-google`, `-caldav`, `-microsoft-graph`, `-ews`, `-vikunja`,
   `-todoist`, `-ical`). Each is a normal Rust library implementing the
   relevant `cal-core` traits.
+- **`crates/ical-mapping`** — iCalendar text to `cal-core` events and back,
+  shared by the CalDAV and iCal adapters and by Exchange's invitations, so
+  no adapter depends on another.
 - **`crates/adapter-*-plugin`** — a thin wrapper that exposes an
   adapter over the C ABI as a loadable plugin (see below).
 - **`crates/plugin-core`** — the ABI contract: the `#[repr(C)]` vtable

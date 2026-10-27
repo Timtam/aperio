@@ -26,6 +26,7 @@ fn manifest() -> PluginManifest {
         single_instance: false,
         adopts_adapter_kinds: Vec::new(),
         kind_names: Default::default(),
+        file_imports: Vec::new(),
         strings: Default::default(),
     }
 }
