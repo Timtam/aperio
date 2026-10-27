@@ -460,6 +460,9 @@ impl OnboardingService {
             }
             None => {
                 debug!("no remote snapshot present; falling back to full log replay",);
+                // Every file from the start, and nothing GC'd without a
+                // snapshot: what this device holds is exactly what it applies.
+                covered_from = Some(Utc::now());
             }
         }
 
@@ -2385,5 +2388,11 @@ mod tests {
             .expect("cursor should be persisted");
         let parsed: DateTime<Utc> = cursor.parse().unwrap();
         assert_eq!(parsed, ts);
+        // No snapshot: every file from the start, nothing GC'd — what this
+        // device holds is exactly what it applied (DESIGN-sync-snapshot-coverage.md).
+        assert!(UserPrefsRepo::new(&db.shared())
+            .get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+            .unwrap()
+            .is_some());
     }
 }

@@ -96,6 +96,10 @@ pub const PREF_LOGS_SINCE_SNAPSHOT: &str = "sync.compaction.localLogsSinceSnapsh
 /// Local counter for bytes pushed, same lifecycle as
 /// [`PREF_LOGS_SINCE_SNAPSHOT`].
 pub const PREF_BYTES_SINCE_SNAPSHOT: &str = "sync.compaction.localBytesSinceSnapshot";
+/// When this device last checked whether it could write a snapshot that
+/// names its events, while the dataset's names nothing
+/// (DESIGN-sync-snapshot-coverage.md). Device-local; at most once a day.
+pub const PREF_COVERAGE_CHECKED_AT: &str = "sync.compaction.coverageCheckedAt";
 
 /// How many days of pre-snapshot logs to RETAIN behind a device that has
 /// fallen behind, before abandoning it to a snapshot resume. This is the cap
@@ -260,6 +264,23 @@ impl Compactor {
             Some(m) => Some(m.clone()),
             None => adapter.fetch_meta().await?,
         };
+        // DESIGN-sync-snapshot-coverage.md: while the dataset's snapshot
+        // names nothing, a device that holds every event in every log file
+        // compacts once to write one that does — the snapshot every other
+        // device then rebuilds from. At most once a day: the check fetches
+        // every file, and a device that does not hold everything keeps not
+        // holding it. A dataset that never compacted has no such snapshot
+        // to heal from; its first compaction names its events anyway.
+        if let Some(meta) = &meta {
+            if meta.has_real_snapshot() && !meta.snapshot_coverage && self.coverage_check_due() {
+                self.note_coverage_check();
+                let logs = adapter.fetch_new_logs(&DeviceCursor::epoch()).await?;
+                if Coverage::of(&logs, &self.local_device_id, self.store.as_ref())?.complete {
+                    debug!("compaction triggered: this device can write a snapshot that names its events");
+                    return Ok(true);
+                }
+            }
+        }
         if let Some(meta) = &meta {
             // Only an existing REAL snapshot has a meaningful age. A
             // never-compacted dataset carries the `MIN_UTC` sentinel, whose
@@ -622,6 +643,27 @@ impl Compactor {
             .flatten()
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(default)
+    }
+
+    /// Whether a day has passed since the last coverage check
+    /// ([`PREF_COVERAGE_CHECKED_AT`]); due when it never ran or the mark
+    /// does not read.
+    fn coverage_check_due(&self) -> bool {
+        self.store
+            .get_pref(PREF_COVERAGE_CHECKED_AT)
+            .ok()
+            .flatten()
+            .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
+            .is_none_or(|at| Utc::now() - at.with_timezone(&Utc) >= ChronoDuration::days(1))
+    }
+
+    fn note_coverage_check(&self) {
+        if let Err(err) = self
+            .store
+            .set_pref(PREF_COVERAGE_CHECKED_AT, &Utc::now().to_rfc3339())
+        {
+            warn!(?err, "couldn't record the coverage check");
+        }
     }
 
     fn read_counter_u64(&self, key: &str) -> u64 {
@@ -1284,6 +1326,70 @@ mod tests {
             remaining[0].name.timestamp, old,
             "the file with an unapplied event stays"
         );
+    }
+
+    /// A dataset whose real, recent snapshot names nothing (or does).
+    fn meta_with_snapshot(coverage: bool) -> MetaJson {
+        let mut meta = meta_with_caught_up_peer();
+        meta.snapshot_timestamp = Utc::now() - ChronoDuration::hours(1);
+        meta.snapshot_coverage = coverage;
+        meta
+    }
+
+    #[tokio::test]
+    async fn a_complete_device_compacts_once_a_day_while_the_snapshot_names_nothing() {
+        // DESIGN-sync-snapshot-coverage.md: the snapshot every device
+        // rebuilds from has to come from somewhere — a device that holds
+        // every event writes it, unprompted, and checks at most daily.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        let (own, _) = log_of(Utc::now() - ChronoDuration::hours(2), "dev-this", 1);
+        adapter.logs.lock().unwrap().push(own);
+        let meta = meta_with_snapshot(false);
+
+        assert!(compactor
+            .should_compact(&adapter, Some(&meta))
+            .await
+            .unwrap());
+        assert!(
+            !compactor
+                .should_compact(&adapter, Some(&meta))
+                .await
+                .unwrap(),
+            "not again the same day"
+        );
+        assert!(store.get_pref(PREF_COVERAGE_CHECKED_AT).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn an_incomplete_device_does_not_compact_for_coverage() {
+        let (_store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        let (peer, _) = log_of(Utc::now() - ChronoDuration::hours(2), "dev-other", 1);
+        adapter.logs.lock().unwrap().push(peer);
+
+        assert!(!compactor
+            .should_compact(&adapter, Some(&meta_with_snapshot(false)))
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn no_coverage_check_once_the_snapshot_names_its_events_or_none_exists() {
+        // A naming snapshot needs no second one; a dataset that never
+        // compacted waits for its thresholds — its first snapshot names its
+        // events anyway.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        assert!(!compactor
+            .should_compact(&adapter, Some(&meta_with_snapshot(true)))
+            .await
+            .unwrap());
+        assert!(!compactor
+            .should_compact(&adapter, Some(&MetaJson::fresh("1.0.0-test")))
+            .await
+            .unwrap());
+        assert_eq!(store.get_pref(PREF_COVERAGE_CHECKED_AT).unwrap(), None);
     }
 
     #[tokio::test]
