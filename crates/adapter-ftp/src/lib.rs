@@ -1299,6 +1299,7 @@ mod tests {
                 name: filename.clone(),
                 len: known_len,
             }],
+            unknown_from: None,
         };
 
         let listed = vec![(filename.clone(), Some(120))];
@@ -1318,6 +1319,7 @@ mod tests {
             last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
             exclude_device: Some(DeviceId::from_string("me".into())),
             known_lengths: Vec::new(),
+            unknown_from: None,
         };
         let newer = log_name(2_000, "peer").to_filename();
         let entries = vec![
@@ -1344,6 +1346,7 @@ mod tests {
                 name: known.to_filename(),
                 len: 100,
             }],
+            unknown_from: None,
         };
         // At the cursor with a recorded length → probe.
         assert!(needs_size_probe(&cursor, &known, &known.to_filename()));

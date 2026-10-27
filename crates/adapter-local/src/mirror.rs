@@ -483,6 +483,7 @@ mod tests {
                 name: log.name.to_filename(),
                 len: known_len,
             }],
+            unknown_from: None,
         };
 
         // Applied length smaller than the file → grown → refetched.
@@ -604,6 +605,7 @@ mod tests {
             last_seen_log: Utc.timestamp_opt(1_500, 0).unwrap(),
             exclude_device: None,
             known_lengths: Vec::new(),
+            unknown_from: None,
         };
         let fetched = adapter.fetch_new_logs(&cursor).await.unwrap();
         assert_eq!(fetched.len(), 1);

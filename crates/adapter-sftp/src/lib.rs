@@ -1255,6 +1255,7 @@ mod tests {
                 name: filename.clone(),
                 len: known_len,
             }],
+            unknown_from: None,
         };
 
         // Listed size grew past the applied length → refetched.
@@ -1281,6 +1282,7 @@ mod tests {
             last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
             exclude_device: Some(DeviceId::from_string("me".into())),
             known_lengths: Vec::new(),
+            unknown_from: None,
         };
         let wanted = select_wanted_logs(
             [
@@ -1347,6 +1349,7 @@ mod tests {
                 name: grown_name.clone(),
                 len: 100,
             }],
+            unknown_from: None,
         };
         let fetched = std::sync::Mutex::new(Vec::new());
         let logs = fetch_logs_via(
@@ -1386,6 +1389,7 @@ mod tests {
             last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
             exclude_device: None,
             known_lengths: Vec::new(),
+            unknown_from: None,
         };
         let kept = log_name(2_000, "dev-a");
         let vanished_name = log_name(3_000, "dev-b").to_filename();
@@ -1424,6 +1428,7 @@ mod tests {
             last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
             exclude_device: None,
             known_lengths: Vec::new(),
+            unknown_from: None,
         };
         let broken_name = log_name(3_000, "dev-b").to_filename();
         let err = fetch_logs_via(
