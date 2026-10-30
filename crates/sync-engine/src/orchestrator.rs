@@ -107,14 +107,13 @@ pub const SYNC_APPLIED_LOG_LENGTHS_PREF_KEY: &str = "sync.cursor.appliedLogLengt
 /// the files 14 days of retention keep (one per device and session).
 pub const APPLIED_LOG_LENGTHS_CAP: usize = 256;
 
-/// RFC 3339 timestamp of the snapshot from which this device's applied
-/// record became EXACT (DESIGN-sync-snapshot-coverage.md): every event still
-/// in a log file that its state reflects is its own or in
-/// `sync_applied_events`. Set when the device wrote a snapshot that names its
-/// events, or took or rebuilt from one. Absent on a device that joined or
-/// resumed from a snapshot without them — its state holds events its record
-/// does not name, so re-fetching older files would re-apply them.
-/// Device-local, like every `sync.cursor.*` key.
+/// RFC 3339 instant from which this device's applied record is EXACT
+/// (DESIGN-sync-snapshot-coverage.md): it joined, resumed or caught up over
+/// every log file still present, weighing each change against its row, so
+/// nothing it records as applied was reverted under the record since. Absent
+/// on a device that joined or resumed from a snapshot before this existed —
+/// the round catches it up once. Device-local, like every `sync.cursor.*`
+/// key.
 pub const SYNC_COVERAGE_EXACT_SINCE_PREF_KEY: &str = "sync.cursor.coverageExactSince";
 
 /// Merge freshly applied `(filename, byte length)` records into the
@@ -221,15 +220,15 @@ pub trait SyncRoundHooks: Send + Sync {
             "auto-resume not supported on this platform",
         ))
     }
-    /// Rebuild this device once from the current snapshot, which must name
-    /// the events it holds (DESIGN-sync-snapshot-coverage.md). Invoked by the
-    /// round while meta.json says it does and this device's record is not
-    /// exact yet; errors when the snapshot names nothing (a concurrent
-    /// compaction), so the round goes on and retries. The default errors: the
-    /// device keeps its state, as before.
-    async fn rebuild_from_snapshot(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
+    /// Catch this device up once over every log file still present, its own
+    /// included (DESIGN-sync-snapshot-coverage.md; Toni, 2026-10-30): its
+    /// applied record is not exact yet. A change wins only where it is newer
+    /// than its row, without a conflict; afterwards the record is exact. The
+    /// default errors: the device keeps its state, as before, and the next
+    /// round tries again.
+    async fn catch_up(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
         Err(SyncError::internal(
-            "rebuild not supported on this platform",
+            "catch-up not supported on this platform",
         ))
     }
     /// Cache the device names announced in `meta.json` locally so a UI
@@ -622,26 +621,6 @@ impl SyncOrchestrator {
                 }
             }
 
-            // DESIGN-sync-snapshot-coverage.md (Toni, 2026-10-27): once a
-            // snapshot names the events it holds, a device whose record is
-            // not exact yet rebuilds from it once — it joined or resumed from
-            // a snapshot that named nothing, so a file it skipped by name may
-            // hold events it never applied, and which devices that hit cannot
-            // be told. A failure leaves the device as it was, and the next
-            // round retries.
-            if !resumed && meta.snapshot_coverage && !self.coverage_exact() {
-                match self.hooks.rebuild_from_snapshot(adapter.as_ref()).await {
-                    Ok(()) => {
-                        info!("rebuilt once from the first snapshot that names its events");
-                        resumed = true;
-                    }
-                    Err(err) => warn!(
-                        ?err,
-                        "rebuild from the snapshot that names its events failed; retrying next round",
-                    ),
-                }
-            }
-
             // §19.7 encryption gate. The dataset is end-to-end encrypted but
             // this device isn't in E2E mode — i.e. another device flipped
             // encryption on after we onboarded in plaintext. Refuse the round
@@ -656,6 +635,22 @@ impl SyncOrchestrator {
             // enables or adopts E2E, clearing this gate.
             if meta.e2e_enabled && !self.store.e2e_enabled() {
                 return Err(sync_core::SyncError::EncryptionRequired);
+            }
+
+            // DESIGN-sync-snapshot-coverage.md (Toni, 2026-10-30): a device
+            // whose record is not exact catches up once over every log file
+            // still present — it joined or resumed from a snapshot before
+            // this, and a file it skipped by name may hold events it never
+            // applied, on any device. The stale resume above already did. A
+            // failure leaves the device as it was; the next round retries.
+            if !resumed && !self.coverage_exact() {
+                match self.hooks.catch_up(adapter.as_ref()).await {
+                    Ok(()) => info!("caught up once over every log file"),
+                    Err(err) => warn!(
+                        ?err,
+                        "catch-up over every log file failed; retrying next round",
+                    ),
+                }
             }
         }
         if resumed {
@@ -674,20 +669,16 @@ impl SyncOrchestrator {
         }
 
         // 2. Fetch + apply. A device whose record is exact also fetches a
-        //    file it has no length for at/below the cursor, down to the GC
-        //    horizon (DESIGN-sync-snapshot-coverage.md): a peer's session
-        //    pushed late, named before the cursor, reached nobody. Only when
-        //    the record reads as exact — re-applying is a no-op there, and a
-        //    doubt keeps the old rule rather than re-applying what the rows
-        //    hold.
+        //    file it has no length for at/below the cursor
+        //    (DESIGN-sync-snapshot-coverage.md): a peer's session pushed
+        //    late, named before the cursor, or pushed again after a GC,
+        //    reached nobody. Only when the record reads as exact — a doubt
+        //    keeps the old rule.
         let mut cursor = self.cursor_for_fetch()?;
-        let gc_horizon = round_meta.as_ref().map(|meta| meta.gc_horizon_or_min());
-        if matches!(
+        cursor.fetch_unknown = matches!(
             self.store.get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY),
             Ok(Some(_))
-        ) {
-            cursor.unknown_from = gc_horizon;
-        }
+        );
         match adapter.fetch_new_logs(&cursor).await {
             Ok(logs) => {
                 // Filter out our own device's logs. The remote
@@ -1029,7 +1020,7 @@ impl SyncOrchestrator {
 
     /// Whether this device's applied record is exact
     /// ([`SYNC_COVERAGE_EXACT_SINCE_PREF_KEY`]). An unreadable record counts
-    /// as exact: guessing "not exact" would rebuild the device every round
+    /// as exact: guessing "not exact" would catch the device up every round
     /// for as long as the read fails.
     fn coverage_exact(&self) -> bool {
         match self.store.get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY) {
@@ -1104,7 +1095,7 @@ impl SyncOrchestrator {
                     last_seen_log: ts.with_timezone(&Utc),
                     exclude_device,
                     known_lengths,
-                    unknown_from: None,
+                    fetch_unknown: false,
                 },
                 // Absent or unparseable: start from the epoch and re-apply. The
                 // apply side is idempotent, so this costs bandwidth, not

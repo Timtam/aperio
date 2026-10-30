@@ -87,11 +87,16 @@ snapshot and then every change made since — including those another device
 wrote in a session that had already begun before the snapshot. A change a
 device made offline and uploads late arrives at the others too.
 
-After the update that brought this, the first device that holds every change
-writes such a snapshot on its own, within a day. Every other device then
-rebuilds its local data from it **once**: changes it had missed arrive, and
-entries deleted elsewhere disappear. That one round can take a little longer.
-Nothing that exists only on this device is removed.
+After the update that brought this, every device **catches up once**: it goes
+through every change still kept, its own included. Changes it had missed
+arrive, and entries deleted elsewhere disappear. A change only counts where it
+is newer than what the device already has, so nothing newer is overwritten and
+no conflict is reported. That one round can take a little longer. Nothing that
+exists only on this device is removed.
+
+The same rule holds every day: a change that arrives late — written offline,
+say — does not win over a newer one. Deleting an entry wins over an edit made
+elsewhere at the same time, so both devices end up the same.
 
 ## Your devices
 

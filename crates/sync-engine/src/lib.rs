@@ -379,21 +379,16 @@ pub trait SyncStore: Send + Sync {
     /// per snapshot. All or none: a half-recorded batch would let a later
     /// pass re-apply events the snapshot's rows already hold.
     fn mark_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError>;
-    /// Forget every applied event — the rebuild's first local step
-    /// (DESIGN-sync-snapshot-coverage.md): what the snapshot does not name
-    /// must be applied again over its rows.
-    fn clear_applied_events(&self) -> Result<(), StoreError>;
-    /// Forget these applied events, so a later pass applies them again —
-    /// the named deletes whose row the snapshot no longer holds.
-    fn forget_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError>;
-    /// The time of the newest change this row has seen (`sync_row_clock`,
-    /// DESIGN-sync-snapshot-coverage.md), or `None` before any.
-    fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<DateTime<Utc>>, StoreError>;
-    /// Move the row's clock forward to `at`; never back.
+    /// The row's clock (`sync_row_clock`, DESIGN-sync-snapshot-coverage.md),
+    /// or `None` before any change stamped it.
+    fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<RowClock>, StoreError>;
+    /// Move the row's clock forward to `at` — its whole-row time too when
+    /// the change wrote the whole row (`whole`); never back.
     fn advance_row_clock(
         &self,
         key: &sync_core::RowKey,
         at: DateTime<Utc>,
+        whole: bool,
     ) -> Result<(), StoreError>;
     /// Persist a field-level conflict the applier couldn't auto-merge,
     /// superseding any prior unresolved conflict on the same
@@ -516,6 +511,17 @@ impl ConflictKind {
             _ => None,
         }
     }
+}
+
+/// A synced row's clock (`sync_row_clock`, DESIGN-sync-snapshot-coverage.md):
+/// an older change does not win over a newer one, even when it arrives later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowClock {
+    /// The newest change the row has seen, of any kind.
+    pub changed: DateTime<Utc>,
+    /// The newest change that wrote the whole row — a create, a whole-row
+    /// update or a delete. `None` while only field merges touched it.
+    pub written: Option<DateTime<Utc>>,
 }
 
 /// Insert-side shape for a field-level conflict — the values the applier

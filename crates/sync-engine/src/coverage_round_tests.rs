@@ -1,8 +1,9 @@
-//! The round's one-time rebuild (DESIGN-sync-snapshot-coverage.md; Toni,
-//! 2026-10-27). Once meta.json says the current snapshot names the events it
-//! holds, a device whose record is not exact yet rebuilds from it — and only
-//! once: a device that is exact, or a dataset whose snapshot names nothing,
-//! leaves the round as it was. A failed rebuild must not fail the round.
+//! The round's one-time catch-up (DESIGN-sync-snapshot-coverage.md; Toni,
+//! 2026-10-30). A device whose applied record is not exact catches up once
+//! over every log file still present; an exact device leaves the round as it
+//! was. A failed catch-up must not fail the round. And an exact device
+//! fetches what nobody would by name: a session pushed late below its
+//! cursor, a live one named below the GC horizon that keeps growing.
 
 use std::sync::{Arc, Mutex};
 
@@ -21,11 +22,11 @@ use crate::{
     SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
 };
 
-/// Counts rebuilds; a successful one marks the record exact, as the
+/// Counts catch-ups; a successful one marks the record exact, as the
 /// platform's onboarding service does.
 struct RecordingHooks {
     store: Arc<FakeStore>,
-    rebuilds: Mutex<usize>,
+    catch_ups: Mutex<usize>,
     fail: bool,
 }
 
@@ -44,22 +45,26 @@ impl SyncRoundHooks for RecordingHooks {
         Ok(())
     }
 
-    async fn rebuild_from_snapshot(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
-        *self.rebuilds.lock().unwrap() += 1;
+    async fn catch_up(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
+        *self.catch_ups.lock().unwrap() += 1;
         if self.fail {
             return Err(SyncError::internal("offline"));
         }
-        self.store
-            .set_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &Utc::now().to_rfc3339())
-            .unwrap();
+        mark_exact(&self.store);
         Ok(())
     }
 }
 
-/// One device over a local-FS remote whose meta.json says the snapshot
-/// names its events (`coverage`) or not.
+fn mark_exact(store: &FakeStore) {
+    store
+        .set_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &Utc::now().to_rfc3339())
+        .unwrap();
+}
+
+/// One device over a local-FS remote holding `meta`. `fail` makes its
+/// catch-up fail, so it stays as exact as the test sets it.
 async fn device(
-    coverage: bool,
+    meta: MetaJson,
     fail: bool,
 ) -> (
     TempDir,
@@ -71,8 +76,6 @@ async fn device(
     let remote = tmp.path().join("remote");
     std::fs::create_dir_all(&remote).unwrap();
     let adapter: Arc<dyn SyncAdapter> = Arc::new(LocalFsSyncAdapter::new(&remote));
-    let mut meta = MetaJson::fresh("1.0.0-test");
-    meta.snapshot_coverage = coverage;
     adapter.push_meta(&meta).await.unwrap();
 
     let device_id = DeviceId::from_string("dev-laptop".into());
@@ -103,7 +106,7 @@ async fn device(
     ));
     let hooks = Arc::new(RecordingHooks {
         store: fake,
-        rebuilds: Mutex::new(0),
+        catch_ups: Mutex::new(0),
         fail,
     });
     let orchestrator = SyncOrchestrator::new(
@@ -119,70 +122,78 @@ async fn device(
     (tmp, orchestrator, hooks, adapter)
 }
 
+fn fresh_meta() -> MetaJson {
+    MetaJson::fresh("1.0.0-test")
+}
+
 #[tokio::test]
-async fn a_device_rebuilds_once_from_the_first_snapshot_that_names_its_events() {
-    let (_tmp, orchestrator, hooks, _adapter) = device(true, false).await;
+async fn an_inexact_device_catches_up_once() {
+    let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
     orchestrator.sync_now().await.expect("round 1");
     orchestrator.sync_now().await.expect("round 2");
     assert_eq!(
-        *hooks.rebuilds.lock().unwrap(),
+        *hooks.catch_ups.lock().unwrap(),
         1,
         "once, then its record is exact"
     );
 }
 
 #[tokio::test]
-async fn no_rebuild_while_the_snapshot_names_nothing() {
-    let (_tmp, orchestrator, hooks, _adapter) = device(false, false).await;
+async fn an_exact_device_does_not_catch_up() {
+    let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
     orchestrator.sync_now().await.expect("round");
-    assert_eq!(*hooks.rebuilds.lock().unwrap(), 0);
+    assert_eq!(*hooks.catch_ups.lock().unwrap(), 0);
 }
 
 #[tokio::test]
-async fn a_failed_rebuild_leaves_the_round_going_and_retries() {
-    let (_tmp, orchestrator, hooks, _adapter) = device(true, true).await;
+async fn a_failed_catch_up_leaves_the_round_going_and_retries() {
+    let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), true).await;
     orchestrator
         .sync_now()
         .await
         .expect("the round still succeeds");
     orchestrator.sync_now().await.expect("and the next one");
-    assert_eq!(*hooks.rebuilds.lock().unwrap(), 2, "retried each round");
+    assert_eq!(*hooks.catch_ups.lock().unwrap(), 2, "retried each round");
 }
 
-/// A peer's session file named at `secs`, holding one event.
-fn session(device: &str, secs: i64) -> LogFile {
+/// A session file of `device` named at `secs`, holding `events` events.
+fn session(device: &str, secs: i64, events: i64) -> LogFile {
     let device_id = DeviceId::from_string(device.into());
-    let envelope = EventEnvelope {
-        id: format!("ev-{device}-{secs}"),
-        device_id: device_id.clone(),
-        timestamp: Utc.timestamp_opt(secs, 0).unwrap(),
-        event: SyncEvent::EventDeleted(IdPayload {
-            id: format!("row-{secs}"),
-        }),
-    };
+    let lines: Vec<String> = (0..events)
+        .map(|n| {
+            serde_json::to_string(&EventEnvelope {
+                id: format!("ev-{device}-{secs}-{n}"),
+                device_id: device_id.clone(),
+                timestamp: Utc.timestamp_opt(secs + n, 0).unwrap(),
+                event: SyncEvent::EventDeleted(IdPayload {
+                    id: format!("row-{secs}-{n}"),
+                }),
+            })
+            .unwrap()
+        })
+        .collect();
     LogFile {
         name: LogFileName::new(Utc.timestamp_opt(secs, 0).unwrap(), device_id),
-        bytes: serde_json::to_vec(&envelope).unwrap(),
+        bytes: lines.join("\n").into_bytes(),
     }
 }
 
 /// A peer pushes a session late — offline, named before this device's
-/// cursor. `exact` decides whether this device's record is exact.
+/// cursor. `exact` decides whether this device's record is exact; its
+/// catch-up fails, so it stays that way.
 async fn late_session_rounds(exact: bool) -> [usize; 3] {
-    let (_tmp, orchestrator, hooks, adapter) = device(false, false).await;
+    let (_tmp, orchestrator, hooks, adapter) = device(fresh_meta(), true).await;
     if exact {
-        hooks
-            .store
-            .set_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &Utc::now().to_rfc3339())
-            .unwrap();
+        mark_exact(&hooks.store);
     }
     adapter
-        .push_log(&session("dev-desktop", 2_000))
+        .push_log(&session("dev-desktop", 2_000, 1))
         .await
         .unwrap();
     let first = orchestrator.sync_now().await.expect("round 1").fetched_logs;
     adapter
-        .push_log(&session("dev-phone", 1_500))
+        .push_log(&session("dev-phone", 1_500, 1))
         .await
         .unwrap();
     let late = orchestrator.sync_now().await.expect("round 2").fetched_logs;
@@ -198,8 +209,40 @@ async fn an_exact_device_fetches_a_session_pushed_late_below_its_cursor() {
 }
 
 #[tokio::test]
-async fn an_inexact_device_keeps_the_old_rule_until_it_is_rebuilt() {
-    // Re-fetching would re-apply what its rows hold from a snapshot that
-    // named nothing; the rebuild makes it exact first.
+async fn an_inexact_device_keeps_the_old_rule_until_it_caught_up() {
     assert_eq!(late_session_rounds(false).await, [1, 0, 0]);
+}
+
+#[tokio::test]
+async fn a_live_session_named_below_the_gc_horizon_is_fetched_as_it_grows() {
+    // Review round 1 of #130: the applied lengths were cut at the GC horizon,
+    // so a peer's session still running from before it dropped out, and its
+    // growth reached nobody — the laptop's gap, back. They are kept now.
+    let (_tmp, orchestrator, hooks, adapter) = device(fresh_meta(), true).await;
+    mark_exact(&hooks.store);
+    adapter
+        .push_log(&session("dev-desktop", 1_000, 1))
+        .await
+        .unwrap();
+    adapter
+        .push_log(&session("dev-phone", 5_000, 1))
+        .await
+        .unwrap();
+    assert_eq!(
+        orchestrator.sync_now().await.expect("round 1").fetched_logs,
+        2
+    );
+    // A compaction elsewhere moves the horizon past the desktop's session,
+    // which keeps running and grows.
+    let mut meta = adapter.fetch_meta().await.unwrap().unwrap();
+    meta.gc_horizon = Some(Utc.timestamp_opt(3_000, 0).unwrap());
+    adapter.push_meta(&meta).await.unwrap();
+    adapter
+        .push_log(&session("dev-desktop", 1_000, 2))
+        .await
+        .unwrap();
+
+    let report = orchestrator.sync_now().await.expect("round 2");
+    assert_eq!(report.fetched_logs, 1, "the grown session");
+    assert_eq!(report.applied, 1, "its new event");
 }

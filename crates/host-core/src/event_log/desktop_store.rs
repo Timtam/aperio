@@ -20,7 +20,7 @@ use adapter_local::{LocalAdapter, SnapshotApplyReport, SnapshotDump};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use sync_engine::whitelist::{is_synced_key, SYNC_WHITELIST};
-use sync_engine::{NewConflict, SnapshotAccount, StoreError, SyncStore};
+use sync_engine::{NewConflict, RowClock, SnapshotAccount, StoreError, SyncStore};
 
 use crate::conflicts::ConflictsRepo;
 use crate::db::SharedConn;
@@ -276,55 +276,42 @@ impl SyncStore for DesktopSyncStore {
         tx.commit().map_err(backend)
     }
 
-    fn clear_applied_events(&self) -> Result<(), StoreError> {
+    fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<RowClock>, StoreError> {
         let conn = self.db.lock().expect("db mutex poisoned");
-        conn.execute("DELETE FROM sync_applied_events", [])
-            .map_err(|err| StoreError::Backend(format!("clear_applied_events: {err}")))?;
-        Ok(())
-    }
-
-    fn forget_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError> {
-        let mut conn = self.db.lock().expect("db mutex poisoned");
-        let backend =
-            |err: rusqlite::Error| StoreError::Backend(format!("forget_events_applied: {err}"));
-        let tx = conn.transaction().map_err(backend)?;
-        {
-            let mut stmt = tx
-                .prepare("DELETE FROM sync_applied_events WHERE event_id = ?")
-                .map_err(backend)?;
-            for event_id in event_ids {
-                stmt.execute(params![event_id]).map_err(backend)?;
-            }
-        }
-        tx.commit().map_err(backend)
-    }
-
-    fn row_clock(
-        &self,
-        key: &sync_core::RowKey,
-    ) -> Result<Option<chrono::DateTime<Utc>>, StoreError> {
-        let conn = self.db.lock().expect("db mutex poisoned");
-        let at_us: Option<i64> = conn
+        let stored: Option<(i64, Option<i64>)> = conn
             .query_row(
-                "SELECT at_us FROM sync_row_clock WHERE kind = ? AND id = ?",
+                "SELECT changed_us, written_us FROM sync_row_clock WHERE kind = ? AND id = ?",
                 params![key.kind, key.id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .map_err(|err| StoreError::Backend(format!("row_clock: {err}")))?;
-        Ok(at_us.and_then(chrono::DateTime::<Utc>::from_timestamp_micros))
+        let from_us = chrono::DateTime::<Utc>::from_timestamp_micros;
+        Ok(stored.and_then(|(changed_us, written_us)| {
+            Some(RowClock {
+                changed: from_us(changed_us)?,
+                written: written_us.and_then(from_us),
+            })
+        }))
     }
 
     fn advance_row_clock(
         &self,
         key: &sync_core::RowKey,
         at: chrono::DateTime<Utc>,
+        whole: bool,
     ) -> Result<(), StoreError> {
         let conn = self.db.lock().expect("db mutex poisoned");
+        let at_us = at.timestamp_micros();
+        // SQLite's MAX() is NULL when either side is: a missing whole-row
+        // time takes the other side's.
         conn.execute(
-            "INSERT INTO sync_row_clock (kind, id, at_us) VALUES (?, ?, ?)
-             ON CONFLICT(kind, id) DO UPDATE SET at_us = MAX(at_us, excluded.at_us)",
-            params![key.kind, key.id, at.timestamp_micros()],
+            "INSERT INTO sync_row_clock (kind, id, changed_us, written_us) VALUES (?, ?, ?, ?)
+             ON CONFLICT(kind, id) DO UPDATE SET
+                 changed_us = MAX(changed_us, excluded.changed_us),
+                 written_us = MAX(COALESCE(written_us, excluded.written_us),
+                                  COALESCE(excluded.written_us, written_us))",
+            params![key.kind, key.id, at_us, whole.then_some(at_us)],
         )
         .map_err(|err| StoreError::Backend(format!("advance_row_clock: {err}")))?;
         Ok(())

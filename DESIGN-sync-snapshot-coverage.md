@@ -1,6 +1,6 @@
 # Schnappschuss nennt, was er enthält
 
-Stand 2026-10-27. Befund von Toni: Ein neues Gerät (Laptop) trat dem Sync
+Stand 2026-10-30 (Befund 2026-10-27). Befund von Toni: Ein neues Gerät (Laptop) trat dem Sync
 bei, übernahm den Schnappschuss vom 19.10. und alle Konten. Aufgaben, die seit
 dem 19.10. erledigt oder neu angelegt wurden, fehlten oder standen weiter als
 überfällig da.
@@ -61,121 +61,115 @@ steht, aber noch nicht angewendet ist (gewachsen seit dem letzten Abruf), ist
 nicht abgedeckt: Ein neues Gerät wendet es an, der Compactor selbst holt es mit
 der nächsten Runde nach.
 
-### B. Beitreten und Wiederaufnehmen nutzen sie
+### B. Beitreten, Wiederaufnehmen und Nachholen: ein Durchgang
 
-`accept_remote` und `resume_from_stale`:
+`accept_remote`, `resume_from_stale` und das einmalige Nachholen in der Runde
+enden im selben Durchgang (`OnboardingService::apply_every_log`):
 
-1. Schnappschuss anwenden (wie heute).
-2. `covered_event_ids` in `sync_applied_events` eintragen, im selben Zug.
-   Nur zusammen mit dem Anwenden ist das richtig: Die Wirkung dieser
-   Ereignisse steht dann in den Zeilen.
-3. **Alle** vorhandenen fremden Dateien holen (nicht erst ab dem
-   Schnappschuss), zeitlich sortiert anwenden. Abgedecktes überspringt die
-   Idempotenz, der Rest wird angewendet.
-4. Längen aller angewendeten Dateien merken, Cursor = max(Schnappschuss,
-   neueste Datei).
-5. Merken, welcher Schnappschuss übernommen wurde und ob er Kennungen trug
-   (`sync.snapshot.consumed` = Zeitpunkt + `has_coverage`).
+1. Beitritt und Wiederaufnahme wenden zuerst den Schnappschuss an (Upsert wie
+   bisher). Nennt er Kennungen, werden sie im selben Zug als angewendet
+   eingetragen.
+2. **Alle** vorhandenen Protokolldateien holen, eigene eingeschlossen, dazu
+   die eigenen noch nicht hochgeladenen (`pending/`). Jede Änderung zählt
+   einmal (nach Kennung).
+3. Alle Änderungen **gemeinsam** nach Zeit anwenden, nicht Datei für Datei:
+   Sitzungen verschiedener Geräte überlappen sich.
+4. Eine Änderung gilt nur, wenn sie neuer ist als ihre Zeile (siehe E), ohne
+   Konfliktmeldung. Schon Angewendetes wird erneut gewogen. So bekommt eine
+   Zeile, die ein Schnappschuss zurückgesetzt hat, ihre neuere Änderung zurück.
+5. Längen der fremden Dateien merken (eine unlesbare mit 0, die nächste Runde
+   versucht sie wieder). Cursor = Maximum aus bisherigem Cursor (beim Beitritt
+   und bei der Wiederaufnahme: Schnappschuss) und neuester fremder Datei, nie
+   zurück.
+6. Danach ist das Gerät **genau** (`sync.cursor.coverageExactSince`).
 
-### C. Gewöhnliche Runden holen Unbekanntes
+Erst holen, dann ändern: Ein abgebrochener Abruf lässt den Bestand unberührt.
+Das löst auch, was „Ursache“ gegen das Wiederabspielen einwandte: Es geschieht
+still, und nur Neueres gewinnt.
 
-`wants_sized`: Eine fremde Datei, deren Name nicht nach dem Cursor liegt und
-für die keine angewendete Länge gemerkt ist, wird **geholt** (bisher: nie),
-sofern ihr Name nicht vor `meta.gc_horizon` liegt (`DeviceCursor` bekommt
-dafür eine Untergrenze, `serde(default)` = altes Verhalten). Damit kommt eine
-verspätet hochgeladene Datei an. Das Wiederanwenden ist durch die Idempotenz
-sicher. Einmalig nach dem Neuaufbau lädt jedes Gerät dafür die vorhandenen
-Dateien, deren Länge es noch nicht kennt (heute 19 Dateien, rund 70 KB).
+### C. Gewöhnliche Runden
 
-**Nur auf einem genauen Gerät.** Ein Gerät, dessen `sync_applied_events` nicht
-genau sagt, was sein Bestand enthält (beigetreten über einen Schnappschuss ohne
-Kennungen), würde damit alte, schon enthaltene Ereignisse erneut anwenden und
-falsche Konflikte melden. Die Regel gilt deshalb erst, wenn das Gerät **genau**
-ist: beigetreten oder neu aufgebaut aus einem Schnappschuss mit Kennungen, oder
-selbst einen solchen geschrieben (`sync.coverage.exactSince`).
+- **Einmal nachholen.** Ein Gerät, das nicht genau ist, holt in der Runde
+  einmal alles nach (B). Das betrifft jedes Gerät, das vor dieser Korrektur
+  beigetreten oder wiederaufgenommen ist, und eines nach „Neu beginnen“.
+  Schlägt es fehl, versucht die nächste Runde es wieder; die Runde selbst
+  läuft weiter.
+- **Unbekanntes holen.** Ein genaues Gerät holt auch eine fremde Datei, deren
+  Name nicht nach dem Cursor liegt und deren Länge es nicht kennt
+  (`DeviceCursor::fetch_unknown`), ohne Untergrenze. Das ist eine verspätet
+  hochgeladene Sitzung, oder eine nach dem Aufräumen erneut hochgeladene mit
+  Namen unter `gc_horizon`. Ein nicht genaues Gerät behält die alte Regel, bis
+  es nachgeholt hat.
+- **Gemerkte Längen.** Die 256 neuesten (nach Namen), nicht nach `gc_horizon`
+  beschnitten: Eine noch laufende Sitzung mit altem Namen muss ihr Wachstum
+  weiter zeigen. Grenze: Liegen mehr als 256 Dateien vor, ist die älteste jede
+  Runde „unbekannt“ und wird erneut geholt. Das ist richtig, kostet aber
+  Bandbreite.
 
-**Gemerkte Längen.** Bisher die 64 neuesten Dateien; eine herausgefallene ältere
-Datei wäre mit der neuen Regel jede Runde wieder „unbekannt“. Stattdessen fallen
-Einträge mit Namen vor `gc_horizon` heraus (die Dateien sind gelöscht oder
-abgedeckt); eine große Sicherheitsgrenze bleibt.
+### D. Kennungen im Schnappschuss
 
-### D. Heilen: jedes Gerät baut einmal neu auf (Toni, 2026-10-27)
+Der Compactor nennt die gehaltenen Kennungen nur, wenn das Gerät **genau** ist
+und jedes Ereignis in jeder vorhandenen Datei hält (eigenes oder angewendet).
+Sonst nennt er nichts. Kennungen sparen einem beitretenden Gerät Arbeit und
+schützen Zeilen ohne bekannte Zeit (E). Nötig sind sie nicht mehr: Das
+Nachholen heilt auch ohne sie.
 
-Geräte, die vor der Korrektur beigetreten oder wiederaufgenommen sind, lassen
-sich nicht sicher erkennen: Kein Gerät merkte sich, welchen Schnappschuss es
-übernahm, und nach einer neuen Verdichtung sind ihm fehlende Dateien vielleicht
-schon gelöscht. Toni: kein festes Datum, kein Erkennen, sondern **jedes Gerät
-baut einmal neu auf**, sobald ein Schnappschuss mit Kennungen da ist.
+### E. Zeilen-Uhr: Neuer gewinnt
 
-**Wer den ersten schreibt.** Ein betroffenes Gerät kennt nicht genau, welche
-Ereignisse sein Bestand enthält (ein Teil kam über einen Schnappschuss ohne
-Kennungen). Darum schreibt der Compactor Kennungen nur, wenn das Gerät
-**vollständig** ist: Jedes Ereignis in jeder vorhandenen Protokolldatei stammt
-von ihm oder steht in `sync_applied_events`. Sonst verdichtet er wie bisher,
-ohne Kennungen. `meta.json` sagt, ob der aktuelle Schnappschuss Kennungen trägt
-(`snapshot_coverage`, `serde(default)`), damit ein vollständiges Gerät nach dem
-Update von selbst einmal verdichtet, wenn es noch keinen solchen gibt.
-Bei Toni ist das der Desktop. Gibt es kein vollständiges Gerät mehr (Gründer
-weg, alle über alte Schnappschüsse beigetreten), bleibt der Datensatz beim
-alten Verhalten — sagen, nicht still.
+`sync_row_clock` (Migration 49) hält je Zeile zwei Zeiten:
 
-**Der Neuaufbau** (einmal je Gerät; danach ist es „genau“,
-`sync.cursor.coverageExactSince`). Erst alles holen, dann lokal arbeiten — ein
-abgebrochener Abruf lässt den Bestand unberührt:
+- `changed`: die neueste Änderung jeder Art.
+- `written`: die neueste, die die ganze Zeile schrieb (Anlegen, ganze Zeile,
+  Löschen). Leer, solange nur Feld-Zusammenführungen die Zeile berührten.
 
-1. Schnappschuss (er muss Kennungen tragen) und **alle** Protokolldateien
-   holen, auch die eigenen.
-2. `sync_applied_events` leeren. Was das Gerät früher angewendet hat und der
-   Schnappschuss nicht enthält, muss erneut angewendet werden: Der Schnappschuss
-   kann von einem Gerät stammen, das in einer Zeile hinter diesem lag.
-3. Schnappschuss anwenden (Upsert, wie bisher) — das trägt seine Kennungen ein.
-4. **Gelöschtes:** Eine abgedeckte Lösch-Änderung (`*.deleted`,
-   `event_group.dissolved`, `account.deleted`), deren Zeile der Schnappschuss
-   nicht enthält, wird wieder als nicht angewendet geführt
-   (`AperioSnapshotBody::deletes_to_replay`). So entfernt Schritt 5 eine
-   übrig gebliebene Zeile; wo sie fehlt, tut die Löschung nichts.
-   **Nicht** alles leeren, was der Schnappschuss nicht enthält: Lokale Termine
-   und Kalender werden beim Start nicht nachgetragen; ein Gerät kann Zeilen
-   haben, die nie ins Protokoll kamen, und die wären verloren.
-5. Alle Ereignisse aller Dateien anwenden, eigene eingeschlossen
-   (`apply_envelopes_force_own`, zeitlich sortiert, die Idempotenz überspringt
-   das Abgedeckte); dann die eigenen noch nicht hochgeladenen (`pending/`).
-6. Längen der fremden Dateien merken, Cursor = max(Schnappschuss, neueste
-   fremde Datei), „genau“ ab dem Schnappschuss.
+Der Writer stempelt eigene Änderungen beim Schreiben, der Anwender jede
+übernommene. Die Zeit einer Zeile ist `changed`. Bei Terminen und Aufgaben ist
+sie mindestens ihr eigenes `updated_at`, denn das schreibt ein Schnappschuss,
+nicht die Uhr.
 
-Dem Laptop kommt so die Desktop-Sitzung vom 19.10. zu, Löschungen
-eingeschlossen. `resume_from_stale` wird derselbe Neuaufbau, wenn der
-Schnappschuss Kennungen trägt (sonst wie bisher). Grenze: Eine Löschung, deren
-Datei schon aufgeräumt ist, kann nicht mehr nachgeholt werden.
+- **Ganze Zeile und Anlegen:** Älter als die Zeile wird übersprungen
+  (`skipped_older`) und als angewendet vermerkt.
+- **Feld-Zusammenführung** (Termin, Aufgabe, Liste, Kalender, Farbe): wägt die
+  Zeit der Zeile wie bisher `updated_at`. Ältere Felder ergeben einen
+  Konflikt; beim Nachholen bleibt die neuere Zeile still.
+- **Löschen:** verliert nur gegen eine neuere Schreibung der ganzen Zeile,
+  nicht gegen eine neuere Feldänderung. Eine Feldänderung kann eine gelöschte
+  Zeile auf dem löschenden Gerät nicht zurückholen. Verlöre das Löschen,
+  liefen die beiden Geräte dauerhaft auseinander. Ein älteres Anlegen nach dem
+  Löschen bleibt gelöscht.
 
-**Aufräumen wird genau.** Der Compactor löscht eine fremde Datei nur noch,
-wenn jedes Ereignis darin abgedeckt ist (bisher: Name bis zum Cursor). Ein
-betroffenes Gerät, das verdichtet, kann so keine Datei löschen, deren Rest es
-nie angewendet hat.
+**Übergang.** Die Uhr beginnt leer. Eine Zeile ohne bekannte Zeit (keine Uhr,
+kein `updated_at`) kann einen neueren Stand aus einer schon gelöschten Datei
+halten. Beim Nachholen wird darum für so eine Zeile eine schon angewendete
+Änderung (außer Löschen) **nicht** erneut angewendet; ihre Zeit wird die Uhr
+der Zeile. Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
+angewendeten Änderung, werden spätere angewendete wieder gewogen. Grenze: Eine
+nie angewendete ältere Änderung auf so einer Zeile gewinnt noch, wie in jeder
+Runde zuvor.
 
 ## Was nicht Teil davon ist
 
-- Beitreten mit eigenen lokalen Daten (`accept_remote` auf einem Gerät, das
-  schon etwas hat) leert nichts: Es führt zusammen wie bisher, nur mit
-  Kennungen und allen Dateien.
-- Echte Gleichzeitigkeit (Vektoruhren) bleibt wie in §19.3.
+- Lokale Termine und Kalender werden beim Start nicht nachgetragen (TODO B3).
+  Was nie im Protokoll stand, bringt das Nachholen nicht, löscht es aber auch
+  nicht.
+- Echte Gleichzeitigkeit (Vektoruhren) bleibt wie in §19.3: Bei gleich alten
+  Änderungen verschiedener Geräte entscheidet die Reihenfolge.
 
 ## Schritte
 
-- C1 Compactor: alle Dateien vor dem Bau, Vollständigkeit, `covered_event_ids`
-  im Rumpf, `meta.snapshot_coverage`, genaues Aufräumen; ein vollständiger
-  Compactor wird „genau“ (sync-engine).
-- C2 Beitreten: Kennungen eintragen, alle Dateien holen, „genau“ (host-core).
-- C3 Neuaufbau als ein Weg für Wiederaufnahme und einmaliges Heilen;
-  Auslöser in der Runde; einmalige Verdichtung eines vollständigen Geräts.
-- C4 `wants_sized` holt Unbekanntes auf genauen Geräten (sync-core,
-  Orchestrator), gemerkte Längen nach `gc_horizon` statt 64 neueste.
-- C5 Handy (cal-ffi) mitziehen, Doku (DESIGN-sync-engine.md, Entwickler-Doku),
-  TODO.
+- C1 bis C5, die erste Fassung mit Neuaufbau: nach Prüfrunde 1 ersetzt.
+- R1 Längen: die 256 neuesten, kein Beschnitt nach Horizont. Erledigt.
+- R7 Zeilen-Uhr, mit zwei Zeiten, Löschen und Übergang (E). Erledigt.
+- R3 Kennungen nur, wenn genau und vollständig. Erledigt.
+- R4 und R5 Nachholen statt Neuaufbau, ein Durchgang für Beitritt,
+  Wiederaufnahme und Runde. Erledigt.
+- R6 Unbekanntes ohne Untergrenze. Erledigt.
+- R2 Aufräumen: nach dem Schnappschuss neu auflisten, nur ganz Gehaltenes
+  löschen, Leeres und Unlesbares nie, rotierte Sitzung erst hochladen. Offen.
+- Doku, dann Prüfrunde 2.
 
 Je Schritt Tests und Gegenproben; `cargo test -p cal-ffi` bei jeder Änderung an
-Compactor oder Runde (Lehre aus dem Compactor-Bogen). Prüfrunde mit
-Gegenprüfern vor dem Merge.
+Compactor oder Runde (Lehre aus dem Compactor-Bogen).
 
 ## Prüfrunde 1 (PR #130, 2026-10-30)
 

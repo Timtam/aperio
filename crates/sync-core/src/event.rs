@@ -427,7 +427,8 @@ impl SyncEvent {
     }
 
     /// Whether this event removes its row. A delete keeps the row's clock,
-    /// so an older create arriving after it stays deleted.
+    /// so an older create arriving after it stays deleted; it loses only to
+    /// a newer write of the whole row (see [`Self::merges_fields`]).
     pub fn is_delete(&self) -> bool {
         matches!(
             self,
@@ -442,6 +443,21 @@ impl SyncEvent {
                 | SyncEvent::PluginUninstalled(_)
                 | SyncEvent::AccountDeleted(_)
                 | SyncEvent::CredentialCleared(_)
+        )
+    }
+
+    /// Whether this event merges into its row field by field, reporting a
+    /// conflict where both sides changed a field, rather than writing the
+    /// whole row. A delete does not lose to such a change: it cannot bring
+    /// the row back on the device that deleted it, so the two would part.
+    pub fn merges_fields(&self) -> bool {
+        matches!(
+            self,
+            SyncEvent::EventUpdated(_)
+                | SyncEvent::TaskUpdated(_)
+                | SyncEvent::TaskListUpdated(_)
+                | SyncEvent::CalendarUpdated(_)
+                | SyncEvent::ColorLabelUpdated(_)
         )
     }
 }

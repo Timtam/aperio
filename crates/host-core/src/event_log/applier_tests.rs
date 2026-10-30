@@ -1347,18 +1347,153 @@ fn the_catch_up_keeps_a_newer_row_quietly_and_brings_a_reverted_one_back() {
 }
 
 #[test]
-fn a_rows_clock_never_goes_back() {
-    use sync_engine::SyncStore;
+fn a_rows_clock_never_goes_back_and_a_field_merge_leaves_its_whole_row_time() {
+    use sync_engine::{RowClock, SyncStore};
     let (adapter, db) = fixture();
     let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
     let key = sync_core::RowKey {
-        kind: "setting",
-        id: "appearance.darkMode".into(),
+        kind: "color_label",
+        id: "lbl-a".into(),
     };
-    let late = Utc.timestamp_opt(3000, 0).unwrap();
-    store.advance_row_clock(&key, late).unwrap();
-    store
-        .advance_row_clock(&key, Utc.timestamp_opt(1000, 0).unwrap())
+    let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+    let clock = |changed: i64, written: Option<i64>| {
+        Some(RowClock {
+            changed: at(changed),
+            written: written.map(at),
+        })
+    };
+    // A field merge alone writes no whole-row time.
+    store.advance_row_clock(&key, at(2000), false).unwrap();
+    assert_eq!(store.row_clock(&key).unwrap(), clock(2000, None));
+    // An older whole-row write: its time comes, the change time stays.
+    store.advance_row_clock(&key, at(1000), true).unwrap();
+    assert_eq!(store.row_clock(&key).unwrap(), clock(2000, Some(1000)));
+    // A newer field merge leaves the whole-row time.
+    store.advance_row_clock(&key, at(3000), false).unwrap();
+    assert_eq!(store.row_clock(&key).unwrap(), clock(3000, Some(1000)));
+    // Nothing goes back.
+    store.advance_row_clock(&key, at(500), true).unwrap();
+    assert_eq!(store.row_clock(&key).unwrap(), clock(3000, Some(1000)));
+}
+
+#[test]
+fn a_delete_wins_over_a_newer_field_edit() {
+    // An edit cannot bring the row back on the device that deleted it: if
+    // the delete lost here, the two devices would part for good. It loses
+    // only to a newer write of the whole row.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-edit", "Arbeit", 1000, true),
+            label_event("lbl-edit", "Job", 3000, false),
+        ])
         .unwrap();
-    assert_eq!(store.row_clock(&key).unwrap(), Some(late));
+    let report = applier
+        .apply_envelopes(vec![label_deleted("lbl-edit", 2000)])
+        .unwrap();
+    assert_eq!(report.applied, 1);
+    assert_eq!(label_name(&db, "lbl-edit"), None);
+}
+
+#[test]
+fn an_older_create_does_not_overwrite_a_newer_appointment() {
+    // An appointment keeps its own time: a snapshot wrote the row, not the
+    // clock. A create from before it — a file the join fetches whole — is
+    // older than the row and does not reset it.
+    let (adapter, db) = fixture();
+    seed_event(&adapter, "ev-newer");
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let mut created = fixture_event("ev-newer", "cal-merge");
+    created.title = "Created".into();
+    let report = applier
+        .apply_envelopes(vec![fixture_envelope(
+            DeviceId::from_string("dev-other".into()),
+            SyncEvent::EventCreated(EventPayload {
+                id: "ev-newer".into(),
+                fields: serde_json::to_value(&created).unwrap(),
+            }),
+            Utc.with_ymd_and_hms(2026, 5, 12, 8, 0, 0)
+                .unwrap()
+                .timestamp(),
+        )])
+        .unwrap();
+    assert_eq!(report.skipped_older, 1);
+    assert_eq!(
+        adapter.get_event_by_id("ev-newer").unwrap().unwrap().title,
+        "Original",
+    );
+}
+
+fn set_interval(value: &str, at: i64) -> EventEnvelope {
+    fixture_envelope(
+        DeviceId::from_string("dev-other".into()),
+        SyncEvent::SettingsUpdated(SettingsPayload {
+            key: "sync.intervalMinutes".into(),
+            value: serde_json::json!(value),
+        }),
+        at,
+    )
+}
+
+fn interval(db: &SharedConn) -> Option<String> {
+    UserPrefsRepo::new(db).get("sync.intervalMinutes").unwrap()
+}
+
+/// The clocks before this version: none.
+fn forget_clocks(db: &SharedConn) {
+    db.lock()
+        .unwrap()
+        .execute("DELETE FROM sync_row_clock", [])
+        .unwrap();
+}
+
+#[test]
+fn the_catch_up_leaves_a_row_of_unknown_time_as_it_is() {
+    // A row no change has stamped (its clock came with this version) holds
+    // what it applied or something newer, maybe from a file already gone:
+    // an applied change is not taken again, its time becomes the clock.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![set_interval("30", 1000)])
+        .unwrap();
+    forget_clocks(&db);
+    UserPrefsRepo::new(&db)
+        .set("sync.intervalMinutes", "90")
+        .unwrap();
+
+    applier
+        .catch_up_envelopes(vec![set_interval("30", 1000)])
+        .unwrap();
+
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+    // From here on the row has a time: an older change no longer wins.
+    let report = applier
+        .apply_envelopes(vec![set_interval("15", 500)])
+        .unwrap();
+    assert_eq!(report.skipped_older, 1);
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+}
+
+#[test]
+fn the_catch_up_weighs_applied_changes_again_once_it_changed_the_row() {
+    // A change never applied comes in between two applied ones: once it
+    // changed the row, the later applied change is taken again, in order.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![set_interval("30", 1000), set_interval("60", 3000)])
+        .unwrap();
+    forget_clocks(&db);
+
+    applier
+        .catch_up_envelopes(vec![
+            set_interval("30", 1000),
+            set_interval("45", 2000),
+            set_interval("60", 3000),
+        ])
+        .unwrap();
+
+    assert_eq!(interval(&db).as_deref(), Some("60"));
 }

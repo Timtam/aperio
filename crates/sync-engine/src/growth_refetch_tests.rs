@@ -368,13 +368,12 @@ async fn encrypting_adapter_translates_known_lengths_by_exactly_the_wire_overhea
     let spy = Arc::new(CursorSpyAdapter::default());
     let encrypting =
         EncryptingAdapter::new(Arc::clone(&spy) as Arc<dyn SyncAdapter>, [5u8; KEY_LEN]);
-    let floor = Utc.timestamp_opt(1_000, 0).unwrap();
     let cursor = DeviceCursor {
         known_lengths: vec![KnownLogLength {
             name: "f.jsonl".into(),
             len: 1_000,
         }],
-        unknown_from: Some(floor),
+        fetch_unknown: true,
         ..DeviceCursor::epoch()
     };
     encrypting.fetch_new_logs(&cursor).await.expect("fetch");
@@ -384,9 +383,9 @@ async fn encrypting_adapter_translates_known_lengths_by_exactly_the_wire_overhea
         .expect("seen mutex")
         .clone()
         .expect("inner adapter saw a cursor");
-    // The floor for unknown files (DESIGN-sync-snapshot-coverage.md) is a
-    // name rule and passes through untranslated.
-    assert_eq!(seen.unknown_from, Some(floor));
+    // Fetching unknown files (DESIGN-sync-snapshot-coverage.md) is a name
+    // rule and passes through untranslated.
+    assert!(seen.fetch_unknown);
     assert_eq!(seen.known_lengths.len(), 1);
     assert_eq!(seen.known_lengths[0].name, "f.jsonl");
     assert_eq!(

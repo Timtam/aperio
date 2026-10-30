@@ -46,6 +46,7 @@
 //!   no-op rather than failing, so a forward-compat dataset
 //!   from a future Aperio doesn't break us.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use adapter_local::LocalAdapter;
@@ -54,7 +55,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sync_core::{
     AccountPayload, CredentialPayload, CredentialSlotPayload, DeviceId, EventEnvelope,
-    EventPayload, IdPayload, LogFile, PluginPayload, SettingsPayload, SyncError, SyncEvent,
+    EventPayload, IdPayload, LogFile, PluginPayload, RowKey, SettingsPayload, SyncError, SyncEvent,
     SyncResult,
 };
 use tracing::{debug, warn};
@@ -279,6 +280,12 @@ impl EventLogApplier {
     /// where it is newer than its row, without a conflict: what the row
     /// holds is either the same change or a newer one. Nothing is reset, and
     /// a row an old snapshot upsert reverted gets its newer change back.
+    ///
+    /// An applied change is weighed again only against a known time. A row
+    /// no change has stamped yet (its clock came with this version, and its
+    /// table keeps no `updated_at`) holds this change or a newer one, maybe
+    /// from a file already gone: it stays as it is and takes the change's
+    /// time as its clock — until the catch-up itself changes the row.
     pub fn catch_up_envelopes(&self, envelopes: Vec<EventEnvelope>) -> SyncResult<ApplyReport> {
         self.apply_envelopes_inner(
             envelopes,
@@ -306,17 +313,20 @@ impl EventLogApplier {
         envelopes.sort_by(|a, b| a.timestamp.cmp(&b.timestamp).then_with(|| a.id.cmp(&b.id)));
 
         let mut report = ApplyReport::default();
+        // Rows whose clock this pass only seeded from applied changes (see
+        // `catch_up_envelopes`): their time is still unknown.
+        let mut seeded: HashSet<RowKey> = HashSet::new();
         for env in envelopes {
             if !mode.force_own && env.device_id == self.local_device_id {
                 report.skipped_own += 1;
                 continue;
             }
-            match self.is_already_applied(&env.id) {
+            let applied = match self.is_already_applied(&env.id) {
                 Ok(true) if !mode.reapply => {
                     report.skipped_already_applied += 1;
                     continue;
                 }
-                Ok(_) => {}
+                Ok(applied) => applied,
                 Err(err) => {
                     warn!(
                         event_id = %env.id,
@@ -326,22 +336,43 @@ impl EventLogApplier {
                     report.failed += 1;
                     continue;
                 }
-            }
+            };
 
-            // The row's clock: the newest change it has seen. An older
-            // change does not win — a whole-row write, a create or a delete
-            // is skipped; a field merge weighs the clock as the row's time.
+            // The row's time. An older change does not win: a whole-row
+            // write or a create is skipped behind any newer change, a delete
+            // only behind a newer whole-row write, and a field merge weighs
+            // it as the row's time.
             let key = env.event.row_key();
-            let clock = match key.as_ref().map(|key| self.store.row_clock(key)) {
-                Some(Ok(clock)) => clock,
-                Some(Err(err)) => {
-                    warn!(event_id = %env.id, ?err, "could not read the row's clock; skipping envelope");
+            let (changed, written) = match self.row_time(key.as_ref(), &env.event) {
+                Ok(time) => time,
+                Err(err) => {
+                    warn!(event_id = %env.id, ?err, "could not read the row's time; skipping envelope");
                     report.failed += 1;
                     continue;
                 }
-                None => None,
             };
-            if clock.is_some_and(|at| at > env.timestamp) && !merges_fields(&env.event) {
+            let whole = !env.event.merges_fields();
+            if applied
+                && !env.event.is_delete()
+                && (changed.is_none() || key.as_ref().is_some_and(|key| seeded.contains(key)))
+            {
+                // The catch-up, on a row of unknown time: it keeps what it
+                // holds and takes this change's time as its clock.
+                if let Some(key) = key {
+                    if let Err(err) = self.store.advance_row_clock(&key, env.timestamp, whole) {
+                        warn!(event_id = %env.id, ?err, "couldn't seed the row's clock");
+                    }
+                    seeded.insert(key);
+                }
+                report.skipped_already_applied += 1;
+                continue;
+            }
+            let older = if env.event.is_delete() {
+                written.is_some_and(|at| at > env.timestamp)
+            } else {
+                whole && changed.is_some_and(|at| at > env.timestamp)
+            };
+            if older {
                 report.skipped_older += 1;
                 // Recorded, so a re-fetch does not weigh it again.
                 if let Err(err) = self.mark_applied(&env.id) {
@@ -353,13 +384,14 @@ impl EventLogApplier {
             match self.apply_one(
                 &env,
                 Merge {
-                    clock,
+                    clock: changed,
                     quiet: mode.quiet,
                 },
             ) {
                 Ok(true) => {
                     if let Some(key) = &key {
-                        if let Err(err) = self.store.advance_row_clock(key, env.timestamp) {
+                        seeded.remove(key);
+                        if let Err(err) = self.store.advance_row_clock(key, env.timestamp, whole) {
                             warn!(event_id = %env.id, ?err, "couldn't advance the row's clock");
                         }
                     }
@@ -1216,18 +1248,35 @@ impl EventLogApplier {
             .map_err(store_to_sync)
     }
 
-    /// Forget every applied event, so the next pass applies all it is
-    /// handed again — the rebuild's first local step
-    /// (DESIGN-sync-snapshot-coverage.md).
-    pub fn forget_all_applied(&self) -> SyncResult<()> {
-        self.store.clear_applied_events().map_err(store_to_sync)
-    }
-
-    /// Forget these applied events, so the next pass applies them again.
-    pub fn forget_applied(&self, event_ids: &[String]) -> SyncResult<()> {
-        self.store
-            .forget_events_applied(event_ids)
-            .map_err(store_to_sync)
+    /// The row's time: the newest change its clock has seen — raised to its
+    /// own `updated_at` where its table keeps one (appointments, tasks; a
+    /// snapshot writes that, not the clock) — and the newest whole-row write.
+    fn row_time(
+        &self,
+        key: Option<&RowKey>,
+        event: &SyncEvent,
+    ) -> SyncResult<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)> {
+        let clock = match key {
+            Some(key) => self.store.row_clock(key).map_err(store_to_sync)?,
+            None => None,
+        };
+        let updated_at = match event {
+            SyncEvent::EventCreated(payload) | SyncEvent::EventUpdated(payload) => self
+                .adapter
+                .get_event_by_id(&payload.id)
+                .map_err(core_to_sync)?
+                .map(|row| row.updated_at),
+            SyncEvent::TaskCreated(payload) | SyncEvent::TaskUpdated(payload) => self
+                .adapter
+                .get_task_by_id(&payload.id)
+                .map_err(core_to_sync)?
+                .map(|row| row.updated_at),
+            _ => None,
+        };
+        Ok((
+            clock.map(|clock| clock.changed).max(updated_at),
+            clock.and_then(|clock| clock.written),
+        ))
     }
 }
 
@@ -1242,8 +1291,8 @@ struct PassMode {
     quiet: bool,
 }
 
-/// What a field merge weighs besides the row: the row's clock, and whether
-/// a newer row is kept quietly.
+/// What a field merge weighs besides the row: the row's time, and whether a
+/// newer row is kept quietly.
 #[derive(Debug, Clone, Copy)]
 struct Merge {
     clock: Option<DateTime<Utc>>,
@@ -1263,20 +1312,6 @@ impl Merge {
             (None, None) => env.timestamp,
         }
     }
-}
-
-/// The updates that merge field by field against the row and report a
-/// conflict, rather than replacing it: their row's clock is weighed as the
-/// row's time instead of skipping them.
-fn merges_fields(event: &SyncEvent) -> bool {
-    matches!(
-        event,
-        SyncEvent::EventUpdated(_)
-            | SyncEvent::TaskUpdated(_)
-            | SyncEvent::TaskListUpdated(_)
-            | SyncEvent::CalendarUpdated(_)
-            | SyncEvent::ColorLabelUpdated(_)
-    )
 }
 
 /// Map a store-seam error into the apply path's `SyncError`. The store

@@ -90,11 +90,18 @@ geschrieben hat, die schon vor dem Schnappschuss begann. Eine Änderung, die ein
 Gerät offline gemacht und erst später hochgeladen hat, kommt ebenfalls bei den
 anderen an.
 
-Nach dem Update, das dies mitbringt, schreibt das erste Gerät, das jede Änderung
-hält, innerhalb eines Tages von selbst so einen Schnappschuss. Jedes andere Gerät
-baut daraus **einmal** seine lokalen Daten neu auf: Verpasste Änderungen kommen
-an, und anderswo Gelöschtes verschwindet. Diese eine Runde kann etwas länger
-dauern. Was es nur auf diesem Gerät gibt, wird nicht entfernt.
+Nach dem Update, das dies mitbringt, **holt jedes Gerät einmal nach**: Es geht
+alle noch aufbewahrten Änderungen durch, seine eigenen eingeschlossen.
+Verpasste Änderungen kommen an, und anderswo Gelöschtes verschwindet. Eine
+Änderung zählt nur, wo sie neuer ist als das, was das Gerät schon hat. So wird
+nichts Neueres überschrieben, und es wird kein Konflikt gemeldet. Diese eine
+Runde kann etwas länger dauern. Was es nur auf diesem Gerät gibt, wird nicht
+entfernt.
+
+Dieselbe Regel gilt jeden Tag: Eine Änderung, die spät ankommt, etwa offline
+geschrieben, gewinnt nicht gegen eine neuere. Das Löschen eines Eintrags
+gewinnt gegen eine gleichzeitige Bearbeitung auf einem anderen Gerät, damit
+beide Geräte gleich bleiben.
 
 ## Deine Geräte
 

@@ -84,16 +84,16 @@ pub struct DeviceCursor {
     /// there until rotation). `serde(default)` keeps the wire compatible.
     #[serde(default)]
     pub known_lengths: Vec<KnownLogLength>,
-    /// Fetch a file at/below the cursor that has NO recorded length, when
-    /// its name is at/after this instant (DESIGN-sync-snapshot-coverage.md).
-    /// The cursor goes by file name, so a session file a peer wrote offline
-    /// and pushed late, named before the cursor, was never fetched by
-    /// anyone. Set only by a device whose applied record is exact — there
-    /// re-applying is a no-op — and to the dataset's `gc_horizon` (files
-    /// below it are gone or held by the snapshot). `None` = the old rule:
-    /// an unknown file at/below the cursor is never fetched.
+    /// Fetch a file at/below the cursor that has NO recorded length
+    /// (DESIGN-sync-snapshot-coverage.md). The cursor goes by file name, so
+    /// a session file a peer wrote offline and pushed late, named before the
+    /// cursor, was never fetched by anyone; nor one pushed again after a GC
+    /// deleted it. Set only by a device whose applied record is exact —
+    /// there re-applying weighs each change against its row. No floor: such
+    /// a file can be named below the GC horizon. `false` = the old rule: an
+    /// unknown file at/below the cursor is never fetched.
     #[serde(default)]
-    pub unknown_from: Option<DateTime<Utc>>,
+    pub fetch_unknown: bool,
 }
 
 /// One applied-length record for [`DeviceCursor::known_lengths`].
@@ -114,7 +114,7 @@ impl DeviceCursor {
             last_seen_log: DateTime::<Utc>::MIN_UTC,
             exclude_device: None,
             known_lengths: Vec::new(),
-            unknown_from: None,
+            fetch_unknown: false,
         }
     }
 
@@ -131,7 +131,7 @@ impl DeviceCursor {
     /// cursor whose listed size GREW past the recorded applied length
     /// (a peer's live session file gaining appended events). A file with
     /// no recorded length at/below the cursor is fetched only under
-    /// [`Self::unknown_from`]: without it, it counts as applied before
+    /// [`Self::fetch_unknown`]: without it, it counts as applied before
     /// length tracking existed, and treating "unknown" as grown would
     /// re-download the whole history once per upgrade.
     pub fn wants_sized(
@@ -148,7 +148,7 @@ impl DeviceCursor {
         }
         match self.known_lengths.iter().find(|k| k.name == filename) {
             Some(known) => listed_len.is_some_and(|listed| listed > known.len),
-            None => self.unknown_from.is_some_and(|from| name.timestamp >= from),
+            None => self.fetch_unknown,
         }
     }
 }
@@ -253,7 +253,7 @@ mod tests {
             last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
             exclude_device: Some(DeviceId::from_string("me".into())),
             known_lengths: Vec::new(),
-            unknown_from: None,
+            fetch_unknown: false,
         };
         // Newer + foreign → fetch.
         assert!(cursor.wants(&name(2_000, "peer")));
@@ -268,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_file_below_the_cursor_is_fetched_from_the_floor_on() {
+    fn an_unknown_file_below_the_cursor_is_fetched_on_an_exact_device() {
         // DESIGN-sync-snapshot-coverage.md: a peer's session pushed late,
         // named before the cursor, with no recorded length.
         let cursor = DeviceCursor {
@@ -278,7 +278,7 @@ mod tests {
                 name: "known.jsonl".into(),
                 len: 100,
             }],
-            unknown_from: Some(Utc.timestamp_opt(1_000, 0).unwrap()),
+            fetch_unknown: true,
         };
         let late = name(3_000, "peer");
         assert!(cursor.wants_sized(&late, "late.jsonl", Some(10)));
@@ -287,15 +287,15 @@ mod tests {
             "no size needed to be unknown"
         );
         assert!(cursor.wants(&late));
-        // Below the floor: gone or held by the snapshot.
-        assert!(!cursor.wants_sized(&name(999, "peer"), "old.jsonl", Some(10)));
+        // No floor: pushed again after a GC, named below its horizon.
+        assert!(cursor.wants_sized(&name(999, "peer"), "old.jsonl", Some(10)));
         // Known and unchanged: still skipped.
         assert!(!cursor.wants_sized(&late, "known.jsonl", Some(100)));
         // Own: still excluded.
         assert!(!cursor.wants_sized(&name(3_000, "me"), "own.jsonl", Some(10)));
-        // Without a floor, the old rule.
+        // Not exact: the old rule.
         let legacy = DeviceCursor {
-            unknown_from: None,
+            fetch_unknown: false,
             ..cursor
         };
         assert!(!legacy.wants_sized(&late, "late.jsonl", Some(10)));
@@ -313,7 +313,7 @@ mod tests {
                 name: filename.into(),
                 len: 100,
             }],
-            unknown_from: None,
+            fetch_unknown: false,
         };
         // Listed size grew past the applied length → refetch.
         assert!(cursor.wants_sized(&file, filename, Some(150)));

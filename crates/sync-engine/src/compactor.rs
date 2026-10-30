@@ -33,8 +33,8 @@
 //!    catch up incrementally (the over-fire fix keys staleness on what
 //!    was deleted, not on snapshot content).
 //!    The snapshot names the events still in log files that it holds
-//!    (own or applied), when this device holds every readable one
-//!    (DESIGN-sync-snapshot-coverage.md); meta.json says whether it does.
+//!    (own or applied), when this device's record is exact and it holds
+//!    every readable one (DESIGN-sync-snapshot-coverage.md).
 //! 5. Delete every log with timestamp STRICTLY < safe_cutoff whose every
 //!    event the snapshot holds (a file that does not parse: own, or
 //!    foreign up to our cursor, as before). Strict `<` spares the
@@ -96,10 +96,6 @@ pub const PREF_LOGS_SINCE_SNAPSHOT: &str = "sync.compaction.localLogsSinceSnapsh
 /// Local counter for bytes pushed, same lifecycle as
 /// [`PREF_LOGS_SINCE_SNAPSHOT`].
 pub const PREF_BYTES_SINCE_SNAPSHOT: &str = "sync.compaction.localBytesSinceSnapshot";
-/// When this device last checked whether it could write a snapshot that
-/// names its events, while the dataset's names nothing
-/// (DESIGN-sync-snapshot-coverage.md). Device-local; at most once a day.
-pub const PREF_COVERAGE_CHECKED_AT: &str = "sync.compaction.coverageCheckedAt";
 
 /// How many days of pre-snapshot logs to RETAIN behind a device that has
 /// fallen behind, before abandoning it to a snapshot resume. This is the cap
@@ -135,7 +131,8 @@ pub struct CompactionReport {
     pub snapshot_rows: usize,
     pub snapshot_settings: usize,
     /// Whether the snapshot names the events it holds — false when this
-    /// device could not vouch for its applied record.
+    /// device could not vouch for its applied record: not exact yet, or an
+    /// event in a file it neither wrote nor applied.
     pub snapshot_coverage: bool,
 }
 
@@ -264,23 +261,6 @@ impl Compactor {
             Some(m) => Some(m.clone()),
             None => adapter.fetch_meta().await?,
         };
-        // DESIGN-sync-snapshot-coverage.md: while the dataset's snapshot
-        // names nothing, a device that holds every event in every log file
-        // compacts once to write one that does — the snapshot every other
-        // device then rebuilds from. At most once a day: the check fetches
-        // every file, and a device that does not hold everything keeps not
-        // holding it. A dataset that never compacted has no such snapshot
-        // to heal from; its first compaction names its events anyway.
-        if let Some(meta) = &meta {
-            if meta.has_real_snapshot() && !meta.snapshot_coverage && self.coverage_check_due() {
-                self.note_coverage_check();
-                let logs = adapter.fetch_new_logs(&DeviceCursor::epoch()).await?;
-                if Coverage::of(&logs, &self.local_device_id, self.store.as_ref())?.complete {
-                    debug!("compaction triggered: this device can write a snapshot that names its events");
-                    return Ok(true);
-                }
-            }
-        }
         if let Some(meta) = &meta {
             // Only an existing REAL snapshot has a meaningful age. A
             // never-compacted dataset carries the `MIN_UTC` sentinel, whose
@@ -409,16 +389,18 @@ impl Compactor {
         // 1. Build + push the snapshot, stamped just before the new file.
         //    It names the events it holds that are still in log files, so a
         //    device taking it can fetch every file and apply only the rest —
-        //    but only when this device can vouch for its record: an event in
-        //    a file it neither wrote nor applied (it joined from a snapshot
-        //    that named nothing, or a peer's file grew since its last fetch)
-        //    makes it name nothing. The same listing serves the GC below.
+        //    but only when this device can vouch for its record: it is exact
+        //    (it joined or caught up over every file, so nothing it applied
+        //    was reverted under the record), and no file holds an event it
+        //    neither wrote nor applied (a peer's file grew since its last
+        //    fetch). Otherwise it names nothing. The same listing serves the
+        //    GC below.
         let all_logs = adapter.fetch_new_logs(&DeviceCursor::epoch()).await?;
         let coverage = Coverage::of(&all_logs, &self.local_device_id, self.store.as_ref())?;
-        let snapshot = self.builder.build_at(
-            snapshot_ts,
-            coverage.complete.then(|| coverage.held.clone()),
-        )?;
+        let names = coverage.complete && self.record_exact();
+        let snapshot = self
+            .builder
+            .build_at(snapshot_ts, names.then(|| coverage.held.clone()))?;
         adapter.push_snapshot(&snapshot).await?;
 
         // The snapshot is now durable on the remote, so every LOCAL pending
@@ -456,7 +438,6 @@ impl Compactor {
             meta.min_app_version = self.app_version.clone();
         }
         meta.snapshot_timestamp = snapshot_ts;
-        meta.snapshot_coverage = coverage.complete;
         let device_name = self.store.get_pref(PREF_DEVICE_NAME).ok().flatten();
         meta.upsert_device(
             &self.local_device_id,
@@ -545,21 +526,7 @@ impl Compactor {
         }
 
         adapter.push_meta(&meta).await?;
-        report.snapshot_coverage = coverage.complete;
-        // A device that named everything it holds has an exact record from
-        // here on: re-fetching older files can no longer re-apply something
-        // its state already reflects.
-        if coverage.complete {
-            if let Err(err) = self.store.set_pref(
-                SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
-                &snapshot_ts.to_rfc3339(),
-            ) {
-                warn!(
-                    ?err,
-                    "couldn't record that this device's applied record is exact"
-                );
-            }
-        }
+        report.snapshot_coverage = names;
 
         // 6. GC the now-redundant logs, from the listing taken before the
         //    snapshot (a file pushed since is not in it, so it stays). Delete
@@ -605,7 +572,7 @@ impl Compactor {
             gc_horizon = %gc_horizon,
             deleted = report.deleted_logs,
             stale = report.stale_devices,
-            coverage = coverage.complete,
+            names,
             held = coverage.held.len(),
             "compaction complete",
         );
@@ -645,25 +612,14 @@ impl Compactor {
             .unwrap_or(default)
     }
 
-    /// Whether a day has passed since the last coverage check
-    /// ([`PREF_COVERAGE_CHECKED_AT`]); due when it never ran or the mark
-    /// does not read.
-    fn coverage_check_due(&self) -> bool {
-        self.store
-            .get_pref(PREF_COVERAGE_CHECKED_AT)
-            .ok()
-            .flatten()
-            .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
-            .is_none_or(|at| Utc::now() - at.with_timezone(&Utc) >= ChronoDuration::days(1))
-    }
-
-    fn note_coverage_check(&self) {
-        if let Err(err) = self
-            .store
-            .set_pref(PREF_COVERAGE_CHECKED_AT, &Utc::now().to_rfc3339())
-        {
-            warn!(?err, "couldn't record the coverage check");
-        }
+    /// Whether this device's applied record is exact
+    /// ([`SYNC_COVERAGE_EXACT_SINCE_PREF_KEY`]). A record that does not read
+    /// is not: naming nothing is the safe side.
+    fn record_exact(&self) -> bool {
+        matches!(
+            self.store.get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY),
+            Ok(Some(_))
+        )
     }
 
     fn read_counter_u64(&self, key: &str) -> u64 {
@@ -1224,13 +1180,14 @@ mod tests {
     #[tokio::test]
     async fn names_the_events_it_holds_when_it_holds_every_one() {
         // DESIGN-sync-snapshot-coverage.md: own events and applied foreign
-        // ones are held; holding every readable one, the snapshot names them,
-        // meta says so, and this device's record is exact from here on.
+        // ones are held; an exact device holding every readable one names
+        // them.
         let (store, compactor) = build_compactor();
         let adapter = FakeAdapter::new();
         store
             .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
             .unwrap();
+        mark_exact(&store);
         let recent = Utc::now() - ChronoDuration::hours(2);
         let (own, own_ids) = log_of(recent, "dev-this", 2);
         let (peer, peer_ids) = log_of(recent + ChronoDuration::minutes(5), "dev-other", 2);
@@ -1250,29 +1207,44 @@ mod tests {
         expected.sort();
         assert_eq!(named, expected);
         assert!(report.snapshot_coverage);
-        let meta = adapter.meta.lock().unwrap().clone().unwrap();
-        assert!(meta.snapshot_coverage);
-        assert_eq!(
-            store
-                .get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
-                .unwrap()
-                .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
-                .map(|ts| ts.with_timezone(&Utc)),
-            Some(meta.snapshot_timestamp),
-        );
     }
 
     #[tokio::test]
-    async fn names_nothing_when_a_peers_event_was_never_applied() {
-        // A peer's file holding an event this device never applied — it
-        // joined from a snapshot that named nothing, or the file grew since
-        // the last fetch: the device cannot vouch for its record, so the
-        // snapshot names nothing and its record stays inexact.
+    async fn names_nothing_while_its_record_is_not_exact() {
+        // Holding every event in every file is not enough: a device that
+        // joined or resumed from a snapshot before it caught up may have had
+        // rows reverted under its record (DESIGN-sync-snapshot-coverage.md).
         let (store, compactor) = build_compactor();
         let adapter = FakeAdapter::new();
         store
             .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
             .unwrap();
+        let (own, _) = log_of(Utc::now() - ChronoDuration::hours(2), "dev-this", 2);
+        adapter.logs.lock().unwrap().push(own);
+        *adapter.meta.lock().unwrap() = Some(meta_with_caught_up_peer());
+
+        let report = compactor.compact_now(&adapter).await.unwrap();
+
+        assert_eq!(body_of(&adapter).covered_event_ids, None);
+        assert!(!report.snapshot_coverage);
+    }
+
+    fn mark_exact(store: &FakeStore) {
+        store
+            .set_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn names_nothing_when_a_peers_event_was_never_applied() {
+        // A peer's file holding an event this exact device never applied —
+        // the file grew since the last fetch: the snapshot names nothing.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        store
+            .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+        mark_exact(&store);
         let (peer, peer_ids) = log_of(Utc::now() - ChronoDuration::hours(1), "dev-other", 2);
         store.mark_event_applied(&peer_ids[0]).unwrap();
         adapter.logs.lock().unwrap().push(peer);
@@ -1282,19 +1254,6 @@ mod tests {
 
         assert_eq!(body_of(&adapter).covered_event_ids, None);
         assert!(!report.snapshot_coverage);
-        assert!(
-            !adapter
-                .meta
-                .lock()
-                .unwrap()
-                .clone()
-                .unwrap()
-                .snapshot_coverage
-        );
-        assert_eq!(
-            store.get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY).unwrap(),
-            None
-        );
     }
 
     #[tokio::test]
@@ -1326,70 +1285,6 @@ mod tests {
             remaining[0].name.timestamp, old,
             "the file with an unapplied event stays"
         );
-    }
-
-    /// A dataset whose real, recent snapshot names nothing (or does).
-    fn meta_with_snapshot(coverage: bool) -> MetaJson {
-        let mut meta = meta_with_caught_up_peer();
-        meta.snapshot_timestamp = Utc::now() - ChronoDuration::hours(1);
-        meta.snapshot_coverage = coverage;
-        meta
-    }
-
-    #[tokio::test]
-    async fn a_complete_device_compacts_once_a_day_while_the_snapshot_names_nothing() {
-        // DESIGN-sync-snapshot-coverage.md: the snapshot every device
-        // rebuilds from has to come from somewhere — a device that holds
-        // every event writes it, unprompted, and checks at most daily.
-        let (store, compactor) = build_compactor();
-        let adapter = FakeAdapter::new();
-        let (own, _) = log_of(Utc::now() - ChronoDuration::hours(2), "dev-this", 1);
-        adapter.logs.lock().unwrap().push(own);
-        let meta = meta_with_snapshot(false);
-
-        assert!(compactor
-            .should_compact(&adapter, Some(&meta))
-            .await
-            .unwrap());
-        assert!(
-            !compactor
-                .should_compact(&adapter, Some(&meta))
-                .await
-                .unwrap(),
-            "not again the same day"
-        );
-        assert!(store.get_pref(PREF_COVERAGE_CHECKED_AT).unwrap().is_some());
-    }
-
-    #[tokio::test]
-    async fn an_incomplete_device_does_not_compact_for_coverage() {
-        let (_store, compactor) = build_compactor();
-        let adapter = FakeAdapter::new();
-        let (peer, _) = log_of(Utc::now() - ChronoDuration::hours(2), "dev-other", 1);
-        adapter.logs.lock().unwrap().push(peer);
-
-        assert!(!compactor
-            .should_compact(&adapter, Some(&meta_with_snapshot(false)))
-            .await
-            .unwrap());
-    }
-
-    #[tokio::test]
-    async fn no_coverage_check_once_the_snapshot_names_its_events_or_none_exists() {
-        // A naming snapshot needs no second one; a dataset that never
-        // compacted waits for its thresholds — its first snapshot names its
-        // events anyway.
-        let (store, compactor) = build_compactor();
-        let adapter = FakeAdapter::new();
-        assert!(!compactor
-            .should_compact(&adapter, Some(&meta_with_snapshot(true)))
-            .await
-            .unwrap());
-        assert!(!compactor
-            .should_compact(&adapter, Some(&MetaJson::fresh("1.0.0-test")))
-            .await
-            .unwrap());
-        assert_eq!(store.get_pref(PREF_COVERAGE_CHECKED_AT).unwrap(), None);
     }
 
     #[tokio::test]

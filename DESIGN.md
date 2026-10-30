@@ -3425,6 +3425,8 @@ Da zwei Geräte dasselbe Objekt gleichzeitig ändern können, wird folgende Stra
 
 Konflikte werden per `aria-live` angekündigt und sind vollständig per Tastatur auflösbar.
 
+**Neuer gewinnt** (DESIGN-sync-snapshot-coverage.md, Abschnitt E): Jede Zeile hat eine Uhr (`sync_row_clock`), die jede eigene und jede übernommene Änderung stempelt. Eine Änderung, die älter ist als ihre Zeile, gewinnt nicht, auch wenn sie spät ankommt (offline geschrieben, gewachsene Datei): Eine Schreibung der ganzen Zeile wird übersprungen, eine Feld-Zusammenführung wägt die Uhr wie `updated_at`. Ein Löschen verliert nur gegen eine neuere Schreibung der ganzen Zeile, nie gegen eine Feldänderung, sonst liefen löschendes und bearbeitendes Gerät auseinander.
+
 ### 19.4 Lokaler SQLite-Cache & Zustandsrekonstruktion
 
 Beim Start liest die App alle noch nicht lokal angewandten Log-Ereignisse vom Sync-Speicher, wendet sie auf den lokalen SQLite-Cache an und hat damit den aktuellen Stand. Das Log ist die **Quelle der Wahrheit** (Source of Truth); SQLite ist der schnelle lokale Spiegel.
@@ -3664,7 +3666,7 @@ Wenn ein Gerät länger offline war als der Kompaktierungszeitraum, fehlen ihm L
 └─────────────────────────────────────────────────────┘
 ```
 
-Lokale Änderungen des veralteten Geräts (die es noch nicht hochgeladen hatte) werden als neue Log-Ereignisse auf den frischen Snapshot angewendet – mit normaler Konfliktauflösung (Abschnitt 19.3).
+Danach wendet es alle noch vorhandenen Log-Dateien, seine eigenen eingeschlossen, und seine noch nicht hochgeladenen Änderungen in einem Durchgang nach Zeit an (DESIGN-sync-snapshot-coverage.md): Eine Änderung gilt nur, wo sie neuer ist als ihre Zeile (Abschnitt 19.3), ohne Konfliktmeldung. So kommen lokale Änderungen und schon übernommene zurück, die der Snapshot überschrieben hat. Dasselbe Nachholen läuft einmal in der Runde auf jedem Gerät, dessen Anwendungsprotokoll nicht als genau gilt (beigetreten oder wiederaufgenommen vor dieser Regel).
 
 ### 19.11 Onboarding: Neue Instanz verbindet sich mit bestehendem Datensatz
 
@@ -3705,7 +3707,7 @@ Die App lädt `snapshot.json` herunter, entschlüsselt ihn falls nötig, und bef
 
 #### Schritt 6 – Neuere Log-Ereignisse anwenden
 
-Alle Log-Dateien mit einem Zeitstempel nach `snapshot_timestamp` werden heruntergeladen und chronologisch auf den SQLite-Cache angewendet. Das Gerät ist damit vollständig auf dem aktuellen Stand.
+Alle vorhandenen Log-Dateien werden heruntergeladen, auch solche mit einem Namen vor `snapshot_timestamp`: Eine Sitzung kann nach dem Snapshot weitergewachsen sein. Ihre Ereignisse werden gemeinsam nach Zeit angewendet. Was der Snapshot als enthalten nennt (`covered_event_ids`), gilt als angewendet; sonst gilt eine Änderung nur, wo sie neuer ist als ihre Zeile (Abschnitt 19.3). Das Gerät ist damit vollständig auf dem aktuellen Stand, und sein Anwendungsprotokoll ist genau (DESIGN-sync-snapshot-coverage.md).
 
 #### Schritt 7 – Sound-Dateien nachladen
 

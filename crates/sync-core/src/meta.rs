@@ -144,14 +144,6 @@ pub struct MetaJson {
     /// meta (real `snapshot_timestamp`, no `snapshot.json`) from wedging.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gc_horizon: Option<DateTime<Utc>>,
-    /// Whether the current snapshot names the events it already holds that
-    /// are still in log files (its body's `covered_event_ids`,
-    /// DESIGN-sync-snapshot-coverage.md). A compactor writes them only when
-    /// it can vouch for its own applied record. Read without fetching the
-    /// snapshot: a device rebuilds once from the first such snapshot, and a
-    /// complete device compacts once while there is none.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub snapshot_coverage: bool,
     /// Per-device registry. Keyed by [`DeviceId`] (the bare string
     /// form). BTreeMap so the on-disk order is deterministic per
     /// device id — useful for git-style diffing if someone hosts
@@ -178,7 +170,6 @@ impl MetaJson {
             e2e_params: None,
             snapshot_timestamp: DateTime::<Utc>::MIN_UTC,
             gc_horizon: None,
-            snapshot_coverage: false,
             devices: BTreeMap::new(),
         }
     }
@@ -280,7 +271,6 @@ mod tests {
             e2e_params: None,
             snapshot_timestamp: Utc::now(),
             gc_horizon: None,
-            snapshot_coverage: false,
             devices: BTreeMap::from([(
                 "dev-a".into(),
                 DeviceRecord {

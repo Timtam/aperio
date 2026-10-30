@@ -155,7 +155,8 @@ impl EventLogWriter {
         // This change is the newest its row has seen: an older one from
         // another device, arriving later, must not win over it.
         if let (Some(store), Some(key)) = (self.row_clock.get(), envelope.event.row_key()) {
-            if let Err(err) = store.advance_row_clock(&key, envelope.timestamp) {
+            let whole = !envelope.event.merges_fields();
+            if let Err(err) = store.advance_row_clock(&key, envelope.timestamp, whole) {
                 warn!(?err, kind = key.kind, "couldn't advance the row's clock");
             }
         }
@@ -464,7 +465,13 @@ mod tests {
             id: "appearance.darkMode".into(),
         };
         let clock = store.row_clocks.lock().unwrap().get(&key).copied();
-        assert!(clock.is_some_and(|at| at >= before), "{clock:?}");
+        // A setting is written whole: both times move.
+        assert!(
+            clock.is_some_and(
+                |clock| clock.changed >= before && clock.written == Some(clock.changed)
+            ),
+            "{clock:?}",
+        );
     }
 
     #[tokio::test]

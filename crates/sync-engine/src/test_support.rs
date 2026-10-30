@@ -34,8 +34,8 @@ pub struct FakeStore {
     /// exercise the difference between "this pref is unset" and "the store
     /// could not be read" — the two used to be the same thing to callers.
     pub failing_pref_reads: Mutex<HashSet<String>>,
-    /// `sync_row_clock`: the newest change each row has seen.
-    pub row_clocks: Mutex<std::collections::HashMap<sync_core::RowKey, DateTime<Utc>>>,
+    /// `sync_row_clock`: each row's clock.
+    pub row_clocks: Mutex<std::collections::HashMap<sync_core::RowKey, crate::RowClock>>,
 }
 
 impl SyncStore for FakeStore {
@@ -107,20 +107,7 @@ impl SyncStore for FakeStore {
         Ok(())
     }
 
-    fn clear_applied_events(&self) -> Result<(), StoreError> {
-        self.applied.lock().unwrap().clear();
-        Ok(())
-    }
-
-    fn forget_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError> {
-        let mut applied = self.applied.lock().unwrap();
-        for id in event_ids {
-            applied.remove(id);
-        }
-        Ok(())
-    }
-
-    fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<DateTime<Utc>>, StoreError> {
+    fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<crate::RowClock>, StoreError> {
         Ok(self.row_clocks.lock().unwrap().get(key).copied())
     }
 
@@ -128,10 +115,16 @@ impl SyncStore for FakeStore {
         &self,
         key: &sync_core::RowKey,
         at: DateTime<Utc>,
+        whole: bool,
     ) -> Result<(), StoreError> {
+        let written = whole.then_some(at);
         let mut clocks = self.row_clocks.lock().unwrap();
-        let clock = clocks.entry(key.clone()).or_insert(at);
-        *clock = (*clock).max(at);
+        let clock = clocks.entry(key.clone()).or_insert(crate::RowClock {
+            changed: at,
+            written,
+        });
+        clock.changed = clock.changed.max(at);
+        clock.written = clock.written.max(written);
         Ok(())
     }
 
