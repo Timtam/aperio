@@ -329,3 +329,28 @@ async fn with_e2e_off_the_push_sends_no_secret() {
     assert_eq!(pushed.len(), 1, "the setting only");
     assert!(!String::from_utf8_lossy(&remote[0].bytes).contains("hunter2"));
 }
+
+#[tokio::test]
+async fn a_finished_session_goes_once_pushed_and_the_live_one_stays() {
+    // Review round 2 of #130: pending files from earlier app starts went up
+    // again after every start, so a file the GC had deleted came back for an
+    // exact device to take in as unknown.
+    let (tmp, orchestrator, _hooks, adapter) = device(fresh_meta(), true).await;
+    let pending = tmp.path().join("pending");
+    let finished = session("dev-laptop", 2_000, 1);
+    let live = session("dev-laptop", Utc::now().timestamp() + 60, 1);
+    for file in [&finished, &live] {
+        std::fs::write(pending.join(file.name.to_filename()), &file.bytes).unwrap();
+    }
+
+    let report = orchestrator.sync_now().await.expect("round");
+
+    assert_eq!(report.pushed_logs, 2);
+    assert!(!pending.join(finished.name.to_filename()).exists());
+    assert!(pending.join(live.name.to_filename()).exists());
+    let remote = adapter
+        .fetch_new_logs(&sync_core::DeviceCursor::epoch())
+        .await
+        .unwrap();
+    assert_eq!(remote.len(), 2, "both are on the remote");
+}

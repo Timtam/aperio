@@ -319,9 +319,10 @@ pub struct SyncOrchestrator {
     /// Byte length last successfully PUSHED per pending filename, so a
     /// round skips re-uploading a session file that hasn't grown since
     /// (the writer only appends, so length equality means content
-    /// equality). Deliberately IN-MEMORY: every file is re-pushed at
-    /// least once per app session, which self-heals a remote copy that
-    /// was manually deleted or truncated behind our back.
+    /// equality). Deliberately IN-MEMORY: every file still pending is
+    /// pushed at least once per app session. A finished session (from an
+    /// earlier app start) is removed once pushed whole, so a file the GC
+    /// deleted does not come back.
     pushed_lengths: Mutex<std::collections::HashMap<String, u64>>,
     /// §19.10: latched stale-device state. Set when a sync
     /// round notices our `meta.devices[me].stale == true`;
@@ -1015,13 +1016,16 @@ impl SyncOrchestrator {
                 continue;
             }
             let byte_count = bytes.len();
+            // A session from an earlier app start: the writer no longer
+            // appends to it, so once pushed whole it is done here.
+            let finished = parsed.device_id == self.local_device_id
+                && is_stale_empty_stub(parsed.timestamp, self.boot_at);
             // Skip a file whose byte length matches what this SESSION
             // already pushed — the writer only appends, so equal length
             // means identical content, and re-uploading the whole (all-day
             // growing) session file every round was often the slowest
             // request of the round. The map is in-memory by design: a
-            // fresh app session re-pushes everything once, which
-            // self-heals a remote copy deleted/truncated behind our back.
+            // fresh app session pushes once more what is still pending.
             let already_pushed = self
                 .pushed_lengths
                 .lock()
@@ -1059,6 +1063,17 @@ impl SyncOrchestrator {
                     // counters so its threshold check picks up the
                     // new push without an extra round-trip.
                     self.compactor.record_pushed_log(byte_count);
+                    // Kept, it went up again after every start, and a file
+                    // the GC had deleted came back, for an exact device to
+                    // take in as unknown (review round 2 of #130).
+                    if finished {
+                        match tokio::fs::remove_file(&path).await {
+                            Ok(()) => debug!(name = name, "pushed a finished session; removed it"),
+                            Err(err) => {
+                                debug!(name = name, ?err, "couldn't remove a pushed pending log")
+                            }
+                        }
+                    }
                 }
                 Err(err) => warn!(name = name, ?err, "push_log failed"),
             }
