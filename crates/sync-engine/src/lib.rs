@@ -54,6 +54,7 @@ pub use orchestrator::{
 };
 pub use snapshot::{
     AperioSnapshotBody, SnapshotAccount, SnapshotApplyOutcome, SnapshotBuilder, SnapshotCredential,
+    SnapshotRowClock,
 };
 pub use writer::EventLogWriter;
 
@@ -389,6 +390,15 @@ pub trait SyncStore: Send + Sync {
         key: &sync_core::RowKey,
         at: DateTime<Utc>,
         whole: bool,
+    ) -> Result<(), StoreError>;
+    /// Every row's clock, for the snapshot. A kind this version does not
+    /// know is left out.
+    fn row_clocks(&self) -> Result<Vec<(sync_core::RowKey, RowClock)>, StoreError>;
+    /// Move many rows' clocks forward at once — a snapshot's, all or none;
+    /// each time never back.
+    fn advance_row_clocks(
+        &self,
+        clocks: &[(sync_core::RowKey, RowClock)],
     ) -> Result<(), StoreError>;
     /// Persist a field-level conflict the applier couldn't auto-merge,
     /// superseding any prior unresolved conflict on the same

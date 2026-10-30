@@ -128,6 +128,29 @@ impl SyncStore for FakeStore {
         Ok(())
     }
 
+    fn row_clocks(&self) -> Result<Vec<(sync_core::RowKey, crate::RowClock)>, StoreError> {
+        Ok(self
+            .row_clocks
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(key, clock)| (key.clone(), *clock))
+            .collect())
+    }
+
+    fn advance_row_clocks(
+        &self,
+        clocks: &[(sync_core::RowKey, crate::RowClock)],
+    ) -> Result<(), StoreError> {
+        let mut table = self.row_clocks.lock().unwrap();
+        for (key, theirs) in clocks {
+            let clock = table.entry(key.clone()).or_insert(*theirs);
+            clock.changed = clock.changed.max(theirs.changed);
+            clock.written = clock.written.max(theirs.written);
+        }
+        Ok(())
+    }
+
     fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError> {
         self.conflicts.lock().unwrap().push(conflict.clone());
         Ok(())

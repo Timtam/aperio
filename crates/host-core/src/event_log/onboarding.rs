@@ -423,8 +423,11 @@ impl OnboardingService {
         let mut starting_cursor: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
         let mut snapshot_applied = false;
         // Whatever this device knew of another dataset says nothing here; the
-        // pass over every file below makes the record exact again.
+        // pass over every file below makes the record exact again. Nor do its
+        // row clocks: they would let that dataset's times keep this one's
+        // changes out (review round 2 of #130). The snapshot brings its own.
         self.clear_coverage_exact()?;
+        self.clear_row_clocks()?;
         match adapter.fetch_snapshot().await? {
             Some(snapshot) => {
                 info!(
@@ -984,6 +987,15 @@ impl OnboardingService {
         UserPrefsRepo::new(&self.db)
             .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &ts.to_rfc3339())
             .map_err(|err| SyncError::internal(format!("save coverage mark: {err}")))?;
+        Ok(())
+    }
+
+    /// Forget every row's clock (`sync_row_clock`): this device joins a
+    /// dataset, maybe another one.
+    fn clear_row_clocks(&self) -> SyncResult<()> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute("DELETE FROM sync_row_clock", [])
+            .map_err(|err| SyncError::internal(format!("clear row clocks: {err}")))?;
         Ok(())
     }
 
@@ -2050,6 +2062,75 @@ mod tests {
             rusqlite::params![kind, id, at.timestamp_micros(), at.timestamp_micros()],
         )
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_stale_resume_does_not_let_an_older_change_win_over_the_snapshot() {
+        // Review round 2 of #130: the snapshot wrote its rows but not their
+        // times, so this device's own older change, still pending, won over
+        // the snapshot's newer value — and every peer skipped it as older.
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let own = envelope("ev-own", "dev-this", at, set_interval("15"));
+        let own_file = file_of("dev-this", at, &[&own]);
+        std::fs::write(
+            pending.path().join(own_file.name.to_filename()),
+            &own_file.bytes,
+        )
+        .unwrap();
+        stamp_clock(&db, "setting", "sync.intervalMinutes", at);
+        UserPrefsRepo::new(&db.shared())
+            .set("sync.intervalMinutes", "15")
+            .unwrap();
+        // A peer set 45 two hours later; its file is gone, the snapshot
+        // holds it.
+        let later = at + chrono::Duration::hours(2);
+        let body = sync_engine::AperioSnapshotBody {
+            settings: std::collections::BTreeMap::from([(
+                "sync.intervalMinutes".to_string(),
+                "45".to_string(),
+            )]),
+            row_clocks: vec![sync_engine::SnapshotRowClock {
+                kind: "setting".into(),
+                id: "sync.intervalMinutes".into(),
+                changed: later,
+                written: Some(later),
+            }],
+            ..Default::default()
+        };
+        let adapter = FakeAdapter::with_logs(Vec::new());
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = later;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(Snapshot::new(
+            later,
+            "1.0.0",
+            serde_json::to_value(body).unwrap(),
+        ));
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn joining_forgets_the_row_clocks_of_the_dataset_it_left() {
+        // A clock from the dataset this device left would keep this one's
+        // changes out as older.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let far: DateTime<Utc> = "2030-01-01T00:00:00Z".parse().unwrap();
+        stamp_clock(&db, "setting", "sync.intervalMinutes", far);
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let change = envelope("ev-45", "dev-other", at, set_interval("45"));
+        let adapter = FakeAdapter::with_logs(vec![file_of("dev-other", at, &[&change])]);
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
     }
 
     #[tokio::test]

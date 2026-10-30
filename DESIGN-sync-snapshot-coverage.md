@@ -124,8 +124,13 @@ Nachholen heilt auch ohne sie.
 
 Der Writer stempelt eigene Änderungen beim Schreiben, der Anwender jede
 übernommene. Die Zeit einer Zeile ist `changed`. Bei Terminen und Aufgaben ist
-sie mindestens ihr eigenes `updated_at`, denn das schreibt ein Schnappschuss,
-nicht die Uhr.
+sie mindestens ihr eigenes `updated_at`.
+
+Ein Schnappschuss trägt die Uhren seines Autors (`row_clocks`). Wer ihn
+übernimmt, stempelt sie, jede nie zurück, aber nur, wenn alle seine Zeilen
+geschrieben wurden; sonst trägt er auch keine Kennungen ein. Ein Beitritt
+beginnt mit leeren Uhren: Die eines früheren Datensatzes hielten die
+Änderungen des neuen als älter draußen.
 
 - **Ganze Zeile und Anlegen:** Älter als die Zeile wird übersprungen
   (`skipped_older`) und als angewendet vermerkt.

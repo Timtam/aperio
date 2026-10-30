@@ -374,12 +374,45 @@ pub struct RowKey {
     pub id: String,
 }
 
+impl RowKey {
+    /// Every kind of row [`SyncEvent::row_key`] names.
+    pub const KINDS: &'static [&'static str] = &[
+        "event",
+        "event_group",
+        "event_local_reminders",
+        "task",
+        "task_list",
+        "section",
+        "calendar",
+        "color_label",
+        "day_marker",
+        "day_log",
+        "plugin",
+        "account",
+        "credential",
+        "setting",
+    ];
+
+    /// The key for a kind read back as text — from the clock table or a
+    /// snapshot. `None` for a kind this version does not know.
+    pub fn named(kind: &str, id: String) -> Option<RowKey> {
+        Self::KINDS
+            .iter()
+            .find(|known| **known == kind)
+            .map(|kind| RowKey { kind, id })
+    }
+}
+
 impl SyncEvent {
     /// The row this event writes. `None` for an append-only record (a
     /// declined suggestion: nothing newer replaces it) and for the shortcut
     /// events, which no device emits yet.
     pub fn row_key(&self) -> Option<RowKey> {
         let row = |kind: &'static str, id: &str| {
+            debug_assert!(
+                RowKey::KINDS.contains(&kind),
+                "row kind {kind} is missing from RowKey::KINDS"
+            );
             Some(RowKey {
                 kind,
                 id: id.to_string(),

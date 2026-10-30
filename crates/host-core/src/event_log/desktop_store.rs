@@ -317,6 +317,73 @@ impl SyncStore for DesktopSyncStore {
         Ok(())
     }
 
+    fn row_clocks(&self) -> Result<Vec<(sync_core::RowKey, RowClock)>, StoreError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let backend = |err: rusqlite::Error| StoreError::Backend(format!("row_clocks: {err}"));
+        let mut stmt = conn
+            .prepare("SELECT kind, id, changed_us, written_us FROM sync_row_clock")
+            .map_err(backend)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            })
+            .map_err(backend)?;
+        let from_us = chrono::DateTime::<Utc>::from_timestamp_micros;
+        let mut clocks = Vec::new();
+        for row in rows {
+            let (kind, id, changed_us, written_us) = row.map_err(backend)?;
+            let (Some(key), Some(changed)) =
+                (sync_core::RowKey::named(&kind, id), from_us(changed_us))
+            else {
+                continue;
+            };
+            clocks.push((
+                key,
+                RowClock {
+                    changed,
+                    written: written_us.and_then(from_us),
+                },
+            ));
+        }
+        Ok(clocks)
+    }
+
+    fn advance_row_clocks(
+        &self,
+        clocks: &[(sync_core::RowKey, RowClock)],
+    ) -> Result<(), StoreError> {
+        let mut conn = self.db.lock().expect("db mutex poisoned");
+        let backend =
+            |err: rusqlite::Error| StoreError::Backend(format!("advance_row_clocks: {err}"));
+        let tx = conn.transaction().map_err(backend)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO sync_row_clock (kind, id, changed_us, written_us) VALUES (?, ?, ?, ?)
+                     ON CONFLICT(kind, id) DO UPDATE SET
+                         changed_us = MAX(changed_us, excluded.changed_us),
+                         written_us = MAX(COALESCE(written_us, excluded.written_us),
+                                          COALESCE(excluded.written_us, written_us))",
+                )
+                .map_err(backend)?;
+            for (key, clock) in clocks {
+                stmt.execute(params![
+                    key.kind,
+                    key.id,
+                    clock.changed.timestamp_micros(),
+                    clock.written.map(|at| at.timestamp_micros()),
+                ])
+                .map_err(backend)?;
+            }
+        }
+        tx.commit().map_err(backend)
+    }
+
     fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError> {
         ConflictsRepo::new(&self.db)
             .record(conflict.clone())

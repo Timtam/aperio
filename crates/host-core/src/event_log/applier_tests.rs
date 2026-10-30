@@ -1581,3 +1581,33 @@ fn a_device_catching_up_over_create_delete_and_a_later_edit_ends_deleted() {
 
     assert_eq!(label_name(&db, "lbl-third"), None);
 }
+
+#[test]
+fn a_snapshots_clocks_never_move_a_row_back() {
+    use sync_engine::{RowClock, SyncStore};
+    let (adapter, db) = fixture();
+    let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
+    let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+    let key = sync_core::RowKey {
+        kind: "task_list",
+        id: "list-1".into(),
+    };
+    store.advance_row_clock(&key, at(5000), false).unwrap();
+    store
+        .advance_row_clocks(&[(
+            key.clone(),
+            RowClock {
+                changed: at(3000),
+                written: Some(at(2000)),
+            },
+        )])
+        .unwrap();
+    assert_eq!(
+        store.row_clock(&key).unwrap(),
+        Some(RowClock {
+            changed: at(5000),
+            written: Some(at(2000)),
+        }),
+    );
+    assert_eq!(store.row_clocks().unwrap().len(), 1);
+}
