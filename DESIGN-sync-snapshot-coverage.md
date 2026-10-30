@@ -77,11 +77,14 @@ enden im selben Durchgang (`OnboardingService::apply_every_log`):
 4. Eine Änderung gilt nur, wenn sie neuer ist als ihre Zeile (siehe E), ohne
    Konfliktmeldung. Schon Angewendetes wird erneut gewogen. So bekommt eine
    Zeile, die ein Schnappschuss zurückgesetzt hat, ihre neuere Änderung zurück.
-5. Längen der fremden Dateien merken (eine unlesbare mit 0, die nächste Runde
-   versucht sie wieder). Cursor = Maximum aus bisherigem Cursor (beim Beitritt
+5. Längen der fremden Dateien merken. Eine unlesbare (abgerissen gelesen, oder
+   von einer neueren Version) nicht: Dann ist der Durchgang unvollständig, und
+   das nächste Nachholen nimmt sie wieder, nach seinen Regeln statt denen einer
+   Runde. Cursor = Maximum aus bisherigem Cursor (beim Beitritt
    und bei der Wiederaufnahme: Schnappschuss) und neuester fremder Datei, nie
    zurück.
-6. Danach ist das Gerät **genau** (`sync.cursor.coverageExactSince`).
+6. Danach ist das Gerät **genau** (`sync.cursor.coverageExactSince`), wenn jede
+   Datei lesbar war.
 
 Erst holen, dann ändern: Ein abgebrochener Abruf lässt den Bestand unberührt.
 Das löst auch, was „Ursache“ gegen das Wiederabspielen einwandte: Es geschieht
@@ -92,8 +95,9 @@ still, und nur Neueres gewinnt.
 - **Einmal nachholen.** Ein Gerät, das nicht genau ist, holt in der Runde
   einmal alles nach (B). Das betrifft jedes Gerät, das vor dieser Korrektur
   beigetreten oder wiederaufgenommen ist, und eines nach „Neu beginnen“.
-  Schlägt es fehl, versucht die nächste Runde es wieder; die Runde selbst
-  läuft weiter.
+  Schlägt es fehl oder bleibt es unvollständig, versucht es eine Runde
+  frühestens eine Stunde später wieder (`sync.cursor.catchUpTriedAt`): Es holt
+  jede Datei. Die Runde selbst läuft weiter.
 - **Unbekanntes holen.** Ein genaues Gerät holt auch eine fremde Datei, deren
   Name nicht nach dem Cursor liegt und deren Länge es nicht kennt
   (`DeviceCursor::fetch_unknown`), ohne Untergrenze. Das ist eine verspätet

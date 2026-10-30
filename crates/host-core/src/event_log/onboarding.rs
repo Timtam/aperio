@@ -178,6 +178,14 @@ impl OnboardingReport {
     }
 }
 
+/// What [`OnboardingService::apply_every_log`] found.
+struct Pass {
+    /// The newest foreign file's name time, if any.
+    newest_foreign: Option<DateTime<Utc>>,
+    /// Every file read: the device is exact.
+    complete: bool,
+}
+
 /// Onboarding helper. The Tauri commands hold one of these in State
 /// and dispatch the user-facing verbs through it.
 ///
@@ -471,7 +479,7 @@ impl OnboardingService {
         // Every log file, not only those named after the snapshot: a session
         // named before it may have grown after it (Toni's laptop,
         // 2026-10-27).
-        let newest = self.apply_every_log(adapter, &mut report).await?;
+        let pass = self.apply_every_log(adapter, &mut report).await?;
         info!(
             count = report.fetched_logs,
             snapshot_applied = snapshot_applied,
@@ -482,11 +490,13 @@ impl OnboardingService {
         // same backlog: the snapshot's time, or the newest foreign file's. If
         // neither moved it past MIN_UTC (no snapshot AND no logs), don't
         // touch the existing cursor.
-        let cursor = starting_cursor.max(newest.unwrap_or(DateTime::<Utc>::MIN_UTC));
+        let cursor = starting_cursor.max(pass.newest_foreign.unwrap_or(DateTime::<Utc>::MIN_UTC));
         if cursor > DateTime::<Utc>::MIN_UTC {
             self.save_cursor(cursor)?;
         }
-        self.save_coverage_exact_since(Utc::now())?;
+        if pass.complete {
+            self.save_coverage_exact_since(Utc::now())?;
+        }
 
         // Persist + push the device registration.
         self.register_self_in_meta(&mut meta, device_name);
@@ -586,7 +596,7 @@ impl OnboardingService {
             remote_was_empty: false,
             ..Default::default()
         };
-        let newest = self.apply_every_log(adapter, &mut report).await?;
+        let pass = self.apply_every_log(adapter, &mut report).await?;
         info!(
             count = report.fetched_logs,
             "stale resume applied every log",
@@ -595,9 +605,11 @@ impl OnboardingService {
         // Persist the cursor before mutating meta. If we crash
         // between cursor + meta push the next sync round just
         // re-pulls the post-snapshot logs (idempotent applier).
-        let cursor = base.max(newest.unwrap_or(DateTime::<Utc>::MIN_UTC));
+        let cursor = base.max(pass.newest_foreign.unwrap_or(DateTime::<Utc>::MIN_UTC));
         self.save_cursor(cursor)?;
-        self.save_coverage_exact_since(Utc::now())?;
+        if pass.complete {
+            self.save_coverage_exact_since(Utc::now())?;
+        }
 
         // Clear our device's `stale` flag in meta.json + bump
         // `last_seen_log` so other devices see us as current.
@@ -608,7 +620,7 @@ impl OnboardingService {
         if let Some(entry) = meta.devices.get_mut(self.local_device_id.as_str()) {
             entry.stale = false;
             entry.last_seen_log = cursor;
-            entry.exact = true;
+            entry.exact = pass.complete;
         }
         adapter.push_meta(&meta).await?;
         report.device_count = meta.devices.len();
@@ -644,11 +656,13 @@ impl OnboardingService {
             remote_was_empty: false,
             ..Default::default()
         };
-        let newest = self.apply_every_log(adapter, &mut report).await?;
-        if let Some(newest) = newest {
+        let pass = self.apply_every_log(adapter, &mut report).await?;
+        if let Some(newest) = pass.newest_foreign {
             self.save_cursor(self.read_cursor().max(newest))?;
         }
-        self.save_coverage_exact_since(Utc::now())?;
+        if pass.complete {
+            self.save_coverage_exact_since(Utc::now())?;
+        }
         info!(
             fetched = report.fetched_logs,
             applied = report.applied,
@@ -670,13 +684,13 @@ impl OnboardingService {
     ///
     /// Everything is fetched before anything changes, so a failed fetch
     /// leaves the device as it was. Records the foreign files' lengths for
-    /// the growth refetch (an unreadable one as 0, so the next round
-    /// retries it) and returns the newest foreign file's name time.
+    /// the growth refetch and returns the newest foreign file's name time,
+    /// and whether every file read: only then is the device exact.
     async fn apply_every_log(
         &self,
         adapter: &dyn SyncAdapter,
         report: &mut OnboardingReport,
-    ) -> SyncResult<Option<DateTime<Utc>>> {
+    ) -> SyncResult<Pass> {
         let logs = adapter
             .fetch_new_logs(&DeviceCursor {
                 last_seen_log: DateTime::<Utc>::MIN_UTC,
@@ -688,29 +702,34 @@ impl OnboardingService {
         let mut envelopes = Vec::new();
         let mut lengths: Vec<(String, u64)> = Vec::new();
         let mut newest_foreign: Option<DateTime<Utc>> = None;
+        let mut complete = true;
         for log in &logs {
             let foreign = log.name.device_id != self.local_device_id;
             if foreign {
                 report.fetched_logs += 1;
                 newest_foreign = newest_foreign.max(Some(log.name.timestamp));
             }
-            let applied_len = match log.into_envelopes() {
+            match log.into_envelopes() {
                 Ok(mut parsed) => {
                     envelopes.append(&mut parsed);
-                    log.bytes.len() as u64
+                    if foreign {
+                        lengths.push((log.name.to_filename(), log.bytes.len() as u64));
+                    }
                 }
                 Err(err) => {
+                    // A torn read of a file being written, or one this version
+                    // cannot read. Not recorded, and the pass is not complete:
+                    // the device is not exact, and the next catch-up takes the
+                    // file again, under its rules rather than a round's
+                    // (review round 2 of #130).
                     warn!(
                         log = %log.name.to_filename(),
                         ?err,
-                        "unreadable log file; the next round retries it",
+                        "unreadable log file; the device catches up again later",
                     );
                     report.apply_failures += 1;
-                    0
+                    complete = false;
                 }
-            };
-            if foreign {
-                lengths.push((log.name.to_filename(), applied_len));
             }
         }
         envelopes.extend(self.pending_envelopes().await);
@@ -721,7 +740,10 @@ impl OnboardingService {
         report.detail = applied.clone();
         report.merge_apply(applied);
         self.record_applied_lengths(&lengths);
-        Ok(newest_foreign)
+        Ok(Pass {
+            newest_foreign,
+            complete,
+        })
     }
 
     /// This device's own changes in `pending_dir` — written, maybe not
@@ -2130,6 +2152,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_catch_up_meeting_an_unreadable_file_is_not_exact_and_leaves_it_unrecorded() {
+        // Review round 2 of #130: a torn read of a peer's live file still
+        // marked the device exact, and recorded the file, so a round applied
+        // it later outside the catch-up's rules. The next catch-up takes it.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let torn = LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"{\"id\":".to_vec(),
+        };
+        let torn_name = torn.name.to_filename();
+        adapter.logs.lock().unwrap().push(torn);
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert_eq!(
+            interval(&db).as_deref(),
+            Some("45"),
+            "the rest still arrives"
+        );
+        assert!(exact_since(&db).is_none());
+        let lengths = UserPrefsRepo::new(&db.shared())
+            .get(sync_engine::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(!lengths.contains(&torn_name));
+    }
+
+    #[tokio::test]
     async fn the_catch_up_brings_back_this_devices_own_changes() {
         // Its own change, pushed and no longer pending: not skipped as own
         // here, and newer than the row, so it wins.
@@ -2361,22 +2415,18 @@ mod tests {
         let svc = build_service(db.shared());
 
         // Pre-seed: one log from another device with a known
-        // timestamp. The applier will reject any unsupported event
-        // types as "skipped", which is fine — the test asserts on
-        // cursor advance, not on row counts.
+        // timestamp. The test asserts on cursor advance, not on row
+        // counts; the delete of a missing row changes nothing.
         let ts: DateTime<Utc> = "2026-05-01T12:34:56Z".parse().unwrap();
-        // Hard-code an envelope id rather than minting one — the
-        // applier doesn't validate id shape, and `mint_event_id` is
-        // crate-private.
-        let envelope_json = format!(
-            r#"{{"id":"ev-test-001","device_id":"dev-other","timestamp":"{}","type":"event.deleted","id_payload":{{"id":"nonexistent"}}}}"#,
-            ts.to_rfc3339(),
+        let deleted = envelope(
+            "ev-test-001",
+            "dev-other",
+            ts,
+            sync_core::SyncEvent::EventDeleted(sync_core::IdPayload {
+                id: "nonexistent".into(),
+            }),
         );
-        let log = LogFile {
-            name: LogFileName::new(ts, DeviceId::from_string("dev-other".into())),
-            bytes: envelope_json.into_bytes(),
-        };
-        let adapter = FakeAdapter::with_logs(vec![log]);
+        let adapter = FakeAdapter::with_logs(vec![file_of("dev-other", ts, &[&deleted])]);
         adapter.install_meta(MetaJson::fresh("1.0.0"));
 
         svc.accept_remote(&adapter, None).await.unwrap();

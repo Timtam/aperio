@@ -107,6 +107,16 @@ pub const SYNC_APPLIED_LOG_LENGTHS_PREF_KEY: &str = "sync.cursor.appliedLogLengt
 /// the files 14 days of retention keep (one per device and session).
 pub const APPLIED_LOG_LENGTHS_CAP: usize = 256;
 
+/// When this device last tried its one-time catch-up
+/// (DESIGN-sync-snapshot-coverage.md). One that fails or meets a file it
+/// cannot read leaves the device not exact; it is tried again after
+/// [`CATCH_UP_RETRY`], not every round — it fetches every log file.
+/// Device-local, like every `sync.cursor.*` key.
+pub const SYNC_CATCH_UP_TRIED_AT_PREF_KEY: &str = "sync.cursor.catchUpTriedAt";
+
+/// How long a device waits before it tries a failed catch-up again.
+pub const CATCH_UP_RETRY: chrono::Duration = chrono::Duration::hours(1);
+
 /// What a pending log file sends to the remote: as written — but without
 /// credential events while E2E is off (review round 2 of #130). Those exist
 /// only from before an E2E downgrade, which purged them from the remote;
@@ -674,7 +684,13 @@ impl SyncOrchestrator {
             // this, and a file it skipped by name may hold events it never
             // applied, on any device. The stale resume above already did. A
             // failure leaves the device as it was; the next round retries.
-            if !resumed && !self.coverage_exact() {
+            if !resumed && !self.coverage_exact() && self.catch_up_due() {
+                if let Err(err) = self
+                    .store
+                    .set_pref(SYNC_CATCH_UP_TRIED_AT_PREF_KEY, &Utc::now().to_rfc3339())
+                {
+                    warn!(?err, "couldn't record the catch-up attempt");
+                }
                 match self.hooks.catch_up(adapter.as_ref()).await {
                     Ok(applied) => {
                         info!("caught up once over every log file");
@@ -682,7 +698,7 @@ impl SyncOrchestrator {
                     }
                     Err(err) => warn!(
                         ?err,
-                        "catch-up over every log file failed; retrying next round",
+                        "catch-up over every log file failed; trying again in an hour",
                     ),
                 }
             }
@@ -1065,6 +1081,18 @@ impl SyncOrchestrator {
             }
         }
         Ok(pushed)
+    }
+
+    /// Whether the catch-up is due ([`SYNC_CATCH_UP_TRIED_AT_PREF_KEY`]):
+    /// never tried, or tried more than [`CATCH_UP_RETRY`] ago. A mark that
+    /// does not read counts as due.
+    fn catch_up_due(&self) -> bool {
+        self.store
+            .get_pref(SYNC_CATCH_UP_TRIED_AT_PREF_KEY)
+            .ok()
+            .flatten()
+            .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
+            .is_none_or(|at| Utc::now() - at.with_timezone(&Utc) >= CATCH_UP_RETRY)
     }
 
     /// Whether this device's applied record is exact

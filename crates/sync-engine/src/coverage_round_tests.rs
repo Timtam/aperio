@@ -19,7 +19,7 @@ use tempfile::TempDir;
 use crate::test_support::{FakeSecrets, FakeStore};
 use crate::{
     ApplyReport, Compactor, EventLogApplier, SnapshotBuilder, SyncOrchestrator, SyncRoundHooks,
-    SyncStore, SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
+    SyncStore, CATCH_UP_RETRY, SYNC_CATCH_UP_TRIED_AT_PREF_KEY, SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
 };
 
 /// Counts catch-ups; a successful one marks the record exact, as the
@@ -166,14 +166,23 @@ async fn an_exact_device_does_not_catch_up() {
 }
 
 #[tokio::test]
-async fn a_failed_catch_up_leaves_the_round_going_and_retries() {
+async fn a_failed_catch_up_leaves_the_round_going_and_retries_an_hour_later() {
+    // It fetches every log file: not again every round.
     let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), true).await;
     orchestrator
         .sync_now()
         .await
         .expect("the round still succeeds");
     orchestrator.sync_now().await.expect("and the next one");
-    assert_eq!(*hooks.catch_ups.lock().unwrap(), 2, "retried each round");
+    assert_eq!(*hooks.catch_ups.lock().unwrap(), 1, "not again right away");
+
+    let earlier = Utc::now() - CATCH_UP_RETRY - chrono::Duration::minutes(1);
+    hooks
+        .store
+        .set_pref(SYNC_CATCH_UP_TRIED_AT_PREF_KEY, &earlier.to_rfc3339())
+        .unwrap();
+    orchestrator.sync_now().await.expect("an hour later");
+    assert_eq!(*hooks.catch_ups.lock().unwrap(), 2);
 }
 
 /// A session file of `device` named at `secs`, holding `events` events.
