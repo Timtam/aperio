@@ -176,3 +176,50 @@ nie angewendet hat.
 Je Schritt Tests und Gegenproben; `cargo test -p cal-ffi` bei jeder Änderung an
 Compactor oder Runde (Lehre aus dem Compactor-Bogen). Prüfrunde mit
 Gegenprüfern vor dem Merge.
+
+## Prüfrunde 1 (PR #130, 2026-10-30)
+
+4 Prüfer + Gegenprüfer + Kritiker (40 Agenten): 35 bestätigt, 0 widerlegt,
+dazu 7 vom Kritiker. Einzelheiten: scratchpad `coverage/review_r1.json`.
+
+**Kritisch**
+- Gemerkte Längen nach `gc_horizon` beschnitten: Eine noch laufende Sitzung mit
+  altem Namen fällt heraus, ihr Wachstum wird nie mehr geholt — der
+  Laptop-Fehler kehrt zurück, auch beim Beitritt (dreimal gefunden).
+- „Vollständig“ ist nicht beweisbar: Der Compactor sieht nur vorhandene
+  Dateien. Fehlen einem Gerät Ereignisse aus schon gelöschten Dateien, oder hat
+  ein alter Schnappschuss (Upsert bei der Wiederaufnahme) Zeilen zurückgesetzt,
+  deren Ereignisse als angewendet vermerkt bleiben, gilt es trotzdem als
+  vollständig — sein Schnappschuss würde Grundlage aller Neuaufbauten.
+- Der Neuaufbau setzt zurück: Was ein Gerät mehr wusste als der Autor des
+  Schnappschusses, ist verloren, wenn die Dateien schon gelöscht sind.
+- Verspätete Dateien unter `gc_horizon` holt niemand; erneut hochgeladene alte
+  Sitzungen ebenso.
+
+**Schwer:** Beitritt wendet ganze Dateien nach Namen an statt Ereignisse nach
+Zeit; Aufräumen auf einer Liste von vor dem Schnappschuss (Wachstum dazwischen
+gelöscht), leere/abgerissene Lesungen; das Ende der rotierten Sitzung wird
+weggeräumt, ohne hochgeladen zu sein; alte Builds löschen das Meta-Feld.
+
+## Umbau nach Prüfrunde 1 (Toni, 2026-10-30)
+
+- **Nachholen statt ersetzen.** Kein Neuaufbau aus dem Schnappschuss. Jedes
+  Gerät, das nicht genau ist, holt **einmal** alle vorhandenen Dateien nach,
+  eigene eingeschlossen, in Zeitreihenfolge; eine Änderung gilt nur, wenn sie
+  neuer ist als die Zeile, ohne Konfliktmeldung, Löschungen ebenso. Danach ist
+  es genau. So wird nichts zurückgesetzt; es repariert auch Zeilen, die ein
+  alter Schnappschuss zurückgesetzt hat, solange die Ereignisse noch in Dateien
+  liegen. Neuaufbau, Auto-Verdichtung, `meta.snapshot_coverage` und
+  `deletes_to_replay` entfallen.
+- **Neuer gewinnt auch ohne Zeilenzeit** (Toni: gleich mitbeheben). Wo eine
+  Tabelle `updated_at` hat, setzt das Anwenden sie auf die Zeit des Ereignisses
+  und vergleicht damit; ein älteres Ereignis gewinnt nicht mehr — auch nicht,
+  wenn es spät ankommt (offline geschrieben, gewachsene Datei).
+- **Längen:** die 256 neuesten behalten, nicht nach Horizont beschneiden.
+- **Aufräumen:** nach dem Schnappschuss neu auflisten, nur löschen, was mit
+  aktuellem Inhalt ganz gehalten wird; leere oder unlesbare Dateien nie; das
+  Ende der rotierten Sitzung vor dem Wegräumen hochladen.
+- **Kennungen** schreibt nur ein Gerät, das genau ist UND alles hält.
+- **Beitritt und Nachholen** wenden die Ereignisse aller Dateien gemeinsam
+  nach Zeit an.
+- **Unbekannte Dateien** holt ein genaues Gerät ohne Untergrenze.
