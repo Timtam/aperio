@@ -299,6 +299,37 @@ impl SyncStore for DesktopSyncStore {
         tx.commit().map_err(backend)
     }
 
+    fn row_clock(
+        &self,
+        key: &sync_core::RowKey,
+    ) -> Result<Option<chrono::DateTime<Utc>>, StoreError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let at_us: Option<i64> = conn
+            .query_row(
+                "SELECT at_us FROM sync_row_clock WHERE kind = ? AND id = ?",
+                params![key.kind, key.id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|err| StoreError::Backend(format!("row_clock: {err}")))?;
+        Ok(at_us.and_then(chrono::DateTime::<Utc>::from_timestamp_micros))
+    }
+
+    fn advance_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: chrono::DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "INSERT INTO sync_row_clock (kind, id, at_us) VALUES (?, ?, ?)
+             ON CONFLICT(kind, id) DO UPDATE SET at_us = MAX(at_us, excluded.at_us)",
+            params![key.kind, key.id, at.timestamp_micros()],
+        )
+        .map_err(|err| StoreError::Backend(format!("advance_row_clock: {err}")))?;
+        Ok(())
+    }
+
     fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError> {
         ConflictsRepo::new(&self.db)
             .record(conflict.clone())

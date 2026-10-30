@@ -58,8 +58,8 @@ pub use encrypting_adapter::EncryptingAdapter;
 pub use error::{SyncError, SyncResult};
 pub use event::{
     AccountPayload, CredentialPayload, CredentialSlotPayload, EventEnvelope, EventId, EventPayload,
-    IdPayload, PartialPayload, PluginPayload, SettingsPayload, ShortcutKeyPayload, ShortcutPayload,
-    SyncEvent,
+    IdPayload, PartialPayload, PluginPayload, RowKey, SettingsPayload, ShortcutKeyPayload,
+    ShortcutPayload, SyncEvent,
 };
 pub use log::{LogFile, LogFileName};
 pub use meta::{DeviceRecord, MetaJson, SCHEMA_VERSION};

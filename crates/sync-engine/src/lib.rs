@@ -94,6 +94,8 @@ pub struct SyncRoundReport {
     pub skipped_own: usize,
     pub skipped_already_applied: usize,
     pub skipped_unsupported: usize,
+    /// Envelopes older than their row's clock: a newer change already won.
+    pub skipped_older: usize,
     /// Per-envelope apply failures (non-fatal; the round still succeeds).
     pub apply_failures: usize,
     /// Push failures logged but tolerated (one bad file shouldn't sink a round).
@@ -384,6 +386,15 @@ pub trait SyncStore: Send + Sync {
     /// Forget these applied events, so a later pass applies them again —
     /// the named deletes whose row the snapshot no longer holds.
     fn forget_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError>;
+    /// The time of the newest change this row has seen (`sync_row_clock`,
+    /// DESIGN-sync-snapshot-coverage.md), or `None` before any.
+    fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<DateTime<Utc>>, StoreError>;
+    /// Move the row's clock forward to `at`; never back.
+    fn advance_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: DateTime<Utc>,
+    ) -> Result<(), StoreError>;
     /// Persist a field-level conflict the applier couldn't auto-merge,
     /// superseding any prior unresolved conflict on the same
     /// (kind, row, field) (DESIGN.md §19.3).

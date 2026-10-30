@@ -1671,6 +1671,8 @@ export interface SyncRoundReport {
   skipped_own: number;
   skipped_already_applied: number;
   skipped_unsupported: number;
+  /** Older than their row's clock: a newer change already won. */
+  skipped_older: number;
   apply_failures: number;
   push_failures: number;
   fetch_failures: number;

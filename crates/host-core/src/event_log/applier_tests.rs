@@ -1173,3 +1173,192 @@ fn a_group_travels_between_devices_and_a_dissolve_sticks() {
         "a dissolved group must stay dissolved",
     );
 }
+
+// ---- The row's clock (DESIGN-sync-snapshot-coverage.md, review round 1 of
+// #130; Toni, 2026-10-30: fix it in this PR) -----------------------------
+
+fn set_dark_mode(device: &DeviceId, value: bool, at: i64) -> EventEnvelope {
+    fixture_envelope(
+        device.clone(),
+        SyncEvent::SettingsUpdated(SettingsPayload {
+            key: "appearance.darkMode".into(),
+            value: serde_json::json!(value),
+        }),
+        at,
+    )
+}
+
+fn label_event(id: &str, name: &str, at: i64, created: bool) -> EventEnvelope {
+    let label = ColorLabel {
+        id: cal_core::ColorLabelId::new(id),
+        name: name.into(),
+        hex: "#ff0000".into(),
+        ad_hoc: false,
+    };
+    let payload = EventPayload {
+        id: id.into(),
+        fields: serde_json::to_value(&label).unwrap(),
+    };
+    fixture_envelope(
+        DeviceId::from_string("dev-other".into()),
+        if created {
+            SyncEvent::ColorLabelCreated(payload)
+        } else {
+            SyncEvent::ColorLabelUpdated(payload)
+        },
+        at,
+    )
+}
+
+fn label_deleted(id: &str, at: i64) -> EventEnvelope {
+    fixture_envelope(
+        DeviceId::from_string("dev-other".into()),
+        SyncEvent::ColorLabelDeleted(IdPayload { id: id.into() }),
+        at,
+    )
+}
+
+fn label_name(db: &SharedConn, id: &str) -> Option<String> {
+    let conn = db.lock().unwrap();
+    conn.query_row(
+        "SELECT name FROM color_labels WHERE id = ?",
+        params![id],
+        |row| row.get(0),
+    )
+    .ok()
+}
+
+#[test]
+fn an_older_setting_arriving_late_does_not_overwrite_a_newer_one() {
+    // A whole-row kind: the newer change already reached the row, so a
+    // change written earlier and uploaded late is skipped, in its own pass
+    // as in a later one.
+    let (adapter, db) = fixture();
+    let other = DeviceId::from_string("dev-other".into());
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![set_dark_mode(&other, true, 2000)])
+        .unwrap();
+    let report = applier
+        .apply_envelopes(vec![set_dark_mode(&other, false, 1000)])
+        .unwrap();
+    assert_eq!(report.skipped_older, 1);
+    assert_eq!(report.applied, 0);
+    let shared = db.clone();
+    assert_eq!(
+        UserPrefsRepo::new(&shared)
+            .get("appearance.darkMode")
+            .unwrap()
+            .as_deref(),
+        Some("true"),
+    );
+}
+
+#[test]
+fn an_older_delete_spares_a_row_changed_after_it_and_a_delete_keeps_its_clock() {
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    // Changed at 2000; a delete from 1000 arriving late does not remove it.
+    applier
+        .apply_envelopes(vec![label_event("lbl-kept", "Arbeit", 2000, true)])
+        .unwrap();
+    applier
+        .apply_envelopes(vec![label_deleted("lbl-kept", 1000)])
+        .unwrap();
+    assert_eq!(label_name(&db, "lbl-kept").as_deref(), Some("Arbeit"));
+    // Deleted at 3000; a create from 2500 arriving late does not bring it back.
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-gone", "Privat", 1000, true),
+            label_deleted("lbl-gone", 3000),
+        ])
+        .unwrap();
+    applier
+        .apply_envelopes(vec![label_event("lbl-gone", "Privat", 2500, true)])
+        .unwrap();
+    assert_eq!(label_name(&db, "lbl-gone"), None);
+}
+
+#[test]
+fn an_older_update_of_a_kind_without_its_own_time_is_a_conflict_not_a_win() {
+    // Colour labels have no `updated_at`; the merge used the envelope's own
+    // time, so any late update won. With a clock, it is weighed like an
+    // event's: the newer value stays and the user is asked.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-a", "Work", 1000, true),
+            label_event("lbl-a", "Arbeit", 3000, false),
+        ])
+        .unwrap();
+    let report = applier
+        .apply_envelopes(vec![label_event("lbl-a", "Job", 2000, false)])
+        .unwrap();
+    assert_eq!(label_name(&db, "lbl-a").as_deref(), Some("Arbeit"));
+    assert_eq!(report.conflicts, 1);
+}
+
+#[test]
+fn the_catch_up_keeps_a_newer_row_quietly_and_brings_a_reverted_one_back() {
+    // DESIGN-sync-snapshot-coverage.md (Toni, 2026-10-30): the catch-up
+    // takes every event again — already applied ones too — and a change
+    // wins only where it is newer than its row, without a conflict.
+    let (adapter, db) = fixture();
+    let me = DeviceId::from_string("dev-me".into());
+    let other = DeviceId::from_string("dev-other".into());
+    let applier = make_applier(&db, &adapter, me);
+    seed_event(&adapter, "ev-catch");
+    let at = |hour: u32| {
+        Utc.with_ymd_and_hms(2026, 5, 12, hour, 0, 0)
+            .unwrap()
+            .timestamp()
+    };
+    let title = |text: &str, hour: u32| {
+        fixture_envelope(
+            other.clone(),
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-catch".into(),
+                fields: serde_json::json!({ "title": text }),
+            }),
+            at(hour),
+        )
+    };
+    // Applied once at 10:00 …
+    applier.apply_envelopes(vec![title("Zehn", 10)]).unwrap();
+    // … then reverted under the record, as an old snapshot's upsert does.
+    let mut reverted = adapter.get_event_by_id("ev-catch").unwrap().unwrap();
+    reverted.title = "Original".into();
+    reverted.updated_at = Utc.with_ymd_and_hms(2026, 5, 12, 9, 0, 0).unwrap();
+    adapter.upsert_event_from_sync(&reverted).unwrap();
+
+    // The catch-up: an older change (08:00) differs from the row and stays
+    // out without a conflict; the applied 10:00 change comes back.
+    let report = applier
+        .catch_up_envelopes(vec![title("Acht", 8), title("Zehn", 10)])
+        .unwrap();
+    assert_eq!(report.conflicts, 0);
+    assert_eq!(
+        adapter.get_event_by_id("ev-catch").unwrap().unwrap().title,
+        "Zehn",
+    );
+    let shared = db.clone();
+    assert_eq!(ConflictsRepo::new(&shared).unresolved_count().unwrap(), 0);
+}
+
+#[test]
+fn a_rows_clock_never_goes_back() {
+    use sync_engine::SyncStore;
+    let (adapter, db) = fixture();
+    let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
+    let key = sync_core::RowKey {
+        kind: "setting",
+        id: "appearance.darkMode".into(),
+    };
+    let late = Utc.timestamp_opt(3000, 0).unwrap();
+    store.advance_row_clock(&key, late).unwrap();
+    store
+        .advance_row_clock(&key, Utc.timestamp_opt(1000, 0).unwrap())
+        .unwrap();
+    assert_eq!(store.row_clock(&key).unwrap(), Some(late));
+}

@@ -29,7 +29,7 @@
 //! from `user_prefs` by the host (a DB concern) and handed in.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use chrono::{DateTime, Utc};
 use sync_core::{DeviceId, EventEnvelope, LogFileName, SyncEvent};
@@ -37,6 +37,8 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot, Notify};
 use tracing::{debug, warn};
+
+use crate::SyncStore;
 
 /// A message on the drain queue. Either an event to append or a request to
 /// roll over to a new session file. Routing the rotation through the same
@@ -56,7 +58,7 @@ enum DrainMsg {
 }
 
 /// Handle to the per-process event-log writer.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct EventLogWriter {
     device_id: DeviceId,
     /// Sender half of the drain queue. `send` is allocation-only — appending a
@@ -70,6 +72,22 @@ pub struct EventLogWriter {
     /// inside a debounce window, the second ping is absorbed and the same
     /// round flushes both edits (the coalescing DESIGN.md §19.8 asks for).
     kick: Option<Arc<Notify>>,
+    /// Where this device's own changes advance their row's clock
+    /// (`sync_row_clock`, DESIGN-sync-snapshot-coverage.md), so an older
+    /// change from another device, arriving late, does not win over them.
+    /// Set once the store exists ([`Self::set_row_clock`]); shared by every
+    /// clone of the handle.
+    row_clock: Arc<OnceLock<Arc<dyn SyncStore>>>,
+}
+
+impl std::fmt::Debug for EventLogWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventLogWriter")
+            .field("device_id", &self.device_id)
+            .field("kick", &self.kick.is_some())
+            .field("row_clock", &self.row_clock.get().is_some())
+            .finish()
+    }
 }
 
 impl EventLogWriter {
@@ -110,6 +128,7 @@ impl EventLogWriter {
             device_id: device_id.clone(),
             sender,
             kick,
+            row_clock: Arc::new(OnceLock::new()),
         });
         let pending_dir = data_dir.join("sync").join("log").join("pending");
         tokio::spawn(drain_loop(pending_dir, device_id, session_at, receiver));
@@ -121,12 +140,25 @@ impl EventLogWriter {
         &self.device_id
     }
 
+    /// Hand the writer the store whose row clocks this device's own changes
+    /// advance. Once; a second call is ignored.
+    pub fn set_row_clock(&self, store: Arc<dyn SyncStore>) {
+        let _ = self.row_clock.set(store);
+    }
+
     /// Queue one [`SyncEvent`] for writing. Returns immediately — the actual
     /// disk write happens in the drain task. A `send` error (only possible if
     /// the drain task has exited, which it doesn't in production) logs a
     /// warning; the mutation itself already succeeded against the store.
     pub fn append(&self, event: SyncEvent) {
         let envelope = EventEnvelope::new(self.device_id.clone(), event);
+        // This change is the newest its row has seen: an older one from
+        // another device, arriving later, must not win over it.
+        if let (Some(store), Some(key)) = (self.row_clock.get(), envelope.event.row_key()) {
+            if let Err(err) = store.advance_row_clock(&key, envelope.timestamp) {
+                warn!(?err, kind = key.kind, "couldn't advance the row's clock");
+            }
+        }
         if let Err(err) = self.sender.send(DrainMsg::Event(Box::new(envelope))) {
             warn!(?err, "event-log writer channel closed; event lost");
         }
@@ -410,6 +442,29 @@ mod tests {
             }
         }
         panic!("rotation didn't split the events across the two files within 1 s");
+    }
+
+    #[tokio::test]
+    async fn own_changes_advance_their_rows_clock_as_they_are_written() {
+        // DESIGN-sync-snapshot-coverage.md: this device's own change is the
+        // newest its row has seen, so an older one from another device,
+        // arriving later, does not win over it.
+        let tmp = TempDir::new().unwrap();
+        let writer =
+            EventLogWriter::spawn(tmp.path().to_path_buf(), DeviceId::from_string("me".into()));
+        let store = Arc::new(crate::test_support::FakeStore::default());
+        writer.set_row_clock(store.clone());
+        let before = Utc::now();
+        writer.append(SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+            key: "appearance.darkMode".into(),
+            value: serde_json::json!(true),
+        }));
+        let key = sync_core::RowKey {
+            kind: "setting",
+            id: "appearance.darkMode".into(),
+        };
+        let clock = store.row_clocks.lock().unwrap().get(&key).copied();
+        assert!(clock.is_some_and(|at| at >= before), "{clock:?}");
     }
 
     #[tokio::test]

@@ -8,6 +8,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
 
+use chrono::{DateTime, Utc};
+
 use adapter_local::{SnapshotApplyReport, SnapshotDump};
 
 use crate::whitelist::is_synced_key;
@@ -32,6 +34,8 @@ pub struct FakeStore {
     /// exercise the difference between "this pref is unset" and "the store
     /// could not be read" — the two used to be the same thing to callers.
     pub failing_pref_reads: Mutex<HashSet<String>>,
+    /// `sync_row_clock`: the newest change each row has seen.
+    pub row_clocks: Mutex<std::collections::HashMap<sync_core::RowKey, DateTime<Utc>>>,
 }
 
 impl SyncStore for FakeStore {
@@ -113,6 +117,21 @@ impl SyncStore for FakeStore {
         for id in event_ids {
             applied.remove(id);
         }
+        Ok(())
+    }
+
+    fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<DateTime<Utc>>, StoreError> {
+        Ok(self.row_clocks.lock().unwrap().get(key).copied())
+    }
+
+    fn advance_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let mut clocks = self.row_clocks.lock().unwrap();
+        let clock = clocks.entry(key.clone()).or_insert(at);
+        *clock = (*clock).max(at);
         Ok(())
     }
 

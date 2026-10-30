@@ -93,6 +93,9 @@ pub fn build_orchestrator(
     let sync_store: Arc<dyn SyncStore> = Arc::new(
         DesktopSyncStore::new(db.clone(), Arc::clone(&applier_adapter)).with_plugins(plugins),
     );
+    // This device's own changes advance their row's clock as they are written
+    // (DESIGN-sync-snapshot-coverage.md).
+    writer.set_row_clock(Arc::clone(&sync_store));
     let applier = Arc::new(EventLogApplier::new(
         Arc::clone(&sync_store),
         Arc::clone(&secret_store),

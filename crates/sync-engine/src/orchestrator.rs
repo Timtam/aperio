@@ -161,6 +161,7 @@ impl SyncRoundReport {
         self.skipped_own += report.skipped_own;
         self.skipped_already_applied += report.skipped_already_applied;
         self.skipped_unsupported += report.skipped_unsupported;
+        self.skipped_older += report.skipped_older;
         self.apply_failures += report.failed;
         self.conflicts += report.conflicts;
         // De-duplicated: several logs in one round can carry the same key
