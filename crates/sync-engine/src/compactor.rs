@@ -458,7 +458,9 @@ impl Compactor {
                 .iter()
                 .map(|log| (log.name.to_filename(), log.bytes.len()))
                 .collect();
-            kept_pending = sweep_redundant_pending(pending, cut, &remote_lengths).await;
+            kept_pending =
+                sweep_redundant_pending(pending, cut, &remote_lengths, self.store.e2e_enabled())
+                    .await;
         }
 
         let mut report = CompactionReport::default();
@@ -792,14 +794,16 @@ impl Compactor {
 /// exactly `cut`, so the strict `< cut` comparison keeps it; non-log files
 /// in the dir are left alone.
 ///
-/// Peers take log files, not the snapshot: a file longer than its remote
-/// copy (`remote_lengths`, plaintext bytes by filename) stays — the end of
-/// the rotated session, written since its last push — and the next round's
+/// Peers take log files, not the snapshot: a file whose outgoing form
+/// ([`crate::orchestrator::outgoing_log`]) is longer than its remote copy
+/// (`remote_lengths`, plaintext bytes by filename) stays — the end of the
+/// rotated session, written since its last push — and the next round's
 /// push takes it. Returns the names of the files that stay.
 async fn sweep_redundant_pending(
     pending_dir: &Path,
     cut: DateTime<Utc>,
     remote_lengths: &HashMap<String, usize>,
+    e2e_enabled: bool,
 ) -> HashSet<String> {
     let mut kept = HashSet::new();
     let mut entries = match tokio::fs::read_dir(pending_dir).await {
@@ -832,10 +836,20 @@ async fn sweep_redundant_pending(
                     continue;
                 }
             };
-            let uploaded = remote_lengths
-                .get(name)
-                .is_some_and(|remote| *remote >= bytes.len());
-            if !bytes.is_empty() && !uploaded {
+            let empty = bytes.is_empty();
+            let outgoing = crate::orchestrator::outgoing_log(
+                LogFile {
+                    name: parsed,
+                    bytes,
+                },
+                e2e_enabled,
+            );
+            let uploaded = outgoing.is_some_and(|log| {
+                remote_lengths
+                    .get(name)
+                    .is_some_and(|remote| *remote >= log.bytes.len())
+            });
+            if !empty && !uploaded {
                 debug!(name = name, "pending log not fully pushed; keeping it");
                 kept.insert(name.to_string());
                 continue;
@@ -1564,6 +1578,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_pending_file_pushed_without_its_secrets_counts_as_pushed() {
+        // With E2E off the push leaves credential events out
+        // (`outgoing_log`): the remote copy is shorter than the local file,
+        // and the file is still pushed whole.
+        let dir = TempDir::new().unwrap();
+        let store = Arc::new(FakeStore::default());
+        let compactor = compactor_with_pending(&store, dir.path());
+        let adapter = FakeAdapter::new();
+        let device = DeviceId::from_string("dev-this".into());
+        let at = Utc::now() - ChronoDuration::hours(1);
+        let secret = sync_core::EventEnvelope::new(
+            device.clone(),
+            sync_core::SyncEvent::CredentialCleared(sync_core::CredentialSlotPayload {
+                account_id: "acc-1".into(),
+                slot: "password".into(),
+            }),
+        );
+        let (kept, _) = log_of(at, "dev-this", 1);
+        let mut envelopes = kept.into_envelopes().unwrap();
+        envelopes.insert(0, secret);
+        let local = LogFile::from_envelopes(device, at, &envelopes).unwrap();
+        let path = dir.path().join(local.name.to_filename());
+        std::fs::write(&path, &local.bytes).unwrap();
+        let pushed = crate::orchestrator::outgoing_log(local, false).unwrap();
+        adapter.logs.lock().unwrap().push(pushed);
+
+        compactor.compact_now(&adapter).await.unwrap();
+
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
     async fn gc_leaves_the_remote_copy_of_a_session_still_pending() {
         let dir = TempDir::new().unwrap();
         let store = Arc::new(FakeStore::default());
@@ -1944,7 +1990,8 @@ mod tests {
         // A non-empty leftover log from a long-gone session.
         let old_ts: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
         let leftover = pending.join(LogFileName::new(old_ts, device.clone()).to_filename());
-        tokio::fs::write(&leftover, b"{\"x\":1}\n").await.unwrap();
+        let (old_log, _) = log_of(old_ts, "dev-sweep", 1);
+        tokio::fs::write(&leftover, &old_log.bytes).await.unwrap();
 
         // The current session's live file.
         let session_at = Utc::now() - ChronoDuration::seconds(5);

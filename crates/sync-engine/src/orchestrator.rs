@@ -107,6 +107,34 @@ pub const SYNC_APPLIED_LOG_LENGTHS_PREF_KEY: &str = "sync.cursor.appliedLogLengt
 /// the files 14 days of retention keep (one per device and session).
 pub const APPLIED_LOG_LENGTHS_CAP: usize = 256;
 
+/// What a pending log file sends to the remote: as written — but without
+/// credential events while E2E is off (review round 2 of #130). Those exist
+/// only from before an E2E downgrade, which purged them from the remote;
+/// pushed again from `pending/` after a restart, their secrets would land
+/// there in the clear. `None` for a file that does not parse while E2E is
+/// off: what it holds cannot be vouched for. The one rule for every way a
+/// pending file goes out, and for the compactor weighing whether it has.
+pub(crate) fn outgoing_log(log: LogFile, e2e_enabled: bool) -> Option<LogFile> {
+    if e2e_enabled {
+        return Some(log);
+    }
+    let envelopes = log.into_envelopes().ok()?;
+    let is_credential = |envelope: &sync_core::EventEnvelope| {
+        matches!(
+            envelope.event,
+            sync_core::SyncEvent::CredentialSet(_) | sync_core::SyncEvent::CredentialCleared(_)
+        )
+    };
+    if !envelopes.iter().any(is_credential) {
+        return Some(log);
+    }
+    let kept: Vec<_> = envelopes
+        .into_iter()
+        .filter(|e| !is_credential(e))
+        .collect();
+    LogFile::from_envelopes(log.name.device_id.clone(), log.name.timestamp, &kept).ok()
+}
+
 /// RFC 3339 instant from which this device's applied record is EXACT
 /// (DESIGN-sync-snapshot-coverage.md): it joined, resumed or caught up over
 /// every log file still present, weighing each change against its row, so
@@ -991,9 +1019,18 @@ impl SyncOrchestrator {
                 );
                 continue;
             }
-            let log = LogFile {
-                name: parsed,
-                bytes,
+            let Some(log) = outgoing_log(
+                LogFile {
+                    name: parsed,
+                    bytes,
+                },
+                self.store.e2e_enabled(),
+            ) else {
+                warn!(
+                    name = name,
+                    "pending log does not parse while E2E is off; not pushed this round",
+                );
+                continue;
             };
             match adapter.push_log(&log).await {
                 Ok(()) => {
@@ -1217,8 +1254,43 @@ impl Drop for InFlightGuard<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_stale_empty_stub, merge_applied_log_lengths, snapshot_backstop_trips};
+    #[test]
+    fn the_outgoing_form_of_a_pending_log_drops_secrets_only_while_e2e_is_off() {
+        let device = DeviceId::from_string("dev-a".into());
+        let at = Utc::now();
+        let secret = sync_core::EventEnvelope::new(
+            device.clone(),
+            sync_core::SyncEvent::CredentialCleared(sync_core::CredentialSlotPayload {
+                account_id: "acc-1".into(),
+                slot: "password".into(),
+            }),
+        );
+        let setting = sync_core::EventEnvelope::new(
+            device.clone(),
+            sync_core::SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+                key: "appearance.darkMode".into(),
+                value: serde_json::json!(true),
+            }),
+        );
+        let log = LogFile::from_envelopes(device.clone(), at, &[secret, setting.clone()]).unwrap();
+
+        assert_eq!(outgoing_log(log.clone(), true), Some(log.clone()));
+        let out = outgoing_log(log, false).unwrap();
+        assert_eq!(out.into_envelopes().unwrap(), vec![setting.clone()]);
+        let plain = LogFile::from_envelopes(device.clone(), at, &[setting]).unwrap();
+        assert_eq!(outgoing_log(plain.clone(), false), Some(plain), "unchanged");
+        let torn = LogFile {
+            name: sync_core::LogFileName::new(at, device),
+            bytes: b"{\"id\":".to_vec(),
+        };
+        assert_eq!(outgoing_log(torn, false), None);
+    }
+
+    use super::{
+        is_stale_empty_stub, merge_applied_log_lengths, outgoing_log, snapshot_backstop_trips,
+    };
     use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
+    use sync_core::LogFile;
     use sync_core::{DeviceId, DeviceRecord, MetaJson};
 
     #[test]

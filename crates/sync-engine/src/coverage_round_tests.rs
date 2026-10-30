@@ -265,3 +265,58 @@ async fn a_live_session_named_below_the_gc_horizon_is_fetched_as_it_grows() {
     assert_eq!(report.fetched_logs, 1, "the grown session");
     assert_eq!(report.applied, 1, "its new event");
 }
+
+/// One of this device's pending files: a password it set while E2E was on,
+/// and a setting.
+fn pending_with_a_secret(device: &str, secs: i64) -> LogFile {
+    let device_id = DeviceId::from_string(device.into());
+    let at = Utc.timestamp_opt(secs, 0).unwrap();
+    let envelopes = [
+        EventEnvelope {
+            id: format!("ev-secret-{secs}"),
+            device_id: device_id.clone(),
+            timestamp: at,
+            event: SyncEvent::CredentialSet(sync_core::CredentialPayload {
+                account_id: "acc-1".into(),
+                slot: "password".into(),
+                secret: "hunter2".into(),
+            }),
+        },
+        EventEnvelope {
+            id: format!("ev-setting-{secs}"),
+            device_id: device_id.clone(),
+            timestamp: at,
+            event: SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+                key: "appearance.darkMode".into(),
+                value: serde_json::json!(true),
+            }),
+        },
+    ];
+    LogFile::from_envelopes(device_id, at, &envelopes).unwrap()
+}
+
+#[tokio::test]
+async fn with_e2e_off_the_push_sends_no_secret() {
+    // Review round 2 of #130: after an E2E downgrade purged the remote, the
+    // pending files still held the credential events, and the first push
+    // after a restart sent their secrets in the clear.
+    let (tmp, orchestrator, hooks, adapter) = device(fresh_meta(), true).await;
+    mark_exact(&hooks.store);
+    let file = pending_with_a_secret("dev-laptop", 2_000);
+    std::fs::write(
+        tmp.path().join("pending").join(file.name.to_filename()),
+        &file.bytes,
+    )
+    .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    let remote = adapter
+        .fetch_new_logs(&sync_core::DeviceCursor::epoch())
+        .await
+        .unwrap();
+    assert_eq!(remote.len(), 1);
+    let pushed = remote[0].into_envelopes().unwrap();
+    assert_eq!(pushed.len(), 1, "the setting only");
+    assert!(!String::from_utf8_lossy(&remote[0].bytes).contains("hunter2"));
+}
