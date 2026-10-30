@@ -2028,11 +2028,28 @@ mod tests {
         .unwrap();
         let adapter = FakeAdapter::with_logs(vec![own_file]);
         adapter.install_meta(MetaJson::fresh("1.0.0"));
+        // The writer stamped the row when the change was made; a snapshot
+        // apply then put an older value back.
+        stamp_clock(&db, "setting", "sync.intervalMinutes", at);
+        UserPrefsRepo::new(&db.shared())
+            .set("sync.intervalMinutes", "30")
+            .unwrap();
 
         let report = svc.catch_up(&adapter).await.unwrap();
 
         assert_eq!(report.applied, 1);
         assert_eq!(interval(&db).as_deref(), Some("70"));
+    }
+
+    /// Stamp a row's clock, whole, as this device's writer does.
+    fn stamp_clock(db: &DbHandle, kind: &str, id: &str, at: DateTime<Utc>) {
+        let shared = db.shared();
+        let conn = shared.lock().unwrap();
+        conn.execute(
+            "INSERT INTO sync_row_clock (kind, id, changed_us, written_us) VALUES (?, ?, ?, ?)",
+            rusqlite::params![kind, id, at.timestamp_micros(), at.timestamp_micros()],
+        )
+        .unwrap();
     }
 
     #[tokio::test]

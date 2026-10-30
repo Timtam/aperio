@@ -233,82 +233,6 @@ fn applying_own_device_envelopes_skips_them() {
 }
 
 #[test]
-fn force_own_re_applies_own_device_envelopes() {
-    // §19.10 stale-resume invariant: after a snapshot apply
-    // overwrites local rows, our own pending logs should be
-    // replayable through the applier so offline edits come
-    // back. `apply_envelopes_force_own` is the path that
-    // makes this possible — bypass the skip_own filter that
-    // a normal sync round honours.
-    let (adapter, db) = fixture();
-    let me = DeviceId::from_string("dev-me".into());
-    let applier = make_applier(&db, &adapter, me.clone());
-
-    let cal = fixture_calendar("cal-x");
-    let envelopes = vec![
-        fixture_envelope(
-            me.clone(),
-            SyncEvent::CalendarCreated(EventPayload {
-                id: cal.id.clone(),
-                fields: serde_json::to_value(&cal).unwrap(),
-            }),
-            1000,
-        ),
-        fixture_envelope(
-            me,
-            SyncEvent::EventCreated(EventPayload {
-                id: "ev-1".into(),
-                fields: serde_json::to_value(fixture_event("ev-1", "cal-x")).unwrap(),
-            }),
-            2000,
-        ),
-    ];
-    let report = applier.apply_envelopes_force_own(envelopes).unwrap();
-    // Both envelopes flowed through the dispatch instead of
-    // being skipped — calendar + event landed in SQLite.
-    assert_eq!(report.applied, 2);
-    assert_eq!(report.skipped_own, 0);
-    let conn = db.lock().unwrap();
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM calendars WHERE id = 'cal-x'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(count, 1);
-}
-
-#[test]
-fn force_own_honours_already_applied_check() {
-    // A second `apply_envelopes_force_own` pass over the
-    // same envelopes is idempotent — the first pass writes
-    // to `sync_applied_events`, so the second sees them as
-    // already-applied and counts them in the right bucket.
-    // Important because stale-resume might re-run if the
-    // user dismisses and re-triggers.
-    let (adapter, db) = fixture();
-    let me = DeviceId::from_string("dev-me".into());
-    let applier = make_applier(&db, &adapter, me.clone());
-    let cal = fixture_calendar("cal-y");
-    let env = fixture_envelope(
-        me,
-        SyncEvent::CalendarCreated(EventPayload {
-            id: cal.id.clone(),
-            fields: serde_json::to_value(&cal).unwrap(),
-        }),
-        3000,
-    );
-    let first = applier
-        .apply_envelopes_force_own(vec![env.clone()])
-        .unwrap();
-    assert_eq!(first.applied, 1);
-    let second = applier.apply_envelopes_force_own(vec![env]).unwrap();
-    assert_eq!(second.applied, 0);
-    assert_eq!(second.skipped_already_applied, 1);
-}
-
-#[test]
 fn apply_event_deleted_removes_row() {
     let (adapter, db) = fixture();
     let other = DeviceId::from_string("dev-other".into());
@@ -1496,4 +1420,164 @@ fn the_catch_up_weighs_applied_changes_again_once_it_changed_the_row() {
         .unwrap();
 
     assert_eq!(interval(&db).as_deref(), Some("60"));
+}
+
+// ---- Review round 2 of #130 --------------------------------------------
+
+#[test]
+fn an_older_merge_does_not_lower_the_rows_time() {
+    // The merge took an older patch's `updated_at` as bookkeeping: the row
+    // lost its time, and the next older change won over it.
+    let (adapter, db) = fixture();
+    seed_event(&adapter, "ev-time");
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let edit = |title: &str, hour: u32, minute: u32| {
+        let at = Utc.with_ymd_and_hms(2026, 5, 12, hour, minute, 0).unwrap();
+        fixture_envelope(
+            DeviceId::from_string("dev-other".into()),
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-time".into(),
+                fields: serde_json::json!({ "title": title, "updated_at": at.to_rfc3339() }),
+            }),
+            at.timestamp(),
+        )
+    };
+    // The row is from 09:00; both edits are older.
+    applier.apply_envelopes(vec![edit("Acht", 8, 0)]).unwrap();
+    applier
+        .apply_envelopes(vec![edit("Halb neun", 8, 30)])
+        .unwrap();
+    assert_eq!(
+        adapter.get_event_by_id("ev-time").unwrap().unwrap().title,
+        "Original",
+    );
+}
+
+#[test]
+fn the_catch_up_keeps_a_newer_row_against_this_devices_own_older_change() {
+    // Our own change counts as applied: our rows hold it. On a row of
+    // unknown time, holding something newer from a file already gone, it is
+    // not taken again.
+    let (adapter, db) = fixture();
+    let me = DeviceId::from_string("dev-me".into());
+    let applier = make_applier(&db, &adapter, me.clone());
+    UserPrefsRepo::new(&db)
+        .set("sync.intervalMinutes", "90")
+        .unwrap();
+    let own = fixture_envelope(
+        me,
+        SyncEvent::SettingsUpdated(SettingsPayload {
+            key: "sync.intervalMinutes".into(),
+            value: serde_json::json!("30"),
+        }),
+        1000,
+    );
+
+    applier.catch_up_envelopes(vec![own]).unwrap();
+
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+}
+
+#[test]
+fn the_catch_up_keeps_a_row_set_again_after_an_applied_delete() {
+    // A delete applied long ago, the label set again by a change whose file
+    // is gone, no time known: the delete is not taken again.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-back", "Rot", 500, true),
+            label_deleted("lbl-back", 1000),
+        ])
+        .unwrap();
+    applier
+        .apply_envelopes(vec![label_event("lbl-back", "Wieder da", 2000, true)])
+        .unwrap();
+    forget_clocks(&db);
+
+    applier
+        .catch_up_envelopes(vec![label_deleted("lbl-back", 1000)])
+        .unwrap();
+
+    assert_eq!(label_name(&db, "lbl-back").as_deref(), Some("Wieder da"));
+}
+
+#[test]
+fn a_field_edit_does_not_bring_back_a_label_deleted_here() {
+    // Review round 2 of #130: a merge onto a missing row upserted it, so the
+    // device that deleted it had it again while the editing device deleted
+    // it. Older or newer, the edit stays out.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-gone", "Rot", 1000, true),
+            label_deleted("lbl-gone", 3000),
+        ])
+        .unwrap();
+
+    let report = applier
+        .apply_envelopes(vec![
+            label_event("lbl-gone", "Älter", 2000, false),
+            label_event("lbl-gone", "Neuer", 4000, false),
+        ])
+        .unwrap();
+
+    assert_eq!(report.skipped_older, 2);
+    assert_eq!(label_name(&db, "lbl-gone"), None);
+}
+
+#[test]
+fn a_field_edit_does_not_bring_back_an_appointment_deleted_here() {
+    let (adapter, db) = fixture();
+    adapter
+        .upsert_calendar_from_sync(&fixture_calendar("cal-gone"))
+        .unwrap();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let other = DeviceId::from_string("dev-other".into());
+    let row = fixture_event("ev-gone", "cal-gone");
+    let full = || EventPayload {
+        id: "ev-gone".into(),
+        fields: serde_json::to_value(&row).unwrap(),
+    };
+    applier
+        .apply_envelopes(vec![
+            fixture_envelope(other.clone(), SyncEvent::EventCreated(full()), 1000),
+            fixture_envelope(
+                other.clone(),
+                SyncEvent::EventDeleted(IdPayload {
+                    id: "ev-gone".into(),
+                }),
+                3000,
+            ),
+        ])
+        .unwrap();
+
+    applier
+        .apply_envelopes(vec![fixture_envelope(
+            other,
+            SyncEvent::EventUpdated(full()),
+            4000,
+        )])
+        .unwrap();
+
+    assert!(adapter.get_event_by_id("ev-gone").unwrap().is_none());
+}
+
+#[test]
+fn a_device_catching_up_over_create_delete_and_a_later_edit_ends_deleted() {
+    // A third device sees all three: it ends like the device that deleted
+    // and the one that edited, deleted.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-third".into()));
+
+    applier
+        .catch_up_envelopes(vec![
+            label_event("lbl-third", "Rot", 1000, true),
+            label_deleted("lbl-third", 3000),
+            label_event("lbl-third", "Neuer", 4000, false),
+        ])
+        .unwrap();
+
+    assert_eq!(label_name(&db, "lbl-third"), None);
 }

@@ -238,40 +238,7 @@ impl EventLogApplier {
     /// (timestamp, id) before dispatching, so the same input set
     /// produces the same final state regardless of source order.
     pub fn apply_envelopes(&self, envelopes: Vec<EventEnvelope>) -> SyncResult<ApplyReport> {
-        self.apply_envelopes_inner(envelopes, PassMode::default())
-    }
-
-    /// Like [`apply_envelopes`] but ignores the local-device-id
-    /// filter — every envelope goes through the apply pipeline
-    /// even if it was minted by this device.
-    ///
-    /// Normal sync rounds always skip own-device envelopes
-    /// because they were already applied at write time. The
-    /// §19.10 stale-resume flow needs the opposite: after a
-    /// snapshot apply has overwritten local SQLite to the
-    /// snapshot state, our own pending logs (which carry edits
-    /// the user made while offline) must be replayed to bring
-    /// those edits back. The applier's existing field-level
-    /// merge — using `local_updated_at vs env.timestamp` —
-    /// handles the snapshot-vs-edit ordering correctly without
-    /// any special "force" semantics.
-    ///
-    /// Callers MUST limit this to the stale-resume path. Using
-    /// it during a steady-state round would re-apply own events
-    /// twice (once at write time, once via the applier) and
-    /// could trigger spurious conflicts via the merge_fields
-    /// timestamp comparison.
-    pub fn apply_envelopes_force_own(
-        &self,
-        envelopes: Vec<EventEnvelope>,
-    ) -> SyncResult<ApplyReport> {
-        self.apply_envelopes_inner(
-            envelopes,
-            PassMode {
-                force_own: true,
-                ..PassMode::default()
-            },
-        )
+        self.apply_envelopes_inner(envelopes, false)
     }
 
     /// The catch-up (DESIGN-sync-snapshot-coverage.md, Toni 2026-10-30): a
@@ -281,26 +248,20 @@ impl EventLogApplier {
     /// holds is either the same change or a newer one. Nothing is reset, and
     /// a row an old snapshot upsert reverted gets its newer change back.
     ///
-    /// An applied change is weighed again only against a known time. A row
-    /// no change has stamped yet (its clock came with this version, and its
+    /// This device's own changes count as applied: its rows hold them. An
+    /// applied change is weighed again only against a known time. A row no
+    /// change has stamped yet (its clock came with this version, and its
     /// table keeps no `updated_at`) holds this change or a newer one, maybe
     /// from a file already gone: it stays as it is and takes the change's
     /// time as its clock — until the catch-up itself changes the row.
     pub fn catch_up_envelopes(&self, envelopes: Vec<EventEnvelope>) -> SyncResult<ApplyReport> {
-        self.apply_envelopes_inner(
-            envelopes,
-            PassMode {
-                force_own: true,
-                reapply: true,
-                quiet: true,
-            },
-        )
+        self.apply_envelopes_inner(envelopes, true)
     }
 
     fn apply_envelopes_inner(
         &self,
         mut envelopes: Vec<EventEnvelope>,
-        mode: PassMode,
+        catch_up: bool,
     ) -> SyncResult<ApplyReport> {
         // Reset the per-pass conflict counter. `merge_fields`
         // bumps it on every recorded conflict; we fold the final
@@ -317,16 +278,19 @@ impl EventLogApplier {
         // `catch_up_envelopes`): their time is still unknown.
         let mut seeded: HashSet<RowKey> = HashSet::new();
         for env in envelopes {
-            if !mode.force_own && env.device_id == self.local_device_id {
+            let own = env.device_id == self.local_device_id;
+            if own && !catch_up {
                 report.skipped_own += 1;
                 continue;
             }
             let applied = match self.is_already_applied(&env.id) {
-                Ok(true) if !mode.reapply => {
+                Ok(true) if !catch_up => {
                     report.skipped_already_applied += 1;
                     continue;
                 }
-                Ok(applied) => applied,
+                // Our own change is in our rows: held, as the compactor
+                // counts it (review round 2 of #130).
+                Ok(applied) => applied || own,
                 Err(err) => {
                     warn!(
                         event_id = %env.id,
@@ -341,9 +305,15 @@ impl EventLogApplier {
             // The row's time. An older change does not win: a whole-row
             // write or a create is skipped behind any newer change, a delete
             // only behind a newer whole-row write, and a field merge weighs
-            // it as the row's time.
+            // it as the row's time — but stays out of a row that was written
+            // here and is gone: it was deleted, and an edit does not bring it
+            // back on the device that deleted it.
             let key = env.event.row_key();
-            let (changed, written) = match self.row_time(key.as_ref(), &env.event) {
+            let RowTime {
+                changed,
+                written,
+                absent,
+            } = match self.row_time(key.as_ref(), &env.event) {
                 Ok(time) => time,
                 Err(err) => {
                     warn!(event_id = %env.id, ?err, "could not read the row's time; skipping envelope");
@@ -353,7 +323,6 @@ impl EventLogApplier {
             };
             let whole = !env.event.merges_fields();
             if applied
-                && !env.event.is_delete()
                 && (changed.is_none() || key.as_ref().is_some_and(|key| seeded.contains(key)))
             {
                 // The catch-up, on a row of unknown time: it keeps what it
@@ -369,8 +338,10 @@ impl EventLogApplier {
             }
             let older = if env.event.is_delete() {
                 written.is_some_and(|at| at > env.timestamp)
+            } else if whole {
+                changed.is_some_and(|at| at > env.timestamp)
             } else {
-                whole && changed.is_some_and(|at| at > env.timestamp)
+                absent && written.is_some()
             };
             if older {
                 report.skipped_older += 1;
@@ -385,7 +356,7 @@ impl EventLogApplier {
                 &env,
                 Merge {
                     clock: changed,
-                    quiet: mode.quiet,
+                    quiet: catch_up,
                 },
             ) {
                 Ok(true) => {
@@ -1024,7 +995,12 @@ impl EventLogApplier {
             // row is consistent. They're never user-surfaced as
             // conflicts.
             if METADATA_FIELDS.contains(&field.as_str()) {
-                merged.insert(field.clone(), patch_val.clone());
+                // `updated_at` only from a patch at least as new as the row:
+                // an older one would lower the row's time, and the next older
+                // change would win over it (review round 2 of #130).
+                if field != "updated_at" || local_updated_at <= env.timestamp {
+                    merged.insert(field.clone(), patch_val.clone());
+                }
                 continue;
             }
             if local_updated_at > env.timestamp && quiet {
@@ -1250,45 +1226,66 @@ impl EventLogApplier {
 
     /// The row's time: the newest change its clock has seen — raised to its
     /// own `updated_at` where its table keeps one (appointments, tasks; a
-    /// snapshot writes that, not the clock) — and the newest whole-row write.
-    fn row_time(
-        &self,
-        key: Option<&RowKey>,
-        event: &SyncEvent,
-    ) -> SyncResult<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)> {
+    /// snapshot writes that, not the clock) — the newest whole-row write,
+    /// and, for a field merge, whether the row is missing.
+    fn row_time(&self, key: Option<&RowKey>, event: &SyncEvent) -> SyncResult<RowTime> {
         let clock = match key {
             Some(key) => self.store.row_clock(key).map_err(store_to_sync)?,
             None => None,
         };
-        let updated_at = match event {
-            SyncEvent::EventCreated(payload) | SyncEvent::EventUpdated(payload) => self
-                .adapter
-                .get_event_by_id(&payload.id)
-                .map_err(core_to_sync)?
-                .map(|row| row.updated_at),
-            SyncEvent::TaskCreated(payload) | SyncEvent::TaskUpdated(payload) => self
-                .adapter
-                .get_task_by_id(&payload.id)
-                .map_err(core_to_sync)?
-                .map(|row| row.updated_at),
-            _ => None,
+        // (whether the row exists, its own `updated_at`)
+        let (present, updated_at) = match event {
+            SyncEvent::EventCreated(payload) | SyncEvent::EventUpdated(payload) => {
+                let row = self
+                    .adapter
+                    .get_event_by_id(&payload.id)
+                    .map_err(core_to_sync)?;
+                (row.is_some(), row.map(|row| row.updated_at))
+            }
+            SyncEvent::TaskCreated(payload) | SyncEvent::TaskUpdated(payload) => {
+                let row = self
+                    .adapter
+                    .get_task_by_id(&payload.id)
+                    .map_err(core_to_sync)?;
+                (row.is_some(), row.map(|row| row.updated_at))
+            }
+            SyncEvent::TaskListUpdated(payload) => (
+                self.adapter
+                    .get_task_list_by_id(&payload.id)
+                    .map_err(core_to_sync)?
+                    .is_some(),
+                None,
+            ),
+            SyncEvent::CalendarUpdated(payload) => (
+                self.adapter
+                    .get_calendar_by_id(&payload.id)
+                    .map_err(core_to_sync)?
+                    .is_some(),
+                None,
+            ),
+            SyncEvent::ColorLabelUpdated(payload) => (
+                self.adapter
+                    .get_color_label_by_id(&payload.id)
+                    .map_err(core_to_sync)?
+                    .is_some(),
+                None,
+            ),
+            _ => (true, None),
         };
-        Ok((
-            clock.map(|clock| clock.changed).max(updated_at),
-            clock.and_then(|clock| clock.written),
-        ))
+        Ok(RowTime {
+            changed: clock.map(|clock| clock.changed).max(updated_at),
+            written: clock.and_then(|clock| clock.written),
+            absent: event.merges_fields() && !present,
+        })
     }
 }
 
-/// How a pass treats what it is handed.
-#[derive(Debug, Clone, Copy, Default)]
-struct PassMode {
-    /// Take this device's own events too (the stale resume, the catch-up).
-    force_own: bool,
-    /// Weigh events already recorded as applied again (the catch-up).
-    reapply: bool,
-    /// Keep a newer row without recording a conflict (the catch-up).
-    quiet: bool,
+/// A row's time as the pass weighs it ([`EventLogApplier::row_time`]).
+struct RowTime {
+    changed: Option<DateTime<Utc>>,
+    written: Option<DateTime<Utc>>,
+    /// A field merge's row is missing.
+    absent: bool,
 }
 
 /// What a field merge weighs besides the row: the row's time, and whether a

@@ -131,7 +131,11 @@ nicht die Uhr.
   (`skipped_older`) und als angewendet vermerkt.
 - **Feld-Zusammenführung** (Termin, Aufgabe, Liste, Kalender, Farbe): wägt die
   Zeit der Zeile wie bisher `updated_at`. Ältere Felder ergeben einen
-  Konflikt; beim Nachholen bleibt die neuere Zeile still.
+  Konflikt; beim Nachholen bleibt die neuere Zeile still. Das `updated_at`
+  einer älteren Zusammenführung bleibt draußen, sonst verlöre die Zeile ihre
+  Zeit. Fehlt die Zeile, obwohl ihre Uhr eine Schreibung der ganzen Zeile
+  kennt, wurde sie gelöscht: Die Zusammenführung bleibt draußen und legt sie
+  nicht neu an.
 - **Löschen:** verliert nur gegen eine neuere Schreibung der ganzen Zeile,
   nicht gegen eine neuere Feldänderung. Eine Feldänderung kann eine gelöschte
   Zeile auf dem löschenden Gerät nicht zurückholen. Verlöre das Löschen,
@@ -141,8 +145,9 @@ nicht die Uhr.
 **Übergang.** Die Uhr beginnt leer. Eine Zeile ohne bekannte Zeit (keine Uhr,
 kein `updated_at`) kann einen neueren Stand aus einer schon gelöschten Datei
 halten. Beim Nachholen wird darum für so eine Zeile eine schon angewendete
-Änderung (außer Löschen) **nicht** erneut angewendet; ihre Zeit wird die Uhr
-der Zeile. Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
+oder eigene Änderung, ein Löschen eingeschlossen, **nicht** erneut
+angewendet; ihre Zeit wird die Uhr der Zeile. Eigene Änderungen gelten als
+angewendet, denn die Zeilen des Geräts halten sie. Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
 angewendeten Änderung, werden spätere angewendete wieder gewogen. Grenze: Eine
 nie angewendete ältere Änderung auf so einer Zeile gewinnt noch, wie in jeder
 Runde zuvor.
@@ -224,3 +229,58 @@ weggeräumt, ohne hochgeladen zu sein; alte Builds löschen das Meta-Feld.
 - **Beitritt und Nachholen** wenden die Ereignisse aller Dateien gemeinsam
   nach Zeit an.
 - **Unbekannte Dateien** holt ein genaues Gerät ohne Untergrenze.
+
+## Prüfrunde 2 (PR #130, 2026-10-30)
+
+Gezielt: 4 Prüfer, die 10 schwersten Befunde gegengeprüft (alle bestätigt),
+18 weitere selbst nachgeprüft, ein Kritiker. Einzelheiten: scratchpad
+`coverage/review_r2.json`.
+
+**Die Zeit der Zeile hält nicht**
+- Ein Schnappschuss schreibt Zeilen, aber keine Uhren. Nach Beitritt oder
+  Wiederaufnahme gewinnt dann eine ältere Änderung gegen seinen neueren
+  Inhalt.
+- Eine ältere Feld-Zusammenführung übernimmt ihr `updated_at` als Metadatum.
+  Die Zeile verliert ihre Zeit, und die nächste ältere Änderung gewinnt.
+- Eigene Ereignisse stehen nie in `sync_applied_events`. Die Übergangsregel
+  schützt darum nicht vor den eigenen älteren Änderungen.
+- Ein Gerät mit nachgehender Uhr schreibt eine spätere Änderung mit älterem
+  Stempel; die anderen überspringen sie dauerhaft.
+
+**Löschen gegen Bearbeiten:** Eine Feld-Zusammenführung auf eine fehlende
+Zeile legt sie neu an. Das löschende Gerät bekommt die Zeile zurück, das
+bearbeitende löscht sie: Sie laufen auseinander, entgegen Abschnitt E.
+
+**Aufräumen:** Der Compactor löscht eine Datei, deren Ende ein anderes Gerät
+noch nicht geholt hat, auch die eigene gleich nach dem Hochladen. Er löscht,
+was ein Gerät vor seinem Nachholen braucht (der Laptop). Er vertraut seinem
+eigenen Protokoll, auch wenn es nicht genau ist. Das Hochladen vor dem
+Wegräumen umgeht den Push und lädt nach dem Abschalten von E2E Zugangsdaten
+im Klartext hoch.
+
+**Weiteres:** Der Bericht des Nachholens geht verloren (Ansichten laden nicht
+neu). Ein Schnappschuss mit fehlgeschlagenen Zeilen trägt trotzdem seine
+Kennungen ein. Uhren eines früheren Datensatzes bleiben beim Beitritt.
+„Neu beginnen“ lässt die alten Dateien liegen, und das Nachholen holt sie
+herein.
+
+## Entscheidungen nach Prüfrunde 2 (Toni, 2026-10-30)
+
+- **Aufräumen: warten und 14 Tage.** Der Compactor löscht nichts, solange ein
+  aktives Gerät (nicht als veraltet markiert) noch nicht nachgeholt hat; jedes
+  Gerät meldet das in `meta.json`. Und er löscht eine Datei erst, wenn ihr
+  jüngster Eintrag älter ist als das Aufbewahrungsfenster (14 Tage). Im
+  Sync-Ordner liegen damit immer mindestens 14 Tage Protokoll.
+- **„Neu beginnen“ löscht die Protokolle und den Schnappschuss** des alten
+  Datensatzes.
+- **Das Klartext-Leck wird hier behoben:** Der Push entfernt
+  Zugangsdaten-Ereignisse, solange E2E aus ist, an einer Stelle für alle
+  Wege. Der Compactor lädt nichts mehr selbst hoch; eine ausstehende Datei,
+  deren Ende noch fehlt, bleibt für den nächsten Push liegen.
+- Ohne Rückfrage, weil es Abschnitt E erst wahr macht: Der Schnappschuss trägt
+  die Uhren seines Autors (und nur, wenn alle Zeilen geschrieben wurden);
+  Metadaten einer älteren Zusammenführung bleiben draußen; eigene Ereignisse
+  gelten beim Nachholen als gehalten; eine Zusammenführung auf eine gelöschte
+  Zeile bleibt draußen; eine eigene Änderung ist immer neuer als ihre Zeile;
+  der Beitritt beginnt mit leeren Uhren; der Bericht des Nachholens geht in
+  die Runde ein.
