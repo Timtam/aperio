@@ -123,7 +123,9 @@ Nachholen heilt auch ohne sie.
   Löschen). Leer, solange nur Feld-Zusammenführungen die Zeile berührten.
 
 Der Writer stempelt eigene Änderungen beim Schreiben, der Anwender jede
-übernommene. Die Zeit einer Zeile ist `changed`. Bei Terminen und Aufgaben ist
+übernommene. Eine eigene Änderung ist immer neuer als alles, was ihre Zeile
+gesehen hat: Geht die Uhr dieses Geräts nach, bekommt sie einen Stempel knapp
+über der Uhr der Zeile, sonst übersprängen die anderen sie dauerhaft. Die Zeit einer Zeile ist `changed`. Bei Terminen und Aufgaben ist
 sie mindestens ihr eigenes `updated_at`.
 
 Ein Schnappschuss trägt die Uhren seines Autors (`row_clocks`). Wer ihn

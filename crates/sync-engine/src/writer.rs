@@ -151,10 +151,20 @@ impl EventLogWriter {
     /// the drain task has exited, which it doesn't in production) logs a
     /// warning; the mutation itself already succeeded against the store.
     pub fn append(&self, event: SyncEvent) {
-        let envelope = EventEnvelope::new(self.device_id.clone(), event);
+        let mut envelope = EventEnvelope::new(self.device_id.clone(), event);
         // This change is the newest its row has seen: an older one from
         // another device, arriving later, must not win over it.
         if let (Some(store), Some(key)) = (self.row_clock.get(), envelope.event.row_key()) {
+            // Newer than anything the row has seen, even where this device's
+            // clock lags the one that wrote it: stamped older, every other
+            // device would skip it for good (review round 2 of #130).
+            match store.row_clock(&key) {
+                Ok(Some(clock)) if clock.changed >= envelope.timestamp => {
+                    envelope.timestamp = clock.changed + chrono::Duration::microseconds(1);
+                }
+                Ok(_) => {}
+                Err(err) => warn!(?err, kind = key.kind, "couldn't read the row's clock"),
+            }
             let whole = !envelope.event.merges_fields();
             if let Err(err) = store.advance_row_clock(&key, envelope.timestamp, whole) {
                 warn!(?err, kind = key.kind, "couldn't advance the row's clock");
@@ -472,6 +482,30 @@ mod tests {
             ),
             "{clock:?}",
         );
+    }
+
+    #[tokio::test]
+    async fn an_own_change_is_newer_than_its_row_even_when_this_clock_lags() {
+        // The row's newest change came from a device whose clock runs ahead:
+        // stamped with this device's time, this later change would count as
+        // older everywhere else.
+        let tmp = TempDir::new().unwrap();
+        let writer =
+            EventLogWriter::spawn(tmp.path().to_path_buf(), DeviceId::from_string("me".into()));
+        let store = Arc::new(crate::test_support::FakeStore::default());
+        writer.set_row_clock(store.clone());
+        let key = sync_core::RowKey {
+            kind: "setting",
+            id: "appearance.darkMode".into(),
+        };
+        let ahead = Utc::now() + chrono::Duration::minutes(5);
+        store.advance_row_clock(&key, ahead, true).unwrap();
+        writer.append(SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+            key: "appearance.darkMode".into(),
+            value: serde_json::json!(false),
+        }));
+        let clock = store.row_clocks.lock().unwrap().get(&key).copied().unwrap();
+        assert_eq!(clock.changed, ahead + chrono::Duration::microseconds(1));
     }
 
     #[tokio::test]
