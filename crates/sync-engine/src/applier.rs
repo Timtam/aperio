@@ -61,7 +61,8 @@ use sync_core::{
 use tracing::{debug, warn};
 
 use crate::{
-    ConflictKind, NewConflict, SecretSlot, SecretStore, SnapshotAccount, StoreError, SyncStore,
+    ConflictKind, NewConflict, RowWrite, SecretSlot, SecretStore, SnapshotAccount, StoreError,
+    SyncStore,
 };
 
 /// Fields the merge path treats as metadata — never user-surfaced
@@ -339,6 +340,7 @@ impl EventLogApplier {
             let RowTime {
                 changed,
                 written,
+                deleted,
                 absent,
             } = match self.row_time(key.as_ref(), &env.event) {
                 Ok(time) => time,
@@ -348,7 +350,8 @@ impl EventLogApplier {
                     continue;
                 }
             };
-            let whole = !env.event.merges_fields();
+            let write = RowWrite::of(&env.event);
+            let whole = write != RowWrite::Fields;
             let older_than_gc = context
                 .held_before
                 .is_some_and(|before| env.timestamp < before)
@@ -359,7 +362,7 @@ impl EventLogApplier {
                 // change's time as its clock. Recorded as applied, so a later
                 // pass does not weigh it again (review round 3 of #130).
                 if let Some(key) = key {
-                    if let Err(err) = self.store.advance_row_clock(&key, env.timestamp, whole) {
+                    if let Err(err) = self.store.advance_row_clock(&key, env.timestamp, write) {
                         warn!(event_id = %env.id, ?err, "couldn't seed the row's clock");
                     }
                     seeded.insert(key);
@@ -375,7 +378,7 @@ impl EventLogApplier {
             } else if whole {
                 changed.is_some_and(|at| at > env.timestamp)
             } else {
-                absent && written.is_some()
+                absent && deleted
             };
             if older {
                 report.skipped_older += 1;
@@ -396,7 +399,7 @@ impl EventLogApplier {
                 Ok(true) => {
                     if let Some(key) = &key {
                         seeded.remove(key);
-                        if let Err(err) = self.store.advance_row_clock(key, env.timestamp, whole) {
+                        if let Err(err) = self.store.advance_row_clock(key, env.timestamp, write) {
                             warn!(event_id = %env.id, ?err, "couldn't advance the row's clock");
                         }
                     }
@@ -1325,6 +1328,7 @@ impl EventLogApplier {
         Ok(RowTime {
             changed: clock.map(|clock| clock.changed).max(updated_at),
             written: clock.and_then(|clock| clock.written),
+            deleted: clock.is_some_and(|clock| clock.deleted),
             absent: event.merges_fields() && !present,
         })
     }
@@ -1349,6 +1353,8 @@ pub struct PassContext {
 struct RowTime {
     changed: Option<DateTime<Utc>>,
     written: Option<DateTime<Utc>>,
+    /// The newest whole-row write was a delete.
+    deleted: bool,
     /// A field merge's row is missing.
     absent: bool,
 }

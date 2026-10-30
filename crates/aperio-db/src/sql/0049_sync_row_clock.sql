@@ -8,14 +8,16 @@
 --
 -- `changed_us`: the newest change of any kind. `written_us`: the newest that
 -- wrote the whole row (a create, a whole-row update, a delete), NULL while
--- only field merges touched it. A delete loses only to a newer whole-row
--- write — a field merge cannot bring the row back on the device that deleted
--- it — and keeps both, so an older create arriving later stays deleted.
--- Microseconds since the epoch: compared as numbers, never as text.
+-- only field merges touched it. `deleted`: that newest whole-row write was a
+-- delete. A delete loses only to a newer whole-row write; a field merge onto
+-- a row deleted here stays out, but not onto one its list or calendar took
+-- along (no delete of its own). An older create arriving later stays
+-- deleted. Microseconds since the epoch: compared as numbers, never as text.
 CREATE TABLE sync_row_clock (
     kind       TEXT    NOT NULL,
     id         TEXT    NOT NULL,
     changed_us INTEGER NOT NULL,
     written_us INTEGER,
+    deleted    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (kind, id)
 );

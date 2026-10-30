@@ -115,17 +115,14 @@ impl SyncStore for FakeStore {
         &self,
         key: &sync_core::RowKey,
         at: DateTime<Utc>,
-        whole: bool,
+        write: crate::RowWrite,
     ) -> Result<(), StoreError> {
-        let written = whole.then_some(at);
-        let mut clocks = self.row_clocks.lock().unwrap();
-        let clock = clocks.entry(key.clone()).or_insert(crate::RowClock {
+        let theirs = crate::RowClock {
             changed: at,
-            written,
-        });
-        clock.changed = clock.changed.max(at);
-        clock.written = clock.written.max(written);
-        Ok(())
+            written: (write != crate::RowWrite::Fields).then_some(at),
+            deleted: write == crate::RowWrite::Delete,
+        };
+        self.advance_row_clocks(&[(key.clone(), theirs)])
     }
 
     fn row_clocks(&self) -> Result<Vec<(sync_core::RowKey, crate::RowClock)>, StoreError> {
@@ -145,6 +142,12 @@ impl SyncStore for FakeStore {
         let mut table = self.row_clocks.lock().unwrap();
         for (key, theirs) in clocks {
             let clock = table.entry(key.clone()).or_insert(*theirs);
+            // The delete flag follows the newest whole-row write.
+            if let Some(at) = theirs.written {
+                if clock.written.is_none_or(|ours| at >= ours) {
+                    clock.deleted = theirs.deleted;
+                }
+            }
             clock.changed = clock.changed.max(theirs.changed);
             clock.written = clock.written.max(theirs.written);
         }

@@ -20,7 +20,7 @@ use adapter_local::{LocalAdapter, SnapshotApplyReport, SnapshotDump};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use sync_engine::whitelist::{is_synced_key, SYNC_WHITELIST};
-use sync_engine::{NewConflict, RowClock, SnapshotAccount, StoreError, SyncStore};
+use sync_engine::{NewConflict, RowClock, RowWrite, SnapshotAccount, StoreError, SyncStore};
 
 use crate::conflicts::ConflictsRepo;
 use crate::db::SharedConn;
@@ -278,19 +278,21 @@ impl SyncStore for DesktopSyncStore {
 
     fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<RowClock>, StoreError> {
         let conn = self.db.lock().expect("db mutex poisoned");
-        let stored: Option<(i64, Option<i64>)> = conn
+        let stored: Option<(i64, Option<i64>, bool)> = conn
             .query_row(
-                "SELECT changed_us, written_us FROM sync_row_clock WHERE kind = ? AND id = ?",
+                "SELECT changed_us, written_us, deleted FROM sync_row_clock
+                 WHERE kind = ? AND id = ?",
                 params![key.kind, key.id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()
             .map_err(|err| StoreError::Backend(format!("row_clock: {err}")))?;
         let from_us = chrono::DateTime::<Utc>::from_timestamp_micros;
-        Ok(stored.and_then(|(changed_us, written_us)| {
+        Ok(stored.and_then(|(changed_us, written_us, deleted)| {
             Some(RowClock {
                 changed: from_us(changed_us)?,
                 written: written_us.and_then(from_us),
+                deleted,
             })
         }))
     }
@@ -299,29 +301,23 @@ impl SyncStore for DesktopSyncStore {
         &self,
         key: &sync_core::RowKey,
         at: chrono::DateTime<Utc>,
-        whole: bool,
+        write: RowWrite,
     ) -> Result<(), StoreError> {
-        let conn = self.db.lock().expect("db mutex poisoned");
-        let at_us = at.timestamp_micros();
-        // SQLite's MAX() is NULL when either side is: a missing whole-row
-        // time takes the other side's.
-        conn.execute(
-            "INSERT INTO sync_row_clock (kind, id, changed_us, written_us) VALUES (?, ?, ?, ?)
-             ON CONFLICT(kind, id) DO UPDATE SET
-                 changed_us = MAX(changed_us, excluded.changed_us),
-                 written_us = MAX(COALESCE(written_us, excluded.written_us),
-                                  COALESCE(excluded.written_us, written_us))",
-            params![key.kind, key.id, at_us, whole.then_some(at_us)],
-        )
-        .map_err(|err| StoreError::Backend(format!("advance_row_clock: {err}")))?;
-        Ok(())
+        self.advance_row_clocks(&[(
+            key.clone(),
+            RowClock {
+                changed: at,
+                written: (write != RowWrite::Fields).then_some(at),
+                deleted: write == RowWrite::Delete,
+            },
+        )])
     }
 
     fn row_clocks(&self) -> Result<Vec<(sync_core::RowKey, RowClock)>, StoreError> {
         let conn = self.db.lock().expect("db mutex poisoned");
         let backend = |err: rusqlite::Error| StoreError::Backend(format!("row_clocks: {err}"));
         let mut stmt = conn
-            .prepare("SELECT kind, id, changed_us, written_us FROM sync_row_clock")
+            .prepare("SELECT kind, id, changed_us, written_us, deleted FROM sync_row_clock")
             .map_err(backend)?;
         let rows = stmt
             .query_map([], |row| {
@@ -330,13 +326,14 @@ impl SyncStore for DesktopSyncStore {
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, bool>(4)?,
                 ))
             })
             .map_err(backend)?;
         let from_us = chrono::DateTime::<Utc>::from_timestamp_micros;
         let mut clocks = Vec::new();
         for row in rows {
-            let (kind, id, changed_us, written_us) = row.map_err(backend)?;
+            let (kind, id, changed_us, written_us, deleted) = row.map_err(backend)?;
             let (Some(key), Some(changed)) =
                 (sync_core::RowKey::named(&kind, id), from_us(changed_us))
             else {
@@ -347,6 +344,7 @@ impl SyncStore for DesktopSyncStore {
                 RowClock {
                     changed,
                     written: written_us.and_then(from_us),
+                    deleted,
                 },
             ));
         }
@@ -364,9 +362,20 @@ impl SyncStore for DesktopSyncStore {
         {
             let mut stmt = tx
                 .prepare(
-                    "INSERT INTO sync_row_clock (kind, id, changed_us, written_us) VALUES (?, ?, ?, ?)
+                    // SQLite's MAX() is NULL when either side is: a missing
+                    // whole-row time takes the other side's. The delete flag
+                    // follows the newest whole-row write; every right-hand
+                    // side reads the row as it was.
+                    "INSERT INTO sync_row_clock (kind, id, changed_us, written_us, deleted)
+                     VALUES (?, ?, ?, ?, ?)
                      ON CONFLICT(kind, id) DO UPDATE SET
                          changed_us = MAX(changed_us, excluded.changed_us),
+                         deleted = CASE
+                             WHEN excluded.written_us IS NOT NULL
+                                  AND (written_us IS NULL OR excluded.written_us >= written_us)
+                             THEN excluded.deleted
+                             ELSE deleted
+                         END,
                          written_us = MAX(COALESCE(written_us, excluded.written_us),
                                           COALESCE(excluded.written_us, written_us))",
                 )
@@ -377,6 +386,7 @@ impl SyncStore for DesktopSyncStore {
                     key.id,
                     clock.changed.timestamp_micros(),
                     clock.written.map(|at| at.timestamp_micros()),
+                    clock.deleted,
                 ])
                 .map_err(backend)?;
             }

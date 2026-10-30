@@ -165,8 +165,8 @@ impl EventLogWriter {
                 Ok(_) => {}
                 Err(err) => warn!(?err, kind = key.kind, "couldn't read the row's clock"),
             }
-            let whole = !envelope.event.merges_fields();
-            if let Err(err) = store.advance_row_clock(&key, envelope.timestamp, whole) {
+            let write = crate::RowWrite::of(&envelope.event);
+            if let Err(err) = store.advance_row_clock(&key, envelope.timestamp, write) {
                 warn!(?err, kind = key.kind, "couldn't advance the row's clock");
             }
         }
@@ -499,7 +499,9 @@ mod tests {
             id: "appearance.darkMode".into(),
         };
         let ahead = Utc::now() + chrono::Duration::minutes(5);
-        store.advance_row_clock(&key, ahead, true).unwrap();
+        store
+            .advance_row_clock(&key, ahead, crate::RowWrite::Whole)
+            .unwrap();
         writer.append(SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
             key: "appearance.darkMode".into(),
             value: serde_json::json!(false),

@@ -2365,6 +2365,7 @@ mod tests {
                 id: "sync.intervalMinutes".into(),
                 changed: later,
                 written: Some(later),
+                deleted: false,
             }],
             ..Default::default()
         };

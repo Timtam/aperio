@@ -44,6 +44,8 @@ use sync_core::{RowKey, Snapshot, SyncError, SyncResult};
 use tracing::warn;
 
 use crate::whitelist::is_synced_key;
+#[cfg(test)]
+use crate::RowWrite;
 use crate::{RowClock, SecretSlot, SecretStore, SyncStore};
 
 /// The body of an Aperio snapshot. Lives between
@@ -103,6 +105,8 @@ pub struct SnapshotRowClock {
     pub changed: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub written: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deleted: bool,
 }
 
 /// One account secret carried in [`AperioSnapshotBody::credentials`].
@@ -231,6 +235,7 @@ impl SnapshotBuilder {
                 id: key.id,
                 changed: clock.changed,
                 written: clock.written,
+                deleted: clock.deleted,
             })
             .collect();
         let body = AperioSnapshotBody {
@@ -372,6 +377,7 @@ impl SnapshotBuilder {
                     RowClock {
                         changed: clock.changed,
                         written: clock.written,
+                        deleted: clock.deleted,
                     },
                 ))
             })
@@ -522,19 +528,23 @@ mod tests {
         let author = Arc::new(FakeStore::default());
         let secrets = Arc::new(FakeSecrets::default());
         author
-            .advance_row_clock(&setting_key(), at(6000), true)
+            .advance_row_clock(&setting_key(), at(6000), RowWrite::Whole)
             .unwrap();
         let label = RowKey {
             kind: "color_label",
             id: "lbl-1".into(),
         };
-        author.advance_row_clock(&label, at(3000), true).unwrap();
+        author
+            .advance_row_clock(&label, at(3000), RowWrite::Whole)
+            .unwrap();
         let snap = builder(Arc::clone(&author), Arc::clone(&secrets))
             .build_at(Utc::now(), None)
             .unwrap();
 
         let taker = Arc::new(FakeStore::default());
-        taker.advance_row_clock(&label, at(9000), false).unwrap();
+        taker
+            .advance_row_clock(&label, at(9000), RowWrite::Fields)
+            .unwrap();
         builder(Arc::clone(&taker), secrets).apply(&snap).unwrap();
 
         let clocks = taker.row_clocks.lock().unwrap();
@@ -543,6 +553,7 @@ mod tests {
             Some(&RowClock {
                 changed: at(6000),
                 written: Some(at(6000)),
+                deleted: false,
             }),
         );
         assert_eq!(
@@ -550,6 +561,7 @@ mod tests {
             Some(&RowClock {
                 changed: at(9000),
                 written: Some(at(3000)),
+                deleted: false,
             }),
             "its own newer change stays; the whole-row time comes",
         );
@@ -568,6 +580,7 @@ mod tests {
                 id: "appearance.darkMode".into(),
                 changed: Utc::now(),
                 written: None,
+                deleted: false,
             }],
             ..Default::default()
         };

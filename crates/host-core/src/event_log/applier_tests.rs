@@ -1287,7 +1287,7 @@ fn the_catch_up_keeps_a_newer_row_quietly_and_brings_a_reverted_one_back() {
 
 #[test]
 fn a_rows_clock_never_goes_back_and_a_field_merge_leaves_its_whole_row_time() {
-    use sync_engine::{RowClock, SyncStore};
+    use sync_engine::{RowClock, RowWrite, SyncStore};
     let (adapter, db) = fixture();
     let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
     let key = sync_core::RowKey {
@@ -1299,19 +1299,28 @@ fn a_rows_clock_never_goes_back_and_a_field_merge_leaves_its_whole_row_time() {
         Some(RowClock {
             changed: at(changed),
             written: written.map(at),
+            deleted: false,
         })
     };
     // A field merge alone writes no whole-row time.
-    store.advance_row_clock(&key, at(2000), false).unwrap();
+    store
+        .advance_row_clock(&key, at(2000), RowWrite::Fields)
+        .unwrap();
     assert_eq!(store.row_clock(&key).unwrap(), clock(2000, None));
     // An older whole-row write: its time comes, the change time stays.
-    store.advance_row_clock(&key, at(1000), true).unwrap();
+    store
+        .advance_row_clock(&key, at(1000), RowWrite::Whole)
+        .unwrap();
     assert_eq!(store.row_clock(&key).unwrap(), clock(2000, Some(1000)));
     // A newer field merge leaves the whole-row time.
-    store.advance_row_clock(&key, at(3000), false).unwrap();
+    store
+        .advance_row_clock(&key, at(3000), RowWrite::Fields)
+        .unwrap();
     assert_eq!(store.row_clock(&key).unwrap(), clock(3000, Some(1000)));
     // Nothing goes back.
-    store.advance_row_clock(&key, at(500), true).unwrap();
+    store
+        .advance_row_clock(&key, at(500), RowWrite::Whole)
+        .unwrap();
     assert_eq!(store.row_clock(&key).unwrap(), clock(3000, Some(1000)));
 }
 
@@ -1610,7 +1619,7 @@ fn a_device_catching_up_over_create_delete_and_a_later_edit_ends_deleted() {
 
 #[test]
 fn a_snapshots_clocks_never_move_a_row_back() {
-    use sync_engine::{RowClock, SyncStore};
+    use sync_engine::{RowClock, RowWrite, SyncStore};
     let (adapter, db) = fixture();
     let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
     let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
@@ -1618,13 +1627,16 @@ fn a_snapshots_clocks_never_move_a_row_back() {
         kind: "task_list",
         id: "list-1".into(),
     };
-    store.advance_row_clock(&key, at(5000), false).unwrap();
+    store
+        .advance_row_clock(&key, at(5000), RowWrite::Fields)
+        .unwrap();
     store
         .advance_row_clocks(&[(
             key.clone(),
             RowClock {
                 changed: at(3000),
                 written: Some(at(2000)),
+                deleted: false,
             },
         )])
         .unwrap();
@@ -1633,6 +1645,7 @@ fn a_snapshots_clocks_never_move_a_row_back() {
         Some(RowClock {
             changed: at(5000),
             written: Some(at(2000)),
+            deleted: false,
         }),
     );
     assert_eq!(store.row_clocks().unwrap().len(), 1);
@@ -1764,4 +1777,91 @@ fn a_delete_takes_away_an_appointment_a_snapshot_brought_back() {
         .unwrap();
 
     assert!(adapter.get_event_by_id("ev-back").unwrap().is_none());
+}
+
+#[test]
+fn an_appointment_moved_out_of_a_calendar_deleted_meanwhile_stays() {
+    // Review round 3 of #130: the calendar's delete took the appointment
+    // along, without a delete of its own; the move from another device
+    // brings it into the other calendar there, so it must here too. Only a
+    // row deleted itself keeps an edit out.
+    let (adapter, db) = fixture();
+    for id in ["cal-old", "cal-new"] {
+        adapter
+            .upsert_calendar_from_sync(&fixture_calendar(id))
+            .unwrap();
+    }
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let other = DeviceId::from_string("dev-other".into());
+    let row = fixture_event("ev-moved", "cal-old");
+    applier
+        .apply_envelopes(vec![
+            fixture_envelope(
+                other.clone(),
+                SyncEvent::EventCreated(EventPayload {
+                    id: "ev-moved".into(),
+                    fields: serde_json::to_value(&row).unwrap(),
+                }),
+                1000,
+            ),
+            fixture_envelope(
+                other.clone(),
+                SyncEvent::CalendarDeleted(IdPayload {
+                    id: "cal-old".into(),
+                }),
+                2000,
+            ),
+        ])
+        .unwrap();
+    assert!(adapter.get_event_by_id("ev-moved").unwrap().is_none());
+
+    let mut moved = row.clone();
+    moved.calendar_id = "cal-new".into();
+    applier
+        .apply_envelopes(vec![fixture_envelope(
+            other,
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-moved".into(),
+                fields: serde_json::to_value(&moved).unwrap(),
+            }),
+            3000,
+        )])
+        .unwrap();
+
+    assert_eq!(
+        adapter
+            .get_event_by_id("ev-moved")
+            .unwrap()
+            .map(|event| event.calendar_id),
+        Some("cal-new".to_string()),
+    );
+}
+
+#[test]
+fn the_delete_mark_follows_the_newest_whole_row_write() {
+    use sync_engine::{RowWrite, SyncStore};
+    let (adapter, db) = fixture();
+    let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
+    let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+    let key = sync_core::RowKey {
+        kind: "color_label",
+        id: "lbl-mark".into(),
+    };
+    let deleted = || store.row_clock(&key).unwrap().unwrap().deleted;
+    store
+        .advance_row_clock(&key, at(2000), RowWrite::Delete)
+        .unwrap();
+    assert!(deleted());
+    store
+        .advance_row_clock(&key, at(1000), RowWrite::Whole)
+        .unwrap();
+    assert!(deleted(), "an older write does not undo it");
+    store
+        .advance_row_clock(&key, at(3000), RowWrite::Whole)
+        .unwrap();
+    assert!(!deleted(), "a newer one does");
+    store
+        .advance_row_clock(&key, at(4000), RowWrite::Fields)
+        .unwrap();
+    assert!(!deleted(), "a field merge leaves it");
 }

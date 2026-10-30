@@ -130,6 +130,7 @@ Nachholen heilt auch ohne sie.
 - `changed`: die neueste Änderung jeder Art.
 - `written`: die neueste, die die ganze Zeile schrieb (Anlegen, ganze Zeile,
   Löschen). Leer, solange nur Feld-Zusammenführungen die Zeile berührten.
+- `deleted`: Diese neueste Schreibung der ganzen Zeile war ein Löschen.
 
 Der Writer stempelt eigene Änderungen beim Schreiben, der Anwender jede
 übernommene. Eine eigene Änderung ist immer neuer als alles, was ihre Zeile
@@ -149,9 +150,11 @@ beginnt mit leeren Uhren: Die eines früheren Datensatzes hielten die
   Zeit der Zeile wie bisher `updated_at`. Ältere Felder ergeben einen
   Konflikt; beim Nachholen bleibt die neuere Zeile still. Das `updated_at`
   einer älteren Zusammenführung bleibt draußen, sonst verlöre die Zeile ihre
-  Zeit. Fehlt die Zeile, obwohl ihre Uhr eine Schreibung der ganzen Zeile
-  kennt, wurde sie gelöscht: Die Zusammenführung bleibt draußen und legt sie
-  nicht neu an.
+  Zeit. Fehlt die Zeile und war ihre letzte Schreibung der ganzen Zeile ein
+  Löschen, bleibt die Zusammenführung draußen und legt sie nicht neu an. Hat
+  dagegen ihre Liste oder ihr Kalender sie beim Löschen mitgenommen, ohne
+  eigenes Löschen, gilt die Zusammenführung: Eine Aufgabe, die ein anderes
+  Gerät inzwischen in eine andere Liste verschoben hat, kommt dort an.
 - **Löschen:** verliert nur gegen eine neuere Schreibung der ganzen Zeile,
   nicht gegen eine neuere Feldänderung. Eine Feldänderung kann eine gelöschte
   Zeile auf dem löschenden Gerät nicht zurückholen. Verlöre das Löschen,

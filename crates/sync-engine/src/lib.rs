@@ -385,12 +385,13 @@ pub trait SyncStore: Send + Sync {
     /// or `None` before any change stamped it.
     fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<RowClock>, StoreError>;
     /// Move the row's clock forward to `at` — its whole-row time too when
-    /// the change wrote the whole row (`whole`); never back.
+    /// the change wrote the whole row, and whether that was a delete; never
+    /// back.
     fn advance_row_clock(
         &self,
         key: &sync_core::RowKey,
         at: DateTime<Utc>,
-        whole: bool,
+        write: RowWrite,
     ) -> Result<(), StoreError>;
     /// Every row's clock, for the snapshot. A kind this version does not
     /// know is left out.
@@ -533,6 +534,35 @@ pub struct RowClock {
     /// The newest change that wrote the whole row — a create, a whole-row
     /// update or a delete. `None` while only field merges touched it.
     pub written: Option<DateTime<Utc>>,
+    /// That newest whole-row write was a delete. A row gone without one —
+    /// its list or calendar was deleted and took it along — is not deleted
+    /// itself, and an edit moving it elsewhere still applies (review round 3
+    /// of #130).
+    pub deleted: bool,
+}
+
+/// How a change writes its row, for the row's clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowWrite {
+    /// A field merge: the change time only.
+    Fields,
+    /// The whole row: a create or a whole-row update.
+    Whole,
+    /// A delete.
+    Delete,
+}
+
+impl RowWrite {
+    /// How `event` writes its row.
+    pub fn of(event: &sync_core::SyncEvent) -> Self {
+        if event.is_delete() {
+            RowWrite::Delete
+        } else if event.merges_fields() {
+            RowWrite::Fields
+        } else {
+            RowWrite::Whole
+        }
+    }
 }
 
 /// Insert-side shape for a field-level conflict — the values the applier
