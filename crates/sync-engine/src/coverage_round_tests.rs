@@ -246,8 +246,8 @@ async fn a_live_session_named_below_the_gc_horizon_is_fetched_as_it_grows() {
     // Review round 1 of #130: the applied lengths were cut at the GC horizon,
     // so a peer's session still running from before it dropped out, and its
     // growth reached nobody — the laptop's gap, back. They are kept now.
-    let (_tmp, orchestrator, hooks, adapter) = device(fresh_meta(), true).await;
-    mark_exact(&hooks.store);
+    // Not exact, so only its recorded length can fetch the file again.
+    let (_tmp, orchestrator, _hooks, adapter) = device(fresh_meta(), true).await;
     adapter
         .push_log(&session("dev-desktop", 1_000, 1))
         .await

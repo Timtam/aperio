@@ -1137,6 +1137,10 @@ Siehe DESIGN §4.2.
   ↳ Live prüfen: Nach dem Update holt jedes Gerät einmal nach; auf dem Laptop stimmen die Aufgaben seit dem 19.10., gelöschte verschwinden, kein Konflikt.
   ↳ Grenzen: Eine Löschung, deren Datei schon aufgeräumt ist, lässt sich nicht nachholen. Eine Zeile ohne bekannte Zeit (Uhr erst ab diesem Update, kein `updated_at`) nimmt eine nie angewendete ältere Änderung noch an.
   ↳ Mehr als 256 Dateien im Sync-Ordner: Die ältesten fallen aus den gemerkten Längen und werden jede Runde neu geholt (richtig, aber Bandbreite). Bei Bedarf Längen nach Auflistung statt nach Anzahl kappen.
+  ↳ Eine einzige unlesbare Datei (Lesefehler, oder unter E2E eine nicht entschlüsselbare) lässt den ganzen Abruf scheitern: Beitritt und Wiederaufnahme schlagen fehl, das Nachholen versucht es stündlich. Adapter sollten so eine Datei mit Warnung überspringen und benennen (Prüfrunde 2, U5).
+  ↳ Termine und Aufgaben schicken in `*.updated` die ganze Zeile. Ein Gerät mit veraltetem Stand, das eine Zeile bearbeitet, schreibt deren alte Felder als neuer zurück, überall (der Laptop seit dem 27.10. womöglich). Abhilfe: nur geänderte Felder senden (Prüfrunde 2, U9). Auf dem Laptop prüfen.
+  ↳ Ein Ereignis, das nie angewendet werden kann (z. B. Aufgabe in einer inzwischen gelöschten Liste), wird nie als angewendet vermerkt: Seine Datei bleibt für immer, und das Gerät nennt keine Kennungen mehr (Prüfrunde 2, K4). Dauerhafte Fehler nach einigen Versuchen als gehalten führen?
+  ↳ Ein Gerät mit älterem Build meldet sich nie als genau: Solange es aktiv ist, löscht kein Compactor etwas. Alle Geräte aktualisieren; die Meldung nach „Jetzt kompaktieren“ nennt es.
   ↳ Lokale Termine und Kalender werden beim Start nicht ins Protokoll nachgetragen (anders als Aufgaben, Konten, Einstellungen): Was vor dem Beitritt da war, erreicht die anderen Geräte nie. Eigener Befund, prüfen.
 ### B4 · Mini-Kalender-Sidebar-Widget (§5.3) `[ ]`
 - [ ] Optionales, ein-/ausblendbares Datums-Widget für schnelle Navigation in der Sidebar.

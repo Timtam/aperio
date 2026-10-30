@@ -1163,9 +1163,9 @@ fn an_older_setting_arriving_late_does_not_overwrite_a_newer_one() {
     applier
         .apply_envelopes(vec![set_dark_mode(&other, true, 2000)])
         .unwrap();
-    let report = applier
-        .apply_envelopes(vec![set_dark_mode(&other, false, 1000)])
-        .unwrap();
+    let older = set_dark_mode(&other, false, 1000);
+    let older_id = older.id.clone();
+    let report = applier.apply_envelopes(vec![older]).unwrap();
     assert_eq!(report.skipped_older, 1);
     assert_eq!(report.applied, 0);
     let shared = db.clone();
@@ -1176,6 +1176,18 @@ fn an_older_setting_arriving_late_does_not_overwrite_a_newer_one() {
             .as_deref(),
         Some("true"),
     );
+    // Recorded as applied: a re-fetch does not weigh it again, and the
+    // compactor counts it as held (else its file would never go).
+    let recorded: i64 = db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM sync_applied_events WHERE event_id = ?",
+            params![older_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(recorded, 1);
 }
 
 #[test]
