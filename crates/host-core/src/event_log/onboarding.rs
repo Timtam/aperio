@@ -546,7 +546,7 @@ impl OnboardingService {
         // typically including the peers' LIVE session files, whose later
         // appends would otherwise stay invisible until those peers rotate
         // (the cursor lands exactly on their timestamps).
-        self.record_applied_lengths(&applied_lengths, meta.gc_horizon_or_min());
+        self.record_applied_lengths(&applied_lengths);
 
         // Persist the cursor so the next scheduler round doesn't
         // re-pull the same backlog. The snapshot path bumps
@@ -730,7 +730,7 @@ impl OnboardingService {
         // Seed growth-refetch records (see accept_remote): the peers'
         // live session files just applied would otherwise never be
         // re-fetched when they grow.
-        self.record_applied_lengths(&applied_lengths, meta.gc_horizon_or_min());
+        self.record_applied_lengths(&applied_lengths);
 
         // §19.10 v1.1: replay our own pending logs through the
         // applier's force-own path. The snapshot apply above
@@ -904,7 +904,7 @@ impl OnboardingService {
             }
         }
         report.merge_apply(self.applier.apply_envelopes_force_own(envelopes)?);
-        self.record_applied_lengths(&applied_lengths, meta.gc_horizon_or_min());
+        self.record_applied_lengths(&applied_lengths);
         self.replay_pending_logs(&mut report).await;
 
         // 6. The cursor (foreign files only, as everywhere), and this
@@ -1265,15 +1265,13 @@ impl OnboardingService {
     /// user-triggered onboarding to interleave their final writes.
     /// Accepted: rare, self-healing, and strictly no worse than before
     /// this recording existed.
-    fn record_applied_lengths(&self, applied: &[(String, u64)], floor: DateTime<Utc>) {
+    fn record_applied_lengths(&self, applied: &[(String, u64)]) {
         let prefs = UserPrefsRepo::new(&self.db);
         let existing = prefs
             .get(sync_engine::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
             .ok()
             .flatten();
-        if let Some(raw) =
-            sync_engine::merge_applied_log_lengths(existing.as_deref(), applied, floor)
-        {
+        if let Some(raw) = sync_engine::merge_applied_log_lengths(existing.as_deref(), applied) {
             if let Err(err) = prefs.set(sync_engine::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY, &raw) {
                 warn!(?err, "couldn't persist applied-log-length map");
             }

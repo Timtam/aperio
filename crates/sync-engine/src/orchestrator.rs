@@ -49,7 +49,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Timelike, Utc};
-use sync_core::{DeviceCursor, DeviceId, LogFile, LogFileName, SyncAdapter, SyncError, SyncResult};
+use sync_core::{DeviceCursor, DeviceId, LogFile, SyncAdapter, SyncError, SyncResult};
 use tracing::{debug, info, warn};
 
 use crate::{
@@ -95,18 +95,17 @@ pub const SYNC_OWN_NEWEST_LOG_PREF_KEY: &str = "sync.cursor.ownNewestLog";
 /// recorded applied length, instead of those events staying invisible
 /// until the peer rotates its session. Persisted (not in-memory) so
 /// appends that landed while this device was OFFLINE are detected on the
-/// next launch. Entries for files named before the dataset's `gc_horizon`
-/// drop out (the files are gone or held by the snapshot), and
-/// [`APPLIED_LOG_LENGTHS_CAP`] bounds the rest.
+/// next launch. Capped to the newest [`APPLIED_LOG_LENGTHS_CAP`] files.
 pub const SYNC_APPLIED_LOG_LENGTHS_PREF_KEY: &str = "sync.cursor.appliedLogLengths";
 
-/// Safety cap for [`SYNC_APPLIED_LOG_LENGTHS_PREF_KEY`]. It is no longer the
-/// pruning rule: a file whose record dropped out counts as UNKNOWN, and an
-/// exact device fetches unknown files (DESIGN-sync-snapshot-coverage.md) —
-/// a cap of 64 would have re-fetched every older retained file every round.
-/// Entries below `gc_horizon` go instead; this only bounds a pathological
-/// dataset, far beyond the files 14 days of retention keep.
-pub const APPLIED_LOG_LENGTHS_CAP: usize = 4096;
+/// Cap for [`SYNC_APPLIED_LOG_LENGTHS_PREF_KEY`], the newest files by name.
+/// A record must stay while its file can still grow — a live session named
+/// long ago included, so no cut by `gc_horizon`: that dropped such a file
+/// and its growth was never fetched again (review round 1 of #130). And a
+/// file whose record dropped out counts as unknown, which an exact device
+/// fetches (DESIGN-sync-snapshot-coverage.md), so the cap sits well above
+/// the files 14 days of retention keep (one per device and session).
+pub const APPLIED_LOG_LENGTHS_CAP: usize = 256;
 
 /// RFC 3339 timestamp of the snapshot from which this device's applied
 /// record became EXACT (DESIGN-sync-snapshot-coverage.md): every event still
@@ -119,12 +118,10 @@ pub const APPLIED_LOG_LENGTHS_CAP: usize = 4096;
 pub const SYNC_COVERAGE_EXACT_SINCE_PREF_KEY: &str = "sync.cursor.coverageExactSince";
 
 /// Merge freshly applied `(filename, byte length)` records into the
-/// serialized map [`SYNC_APPLIED_LOG_LENGTHS_PREF_KEY`] holds, dropping
-/// records of files named before `floor` (the dataset's `gc_horizon`) and
-/// applying the safety cap (filenames sort chronologically — the timestamp
-/// prefix is fixed-width — so a plain string sort ages out the oldest).
-/// Returns the new serialized map, or `None` when there is nothing to
-/// record.
+/// serialized map [`SYNC_APPLIED_LOG_LENGTHS_PREF_KEY`] holds, applying
+/// the cap (filenames sort chronologically — the timestamp prefix is
+/// fixed-width — so a plain string sort ages out the oldest). Returns
+/// the new serialized map, or `None` when there is nothing to record.
 /// Pure, so the onboarding/stale-resume paths — which fetch + apply logs
 /// OUTSIDE the round — share the exact recording semantics; without
 /// that, a peer's live session file applied during onboarding had no
@@ -133,7 +130,6 @@ pub const SYNC_COVERAGE_EXACT_SINCE_PREF_KEY: &str = "sync.cursor.coverageExactS
 pub fn merge_applied_log_lengths(
     existing_raw: Option<&str>,
     fetched: &[(String, u64)],
-    floor: DateTime<Utc>,
 ) -> Option<String> {
     if fetched.is_empty() {
         return None;
@@ -144,11 +140,6 @@ pub fn merge_applied_log_lengths(
     for (name, len) in fetched {
         map.insert(name.clone(), *len);
     }
-    // A name that does not parse is kept: it says nothing about its age.
-    map.retain(|name, _| match LogFileName::from_filename(name) {
-        Ok(parsed) => parsed.timestamp >= floor,
-        Err(_) => true,
-    });
     if map.len() > APPLIED_LOG_LENGTHS_CAP {
         let mut names: Vec<String> = map.keys().cloned().collect();
         names.sort_unstable();
@@ -761,10 +752,7 @@ impl SyncOrchestrator {
                         }
                     }
                 }
-                self.record_applied_lengths(
-                    &applied_lengths,
-                    gc_horizon.unwrap_or(DateTime::<Utc>::MIN_UTC),
-                );
+                self.record_applied_lengths(&applied_lengths);
 
                 // 3. Advance cursor. Persist as RFC 3339 to keep
                 // the user_prefs value human-readable.
@@ -1144,13 +1132,13 @@ impl SyncOrchestrator {
 
     /// Record the applied byte lengths of freshly fetched foreign logs
     /// (see [`merge_applied_log_lengths`]).
-    fn record_applied_lengths(&self, fetched: &[(String, u64)], floor: DateTime<Utc>) {
+    fn record_applied_lengths(&self, fetched: &[(String, u64)]) {
         let existing = self
             .store
             .get_pref(SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
             .ok()
             .flatten();
-        if let Some(raw) = merge_applied_log_lengths(existing.as_deref(), fetched, floor) {
+        if let Some(raw) = merge_applied_log_lengths(existing.as_deref(), fetched) {
             if let Err(err) = self.store.set_pref(SYNC_APPLIED_LOG_LENGTHS_PREF_KEY, &raw) {
                 warn!(?err, "couldn't persist applied-log-length map");
             }
@@ -1230,11 +1218,11 @@ mod tests {
     use sync_core::{DeviceId, DeviceRecord, MetaJson};
 
     #[test]
-    fn applied_lengths_drop_out_below_the_gc_horizon_not_by_count() {
-        // DESIGN-sync-snapshot-coverage.md: a record that drops out makes its
-        // file UNKNOWN, which an exact device fetches — so records go by the
-        // GC horizon (the file is gone or held by the snapshot), not by
-        // keeping the newest 64.
+    fn applied_lengths_keep_the_newest_files_whatever_their_age() {
+        // A record must stay while its file can still grow — a live session
+        // named long ago included. Cutting records by the GC horizon dropped
+        // such a file, and its growth was never fetched again (review round 1
+        // of #130). Only the count cap ages records out, oldest name first.
         let at = |secs: i64| {
             sync_core::LogFileName::new(
                 Utc.timestamp_opt(secs, 0).unwrap(),
@@ -1242,20 +1230,27 @@ mod tests {
             )
             .to_filename()
         };
-        let fetched: Vec<(String, u64)> = (0..100).map(|n| (at(10_000 + n), 7)).collect();
-        let mut with_old = fetched.clone();
-        with_old.push((at(500), 3));
-        with_old.push(("not-a-log-name".into(), 1));
-        let floor = Utc.timestamp_opt(1_000, 0).unwrap();
-        let raw = merge_applied_log_lengths(None, &with_old, floor).unwrap();
+        let live = at(500);
+        let mut fetched: Vec<(String, u64)> = (0..100).map(|n| (at(10_000 + n), 7)).collect();
+        fetched.push((live.clone(), 3));
+        let raw = merge_applied_log_lengths(None, &fetched).unwrap();
         let map: std::collections::HashMap<String, u64> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(map.len(), 101);
         assert_eq!(
-            map.len(),
-            101,
-            "all 100 above the horizon, and the unparsed name"
+            map.get(&live),
+            Some(&3),
+            "an old live session keeps its record"
         );
-        assert!(!map.contains_key(&at(500)));
-        assert!(map.contains_key("not-a-log-name"));
+
+        let many: Vec<(String, u64)> = (0..300).map(|n| (at(20_000 + n), 1)).collect();
+        let raw = merge_applied_log_lengths(Some(&raw), &many).unwrap();
+        let map: std::collections::HashMap<String, u64> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(map.len(), super::APPLIED_LOG_LENGTHS_CAP);
+        assert!(
+            !map.contains_key(&live),
+            "beyond the cap, the oldest name goes"
+        );
+        assert!(map.contains_key(&at(20_299)));
     }
 
     /// Build a meta whose GC high-water mark sits at `gc_horizon` — i.e. logs
