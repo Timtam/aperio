@@ -104,6 +104,11 @@ still, und nur Neueres gewinnt.
   hochgeladene Sitzung, oder eine nach dem Aufräumen erneut hochgeladene mit
   Namen unter `gc_horizon`. Ein nicht genaues Gerät behält die alte Regel, bis
   es nachgeholt hat.
+- **Fertige Sitzungen.** Der Push entfernt eine eigene ausstehende Datei aus
+  einem früheren App-Start, sobald sie ganz hochgeladen ist: Sie wächst nicht
+  mehr. Bisher ging sie nach jedem Start wieder hoch, und eine Datei, die der
+  Compactor gelöscht hatte, kam zurück; ein genaues Gerät nahm sie dann als
+  unbekannt herein.
 - **Gemerkte Längen.** Die 256 neuesten (nach Namen), nicht nach `gc_horizon`
   beschnitten: Eine noch laufende Sitzung mit altem Namen muss ihr Wachstum
   weiter zeigen. Grenze: Liegen mehr als 256 Dateien vor, ist die älteste jede
@@ -158,7 +163,10 @@ kein `updated_at`) kann einen neueren Stand aus einer schon gelöschten Datei
 halten. Beim Nachholen wird darum für so eine Zeile eine schon angewendete
 oder eigene Änderung, ein Löschen eingeschlossen, **nicht** erneut
 angewendet; ihre Zeit wird die Uhr der Zeile. Eigene Änderungen gelten als
-angewendet, denn die Zeilen des Geräts halten sie. Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
+angewendet, denn die Zeilen des Geräts halten sie. Ebenso eine Änderung, die
+älter ist als `gc_horizon`: Ihre Datei war gelöscht, der Schnappschuss hält,
+was sie tat, und sie liegt nur da, weil ein Gerät sie erneut hochgeladen hat
+(ältere Builds tun das nach jedem Start). Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
 angewendeten Änderung, werden spätere angewendete wieder gewogen. Grenze: Eine
 nie angewendete ältere Änderung auf so einer Zeile gewinnt noch, wie in jeder
 Runde zuvor.

@@ -1259,7 +1259,7 @@ fn the_catch_up_keeps_a_newer_row_quietly_and_brings_a_reverted_one_back() {
     // The catch-up: an older change (08:00) differs from the row and stays
     // out without a conflict; the applied 10:00 change comes back.
     let report = applier
-        .catch_up_envelopes(vec![title("Acht", 8), title("Zehn", 10)])
+        .catch_up_envelopes(vec![title("Acht", 8), title("Zehn", 10)], None)
         .unwrap();
     assert_eq!(report.conflicts, 0);
     assert_eq!(
@@ -1388,7 +1388,7 @@ fn the_catch_up_leaves_a_row_of_unknown_time_as_it_is() {
         .unwrap();
 
     applier
-        .catch_up_envelopes(vec![set_interval("30", 1000)])
+        .catch_up_envelopes(vec![set_interval("30", 1000)], None)
         .unwrap();
 
     assert_eq!(interval(&db).as_deref(), Some("90"));
@@ -1412,11 +1412,14 @@ fn the_catch_up_weighs_applied_changes_again_once_it_changed_the_row() {
     forget_clocks(&db);
 
     applier
-        .catch_up_envelopes(vec![
-            set_interval("30", 1000),
-            set_interval("45", 2000),
-            set_interval("60", 3000),
-        ])
+        .catch_up_envelopes(
+            vec![
+                set_interval("30", 1000),
+                set_interval("45", 2000),
+                set_interval("60", 3000),
+            ],
+            None,
+        )
         .unwrap();
 
     assert_eq!(interval(&db).as_deref(), Some("60"));
@@ -1473,7 +1476,7 @@ fn the_catch_up_keeps_a_newer_row_against_this_devices_own_older_change() {
         1000,
     );
 
-    applier.catch_up_envelopes(vec![own]).unwrap();
+    applier.catch_up_envelopes(vec![own], None).unwrap();
 
     assert_eq!(interval(&db).as_deref(), Some("90"));
 }
@@ -1496,7 +1499,7 @@ fn the_catch_up_keeps_a_row_set_again_after_an_applied_delete() {
     forget_clocks(&db);
 
     applier
-        .catch_up_envelopes(vec![label_deleted("lbl-back", 1000)])
+        .catch_up_envelopes(vec![label_deleted("lbl-back", 1000)], None)
         .unwrap();
 
     assert_eq!(label_name(&db, "lbl-back").as_deref(), Some("Wieder da"));
@@ -1572,11 +1575,14 @@ fn a_device_catching_up_over_create_delete_and_a_later_edit_ends_deleted() {
     let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-third".into()));
 
     applier
-        .catch_up_envelopes(vec![
-            label_event("lbl-third", "Rot", 1000, true),
-            label_deleted("lbl-third", 3000),
-            label_event("lbl-third", "Neuer", 4000, false),
-        ])
+        .catch_up_envelopes(
+            vec![
+                label_event("lbl-third", "Rot", 1000, true),
+                label_deleted("lbl-third", 3000),
+                label_event("lbl-third", "Neuer", 4000, false),
+            ],
+            None,
+        )
         .unwrap();
 
     assert_eq!(label_name(&db, "lbl-third"), None);
@@ -1610,4 +1616,27 @@ fn a_snapshots_clocks_never_move_a_row_back() {
         }),
     );
     assert_eq!(store.row_clocks().unwrap().len(), 1);
+}
+
+#[test]
+fn the_catch_up_does_not_take_an_old_change_from_a_file_pushed_again_after_the_gc() {
+    // Review round 2 of #130: a device pushed a file again that the GC had
+    // deleted. On a row of unknown time its change, older than the GC
+    // horizon, is held by the snapshot and does not win; a newer one does.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    UserPrefsRepo::new(&db)
+        .set("sync.intervalMinutes", "90")
+        .unwrap();
+    let horizon = Some(Utc.timestamp_opt(2000, 0).unwrap());
+
+    applier
+        .catch_up_envelopes(vec![set_interval("30", 1000)], horizon)
+        .unwrap();
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+
+    applier
+        .catch_up_envelopes(vec![set_interval("45", 3000)], horizon)
+        .unwrap();
+    assert_eq!(interval(&db).as_deref(), Some("45"));
 }

@@ -238,7 +238,7 @@ impl EventLogApplier {
     /// (timestamp, id) before dispatching, so the same input set
     /// produces the same final state regardless of source order.
     pub fn apply_envelopes(&self, envelopes: Vec<EventEnvelope>) -> SyncResult<ApplyReport> {
-        self.apply_envelopes_inner(envelopes, false)
+        self.apply_envelopes_inner(envelopes, false, None)
     }
 
     /// The catch-up (DESIGN-sync-snapshot-coverage.md, Toni 2026-10-30): a
@@ -254,14 +254,24 @@ impl EventLogApplier {
     /// table keeps no `updated_at`) holds this change or a newer one, maybe
     /// from a file already gone: it stays as it is and takes the change's
     /// time as its clock — until the catch-up itself changes the row.
-    pub fn catch_up_envelopes(&self, envelopes: Vec<EventEnvelope>) -> SyncResult<ApplyReport> {
-        self.apply_envelopes_inner(envelopes, true)
+    ///
+    /// So does a change older than `held_before`, the dataset's GC horizon,
+    /// on such a row: its file was deleted, the snapshot holds what it did,
+    /// and it is present only because a device pushed it again (review
+    /// round 2 of #130).
+    pub fn catch_up_envelopes(
+        &self,
+        envelopes: Vec<EventEnvelope>,
+        held_before: Option<DateTime<Utc>>,
+    ) -> SyncResult<ApplyReport> {
+        self.apply_envelopes_inner(envelopes, true, held_before)
     }
 
     fn apply_envelopes_inner(
         &self,
         mut envelopes: Vec<EventEnvelope>,
         catch_up: bool,
+        held_before: Option<DateTime<Utc>>,
     ) -> SyncResult<ApplyReport> {
         // Reset the per-pass conflict counter. `merge_fields`
         // bumps it on every recorded conflict; we fold the final
@@ -322,9 +332,8 @@ impl EventLogApplier {
                 }
             };
             let whole = !env.event.merges_fields();
-            if applied
-                && (changed.is_none() || key.as_ref().is_some_and(|key| seeded.contains(key)))
-            {
+            let held = applied || held_before.is_some_and(|before| env.timestamp < before);
+            if held && (changed.is_none() || key.as_ref().is_some_and(|key| seeded.contains(key))) {
                 // The catch-up, on a row of unknown time: it keeps what it
                 // holds and takes this change's time as its clock.
                 if let Some(key) = key {
