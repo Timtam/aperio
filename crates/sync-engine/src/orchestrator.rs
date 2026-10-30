@@ -215,7 +215,7 @@ pub trait SyncRoundHooks: Send + Sync {
     /// The default errors: a platform that doesn't wire this up falls back to
     /// the old behaviour (the round surfaces `StaleDevice` and the manual
     /// resume dialog handles it).
-    async fn resume_from_stale(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
+    async fn resume_from_stale(&self, _adapter: &dyn SyncAdapter) -> SyncResult<ApplyReport> {
         Err(SyncError::internal(
             "auto-resume not supported on this platform",
         ))
@@ -226,7 +226,7 @@ pub trait SyncRoundHooks: Send + Sync {
     /// than its row, without a conflict; afterwards the record is exact. The
     /// default errors: the device keeps its state, as before, and the next
     /// round tries again.
-    async fn catch_up(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
+    async fn catch_up(&self, _adapter: &dyn SyncAdapter) -> SyncResult<ApplyReport> {
         Err(SyncError::internal(
             "catch-up not supported on this platform",
         ))
@@ -526,6 +526,8 @@ impl SyncOrchestrator {
         // then on — the heartbeat must re-fetch or it would push the old
         // copy back, re-flagging this device as stale.
         let mut resumed = false;
+        // What a resume or a catch-up below applied, for this round's report.
+        let mut recovered: Vec<ApplyReport> = Vec::new();
         if let Some(meta) = &round_meta {
             // Returns `Err(SchemaTooOld)` when the running version
             // is older than meta.min_app_version.
@@ -595,8 +597,9 @@ impl SyncOrchestrator {
             };
             if flagged_stale || backstop {
                 match self.hooks.resume_from_stale(adapter.as_ref()).await {
-                    Ok(()) => {
+                    Ok(applied) => {
                         info!("§19.10: device was stale; auto-resumed via snapshot re-pull");
+                        recovered.push(applied);
                         // Drop any prior latch — the resume cleared the flag,
                         // advanced our cursor past `gc_horizon`, and pushed an
                         // updated meta, so the rest of the round proceeds as a
@@ -645,7 +648,10 @@ impl SyncOrchestrator {
             // failure leaves the device as it was; the next round retries.
             if !resumed && !self.coverage_exact() {
                 match self.hooks.catch_up(adapter.as_ref()).await {
-                    Ok(()) => info!("caught up once over every log file"),
+                    Ok(applied) => {
+                        info!("caught up once over every log file");
+                        recovered.push(applied);
+                    }
                     Err(err) => warn!(
                         ?err,
                         "catch-up over every log file failed; retrying next round",
@@ -658,6 +664,12 @@ impl SyncOrchestrator {
         }
 
         let mut report = SyncRoundReport::default();
+        // What a resume or a catch-up applied counts as this round's: the
+        // platform re-reads settings and reloads views from the report
+        // (review round 2 of #130).
+        for applied in recovered {
+            report.merge_apply(applied);
+        }
 
         // 1. Push pending logs.
         match self.push_pending(adapter.as_ref()).await {

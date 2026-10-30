@@ -18,8 +18,8 @@ use tempfile::TempDir;
 
 use crate::test_support::{FakeSecrets, FakeStore};
 use crate::{
-    Compactor, EventLogApplier, SnapshotBuilder, SyncOrchestrator, SyncRoundHooks, SyncStore,
-    SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
+    ApplyReport, Compactor, EventLogApplier, SnapshotBuilder, SyncOrchestrator, SyncRoundHooks,
+    SyncStore, SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
 };
 
 /// Counts catch-ups; a successful one marks the record exact, as the
@@ -45,13 +45,18 @@ impl SyncRoundHooks for RecordingHooks {
         Ok(())
     }
 
-    async fn catch_up(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
+    async fn catch_up(&self, _adapter: &dyn SyncAdapter) -> SyncResult<ApplyReport> {
         *self.catch_ups.lock().unwrap() += 1;
         if self.fail {
             return Err(SyncError::internal("offline"));
         }
         mark_exact(&self.store);
-        Ok(())
+        Ok(ApplyReport {
+            applied: 3,
+            settings_keys: vec!["appearance.darkMode".into()],
+            day_markers_touched: true,
+            ..ApplyReport::default()
+        })
     }
 }
 
@@ -136,6 +141,20 @@ async fn an_inexact_device_catches_up_once() {
         1,
         "once, then its record is exact"
     );
+}
+
+#[tokio::test]
+async fn what_the_catch_up_applied_reaches_the_rounds_report() {
+    // Review round 2 of #130: the report was dropped, so the platform never
+    // re-read the settings or reloaded the views the catch-up changed.
+    let (_tmp, orchestrator, _hooks, _adapter) = device(fresh_meta(), false).await;
+    let report = orchestrator.sync_now().await.expect("round");
+    assert_eq!(report.applied, 3);
+    assert_eq!(
+        report.settings_keys,
+        vec!["appearance.darkMode".to_string()]
+    );
+    assert!(report.day_markers_touched);
 }
 
 #[tokio::test]

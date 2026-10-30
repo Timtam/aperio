@@ -161,6 +161,11 @@ pub struct OnboardingReport {
     /// Number of devices in `meta.json` AFTER this device's entry
     /// was upserted. Includes us.
     pub device_count: usize,
+    /// What the pass over every log applied, whole — for a sync round that
+    /// resumed or caught up, so the platform re-reads settings and reloads
+    /// views from its report.
+    #[serde(skip)]
+    pub detail: ApplyReport,
 }
 
 impl OnboardingReport {
@@ -711,7 +716,9 @@ impl OnboardingService {
         // A pending file may already be uploaded: each change once.
         let mut seen = HashSet::new();
         envelopes.retain(|envelope| seen.insert(envelope.id.clone()));
-        report.merge_apply(self.applier.catch_up_envelopes(envelopes)?);
+        let applied = self.applier.catch_up_envelopes(envelopes)?;
+        report.detail = applied.clone();
+        report.merge_apply(applied);
         self.record_applied_lengths(&lengths);
         Ok(newest_foreign)
     }
@@ -1990,12 +1997,17 @@ mod tests {
         let (_tmp, db) = fresh_db();
         let (svc, adapter, _) = laptop_before_catch_up(&db, no_pending(), false).await;
 
-        svc.catch_up(&adapter).await.unwrap();
+        let report = svc.catch_up(&adapter).await.unwrap();
 
         assert_eq!(interval(&db).as_deref(), Some("45"));
         assert_eq!(label_count(&db, "lbl-1"), 0, "the deleted label goes");
         assert_eq!(unresolved_conflicts(&db), 0);
         assert!(exact_since(&db).is_some());
+        // For the round's report: the platform re-reads this setting.
+        assert!(report
+            .detail
+            .settings_keys
+            .contains(&"sync.intervalMinutes".to_string()));
     }
 
     #[tokio::test]
