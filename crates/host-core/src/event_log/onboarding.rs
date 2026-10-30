@@ -794,15 +794,14 @@ impl OnboardingService {
         envelopes
     }
 
-    /// "Neu beginnen" path. Builds a fresh meta.json with only this
-    /// device, pushes it to the remote, then leaves the rest to the
-    /// scheduler's next round (which will push whatever was already
-    /// queued in `pending/`).
+    /// "Neu beginnen" path. Deletes the old dataset's log files, pushes a
+    /// snapshot of this device's state and a fresh meta.json with only this
+    /// device, then leaves the rest to the scheduler's next round (which
+    /// will push whatever was already queued in `pending/`).
     ///
     /// Caller is responsible for warning the user that any existing
-    /// remote data is now orphaned — the meta we write overwrites
-    /// the prior file, and the prior logs become unreachable on
-    /// next compaction.
+    /// remote data is overwritten — its log files are deleted and its
+    /// snapshot replaced.
     pub async fn adopt_local(
         &self,
         adapter: &dyn SyncAdapter,
@@ -826,7 +825,30 @@ impl OnboardingService {
             );
         }
 
+        // "Neu beginnen" overwrites the dataset (Toni, 2026-10-30): the old
+        // one's log files go, so neither this device's rounds nor a device
+        // joining later take them in, and its snapshot gives way to this
+        // device's state. Names only: the old files may be under another key.
+        // A delete that fails stops here, before the new meta, and the user
+        // can start over again.
+        let old_logs = adapter.list_log_names().await?;
+        for name in &old_logs {
+            adapter.delete_log(name).await?;
+        }
+        if !old_logs.is_empty() {
+            info!(
+                count = old_logs.len(),
+                "adopt_local deleted the old dataset's log files"
+            );
+        }
+        let snapshot_ts = Utc::now();
+        let snapshot = self.snapshot_builder.build_at(snapshot_ts, None)?;
+        adapter.push_snapshot(&snapshot).await?;
+        // Its own state is the dataset now: nothing to catch up over.
+        self.save_coverage_exact_since(snapshot_ts)?;
+
         let mut meta = MetaJson::fresh(&self.app_version);
+        meta.snapshot_timestamp = snapshot_ts;
         // Phase Sk: bake the E2E flag + params into the fresh
         // meta so devices joining later can derive the same key
         // from the user's passphrase. The key itself is NEVER
@@ -842,9 +864,6 @@ impl OnboardingService {
             self.save_device_name(name)?;
         }
         self.mark_onboarded()?;
-        // Not marked exact here: the folder may still hold another dataset's
-        // logs. Its first round catches it up over every file.
-        self.clear_coverage_exact()?;
 
         Ok(OnboardingReport {
             remote_was_empty,
@@ -1167,10 +1186,12 @@ mod tests {
         async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
             Ok(self.snapshot.lock().unwrap().clone())
         }
-        async fn push_snapshot(&self, _snapshot: &Snapshot) -> SyncResult<()> {
+        async fn push_snapshot(&self, snapshot: &Snapshot) -> SyncResult<()> {
+            *self.snapshot.lock().unwrap() = Some(snapshot.clone());
             Ok(())
         }
-        async fn delete_log(&self, _name: &LogFileName) -> SyncResult<()> {
+        async fn delete_log(&self, name: &LogFileName) -> SyncResult<()> {
+            self.logs.lock().unwrap().retain(|log| log.name != *name);
             Ok(())
         }
         async fn push_sound_asset(
@@ -1377,6 +1398,42 @@ mod tests {
         assert!(updated
             .device(&DeviceId::from_string("dev-a".into()))
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn starting_over_deletes_the_old_dataset_and_puts_this_devices_state_in_its_place() {
+        // Toni, 2026-10-30: "Neu beginnen" overwrites the dataset. Its old log
+        // files would otherwise come in through the catch-up, here or on a
+        // device joining later, and its snapshot through the join.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        UserPrefsRepo::new(&db.shared())
+            .set("sync.intervalMinutes", "15")
+            .unwrap();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = envelope("ev-old", "dev-old", at, set_interval("45"));
+        let adapter = FakeAdapter::with_logs(vec![file_of("dev-old", at, &[&old])]);
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+        adapter.install_snapshot(snapshot_at(at, None));
+
+        svc.adopt_local(&adapter, None, None).await.unwrap();
+
+        assert!(adapter.logs.lock().unwrap().is_empty());
+        let snapshot = adapter.fetch_snapshot().await.unwrap().unwrap();
+        let body: sync_engine::AperioSnapshotBody = serde_json::from_value(snapshot.body).unwrap();
+        assert_eq!(
+            body.settings
+                .get("sync.intervalMinutes")
+                .map(String::as_str),
+            Some("15"),
+            "this device's state",
+        );
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(
+            meta.snapshot_timestamp,
+            snapshot.metadata.snapshot_timestamp
+        );
+        assert!(after_self(&adapter).await.exact, "nothing to catch up over");
     }
 
     #[tokio::test]

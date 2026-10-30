@@ -3712,7 +3712,7 @@ Die App prüft, ob `meta.json` im Sync-Speicher existiert. Ist dies der Fall, ze
 └─────────────────────────────────────────────────────┘
 ```
 
-"Neu beginnen" legt einen frischen Datensatz an und überschreibt den bestehenden – mit expliziter Warnung und Bestätigung.
+"Neu beginnen" legt einen frischen Datensatz an und überschreibt den bestehenden – mit expliziter Warnung und Bestätigung. Dabei löscht es die Log-Dateien des alten Datensatzes (nur nach Namen, auch unter einem anderen Schlüssel) und ersetzt seinen Snapshot durch den Stand dieses Geräts; sonst holte das Nachholen sie wieder herein, hier oder auf einem später beitretenden Gerät (DESIGN-sync-snapshot-coverage.md).
 
 #### Schritt 4 – E2E-Passwort (falls aktiv)
 

@@ -220,6 +220,20 @@ pub trait SyncAdapter: Send + Sync {
     /// universal.
     async fn delete_log(&self, name: &crate::log::LogFileName) -> SyncResult<()>;
 
+    /// The names of every log file on the remote, whatever they hold — for
+    /// "Neu beginnen", which deletes them all (DESIGN-sync-snapshot-coverage.md).
+    /// The default fetches every file and keeps the names; a wrapper that
+    /// transforms contents passes this through, so a file it cannot read
+    /// (another dataset's key) is still named.
+    async fn list_log_names(&self) -> SyncResult<Vec<crate::log::LogFileName>> {
+        Ok(self
+            .fetch_new_logs(&DeviceCursor::epoch())
+            .await?
+            .into_iter()
+            .map(|log| log.name)
+            .collect())
+    }
+
     /// Upload a binary asset (sound file). Keyed by its sha256
     /// hash so the adapter writes to
     /// `assets/sounds/<hash>.<ext>`. Returns `Ok` if the file
