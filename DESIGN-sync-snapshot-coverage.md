@@ -162,11 +162,18 @@ beginnt mit leeren Uhren: Die eines früheren Datensatzes hielten die
 kein `updated_at`) kann einen neueren Stand aus einer schon gelöschten Datei
 halten. Beim Nachholen wird darum für so eine Zeile eine schon angewendete
 oder eigene Änderung, ein Löschen eingeschlossen, **nicht** erneut
-angewendet; ihre Zeit wird die Uhr der Zeile. Eigene Änderungen gelten als
-angewendet, denn die Zeilen des Geräts halten sie. Ebenso eine Änderung, die
-älter ist als `gc_horizon`: Ihre Datei war gelöscht, der Schnappschuss hält,
-was sie tat, und sie liegt nur da, weil ein Gerät sie erneut hochgeladen hat
-(ältere Builds tun das nach jedem Start). Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
+angewendet; ihre Zeit wird die Uhr der Zeile, und sie wird als angewendet
+vermerkt. Eigene Änderungen gelten als angewendet, denn die Zeilen des Geräts
+halten sie — nicht aber eigene, die noch nicht im Sync-Speicher liegen: Ein
+Schnappschuss dieses Durchgangs kann einen älteren Wert zurückgesetzt haben,
+und die anderen Geräte übernehmen die Änderung, sobald sie hochgeladen ist;
+sie wird gewogen wie dort. Als gehalten gilt in **jedem** Durchgang auch eine
+Änderung, die älter ist als `gc_horizon`: Ihre Datei war gelöscht, der
+Schnappschuss hält, was sie tat, und sie liegt nur da, weil ein Gerät sie
+erneut hochgeladen hat (ältere Builds tun das nach jedem Start). Weil jedes
+Gerät sie gleich wiegt, bleiben die Geräte gleich. Ein Löschen eines Termins
+oder einer Aufgabe wiegt das `updated_at` der Zeile mit, wenn ein Schnappschuss
+sie zurückgebracht hat. Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
 angewendeten Änderung, werden spätere angewendete wieder gewogen. Grenze: Eine
 nie angewendete ältere Änderung auf so einer Zeile gewinnt noch, wie in jeder
 Runde zuvor.
@@ -321,3 +328,37 @@ herein.
   Zeile bleibt draußen; eine eigene Änderung ist immer neuer als ihre Zeile;
   der Beitritt beginnt mit leeren Uhren; der Bericht des Nachholens geht in
   die Runde ein.
+
+## Prüfrunde 3 (PR #130, 2026-10-31)
+
+Klein: 3 Prüfer auf die zehn Commits nach Runde 2, die 6 schwersten Befunde
+gegengeprüft, ein Kritiker. Einzelheiten: scratchpad `coverage/review_r3.json`.
+
+- **Eigene, noch nicht hochgeladene Änderungen sind nicht gehalten.** Nach dem
+  Schnappschuss eines Beitritts oder einer Wiederaufnahme halten die Zeilen sie
+  nicht mehr; das Gerät behielt den Wert des Schnappschusses, schob aber seine
+  Änderung, und die anderen übernahmen sie.
+- **Was das Nachholen hält, wird nicht vermerkt** (älter als die GC-Grenze),
+  und eine gewöhnliche Runde wendet es später doch an. Die Regel gilt nur im
+  Nachholen.
+- **Kaskade ist kein Löschen:** Eine Aufgabe, die aus einer gleichzeitig
+  gelöschten Liste verschoben wurde, ging verloren; die Regel „eine
+  Zusammenführung auf eine gelöschte Zeile bleibt draußen“ unterscheidet nicht
+  zwischen gelöscht und mit dem Behälter verschwunden.
+- **14 Tage ab dem Schreiben, nicht ab dem Eintreffen:** Eine spät
+  hochgeladene Sitzung mit alten Einträgen ging gleich wieder.
+- **Alte Builds** verdichten nach Namen und löschen die `exact`-Meldungen.
+- Kleiner: eine dauerhaft unlesbare Datei sperrt das Aufräumen für immer; eine
+  unvollständige Wiederaufnahme behält ein altes „genau“; ein gelöschter Termin,
+  den ein Schnappschuss zurückbrachte, galt als Zeile ohne Zeit; der Beitritt
+  ändert Uhren und Merker, bevor er etwas geholt hat; ein aus gutem Grund
+  verworfener Schlüssel ließ den Schnappschuss als fehlerhaft gelten;
+  „Neu beginnen“ ohne Passwort könnte bei übrig gebliebenem E2E-Merker
+  Zugangsdaten in den Schnappschuss schreiben.
+
+## Entscheidungen nach Prüfrunde 3 (Toni, 2026-10-31)
+
+- **Alte Builds aussperren:** Die Sync-Formatversion steigt. Die erste
+  Verdichtung eines neuen Builds hebt `min_app_version` an; alte Builds
+  synchronisieren dann nicht mehr und zeigen „Update nötig“.
+- Danach eine Prüfrunde wie Runde 3.

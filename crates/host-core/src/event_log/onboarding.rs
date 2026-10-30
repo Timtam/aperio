@@ -712,6 +712,7 @@ impl OnboardingService {
             })
             .await?;
         let mut envelopes = Vec::new();
+        let mut pushed: HashSet<String> = HashSet::new();
         let mut lengths: Vec<(String, u64)> = Vec::new();
         let mut newest_foreign: Option<DateTime<Utc>> = None;
         let mut complete = true;
@@ -723,6 +724,9 @@ impl OnboardingService {
             }
             match log.into_envelopes() {
                 Ok(mut parsed) => {
+                    if !foreign {
+                        pushed.extend(parsed.iter().map(|envelope| envelope.id.clone()));
+                    }
                     envelopes.append(&mut parsed);
                     if foreign {
                         lengths.push((log.name.to_filename(), log.bytes.len() as u64));
@@ -744,11 +748,24 @@ impl OnboardingService {
                 }
             }
         }
-        envelopes.extend(self.pending_envelopes().await);
+        // Our own changes not on the remote yet are weighed, not held.
+        let pending = self.pending_envelopes().await;
+        let unpushed = pending
+            .iter()
+            .filter(|envelope| !pushed.contains(&envelope.id))
+            .map(|envelope| envelope.id.clone())
+            .collect();
+        envelopes.extend(pending);
         // A pending file may already be uploaded: each change once.
         let mut seen = HashSet::new();
         envelopes.retain(|envelope| seen.insert(envelope.id.clone()));
-        let applied = self.applier.catch_up_envelopes(envelopes, gc_horizon)?;
+        let applied = self.applier.catch_up_envelopes(
+            envelopes,
+            &sync_engine::PassContext {
+                held_before: gc_horizon,
+                unpushed,
+            },
+        )?;
         report.detail = applied.clone();
         report.merge_apply(applied);
         self.record_applied_lengths(&lengths);
@@ -2214,6 +2231,39 @@ mod tests {
         svc.catch_up(&adapter).await.unwrap();
 
         assert_eq!(interval(&db).as_deref(), Some("90"));
+    }
+
+    #[tokio::test]
+    async fn a_joining_device_keeps_its_own_change_not_pushed_yet() {
+        // Review round 3 of #130: a setting made in the first-launch wizard,
+        // pending, before the join. The snapshot holds the peer's value with
+        // no clock; the peers take this device's change once it is pushed,
+        // so it has to win here too, or the devices part.
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at = Utc::now() - chrono::Duration::minutes(5);
+        let own = envelope("ev-own", "dev-this", at, set_interval("70"));
+        let own_file = file_of("dev-this", at, &[&own]);
+        std::fs::write(
+            pending.path().join(own_file.name.to_filename()),
+            &own_file.bytes,
+        )
+        .unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set("sync.intervalMinutes", "70")
+            .unwrap();
+        stamp_clock(&db, "setting", "sync.intervalMinutes", at);
+        let adapter = FakeAdapter::with_logs(Vec::new());
+        let snapshot_ts = at - chrono::Duration::hours(1);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = snapshot_ts;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(snapshot_ts, None));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("70"));
     }
 
     #[tokio::test]

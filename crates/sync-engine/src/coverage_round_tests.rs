@@ -265,10 +265,16 @@ async fn a_live_session_named_below_the_gc_horizon_is_fetched_as_it_grows() {
     let mut meta = adapter.fetch_meta().await.unwrap().unwrap();
     meta.gc_horizon = Some(Utc.timestamp_opt(3_000, 0).unwrap());
     adapter.push_meta(&meta).await.unwrap();
-    adapter
-        .push_log(&session("dev-desktop", 1_000, 2))
-        .await
+    // Its new event is written now, after the horizon.
+    let mut grown = session("dev-desktop", 1_000, 1);
+    let mut events = grown.into_envelopes().unwrap();
+    let mut new_event = events[0].clone();
+    new_event.id = "ev-dev-desktop-grown".into();
+    new_event.timestamp = Utc.timestamp_opt(6_000, 0).unwrap();
+    events.push(new_event);
+    grown = LogFile::from_envelopes(grown.name.device_id.clone(), grown.name.timestamp, &events)
         .unwrap();
+    adapter.push_log(&grown).await.unwrap();
 
     let report = orchestrator.sync_now().await.expect("round 2");
     assert_eq!(report.fetched_logs, 1, "the grown session");
@@ -353,4 +359,33 @@ async fn a_finished_session_goes_once_pushed_and_the_live_one_stays() {
         .await
         .unwrap();
     assert_eq!(remote.len(), 2, "both are on the remote");
+}
+
+#[tokio::test]
+async fn an_ordinary_round_holds_what_is_older_than_the_gc_horizon() {
+    // Review round 3 of #130: a file the GC deleted, pushed again by an
+    // older build, reached an exact device as unknown; its old change won
+    // on a row of unknown time in a normal pass. The round passes the
+    // dataset's horizon, as the catch-up does.
+    let mut meta = fresh_meta();
+    meta.gc_horizon = Some(Utc.timestamp_opt(3_000, 0).unwrap());
+    let (_tmp, orchestrator, hooks, adapter) = device(meta, true).await;
+    mark_exact(&hooks.store);
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_CURSOR_PREF_KEY,
+            &Utc.timestamp_opt(4_000, 0).unwrap().to_rfc3339(),
+        )
+        .unwrap();
+    adapter
+        .push_log(&session("dev-desktop", 1_000, 1))
+        .await
+        .unwrap();
+
+    let report = orchestrator.sync_now().await.expect("round");
+
+    assert_eq!(report.fetched_logs, 1, "unknown, below the cursor");
+    assert_eq!(report.applied, 0);
+    assert_eq!(report.skipped_already_applied, 1, "held, and recorded");
 }

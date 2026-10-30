@@ -783,9 +783,10 @@ impl SyncOrchestrator {
                 // size counts as grown and a size-reporting adapter
                 // retries it next round.
                 let mut applied_lengths: Vec<(String, u64)> = Vec::new();
+                let held_before = round_meta.as_ref().and_then(|meta| meta.gc_horizon);
                 for log in foreign {
                     let byte_len = log.bytes.len() as u64;
-                    match self.applier.apply_log_file(&log) {
+                    match self.applier.apply_log_file(&log, held_before) {
                         Ok(apply_report) => {
                             report.merge_apply(apply_report);
                             applied_lengths.push((log.name.to_filename(), byte_len));

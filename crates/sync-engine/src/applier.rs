@@ -227,9 +227,23 @@ impl EventLogApplier {
     /// Apply every envelope in one log file. Convenience wrapper
     /// around `apply_envelopes` that handles the JSONL → envelope
     /// decoding via `LogFile::into_envelopes`.
-    pub fn apply_log_file(&self, log: &LogFile) -> SyncResult<ApplyReport> {
+    ///
+    /// `held_before` is the dataset's GC horizon: a change older than it
+    /// does not win on a row of unknown time (see [`PassContext`]).
+    pub fn apply_log_file(
+        &self,
+        log: &LogFile,
+        held_before: Option<DateTime<Utc>>,
+    ) -> SyncResult<ApplyReport> {
         let envelopes = log.into_envelopes()?;
-        self.apply_envelopes(envelopes)
+        self.apply_envelopes_inner(
+            envelopes,
+            false,
+            &PassContext {
+                held_before,
+                ..PassContext::default()
+            },
+        )
     }
 
     /// Apply a batch of envelopes. The caller can hand in
@@ -238,7 +252,7 @@ impl EventLogApplier {
     /// (timestamp, id) before dispatching, so the same input set
     /// produces the same final state regardless of source order.
     pub fn apply_envelopes(&self, envelopes: Vec<EventEnvelope>) -> SyncResult<ApplyReport> {
-        self.apply_envelopes_inner(envelopes, false, None)
+        self.apply_envelopes_inner(envelopes, false, &PassContext::default())
     }
 
     /// The catch-up (DESIGN-sync-snapshot-coverage.md, Toni 2026-10-30): a
@@ -255,23 +269,23 @@ impl EventLogApplier {
     /// from a file already gone: it stays as it is and takes the change's
     /// time as its clock — until the catch-up itself changes the row.
     ///
-    /// So does a change older than `held_before`, the dataset's GC horizon,
-    /// on such a row: its file was deleted, the snapshot holds what it did,
-    /// and it is present only because a device pushed it again (review
-    /// round 2 of #130).
+    /// So does a change older than the dataset's GC horizon on such a row
+    /// ([`PassContext`]). But not one of this device's own changes that is
+    /// not on the remote yet: the peers will take it, so it is weighed as
+    /// they will weigh it (review round 3 of #130).
     pub fn catch_up_envelopes(
         &self,
         envelopes: Vec<EventEnvelope>,
-        held_before: Option<DateTime<Utc>>,
+        context: &PassContext,
     ) -> SyncResult<ApplyReport> {
-        self.apply_envelopes_inner(envelopes, true, held_before)
+        self.apply_envelopes_inner(envelopes, true, context)
     }
 
     fn apply_envelopes_inner(
         &self,
         mut envelopes: Vec<EventEnvelope>,
         catch_up: bool,
-        held_before: Option<DateTime<Utc>>,
+        context: &PassContext,
     ) -> SyncResult<ApplyReport> {
         // Reset the per-pass conflict counter. `merge_fields`
         // bumps it on every recorded conflict; we fold the final
@@ -299,8 +313,11 @@ impl EventLogApplier {
                     continue;
                 }
                 // Our own change is in our rows: held, as the compactor
-                // counts it (review round 2 of #130).
-                Ok(applied) => applied || own,
+                // counts it (review round 2 of #130) — unless it is not on
+                // the remote yet. A snapshot this pass applied may have put
+                // an older value back, and the peers will take the change:
+                // it is weighed as they will weigh it (review round 3).
+                Ok(applied) => !context.unpushed.contains(&env.id) && (applied || own),
                 Err(err) => {
                     warn!(
                         event_id = %env.id,
@@ -332,15 +349,23 @@ impl EventLogApplier {
                 }
             };
             let whole = !env.event.merges_fields();
-            let held = applied || held_before.is_some_and(|before| env.timestamp < before);
+            let older_than_gc = context
+                .held_before
+                .is_some_and(|before| env.timestamp < before)
+                && !context.unpushed.contains(&env.id);
+            let held = applied || older_than_gc;
             if held && (changed.is_none() || key.as_ref().is_some_and(|key| seeded.contains(key))) {
-                // The catch-up, on a row of unknown time: it keeps what it
-                // holds and takes this change's time as its clock.
+                // A row of unknown time keeps what it holds and takes this
+                // change's time as its clock. Recorded as applied, so a later
+                // pass does not weigh it again (review round 3 of #130).
                 if let Some(key) = key {
                     if let Err(err) = self.store.advance_row_clock(&key, env.timestamp, whole) {
                         warn!(event_id = %env.id, ?err, "couldn't seed the row's clock");
                     }
                     seeded.insert(key);
+                }
+                if let Err(err) = self.mark_applied(&env.id) {
+                    warn!(event_id = %env.id, ?err, "couldn't record a held envelope as applied");
                 }
                 report.skipped_already_applied += 1;
                 continue;
@@ -1258,6 +1283,22 @@ impl EventLogApplier {
                     .map_err(core_to_sync)?;
                 (row.is_some(), row.map(|row| row.updated_at))
             }
+            // A delete of a row that is there — a snapshot brought it back —
+            // weighs the row's own time too (review round 3 of #130).
+            SyncEvent::EventDeleted(payload) => {
+                let row = self
+                    .adapter
+                    .get_event_by_id(&payload.id)
+                    .map_err(core_to_sync)?;
+                (row.is_some(), row.map(|row| row.updated_at))
+            }
+            SyncEvent::TaskDeleted(payload) => {
+                let row = self
+                    .adapter
+                    .get_task_by_id(&payload.id)
+                    .map_err(core_to_sync)?;
+                (row.is_some(), row.map(|row| row.updated_at))
+            }
             SyncEvent::TaskListUpdated(payload) => (
                 self.adapter
                     .get_task_list_by_id(&payload.id)
@@ -1287,6 +1328,21 @@ impl EventLogApplier {
             absent: event.merges_fields() && !present,
         })
     }
+}
+
+/// What a pass knows beyond the envelopes it weighs
+/// (DESIGN-sync-snapshot-coverage.md).
+#[derive(Debug, Clone, Default)]
+pub struct PassContext {
+    /// The dataset's GC horizon. A change older than it does not win on a
+    /// row of unknown time, in any pass: its file was deleted, the snapshot
+    /// holds what it did, and it is present only because a device pushed it
+    /// again. Every device weighs it the same way, so they stay alike.
+    pub held_before: Option<DateTime<Utc>>,
+    /// This device's own changes that are not on the remote yet (the
+    /// catch-up): the peers will take them, so they are weighed as the
+    /// peers will weigh them, never held.
+    pub unpushed: HashSet<String>,
 }
 
 /// A row's time as the pass weighs it ([`EventLogApplier::row_time`]).

@@ -14,7 +14,7 @@ use chrono::{TimeZone, Utc};
 use rusqlite::params;
 use sync_core::{DeviceId, EventEnvelope, EventPayload, IdPayload, SettingsPayload, SyncEvent};
 use sync_engine::test_support::FakeSecrets;
-use sync_engine::EventLogApplier;
+use sync_engine::{EventLogApplier, PassContext};
 
 use crate::conflicts::ConflictKind;
 use crate::db::SharedConn;
@@ -1271,7 +1271,10 @@ fn the_catch_up_keeps_a_newer_row_quietly_and_brings_a_reverted_one_back() {
     // The catch-up: an older change (08:00) differs from the row and stays
     // out without a conflict; the applied 10:00 change comes back.
     let report = applier
-        .catch_up_envelopes(vec![title("Acht", 8), title("Zehn", 10)], None)
+        .catch_up_envelopes(
+            vec![title("Acht", 8), title("Zehn", 10)],
+            &PassContext::default(),
+        )
         .unwrap();
     assert_eq!(report.conflicts, 0);
     assert_eq!(
@@ -1400,7 +1403,7 @@ fn the_catch_up_leaves_a_row_of_unknown_time_as_it_is() {
         .unwrap();
 
     applier
-        .catch_up_envelopes(vec![set_interval("30", 1000)], None)
+        .catch_up_envelopes(vec![set_interval("30", 1000)], &PassContext::default())
         .unwrap();
 
     assert_eq!(interval(&db).as_deref(), Some("90"));
@@ -1430,7 +1433,7 @@ fn the_catch_up_weighs_applied_changes_again_once_it_changed_the_row() {
                 set_interval("45", 2000),
                 set_interval("60", 3000),
             ],
-            None,
+            &PassContext::default(),
         )
         .unwrap();
 
@@ -1488,7 +1491,9 @@ fn the_catch_up_keeps_a_newer_row_against_this_devices_own_older_change() {
         1000,
     );
 
-    applier.catch_up_envelopes(vec![own], None).unwrap();
+    applier
+        .catch_up_envelopes(vec![own], &PassContext::default())
+        .unwrap();
 
     assert_eq!(interval(&db).as_deref(), Some("90"));
 }
@@ -1511,7 +1516,10 @@ fn the_catch_up_keeps_a_row_set_again_after_an_applied_delete() {
     forget_clocks(&db);
 
     applier
-        .catch_up_envelopes(vec![label_deleted("lbl-back", 1000)], None)
+        .catch_up_envelopes(
+            vec![label_deleted("lbl-back", 1000)],
+            &PassContext::default(),
+        )
         .unwrap();
 
     assert_eq!(label_name(&db, "lbl-back").as_deref(), Some("Wieder da"));
@@ -1593,7 +1601,7 @@ fn a_device_catching_up_over_create_delete_and_a_later_edit_ends_deleted() {
                 label_deleted("lbl-third", 3000),
                 label_event("lbl-third", "Neuer", 4000, false),
             ],
-            None,
+            &PassContext::default(),
         )
         .unwrap();
 
@@ -1643,12 +1651,117 @@ fn the_catch_up_does_not_take_an_old_change_from_a_file_pushed_again_after_the_g
     let horizon = Some(Utc.timestamp_opt(2000, 0).unwrap());
 
     applier
-        .catch_up_envelopes(vec![set_interval("30", 1000)], horizon)
+        .catch_up_envelopes(
+            vec![set_interval("30", 1000)],
+            &PassContext {
+                held_before: horizon,
+                ..PassContext::default()
+            },
+        )
         .unwrap();
     assert_eq!(interval(&db).as_deref(), Some("90"));
 
     applier
-        .catch_up_envelopes(vec![set_interval("45", 3000)], horizon)
+        .catch_up_envelopes(
+            vec![set_interval("45", 3000)],
+            &PassContext {
+                held_before: horizon,
+                ..PassContext::default()
+            },
+        )
         .unwrap();
     assert_eq!(interval(&db).as_deref(), Some("45"));
+}
+
+// ---- Review round 3 of #130 --------------------------------------------
+
+#[test]
+fn a_held_change_is_recorded_so_a_later_round_does_not_take_it() {
+    // The catch-up held a change older than the GC horizon but did not
+    // record it, and the next ordinary round that fetched its file applied
+    // it and reverted the row.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    UserPrefsRepo::new(&db)
+        .set("sync.intervalMinutes", "90")
+        .unwrap();
+    let old = set_interval("30", 1000);
+    applier
+        .catch_up_envelopes(
+            vec![old.clone()],
+            &PassContext {
+                held_before: Some(Utc.timestamp_opt(2000, 0).unwrap()),
+                ..PassContext::default()
+            },
+        )
+        .unwrap();
+
+    let report = applier.apply_envelopes(vec![old]).unwrap();
+
+    assert_eq!(report.skipped_already_applied, 1);
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+}
+
+#[test]
+fn an_ordinary_round_holds_a_change_older_than_the_gc_horizon_too() {
+    // Every pass weighs it the same way, so the devices stay alike.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    UserPrefsRepo::new(&db)
+        .set("sync.intervalMinutes", "90")
+        .unwrap();
+    let horizon = Some(Utc.timestamp_opt(2000, 0).unwrap());
+    let file = |env: EventEnvelope| {
+        sync_core::LogFile::from_envelopes(env.device_id.clone(), env.timestamp, &[env]).unwrap()
+    };
+
+    applier
+        .apply_log_file(&file(set_interval("30", 1000)), horizon)
+        .unwrap();
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+    applier
+        .apply_log_file(&file(set_interval("45", 3000)), horizon)
+        .unwrap();
+    assert_eq!(interval(&db).as_deref(), Some("45"));
+}
+
+#[test]
+fn a_delete_takes_away_an_appointment_a_snapshot_brought_back() {
+    // The row is there again, with its own time: the applied delete is
+    // weighed, not taken as a row of unknown time.
+    let (adapter, db) = fixture();
+    adapter
+        .upsert_calendar_from_sync(&fixture_calendar("cal-back"))
+        .unwrap();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let other = DeviceId::from_string("dev-other".into());
+    let row = fixture_event("ev-back", "cal-back");
+    let delete = fixture_envelope(
+        other.clone(),
+        SyncEvent::EventDeleted(IdPayload {
+            id: "ev-back".into(),
+        }),
+        3000,
+    );
+    applier
+        .apply_envelopes(vec![
+            fixture_envelope(
+                other,
+                SyncEvent::EventCreated(EventPayload {
+                    id: "ev-back".into(),
+                    fields: serde_json::to_value(&row).unwrap(),
+                }),
+                1000,
+            ),
+            delete.clone(),
+        ])
+        .unwrap();
+    forget_clocks(&db);
+    adapter.upsert_event_from_sync(&row).unwrap();
+
+    applier
+        .catch_up_envelopes(vec![delete], &PassContext::default())
+        .unwrap();
+
+    assert!(adapter.get_event_by_id("ev-back").unwrap().is_none());
 }
