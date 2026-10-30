@@ -154,6 +154,12 @@ Runde zuvor.
   nicht.
 - Echte Gleichzeitigkeit (Vektoruhren) bleibt wie in §19.3: Bei gleich alten
   Änderungen verschiedener Geräte entscheidet die Reihenfolge.
+- Zwischen dem neuen Auflisten und dem Löschen bleibt ein kurzes Fenster:
+  Hängt ein Gerät genau dann an, geht das Angehängte verloren. Ohne Sperre im
+  Sync-Speicher lässt sich das nicht schließen.
+- Varianten, die diese Version nicht anwendet (Tastenkürzel), gelten als
+  nicht gehalten: Eine Datei mit ihnen bliebe stehen, und das Gerät nennte
+  keine Kennungen. Noch schreibt kein Gerät solche Ereignisse.
 
 ## Schritte
 
@@ -165,7 +171,8 @@ Runde zuvor.
   Wiederaufnahme und Runde. Erledigt.
 - R6 Unbekanntes ohne Untergrenze. Erledigt.
 - R2 Aufräumen: nach dem Schnappschuss neu auflisten, nur ganz Gehaltenes
-  löschen, Leeres und Unlesbares nie, rotierte Sitzung erst hochladen. Offen.
+  löschen, Leeres und Unlesbares nie, das Ende ausstehender Sitzungen vor dem
+  Wegräumen hochladen (scheitert es, bleibt die Datei). Erledigt.
 - Doku, dann Prüfrunde 2.
 
 Je Schritt Tests und Gegenproben; `cargo test -p cal-ffi` bei jeder Änderung an

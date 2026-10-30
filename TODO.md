@@ -1132,8 +1132,8 @@ Siehe DESIGN §4.2.
 
 ### B3 · Sync-Restpunkte (§19) `[~]` (Toggle-UI bewusst zurückgestellt)
 - [ ] Per-Einstellung-Sync-Umschalter-UI im `SyncPanel` (§19.2.1; Backend hat eine feste `SYNC_WHITELIST`) — **bewusst zurückgestellt** (auf Wunsch).
-- [~] Schnappschuss nennt seine Ereignisse, jedes Gerät holt einmal nach (DESIGN-sync-snapshot-coverage.md, Toni 2026-10-27/30, Laptop übersprang eine gewachsene Desktop-Sitzung). PR #130, Branch `fix/snapshot-coverage`: R1, R3-R7 gebaut. Offen:
-  ↳ R2 Aufräumen: nach dem Schnappschuss neu auflisten, nur ganz Gehaltenes löschen, leere/unlesbare Dateien nie, das Ende der rotierten Sitzung vor dem Wegräumen hochladen; nicht unterstützte Varianten als angewendet führen, damit sie keine Datei festhalten.
+- [~] Schnappschuss nennt seine Ereignisse, jedes Gerät holt einmal nach (DESIGN-sync-snapshot-coverage.md, Toni 2026-10-27/30, Laptop übersprang eine gewachsene Desktop-Sitzung). PR #130, Branch `fix/snapshot-coverage`: R1-R7 gebaut. Offen:
+  ↳ Sobald ein Gerät Tastenkürzel-Ereignisse schreibt (`shortcut.*`, noch ohne Anwender): Sie gelten als nicht gehalten, halten jede Datei mit ihnen fest und verhindern Kennungen im Schnappschuss. Dann Anwender bauen oder sie als gehalten zählen.
   ↳ Live prüfen: Nach dem Update holt jedes Gerät einmal nach; auf dem Laptop stimmen die Aufgaben seit dem 19.10., gelöschte verschwinden, kein Konflikt.
   ↳ Grenzen: Eine Löschung, deren Datei schon aufgeräumt ist, lässt sich nicht nachholen. Eine Zeile ohne bekannte Zeit (Uhr erst ab diesem Update, kein `updated_at`) nimmt eine nie angewendete ältere Änderung noch an.
   ↳ Mehr als 256 Dateien im Sync-Ordner: Die ältesten fallen aus den gemerkten Längen und werden jede Runde neu geholt (richtig, aber Bandbreite). Bei Bedarf Längen nach Auflistung statt nach Anzahl kappen.

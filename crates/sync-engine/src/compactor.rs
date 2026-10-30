@@ -36,8 +36,8 @@
 //!    (own or applied), when this device's record is exact and it holds
 //!    every readable one (DESIGN-sync-snapshot-coverage.md).
 //! 5. Delete every log with timestamp STRICTLY < safe_cutoff whose every
-//!    event the snapshot holds (a file that does not parse: own, or
-//!    foreign up to our cursor, as before). Strict `<` spares the
+//!    event, as listed afresh after the snapshot, the snapshot holds; never
+//!    an empty file or one that does not parse. Strict `<` spares the
 //!    freshest covered log one round.
 //! 6. Reset the local "bytes/logs since snapshot" counters so the
 //!    threshold check doesn't immediately re-fire.
@@ -144,12 +144,9 @@ struct Coverage {
     held: Vec<String>,
     /// False when a readable foreign event is neither own nor applied: this
     /// device cannot vouch for its record then, and the snapshot names
-    /// nothing.
+    /// nothing. A file that does not parse is no gap: no device of this
+    /// version can apply it.
     complete: bool,
-    /// Per file: whether every event in it is held. Absent for a file that
-    /// does not parse — no device of this version can apply it, so it is
-    /// neither in this state nor a gap in it, and the GC keeps its old rule.
-    files: HashMap<String, bool>,
 }
 
 impl Coverage {
@@ -161,30 +158,59 @@ impl Coverage {
         let mut coverage = Coverage {
             held: Vec::new(),
             complete: true,
-            files: HashMap::new(),
         };
         for log in logs {
             let Ok(envelopes) = log.into_envelopes() else {
                 continue;
             };
-            let mut all_held = true;
             for envelope in envelopes {
-                let id = envelope.id;
-                let held = envelope.device_id == *local_device
-                    || store.is_event_applied(&id).map_err(|err| {
-                        sync_core::SyncError::internal(format!("read applied events: {err}"))
-                    })?;
-                if held {
-                    coverage.held.push(id);
+                if is_held(&envelope, local_device, store)? {
+                    coverage.held.push(envelope.id);
                 } else {
-                    all_held = false;
                     coverage.complete = false;
                 }
             }
-            coverage.files.insert(log.name.to_filename(), all_held);
         }
         Ok(coverage)
     }
+
+    /// Whether the GC may delete `log`: every event in it is held, as it
+    /// reads now. Never an empty file or one that does not parse — it may be
+    /// a torn read of a file being written, or hold what a newer version
+    /// wrote.
+    fn deletable(
+        log: &LogFile,
+        local_device: &DeviceId,
+        store: &dyn SyncStore,
+    ) -> SyncResult<bool> {
+        let Ok(envelopes) = log.into_envelopes() else {
+            return Ok(false);
+        };
+        if envelopes.is_empty() {
+            return Ok(false);
+        }
+        for envelope in &envelopes {
+            if !is_held(envelope, local_device, store)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
+/// An event is held when it is this device's own (its database has every
+/// own change) or recorded as applied.
+fn is_held(
+    envelope: &sync_core::EventEnvelope,
+    local_device: &DeviceId,
+    store: &dyn SyncStore,
+) -> SyncResult<bool> {
+    if envelope.device_id == *local_device {
+        return Ok(true);
+    }
+    store
+        .is_event_applied(&envelope.id)
+        .map_err(|err| sync_core::SyncError::internal(format!("read applied events: {err}")))
 }
 
 impl CompactionReport {
@@ -393,8 +419,7 @@ impl Compactor {
         //    (it joined or caught up over every file, so nothing it applied
         //    was reverted under the record), and no file holds an event it
         //    neither wrote nor applied (a peer's file grew since its last
-        //    fetch). Otherwise it names nothing. The same listing serves the
-        //    GC below.
+        //    fetch). Otherwise it names nothing.
         let all_logs = adapter.fetch_new_logs(&DeviceCursor::epoch()).await?;
         let coverage = Coverage::of(&all_logs, &self.local_device_id, self.store.as_ref())?;
         let names = coverage.complete && self.record_exact();
@@ -404,14 +429,21 @@ impl Compactor {
         adapter.push_snapshot(&snapshot).await?;
 
         // The snapshot is now durable on the remote, so every LOCAL pending
-        // file stamped before `cut` is fully covered by it and must not be
-        // re-uploaded on the next push. Sweep ALL of them — not just the
-        // file we just rotated away: old leftovers (e.g. from a prior crash
-        // that left logs in `pending/`) would otherwise be re-pushed on
-        // every round and never disappear. The live post-rotation file is
-        // stamped `cut` itself, so the strict `< cut` check keeps it.
+        // file stamped before `cut` is folded into it and must not be
+        // re-uploaded on every push. Sweep ALL of them — not just the file
+        // we just rotated away: old leftovers (e.g. from a prior crash that
+        // left logs in `pending/`) would otherwise be re-pushed on every
+        // round and never disappear. The live post-rotation file is stamped
+        // `cut` itself, so the strict `< cut` check keeps it. But peers take
+        // log files, not the snapshot: what a file gained since its last
+        // push is uploaded first (review round 1 of #130), and a file that
+        // fails to upload stays for the next round's push.
         if let Some(pending) = &self.pending_dir {
-            sweep_redundant_pending(pending, cut).await;
+            let remote_lengths: HashMap<String, usize> = all_logs
+                .iter()
+                .map(|log| (log.name.to_filename(), log.bytes.len()))
+                .collect();
+            sweep_redundant_pending(pending, cut, adapter, &remote_lengths).await;
         }
 
         let mut report = CompactionReport::default();
@@ -528,25 +560,31 @@ impl Compactor {
         adapter.push_meta(&meta).await?;
         report.snapshot_coverage = names;
 
-        // 6. GC the now-redundant logs, from the listing taken before the
-        //    snapshot (a file pushed since is not in it, so it stays). Delete
-        //    one only when BOTH hold:
+        // 6. GC the now-redundant logs, listed afresh: a peer may have
+        //    appended to a file since the listing above, and only what a
+        //    file holds now decides (review round 1 of #130). Delete one only
+        //    when BOTH hold:
         //      - its timestamp is STRICTLY below `safe_cutoff`. Strict `<`
         //        spares the freshest covered log for one round.
         //      - the snapshot actually COVERS it: every event in it is held —
         //        our own, or applied. Not its name against our cursor: a
         //        session file named before the cursor may have grown after
-        //        our last fetch, or never been applied here at all (we joined
-        //        from a snapshot that named nothing), and deleting it would
-        //        lose those events for the whole dataset. A file that does not
-        //        parse keeps the rule by name — nobody on this version can
-        //        apply it either way.
-        for log in all_logs {
-            let covered = match coverage.files.get(&log.name.to_filename()) {
-                Some(all_held) => *all_held,
-                None => log.name.device_id == self.local_device_id || log.name.timestamp <= cursor,
-            };
-            if log.name.timestamp < safe_cutoff && covered {
+        //        our last fetch, and deleting it would lose those events for
+        //        the whole dataset. Never an empty file or one that does not
+        //        parse.
+        //    A failed listing skips the GC: the snapshot is out already.
+        let current = match adapter.fetch_new_logs(&DeviceCursor::epoch()).await {
+            Ok(logs) => logs,
+            Err(err) => {
+                warn!(?err, "couldn't list the logs again; no GC this time");
+                Vec::new()
+            }
+        };
+        for log in current {
+            if log.name.timestamp >= safe_cutoff {
+                continue;
+            }
+            if Coverage::deletable(&log, &self.local_device_id, self.store.as_ref())? {
                 match adapter.delete_log(&log.name).await {
                     Ok(()) => report.deleted_logs += 1,
                     Err(err) => {
@@ -694,14 +732,24 @@ impl Compactor {
 }
 
 /// Delete every LOCAL pending log file stamped before `cut`. After a
-/// snapshot has been pushed, those files are fully covered by it, so the
+/// snapshot has been pushed, those files are folded into it, so the
 /// orchestrator must not re-upload them. Leaving them was the bug: the
 /// compactor only ever dropped the single just-rotated file, so older
 /// leftovers (e.g. from a prior crash) were re-pushed on every round and
 /// never disappeared. The live post-rotation session file is stamped
 /// exactly `cut`, so the strict `< cut` comparison keeps it; non-log files
 /// in the dir are left alone.
-async fn sweep_redundant_pending(pending_dir: &Path, cut: DateTime<Utc>) {
+///
+/// Peers take log files, not the snapshot: a file longer than its remote
+/// copy (`remote_lengths`, plaintext bytes by filename) is uploaded first —
+/// the end of the rotated session, written since its last push. One that
+/// fails to upload stays, and the next round's push takes it.
+async fn sweep_redundant_pending(
+    pending_dir: &Path,
+    cut: DateTime<Utc>,
+    adapter: &dyn SyncAdapter,
+    remote_lengths: &HashMap<String, usize>,
+) {
     let mut entries = match tokio::fs::read_dir(pending_dir).await {
         Ok(rd) => rd,
         // No staging dir yet → nothing to sweep.
@@ -724,6 +772,30 @@ async fn sweep_redundant_pending(pending_dir: &Path, cut: DateTime<Utc>) {
             continue; // not a session log file — leave it untouched
         };
         if parsed.timestamp < cut {
+            let bytes = match tokio::fs::read(&path).await {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    debug!(name = name, ?err, "couldn't read pending log; keeping it");
+                    continue;
+                }
+            };
+            let uploaded = remote_lengths
+                .get(name)
+                .is_some_and(|remote| *remote >= bytes.len());
+            if !bytes.is_empty() && !uploaded {
+                let log = LogFile {
+                    name: parsed,
+                    bytes,
+                };
+                if let Err(err) = adapter.push_log(&log).await {
+                    warn!(
+                        name = name,
+                        ?err,
+                        "couldn't upload the end of a pending log; keeping it"
+                    );
+                    continue;
+                }
+            }
             match tokio::fs::remove_file(&path).await {
                 Ok(()) => debug!(name = name, "swept pending log folded into snapshot"),
                 Err(err) => debug!(name = name, ?err, "couldn't sweep redundant pending log"),
@@ -748,6 +820,13 @@ mod tests {
         meta: Mutex<Option<MetaJson>>,
         snapshot: Mutex<Option<Snapshot>>,
         logs: Mutex<Vec<LogFile>>,
+        /// Every log pushed, in order.
+        pushed: Mutex<Vec<LogFile>>,
+        /// Pushing a log fails.
+        fail_pushes: Mutex<bool>,
+        /// A peer's file as it reads once the snapshot is out: it grew while
+        /// this device compacted.
+        grow_on_snapshot: Mutex<Option<LogFile>>,
     }
 
     impl FakeAdapter {
@@ -756,6 +835,9 @@ mod tests {
                 meta: Mutex::new(None),
                 snapshot: Mutex::new(None),
                 logs: Mutex::new(Vec::new()),
+                pushed: Mutex::new(Vec::new()),
+                fail_pushes: Mutex::new(false),
+                grow_on_snapshot: Mutex::new(None),
             }
         }
     }
@@ -783,7 +865,13 @@ mod tests {
                 .collect())
         }
         async fn push_log(&self, log: &LogFile) -> SyncResult<()> {
-            self.logs.lock().unwrap().push(log.clone());
+            if *self.fail_pushes.lock().unwrap() {
+                return Err(sync_core::SyncError::internal("offline"));
+            }
+            self.pushed.lock().unwrap().push(log.clone());
+            let mut logs = self.logs.lock().unwrap();
+            logs.retain(|l| l.name != log.name);
+            logs.push(log.clone());
             Ok(())
         }
         async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
@@ -791,6 +879,11 @@ mod tests {
         }
         async fn push_snapshot(&self, snapshot: &Snapshot) -> SyncResult<()> {
             *self.snapshot.lock().unwrap() = Some(snapshot.clone());
+            if let Some(grown) = self.grow_on_snapshot.lock().unwrap().take() {
+                let mut logs = self.logs.lock().unwrap();
+                logs.retain(|l| l.name != grown.name);
+                logs.push(grown);
+            }
             Ok(())
         }
         async fn delete_log(&self, name: &LogFileName) -> SyncResult<()> {
@@ -945,14 +1038,11 @@ mod tests {
         // than the snapshot, so it must survive).
         let old_ts: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
         let fresh_ts: DateTime<Utc> = (Utc::now() + ChronoDuration::days(1)).with_timezone(&Utc);
-        adapter.logs.lock().unwrap().push(LogFile {
-            name: LogFileName::new(old_ts, DeviceId::from_string("dev-other".into())),
-            bytes: b"{}".to_vec(),
-        });
-        adapter.logs.lock().unwrap().push(LogFile {
-            name: LogFileName::new(fresh_ts, DeviceId::from_string("dev-other".into())),
-            bytes: b"{}".to_vec(),
-        });
+        adapter
+            .logs
+            .lock()
+            .unwrap()
+            .extend([held_log(&store, old_ts), held_log(&store, fresh_ts)]);
 
         let mut meta = MetaJson::fresh("1.0.0-test");
         meta.upsert_device(
@@ -996,10 +1086,7 @@ mod tests {
         let old_log: DateTime<Utc> = Utc::now() - ChronoDuration::days(20);
         let recent_log: DateTime<Utc> = Utc::now() - ChronoDuration::days(5);
         for ts in [old_log, recent_log] {
-            adapter.logs.lock().unwrap().push(LogFile {
-                name: LogFileName::new(ts, DeviceId::from_string("dev-other".into())),
-                bytes: b"{}".to_vec(),
-            });
+            adapter.logs.lock().unwrap().push(held_log(&store, ts));
         }
 
         // dev-other is 30 days offline — past the retention window, so it no
@@ -1051,10 +1138,7 @@ mod tests {
         // A log from 1 day ago — NEWER than the behind device's 3-day horizon,
         // so it's one of the logs that device still needs to apply.
         let log_ts: DateTime<Utc> = Utc::now() - ChronoDuration::days(1);
-        adapter.logs.lock().unwrap().push(LogFile {
-            name: LogFileName::new(log_ts, DeviceId::from_string("dev-other".into())),
-            bytes: b"{}".to_vec(),
-        });
+        adapter.logs.lock().unwrap().push(held_log(&store, log_ts));
 
         let mut meta = MetaJson::fresh("1.0.0-test");
         meta.upsert_device(
@@ -1109,12 +1193,14 @@ mod tests {
             .unwrap();
 
         // Foreign log from 5 days ago: BELOW the snapshot horizon (~now) but
-        // ABOVE our cursor (10 days ago) → uncovered → must NOT be deleted.
+        // ABOVE our cursor (10 days ago), never applied → not held → must
+        // NOT be deleted.
         let uncovered: DateTime<Utc> = Utc::now() - ChronoDuration::days(5);
-        adapter.logs.lock().unwrap().push(LogFile {
-            name: LogFileName::new(uncovered, DeviceId::from_string("dev-other".into())),
-            bytes: b"{}".to_vec(),
-        });
+        adapter
+            .logs
+            .lock()
+            .unwrap()
+            .push(log_of(uncovered, "dev-other", 1).0);
 
         let report = compactor.compact_now(&adapter).await.unwrap();
 
@@ -1287,6 +1373,150 @@ mod tests {
         );
     }
 
+    /// A peer's log file of one event at `ts`, recorded as applied: held.
+    fn held_log(store: &FakeStore, ts: DateTime<Utc>) -> LogFile {
+        let (log, ids) = log_of(ts, "dev-other", 1);
+        for id in &ids {
+            store.mark_event_applied(id).unwrap();
+        }
+        log
+    }
+
+    /// The first line of a log file: what was pushed before it grew.
+    fn first_line(log: &LogFile) -> LogFile {
+        LogFile {
+            name: log.name.clone(),
+            bytes: log.bytes.split(|b| *b == b'\n').next().unwrap().to_vec(),
+        }
+    }
+
+    #[tokio::test]
+    async fn gc_keeps_an_empty_or_unreadable_file() {
+        // Review round 1 of #130: an empty read may be a file being written,
+        // an unreadable one may hold what a newer version wrote.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        store
+            .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+        let old: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
+        for (secs, bytes) in [(0, Vec::new()), (60, b"{}".to_vec())] {
+            adapter.logs.lock().unwrap().push(LogFile {
+                name: LogFileName::new(
+                    old + ChronoDuration::seconds(secs),
+                    DeviceId::from_string("dev-other".into()),
+                ),
+                bytes,
+            });
+        }
+        *adapter.meta.lock().unwrap() = Some(meta_with_caught_up_peer());
+
+        let report = compactor.compact_now(&adapter).await.unwrap();
+
+        assert_eq!(report.deleted_logs, 0);
+        assert_eq!(adapter.logs.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn gc_reads_each_file_afresh_after_the_snapshot() {
+        // A peer appends to its session while this device compacts: what the
+        // file held before the snapshot is not what it holds now.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        store
+            .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+        let old: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
+        let (grown, ids) = log_of(old, "dev-other", 2);
+        store.mark_event_applied(&ids[0]).unwrap();
+        adapter.logs.lock().unwrap().push(first_line(&grown));
+        *adapter.grow_on_snapshot.lock().unwrap() = Some(grown);
+        *adapter.meta.lock().unwrap() = Some(meta_with_caught_up_peer());
+
+        let report = compactor.compact_now(&adapter).await.unwrap();
+
+        assert_eq!(
+            report.deleted_logs, 0,
+            "its new event was never applied here"
+        );
+        assert_eq!(adapter.logs.lock().unwrap().len(), 1);
+    }
+
+    /// A compactor that stages in `pending`, no writer.
+    fn compactor_with_pending(store: &Arc<FakeStore>, pending: &Path) -> Compactor {
+        let store: Arc<dyn SyncStore> = store.clone();
+        let builder = Arc::new(SnapshotBuilder::new(
+            Arc::clone(&store),
+            Arc::new(FakeSecrets::default()),
+            "1.0.0-test",
+        ));
+        Compactor::new(
+            store,
+            builder,
+            DeviceId::from_string("dev-this".into()),
+            "1.0.0-test",
+            None,
+            Some(pending.to_path_buf()),
+        )
+    }
+
+    /// Two of this device's pending sessions from an hour ago: one pushed
+    /// whole, one whose end was written after its last push. Returns them
+    /// and their local paths.
+    fn pending_sessions(adapter: &FakeAdapter, pending: &Path) -> [(LogFile, PathBuf); 2] {
+        let at = Utc::now() - ChronoDuration::hours(1);
+        let (whole, _) = log_of(at, "dev-this", 1);
+        let (grown, _) = log_of(at + ChronoDuration::minutes(1), "dev-this", 2);
+        adapter
+            .logs
+            .lock()
+            .unwrap()
+            .extend([whole.clone(), first_line(&grown)]);
+        [whole, grown].map(|log| {
+            let path = pending.join(log.name.to_filename());
+            std::fs::write(&path, &log.bytes).unwrap();
+            (log, path)
+        })
+    }
+
+    #[tokio::test]
+    async fn the_end_of_a_pending_session_is_uploaded_before_it_is_swept() {
+        // Review round 1 of #130: peers take log files, not the snapshot —
+        // what this device wrote since its last push reached nobody.
+        let dir = TempDir::new().unwrap();
+        let store = Arc::new(FakeStore::default());
+        let compactor = compactor_with_pending(&store, dir.path());
+        let adapter = FakeAdapter::new();
+        let [(_, whole_path), (grown, grown_path)] = pending_sessions(&adapter, dir.path());
+
+        compactor.compact_now(&adapter).await.unwrap();
+
+        let pushed = adapter.pushed.lock().unwrap();
+        assert_eq!(pushed.len(), 1, "the whole one is not pushed again");
+        assert_eq!(
+            pushed[0].name.to_filename(),
+            grown.name.to_filename(),
+            "the grown one"
+        );
+        assert_eq!(pushed[0].bytes, grown.bytes, "with its end");
+        assert!(!whole_path.exists() && !grown_path.exists(), "both swept");
+    }
+
+    #[tokio::test]
+    async fn a_pending_session_that_fails_to_upload_stays() {
+        let dir = TempDir::new().unwrap();
+        let store = Arc::new(FakeStore::default());
+        let compactor = compactor_with_pending(&store, dir.path());
+        let adapter = FakeAdapter::new();
+        *adapter.fail_pushes.lock().unwrap() = true;
+        let [(_, whole_path), (_, grown_path)] = pending_sessions(&adapter, dir.path());
+
+        compactor.compact_now(&adapter).await.unwrap();
+
+        assert!(grown_path.exists(), "the next round's push takes it");
+        assert!(!whole_path.exists(), "nothing of it is missing remotely");
+    }
+
     #[tokio::test]
     async fn snapshot_ts_is_bounded_to_held_content() {
         // The snapshot horizon must be max(own_newest_log, cursor) — real
@@ -1337,10 +1567,7 @@ mod tests {
         let at_horizon = horizon;
         let below_horizon = horizon - ChronoDuration::seconds(1);
         for ts in [at_horizon, below_horizon] {
-            adapter.logs.lock().unwrap().push(LogFile {
-                name: LogFileName::new(ts, DeviceId::from_string("dev-other".into())),
-                bytes: b"{}".to_vec(),
-            });
+            adapter.logs.lock().unwrap().push(held_log(&store, ts));
         }
 
         let report = compactor.compact_now(&adapter).await.unwrap();

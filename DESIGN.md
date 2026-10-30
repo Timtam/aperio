@@ -3641,10 +3641,19 @@ Die Prüfung erfolgt bei jedem Sync-Durchlauf. Auslösendes Gerät ist dasjenige
    gelöscht. Ein Gerät nur HINTER dem Snapshot, aber ≥ gc_horizon,
    bleibt unmarkiert (es holt über die aufbewahrten Logs auf).
 
-7. Jede Log-Datei mit Zeitstempel STRIKT < safe_cutoff löschen, die
-   der Snapshot abdeckt (eigene Logs immer; fremde nur bis zum Cursor —
-   ein fremdes Log neuer als der Cursor wurde nie angewendet und steckt
-   nicht im Snapshot).
+7. Die Logs NEU auflisten (ein Gerät kann während der Kompaktierung
+   angehängt haben) und jede Log-Datei mit Zeitstempel STRIKT
+   < safe_cutoff löschen, deren JEDES Ereignis, wie es jetzt dasteht,
+   der Snapshot hält: eigenes oder angewendetes
+   (DESIGN-sync-snapshot-coverage.md). Nicht nach dem Namen gegen den
+   Cursor: Eine Sitzungsdatei mit altem Namen kann gewachsen sein. Eine
+   leere oder unlesbare Datei wird nie gelöscht.
+
+Vor dem Wegräumen der eigenen ausstehenden Dateien (pending/, Stempel
+vor dem Schnitt) lädt der Compactor jede hoch, die länger ist als ihre
+Kopie im Sync-Speicher: Die anderen Geräte lesen Logs, nicht den
+Snapshot. Scheitert das Hochladen, bleibt die Datei für die nächste
+Runde.
 ```
 
 #### Umgang mit veralteten Geräten ("stale")
