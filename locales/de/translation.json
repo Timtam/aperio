@@ -871,6 +871,7 @@
         "compactNow": "Jetzt kompaktieren",
         "compacting": "Wird kompaktiert …",
         "compactDone": "Snapshot erstellt, {{deleted}} alte Log-Dateien gelöscht.",
+        "compactWaiting": "Snapshot erstellt. Alte Log-Dateien bleiben, bis diese Geräte nachgeholt haben: {{devices}}.",
         "intervalLabel": "Sync-Intervall",
         "intervalOption_one": "{{minutes}} Minute",
         "intervalOption_other": "{{minutes}} Minuten",

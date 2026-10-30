@@ -98,6 +98,10 @@ nichts Neueres überschrieben, und es wird kein Konflikt gemeldet. Diese eine
 Runde kann etwas länger dauern. Was es nur auf diesem Gerät gibt, wird nicht
 entfernt.
 
+Aperio bewahrt die Änderungsprotokolle mindestens zwei Wochen auf und löscht
+keines, solange ein Gerät darüber noch nachholen muss. Wenn du von Hand
+kompaktierst, nennt es die Geräte, auf die es wartet.
+
 Dieselbe Regel gilt jeden Tag: Eine Änderung, die spät ankommt, etwa offline
 geschrieben, gewinnt nicht gegen eine neuere. Das Löschen eines Eintrags
 gewinnt gegen eine gleichzeitige Bearbeitung auf einem anderen Gerät, damit

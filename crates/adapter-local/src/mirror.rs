@@ -628,6 +628,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
             },
         );
         adapter.push_meta(&meta).await.unwrap();

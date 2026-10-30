@@ -1701,6 +1701,11 @@ export interface CompactionReport {
   stale_devices: number;
   snapshot_rows: number;
   snapshot_settings: number;
+  /** Whether the snapshot names the events it holds. */
+  snapshot_coverage: boolean;
+  /** Devices (names, else ids) that have not caught up yet: no log file was
+   *  deleted while they still need them. */
+  gc_waiting_for: string[];
 }
 
 /** Onboarding preview result — what the §19.11 dialog needs to

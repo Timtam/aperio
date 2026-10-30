@@ -159,6 +159,24 @@ angewendeten Änderung, werden spätere angewendete wieder gewogen. Grenze: Eine
 nie angewendete ältere Änderung auf so einer Zeile gewinnt noch, wie in jeder
 Runde zuvor.
 
+### F. Aufräumen (nach Prüfrunde 2)
+
+- **Warten.** Jedes Gerät meldet in seinem Eintrag in `meta.json`, ob es
+  genau ist (`exact`, Herzschlag, Beitritt, Wiederaufnahme, Compactor).
+  Der Compactor löscht nichts, solange ein aktives Gerät es nicht ist,
+  sich selbst eingeschlossen; aktiv heißt: nicht als veraltet markiert und
+  sein Horizont liegt im Aufbewahrungsfenster. Ein älterer Build kennt das
+  Feld nicht und gilt als nicht genau. Solange gewartet wird, hebt er
+  `gc_horizon` nicht an und markiert niemanden als veraltet. Die Meldung
+  nach „Jetzt kompaktieren“ nennt die Geräte, auf die gewartet wird.
+- **14 Tage.** Eine Datei geht erst, wenn ihr jüngster Eintrag älter ist als
+  das Aufbewahrungsfenster, und jedes Ereignis darin ist eigenes oder war
+  beim Bau des Schnappschusses angewendet.
+- **Ausstehende Dateien.** Der Compactor lädt nichts hoch. Er räumt eine
+  ausstehende Datei nur weg, wenn ihre entfernte Kopie mindestens so lang
+  ist; sonst bleibt sie für den Push der Runde, und ihre entfernte Kopie
+  bleibt stehen. Scheitert die Rotation, räumt er nichts weg.
+
 ## Was nicht Teil davon ist
 
 - Lokale Termine und Kalender werden beim Start nicht nachgetragen (TODO B3).

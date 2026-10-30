@@ -608,6 +608,7 @@ impl OnboardingService {
         if let Some(entry) = meta.devices.get_mut(self.local_device_id.as_str()) {
             entry.stale = false;
             entry.last_seen_log = cursor;
+            entry.exact = true;
         }
         adapter.push_meta(&meta).await?;
         report.device_count = meta.devices.len();
@@ -885,6 +886,7 @@ impl OnboardingService {
             .get(PREF_DEVICE_NAME)
             .ok()
             .flatten();
+        let exact = self.coverage_exact();
         let now = Utc::now();
         let is_current = |meta: &MetaJson| {
             meta.devices
@@ -894,6 +896,7 @@ impl OnboardingService {
                         && d.name == name
                         && d.app_version == self.app_version
                         && !d.stale
+                        && d.exact == exact
                         // Deliberately COARSE. Every other term here is an
                         // equality, and treating the wall clock the same way
                         // would make the skip below unreachable — the stamp
@@ -944,6 +947,7 @@ impl OnboardingService {
                 last_seen: Some(now),
                 app_version: self.app_version.clone(),
                 stale: false,
+                exact,
             },
         );
         adapter.push_meta(&meta).await?;
@@ -966,6 +970,7 @@ impl OnboardingService {
                 last_seen: Some(now),
                 app_version: self.app_version.clone(),
                 stale: false,
+                exact: self.coverage_exact(),
             },
         );
     }
@@ -1004,6 +1009,15 @@ impl OnboardingService {
         conn.execute("DELETE FROM sync_row_clock", [])
             .map_err(|err| SyncError::internal(format!("clear row clocks: {err}")))?;
         Ok(())
+    }
+
+    /// Whether this device's applied record is exact, for its entry in
+    /// meta.json. A mark that does not read is not: the compactors then wait.
+    fn coverage_exact(&self) -> bool {
+        matches!(
+            UserPrefsRepo::new(&self.db).get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY),
+            Ok(Some(_))
+        )
     }
 
     /// This device's record is no longer known to be exact: it joins a
@@ -1246,6 +1260,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
             },
         );
         adapter.install_meta(meta);
@@ -1277,6 +1292,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
             },
         );
         adapter.install_meta(meta);
@@ -1332,6 +1348,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
             },
         );
         meta.upsert_device(
@@ -1342,6 +1359,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
             },
         );
         adapter.install_meta(meta);
@@ -1359,6 +1377,41 @@ mod tests {
         assert!(updated
             .device(&DeviceId::from_string("dev-a".into()))
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn the_heartbeat_reports_once_the_record_is_exact() {
+        // The compactors delete no log file while an active device has not
+        // caught up (Toni, 2026-10-30); each device says so in meta.json, and
+        // a record that only changed there is pushed.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let now = Utc::now();
+        svc.heartbeat_meta(&adapter, now, None).await.unwrap();
+        assert!(!after_self(&adapter).await.exact);
+        let cached = adapter.fetch_meta().await.unwrap().unwrap();
+
+        UserPrefsRepo::new(&db.shared())
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &now.to_rfc3339())
+            .unwrap();
+        svc.heartbeat_meta(&adapter, now, Some(&cached))
+            .await
+            .unwrap();
+
+        assert!(after_self(&adapter).await.exact);
+    }
+
+    #[tokio::test]
+    async fn a_joined_device_reports_its_record_exact() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::with_logs(Vec::new());
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert!(after_self(&adapter).await.exact);
     }
 
     #[tokio::test]
@@ -1396,6 +1449,7 @@ mod tests {
                 last_seen: Some(now - chrono::Duration::hours(1)),
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
             },
         );
         // The REMOTE meanwhile gained a marker device (a concurrent peer's
@@ -1410,6 +1464,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
             },
         );
         adapter.install_meta(remote);
@@ -1449,6 +1504,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
             },
         );
         // Remote meanwhile: the peer's write landed.
@@ -1461,6 +1517,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
             },
         );
         adapter.install_meta(remote);
@@ -1498,6 +1555,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
             },
         );
         adapter.install_meta(cached.clone());
@@ -1535,6 +1593,7 @@ mod tests {
                 last_seen: Some(now - chrono::Duration::days(2)),
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
             },
         );
         adapter.install_meta(cached.clone());
@@ -1572,6 +1631,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
             },
         );
         adapter.install_meta(cached.clone());
@@ -1594,6 +1654,7 @@ mod tests {
             last_seen,
             app_version: "1.0.0-test".into(),
             stale: false,
+            exact: false,
         }
     }
 
@@ -1733,6 +1794,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: true,
+                exact: false,
             },
         );
         adapter.install_meta(meta);

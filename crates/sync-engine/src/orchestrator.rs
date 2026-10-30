@@ -1313,6 +1313,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
             },
         );
         assert!(legacy.has_real_snapshot());

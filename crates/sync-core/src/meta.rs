@@ -93,6 +93,14 @@ pub struct DeviceRecord {
     /// case.
     #[serde(default, skip_serializing_if = "is_false")]
     pub stale: bool,
+    /// The device's applied record is exact (DESIGN-sync-snapshot-coverage.md):
+    /// it joined, resumed or caught up over every log file still present.
+    /// The compactor deletes no log file while an active device is not —
+    /// the files it still needs for that catch-up. `false` for a build that
+    /// predates the field, which drops it again on its next write: while it
+    /// takes part, nothing is deleted.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub exact: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -255,6 +263,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
             },
         );
         let bytes = meta.to_bytes().unwrap();
@@ -279,6 +288,7 @@ mod tests {
                     last_seen: None,
                     app_version: "1.0.0".into(),
                     stale: false,
+                    exact: false,
                 },
             )]),
         };
@@ -326,6 +336,7 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
             },
         );
         let json = String::from_utf8(meta.to_bytes().unwrap()).unwrap();
@@ -340,6 +351,7 @@ mod tests {
                 last_seen: Some(Utc::now()),
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
             },
         );
         let json = String::from_utf8(meta.to_bytes().unwrap()).unwrap();
@@ -363,6 +375,7 @@ mod tests {
                     last_seen: None,
                     app_version: "1.0.0".into(),
                     stale: false,
+                    exact: false,
                 },
             );
         }

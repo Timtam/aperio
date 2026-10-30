@@ -3641,19 +3641,27 @@ Die Prüfung erfolgt bei jedem Sync-Durchlauf. Auslösendes Gerät ist dasjenige
    gelöscht. Ein Gerät nur HINTER dem Snapshot, aber ≥ gc_horizon,
    bleibt unmarkiert (es holt über die aufbewahrten Logs auf).
 
-7. Die Logs NEU auflisten (ein Gerät kann während der Kompaktierung
-   angehängt haben) und jede Log-Datei mit Zeitstempel STRIKT
-   < safe_cutoff löschen, deren JEDES Ereignis, wie es jetzt dasteht,
-   der Snapshot hält: eigenes oder angewendetes
-   (DESIGN-sync-snapshot-coverage.md). Nicht nach dem Namen gegen den
-   Cursor: Eine Sitzungsdatei mit altem Namen kann gewachsen sein. Eine
-   leere oder unlesbare Datei wird nie gelöscht.
+7. Nichts löschen, solange ein aktives Gerät (nicht "stale", Horizont
+   im Aufbewahrungsfenster) in meta.json nicht als "genau" eingetragen
+   ist, dieses eingeschlossen: Es muss erst über alle Dateien
+   nachholen (DESIGN-sync-snapshot-coverage.md). Dann auch gc_horizon
+   nicht anheben und niemanden als "stale" markieren (Schritte 5 und 6
+   entfallen), denn es wurde nichts gelöscht.
 
-Vor dem Wegräumen der eigenen ausstehenden Dateien (pending/, Stempel
-vor dem Schnitt) lädt der Compactor jede hoch, die länger ist als ihre
-Kopie im Sync-Speicher: Die anderen Geräte lesen Logs, nicht den
-Snapshot. Scheitert das Hochladen, bleibt die Datei für die nächste
-Runde.
+8. Sonst die Logs NEU auflisten (ein Gerät kann während der
+   Kompaktierung angehängt haben) und jede Log-Datei mit Zeitstempel
+   STRIKT < safe_cutoff löschen, deren JEDES Ereignis, wie es jetzt
+   dasteht, eigenes ist oder beim Bau des Snapshots angewendet war, und
+   deren jüngstes Ereignis älter ist als das Aufbewahrungsfenster. Nicht
+   nach dem Namen gegen den Cursor: Eine Sitzungsdatei mit altem Namen
+   kann gestern gewachsen sein. Eine leere oder unlesbare Datei wird nie
+   gelöscht.
+
+Die eigenen ausstehenden Dateien (pending/, Stempel vor dem Schnitt)
+räumt der Compactor nur weg, wenn ihre Kopie im Sync-Speicher
+mindestens so lang ist. Eine längere bleibt für den Push der nächsten
+Runde, und ihre entfernte Kopie wird in Schritt 8 nicht gelöscht: Die
+anderen Geräte lesen Logs, nicht den Snapshot.
 ```
 
 #### Umgang mit veralteten Geräten ("stale")

@@ -94,6 +94,10 @@ is newer than what the device already has, so nothing newer is overwritten and
 no conflict is reported. That one round can take a little longer. Nothing that
 exists only on this device is removed.
 
+Aperio keeps the change logs for at least two weeks, and deletes none while a
+device still has to catch up over them. If you compact by hand, it names the
+devices it is waiting for.
+
 The same rule holds every day: a change that arrives late — written offline,
 say — does not win over a newer one. Deleting an entry wins over an edit made
 elsewhere at the same time, so both devices end up the same.
