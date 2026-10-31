@@ -4800,7 +4800,7 @@ impl Host {
         // queued just before the flag-clear goes up ciphertext (then gets
         // rewritten plaintext below) rather than plaintext after the swap.
         self.runtime
-            .block_on(async { self.orchestrator.push_now().await })
+            .block_on(async { self.orchestrator.flush_before_e2e_downgrade().await })
             .map_err(sync_err)?;
         // Rebuild the now-genuinely-plain adapter (pref cleared above).
         let plain = restore_adapter_from_prefs(

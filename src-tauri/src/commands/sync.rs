@@ -2172,7 +2172,10 @@ pub async fn disable_sync_encryption(
     //     adapter, so any credential event emitted just before 2b goes up
     //     ENCRYPTED and is then caught by the log strip below — rather than
     //     being pushed plaintext after the step-7 swap.
-    orchestrator.push_now().await.map_err(sync_err)?;
+    orchestrator
+        .flush_before_e2e_downgrade()
+        .await
+        .map_err(sync_err)?;
 
     // 3. Build the now-genuinely-PLAIN adapter from the persisted config —
     //    an unwrapped handle to push plaintext bytes (the pref was cleared in

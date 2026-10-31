@@ -993,6 +993,18 @@ impl SyncOrchestrator {
     /// downgrades to a warning + counter rather than aborting the
     /// shutdown round.
     pub async fn push_now(&self) -> SyncResult<usize> {
+        self.push_gated(true).await
+    }
+
+    /// [`Self::push_now`] for the end-to-end downgrade, the one caller that
+    /// has cleared the local E2E flag while this orchestrator's adapter
+    /// still encrypts: what is pending goes up encrypted, to be rewritten
+    /// as plaintext with the rest of the dataset. Every other gate holds.
+    pub async fn flush_before_e2e_downgrade(&self) -> SyncResult<usize> {
+        self.push_gated(false).await
+    }
+
+    async fn push_gated(&self, encryption_gate: bool) -> SyncResult<usize> {
         let _guard = InFlightGuard::acquire(&self.in_flight)?;
         let adapter = match self.adapter.lock().expect("adapter mutex poison").clone() {
             Some(a) => a,
@@ -1006,7 +1018,7 @@ impl SyncOrchestrator {
         let meta = adapter.fetch_meta().await?;
         if let Some(meta) = &meta {
             sync_core::ensure_compatible(meta, &self.hooks.app_version())?;
-            if meta.e2e_enabled && !self.store.e2e_enabled() {
+            if encryption_gate && meta.e2e_enabled && !self.store.e2e_enabled() {
                 return Err(sync_core::SyncError::EncryptionRequired);
             }
         }
