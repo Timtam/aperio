@@ -175,6 +175,25 @@ impl LogFile {
         })
     }
 
+    /// Whether only the last line is in doubt: the file ends without its
+    /// newline — a read that met a line being written — and every line
+    /// before it parses. Any other file that does not parse holds a line
+    /// this build cannot read (review round 5 of #130).
+    pub fn is_torn(&self) -> bool {
+        if self.bytes.is_empty() || self.bytes.ends_with(b"\n") {
+            return false;
+        }
+        let Some(end) = self.bytes.iter().rposition(|byte| *byte == b'\n') else {
+            return true;
+        };
+        Self {
+            name: self.name.clone(),
+            bytes: self.bytes[..=end].to_vec(),
+        }
+        .into_envelopes()
+        .is_ok()
+    }
+
     /// Parse the file bytes back into a list of envelopes. Empty
     /// lines are skipped; malformed lines surface a Protocol
     /// error with the originating line number so debugging
@@ -205,10 +224,64 @@ impl LogFile {
     }
 }
 
+/// This build's log parser (review round 5 of #130): a hash of the sources
+/// that decide which lines parse, the event catalogue and this reader. A file
+/// one build could not read is read again once an update changed these; the
+/// app version stays the same across builds.
+pub const PARSER_FINGERPRINT: u64 = fnv1a(&[include_bytes!("event.rs"), include_bytes!("log.rs")]);
+
+const fn fnv1a(parts: &[&[u8]]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut part = 0;
+    while part < parts.len() {
+        let bytes = parts[part];
+        let mut at = 0;
+        while at < bytes.len() {
+            hash ^= bytes[at] as u64;
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+            at += 1;
+        }
+        part += 1;
+    }
+    hash
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::event::{EventPayload, SyncEvent};
+
+    fn file(bytes: &[u8]) -> LogFile {
+        LogFile {
+            name: LogFileName::new(Utc::now(), DeviceId::from_string("dev-a".into())),
+            bytes: bytes.to_vec(),
+        }
+    }
+
+    #[test]
+    fn only_a_last_line_without_its_newline_is_a_torn_read() {
+        let line = serde_json::to_string(&EventEnvelope {
+            id: "ev-1".into(),
+            device_id: DeviceId::from_string("dev-a".into()),
+            timestamp: Utc::now(),
+            event: SyncEvent::EventDeleted(crate::event::IdPayload { id: "row".into() }),
+        })
+        .unwrap();
+        assert!(file(format!("{line}\n{{\"id\":").as_bytes()).is_torn());
+        assert!(file(b"{\"id\":").is_torn(), "the first line being written");
+        assert!(
+            !file(format!("{{\"unknown\":1}}\n{line}").as_bytes()).is_torn(),
+            "a line before the last does not parse",
+        );
+        assert!(
+            !file(b"{\"unknown\":1}\n").is_torn(),
+            "ends with its newline"
+        );
+        assert!(
+            !file(format!("{line}\n").as_bytes()).is_torn(),
+            "a whole file"
+        );
+    }
     use chrono::TimeZone;
 
     fn fixture_id() -> DeviceId {

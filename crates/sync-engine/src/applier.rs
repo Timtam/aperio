@@ -284,9 +284,6 @@ impl EventLogApplier {
         envelopes.sort_by(|a, b| a.timestamp.cmp(&b.timestamp).then_with(|| a.id.cmp(&b.id)));
 
         let mut report = ApplyReport::default();
-        // Rows whose clock this pass only seeded from applied changes (see
-        // `catch_up_envelopes`): their time is still unknown.
-        let mut seeded: HashSet<RowKey> = HashSet::new();
         for env in envelopes {
             let own = env.device_id == self.local_device_id;
             if own && !catch_up {
@@ -328,6 +325,8 @@ impl EventLogApplier {
                 deleted,
                 present,
                 absent,
+                container_gone,
+                seeded,
             } = match self.row_time(key.as_ref(), &env.event) {
                 Ok(time) => time,
                 Err(err) => {
@@ -338,26 +337,30 @@ impl EventLogApplier {
             };
             let write = RowWrite::of(&env.event);
             let whole = write != RowWrite::Fields;
-            if applied
-                && (changed.is_none() || key.as_ref().is_some_and(|key| seeded.contains(key)))
-            {
+            // A row whose clock is only seeded is still of unknown time, in
+            // this pass and in a later one (review round 5 of #130).
+            if applied && (changed.is_none() || seeded) {
                 // A row of unknown time keeps what it holds: this change or
                 // a newer one. Its clock goes just past the change, so the
                 // change itself, met again in a later pass or by a device
                 // taking a snapshot of this row, does not win over it. A row
                 // that is missing was deleted after it; one still there after
-                // a delete was made again (review round 4 of #130).
+                // a delete was made again (review round 4 of #130). But a
+                // task or appointment whose list, calendar or parent task is
+                // gone too may have been taken along: not deleted itself, so
+                // an edit moving it elsewhere still applies (review round 5).
                 if let Some(key) = key {
                     let seed = match (present, write) {
+                        (false, RowWrite::Delete) => RowWrite::Delete,
+                        (false, _) if container_gone => RowWrite::Whole,
                         (false, _) => RowWrite::Delete,
                         (true, RowWrite::Delete) => RowWrite::Whole,
                         (true, write) => write,
                     };
                     let past = env.timestamp + chrono::Duration::microseconds(1);
-                    if let Err(err) = self.store.advance_row_clock(&key, past, seed) {
+                    if let Err(err) = self.store.seed_row_clock(&key, past, seed) {
                         warn!(event_id = %env.id, ?err, "couldn't seed the row's clock");
                     }
-                    seeded.insert(key);
                 }
                 report.skipped_already_applied += 1;
                 continue;
@@ -387,7 +390,6 @@ impl EventLogApplier {
             ) {
                 Ok(true) => {
                     if let Some(key) = &key {
-                        seeded.remove(key);
                         if let Err(err) = self.store.advance_row_clock(key, env.timestamp, write) {
                             warn!(event_id = %env.id, ?err, "couldn't advance the row's clock");
                         }
@@ -1260,12 +1262,20 @@ impl EventLogApplier {
             None => None,
         };
         // (whether the row exists, its own `updated_at`)
+        let mut container_gone = false;
         let (present, updated_at) = match event {
             SyncEvent::EventCreated(payload) | SyncEvent::EventUpdated(payload) => {
                 let row = self
                     .adapter
                     .get_event_by_id(&payload.id)
                     .map_err(core_to_sync)?;
+                if row.is_none() {
+                    if let Some(calendar) =
+                        payload.fields.get("calendar_id").and_then(|v| v.as_str())
+                    {
+                        container_gone = !self.calendar_exists(calendar)?;
+                    }
+                }
                 (row.is_some(), row.map(|row| row.updated_at))
             }
             SyncEvent::TaskCreated(payload) | SyncEvent::TaskUpdated(payload) => {
@@ -1273,6 +1283,24 @@ impl EventLogApplier {
                     .adapter
                     .get_task_by_id(&payload.id)
                     .map_err(core_to_sync)?;
+                if row.is_none() {
+                    // Its list, or its parent task: deleting either takes it
+                    // along.
+                    let field = |name: &str| payload.fields.get(name).and_then(|v| v.as_str());
+                    let list_gone = match field("list_id") {
+                        Some(list) => !self.task_list_exists(list)?,
+                        None => false,
+                    };
+                    let parent_gone = match field("parent_id") {
+                        Some(parent) => self
+                            .adapter
+                            .get_task_by_id(parent)
+                            .map_err(core_to_sync)?
+                            .is_none(),
+                        None => false,
+                    };
+                    container_gone = list_gone || parent_gone;
+                }
                 (row.is_some(), row.map(|row| row.updated_at))
             }
             // A delete of a row that is there — a snapshot brought it back —
@@ -1311,6 +1339,8 @@ impl EventLogApplier {
             deleted: clock.is_some_and(|clock| clock.deleted),
             present,
             absent: event.merges_fields() && !present,
+            container_gone,
+            seeded: clock.is_some_and(|clock| clock.seeded),
         })
     }
 
@@ -1359,6 +1389,11 @@ struct RowTime {
     present: bool,
     /// A field merge's row is missing.
     absent: bool,
+    /// The row is missing, and so is the list, calendar or parent task the
+    /// change names: it may have taken the row along (no delete of its own).
+    container_gone: bool,
+    /// The clock is only seeded ([`crate::RowClock::seeded`]).
+    seeded: bool,
 }
 
 /// What a field merge weighs besides the row: the row's time, and whether a

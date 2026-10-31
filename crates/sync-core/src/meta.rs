@@ -106,6 +106,12 @@ pub struct DeviceRecord {
     /// takes part, nothing is deleted.
     #[serde(default, skip_serializing_if = "is_false")]
     pub exact: bool,
+    /// The log files this device's build could not read
+    /// (DESIGN-sync-snapshot-coverage.md, review round 5 of #130). No
+    /// compactor deletes them while an active device names them: an update
+    /// of that device reads them again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unreadable: Vec<String>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -269,6 +275,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         let bytes = meta.to_bytes().unwrap();
@@ -294,6 +301,7 @@ mod tests {
                     app_version: "1.0.0".into(),
                     stale: false,
                     exact: false,
+                    unreadable: Vec::new(),
                 },
             )]),
         };
@@ -342,6 +350,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         let json = String::from_utf8(meta.to_bytes().unwrap()).unwrap();
@@ -357,6 +366,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         let json = String::from_utf8(meta.to_bytes().unwrap()).unwrap();
@@ -381,6 +391,7 @@ mod tests {
                     app_version: "1.0.0".into(),
                     stale: false,
                     exact: false,
+                    unreadable: Vec::new(),
                 },
             );
         }

@@ -401,6 +401,12 @@ impl Compactor {
             // A build the dataset locked out compacts nothing, by hand
             // neither (review round 4 of #130).
             sync_core::ensure_compatible(&existing, &self.app_version)?;
+            // The round's §19.7 gate, by hand too: a plaintext device would
+            // write its snapshot readable over the encrypted one (review
+            // round 5 of #130).
+            if existing.e2e_enabled && !self.store.e2e_enabled() {
+                return Err(sync_core::SyncError::EncryptionRequired);
+            }
             if content_horizon < existing.gc_horizon_or_min() {
                 return Err(sync_core::SyncError::StaleDevice {
                     snapshot_at: existing.snapshot_timestamp.to_rfc3339(),
@@ -531,6 +537,13 @@ impl Compactor {
                 app_version: self.app_version.clone(),
                 stale: false,
                 exact: self.record_exact(),
+                unreadable: crate::UnreadableLogs::names(
+                    self.store
+                        .get_pref(crate::SYNC_UNREADABLE_LOGS_PREF_KEY)
+                        .ok()
+                        .flatten()
+                        .as_deref(),
+                ),
             },
         );
 
@@ -664,9 +677,20 @@ impl Compactor {
         let settled_by = now
             .checked_sub_signed(ChronoDuration::days(i64::from(retention_days)))
             .unwrap_or(DateTime::<Utc>::MIN_UTC);
+        // A file an active device could not read stays: an update of that
+        // device reads it again (review round 5 of #130).
+        let unread: HashSet<String> = meta
+            .devices
+            .values()
+            .filter(|record| !record.stale && record.last_seen_log >= retention_floor)
+            .flat_map(|record| record.unreadable.iter().cloned())
+            .collect();
         for log in current {
             let filename = log.name.to_filename();
-            if log.name.timestamp >= safe_cutoff || kept_pending.contains(&filename) {
+            if log.name.timestamp >= safe_cutoff
+                || kept_pending.contains(&filename)
+                || unread.contains(&filename)
+            {
                 continue;
             }
             if seen.get(&filename).is_none_or(|since| *since > settled_by) {
@@ -1257,6 +1281,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: true,
+                unreadable: Vec::new(),
             },
         );
         *adapter.meta.lock().unwrap() = Some(meta);
@@ -1306,6 +1331,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         *adapter.meta.lock().unwrap() = Some(meta);
@@ -1357,6 +1383,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         *adapter.meta.lock().unwrap() = Some(meta);
@@ -1471,6 +1498,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: true,
+                unreadable: Vec::new(),
             },
         );
         meta
@@ -1793,6 +1821,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         *adapter.meta.lock().unwrap() = Some(meta);
@@ -1970,6 +1999,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_file_an_active_device_could_not_read_stays() {
+        // Review round 5 of #130: the author holds every event of its own
+        // file, but a device whose build could not read it is not done with
+        // it; an update there reads it again.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        let mut meta = meta_with_caught_up_peer();
+        let old: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
+        let log = held_log(&store, old);
+        let filename = log.name.to_filename();
+        for record in meta.devices.values_mut() {
+            record.unreadable = vec![filename.clone()];
+        }
+        *adapter.meta.lock().unwrap() = Some(meta);
+        adapter.logs.lock().unwrap().push(log);
+        seen_long_ago(&store, &adapter);
+
+        let report = compactor.compact_now(&adapter).await.unwrap();
+
+        assert_eq!(report.deleted_logs, 0);
+    }
+
+    #[tokio::test]
     async fn a_failed_second_listing_keeps_when_each_file_was_first_seen() {
         // Review round 4 of #130: the failure read as an empty listing and
         // the record of first sightings started over for every file.
@@ -2006,6 +2058,26 @@ mod tests {
         assert!(matches!(
             result,
             Err(sync_core::SyncError::SchemaTooOld { .. })
+        ));
+        assert!(adapter.snapshot.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_plaintext_device_does_not_compact_an_encrypted_dataset() {
+        // Review round 5 of #130: compacting by hand skipped the round's
+        // §19.7 gate, and a plaintext device wrote its snapshot readable over
+        // the encrypted one.
+        let (_store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        let mut meta = meta_with_caught_up_peer();
+        meta.e2e_enabled = true;
+        *adapter.meta.lock().unwrap() = Some(meta);
+
+        let result = compactor.compact_now(&adapter).await;
+
+        assert!(matches!(
+            result,
+            Err(sync_core::SyncError::EncryptionRequired)
         ));
         assert!(adapter.snapshot.lock().unwrap().is_none());
     }

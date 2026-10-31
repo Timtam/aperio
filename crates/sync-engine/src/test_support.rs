@@ -126,6 +126,22 @@ impl SyncStore for FakeStore {
             changed: at,
             written: (write != crate::RowWrite::Fields).then_some(at),
             deleted: write == crate::RowWrite::Delete,
+            seeded: false,
+        };
+        self.advance_row_clocks(&[(key.clone(), theirs)])
+    }
+
+    fn seed_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: DateTime<Utc>,
+        write: crate::RowWrite,
+    ) -> Result<(), StoreError> {
+        let theirs = crate::RowClock {
+            changed: at,
+            written: (write != crate::RowWrite::Fields).then_some(at),
+            deleted: write == crate::RowWrite::Delete,
+            seeded: true,
         };
         self.advance_row_clocks(&[(key.clone(), theirs)])
     }
@@ -147,11 +163,20 @@ impl SyncStore for FakeStore {
         let mut table = self.row_clocks.lock().unwrap();
         for (key, theirs) in clocks {
             let clock = table.entry(key.clone()).or_insert(*theirs);
-            // The delete flag follows the newest whole-row write.
+            // As the desktop store: the delete flag follows the newest
+            // whole-row write and the seeded flag the newest change; at the
+            // same time a seed takes over neither.
             if let Some(at) = theirs.written {
-                if clock.written.is_none_or(|ours| at >= ours) {
+                let newer = clock.written.is_none_or(|ours| at > ours);
+                let same = clock.written == Some(at);
+                if newer || (same && !theirs.seeded) {
                     clock.deleted = theirs.deleted;
                 }
+            }
+            if theirs.changed > clock.changed {
+                clock.seeded = theirs.seeded;
+            } else if theirs.changed == clock.changed {
+                clock.seeded = clock.seeded && theirs.seeded;
             }
             clock.changed = clock.changed.max(theirs.changed);
             clock.written = clock.written.max(theirs.written);

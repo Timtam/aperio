@@ -107,6 +107,10 @@ pub struct SnapshotRowClock {
     pub written: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub deleted: bool,
+    /// The author's row was of unknown time ([`RowClock::seeded`]): the
+    /// taker holds the author's applied changes there too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub seeded: bool,
 }
 
 /// One account secret carried in [`AperioSnapshotBody::credentials`].
@@ -240,6 +244,7 @@ impl SnapshotBuilder {
                 changed: clock.changed,
                 written: clock.written,
                 deleted: clock.deleted,
+                seeded: clock.seeded,
             })
             .collect();
         let body = AperioSnapshotBody {
@@ -382,6 +387,7 @@ impl SnapshotBuilder {
                         changed: clock.changed,
                         written: clock.written,
                         deleted: clock.deleted,
+                        seeded: clock.seeded,
                     },
                 ))
             })
@@ -559,6 +565,7 @@ mod tests {
                 changed: at(6000),
                 written: Some(at(6000)),
                 deleted: false,
+                seeded: false,
             }),
         );
         assert_eq!(
@@ -567,9 +574,31 @@ mod tests {
                 changed: at(9000),
                 written: Some(at(3000)),
                 deleted: false,
+                seeded: false,
             }),
             "its own newer change stays; the whole-row time comes",
         );
+    }
+
+    #[test]
+    fn a_snapshot_carries_a_seeded_clock_as_seeded() {
+        // Review round 5 of #130: the author's row was of unknown time; the
+        // taker holds the author's applied changes there as the author does.
+        use chrono::TimeZone;
+        let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+        let author = Arc::new(FakeStore::default());
+        let secrets = Arc::new(FakeSecrets::default());
+        author
+            .seed_row_clock(&setting_key(), at(6000), RowWrite::Whole)
+            .unwrap();
+        let snap = builder(Arc::clone(&author), Arc::clone(&secrets))
+            .build_at(Utc::now(), None)
+            .unwrap();
+
+        let taker = Arc::new(FakeStore::default());
+        builder(Arc::clone(&taker), secrets).apply(&snap).unwrap();
+
+        assert!(taker.row_clocks.lock().unwrap()[&setting_key()].seeded);
     }
 
     #[test]
@@ -591,6 +620,7 @@ mod tests {
                 changed: Utc::now(),
                 written: None,
                 deleted: false,
+                seeded: false,
             }],
             ..Default::default()
         };
@@ -622,6 +652,7 @@ mod tests {
                 changed: Utc::now(),
                 written: None,
                 deleted: false,
+                seeded: false,
             }],
             ..Default::default()
         };

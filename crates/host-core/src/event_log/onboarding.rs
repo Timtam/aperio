@@ -728,22 +728,24 @@ impl OnboardingService {
                     }
                 }
                 Err(err) => {
-                    // A torn read of a file being written, or one this version
-                    // cannot read. Not recorded, and the pass is not complete:
-                    // the device is not exact, and the next catch-up takes the
-                    // file again, under its rules rather than a round's
-                    // (review round 2 of #130). Unreadable again at the same
-                    // size, it is no torn read: nothing here can apply it, and
-                    // it no longer keeps the device from being exact (review
-                    // round 3) — its length is recorded until it grows.
+                    // A torn read of a file being written: not recorded, and
+                    // the pass is not complete — the device is not exact, and
+                    // the next catch-up takes the file again, under its rules
+                    // rather than a round's (review round 2 of #130). Torn
+                    // again at the same size, it is no read in progress
+                    // (review round 3). A line this build does not know is
+                    // no torn read either, at any size: nothing here can
+                    // apply it, and it keeps no device from being exact; its
+                    // length is recorded, and an update that changed the
+                    // parser reads it again (review round 5).
                     let filename = log.name.to_filename();
                     let len = log.bytes.len() as u64;
                     report.apply_failures += 1;
-                    if unreadable_before.get(&filename) == Some(&len) {
+                    if !log.is_torn() || unreadable_before.get(&filename) == Some(&len) {
                         warn!(
                             log = %filename,
                             ?err,
-                            "log file still unreadable at the same size; nothing to apply from it",
+                            "log file this build cannot read; nothing to apply from it",
                         );
                         if foreign {
                             lengths.push((filename.clone(), len));
@@ -797,19 +799,27 @@ impl OnboardingService {
     }
 
     /// The log files the last pass over every log could not read, with
-    /// their sizes ([`SYNC_UNREADABLE_LOGS_PREF_KEY`]) — only if this build
-    /// tried: another one may read what that one could not. A record that
-    /// does not read is empty. Either way every unreadable file then counts
-    /// as a first sighting.
+    /// their sizes ([`SYNC_UNREADABLE_LOGS_PREF_KEY`]) — only if this build's
+    /// parser tried: another one may read what that one could not. A record
+    /// that does not read is empty. Either way every unreadable file then
+    /// counts as a first sighting.
     fn read_unreadable_logs(&self) -> HashMap<String, u64> {
-        UserPrefsRepo::new(&self.db)
+        let raw = UserPrefsRepo::new(&self.db)
             .get(SYNC_UNREADABLE_LOGS_PREF_KEY)
             .ok()
-            .flatten()
-            .and_then(|raw| serde_json::from_str::<sync_engine::UnreadableLogs>(&raw).ok())
-            .filter(|record| record.version == self.app_version)
+            .flatten();
+        sync_engine::UnreadableLogs::of_this_parser(raw.as_deref())
             .map(|record| record.files)
             .unwrap_or_default()
+    }
+
+    /// The files this device names as unreadable in `meta.json`.
+    fn unreadable_names(&self) -> Vec<String> {
+        let raw = UserPrefsRepo::new(&self.db)
+            .get(SYNC_UNREADABLE_LOGS_PREF_KEY)
+            .ok()
+            .flatten();
+        sync_engine::UnreadableLogs::names(raw.as_deref())
     }
 
     fn save_unreadable_logs(&self, unreadable: &HashMap<String, u64>) {
@@ -818,7 +828,7 @@ impl OnboardingService {
             prefs.delete(SYNC_UNREADABLE_LOGS_PREF_KEY)
         } else {
             let record = sync_engine::UnreadableLogs {
-                version: self.app_version.clone(),
+                parser: sync_core::PARSER_FINGERPRINT,
                 files: unreadable.clone(),
             };
             match serde_json::to_string(&record) {
@@ -1022,6 +1032,7 @@ impl OnboardingService {
             .ok()
             .flatten();
         let exact = self.coverage_exact();
+        let unreadable = self.unreadable_names();
         let now = Utc::now();
         let is_current = |meta: &MetaJson| {
             meta.devices
@@ -1032,6 +1043,7 @@ impl OnboardingService {
                         && d.app_version == self.app_version
                         && !d.stale
                         && d.exact == exact
+                        && d.unreadable == unreadable
                         // Deliberately COARSE. Every other term here is an
                         // equality, and treating the wall clock the same way
                         // would make the skip below unreachable — the stamp
@@ -1083,6 +1095,7 @@ impl OnboardingService {
                 app_version: self.app_version.clone(),
                 stale: false,
                 exact,
+                unreadable,
             },
         );
         adapter.push_meta(&meta).await?;
@@ -1106,6 +1119,7 @@ impl OnboardingService {
                 app_version: self.app_version.clone(),
                 stale: false,
                 exact: self.coverage_exact(),
+                unreadable: self.unreadable_names(),
             },
         );
     }
@@ -1423,6 +1437,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -1455,6 +1470,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -1511,6 +1527,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         meta.upsert_device(
@@ -1522,6 +1539,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -1679,6 +1697,7 @@ mod tests {
                 app_version: "1.0.0-test".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         // The REMOTE meanwhile gained a marker device (a concurrent peer's
@@ -1694,6 +1713,7 @@ mod tests {
                 app_version: "1.0.0-test".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         adapter.install_meta(remote);
@@ -1734,6 +1754,7 @@ mod tests {
                 app_version: "1.0.0-test".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         // Remote meanwhile: the peer's write landed.
@@ -1747,6 +1768,7 @@ mod tests {
                 app_version: "1.0.0-test".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         adapter.install_meta(remote);
@@ -1785,6 +1807,7 @@ mod tests {
                 app_version: "1.0.0-test".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         adapter.install_meta(cached.clone());
@@ -1823,6 +1846,7 @@ mod tests {
                 app_version: "1.0.0-test".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         adapter.install_meta(cached.clone());
@@ -1861,6 +1885,7 @@ mod tests {
                 app_version: "1.0.0-test".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         adapter.install_meta(cached.clone());
@@ -1884,6 +1909,7 @@ mod tests {
             app_version: "1.0.0-test".into(),
             stale: false,
             exact: false,
+            unreadable: Vec::new(),
         }
     }
 
@@ -2024,6 +2050,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: true,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -2452,9 +2479,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_file_another_build_could_not_read_is_a_first_sighting() {
-        // Review round 4 of #130: what an earlier build recorded as unreadable
-        // says nothing about this one, which may read it.
+    async fn a_file_another_parser_could_not_read_is_a_first_sighting() {
+        // Review rounds 4 and 5 of #130: what an earlier parser recorded as
+        // unreadable says nothing about this one, which may read it.
         let (_tmp, db) = fresh_db();
         let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
         let broken = LogFile {
@@ -2465,7 +2492,7 @@ mod tests {
             bytes: b"not json".to_vec(),
         };
         let record = sync_engine::UnreadableLogs {
-            version: "0.0.1".into(),
+            parser: 0,
             files: HashMap::from([(broken.name.to_filename(), broken.bytes.len() as u64)]),
         };
         UserPrefsRepo::new(&db.shared())
@@ -2500,6 +2527,54 @@ mod tests {
         assert_eq!(meta.gc_horizon, compacted.gc_horizon);
         assert_eq!(meta.min_app_version, "0.2.0");
         assert!(meta.device(svc.device_id()).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_line_this_build_does_not_know_keeps_the_device_exact_and_is_named() {
+        // Review round 5 of #130: a newer build's live session, holding a
+        // line this one cannot read, grew between catch-ups and kept the
+        // device from ever being exact. It is no torn read; the device is
+        // exact, and names the file in meta.json, so no compactor deletes it.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let newer = LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"{\"from\":\"a newer build\"}\n".to_vec(),
+        };
+        let filename = newer.name.to_filename();
+        adapter.logs.lock().unwrap().push(newer);
+
+        svc.catch_up(&adapter).await.unwrap();
+        assert!(exact_since(&db).is_some());
+        svc.heartbeat_meta(&adapter, snapshot_ts, None)
+            .await
+            .unwrap();
+
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(
+            meta.device(svc.device_id())
+                .map(|record| record.unreadable.clone()),
+            Some(vec![filename]),
+        );
+
+        // Read at last: the next heartbeat names it no more, though nothing
+        // else about the record changed.
+        UserPrefsRepo::new(&db.shared())
+            .delete(SYNC_UNREADABLE_LOGS_PREF_KEY)
+            .unwrap();
+        let round_meta = adapter.fetch_meta().await.unwrap();
+        svc.heartbeat_meta(&adapter, snapshot_ts, round_meta.as_ref())
+            .await
+            .unwrap();
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(
+            meta.device(svc.device_id())
+                .map(|record| record.unreadable.clone()),
+            Some(Vec::new()),
+        );
     }
 
     #[tokio::test]
@@ -2602,6 +2677,7 @@ mod tests {
                 changed: later,
                 written: Some(later),
                 deleted: false,
+                seeded: false,
             }],
             ..Default::default()
         };

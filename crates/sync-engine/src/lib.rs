@@ -393,6 +393,15 @@ pub trait SyncStore: Send + Sync {
         at: DateTime<Utc>,
         write: RowWrite,
     ) -> Result<(), StoreError>;
+    /// As [`Self::advance_row_clock`] for a row of unknown time that holds a
+    /// change this device had applied: the clock is marked
+    /// [`RowClock::seeded`]. A clock already known stays known.
+    fn seed_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: DateTime<Utc>,
+        write: RowWrite,
+    ) -> Result<(), StoreError>;
     /// Every row's clock, for the snapshot. A kind this version does not
     /// know is left out.
     fn row_clocks(&self) -> Result<Vec<(sync_core::RowKey, RowClock)>, StoreError>;
@@ -535,10 +544,16 @@ pub struct RowClock {
     /// update or a delete. `None` while only field merges touched it.
     pub written: Option<DateTime<Utc>>,
     /// That newest whole-row write was a delete. A row gone without one —
-    /// its list or calendar was deleted and took it along — is not deleted
-    /// itself, and an edit moving it elsewhere still applies (review round 3
-    /// of #130).
+    /// its list, calendar or parent task was deleted and took it along — is
+    /// not deleted itself, and an edit moving it elsewhere still applies
+    /// (review rounds 3 and 5 of #130).
     pub deleted: bool,
+    /// Only seeded: a change this device had applied set it, on a row of
+    /// unknown time ([`SyncStore::seed_row_clock`]). The row holds that
+    /// change or a newer one, so the next catch-up holds an applied change
+    /// here too; the first newer change taken on the row makes its time
+    /// known (review round 5 of #130).
+    pub seeded: bool,
 }
 
 /// How a change writes its row, for the row's clock.

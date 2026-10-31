@@ -107,21 +107,41 @@ pub const SYNC_APPLIED_LOG_LENGTHS_PREF_KEY: &str = "sync.cursor.appliedLogLengt
 /// the files 14 days of retention keep (one per device and session).
 pub const APPLIED_LOG_LENGTHS_CAP: usize = 256;
 
-/// The log files the last pass over every log could not read, with their
-/// sizes and the app version that tried (JSON, [`UnreadableLogs`]; review
-/// rounds 3 and 4 of #130). One unreadable again at the same size is no torn
-/// read and no longer keeps the device from being exact. A newer build may
-/// read it: while the record names files under another version, the device
-/// counts as not exact and catches up once more. Device-local.
+/// The log files this device could not read, with their sizes and the
+/// parser that tried (JSON, [`UnreadableLogs`]; review rounds 3 to 5 of
+/// #130). A file holding a line this build does not know keeps no device from
+/// being exact; this device names it in `meta.json`, and no compactor deletes
+/// it while it does. Once an update changed the parser, the round reads it
+/// again. Device-local.
 pub const SYNC_UNREADABLE_LOGS_PREF_KEY: &str = "sync.cursor.unreadableLogs";
 
 /// The record behind [`SYNC_UNREADABLE_LOGS_PREF_KEY`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UnreadableLogs {
-    /// The app version that could not read them.
-    pub version: String,
+    /// The parser that could not read them ([`sync_core::PARSER_FINGERPRINT`]);
+    /// absent (0) in a record of an earlier build.
+    #[serde(default)]
+    pub parser: u64,
     /// Filename to size.
     pub files: std::collections::HashMap<String, u64>,
+}
+
+impl UnreadableLogs {
+    /// The record as `raw` holds it, if this build's parser wrote it: another
+    /// one may read what that one could not.
+    pub fn of_this_parser(raw: Option<&str>) -> Option<Self> {
+        raw.and_then(|raw| serde_json::from_str::<Self>(raw).ok())
+            .filter(|record| record.parser == sync_core::PARSER_FINGERPRINT)
+    }
+
+    /// The names a device publishes in `meta.json`, sorted.
+    pub fn names(raw: Option<&str>) -> Vec<String> {
+        let mut names: Vec<String> = Self::of_this_parser(raw)
+            .map(|record| record.files.into_keys().collect())
+            .unwrap_or_default();
+        names.sort_unstable();
+        names
+    }
 }
 
 /// When this device last tried its one-time catch-up
@@ -696,6 +716,8 @@ impl SyncOrchestrator {
                 return Err(sync_core::SyncError::EncryptionRequired);
             }
 
+            self.reread_after_parser_change();
+
             // DESIGN-sync-snapshot-coverage.md (Toni, 2026-10-30): a device
             // whose record is not exact catches up once over every log file
             // still present — it joined or resumed from a snapshot before
@@ -799,26 +821,48 @@ impl SyncOrchestrator {
                 // would never be looked at again — with 0, any listed
                 // size counts as grown and a size-reporting adapter
                 // retries it next round.
+                //
+                // A file holding a line this build cannot read is no torn
+                // read: retried every round, it was fetched again and again.
+                // Its length is recorded, and the file is named unreadable
+                // until an update changed the parser (review round 5 of #130).
                 let mut applied_lengths: Vec<(String, u64)> = Vec::new();
+                let mut unreadable: Vec<(String, u64)> = Vec::new();
                 for log in foreign {
                     let byte_len = log.bytes.len() as u64;
-                    match self.applier.apply_log_file(&log) {
+                    let filename = log.name.to_filename();
+                    let applied = log
+                        .into_envelopes()
+                        .map_err(|err| (err, !log.is_torn()))
+                        .and_then(|envelopes| {
+                            self.applier
+                                .apply_envelopes(envelopes)
+                                .map_err(|err| (err, false))
+                        });
+                    match applied {
                         Ok(apply_report) => {
                             report.merge_apply(apply_report);
-                            applied_lengths.push((log.name.to_filename(), byte_len));
+                            applied_lengths.push((filename, byte_len));
                         }
-                        Err(err) => {
+                        Err((err, unknown_line)) => {
                             warn!(
-                                log = %log.name.to_filename(),
+                                log = %filename,
                                 ?err,
+                                unknown_line,
                                 "apply phase failed for log file",
                             );
                             report.apply_failures += 1;
-                            applied_lengths.push((log.name.to_filename(), 0));
+                            if unknown_line {
+                                applied_lengths.push((filename.clone(), byte_len));
+                                unreadable.push((filename, byte_len));
+                            } else {
+                                applied_lengths.push((filename, 0));
+                            }
                         }
                     }
                 }
                 self.record_applied_lengths(&applied_lengths);
+                self.record_unreadable(unreadable);
 
                 // 3. Advance cursor. Persist as RFC 3339 to keep
                 // the user_prefs value human-readable.
@@ -1131,27 +1175,70 @@ impl SyncOrchestrator {
     /// ([`SYNC_COVERAGE_EXACT_SINCE_PREF_KEY`]). An unreadable record counts
     /// as exact: guessing "not exact" would catch the device up every round
     /// for as long as the read fails.
-    ///
-    /// Files an earlier build could not read make it not exact again: this
-    /// one may read them, and only a catch-up fetches them once more.
     fn coverage_exact(&self) -> bool {
-        let exact = match self.store.get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY) {
+        match self.store.get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY) {
             Ok(mark) => mark.is_some(),
             Err(err) => {
                 warn!(?err, "couldn't read whether this device's record is exact");
                 true
             }
+        }
+    }
+
+    /// A file this build's parser could not read is read again once an
+    /// update changed the parser (review round 5 of #130): its length goes
+    /// back to 0, so the next fetch takes it, and the record goes. A record
+    /// that does not read names nothing certain: the device catches up once
+    /// over every file.
+    fn reread_after_parser_change(&self) {
+        let Ok(Some(raw)) = self.store.get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY) else {
+            return;
         };
-        let unread_by_another_build = self
+        match serde_json::from_str::<UnreadableLogs>(&raw) {
+            Ok(record) if record.parser == sync_core::PARSER_FINGERPRINT => return,
+            Ok(record) => {
+                let again: Vec<(String, u64)> =
+                    record.files.into_keys().map(|name| (name, 0)).collect();
+                self.record_applied_lengths(&again);
+            }
+            Err(err) => {
+                warn!(
+                    ?err,
+                    "the record of unreadable log files does not read; catching up once"
+                );
+                if let Err(err) = self.store.delete_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY) {
+                    warn!(?err, "couldn't clear the exact mark");
+                }
+            }
+        }
+        if let Err(err) = self.store.delete_pref(SYNC_UNREADABLE_LOGS_PREF_KEY) {
+            warn!(?err, "couldn't clear the record of unreadable log files");
+        }
+    }
+
+    /// Add `files` to the record of unreadable log files.
+    fn record_unreadable(&self, files: Vec<(String, u64)>) {
+        if files.is_empty() {
+            return;
+        }
+        let raw = self
             .store
             .get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY)
             .ok()
-            .flatten()
-            .and_then(|raw| serde_json::from_str::<UnreadableLogs>(&raw).ok())
-            .is_some_and(|record| {
-                !record.files.is_empty() && record.version != self.hooks.app_version()
-            });
-        exact && !unread_by_another_build
+            .flatten();
+        let mut record = UnreadableLogs::of_this_parser(raw.as_deref()).unwrap_or(UnreadableLogs {
+            parser: sync_core::PARSER_FINGERPRINT,
+            files: Default::default(),
+        });
+        record.files.extend(files);
+        match serde_json::to_string(&record) {
+            Ok(raw) => {
+                if let Err(err) = self.store.set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &raw) {
+                    warn!(?err, "couldn't record the unreadable log files");
+                }
+            }
+            Err(err) => warn!(?err, "couldn't encode the unreadable log files"),
+        }
     }
 
     /// This device's held horizon: the newest point up to which it holds
@@ -1459,6 +1546,7 @@ mod tests {
                 app_version: "1.0.0-test".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         assert!(legacy.has_real_snapshot());

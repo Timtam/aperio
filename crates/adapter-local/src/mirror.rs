@@ -629,6 +629,7 @@ mod tests {
                 app_version: "1.0.0".into(),
                 stale: false,
                 exact: false,
+                unreadable: Vec::new(),
             },
         );
         adapter.push_meta(&meta).await.unwrap();

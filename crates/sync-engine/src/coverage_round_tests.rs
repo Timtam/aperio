@@ -391,25 +391,78 @@ async fn an_ordinary_round_takes_a_late_change_older_than_the_gc_horizon() {
     assert_eq!(report.applied, 1);
 }
 
-/// One file, unreadable to the build `version`.
-fn unreadable_by(version: &str) -> String {
+/// One file, unreadable to the parser `parser`.
+fn unreadable_by(parser: u64) -> String {
     serde_json::to_string(&crate::UnreadableLogs {
-        version: version.into(),
+        parser,
         files: std::collections::HashMap::from([("x.jsonl".to_string(), 1)]),
     })
     .unwrap()
 }
 
+fn applied_length(store: &FakeStore, name: &str) -> Option<u64> {
+    let raw = store
+        .get_pref(crate::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
+        .unwrap()?;
+    serde_json::from_str::<std::collections::HashMap<String, u64>>(&raw)
+        .unwrap()
+        .get(name)
+        .copied()
+}
+
 #[tokio::test]
-async fn a_file_an_earlier_build_could_not_read_makes_the_device_catch_up_again() {
-    // Review round 4 of #130: a file this build cannot read is recorded and
-    // never fetched again; after an update that can read it, only another
-    // catch-up takes it.
+async fn a_file_an_earlier_parser_could_not_read_is_fetched_again() {
+    // Review rounds 4 and 5 of #130: the app version stays the same across
+    // builds, so an update that can read the file is told by the parser.
+    // The file is fetched again, by an exact device too; no catch-up.
     let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
     mark_exact(&hooks.store);
     hooks
         .store
-        .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &unreadable_by("0.0.1"))
+        .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &unreadable_by(0))
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    assert_eq!(*hooks.catch_ups.lock().unwrap(), 0);
+    assert_eq!(applied_length(&hooks.store, "x.jsonl"), Some(0));
+    assert!(hooks
+        .store
+        .get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY)
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn a_file_this_parser_could_not_read_stays_named() {
+    let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    let record = unreadable_by(sync_core::PARSER_FINGERPRINT);
+    hooks
+        .store
+        .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &record)
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    assert_eq!(*hooks.catch_ups.lock().unwrap(), 0);
+    assert_eq!(
+        hooks
+            .store
+            .get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY)
+            .unwrap()
+            .as_deref(),
+        Some(record.as_str()),
+    );
+}
+
+#[tokio::test]
+async fn a_record_of_unreadable_files_that_does_not_read_makes_the_device_catch_up() {
+    let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    hooks
+        .store
+        .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, "not a record")
         .unwrap();
 
     orchestrator.sync_now().await.expect("round");
@@ -417,16 +470,54 @@ async fn a_file_an_earlier_build_could_not_read_makes_the_device_catch_up_again(
     assert_eq!(*hooks.catch_ups.lock().unwrap(), 1);
 }
 
-#[tokio::test]
-async fn a_file_this_build_could_not_read_does_not_make_it_catch_up_again() {
-    let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
-    mark_exact(&hooks.store);
-    hooks
-        .store
-        .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &unreadable_by("1.0.0-test"))
+/// A peer's file of `bytes`, named an hour ago.
+async fn peer_file(adapter: &Arc<dyn SyncAdapter>, bytes: &[u8]) -> String {
+    let name = LogFileName::new(
+        Utc::now() - chrono::Duration::hours(1),
+        DeviceId::from_string("dev-desktop".into()),
+    );
+    adapter
+        .push_log(&LogFile {
+            name: name.clone(),
+            bytes: bytes.to_vec(),
+        })
+        .await
         .unwrap();
+    name.to_filename()
+}
+
+#[tokio::test]
+async fn a_line_this_build_does_not_know_is_named_and_not_fetched_again_and_again() {
+    // Review round 5 of #130: recorded as length 0, it was fetched again in
+    // every round, for as long as it was there.
+    let (_tmp, orchestrator, hooks, adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    let bytes = b"{\"from\":\"a newer build\"}\n";
+    let name = peer_file(&adapter, bytes).await;
 
     orchestrator.sync_now().await.expect("round");
 
-    assert_eq!(*hooks.catch_ups.lock().unwrap(), 0);
+    assert_eq!(
+        applied_length(&hooks.store, &name),
+        Some(bytes.len() as u64)
+    );
+    let raw = hooks.store.get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY).unwrap();
+    assert_eq!(crate::UnreadableLogs::names(raw.as_deref()), vec![name]);
+}
+
+#[tokio::test]
+async fn a_torn_read_is_fetched_again_and_not_named() {
+    let (_tmp, orchestrator, hooks, adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    let whole = String::from_utf8(session("dev-desktop", 1_000, 1).bytes).unwrap();
+    let name = peer_file(&adapter, format!("{whole}\n{{\"id\":\"ev").as_bytes()).await;
+
+    orchestrator.sync_now().await.expect("round");
+
+    assert_eq!(applied_length(&hooks.store, &name), Some(0));
+    assert!(hooks
+        .store
+        .get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY)
+        .unwrap()
+        .is_none());
 }
