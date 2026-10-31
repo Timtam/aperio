@@ -493,6 +493,12 @@ export function TaskDialog({
   /** See the twin in EventDialog: cleared by the reset effect, which is the
    *  only thing that can undo a prefill. */
   const prefillApplied = useRef<string | null>(null);
+  /** Counts the resets that put the baseline back. The prefill effect lists
+   *  it, so it lands again on top of every one: a reset can run before the
+   *  prefill's own update has rendered — a store pushing synchronously renders
+   *  ahead of the effects' updates — find the form still pristine, and queue
+   *  the baseline behind the prefill (Toni's release log, 2026-10-31). */
+  const [baselineResets, setBaselineResets] = useState(0);
   /** Which prefill's refusal has been said in this opening; the reset does
    *  not clear it (see the twin in EventDialog). */
   const prefillAnnounced = useRef<string | null>(null);
@@ -543,8 +549,12 @@ export function TaskDialog({
       // one rides `defaultTitle` into the baseline rather than through here.
       //
       // Declaration order alone cannot fix that: it orders the two effects
-      // within ONE pass, and this is the same effect running twice.
+      // within ONE pass, and this is the same effect running twice. Nor is it
+      // only StrictMode: a release build re-runs the reset alone, before the
+      // prefill's update has rendered, so the prefill has to run again after
+      // it (`baselineResets`).
       prefillApplied.current = null;
+    setBaselineResets((count) => count + 1);
     statusTouched.current = false;
     setError(null);
     // Only on the first hydrate, as in EventDialog: a later pristine reset
@@ -595,6 +605,7 @@ export function TaskDialog({
     applyTaskPrefill,
     announce,
     t,
+    baselineResets,
   ]);
 
   // Mirror a subtask-cascade-updated status into the Status field while the

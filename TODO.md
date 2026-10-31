@@ -1525,13 +1525,17 @@ Dauer wie die Grundform hatte das verdeckt.
 unvollständigen Auswahl, bleibt die erste Ablehnung stehen (der Riegel
 `prefillApplied`). Bei Toni nicht der Fall.
 
-🚩 **Offen (Toni, 2026-10-31):** Im Release-Build landet der Editor nach einem
-Vorschlag aus dem Schnell-Hinzufügen wieder auf dem ersten Kalender, bei einem
-schlichten Einzeltermin, ohne Ansage zum Kalender. Jeder Test der Übergabe ist
-grün, mit und ohne StrictMode. Eine Spur (`src/state/prefillTrace.ts`,
-`[prefill …]` im Log, Kalender nur als Platz in der Liste) schreibt jeden
-Schritt, der den Kalender entscheidet oder ändert; entfernen, sobald die
-Ursache gemessen ist.
+↻ **Release-Build (Toni, 2026-10-31):** Der Editor landete nach einem
+Vorschlag aus dem Schnell-Hinzufügen wieder auf dem ersten Kalender, obwohl
+jeder Test der Übergabe grün war. Die Spur (`src/state/prefillTrace.ts`,
+`[prefill …]` im Log) zeigte die Ursache: Der Reset lief ein zweites Mal, bevor
+die Aktualisierung des Prefills gerendert war. Ein Store, der synchron pusht,
+rendert vor den Aktualisierungen der Effekte; das Formular sah darum noch
+unberührt aus, und die Grundform landete hinter dem Prefill. Der Prefill lief
+nicht wieder, weil sich keine seiner Abhängigkeiten änderte (in dev rettete
+StrictMode). Jetzt zählt jeder Reset (`baselineResets`), und der Prefill läuft
+danach noch einmal, im Termin- und im Aufgaben-Editor. Die Spur bleibt, bis
+Toni den Fix im Build bestätigt, dann entfernen.
 
 ### B12 · Gerätekonto nach dem Telefonwechsel (162-173) `[~]`
 
