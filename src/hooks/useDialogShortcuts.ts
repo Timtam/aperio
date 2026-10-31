@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import { localDateKey } from '../intl/dateKey';
 import { useDialogState } from '../state/dialogStateContext';
+import { useFileImport } from '../state/useFileImport';
 import { useViewState } from '../state/viewStateContext';
 
 /**
@@ -15,6 +16,8 @@ import { useViewState } from '../state/viewStateContext';
  *  - `Alt+Shift+N` → full new-task dialog
  *  - `Ctrl/Cmd+,` → Settings dialog (matches the platform convention
  *    used by Visual Studio Code, macOS apps and most modern desktops)
+ *  - `Ctrl/Cmd+O` → import a calendar file (DESIGN-file-import.md), as
+ *    "Open" in most desktop apps
  *
  * All ignore keystrokes inside form controls so a stray `N` while
  * typing in a description field doesn't pop another dialog. The
@@ -33,6 +36,7 @@ export function useDialogShortcuts(): void {
     mode,
   } = useDialogState();
   const { anchor } = useViewState();
+  const { importFromDisk } = useFileImport();
   // Read the view's focused day at keypress time via a ref, so the
   // global listener doesn't re-subscribe on every day-navigation.
   const anchorRef = useRef(anchor);
@@ -93,6 +97,11 @@ export function useDialogShortcuts(): void {
         openSettings();
         return;
       }
+      if (cmd && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        void importFromDisk();
+        return;
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -106,6 +115,7 @@ export function useDialogShortcuts(): void {
     openSearch,
     openReminders,
     openSettings,
+    importFromDisk,
   ]);
 }
 

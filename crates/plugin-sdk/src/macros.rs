@@ -332,6 +332,34 @@ macro_rules! declare_discover {
     };
 }
 
+/// Emit the optional `aperio_plugin_import_file` symbol: the plugin reads a
+/// file for an import (DESIGN-file-import.md).
+///
+/// `handler` takes the decoded [`crate::ImportRequest`] and returns what it
+/// read as a [`cal_core::FileImport`], or its own sentence for a file it cannot
+/// read. The formats themselves are declared in the manifest's `file_imports`;
+/// a plugin without this export offers none of them.
+#[macro_export]
+macro_rules! declare_import_file {
+    (handler: $handler:path $(,)?) => {
+        /// Typed twin of the `aperio_plugin_import_file` C-ABI export.
+        /// Crate-mangled (static-link safe); the companion `*-cdylib` crate
+        /// re-exports it as `#[no_mangle]`.
+        ///
+        /// # Safety
+        ///
+        /// FFI shape. `args_ptr` + `args_len` must describe a valid byte buffer
+        /// the host owns for the duration of the call.
+        #[doc(hidden)]
+        pub unsafe extern "C" fn __aperio_import_file_impl(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $crate::import_file::import_file_with(args_ptr, args_len, $handler)
+        }
+    };
+}
+
 /// Emit the optional `aperio_plugin_strings` symbol — the escape hatch for a
 /// plugin whose translations do not fit a JSON block in its manifest.
 ///
@@ -643,6 +671,7 @@ macro_rules! declare_cdylib_exports {
         $(, discover: $disc:tt)?
         $(, probe_host_key: $probe:tt)?
         $(, strings: $strings:tt)?
+        $(, import_file: $import:tt)?
         $(,)?
     ) => {
         /// `aperio_plugin_create` (DESIGN.md §20.3) — thin
@@ -724,6 +753,25 @@ macro_rules! declare_cdylib_exports {
         $($crate::declare_cdylib_exports!(@discover $plugin, $disc);)?
         $($crate::declare_cdylib_exports!(@probe_host_key $plugin, $probe);)?
         $($crate::declare_cdylib_exports!(@strings $plugin, $strings);)?
+        $($crate::declare_cdylib_exports!(@import_file $plugin, $import);)?
+    };
+
+    (@import_file $plugin:ident, no) => {};
+    (@import_file $plugin:ident, yes) => {
+        /// `aperio_plugin_import_file` — this plugin reads files for an
+        /// import; delegates to the rlib's typed twin.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a valid
+        /// host-owned byte buffer for the duration of the call.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_import_file(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $plugin::__aperio_import_file_impl(args_ptr, args_len)
+        }
     };
 
     (@strings $plugin:ident, no) => {};

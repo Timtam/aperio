@@ -76,6 +76,7 @@ fn fixture_event(id: &str, calendar_id: &str) -> Event {
         attendee_responses: Vec::new(),
         cancelled: false,
         scheduling_silenced: false,
+        ical_uid: None,
     }
 }
 
@@ -102,6 +103,8 @@ fn fixture_calendar(id: &str) -> Calendar {
         color: None,
         read_only: false,
         default_sound: None,
+        invitation_import: Default::default(),
+        keeps_uid: false,
     }
 }
 

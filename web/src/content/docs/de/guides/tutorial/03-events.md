@@ -103,7 +103,9 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > Aperio so eine Besprechung schreibgeschützt: Titel, Kalender, Zeiten, Ort,
 > Beschreibung und die Gästeliste stehen alle da, jedes als eigener Halt für
 > den Screenreader, aber keines lässt sich ändern. Eine Zeile über den Feldern
-> sagt, warum.
+> sagt, warum. Die Beschreibung ist ein eigenes Dokument: Am Desktop wechselt
+> NVDA dort in den Lesemodus, die Pfeiltasten lesen sie Zeile für Zeile, und
+> `Tab` führt weiter zum nächsten Feld.
 >
 > Was du weiter tun kannst: antworten (Zusagen, Vorläufig, Absagen), eigene
 > Erinnerungen setzen – angehängte, die der Kalender behält, oder eigene, die
@@ -420,6 +422,65 @@ die Gruppe repariert sich still. Wird nichts Passendes gefunden, bleibt alles,
 wie es ist: Es könnte eine Kopie sein, die Sie gelöscht haben, und das auf
 Verdacht zu entscheiden steht Aperio nicht zu.
 
+## Termine aus einer Datei importieren
+
+Ein Termin, den dir jemand als `.ics`-Datei geschickt hat — eine Einladung aus
+Outlook, Teams oder Google, ein Export aus einem anderen Kalender —, kommt über
+**Importieren …** in der Werkzeugleiste (oder `Strg+O`) nach Aperio, oder indem
+du die Datei auf das Fenster ziehst. Am Desktop meldet sich Aperio für
+keinen Dateityp an; es importiert nur, solange es läuft. Am Handy öffnet **Termine
+importieren …** in der Kalenderliste (neben **Neuer Kalender**) die
+Dateiauswahl; eine `.ics`-Datei lässt sich auch aus einer anderen App (Mail,
+Dateien) an Aperio teilen oder darin öffnen, wobei Aperio angeboten wird, ohne
+Standard zu werden. In der Liste mehrerer Termine ist jede Zeile ein
+Ankreuzfeld; **Bearbeiten …** ist eine ihrer Aktionen (unter iOS im Rotor).
+
+- **Ein Termin** öffnet den Editor, ausgefüllt aus der Datei: Tag und Uhrzeit,
+  Ort und Beschreibung, Erinnerungen, eine Serie mit den Terminen, die sie
+  auslässt. Das Feld **Kalender** sagt, wohin er geht; geschrieben wird erst
+  mit **Anlegen**.
+- **Mehrere** öffnen eine Liste. Jeder lässt sich im Editor öffnen, oder alle
+  angehakten auf einmal in einen Kalender schreiben.
+- **Ein Termin, der schon im Kalender steht** — derselbe, früher importiert
+  oder doppelt geschickt —, wird an der Kennung erkannt, die ihm die Datei
+  gibt, in einem lokalen, iCloud-, anderen CalDAV- oder Exchange-Kalender.
+  Die Liste nennt ihn und lässt ihn abgewählt; wer ihn anhakt, importiert ihn
+  als Kopie. Der Editor sagt es, bevor du anlegst, und **Anlegen** legt dann
+  eine Kopie an. Aperio fragt den gewählten Kalender, und wieder, wenn du
+  einen anderen wählst. Google (außer bei einer Einladung, die es in deinem
+  Hauptkalender behält), Microsoft 365 und die Kalender des Handys behalten
+  keine solche Kennung, und ein geänderter Termin, der als eigener Termin
+  kommt, hat keine: Die werden nicht erkannt und kommen erneut, und Liste
+  und Editor sagen das für einen solchen Kalender.
+- **Was die Datei außer Terminen enthält** — Aufgaben, Notizen, eine Absage,
+  eine Antwort auf eine Einladung —, wird genannt und nicht übernommen.
+- **Ein geänderter Termin einer Serie** wird ein eigener Termin, und die Serie
+  lässt seinen Platz aus.
+- **Eine Einladung, die jemand anderes organisiert,** bleibt dessen
+  Einladung in einem Kalender, der sie behalten kann, ohne jemanden zu
+  benachrichtigen: Organisator und Teilnehmer bleiben, niemand bekommt
+  etwas, und der Editor zeigt sie wie empfangen — Titel, Zeit, Ort,
+  Beschreibung und Teilnehmer wie geschickt; Kalender, Erinnerungen und Farbe
+  wählst du. Lokale, iCloud- und andere CalDAV-Kalender behalten Einladungen
+  so, und Exchange auch: Dort steht deine Antwort danach auf „Mit Vorbehalt“,
+  ohne dass es jemand erfährt, und zu- oder absagen kannst du wie bei jeder
+  Einladung. In einem anderen Exchange-Kalender als deinem Hauptkalender legt
+  Exchange den Termin zuerst in den Hauptkalender, und Aperio verschiebt ihn
+  dann in den gewählten. Google behält sie in deinem Hauptkalender, nicht in deinen
+  anderen Google-Kalendern. In einem Kalender, der das nicht kann, wird sie dein eigener
+  Termin, ohne Teilnehmer. Editor und Liste sagen, was davon für den gewählten Kalender
+  gilt.
+- **Ein Meeting, das du selbst organisierst,** kommt als neuer Termin, mit
+  seinen Teilnehmern, als hättest du ihn gerade angelegt. iCloud- und andere
+  CalDAV-Kalender schreiben Teilnehmer nur zusammen mit ihren Einladungen;
+  die Liste, die niemanden benachrichtigt, bringt ein solches Meeting dort
+  deshalb ohne sie. Im Editor bleiben sie, und sie werden eingeladen.
+
+Zeiten behalten ihre Zone, auch die Windows-Zonennamen, die Outlook schreibt.
+Eine Zone, die nur die Datei selbst festlegt (Outlooks „Customized Time
+Zone“), ergibt die richtigen Zeiten, aber eine Serie darin wiederholt sich
+vorerst in UTC und liegt nach einer Zeitumstellung eine Stunde daneben.
+
 ## Zeitschritte
 
 Unter **Einstellungen → Allgemein** legt **Zeitschritte** fest, wie weit ein
@@ -441,7 +502,9 @@ Abteilung. Unter **Einstellungen → Signaturen** — am Telefon über
 **Signaturen** in den Einstellungen — schreibst du sie. WELCHE ein Kalender
 trägt, legst du am Kalender selbst fest, neben seinen Standard-Erinnerungen,
 und ein Kalender mit Signatur setzt sie **von selbst auf neue Termine**: im
-Normalfall kein einziger Druck.
+Normalfall kein einziger Druck. Ein Termin aus einer Datei bekommt keine von
+selbst: Er behält die Beschreibung, die er mitbringt. Bei deinem eigenen
+Termin aus einer Datei fügt der Knopf **Signatur** trotzdem eine ein.
 
 Die Bindung ist ein Standard, keine Einschränkung. Jede Signatur bleibt im
 Editor wählbar, egal auf welchem Kalender der Termin liegt, und der Knopf

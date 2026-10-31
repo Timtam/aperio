@@ -3,4 +3,4 @@
 /**
  * The reason a write did not happen.
  */
-export type WriteRefusal = "reply-only-invitation" | "server-refused" | "identity-unknown" | "occurrence-not-writable" | "unsafe-to-write" | "access-not-granted" | "day-zone-unreadable" | "copy-unreadable" | "exceptions-would-be-lost" | "deletions-not-kept" | "provider-busy";
+export type WriteRefusal = "reply-only-invitation" | "server-refused" | "identity-unknown" | "occurrence-not-writable" | "unsafe-to-write" | "access-not-granted" | "day-zone-unreadable" | "copy-unreadable" | "exceptions-would-be-lost" | "deletions-not-kept" | "provider-busy" | "uid-taken";

@@ -18,5 +18,6 @@ adapter-ical = { path = "../adapter-ical" }
 serde.workspace = true
 serde_json.workspace = true
 [dev-dependencies]
+base64 = "0.22"
 [lints]
 workspace = true

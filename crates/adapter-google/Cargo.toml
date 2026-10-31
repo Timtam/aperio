@@ -29,6 +29,8 @@ tokio = { workspace = true, features = ["net", "io-util", "macros", "rt", "time"
 tracing.workspace = true
 url = "2"
 rand = "0.8"
+# The UID of an imported invitation the file gave none (I6f).
+uuid.workspace = true
 # Localhost browser launcher for the OAuth redirect step.
 # Tiny crate, platform-aware (uses `start` on Windows, `xdg-open`
 # on Linux, `open` on macOS).

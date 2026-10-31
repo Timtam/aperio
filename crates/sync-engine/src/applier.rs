@@ -67,8 +67,10 @@ use crate::{
 /// as conflicts. `updated_at` and `created_at` diverge mechanically
 /// every time someone edits the row; `etag` is the remote
 /// provider's bookkeeping. Showing the user a "your `etag` differs
-/// from their `etag`" dialog would be noise.
-const METADATA_FIELDS: &[&str] = &["updated_at", "created_at", "etag"];
+/// from their `etag`" dialog would be noise. An event's `ical_uid` is set
+/// once at the create and nobody edits it: a row that lacks it here takes the
+/// one another device sends, and that is never a question for the user.
+const METADATA_FIELDS: &[&str] = &["updated_at", "created_at", "etag", "ical_uid"];
 
 /// Round-trip a `recurrence` field value through its typed model so two
 /// semantically-identical recurrences that serialize differently compare equal.
@@ -1233,6 +1235,19 @@ mod tests {
             "status",
             &json!("completed"),
             &json!("open"),
+        ));
+    }
+
+    /// An event's UID is set once at the create (file import I4): a row that
+    /// lacks it on one device and has it on another is never a question for
+    /// the user.
+    #[test]
+    fn an_events_uid_is_never_a_conflict() {
+        assert!(!conflict_still_genuine(
+            ConflictKind::Event,
+            "ical_uid",
+            &Value::Null,
+            &json!("imported-1@example.test"),
         ));
     }
 

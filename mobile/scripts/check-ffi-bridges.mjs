@@ -588,6 +588,10 @@ const ONLY_ON = new Map([
   ['enableBackgroundRefresh', ['ios', 'the short BGAppRefreshTask wake-up exists only on iOS']],
   ['disableBackgroundRefresh', ['ios', 'cancels that iOS-only wake-up']],
   ['writeVoicePickers', ['ios', 'feeds the Siri intents, which exist only on iOS']],
+  [
+    'takeIncomingFileJson',
+    ['android', 'a shared or opened file arrives as an Android intent; iOS hands it to Linking'],
+  ],
 ]);
 
 /** What JavaScript can call and what the native modules register, kept apart
@@ -602,8 +606,8 @@ for (const { text } of declaredSurface.unreadable) {
   );
 }
 /**
- * The registrations that call the host without `hostCoded` or `groupCoded`
- * (decision 273): an error of the Rust host would reach JavaScript in its raw
+ * The registrations that call the host without `hostCoded` or one of the
+ * coders built on it, `groupCoded` and `importCoded` (decision 273): an error of the Rust host would reach JavaScript in its raw
  * native shape, without the desktop's code, and the token at the start of its
  * message would go unread. Read with comments and strings blanked.
  */
@@ -614,7 +618,7 @@ function unwrappedHostCalls(source, language) {
   for (const m of code.matchAll(/\bAsyncFunction\s*\(\s*"[^"\n]*"\s*\)\s*\{/g)) {
     const body = braced(code, m.index + m[0].length - 1);
     if (body === null) continue;
-    if (host.test(body) && !/\b(?:hostCoded|groupCoded)\b/.test(body)) {
+    if (host.test(body) && !/\b(?:hostCoded|groupCoded|importCoded)\b/.test(body)) {
       const name = /"(\w+)"/.exec(source.slice(m.index, m.index + m[0].length));
       out.push(name ? `${name[1]}()` : `the registration on line ${lineAt(code, m.index)}`);
     }

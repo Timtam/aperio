@@ -18,6 +18,7 @@ adapter just sends a `Bearer` token.
   **masters** come through with their `recurrence` (RRULE/EXDATE) intact —
   the frontend expands occurrences. Incremental updates use a `syncToken`
   (no time bound); a `410 Gone` means the token expired → full resync.
+  `iCalUID`, which a series' instances share, is the event's `ical_uid`.
 - **Tasks:** the Tasks API per task list.
 - **Contacts:** the People API, including *Other Contacts* via its own
   `syncToken`.
@@ -57,6 +58,26 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   Google's list, the organizer's row included, stays as it is. One that
   removed every invitee (`clear_attendees`) sends an empty array; an empty
   list alone leaves the array out.
+- **An invitation from a file goes in through `events.import`.** Built from
+  Google's documentation, not measured (no Google account to test with).
+  `events.import` adds "a private copy of an existing event": it is the one
+  call that takes an `organizer`, it requires the `iCalUID`, and it has no
+  `sendUpdates`, so nobody is told. Google takes it only where the
+  calendar's owner is the organizer or an attendee, so only the primary
+  calendar (`primary: true` in the calendar list, whose id is the account's
+  address) says `invitation_import: kept`; any other calendar says
+  `not-kept`, and the import becomes the account's own appointment there.
+  A create marked `keeps_invitation` whose organizer is not the account
+  (`cal_core::attendee::invitation_organizer`, the account from
+  `GET /calendars/primary`) is imported with the file's invitees without the
+  organizer, the account added where the file did not name it
+  (`invitation_attendees`). Google does not say what an import does with a
+  UID the calendar already holds, so `events.list?iCalUID=` asks first, and
+  a held one is refused as `uid-taken`. A copy imported without the file's
+  UID gets `{uuid}@aperio`. Should Google answer with the account as the
+  organizer after all (one report says it may), the appointment stays as
+  Google made it, logged: nothing was sent, and it reads as the account's own
+  meeting. An unmarked create never asks who the account is.
 - **Deletions come in several spellings.** Google itself deletes an
   occurrence as a cancelled instance, never as an `EXDATE` line, but other
   apps write `EXDATE` lines into the master's `recurrence`, and Google

@@ -1727,6 +1727,8 @@ mod tests {
             send_invitations: notify,
             organizer: None,
             organized_elsewhere: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 

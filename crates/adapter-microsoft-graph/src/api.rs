@@ -1542,6 +1542,8 @@ mod tests {
             sound: None,
             attendees: vec![],
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let ev = create_event(&state, "cal-1", new).await.unwrap();
         assert_eq!(ev.id, "ev1");

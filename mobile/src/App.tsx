@@ -37,6 +37,7 @@ import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import { loadThemeModePref } from './theme/themeMode';
 import { readStartOnToday } from './settings/startOnToday';
 import { navigationRef } from './navigation/navigationRef';
+import { IncomingFileImport } from './state/IncomingFileImport';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
 import { useAppBadge } from './state/useAppBadge';
@@ -57,6 +58,8 @@ import ContactsSettingsScreen from './screens/ContactsSettingsScreen';
 import AgendaScreen from './screens/AgendaScreen';
 import CalendarEditorModal from './screens/CalendarEditorModal';
 import CalendarsScreen from './screens/CalendarsScreen';
+import FileImportScreen from './screens/FileImportScreen';
+import { importRouteId } from './navigation/importRouteId';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import GeneralSettingsScreen from './screens/GeneralSettingsScreen';
@@ -278,6 +281,7 @@ function TasksStackNav() {
         name="EventEditor"
         component={EventEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+        getId={importRouteId}
       />
     </TasksStack.Navigator>
   );
@@ -319,6 +323,12 @@ function CalendarStackNav() {
         options={{ title: t('sidebar.calendars') }}
       />
       <CalendarStack.Screen
+        name="FileImport"
+        component={FileImportScreen}
+        options={{ presentation: 'modal', title: t('fileImport.dialogTitle') }}
+        getId={({ params }) => params.token}
+      />
+      <CalendarStack.Screen
         name="CalendarEditor"
         component={CalendarEditorModal}
         options={{ presentation: 'modal', title: t('sidebar.calendars') }}
@@ -327,6 +337,7 @@ function CalendarStackNav() {
         name="EventEditor"
         component={EventEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+        getId={importRouteId}
       />
       {/* Quick-adds reachable from the calendar create affordances (header
           "New Event", per-day "+ new event / + new task", day activation) so
@@ -447,6 +458,7 @@ function SettingsStackNav() {
         name="EventEditor"
         component={EventEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+        getId={importRouteId}
       />
       <SettingsStack.Screen
         name="ColorLabels"
@@ -489,6 +501,12 @@ function SettingsStackNav() {
         name="Calendars"
         component={CalendarsScreen}
         options={{ title: t('sidebar.calendars') }}
+      />
+      <SettingsStack.Screen
+        name="FileImport"
+        component={FileImportScreen}
+        options={{ presentation: 'modal', title: t('fileImport.dialogTitle') }}
+        getId={({ params }) => params.token}
       />
       <SettingsStack.Screen
         name="CalendarEditor"
@@ -739,6 +757,10 @@ function AppContent() {
               all following / whole series"). App-global so the row handlers can
               open it imperatively; overlays whatever tab/editor is focused. */}
           <EventScopeDialogHost />
+          {/* A calendar file shared into Aperio or opened in it from another
+              app (DESIGN-file-import.md, I5): opens the editor or the import
+              list in the calendar tab, over whatever is focused. */}
+          <IncomingFileImport />
           {/* The root sync-status poll feeds the per-screen header indicator
               (the native tab bar has no slot for an extra custom control). */}
           <SyncStatusContext.Provider value={sync}>{tabs}</SyncStatusContext.Provider>

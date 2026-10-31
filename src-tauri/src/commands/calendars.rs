@@ -556,6 +556,20 @@ pub async fn create_event(
     // The organizer is never an invitee, and only an event the account
     // organizes may notify (decisions 67a, 72a).
     host_core::event_write::guard_create(&mut new_event);
+    // An imported invitation keeps its organizer and invitees only where the
+    // calendar keeps invitations quietly (DESIGN-file-import.md, I6).
+    if new_event.keeps_invitation {
+        let calendars = if is_local {
+            adapter.list_calendars().await?
+        } else {
+            cache.read_calendars(&account).unwrap_or_default()
+        };
+        host_core::event_write::guard_invitation_import(
+            &mut new_event,
+            &calendars,
+            &request.calendar_id,
+        );
+    }
     // A calendar whose default reminders are set to "attach" writes them into
     // a brand-new appointment the editor left without any — the caller says
     // whether the reminders were a choice or merely unset.
@@ -741,6 +755,11 @@ pub async fn update_event(
             reminders: event.reminders.clone(),
             sound: event.sound.clone(),
             attendees: event.attendees.clone(),
+            // A new UID at the target: created before the source is gone, the
+            // same one would stand twice at the provider for a moment, which
+            // nobody measured a server to accept (DESIGN-file-import.md).
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         host_core::event_write::guard_create(&mut new_payload);
         // A copy in another calendar of somebody else's meeting invites
@@ -1280,6 +1299,8 @@ mod tests {
                     sound: None,
                     attendees: vec![],
                     send_invitations: false,
+                    uid_to_keep: None,
+                    keeps_invitation: false,
                 },
             )
             .await

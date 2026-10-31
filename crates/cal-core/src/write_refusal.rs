@@ -97,6 +97,13 @@ pub enum WriteRefusal {
     /// request of the same save had landed is no refusal but
     /// [`crate::WriteLeftover::PartlySaved`] (277).
     ProviderBusy,
+    /// The calendar already holds an appointment with the iCalendar UID the
+    /// create asked to keep ([`crate::NewEvent`]'s `uid_to_keep`, a file
+    /// import), so nothing was written: it is the same appointment. The
+    /// surfaces mark such an appointment before anyone imports it; this is
+    /// the server saying so where they could not see it. The detail is the
+    /// UID, or what the server named.
+    UidTaken,
 }
 
 /// What a provider answered when it turned a request away for throttling, as
@@ -207,6 +214,7 @@ impl WriteRefusal {
             Self::ExceptionsWouldBeLost => "exceptions-would-be-lost",
             Self::DeletionsNotKept => "deletions-not-kept",
             Self::ProviderBusy => "provider-busy",
+            Self::UidTaken => "uid-taken",
         }
     }
 
@@ -267,6 +275,7 @@ impl WriteRefusal {
             Self::ExceptionsWouldBeLost,
             Self::DeletionsNotKept,
             Self::ProviderBusy,
+            Self::UidTaken,
         ] {
             let token = refusal.token();
             let rest = match message.strip_prefix(token) {
@@ -388,6 +397,7 @@ mod tests {
             WriteRefusal::CopyUnreadable,
             WriteRefusal::ExceptionsWouldBeLost,
             WriteRefusal::DeletionsNotKept,
+            WriteRefusal::UidTaken,
         ] {
             let msg = refusal.message("detail");
             assert_eq!(

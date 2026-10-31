@@ -9,7 +9,7 @@
 // PILE UP across re-renders and only clear on unmount. `eventInstanceKey` keys by
 // (calendar_id, id) so every real row is unique and the count stays exact.
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { eventInstanceKey } from '@aperio/shared';
 
@@ -54,14 +54,33 @@ function navigate(keyer: (e: Ev) => string): number[] {
 describe('calendar-view row keys survive same-id events across calendars', () => {
   const expected = Array.from({ length: 12 }, (_, i) => ((i + 1) % 3 === 0 ? 1 : 3));
 
+  /** React's own word for the bug: two rows under one key. */
+  const DUPLICATE_KEY = 'Encountered two children with the same key';
+  const duplicateKeyWarnings = (error: { mock: { calls: unknown[][] } }) =>
+    error.mock.calls.filter((call) => String(call[0]).includes(DUPLICATE_KEY));
+
   it('DEMONSTRATES the bug: keying by id alone inflates the row count', () => {
-    const counts = navigate((e) => e.id);
-    // The buggy path orphans nodes: the final count exceeds the correct one.
-    expect(counts[counts.length - 1]).toBeGreaterThan(expected[expected.length - 1]);
+    // React says what goes wrong, as it did in the app: caught here as part of
+    // what this test shows, not left in the run's output.
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const counts = navigate((e) => e.id);
+      // The buggy path orphans nodes: the final count exceeds the correct one.
+      expect(counts[counts.length - 1]).toBeGreaterThan(expected[expected.length - 1]);
+      expect(duplicateKeyWarnings(error).length).toBeGreaterThan(0);
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it('eventInstanceKey keeps the count exact across navigation', () => {
-    const counts = navigate((e) => eventInstanceKey(e));
-    expect(counts).toEqual(expected);
+    const error = vi.spyOn(console, 'error');
+    try {
+      const counts = navigate((e) => eventInstanceKey(e));
+      expect(counts).toEqual(expected);
+      expect(duplicateKeyWarnings(error)).toEqual([]);
+    } finally {
+      error.mockRestore();
+    }
   });
 });

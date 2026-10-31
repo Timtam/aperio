@@ -939,6 +939,7 @@ mod delta_tests {
             deletions_not_restored: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 
@@ -1773,6 +1774,8 @@ mod delta_tests {
             send_invitations: false,
             organizer: None,
             organized_elsewhere: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 

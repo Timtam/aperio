@@ -758,6 +758,8 @@ mod tests {
                 color: None,
                 read_only: true,
                 default_sound: None,
+                invitation_import: Default::default(),
+                keeps_uid: false,
             },
             cal_core::Calendar {
                 color_label: None,
@@ -772,6 +774,8 @@ mod tests {
                 color: None,
                 read_only: false,
                 default_sound: None,
+                invitation_import: Default::default(),
+                keeps_uid: false,
             },
         ];
         apply_to_calendars(&repo, &mut cals);
@@ -816,6 +820,8 @@ mod tests {
                 color: Some(cal_core::ContainerColor::native("#4285f4")),
                 read_only: false,
                 default_sound: None,
+                invitation_import: Default::default(),
+                keeps_uid: false,
             },
             cal_core::Calendar {
                 color_label: None,
@@ -830,6 +836,8 @@ mod tests {
                 color: None,
                 read_only: false,
                 default_sound: None,
+                invitation_import: Default::default(),
+                keeps_uid: false,
             },
         ];
         apply_color_to_calendars(&repo, &mut cals);
@@ -931,6 +939,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 
@@ -985,6 +994,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         // Apply stamps the binding onto the matching external event only.
         let mut events = vec![mk("icloud:evt-1"), mk("icloud:evt-2")];
@@ -1278,6 +1288,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }];
         apply_color_to_events(&repo, &mut events);
         // The native label survives — the stale override did NOT shadow it.

@@ -18,10 +18,12 @@ import type { ColorLabel } from '@aperio/shared';
 import { listAccounts, type Account } from '../api/accounts';
 import { Calendar, createCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
+import { AppDialog } from '../components/AppDialog';
 import type { RootStackScreenProps } from '../navigation/types';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { useCacheReload } from '../state/cacheObserver';
 import { useCalendarVisibility } from '../state/calendarVisibility';
+import { useFileImport } from '../state/useFileImport';
 import { refreshBannerKey, useRefreshErrors } from '../state/useRefreshErrors';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
@@ -63,6 +65,9 @@ export default function CalendarsScreen({
   // Per-device calendar visibility (hide a calendar from every calendar view +
   // the event-target pickers).
   const { hidden, toggle: toggleVisibility } = useCalendarVisibility();
+  // A calendar file from the document picker (DESIGN-file-import.md, I5),
+  // next to "New calendar", as the design places it.
+  const fileImport = useFileImport(navigation);
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
@@ -167,6 +172,25 @@ export default function CalendarsScreen({
           <Text style={styles.buttonText}>{t('sidebar.newCalendar')}</Text>
         </Pressable>
       </View>
+      <View style={styles.importRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: fileImport.busy }}
+          accessibilityLabel={t('fileImport.calendarListButton')}
+          disabled={fileImport.busy}
+          onPress={() => void fileImport.importFromPicker()}
+          style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
+        >
+          <Text style={styles.manageButtonText}>{t('fileImport.calendarListButton')}</Text>
+        </Pressable>
+      </View>
+      <AppDialog
+        visible={fileImport.notice != null}
+        title={t('fileImport.dialogTitle')}
+        message={fileImport.notice ?? ''}
+        cancelLabel={t('dialogs.close')}
+        onCancel={fileImport.clearNotice}
+      />
 
       {bannerKey != null && (
         <Text style={styles.refreshWarning} accessibilityRole="text">
@@ -285,6 +309,7 @@ const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: c.background },
     form: { flexDirection: 'row', gap: 10, padding: 16, alignItems: 'center' },
+    importRow: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 8 },
     input: {
       flex: 1,
       fontSize: 17,

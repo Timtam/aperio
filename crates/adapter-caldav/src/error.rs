@@ -55,6 +55,14 @@ pub enum CaldavError {
     Busy(cal_core::BusyDetail),
 }
 
+impl From<ical_mapping::IcalError> for CaldavError {
+    fn from(err: ical_mapping::IcalError) -> Self {
+        match err {
+            ical_mapping::IcalError::Protocol(message) => CaldavError::Protocol(message),
+        }
+    }
+}
+
 impl From<reqwest::Error> for CaldavError {
     fn from(err: reqwest::Error) -> Self {
         CaldavError::Network(err.to_string())

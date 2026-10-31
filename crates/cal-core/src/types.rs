@@ -107,12 +107,48 @@ pub struct Calendar {
     /// address.
     #[serde(default)]
     pub stores_occurrence_exceptions: bool,
+    /// What creating a meeting someone else organizes does in this calendar —
+    /// an invitation imported from a file (DESIGN-file-import.md, I6): kept
+    /// with its organizer and invitees and nobody told; kept so, with the
+    /// account's answer reading "tentative" afterwards (Exchange's way in is a
+    /// tentative reply, saved and not sent); or not kept, where the provider
+    /// has no quiet way, and then it is created as the account's own
+    /// appointment without invitees. The adapter says it; the host and the
+    /// editors act on it. `#[serde(default)]` reads older payloads and stored
+    /// listings as not kept, the direction in which nobody is told anything.
+    #[serde(default)]
+    pub invitation_import: InvitationImport,
+    /// Whether a create keeps the UID it asks for (`NewEvent::uid_to_keep`),
+    /// so a file imported here again is found by it (DESIGN-file-import.md,
+    /// I4). Where not — Google's ordinary create, Microsoft Graph, a device
+    /// calendar — an import's held check is not asked, as no answer could
+    /// find anything, and the surfaces say so. `#[serde(default)]` reads
+    /// older payloads as not keeping it: nothing claimed that is not known.
+    #[serde(default)]
+    pub keeps_uid: bool,
     /// The service the editors name when they say so ("iCloud informs the
     /// attendees …"), as the adapter knows it; `None` reads as "the calendar
     /// server". A display string only: no rule looks at it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-export", ts(optional))]
     pub notifier_name: Option<String>,
+}
+
+/// What creating a meeting someone else organizes does in a calendar — see
+/// [`Calendar::invitation_import`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum InvitationImport {
+    /// Not kept: the provider has no quiet way, so the create is the
+    /// account's own appointment, without the organizer and the invitees.
+    #[default]
+    NotKept,
+    /// Kept with its organizer and invitees; nobody is told.
+    Kept,
+    /// Kept, nobody told, and the account's answer reads "tentative"
+    /// afterwards.
+    KeptTentative,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -235,6 +271,17 @@ pub struct Event {
     pub updated_at: DateTime<Utc>,
     /// Provider ETag / sync tag, used for optimistic-concurrency on push.
     pub etag: Option<String>,
+    /// The appointment's iCalendar UID (RFC 5545 `UID`), where the provider
+    /// keeps one: CalDAV's `UID`, Exchange's `calendar:UID`, Google's
+    /// `iCalUID`, Graph's `uid` (its `iCalUId` only for a single appointment),
+    /// the local store's column. A calendar file
+    /// carries it along, so an import finds by it what the target calendar
+    /// already holds (DESIGN-file-import.md, I4). An occurrence and a changed
+    /// occurrence carry their series' UID. Never written on an update; a
+    /// create asks for one through [`NewEvent::uid_to_keep`]. `None` where the
+    /// provider has none to give (a device calendar, a synthesised one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ical_uid: Option<String>,
     /// The organizer's address (RFC 5545 `ORGANIZER`, `mailto:` stripped),
     /// when the provider exposes it on read. Lets the host decide "is the
     /// connected account an *attendee* of this meeting rather than its
@@ -350,6 +397,29 @@ pub struct NewEvent {
     /// [`Event::organized_elsewhere`]. The host then clears the send intent.
     #[serde(default, skip_serializing_if = "is_false")]
     pub organized_elsewhere: bool,
+    /// The iCalendar UID this create asks the provider to keep — see
+    /// [`Event::ical_uid`]. An appointment imported from a file keeps the
+    /// file's, so importing it again finds it. `None` lets the provider mint
+    /// one, as for an appointment made in Aperio, a copy and a move. Kept
+    /// where the provider takes a UID on create (CalDAV, Exchange, the local
+    /// store, and Google for an invitation it imports through
+    /// `events.import`); otherwise Google and Microsoft Graph mint their own.
+    ///
+    /// Named apart from [`Event::ical_uid`] on purpose: the surfaces build
+    /// many creates by spreading a read event (a copy, the tail of a split, a
+    /// carved-out occurrence), and that must never hand the new appointment
+    /// the source's UID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid_to_keep: Option<String>,
+    /// Transient write-only signal: this create is a meeting someone else
+    /// organizes, imported from a file (DESIGN-file-import.md, I6) — written
+    /// with its [`organizer`](Self::organizer) and invitees as they are, and
+    /// nobody told. The host keeps it only where the calendar keeps
+    /// invitations ([`Calendar::invitation_import`]) and elsewhere drops it,
+    /// and the organizer and the invitees with it
+    /// (`attendee::guard_invitation_import`). NOT persisted.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub keeps_invitation: bool,
 }
 
 /// serde `skip_serializing_if` predicate: keep a `false` flag off the wire.
@@ -362,6 +432,7 @@ fn is_false(b: &bool) -> bool {
 /// Stored as a string so adapters can pass it through verbatim; evaluation
 /// happens centrally in the backend with a dedicated crate (Phase 4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct EventRecurrence {
     pub rrule: String,
     /// Exception dates that should be skipped.
@@ -375,6 +446,7 @@ pub struct EventRecurrence {
     /// UTC too — a UTC name, or one tzdata does not know; see
     /// [`crate::series_clock_zone`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
     pub tzid: Option<String>,
 }
 

@@ -325,6 +325,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 

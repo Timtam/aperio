@@ -1,0 +1,32 @@
+[package]
+name = "ical-mapping"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "iCalendar text to Aperio's events and back — the mapping CalDAV, the iCal feeds and file import, and Exchange's invitations share."
+
+[features]
+# The anonymised provider samples the mapping's own tests read, for the tests
+# of the crates that write through it (the CalDAV adapter). Test-only.
+test-fixtures = []
+
+[dependencies]
+cal-core.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+icalendar.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+url = "2"
+
+[dev-dependencies]
+# Reading `shared/contracts/calendarDefaultReminders.json`, the fixture this
+# crate shares with host-core and the TypeScript suite so the calendar
+# default-reminder chain is pinned end to end rather than half at each end.
+serde_json.workspace = true
+
+[lints]
+workspace = true

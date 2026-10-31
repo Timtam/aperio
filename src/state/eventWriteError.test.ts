@@ -53,6 +53,17 @@ describe("a refusal on the phone, behind Expo's wrapper", () => {
 });
 
 describe('eventWriteErrorMessage', () => {
+  it('says that an imported appointment is already in the calendar (I4)', () => {
+    // CalDAV answers a kept UID that is taken with a conflict, carrying the
+    // token; the conflict's own sentence ("changed on the server") is wrong.
+    const err = command('conflict', 'uid-taken: imported-1@example.test');
+    expect(eventWriteErrorMessage(err, t)).toBe(
+      'Dieser Termin steht schon in diesem Kalender. Es wurde nichts angelegt.',
+    );
+    expect(eventWriteFailureReason(err, t)).toBe('er steht schon in diesem Kalender');
+    expect(writeNeverLanded(err)).toBe(true);
+  });
+
   it('says in words that only the organizer may change a meeting', () => {
     const message = eventWriteErrorMessage(
       command('forbidden', 'reply-only-invitation: title'),

@@ -250,7 +250,13 @@ pub struct SyncedFolderState {
 /// 5: items carry their zones' full definitions (`start_zone_definition`,
 ///    `end_zone_definition`, decision 232), which the all-day read uses for a
 ///    zone the CLDR table does not know (decision 239).
-pub const ITEM_PARSER: u32 = 5;
+/// 6: items carry their iCalendar UID (`uid`, file import I4), which only the
+///    detail enrichment reads; a parser-5 row is enriched already and would
+///    never be asked again.
+/// 7: a zone with an empty id is named by its `Name` (`element_zone_id`),
+///    where Exchange keeps an imported file's TZID (I6); a parser-6 row holds
+///    the empty id, and its series repeats in UTC.
+pub const ITEM_PARSER: u32 = 7;
 
 /// How many changes to ask for per `SyncFolderItems` request.
 /// Exchange Online caps at 512 per call; smaller is fine but means
@@ -562,6 +568,9 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
             cached.organizer = fresh.organizer;
             cached.my_response_type = fresh.my_response_type;
             cached.attendees = fresh.attendees;
+            // The iCalendar UID, by which an import finds what is already
+            // here: detail-only as well.
+            cached.uid = fresh.uid;
             cached.detail_fetched = true;
             // Refresh the ChangeKey if GetItem returned a newer one
             // — detail reads don't bump it server-side typically,
@@ -745,6 +754,19 @@ pub async fn create_event(
     event: NewEvent,
     server_zones: Option<&ServerTimeZones>,
 ) -> EwsResult<Event> {
+    // Someone else's meeting from a file goes in the way Exchange takes one:
+    // as their request, made an appointment by a tentative reply (I6).
+    let own = own_address(client);
+    if let Some(organizer) = cal_core::attendee::invitation_organizer(&event, own.as_deref()) {
+        return crate::kept_invitation::create(
+            client,
+            calendar_id,
+            &event,
+            &organizer,
+            own.as_deref(),
+        )
+        .await;
+    }
     // Exchange takes a series' rule but not its deleted occurrences: such a
     // series is created bare and they are deleted again one by one (decisions
     // 202-213, 225, 263-266).
@@ -791,6 +813,18 @@ pub async fn create_event(
         &item_ref.id,
         item_ref.change_key,
     ))
+}
+
+/// The mailbox's own SMTP address, as far as the account says it.
+///
+/// EWS has no cheap "who am I" call (Autodiscover/GetUserSettings is
+/// heavyweight). The configured login is the SMTP address on the vast majority
+/// of Exchange/Outlook setups; when it isn't an email (e.g. `DOMAIN\user`), it
+/// cannot be matched against attendee addresses, so it is `None` rather than a
+/// guess.
+pub fn own_address(client: &EwsClient) -> Option<String> {
+    let username = client.credentials.username.trim();
+    (username.contains('@') && !username.contains('\\')).then(|| username.to_string())
 }
 
 /// Update an existing calendar item with the supplied event payload.
@@ -1430,6 +1464,8 @@ async fn detach_exception(
         sound: event.sound.clone(),
         attendees: event.attendees.clone(),
         send_invitations: event.send_invitations,
+        uid_to_keep: None,
+        keeps_invitation: false,
     };
     cal_core::attendee::guard_create(&mut single);
     let created = create_event(client, &event.calendar_id, single, server_zones).await?;
@@ -2097,6 +2133,14 @@ pub(crate) fn build_event_from_new(
         // Freshly created/updated by us — never a cancellation.
         cancelled: false,
         scheduling_silenced: false,
+        // The UID a create wrote (`new_event_to_calendar_item_xml_in`); a
+        // minted one comes with the next read.
+        ical_uid: new
+            .uid_to_keep
+            .as_deref()
+            .map(str::trim)
+            .filter(|uid| !uid.is_empty())
+            .map(str::to_string),
     }
 }
 
@@ -2129,6 +2173,29 @@ mod tests {
             creds(),
             reqwest::Client::builder().build().unwrap(),
         )
+    }
+
+    /// The login is the mailbox's address only where it is an email: a
+    /// `DOMAIN\user` login or a bare name is never matched against attendees.
+    #[test]
+    fn the_own_address_is_the_login_only_where_it_is_an_email() {
+        let own = |username: &str| {
+            own_address(&EwsClient::new(
+                "https://ews.invalid/EWS/Exchange.asmx".into(),
+                BasicCredentials {
+                    username: username.into(),
+                    password: "pw".into(),
+                },
+                reqwest::Client::builder().build().unwrap(),
+            ))
+        };
+        assert_eq!(
+            own(" toni@example.org ").as_deref(),
+            Some("toni@example.org")
+        );
+        assert_eq!(own(r"EXAMPLE\toni"), None);
+        assert_eq!(own(r"EXAMPLE\toni@example.org"), None);
+        assert_eq!(own("toni"), None);
     }
 
     #[tokio::test]
@@ -2175,6 +2242,13 @@ mod tests {
         assert_eq!(cals[0].id, "FA");
         assert_eq!(cals[0].name, "Calendar");
         assert!(!cals[0].read_only); // 6f.1b made EWS calendars writable
+                                     // Someone else's meeting from a file goes in, the answer tentative (I6).
+        assert_eq!(
+            cals[0].invitation_import,
+            cal_core::InvitationImport::KeptTentative
+        );
+        // A create keeps the file's UID (`t:UID`), so an import finds it again.
+        assert!(cals[0].keeps_uid);
         assert_eq!(cals[1].id, "FB");
     }
 
@@ -2502,6 +2576,8 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 
@@ -2524,6 +2600,50 @@ mod tests {
         assert_eq!(event.title, "Lunch");
         assert_eq!(event.calendar_id, "FOLDER-ID|FCK");
         assert_eq!(event.etag.as_deref(), Some("NEW-CK"));
+    }
+
+    /// The mailbox's own meeting from a file is no invitation: whatever the
+    /// import marked, it goes in as an ordinary create, never as somebody's
+    /// request (live round ICS-5, ICS5-5).
+    #[tokio::test]
+    async fn the_mailboxs_own_meeting_from_a_file_goes_the_ordinary_way() {
+        let mut server = Server::new_async().await;
+        let request = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("<t:MimeContent".into()))
+            .expect(0)
+            .create_async()
+            .await;
+        let ordinary = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                "<t:Subject>Jour fixe</t:Subject>".into(),
+            ))
+            .with_status(200)
+            .with_body(create_item_success_body())
+            .expect(1)
+            .create_async()
+            .await;
+        let client = EwsClient::new(
+            server.url(),
+            BasicCredentials {
+                username: "boss@example.net".into(),
+                password: "pw".into(),
+            },
+            reqwest::Client::builder().build().unwrap(),
+        );
+        let own_meeting = NewEvent {
+            organizer: Some("mailto:Boss@Example.net".into()),
+            organized_elsewhere: true,
+            uid_to_keep: Some("jf-1@example.net".into()),
+            keeps_invitation: true,
+            ..new_event("Jour fixe")
+        };
+        create_event(&client, "FOLDER-ID|FCK", own_meeting, None)
+            .await
+            .unwrap();
+        request.assert_async().await;
+        ordinary.assert_async().await;
     }
 
     #[tokio::test]
@@ -2623,6 +2743,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let updated = update_event(&client_for(&server), &starting, None)
             .await
@@ -2711,6 +2832,7 @@ mod tests {
               <t:ResponseType>Accept</t:ResponseType>
             </t:Attendee>
           </t:RequiredAttendees>
+          <t:UID>MTG-UID@example.test</t:UID>
         </t:CalendarItem>
       </m:Items>
     </m:GetItemResponseMessage>
@@ -2739,6 +2861,8 @@ mod tests {
         assert_eq!(item.attendees.len(), 1);
         assert_eq!(item.attendees[0].email, "me@example.com");
         assert_eq!(item.attendees[0].response_type.as_deref(), Some("Accept"));
+        // The UID is detail-only too (I4).
+        assert_eq!(item.uid.as_deref(), Some("MTG-UID@example.test"));
     }
 
     /// Decision 58a, end to end: a cold drain reads a series with one changed
@@ -3109,6 +3233,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let updated = update_event(&client_for(&server), &starting, None)
             .await
@@ -3237,6 +3362,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let updated = update_event(&client_for(&server), &edit, None)
             .await
@@ -3421,6 +3547,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         update_event(&client_for(&server), &edit, None)
             .await
@@ -3559,6 +3686,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         update_event(&client_for(&server), &edit, None)
             .await
@@ -3726,6 +3854,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 
@@ -3945,6 +4074,7 @@ mod tests {
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 

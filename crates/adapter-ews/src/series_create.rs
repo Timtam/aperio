@@ -1700,6 +1700,8 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 

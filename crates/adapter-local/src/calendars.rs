@@ -9,7 +9,7 @@
 use async_trait::async_trait;
 use cal_core::{
     Calendar, CalendarFeature, ColorLabelId, ContainerColor, DateRange, Event, EventRecurrence,
-    FreeBusy, NewEvent, Reminder, SoundConfig,
+    FreeBusy, InvitationImport, NewEvent, Reminder, SoundConfig,
 };
 use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension};
@@ -73,6 +73,10 @@ impl LocalAdapter {
             invitations_reply_only: false,
             stores_occurrence_exceptions: false,
             notifier_name: None,
+            // Nothing here tells anyone: an invitation from a file is kept as
+            // it is (I6).
+            invitation_import: InvitationImport::Kept,
+            keeps_uid: true,
         })
     }
 
@@ -139,7 +143,7 @@ impl LocalAdapter {
                     "SELECT id, calendar_id, title, description, location,
                             start_utc, end_utc, all_day, rrule, rrule_exceptions,
                             color_label_id, reminders, sound, attendees,
-                            created_at, updated_at, etag, rrule_tzid
+                            created_at, updated_at, etag, rrule_tzid, ical_uid, organizer
                        FROM events WHERE id = ?",
                 )
                 .map_err(map_sql_err)?;
@@ -196,6 +200,10 @@ impl LocalAdapter {
             invitations_reply_only: false,
             stores_occurrence_exceptions: false,
             notifier_name: None,
+            // Nothing here tells anyone: an invitation from a file is kept as
+            // it is (I6).
+            invitation_import: InvitationImport::Kept,
+            keeps_uid: true,
         }))
     }
 
@@ -297,6 +305,10 @@ impl CalendarFeature for LocalAdapter {
                     color_label: color_label?.map(ColorLabelId),
                     read_only: read_only?,
                     default_sound: sound?,
+                    // Nothing here tells anyone: an invitation from a file is kept as
+                    // it is (I6).
+                    invitation_import: InvitationImport::Kept,
+                    keeps_uid: true,
                 });
             }
             Ok(out)
@@ -482,7 +494,7 @@ impl CalendarFeature for LocalAdapter {
 const EVENT_SELECT_PREFIX: &str =
     "SELECT id, calendar_id, title, description, location, start_utc, end_utc,
             all_day, rrule, rrule_exceptions, color_label_id, reminders, sound,
-            attendees, created_at, updated_at, etag, rrule_tzid
+            attendees, created_at, updated_at, etag, rrule_tzid, ical_uid, organizer
        FROM events
       WHERE calendar_id = ?
         AND ( (start_utc < ? AND end_utc > ?)
@@ -533,6 +545,12 @@ fn persist_new_event(
     let attendees_json = encode_json(&event.attendees)?;
     let sound_json = write_sound(&event.sound)?;
     let (rrule, exceptions, rrule_tzid) = split_recurrence(&event.recurrence)?;
+    // Someone else's meeting, kept as the file has it (I6); every other
+    // appointment here is the account's own and names no organizer.
+    let organizer = event
+        .keeps_invitation
+        .then(|| event.organizer.clone())
+        .flatten();
 
     let now_s = fmt_utc(&now);
     adapter
@@ -544,8 +562,8 @@ fn persist_new_event(
                 id, calendar_id, title, description, location, start_utc,
                 end_utc, all_day, rrule, rrule_exceptions, rrule_tzid,
                 color_label_id, reminders, sound, attendees, created_at,
-                updated_at, etag
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                updated_at, etag, ical_uid, organizer
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
             params![
                 id,
                 calendar_id,
@@ -564,6 +582,8 @@ fn persist_new_event(
                 attendees_json,
                 now_s,
                 now_s,
+                event.uid_to_keep,
+                organizer,
             ],
         )
         .map_err(map_sql_err)?;
@@ -573,7 +593,6 @@ fn persist_new_event(
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
-        organized_elsewhere: false,
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
@@ -597,10 +616,12 @@ fn persist_new_event(
         created_at: now,
         updated_at: now,
         etag: None,
-        organizer: None,
+        organized_elsewhere: organizer.is_some(),
+        organizer,
         attendee_responses: Vec::new(),
         cancelled: false,
         scheduling_silenced: false,
+        ical_uid: event.uid_to_keep,
     })
 }
 
@@ -627,6 +648,8 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
     let updated_at = parse_utc(&req_text(row, 15)?)?;
     let etag = opt_text(row, 16)?;
     let rrule_tzid = opt_text(row, 17)?;
+    let ical_uid = opt_text(row, 18)?;
+    let organizer = opt_text(row, 19)?;
     let recurrence = combine_recurrence(rrule, exceptions, rrule_tzid)?;
 
     Ok(Event {
@@ -634,7 +657,9 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
-        organized_elsewhere: false,
+        // Someone else's meeting kept from a file (I6) is the only kind with
+        // an organizer here.
+        organized_elsewhere: organizer.is_some(),
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
@@ -658,13 +683,13 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
         created_at,
         updated_at,
         etag,
-        // Local events have no organizer/RSVP metadata; those are
-        // read-only fields populated only by external providers. Local events
-        // are never cancelled (there's no cancel action — you delete them).
-        organizer: None,
+        // No RSVP state: nothing here answers anyone. Local events are never
+        // cancelled (there's no cancel action — you delete them).
+        organizer,
         attendee_responses: Vec::new(),
         cancelled: false,
         scheduling_silenced: false,
+        ical_uid,
     })
 }
 
@@ -736,6 +761,8 @@ mod tests {
                 sound: None,
                 attendees: vec![],
                 send_invitations: false,
+                uid_to_keep: None,
+                keeps_invitation: false,
             },
         )
         .await
@@ -804,6 +831,8 @@ mod tests {
             sound: None,
             attendees: vec![],
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         for h in [0, 5, 24] {
             a.create_event(&cal.id, mk(h)).await.unwrap();
@@ -818,6 +847,143 @@ mod tests {
         assert_eq!(evs.len(), 2);
         assert_eq!(evs[0].title, "E0");
         assert_eq!(evs[1].title, "E5");
+    }
+
+    /// An imported appointment keeps its file's UID (I4) on every read, on an
+    /// edit, in the snapshot another device starts from, and through a sync
+    /// update that does not carry it.
+    #[tokio::test]
+    async fn an_imported_uid_is_kept_read_and_synced() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
+        let base = "2026-05-19T10:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let created = a
+            .create_event(
+                &cal.id,
+                NewEvent {
+                    organized_elsewhere: false,
+                    organizer: None,
+                    title: "Imported".into(),
+                    description: None,
+                    location: None,
+                    start: base,
+                    end: base + Duration::hours(1),
+                    all_day: false,
+                    recurrence: None,
+                    color_label: None,
+                    color_hex: None,
+                    reminders: vec![],
+                    sound: None,
+                    attendees: vec![],
+                    send_invitations: false,
+                    uid_to_keep: Some("imported-1@example.test".into()),
+                    keeps_invitation: false,
+                },
+            )
+            .await
+            .unwrap();
+        let uid = Some("imported-1@example.test");
+        assert_eq!(created.ical_uid.as_deref(), uid);
+        let range = DateRange {
+            start: base - Duration::hours(1),
+            end: base + Duration::hours(2),
+        };
+        assert_eq!(
+            a.get_events(&cal.id, range).await.unwrap()[0]
+                .ical_uid
+                .as_deref(),
+            uid
+        );
+
+        // An edit whose copy never read the UID leaves it.
+        let mut edit = created.clone();
+        edit.title = "Imported, renamed".into();
+        edit.ical_uid = None;
+        a.update_event(edit).await.unwrap();
+        let read = a.get_event_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(
+            (read.title.as_str(), read.ical_uid.as_deref()),
+            ("Imported, renamed", uid)
+        );
+
+        // Another device starts from the snapshot, then takes updates.
+        let dumped = a.dump_events_for_snapshot().unwrap();
+        assert_eq!(dumped[0].ical_uid.as_deref(), uid);
+        let other = make_adapter();
+        other.upsert_calendar_from_sync(&cal).unwrap();
+        other.upsert_event_from_sync(&dumped[0]).unwrap();
+        let mut update = dumped[0].clone();
+        update.title = "Renamed elsewhere".into();
+        update.ical_uid = None;
+        other.upsert_event_from_sync(&update).unwrap();
+        let there = other.get_event_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(
+            (there.title.as_str(), there.ical_uid.as_deref()),
+            ("Renamed elsewhere", uid)
+        );
+    }
+
+    /// A local calendar keeps an invitation from a file as it is (I6c): its
+    /// organizer stays on every read, through an edit and through the sync to
+    /// another device, and the event reads as someone else's.
+    #[tokio::test]
+    async fn an_imported_invitation_keeps_its_organizer() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
+        let listed = &a.list_calendars().await.unwrap()[0];
+        assert_eq!(listed.invitation_import, InvitationImport::Kept);
+        // The column keeps the file's UID: an import finds it again.
+        assert!(listed.keeps_uid);
+        let base = "2026-05-19T10:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let new = |keeps_invitation: bool| NewEvent {
+            organized_elsewhere: true,
+            organizer: Some("boss@example.org".into()),
+            title: "Jour fixe".into(),
+            description: None,
+            location: None,
+            start: base,
+            end: base + Duration::hours(1),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec!["bob@example.org".into()],
+            send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation,
+        };
+        let created = a.create_event(&cal.id, new(true)).await.unwrap();
+        assert_eq!(created.organizer.as_deref(), Some("boss@example.org"));
+        assert!(created.organized_elsewhere);
+        let read = a.get_event_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(read.organizer.as_deref(), Some("boss@example.org"));
+        assert!(read.organized_elsewhere);
+        assert_eq!(read.attendees, ["bob@example.org"]);
+
+        // Not marked: the account's own, whatever the create names.
+        let copy = a.create_event(&cal.id, new(false)).await.unwrap();
+        let copy = a.get_event_by_id(&copy.id).unwrap().unwrap();
+        assert_eq!((copy.organizer, copy.organized_elsewhere), (None, false));
+
+        // Another device starts from the snapshot, then takes an update that
+        // does not carry the organizer.
+        let dumped = a
+            .dump_events_for_snapshot()
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id == created.id)
+            .unwrap();
+        assert_eq!(dumped.organizer.as_deref(), Some("boss@example.org"));
+        let other = make_adapter();
+        other.upsert_calendar_from_sync(&cal).unwrap();
+        other.upsert_event_from_sync(&dumped).unwrap();
+        let mut update = dumped.clone();
+        update.organizer = None;
+        other.upsert_event_from_sync(&update).unwrap();
+        let there = other.get_event_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(there.organizer.as_deref(), Some("boss@example.org"));
     }
 
     #[tokio::test]
@@ -851,6 +1017,8 @@ mod tests {
                     sound: None,
                     attendees: vec![],
                     send_invitations: false,
+                    uid_to_keep: None,
+                    keeps_invitation: false,
                 },
             )
             .await
@@ -899,6 +1067,8 @@ mod tests {
                 sound: None,
                 attendees: vec![],
                 send_invitations: false,
+                uid_to_keep: None,
+                keeps_invitation: false,
             },
         )
         .await
@@ -923,6 +1093,8 @@ mod tests {
                 sound: None,
                 attendees: vec![],
                 send_invitations: false,
+                uid_to_keep: None,
+                keeps_invitation: false,
             },
         )
         .await
@@ -967,6 +1139,8 @@ mod tests {
                     sound: None,
                     attendees: vec![],
                     send_invitations: false,
+                    uid_to_keep: None,
+                    keeps_invitation: false,
                 },
             )
             .await
@@ -1018,6 +1192,8 @@ mod tests {
                     sound: None,
                     attendees: vec![],
                     send_invitations: false,
+                    uid_to_keep: None,
+                    keeps_invitation: false,
                 },
             )
             .await
@@ -1063,6 +1239,8 @@ mod tests {
                     sound: None,
                     attendees: vec![],
                     send_invitations: false,
+                    uid_to_keep: None,
+                    keeps_invitation: false,
                 },
             )
             .await

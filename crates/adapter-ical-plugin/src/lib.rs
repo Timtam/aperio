@@ -205,6 +205,21 @@ pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
     ..AdapterVtable::empty()
 };
 
+/// Read an `.ics` file for an import (DESIGN-file-import.md): the manifest's
+/// one format, read by the same parser as the feeds.
+fn import_file(
+    request: plugin_sdk::ImportRequest,
+) -> Result<plugin_sdk::cal_core::FileImport, String> {
+    match request.format.as_str() {
+        "ics" => adapter_ical::import::import_ics(&request.content),
+        other => Err(format!("this plugin reads no format {other}")),
+    }
+}
+
+plugin_sdk::declare_import_file! {
+    handler: import_file,
+}
+
 plugin_sdk::declare_lifecycle! {
     id: "com.aperio.cal-adapter-ical",
     name: "Aperio iCal Feed",
@@ -225,6 +240,30 @@ mod tests {
     fn manifest() -> plugin_sdk::plugin_core::manifest::PluginManifest {
         plugin_sdk::plugin_core::manifest::PluginManifest::from_bytes(crate::MANIFEST)
             .expect("plugin.json parses and its account schema validates")
+    }
+
+    /// The format the manifest offers is the one the handler reads, and an
+    /// iCalendar file reaches it through the export.
+    #[test]
+    fn the_declared_format_is_the_one_the_export_reads() {
+        let manifest = manifest();
+        assert_eq!(manifest.file_imports.len(), 1);
+        assert_eq!(manifest.file_imports[0].id, "ics");
+        use base64::Engine as _;
+        let content = base64::engine::general_purpose::STANDARD.encode(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:a\r\n\
+             SUMMARY:Probe\r\nDTSTART:20261116T090000Z\r\n\
+             DTEND:20261116T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        );
+        let args = serde_json::json!({"format": "ics", "file_name": "a.ics", "content": content})
+            .to_string();
+        let result = unsafe { crate::__aperio_import_file_impl(args.as_ptr(), args.len()) };
+        let bytes = unsafe { result.payload.as_slice().to_vec() };
+        let mut payload = result.payload;
+        unsafe { payload.free_in_place() };
+        assert_eq!(result.status, plugin_sdk::plugin_core::ffi::PLUGIN_CALL_OK);
+        let import: plugin_sdk::cal_core::FileImport = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(import.events[0].title, "Probe");
     }
 
     #[test]

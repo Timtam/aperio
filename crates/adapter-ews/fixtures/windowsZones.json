@@ -1,16 +1,16 @@
 {
   "what": "What Exchange gets for a series' stored zone, and what a Windows zone id read from Exchange means — the answers crates/adapter-ews/src/windows_tz.rs must give.",
   "why": "Exchange names a series' zone by a Windows id, the rest of Aperio by tzdata. The translation decides whether a series reaches Exchange with its clock, with another city's, or with none, and what a series from Outlook repeats on. A hand-kept table had drifted: three wrong rows, and 174 of the 312 listed zones written without a zone.",
-  "decidedBy": "DESIGN-series-time-zone.md, stage 4, and decisions 14a (no zone repeats in UTC), 22a (zones Exchange cannot store), 25b (a merged place is stored as its target) and 26a (one rule for zones).",
+  "decidedBy": "DESIGN-series-time-zone.md, stage 4, and decisions 14a (no zone repeats in UTC), 22a (zones Exchange cannot store), 25b (a merged place is stored as its target), 26a (one rule for zones) and 236 (an id that is tzdata's own name); DESIGN-file-import.md, I6 (an imported file's series keeps its TZID).",
   "writtenBy": [
-    "By hand, from the CLDR release-48-2 windowsZones.xml pinned in crates/adapter-ews/cldr/ and from tzdata 2025b. Chosen, not measured: each row pins one reason the rule exists. The generated table they are checked against is crates/adapter-ews/src/windows_tz/windows_zones.rs."
+    "By hand, from the CLDR release-48-2 windowsZones.xml pinned in crates/cal-core/cldr/ and from tzdata 2025b. Chosen, not measured: each row pins one reason the rule exists. The generated table they are checked against is crates/cal-core/src/windows_zone/table.rs."
   ],
   "readBy": [
     "crates/adapter-ews/src/windows_tz.rs (the `every_contract_row_holds` test; its MUST_RUN list names every row)"
   ],
   "shape": {
     "write": "[{name, tzid, expect, note}]: tzid is the series' stored zone or null; expect is {id} (StartTimeZone and EndTimeZone with this id), {no_zone: true}, or {not_storable: no_windows_zone | other_clock, windows?}",
-    "read": "[{name, windows, expect, note}]: windows is the StartTimeZone Id Exchange reports; expect is {zone}, {utc: true} or {unknown: true}"
+    "read": "[{name, windows, expect, note}]: windows is the StartTimeZone Id Exchange reports, or its Name where the Id is empty; expect is {zone}, {utc: true} or {unknown: true}"
   },
   "write": [
     { "name": "berlin-default", "tzid": "Europe/Berlin", "expect": { "id": "W. Europe Standard Time" }, "note": "The default zone of its id." },
@@ -53,6 +53,10 @@
     { "name": "kamchatka-registry-only", "windows": "Kamchatka Standard Time", "expect": { "unknown": true }, "note": "In the Windows registry, not in CLDR." },
     { "name": "lebanon-not-an-id", "windows": "Lebanon Standard Time", "expect": { "unknown": true }, "note": "The id the hand table invented." },
     { "name": "custom-definition", "windows": "tzone://Microsoft/Custom", "expect": { "unknown": true }, "note": "A custom time zone definition." },
-    { "name": "empty-id", "windows": "", "expect": { "unknown": true }, "note": "An empty Id attribute." }
+    { "name": "empty-id", "windows": "", "expect": { "unknown": true }, "note": "An empty Id attribute, and no Name beside it." },
+    { "name": "tzdata-name-berlin", "windows": "Europe/Berlin", "expect": { "zone": "Europe/Berlin" }, "note": "Measured, live run 130307: Exchange 2019 stores the series of an imported invitation with the file's TZID as the StartTimeZone Name beside an empty Id. A Windows id first, then tzdata's own name (236)." },
+    { "name": "tzdata-name-any-case", "windows": "europe/berlin", "expect": { "zone": "Europe/Berlin" }, "note": "tzdata's name in any ASCII case, canonical." },
+    { "name": "tzdata-name-link", "windows": "Europe/Kiev", "expect": { "zone": "Europe/Kyiv" }, "note": "A tzdata link reads as the zone it names." },
+    { "name": "tzdata-name-utc", "windows": "Etc/UTC", "expect": { "utc": true }, "note": "A UTC name is no zone, as the UTC id is." }
   ]
 }

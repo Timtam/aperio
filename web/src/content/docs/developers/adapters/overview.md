@@ -130,6 +130,53 @@ when caching:
 >   existing event carries that event's `organizer` and
 >   `organized_elsewhere` (never sent) so it applies there too.
 
+> **The iCalendar UID.** `Event::ical_uid` carries the appointment's RFC 5545
+> UID where the provider keeps one; an occurrence and a changed occurrence
+> carry their series'. A file import finds by it what the target calendar
+> already holds. It is never written on an update. A create asks for one
+> through `NewEvent::uid_to_keep`, named apart on purpose: the surfaces build
+> creates by spreading a read event, and a copy, a split's tail or a carved-out
+> occurrence must never take the source's UID. Only an import sets it; a move
+> to another calendar gets a new one. CalDAV, Exchange and the local store
+> keep it; Google keeps it only for an imported invitation (`events.import`),
+> and otherwise Google and Graph mint their own. Where the calendar already holds
+> the UID, CalDAV refuses the create and Google is asked first
+> (`events.list?iCalUID=`); both answer `cal_core::WriteRefusal::UidTaken`. The
+> local store and Exchange do not check: there the import's own held check
+> (`alreadyHeld`) is the only guard. `Calendar::keeps_uid` says whether a
+> create keeps the UID it asks for (CalDAV, Exchange, the local store); where
+> not (Google's ordinary create, Graph, a device calendar), the import does
+> not ask what the calendar holds, as nothing could be found, and says so. An
+> adapter that starts reading a field the cache holds needs a
+> `CACHE_GENERATION` bump (`host_core::cache`), or unchanged rows never get it
+> (generation 8 did this for the UID; 9 for the calendars' `invitation_import`
+> and `keeps_uid`).
+
+> **Invitations from a file.** `Calendar::invitation_import` says what
+> creating a meeting someone else organizes does in a calendar: `kept`
+> (organizer and invitees stay, nobody is told), `kept-tentative` (so, with
+> the account's answer reading tentative afterwards) or `not-kept`, the
+> default. The import marks such a create `NewEvent::keeps_invitation` with
+> the `organizer`; both hosts run `cal_core::attendee::guard_invitation_import`
+> before the adapter sees it, which drops the organizer and the invitees where
+> the calendar keeps nothing. An adapter that says `kept` writes the
+> invitation as someone else's without a word to anyone, and treats one whose
+> organizer is the account itself as the account's own meeting. The local
+> store says `kept`: it keeps the organizer in a column of its own (migration
+> 48) and reads such an event as organized elsewhere. CalDAV says `kept`
+> (scheduling markers, see the CalDAV page); Exchange says `kept-tentative`:
+> the meeting goes in as its organizer's request, made an appointment by a
+> tentative reply that is saved, not sent, and moved into the calendar asked
+> for where Exchange filed it in the default one (see the EWS page). Google says
+> `kept` for the primary calendar only and imports the meeting as a private
+> copy (`events.import`, see the Google page). Exchange and Google share two
+> rules in the core: whose meeting a marked create is
+> (`cal_core::attendee::invitation_organizer`) and whom it names
+> (`invitation_attendees`: the file's invitees without the organizer, the
+> account added). CalDAV checks the organizer against every address of its
+> identity in its own code, and the local store keeps the organizer as the
+> file gives it.
+
 > **And some take only an attendee's own changes.** On a scheduling CalDAV
 > server (iCloud), a meeting somebody else organizes accepts the attendee's
 > reply and the attendee's own alarms and refuses everything else (RFC 6638

@@ -26,9 +26,11 @@ iCloud is just CalDAV with Apple's endpoints.
   unbounded window. Later views are served from cache and only a background
   `sync-collection` delta touches the network. Servers without
   `sync-collection` fall back to a windowed, range-scoped read.
-- **Bodies** are iCalendar (`VEVENT`/`VTODO`) and vCard, parsed in
-  `mapping.rs` into `cal-core` types. `RRULE`/`EXDATE` are carried through;
-  occurrences are expanded on the frontend.
+- **Bodies** are iCalendar (`VEVENT`/`VTODO`) and vCard. Events are read
+  and written by `ical-mapping` (`crates/ical-mapping`), the mapping the
+  iCal feeds and file import, and Exchange's invitations share; it stays
+  reachable here as `adapter_caldav::mapping`. `RRULE`/`EXDATE` are carried
+  through; occurrences are expanded on the frontend.
 
 ## Authentication
 
@@ -91,7 +93,25 @@ Apple's well-known endpoints.
   permanently empty (a one-time `cache.contactsMultigetHealV2` heal clears
   those poisoned tokens so books re-bootstrap).
 - **Stable ids.** A resource is keyed by `{href}|{uid}` so renames/moves
-  and per-resource deletions resolve correctly.
+  and per-resource deletions resolve correctly. The bare `UID` is also the
+  event's `ical_uid`, the override's included, whatever the resource is
+  called.
+- **An invitation from a file is written as someone else's.** Calendars say
+  `invitation_import: kept`. A create marked `keeps_invitation` writes the
+  file's ORGANIZER with `SCHEDULE-AGENT=CLIENT` and the account's own ATTENDEE
+  row with `SCHEDULE-AGENT=NONE` (RFC 6638 §7.1), adding that row where the
+  file named the account under another address or not at all; the event
+  reads back organized elsewhere and silenced. iCloud sent nothing for such a
+  create, nor for Aperio's reply and delete on it, even without the markers
+  (live run 100518). One whose organizer is the account itself is the
+  account's own meeting.
+- **A kept UID names the resource.** A create with `uid_to_keep` (an import)
+  writes that UID and, as for a minted one, names the resource after it, so
+  a 412 on `If-None-Match: *` means the calendar holds the appointment. A UID
+  that is no plain name (anything but letters, digits, `-_.~@`, or longer
+  than 200 bytes) goes into a fresh `{uuid}.ics` instead, and the id is the
+  composite `{href}|{uid}`. The server's own `no-uid-conflict` (RFC 4791, 403
+  or 409) says the same. Each is refused as `uid-taken`.
 - **Subtasks ride `RELATED-TO`.** A VTODO's parameter-less `RELATED-TO`
   (RELTYPE defaults to PARENT; CHILD/SIBLING entries are ignored) carries
   the parent's **bare UID** on the wire; the read path resolves it to the
@@ -128,6 +148,14 @@ Apple's well-known endpoints.
   (`event_in_window` returns true for `recurrence.is_some()`).
 - **iCloud date sentinels / colours.** Colours arrive as `#RRGGBBAA`; the
   alpha is dropped to a plain hex.
+- **A `TZID` resolves three ways.** A tzdata name as it is; a Windows id
+  (`W. Europe Standard Time`, what Outlook, Teams and Exchange write) through
+  the core's CLDR table (`cal_core::windows_zone`), and then the series'
+  zone is the tzdata name; any other name by the body's own `VTIMEZONE`
+  (`zone_definitions.rs`: observances with a yearly nth-weekday rule or
+  `RDATE`s). Such a zone keeps its own name, which no expansion knows, so its
+  series repeats in UTC. A time none of the three resolves still reads as UTC.
+  The same reader serves the iCal feeds and the `.ics` import.
 - **`getctag` fast-path.** When the collection's ctag is unchanged, the
   adapter can skip a full enumeration.
 - **The account is every href of its `calendar-user-address-set`.** A server
@@ -226,5 +254,7 @@ Apple's well-known endpoints.
 
 `mockito` serves canned `PROPFIND`/`REPORT`/multiget XML. Tests assert the
 sync-collection token round-trip, per-resource deletions, the
-`{href}|{uid}` id scheme, and the iCalendar → `cal-core` mapping. For a
+`{href}|{uid}` id scheme, and the iCalendar → `cal-core` mapping (whose own
+tests live in `ical-mapping`, with the provider samples both crates read under
+its `test-fixtures` feature). For a
 live smoke test, an iCloud account with an app-specific password works.

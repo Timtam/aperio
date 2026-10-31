@@ -343,6 +343,36 @@ impl Default for TaskCapabilities {
     }
 }
 
+/// One file format a plugin reads for an import.
+///
+/// Named like every other label a manifest declares: verbatim text plus an
+/// optional key into [`PluginManifest::strings`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileImportFormat {
+    /// Stable within the plugin; the host hands it back on the import call,
+    /// so one plugin can read several formats.
+    pub id: String,
+    /// What the format is called, as the open dialog's filter names it.
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_key: Option<String>,
+    /// File name extensions, lower case and without the dot (`"ics"`).
+    pub extensions: Vec<String>,
+    /// Media types the phone's share sheet names the file by
+    /// (`"text/calendar"`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mime_types: Vec<String>,
+    /// What a file of this format yields.
+    pub yields: Vec<ImportYield>,
+}
+
+/// What an imported file yields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportYield {
+    Events,
+}
+
 /// What one adapter kind is called, in the plugin's own words.
 ///
 /// Same shape as every other label a manifest declares: verbatim text that
@@ -686,6 +716,17 @@ pub struct PluginManifest {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub kind_names: BTreeMap<String, KindName>,
 
+    /// The files this plugin can read for an import (DESIGN-file-import.md):
+    /// each format with the extensions and media types it is known by and
+    /// what it yields. The plugin reads them itself, through its optional
+    /// `aperio_plugin_import_file` export; the host never parses a format.
+    ///
+    /// Without that export the formats are not offered: a declaration the
+    /// library cannot answer would put a file type in the open dialog that
+    /// fails on every file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_imports: Vec<FileImportFormat>,
+
     /// This plugin's own text, in the languages it speaks — see
     /// [`crate::strings`] for why it lives here rather than in the host's
     /// locale files, and for the resolution order.
@@ -828,6 +869,48 @@ impl PluginManifest {
                 )));
             }
         }
+        // A format the open dialog could not name, filter or route is offered
+        // and then fails, which is worse than not offering it.
+        for (index, format) in self.file_imports.iter().enumerate() {
+            let id = format.id.trim();
+            if id.is_empty() {
+                return Err(PluginError::Manifest(
+                    "file_imports must not contain a format without an id".into(),
+                ));
+            }
+            if self.file_imports[..index].iter().any(|f| f.id == format.id) {
+                return Err(PluginError::Manifest(format!(
+                    "file_imports lists the format `{id}` twice",
+                )));
+            }
+            if format.name.trim().is_empty() {
+                return Err(PluginError::Manifest(format!(
+                    "file_imports.{id} has an empty name",
+                )));
+            }
+            if format.extensions.is_empty() {
+                return Err(PluginError::Manifest(format!(
+                    "file_imports.{id} names no extension",
+                )));
+            }
+            for extension in &format.extensions {
+                if extension.is_empty()
+                    || extension.starts_with('.')
+                    || extension
+                        .chars()
+                        .any(|c| c.is_uppercase() || c.is_whitespace())
+                {
+                    return Err(PluginError::Manifest(format!(
+                        "file_imports.{id} has the extension `{extension}`; write it lower case, without the dot",
+                    )));
+                }
+            }
+            if format.yields.is_empty() {
+                return Err(PluginError::Manifest(format!(
+                    "file_imports.{id} yields nothing",
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -899,6 +982,88 @@ mod tests {
                 "description": "Bundled SQLite-backed local adapter."
             }}"#
         )
+    }
+
+    /// A manifest declaring `formats` as its `file_imports`.
+    fn with_imports(formats: &str) -> PluginResult<PluginManifest> {
+        PluginManifest::from_bytes(
+            format!(
+                r#"{{
+                    "id": "com.example.import",
+                    "name": "Import",
+                    "version": "0.1.0",
+                    "plugin_type": "adapter",
+                    "capabilities": ["calendar"],
+                    "abi_version": {ABI_VERSION},
+                    "min_app_version": "0.1.0",
+                    "file_imports": {formats}
+                }}"#
+            )
+            .as_bytes(),
+        )
+    }
+
+    /// The formats a plugin reads: parsed, absent by default, and refused
+    /// where the open dialog could not name, filter or route them.
+    #[test]
+    fn file_imports_parse_and_refuse_what_cannot_be_offered() {
+        let manifest = with_imports(
+            r#"[{"id": "ics", "name": "iCalendar", "name_key": "import.ics.name",
+                 "extensions": ["ics", "ical"], "mime_types": ["text/calendar"],
+                 "yields": ["events"]}]"#,
+        )
+        .unwrap();
+        assert_eq!(manifest.file_imports.len(), 1);
+        assert_eq!(manifest.file_imports[0].extensions, ["ics", "ical"]);
+        assert_eq!(manifest.file_imports[0].yields, [ImportYield::Events]);
+        assert!(
+            PluginManifest::from_bytes(sample_manifest_json().as_bytes())
+                .unwrap()
+                .file_imports
+                .is_empty()
+        );
+
+        let refused = |formats: &str| match with_imports(formats) {
+            Err(PluginError::Manifest(message)) => message,
+            other => panic!("expected a refusal for {formats}, got {other:?}"),
+        };
+        let one = |id: &str, name: &str, extensions: &str, yields: &str| {
+            format!(
+                r#"{{"id": "{id}", "name": "{name}", "extensions": {extensions}, "yields": {yields}}}"#
+            )
+        };
+        assert!(refused(&format!(
+            "[{}]",
+            one(" ", "iCal", r#"["ics"]"#, r#"["events"]"#)
+        ))
+        .contains("without an id"));
+        let ics = one("ics", "iCal", r#"["ics"]"#, r#"["events"]"#);
+        assert!(refused(&format!("[{ics}, {ics}]")).contains("twice"));
+        assert!(refused(&format!(
+            "[{}]",
+            one("ics", " ", r#"["ics"]"#, r#"["events"]"#)
+        ))
+        .contains("empty name"));
+        assert!(
+            refused(&format!("[{}]", one("ics", "iCal", "[]", r#"["events"]"#)))
+                .contains("no extension")
+        );
+        for extension in [".ics", "ICS", "i cs", ""] {
+            assert!(refused(&format!(
+                "[{}]",
+                one(
+                    "ics",
+                    "iCal",
+                    &format!(r#"["{extension}"]"#),
+                    r#"["events"]"#
+                )
+            ))
+            .contains("lower case, without the dot"));
+        }
+        assert!(
+            refused(&format!("[{}]", one("ics", "iCal", r#"["ics"]"#, "[]")))
+                .contains("yields nothing")
+        );
     }
 
     /// One account per database: read from the manifest, absent from the

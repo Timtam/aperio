@@ -27,17 +27,17 @@ pub mod error;
 pub mod events;
 pub mod freebusy;
 mod http;
-mod ical_raw;
+// The iCalendar mapping is shared with the iCal feeds and Exchange
+// (`ical-mapping`); its modules keep their old paths here.
+use ical_mapping::ical_raw;
+pub use ical_mapping::{identity, mapping};
 mod scheduling;
 
 use identity::OwnIdentity;
 use scheduling::WriteCtx;
-pub mod identity;
-pub mod mapping;
 pub mod sync;
 pub mod tasks;
 pub mod vcard;
-mod vtimezone;
 mod xml;
 
 use std::sync::Mutex;

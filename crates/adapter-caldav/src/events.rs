@@ -36,7 +36,8 @@ use crate::mapping::{
     same_calendar_user, strip_mailto_scheme, PriorAlarms, SlotRefusal,
 };
 use crate::scheduling::{
-    apply_to_block, attendee_copy, attendee_line, invitees_of, plan_block, PeopleChange, WriteCtx,
+    apply_to_block, attendee_copy, attendee_line, invitees_of, plan_block,
+    unscheduled_attendee_line, PeopleChange, WriteCtx,
 };
 use crate::xml::{parse_multistatus, ResponseEntry};
 use cal_core::attendee::same_address;
@@ -153,9 +154,31 @@ pub async fn create_event(
     credentials: &Credentials,
     ctx: &WriteCtx,
 ) -> CaldavResult<Event> {
-    let uid = format!("{}@aperio", Uuid::new_v4());
-    let resource = resource_url(calendar_url, &uid)?;
-    let (body, written, organizer) = new_event_body(&uid, &event, ctx);
+    // An imported appointment keeps its file's UID (I4); every other create
+    // mints one. A UID that is not a plain slug — a `/` some servers refuse
+    // encoded in a path, a `|` the id would split at — names a fresh resource
+    // instead, and the id then says which.
+    let given = event
+        .uid_to_keep
+        .as_deref()
+        .map(str::trim)
+        .filter(|uid| !uid.is_empty())
+        .map(str::to_string);
+    let uid = given
+        .clone()
+        .unwrap_or_else(|| format!("{}@aperio", Uuid::new_v4()));
+    let own_slug = given.as_deref().is_none_or(is_plain_slug);
+    let resource = if own_slug {
+        resource_url(calendar_url, &uid)?
+    } else {
+        resource_url(calendar_url, &Uuid::new_v4().to_string())?
+    };
+    let NewBody {
+        body,
+        written,
+        organizer,
+        someone_elses,
+    } = new_event_body(&uid, &event, ctx);
 
     let mut headers = auth_header(credentials)?;
     headers.insert(
@@ -164,10 +187,10 @@ pub async fn create_event(
     );
     headers.insert(IF_NONE_MATCH, HeaderValue::from_static("*"));
 
-    // The replay `send_write` makes reuses the SAME freshly minted UID: if
-    // the first PUT secretly landed before the connection died, the replay
-    // answers 412 (`If-None-Match: *` on an existing resource) — and since
-    // nobody else can own this UUID, a 412 after a replay simply means "our
+    // The replay `send_write` makes reuses the SAME UID: if the first PUT
+    // secretly landed before the connection died, the replay answers 412
+    // (`If-None-Match: *` on an existing resource) — and since nobody else can
+    // own a freshly minted UUID, a 412 after a replay of one simply means "our
     // first attempt succeeded". That turns the worst-case duplicate into a
     // clean success. Any other failure of that replay is unsure
     // (`WriteAnswer::settled`): a 429 may be the server throttling a second
@@ -178,25 +201,42 @@ pub async fn create_event(
         .body(body)
         .send_write()
         .await?;
-    let etag = if answer.replayed && answer.response.status() == StatusCode::PRECONDITION_FAILED {
+    let etag = if answer.replayed
+        && given.is_none()
+        && answer.response.status() == StatusCode::PRECONDITION_FAILED
+    {
         // First PUT landed; a 412 carries no ETag — the next read refreshes it.
+        // Only for a minted UID: a kept one may be the calendar's own copy of
+        // the appointment, refused as taken below, replay or not.
         None
+    } else if given.is_some() && answer.response.status() == StatusCode::PRECONDITION_FAILED {
+        // Not a minted UID: the resource named by it is there already, so the
+        // calendar holds this appointment.
+        return Err(CaldavError::Http {
+            status: StatusCode::PRECONDITION_FAILED.as_u16(),
+            message: cal_core::WriteRefusal::UidTaken.message(&uid),
+        });
     } else {
         check_write(answer.settled(resource.as_str()).await?).await?
     };
     let now = Utc::now();
+    let id = if own_slug {
+        uid.clone()
+    } else {
+        format!("{}|{uid}", resource.path())
+    };
 
     Ok(Event {
         original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
-        organized_elsewhere: false,
+        organized_elsewhere: someone_elses,
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
         deletions_not_restored: Vec::new(),
-        id: uid,
+        id,
         calendar_id: calendar_url.to_string(),
         title: event.title,
         description: event.description,
@@ -219,19 +259,47 @@ pub async fn create_event(
         attendee_responses: Vec::new(),
         // Freshly created by us — never a cancellation.
         cancelled: false,
-        scheduling_silenced: false,
+        // A kept invitation tells the server to stay out (`SCHEDULE-AGENT`).
+        scheduling_silenced: someone_elses,
+        ical_uid: Some(uid),
     })
+}
+
+/// A new event's resource and what it says about the meeting.
+struct NewBody {
+    body: String,
+    /// The invitees it names.
+    written: Vec<String>,
+    /// Its organizer as Aperio shows it, when it is a meeting.
+    organizer: Option<String>,
+    /// It is a meeting someone else organizes, kept from a file (I6).
+    someone_elses: bool,
 }
 
 /// A new event's body, the invitees it names, and its organizer as Aperio
 /// shows it when it is a meeting.
-fn new_event_body(
-    uid: &str,
-    event: &NewEvent,
-    ctx: &WriteCtx,
-) -> (String, Vec<String>, Option<String>) {
+///
+/// The account's own meeting names the account as its ORGANIZER and its
+/// invitees only where the server schedules and the create asks it to tell
+/// them; otherwise it is a plain appointment. A meeting someone else
+/// organizes, imported from a file ([`NewEvent::keeps_invitation`], I6), is
+/// written as theirs: their ORGANIZER with `SCHEDULE-AGENT=CLIENT` and the
+/// account's own row with `SCHEDULE-AGENT=NONE` (RFC 6638 §7.1), so the server
+/// tells nobody — iCloud told nobody even without them (live run 100518).
+/// One whose organizer is the account itself is the account's own meeting.
+fn new_event_body(uid: &str, event: &NewEvent, ctx: &WriteCtx) -> NewBody {
     let vcal = new_event_to_ical(uid, event);
     let own = ctx.identity.clone().unwrap_or_default();
+    if event.keeps_invitation {
+        let organizer = event
+            .organizer
+            .as_deref()
+            .map(|o| strip_mailto_scheme(o).unwrap_or(o).trim())
+            .filter(|o| !o.is_empty());
+        if let Some(organizer) = organizer.filter(|o| !own.names(o, None)) {
+            return kept_invitation_body(&vcal, organizer, event, &own, ctx);
+        }
+    }
     let invitees = invitees_of(&event.attendees, &own);
     match ctx.organizer_address.as_deref() {
         Some(organizer) if ctx.schedules && event.send_invitations && !invitees.is_empty() => {
@@ -244,9 +312,68 @@ fn new_event_body(
                 .unwrap_or(organizer)
                 .trim()
                 .to_string();
-            (splice_into_vevent(&vcal, &lines), invitees, Some(shown))
+            NewBody {
+                body: splice_into_vevent(&vcal, &lines),
+                written: invitees,
+                organizer: Some(shown),
+                someone_elses: false,
+            }
         }
-        _ => (vcal, Vec::new(), None),
+        _ => NewBody {
+            body: vcal,
+            written: Vec::new(),
+            organizer: None,
+            someone_elses: false,
+        },
+    }
+}
+
+/// [`new_event_body`] for someone else's meeting: their ORGANIZER, the
+/// invitees as the file has them, and the account among them — added when the
+/// file named it under another address or not at all (Toni, 2026-10-26).
+fn kept_invitation_body(
+    vcal: &str,
+    organizer: &str,
+    event: &NewEvent,
+    own: &OwnIdentity,
+    ctx: &WriteCtx,
+) -> NewBody {
+    let ending = line_ending(vcal);
+    let mut lines = fold(
+        &format!("ORGANIZER;SCHEDULE-AGENT=CLIENT:mailto:{organizer}"),
+        ending,
+    );
+    let mut written = Vec::new();
+    let mut named_own = false;
+    for entry in &event.attendees {
+        let address = cal_core::attendee::parse(entry).1;
+        if address.trim().is_empty() || same_address(&address, organizer) {
+            continue;
+        }
+        if own.names(&address, None) {
+            named_own = true;
+            lines.push_str(&unscheduled_attendee_line(entry, ending));
+        } else {
+            lines.push_str(&attendee_line(entry, ending));
+        }
+        written.push(entry.clone());
+    }
+    if !named_own {
+        if let Some(own_address) = ctx
+            .organizer_address
+            .as_deref()
+            .map(|a| strip_mailto_scheme(a).unwrap_or(a).trim())
+            .filter(|a| !a.is_empty())
+        {
+            lines.push_str(&unscheduled_attendee_line(own_address, ending));
+            written.push(own_address.to_string());
+        }
+    }
+    NewBody {
+        body: splice_into_vevent(vcal, &lines),
+        written,
+        organizer: Some(organizer.to_string()),
+        someone_elses: true,
     }
 }
 
@@ -1567,6 +1694,17 @@ fn resource_url_for_event(calendar_url: &Url, event_id: &str) -> CaldavResult<Ur
     resource_url(calendar_url, uid)
 }
 
+/// Whether a UID makes a resource name of its own: the characters a minted
+/// one uses, and short enough for any server's path. The id of a resource
+/// named by its UID is the bare UID, which must not hold the `|` the
+/// composite id splits at.
+fn is_plain_slug(uid: &str) -> bool {
+    uid.len() <= 200
+        && uid
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'@'))
+}
+
 /// Tiny percent-encoder for slug characters. We avoid pulling in
 /// `percent-encoding` for one call site — only `@`, `:` and a few
 /// other ASCII punctuation marks are at risk in practical UIDs.
@@ -1610,10 +1748,25 @@ async fn check_write(response: reqwest::Response) -> CaldavResult<Option<String>
                 Some(condition) if condition == "allowed-attendee-scheduling-object-change" => {
                     format!("reply-only-invitation: {condition}")
                 }
+                // RFC 4791 §5.3.2.1: another resource in the calendar holds
+                // the UID a create asked to keep (an import).
+                Some(condition) if condition == "no-uid-conflict" => {
+                    cal_core::WriteRefusal::UidTaken.message(&condition)
+                }
                 Some(condition) => format!("server-refused: {condition}"),
                 None => "server-refused: HTTP 403".to_string(),
             },
         ));
+    }
+    // The same precondition answered as 409, which RFC 4791 allows too.
+    if status == StatusCode::CONFLICT {
+        let head: String = body.chars().take(4096).collect();
+        if crate::xml::dav_error_condition(&head).as_deref() == Some("no-uid-conflict") {
+            return Err(CaldavError::Http {
+                status: status.as_u16(),
+                message: cal_core::WriteRefusal::UidTaken.message("no-uid-conflict"),
+            });
+        }
     }
     Err(CaldavError::Http {
         status: status.as_u16(),
@@ -1767,6 +1920,8 @@ END:VCALENDAR</c:calendar-data>
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         }
     }
 
@@ -1795,8 +1950,265 @@ END:VCALENDAR</c:calendar-data>
         .unwrap();
         m.assert_async().await;
         assert!(created.id.contains("@aperio"));
+        // The UID it wrote, which the next read gives as well.
+        assert_eq!(created.ical_uid.as_deref(), Some(created.id.as_str()));
         assert_eq!(created.etag.as_deref(), Some("\"server-etag-1\""));
         assert_eq!(created.calendar_id, cal_url.to_string());
+    }
+
+    fn imported(uid: &str) -> NewEvent {
+        NewEvent {
+            uid_to_keep: Some(uid.into()),
+            ..sample_new_event()
+        }
+    }
+
+    /// An imported appointment keeps its file's UID (I4): it names the
+    /// resource, as a minted one does, and the event.
+    #[tokio::test]
+    async fn create_event_keeps_a_given_uid() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("PUT", "/calendars/alice/work/imported-1%40example.test.ics")
+            .match_header("if-none-match", "*")
+            .match_body(mockito::Matcher::Regex(
+                "UID:imported-1@example.test\r\n".into(),
+            ))
+            .with_status(201)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let created = create_event(
+            &client(),
+            &cal_url,
+            imported(" imported-1@example.test "),
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap();
+        m.assert_async().await;
+        assert_eq!(created.id, "imported-1@example.test");
+        assert_eq!(created.ical_uid.as_deref(), Some("imported-1@example.test"));
+    }
+
+    /// A UID that is no plain resource name — a `/`, which some servers refuse
+    /// encoded in a path, a `|` the id splits at — goes into a resource of its
+    /// own name, and the id says which.
+    #[tokio::test]
+    async fn create_event_puts_an_odd_uid_into_a_fresh_resource() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/[0-9a-f-]{36}\.ics$".into()),
+            )
+            .match_body(mockito::Matcher::Regex("UID:outlook/1|2\r\n".into()))
+            .with_status(201)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let created = create_event(
+            &client(),
+            &cal_url,
+            imported("outlook/1|2"),
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap();
+        m.assert_async().await;
+        let (href, uid) = decode_event_id(&created.id);
+        assert!(
+            href.is_some_and(|h| h.starts_with("/calendars/alice/work/") && h.ends_with(".ics")),
+            "{}",
+            created.id
+        );
+        assert_eq!(uid, "outlook/1|2");
+        assert_eq!(created.ical_uid.as_deref(), Some("outlook/1|2"));
+    }
+
+    /// The calendar holds the appointment already: the resource its UID names
+    /// is there (412), or the server finds the UID in another one (RFC 4791
+    /// `no-uid-conflict`, as 403 or 409). Each says so, in the core's words.
+    #[tokio::test]
+    async fn create_event_says_when_the_kept_uid_is_taken() {
+        let condition = r#"<?xml version="1.0"?><d:error xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><c:no-uid-conflict><d:href>/calendars/alice/work/other.ics</d:href></c:no-uid-conflict></d:error>"#;
+        for (status, body, uid) in [
+            (412, "", "imported-1@example.test"),
+            (403, condition, "outlook/1|2"),
+            (409, condition, "outlook/1|2"),
+        ] {
+            let mut server = Server::new_async().await;
+            server
+                .mock("PUT", mockito::Matcher::Any)
+                .with_status(status)
+                .with_body(body)
+                .create_async()
+                .await;
+            let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+            let err = create_event(
+                &client(),
+                &cal_url,
+                imported(uid),
+                &creds(&server.url()),
+                &WriteCtx::default(),
+            )
+            .await
+            .unwrap_err();
+            let message = match &err {
+                CaldavError::Http { message, .. } | CaldavError::Forbidden(message) => message,
+                other => panic!("{status}: {other:?}"),
+            };
+            assert!(message.starts_with("uid-taken"), "{status}: {message}");
+        }
+    }
+
+    /// The write context of an iCloud account (M1, anonymised).
+    fn kept_ctx() -> WriteCtx {
+        WriteCtx {
+            identity: Some(ical_mapping::fixtures::icloud_identity()),
+            schedules: true,
+            organizer_address: Some("mailto:toni@example.org".into()),
+            writes_color: false,
+        }
+    }
+
+    fn kept_invitation(attendees: &[&str], organizer: &str) -> NewEvent {
+        NewEvent {
+            organizer: Some(organizer.into()),
+            organized_elsewhere: true,
+            keeps_invitation: true,
+            attendees: attendees.iter().map(|a| a.to_string()).collect(),
+            ..sample_new_event()
+        }
+    }
+
+    /// The lines of a body, unfolded (RFC 5545 §3.1), ORGANIZER and ATTENDEE
+    /// only.
+    fn people_lines(body: &str) -> Vec<String> {
+        body.replace("\r\n ", "")
+            .lines()
+            .filter(|l| l.starts_with("ORGANIZER") || l.starts_with("ATTENDEE"))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Someone else's meeting from a file (I6) goes in as theirs: their
+    /// ORGANIZER marked `SCHEDULE-AGENT=CLIENT`, the account's own row `NONE`,
+    /// so the server tells nobody; never the organizer among the invitees.
+    #[test]
+    fn a_kept_invitation_is_written_as_someone_elses() {
+        let made = new_event_body(
+            "uid-1",
+            &kept_invitation(
+                &[
+                    "Toni <toni@example.org>",
+                    "gast@example.net",
+                    "boss@example.net",
+                ],
+                "mailto:boss@example.net",
+            ),
+            &kept_ctx(),
+        );
+        assert_eq!(
+            people_lines(&made.body),
+            [
+                "ORGANIZER;SCHEDULE-AGENT=CLIENT:mailto:boss@example.net",
+                "ATTENDEE;CN=Toni;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;SCHEDULE-AGENT=NONE:mailto:toni@example.org",
+                "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:gast@example.net",
+            ]
+        );
+        assert_eq!(
+            made.written,
+            ["Toni <toni@example.org>", "gast@example.net"]
+        );
+        assert_eq!(made.organizer.as_deref(), Some("boss@example.net"));
+        assert!(made.someone_elses);
+    }
+
+    /// An invitation sent to another address of the account's goes in with
+    /// the account added, so it can answer it (Toni, 2026-10-26).
+    #[test]
+    fn a_kept_invitation_names_the_account_where_the_file_does_not() {
+        let made = new_event_body(
+            "uid-1",
+            &kept_invitation(&["toni@work.example"], "boss@example.net"),
+            &kept_ctx(),
+        );
+        assert_eq!(
+            people_lines(&made.body)[2],
+            "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;SCHEDULE-AGENT=NONE:mailto:toni@example.org"
+        );
+        assert_eq!(made.written, ["toni@work.example", "toni@example.org"]);
+    }
+
+    /// A meeting the account organizes itself is its own, whatever the mark:
+    /// no foreign ORGANIZER, and nobody is told without asking.
+    #[test]
+    fn the_accounts_own_meeting_is_not_kept_as_an_invitation() {
+        let made = new_event_body(
+            "uid-1",
+            &kept_invitation(&["gast@example.net"], "Toni@Example.org"),
+            &kept_ctx(),
+        );
+        assert!(people_lines(&made.body).is_empty(), "{}", made.body);
+        assert!(!made.someone_elses);
+    }
+
+    /// The create hands back what it wrote: someone else's meeting, silenced.
+    #[tokio::test]
+    async fn a_created_kept_invitation_reads_as_someone_elses() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("PUT", mockito::Matcher::Any)
+            .with_status(201)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let created = create_event(
+            &client(),
+            &cal_url,
+            kept_invitation(&["gast@example.net"], "boss@example.net"),
+            &creds(&server.url()),
+            &kept_ctx(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.organizer.as_deref(), Some("boss@example.net"));
+        assert!(created.organized_elsewhere && created.scheduling_silenced);
+        assert_eq!(created.attendees, ["gast@example.net", "toni@example.org"]);
+    }
+
+    /// A minted UID cannot be taken: a 412 on the first attempt is the plain
+    /// precondition failure it always was.
+    #[tokio::test]
+    async fn a_minted_uid_is_never_said_to_be_taken() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("PUT", mockito::Matcher::Any)
+            .with_status(412)
+            .create_async()
+            .await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let err = create_event(
+            &client(),
+            &cal_url,
+            sample_new_event(),
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap_err();
+        match err {
+            CaldavError::Http {
+                status: 412,
+                message,
+            } => {
+                assert!(!message.starts_with("uid-taken"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     /// The iCloud stale-keep-alive shape: the first PUT's connection dies
@@ -1881,6 +2293,38 @@ END:VCALENDAR</c:calendar-data>
         .await
         .expect_err("the replay was refused");
         assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
+    }
+
+    /// A kept UID is no UID only this create can own: a 412 on the replay may
+    /// be the calendar's own copy of the appointment, so it is refused as
+    /// taken, as without the replay — never reported as created.
+    #[tokio::test]
+    async fn a_kept_uid_answering_412_after_a_retry_is_taken() {
+        let base = crate::http::first_attempt_lost_then(
+            b"HTTP/1.1 412 Precondition Failed\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let cal_url = Url::parse(&format!("{base}/calendars/alice/work/")).unwrap();
+        let event = NewEvent {
+            uid_to_keep: Some("jf-1@example.net".into()),
+            ..sample_new_event()
+        };
+        let err = create_event(
+            &client(),
+            &cal_url,
+            event,
+            &creds(&base),
+            &WriteCtx::default(),
+        )
+        .await
+        .expect_err("the calendar may hold this UID");
+        match err {
+            CaldavError::Http {
+                status: 412,
+                message,
+            } => assert!(message.starts_with("uid-taken"), "{message}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     /// A guarded PUT whose first attempt may have landed: the replay's 412 is
@@ -2306,6 +2750,7 @@ END:VCALENDAR\r
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 
@@ -2382,10 +2827,10 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// The iCloud meeting of live round 5 (E1), as the account read it.
     fn icloud_meeting(cal_url: &Url) -> Event {
         crate::mapping::parse_calendar_data_as(
-            crate::mapping::tests::ICLOUD_MEETING,
+            ical_mapping::fixtures::ICLOUD_MEETING,
             cal_url.as_str(),
             Some("/calendars/alice/work/series.ics"),
-            &crate::mapping::tests::icloud_identity(),
+            &ical_mapping::fixtures::icloud_identity(),
         )
         .unwrap()
         .remove(0)
@@ -2393,7 +2838,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 
     fn icloud_ctx() -> WriteCtx {
         WriteCtx {
-            identity: Some(crate::mapping::tests::icloud_identity()),
+            identity: Some(ical_mapping::fixtures::icloud_identity()),
             schedules: true,
             organizer_address: Some("mailto:toni@example.org".into()),
             writes_color: false,
@@ -2409,7 +2854,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let mut server = Server::new_async().await;
         let (seen, get, put) = serve_series(
             &mut server,
-            crate::mapping::tests::ICLOUD_MEETING,
+            ical_mapping::fixtures::ICLOUD_MEETING,
             "\"server-etag\"",
             1,
         )
@@ -2443,7 +2888,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let mut server = Server::new_async().await;
         let (seen, _get, put) = serve_series(
             &mut server,
-            crate::mapping::tests::ICLOUD_MEETING,
+            ical_mapping::fixtures::ICLOUD_MEETING,
             "\"server-etag\"",
             1,
         )
@@ -2508,7 +2953,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// the alarm, Apple's own properties.
     #[tokio::test]
     async fn skipping_an_occurrence_splices_only_the_exdate() {
-        let recurring = crate::mapping::tests::ICLOUD_MEETING.replacen(
+        let recurring = ical_mapping::fixtures::ICLOUD_MEETING.replacen(
             "SEQUENCE:0\r\n",
             "RRULE:FREQ=WEEKLY;COUNT=3\r\nSEQUENCE:0\r\n",
             1,
@@ -2544,7 +2989,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// scheduling message either.
     #[tokio::test]
     async fn skipping_a_skipped_occurrence_sends_nothing() {
-        let recurring = crate::mapping::tests::ICLOUD_MEETING.replacen(
+        let recurring = ical_mapping::fixtures::ICLOUD_MEETING.replacen(
             "SEQUENCE:0\r\n",
             "RRULE:FREQ=WEEKLY;COUNT=3\r\nEXDATE:20261116T150000Z\r\nSEQUENCE:0\r\n",
             1,
@@ -2573,7 +3018,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
             body,
             cal_url.as_str(),
             Some("/calendars/alice/work/series.ics"),
-            &crate::mapping::tests::icloud_identity(),
+            &ical_mapping::fixtures::icloud_identity(),
         )
         .unwrap()
     }
@@ -2590,7 +3035,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// properties, even DTSTAMP — goes back byte for byte.
     #[tokio::test]
     async fn an_invitation_reminder_edit_changes_only_its_alarms() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
@@ -2672,7 +3117,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// save from a second device would quietly drop the alarm the first set.
     #[tokio::test]
     async fn an_invitation_reminder_edit_is_guarded_by_the_callers_version() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         // The resource moved on since this copy was read: the GET answers
         // "server-etag", and only "caller-etag" is accepted on the PUT.
@@ -2698,7 +3143,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// reminder would multiply on every save.
     #[tokio::test]
     async fn an_audio_or_end_related_alarm_is_claimed_not_duplicated() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
@@ -2742,7 +3187,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// A reminder the user removed goes; one Aperio never showed stays.
     #[tokio::test]
     async fn a_removed_reminder_goes_and_an_unshown_alarm_stays() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
@@ -2773,7 +3218,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// refusal names the field and nothing is sent.
     #[tokio::test]
     async fn an_invitation_title_edit_is_refused_before_any_put() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (_seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
@@ -2795,7 +3240,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// The same for a series the user tried to end early.
     #[tokio::test]
     async fn an_invitation_series_truncation_is_refused() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (_seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
@@ -2820,7 +3265,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// not do.
     #[tokio::test]
     async fn a_guest_the_organizer_added_is_a_conflict_not_a_refusal() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (_seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
@@ -2843,7 +3288,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// "unchanged".
     #[tokio::test]
     async fn an_invitation_edit_without_an_etag_is_a_conflict_not_a_refusal() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (_seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
@@ -2866,7 +3311,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// server sent back is no change either, because iCloud stores none.
     #[tokio::test]
     async fn an_invitation_save_that_changes_nothing_puts_nothing() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (_seen, get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 0).await;
@@ -2887,7 +3332,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// alarms, and the master and the other blocks are untouched.
     #[tokio::test]
     async fn an_invitation_occurrence_reminder_edit_touches_only_its_block() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
@@ -2925,7 +3370,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// never be sent.
     #[tokio::test]
     async fn an_all_day_occurrence_is_excluded_by_a_date_exdate() {
-        use crate::mapping::tests::ICLOUD_ALL_DAY_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_ALL_DAY_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, _get, put) =
             serve_series(&mut server, ICLOUD_ALL_DAY_INVITATION, "\"server-etag\"", 1).await;
@@ -2988,7 +3433,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     /// an address that merely contains the account's is somebody else.
     #[tokio::test]
     async fn an_answer_leaves_an_email_alarms_attendee_alone() {
-        use crate::mapping::tests::ICLOUD_INVITATION;
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
         let mut server = Server::new_async().await;
         let (seen, _get, put) =
             serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
@@ -3341,6 +3786,7 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
             attendee_responses: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         };
         let master_vcal = event_to_ical(&master);
         let until = rrule_until_instant(&master.recurrence.as_ref().unwrap().rrule).unwrap();

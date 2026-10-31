@@ -25,8 +25,8 @@ use url::Url;
 use crate::auth::{self, TokenSet, GOOGLE_TOKEN_URL};
 use crate::error::{GoogleError, GoogleResult};
 use crate::mapping::{
-    all_day_slot, event_to_body, map_calendar, map_event, new_event_to_body, CalendarListResponse,
-    EventEntry, EventListResponse,
+    all_day_slot, event_to_body, invitation_import_body, map_calendar, map_event,
+    new_event_to_body, CalendarListResponse, EventEntry, EventListResponse,
 };
 
 const API_BASE: &str = "https://www.googleapis.com/calendar/v3";
@@ -799,6 +799,16 @@ pub async fn create_event(
     calendar_id: &str,
     new: NewEvent,
 ) -> GoogleResult<Event> {
+    // Someone else's meeting from a file goes in as a private copy of theirs
+    // (I6f). Only a marked create asks who the account is. An import is one
+    // call: a series' deleted occurrences go with it as deletion lines, which
+    // Google was never measured to heed, as for a create (TODO B14).
+    if new.keeps_invitation {
+        let own = current_user_email(state).await?;
+        if let Some(organizer) = cal_core::attendee::invitation_organizer(&new, own.as_deref()) {
+            return import_invitation(state, calendar_id, &new, &organizer, own.as_deref()).await;
+        }
+    }
     // A series with deleted occurrences is created bare and they are
     // cancelled one by one (decisions 202-213, 263-269): whether Google heeds
     // a deletion line with a new series was never measured.
@@ -831,6 +841,66 @@ pub async fn create_event(
     let entry: EventEntry = state.post_json(&path, &body).await?;
     map_event(entry, calendar_id)?
         .ok_or_else(|| GoogleError::Protocol("create returned cancelled event".into()))
+}
+
+/// `POST /calendars/{id}/events/import` — a meeting someone else organizes,
+/// from a file, kept as theirs and telling nobody (DESIGN-file-import.md, I6f).
+///
+/// Built from Google's documentation, not measured (no Google account to test
+/// with). `events.import` adds "a private copy of an existing event": it takes
+/// the organizer, which a create may not set, and the iCalendar UID, which it
+/// requires, and it has no `sendUpdates` — an attendee's copy imported so
+/// gets no invitation mail. The calendar's owner must be the organizer or an
+/// attendee, so the account is among the invitees; only the primary calendar
+/// says it keeps invitations ([`crate::mapping::map_calendar`]).
+///
+/// Google does not say what an import does with a UID the calendar already
+/// holds, so the calendar is asked first, and a held one is refused as
+/// `uid-taken`, as a CalDAV server refuses it (Toni, 2026-10-26). A copy
+/// imported without the file's UID gets one of its own. Where Google answers
+/// with the account as the organizer after all (a report says it may), the
+/// appointment stays as Google made it (Toni, 2026-10-26): nothing was sent,
+/// and it reads as the account's own meeting.
+async fn import_invitation(
+    state: &ApiState,
+    calendar_id: &str,
+    new: &NewEvent,
+    organizer: &str,
+    own: Option<&str>,
+) -> GoogleResult<Event> {
+    let cal_enc = urlencoding(calendar_id);
+    let uid = match new.uid_to_keep.as_deref().map(str::trim) {
+        Some(uid) if !uid.is_empty() => {
+            let held: EventListResponse = state
+                .get_json(&format!(
+                    "/calendars/{cal_enc}/events?iCalUID={}&maxResults=1",
+                    urlencoding(uid)
+                ))
+                .await?;
+            if !held.items.is_empty() {
+                return Err(GoogleError::Http {
+                    status: 409,
+                    message: cal_core::WriteRefusal::UidTaken.message(uid),
+                });
+            }
+            uid.to_string()
+        }
+        _ => format!("{}@aperio", uuid::Uuid::new_v4()),
+    };
+    let attendees = cal_core::attendee::invitation_attendees(&new.attendees, organizer, own);
+    let body = invitation_import_body(new, &uid, organizer, &attendees);
+    let entry: EventEntry = state
+        .post_json(&format!("/calendars/{cal_enc}/events/import"), &body)
+        .await?;
+    let imported = map_event(entry, calendar_id)?
+        .ok_or_else(|| GoogleError::Protocol("import returned cancelled event".into()))?;
+    if !imported.organized_elsewhere {
+        warn!(
+            calendar_id,
+            "Google kept an imported invitation as the account's own meeting"
+        );
+    }
+    Ok(imported)
 }
 
 /// `PATCH /calendars/{id}/events/{eventId}` — update an existing
@@ -1986,11 +2056,250 @@ mod tests {
             sound: None,
             attendees: vec![],
             send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         let ev = create_event(&state, "primary", new).await.unwrap();
         assert_eq!(ev.id, "abc123");
         assert_eq!(ev.title, "Standup");
         m.assert_async().await;
+    }
+
+    fn kept_invitation(uid: Option<&str>) -> NewEvent {
+        NewEvent {
+            organized_elsewhere: true,
+            organizer: Some("mailto:Boss@Example.net".into()),
+            title: "Jour fixe".into(),
+            description: None,
+            location: None,
+            start: chrono::Utc.with_ymd_and_hms(2026, 11, 24, 9, 0, 0).unwrap(),
+            end: chrono::Utc
+                .with_ymd_and_hms(2026, 11, 24, 10, 0, 0)
+                .unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec!["boss@example.net".into(), "Gast <gast@example.net>".into()],
+            send_invitations: false,
+            uid_to_keep: uid.map(str::to_string),
+            keeps_invitation: true,
+        }
+    }
+
+    async fn primary_is(server: &mut mockito::Server, address: &str) -> mockito::Mock {
+        server
+            .mock("GET", "/calendars/primary")
+            .with_status(200)
+            .with_body(format!(r#"{{"id": "{address}", "summary": "{address}"}}"#))
+            .create_async()
+            .await
+    }
+
+    async fn uid_held(server: &mut mockito::Server, uid: &str, items: &str) -> mockito::Mock {
+        server
+            .mock("GET", "/calendars/primary/events")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("iCalUID".into(), uid.into()),
+                mockito::Matcher::UrlEncoded("maxResults".into(), "1".into()),
+            ]))
+            .with_status(200)
+            .with_body(format!(r#"{{"items": {items}}}"#))
+            .create_async()
+            .await
+    }
+
+    const IMPORTED: &str = r##"{
+      "id": "imp1", "summary": "Jour fixe", "iCalUID": "jf-1@example.net",
+      "start": { "dateTime": "2026-11-24T09:00:00Z" },
+      "end":   { "dateTime": "2026-11-24T10:00:00Z" },
+      "organizer": { "email": "Boss@Example.net", "self": false },
+      "attendees": [
+        { "email": "gast@example.net", "displayName": "Gast", "responseStatus": "needsAction" },
+        { "email": "toni@gmail.com", "self": true, "responseStatus": "needsAction" }
+      ]
+    }"##;
+
+    /// Someone else's meeting goes in through `events.import`, which takes
+    /// the organizer and the UID and has no `sendUpdates`; the account joins
+    /// the invitees, the organizer is none of them, and the copy reads as
+    /// someone else's.
+    #[tokio::test]
+    async fn a_kept_invitation_goes_in_through_import_and_tells_nobody() {
+        let mut server = mockito::Server::new_async().await;
+        let who = primary_is(&mut server, "toni@gmail.com").await;
+        let held = uid_held(&mut server, "jf-1@example.net", "[]").await;
+        let import = server
+            .mock("POST", "/calendars/primary/events/import")
+            .match_query(mockito::Matcher::Missing)
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+                "summary": "Jour fixe",
+                "iCalUID": "jf-1@example.net",
+                "organizer": { "email": "Boss@Example.net" },
+                "attendees": [
+                    { "email": "gast@example.net", "displayName": "Gast" },
+                    { "email": "toni@gmail.com" }
+                ]
+            })))
+            .with_status(200)
+            .with_body(IMPORTED)
+            .expect(1)
+            .create_async()
+            .await;
+        let ordinary = server
+            .mock("POST", "/calendars/primary/events")
+            .match_query(mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let ev = create_event(&state, "primary", kept_invitation(Some("jf-1@example.net")))
+            .await
+            .unwrap();
+        who.assert_async().await;
+        held.assert_async().await;
+        import.assert_async().await;
+        ordinary.assert_async().await;
+        assert_eq!(ev.id, "imp1");
+        assert!(ev.organized_elsewhere);
+        assert_eq!(ev.organizer.as_deref(), Some("Boss@Example.net"));
+        assert_eq!(ev.ical_uid.as_deref(), Some("jf-1@example.net"));
+    }
+
+    /// Google does not say what an import does with a UID the calendar holds:
+    /// it is asked first, and a held one is refused as `uid-taken` without an
+    /// import.
+    #[tokio::test]
+    async fn a_uid_the_calendar_holds_is_refused_before_any_import() {
+        let mut server = mockito::Server::new_async().await;
+        primary_is(&mut server, "toni@gmail.com").await;
+        let held = uid_held(&mut server, "jf-1@example.net", IMPORTED_LIST).await;
+        let import = server
+            .mock("POST", "/calendars/primary/events/import")
+            .expect(0)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let err = create_event(&state, "primary", kept_invitation(Some("jf-1@example.net")))
+            .await
+            .unwrap_err();
+        held.assert_async().await;
+        import.assert_async().await;
+        match err {
+            GoogleError::Http {
+                status: 409,
+                message,
+            } => assert_eq!(
+                cal_core::WriteRefusal::parse(&message).map(|(r, _)| r),
+                Some(cal_core::WriteRefusal::UidTaken)
+            ),
+            other => panic!("expected the uid-taken refusal, got {other:?}"),
+        }
+    }
+
+    const IMPORTED_LIST: &str = r##"[{
+      "id": "imp0", "summary": "Jour fixe", "iCalUID": "jf-1@example.net",
+      "start": { "dateTime": "2026-11-24T09:00:00Z" },
+      "end":   { "dateTime": "2026-11-24T10:00:00Z" }
+    }]"##;
+
+    /// A copy imported without the file's UID asks nothing and gets a UID of
+    /// its own.
+    #[tokio::test]
+    async fn a_copy_without_the_files_uid_gets_one_of_its_own() {
+        let mut server = mockito::Server::new_async().await;
+        primary_is(&mut server, "toni@gmail.com").await;
+        let asked = server
+            .mock("GET", "/calendars/primary/events")
+            .match_query(mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+        let import = server
+            .mock("POST", "/calendars/primary/events/import")
+            .match_body(mockito::Matcher::Regex(
+                r#""iCalUID":"[0-9a-f-]{36}@aperio""#.into(),
+            ))
+            .with_status(200)
+            .with_body(IMPORTED)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        create_event(&state, "primary", kept_invitation(None))
+            .await
+            .unwrap();
+        asked.assert_async().await;
+        import.assert_async().await;
+    }
+
+    /// The account's own meeting from a file is no invitation: it goes the
+    /// ordinary way, telling nobody, as the host's guard left it.
+    #[tokio::test]
+    async fn the_accounts_own_meeting_from_a_file_goes_the_ordinary_way() {
+        let mut server = mockito::Server::new_async().await;
+        primary_is(&mut server, "boss@example.net").await;
+        let import = server
+            .mock("POST", "/calendars/primary/events/import")
+            .expect(0)
+            .create_async()
+            .await;
+        let ordinary = server
+            .mock("POST", "/calendars/primary/events")
+            .match_query(mockito::Matcher::UrlEncoded(
+                "sendUpdates".into(),
+                "none".into(),
+            ))
+            .with_status(200)
+            .with_body(
+                r##"{ "id": "own1", "summary": "Jour fixe",
+                      "start": { "dateTime": "2026-11-24T09:00:00Z" },
+                      "end":   { "dateTime": "2026-11-24T10:00:00Z" } }"##,
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        create_event(&state, "primary", kept_invitation(Some("jf-1@example.net")))
+            .await
+            .unwrap();
+        import.assert_async().await;
+        ordinary.assert_async().await;
+    }
+
+    /// A create that is no imported invitation never asks who the account is.
+    #[tokio::test]
+    async fn an_ordinary_create_does_not_ask_who_the_account_is() {
+        let mut server = mockito::Server::new_async().await;
+        let who = server
+            .mock("GET", "/calendars/primary")
+            .expect(0)
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/calendars/primary/events")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(
+                r##"{ "id": "ev1", "summary": "Jour fixe",
+                      "start": { "dateTime": "2026-11-24T09:00:00Z" },
+                      "end":   { "dateTime": "2026-11-24T10:00:00Z" } }"##,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let plain = NewEvent {
+            keeps_invitation: false,
+            ..kept_invitation(None)
+        };
+        create_event(&state, "primary", plain).await.unwrap();
+        who.assert_async().await;
     }
 
     #[tokio::test]
@@ -2091,6 +2400,8 @@ mod tests {
             sound: None,
             attendees: vec!["Alice <alice@example.com>".into()],
             send_invitations: true,
+            uid_to_keep: None,
+            keeps_invitation: false,
         };
         create_event(&state, "primary", new).await.unwrap();
         m.assert_async().await;
@@ -2510,6 +2821,7 @@ mod tests {
             deletions_not_restored: Vec::new(),
             cancelled: false,
             scheduling_silenced: false,
+            ical_uid: None,
         }
     }
 

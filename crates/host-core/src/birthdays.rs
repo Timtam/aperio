@@ -87,6 +87,8 @@ pub fn synthesise_calendar(contact_list_id: &str, list_name: &str) -> Calendar {
         }),
         read_only: true,
         default_sound: None,
+        invitation_import: Default::default(),
+        keeps_uid: false,
     }
 }
 
@@ -213,6 +215,7 @@ pub fn events_for_contacts(
                 attendee_responses: Vec::new(),
                 cancelled: false,
                 scheduling_silenced: false,
+                ical_uid: None,
             });
         }
     }

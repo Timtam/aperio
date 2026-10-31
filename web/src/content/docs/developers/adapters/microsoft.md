@@ -20,7 +20,10 @@ flow and token refresh; the adapter sends a `Bearer` token.
   the master+frontend-expansion model the other adapters use — it's simpler
   here because Graph's structured recurrence doesn't map 1:1 to RRULE for
   every shape. Consequence: the adapter never returns a recurring *master*;
-  each month's instances are fetched (and cached) per range.
+  each month's instances are fetched (and cached) per range. `iCalUId`
+  differs per instance, so it is an event's `ical_uid` only for a
+  `singleInstance`; `uid`, which a series shares, wins where Graph sends it
+  (unmeasured whether the default property set carries it).
 - **Delta:** `/calendarView/delta`, `/todoTask` delta, and contacts delta,
   each with the same `410/invalid token → full resync` rule.
 

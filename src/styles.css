@@ -1814,6 +1814,23 @@ button[aria-disabled='true'] {
   cursor: default;
 }
 
+/* A locked description as text to read (`role="document"`, see
+   EventDialog's ReadOnlyText): looks like the read-only field it replaced,
+   keeps the file's lines, and scrolls when long. */
+.form__read-text {
+  color: var(--color-fg-muted);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  min-height: 80px;
+  max-height: 16em;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  cursor: default;
+  user-select: text;
+}
+
 /* A hint that warns rather than merely informs (e.g. staged subtasks the
    chosen list can't hold). Not colour-only — the message text carries it. */
 .form__hint--warning {
@@ -2465,6 +2482,34 @@ button[aria-disabled='true'] {
 .section-field__button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* The appointments of an imported file (ImportDialog): a checkbox, the
+   appointment in words, its Edit button; an imported one says so instead. */
+.import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.import-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+}
+.import-list__row + .import-list__row {
+  border-top: 1px solid var(--color-border);
+}
+.import-list__row label,
+.import-list__done {
+  flex: 1 1 auto;
+}
+.import-list__done {
+  color: var(--color-text-muted, inherit);
 }
 .section-field__button--danger {
   color: var(--color-danger, #c0392b);
