@@ -94,6 +94,22 @@ afterEach(() => {
   announced.length = 0;
 });
 
+describe('TaskView → F6', () => {
+  it('lands on the task list, not on the group-by picker above it', async () => {
+    // Toni, 2026-10-31: F6 reached the picker in the header and never the
+    // list.
+    const { TaskView } = await import('./TaskView');
+    const { findRegionTarget } = await import('../../a11y/focusView');
+    render(
+      <div data-region="view">
+        <TaskView />
+      </div>,
+    );
+    const view = document.querySelector<HTMLElement>('[data-region="view"]')!;
+    expect(findRegionTarget(view).getAttribute('role')).toBe('tree');
+  });
+});
+
 describe('TaskView → the Delete key after a delete that failed (277)', () => {
   it('says the failure and reads the list again', async () => {
     const { TaskView } = await import('./TaskView');

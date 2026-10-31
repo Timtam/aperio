@@ -819,6 +819,7 @@ export function TaskView() {
       <ul
         ref={listRef}
         role="tree"
+        data-region-target
         tabIndex={0}
         aria-label={t('views.tasks.taskList')}
         aria-activedescendant={

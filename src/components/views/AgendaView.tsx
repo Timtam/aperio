@@ -374,6 +374,7 @@ export function AgendaView() {
       <ul
         ref={listRef}
         role="listbox"
+        data-region-target
         tabIndex={0}
         aria-label={t('views.agenda.eventList')}
         aria-activedescendant={

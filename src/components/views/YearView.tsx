@@ -105,6 +105,7 @@ export function YearView() {
       <div
         ref={listRef}
         role="listbox"
+        data-region-target
         tabIndex={0}
         aria-label={t('views.year.gridLabel')}
         aria-activedescendant={itemId(focusIndex)}

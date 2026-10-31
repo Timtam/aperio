@@ -63,8 +63,11 @@ Platz**. Der Zustand bleibt über Neustarts erhalten.
 
 > **Tastatur & Screenreader:** Die Schaltfläche liegt in der Tab-Reihenfolge
 > **vor** der Seitenleiste – nach dem Aufklappen erreichst du die Seitenleiste
-> mit einem weiteren Tab, eingeklappt überspringst du sie. Mit `F6` springst du
-> zwischen den Bereichen (Seitenleiste, Symbolleiste, Ansicht, Backlog).
+> mit einem weiteren Tab, eingeklappt überspringst du sie. Mit `F6` oder
+> `Strg+Tab` springst du zwischen den Bereichen: Seitenleiste, die Schaltfläche
+> der aktiven Ansicht in der Symbolleiste, der Backlog (Woche und Monat) und die
+> Ansicht selbst — ihr Raster, ihre Liste oder ihr Baum, nicht die Schaltfläche
+> darüber. `Umschalt+F6` und `Strg+Umschalt+Tab` gehen rückwärts.
 
 ## Der Backlog (Wochen- und Monatsplanung)
 
@@ -90,11 +93,13 @@ Ziehe einen Eintrag auf eine Tageszelle, um ihn dort **einzuplanen**, oder lege
 eine geplante Aufgabe wieder auf dem Backlog ab, um Tag und Deadline zu
 **entfernen**.
 
-> **Tastatur & Screenreader:** Jeder Teil ist eine eigene **Listbox** mit einem
-> Tabstopp: Tab landet einmal darauf, `Pfeil`/`Pos1`/`Ende` bewegen zwischen den
-> Aufgaben, `Eingabe` öffnet eine Aufgabe, `Umschalt+D` öffnet den Plan-Dialog
-> (Tag zuweisen), und die Kontextmenü-Taste (oder `Umschalt+F10`) öffnet das
-> Aufgabenmenü.
+> **Tastatur & Screenreader:** Der Backlog ist **eine Listbox** mit einer
+> Gruppe je Teil: Tab oder `F6` landet einmal darauf, und die Pfeiltasten gehen
+> durch alle Aufgaben, von einem Teil in den nächsten — ein Screenreader nennt
+> den Teil, sobald du hineinkommst. `Bild auf`/`Bild ab` springen zum Teil davor
+> oder danach, `Pos1`/`Ende` zur ersten oder letzten Aufgabe. `Eingabe` öffnet
+> eine Aufgabe, `Umschalt+D` öffnet den Plan-Dialog (Tag zuweisen), und die
+> Kontextmenü-Taste (oder `Umschalt+F10`) öffnet das Aufgabenmenü.
 
 ### Welche Listen der Backlog zeigt
 

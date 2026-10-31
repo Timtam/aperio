@@ -435,6 +435,7 @@ export function ContactsView() {
       <ul
         ref={listRef}
         role="listbox"
+        data-region-target
         tabIndex={0}
         aria-label={t('views.contacts.listLabel')}
         aria-describedby={`${headingId}-keys`}

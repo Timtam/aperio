@@ -1405,6 +1405,7 @@ export function WeekView() {
         <div
           ref={gridRef}
           role="grid"
+          data-region-target
           aria-label={t('views.week.gridLabel')}
           tabIndex={0}
           aria-activedescendant={
