@@ -1016,6 +1016,12 @@ export function EventDialog({
   /** Which prefill's refusal has been said in this opening. Unlike
    *  `prefillApplied`, the reset does not clear it: saying it is once. */
   const prefillAnnounced = useRef<string | null>(null);
+  /** Counts the resets that put the baseline back. The prefill effect lists
+   *  it, so it lands again on top of every one: a reset can run before the
+   *  prefill's own update has rendered — a store pushing synchronously renders
+   *  ahead of the effects' updates — find the form still pristine, and queue
+   *  the baseline behind the prefill (Toni's release log, 2026-10-31). */
+  const [baselineResets, setBaselineResets] = useState(0);
   /** The signature body this editor last put in by itself, so a calendar
    *  change can SWAP it — and so anything the user wrote or deleted is left
    *  alone. */
@@ -1088,8 +1094,12 @@ export function EventDialog({
       // one rides `defaultTitle` into the baseline rather than through here.
       //
       // Declaration order alone cannot fix that: it orders the two effects
-      // within ONE pass, and this is the same effect running twice.
+      // within ONE pass, and this is the same effect running twice. Nor is it
+      // only StrictMode: a release build re-runs the reset alone, before the
+      // prefill's update has rendered, so the prefill has to run again after
+      // it (`baselineResets`).
       prefillApplied.current = null;
+    setBaselineResets((count) => count + 1);
     setKeepRemindersAsDefault(remindersWereFromDefault);
     if (!firstHydrate) return; // form tracked; leave the independent toggles alone
     setError(null);
@@ -1161,6 +1171,7 @@ export function EventDialog({
     applyEventPrefill,
     announce,
     t,
+    baselineResets,
   ]);
 
   // The form follows the way an import goes in (I6): an invitation kept as the
@@ -2387,6 +2398,7 @@ export function EventDialog({
       imported,
       importIsHeld,
       importAs,
+      importOwn,
       noticeOriginal,
       importHeld.status,
       importCalendarName,

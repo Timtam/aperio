@@ -2144,6 +2144,7 @@ function EventEditorScreen({
     title,
     imported,
     importAs,
+    importOwn,
     importHeld.status,
     importIsHeld,
     importCalendarName,

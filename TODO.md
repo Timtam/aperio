@@ -1525,6 +1525,18 @@ Dauer wie die Grundform hatte das verdeckt.
 unvollständigen Auswahl, bleibt die erste Ablehnung stehen (der Riegel
 `prefillApplied`). Bei Toni nicht der Fall.
 
+↻ **Release-Build (Toni, 2026-10-31):** Der Editor landete nach einem
+Vorschlag aus dem Schnell-Hinzufügen wieder auf dem ersten Kalender, obwohl
+jeder Test der Übergabe grün war. Eine Spur im Log (`[prefill …]`, wieder
+entfernt) zeigte die Ursache: Der Reset lief ein zweites Mal, bevor
+die Aktualisierung des Prefills gerendert war. Ein Store, der synchron pusht,
+rendert vor den Aktualisierungen der Effekte; das Formular sah darum noch
+unberührt aus, und die Grundform landete hinter dem Prefill. Der Prefill lief
+nicht wieder, weil sich keine seiner Abhängigkeiten änderte (in dev rettete
+StrictMode). Jetzt zählt jeder Reset (`baselineResets`), und der Prefill läuft
+danach noch einmal, im Termin- und im Aufgaben-Editor. Bestätigen im Build von
+main.
+
 ### B12 · Gerätekonto nach dem Telefonwechsel (162-173) `[~]`
 
 ✅ **PR-A:** Nach dem Umzug per Schnellstart auf ein neues iPhone kamen Aperios
