@@ -3651,8 +3651,10 @@ Die Prüfung erfolgt bei jedem Sync-Durchlauf. Auslösendes Gerät ist dasjenige
 8. Sonst die Logs NEU auflisten (ein Gerät kann während der
    Kompaktierung angehängt haben) und jede Log-Datei mit Zeitstempel
    STRIKT < safe_cutoff löschen, deren JEDES Ereignis, wie es jetzt
-   dasteht, eigenes ist oder beim Bau des Snapshots angewendet war, und
-   deren jüngstes Ereignis älter ist als das Aufbewahrungsfenster. Nicht
+   dasteht, eigenes ist oder beim Bau des Snapshots angewendet war, deren
+   jüngstes Ereignis älter ist als das Aufbewahrungsfenster, und die dieser
+   Compactor so lange unverändert gesehen hat (das Fenster zählt ab dem
+   Eintreffen und neu ab jedem Wachstum). Nicht
    nach dem Namen gegen den Cursor: Eine Sitzungsdatei mit altem Namen
    kann gestern gewachsen sein. Eine leere oder unlesbare Datei wird nie
    gelöscht.

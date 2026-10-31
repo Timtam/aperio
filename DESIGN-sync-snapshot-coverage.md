@@ -192,12 +192,17 @@ Runde zuvor.
   `gc_horizon` nicht an und markiert niemanden als veraltet. Die Meldung
   nach „Jetzt kompaktieren“ nennt die Geräte, auf die gewartet wird.
 - **14 Tage.** Eine Datei geht erst, wenn ihr jüngster Eintrag älter ist als
-  das Aufbewahrungsfenster, und jedes Ereignis darin ist eigenes oder war
-  beim Bau des Schnappschusses angewendet.
+  das Aufbewahrungsfenster, der Compactor sie so lange unverändert gesehen hat
+  (`sync.compaction.logsSeen`: Größe und seit wann; eine neue oder gewachsene
+  Datei beginnt von vorn), und jedes Ereignis darin eigenes ist oder beim Bau
+  des Schnappschusses angewendet war. So zählt das Fenster ab dem Eintreffen:
+  Eine spät hochgeladene Sitzung mit alten Einträgen bleibt, bis jedes Gerät
+  sie holen konnte.
 - **Ausstehende Dateien.** Der Compactor lädt nichts hoch. Er räumt eine
   ausstehende Datei nur weg, wenn ihre entfernte Kopie mindestens so lang
   ist; sonst bleibt sie für den Push der Runde, und ihre entfernte Kopie
-  bleibt stehen. Scheitert die Rotation, räumt er nichts weg.
+  bleibt stehen. Scheitert die Rotation, räumt er nichts weg, und keine
+  entfernte Kopie einer ausstehenden Datei geht.
 
 ## Was nicht Teil davon ist
 

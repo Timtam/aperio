@@ -72,7 +72,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration as ChronoDuration, Timelike, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sync_core::{
     DeviceCursor, DeviceId, DeviceRecord, LogFile, LogFileName, MetaJson, SyncAdapter, SyncResult,
 };
@@ -96,6 +96,18 @@ pub const PREF_LOGS_SINCE_SNAPSHOT: &str = "sync.compaction.localLogsSinceSnapsh
 /// Local counter for bytes pushed, same lifecycle as
 /// [`PREF_LOGS_SINCE_SNAPSHOT`].
 pub const PREF_BYTES_SINCE_SNAPSHOT: &str = "sync.compaction.localBytesSinceSnapshot";
+
+/// When the compactor first saw each log file at its current size, by
+/// filename (JSON; DESIGN-sync-snapshot-coverage.md). A file goes only once
+/// it has been there, unchanged, for the retention window. Device-local.
+pub const PREF_LOGS_SEEN: &str = "sync.compaction.logsSeen";
+
+/// One file's entry in [`PREF_LOGS_SEEN`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct LogSeen {
+    len: u64,
+    since: DateTime<Utc>,
+}
 
 /// How many days of pre-snapshot logs to RETAIN behind a device that has
 /// fallen behind, before abandoning it to a snapshot resume. This is the cap
@@ -453,15 +465,29 @@ impl Compactor {
         // the round's push is the one way out, credentials gate included.
         // A rotation that failed leaves the live file below `cut`: no sweep.
         let mut kept_pending: HashSet<String> = HashSet::new();
-        if let (Some(pending), true) = (&self.pending_dir, rotated) {
-            let remote_lengths: HashMap<String, usize> = all_logs
-                .iter()
-                .map(|log| (log.name.to_filename(), log.bytes.len()))
-                .collect();
-            kept_pending =
-                sweep_redundant_pending(pending, cut, &remote_lengths, self.store.e2e_enabled())
-                    .await;
+        if let Some(pending) = &self.pending_dir {
+            if rotated {
+                let remote_lengths: HashMap<String, usize> = all_logs
+                    .iter()
+                    .map(|log| (log.name.to_filename(), log.bytes.len()))
+                    .collect();
+                kept_pending = sweep_redundant_pending(
+                    pending,
+                    cut,
+                    &remote_lengths,
+                    self.store.e2e_enabled(),
+                )
+                .await;
+            } else {
+                // Every pending file stays, the live one among them: none of
+                // their remote copies goes either (review round 3 of #130).
+                kept_pending = pending_log_names(pending).await;
+            }
         }
+        // When each file was first seen as it is now: the window counts from
+        // its arrival, not from when its events were written.
+        let now = Utc::now();
+        self.note_logs_seen(&all_logs, now);
 
         let mut report = CompactionReport::default();
         // Surface the snapshot row counters via a fake "apply" of
@@ -625,8 +651,19 @@ impl Compactor {
             }
         };
         let held: HashSet<&str> = coverage.held.iter().map(String::as_str).collect();
+        // A file goes only once it has been there, as it is, for the whole
+        // retention window: a session uploaded late, or grown, with old
+        // events, reaches every device first (review round 3 of #130).
+        let seen = self.note_logs_seen(&current, now);
+        let settled_by = now
+            .checked_sub_signed(ChronoDuration::days(i64::from(retention_days)))
+            .unwrap_or(DateTime::<Utc>::MIN_UTC);
         for log in current {
-            if log.name.timestamp >= safe_cutoff || kept_pending.contains(&log.name.to_filename()) {
+            let filename = log.name.to_filename();
+            if log.name.timestamp >= safe_cutoff || kept_pending.contains(&filename) {
+                continue;
+            }
+            if seen.get(&filename).is_none_or(|since| *since > settled_by) {
                 continue;
             }
             if Coverage::deletable(&log, &self.local_device_id, &held, retention_floor) {
@@ -702,6 +739,49 @@ impl Compactor {
             .flatten()
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(default)
+    }
+
+    /// Record when each listed file was first seen at its current size
+    /// ([`PREF_LOGS_SEEN`]) and return those times by filename. A file new
+    /// or grown since the last record is seen `now`; one no longer listed
+    /// drops out. A record that does not read starts over: every file counts
+    /// as seen now, the safe side.
+    fn note_logs_seen(
+        &self,
+        logs: &[LogFile],
+        now: DateTime<Utc>,
+    ) -> HashMap<String, DateTime<Utc>> {
+        let before: HashMap<String, LogSeen> = self
+            .store
+            .get_pref(PREF_LOGS_SEEN)
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
+        let after: HashMap<String, LogSeen> = logs
+            .iter()
+            .map(|log| {
+                let filename = log.name.to_filename();
+                let len = log.bytes.len() as u64;
+                let since = before
+                    .get(&filename)
+                    .filter(|seen| seen.len == len)
+                    .map_or(now, |seen| seen.since);
+                (filename, LogSeen { len, since })
+            })
+            .collect();
+        match serde_json::to_string(&after) {
+            Ok(raw) => {
+                if let Err(err) = self.store.set_pref(PREF_LOGS_SEEN, &raw) {
+                    warn!(?err, "couldn't record when the log files were seen");
+                }
+            }
+            Err(err) => warn!(?err, "couldn't encode when the log files were seen"),
+        }
+        after
+            .into_iter()
+            .map(|(filename, seen)| (filename, seen.since))
+            .collect()
     }
 
     /// Whether this device's applied record is exact
@@ -783,6 +863,22 @@ impl Compactor {
             covered_events: body.covered_event_ids.as_ref().map(Vec::len),
         }
     }
+}
+
+/// The names of the log files in `pending_dir`.
+async fn pending_log_names(pending_dir: &Path) -> HashSet<String> {
+    let mut names = HashSet::new();
+    let Ok(mut entries) = tokio::fs::read_dir(pending_dir).await else {
+        return names;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Some(name) = entry.file_name().to_str() {
+            if LogFileName::from_filename(name).is_ok() {
+                names.insert(name.to_string());
+            }
+        }
+    }
+    names
 }
 
 /// Delete every LOCAL pending log file stamped before `cut`. After a
@@ -1121,6 +1217,7 @@ mod tests {
         );
         *adapter.meta.lock().unwrap() = Some(meta);
 
+        seen_long_ago(&store, &adapter);
         let report = compactor.compact_now(&adapter).await.unwrap();
         // The old log should be gone; the fresh one stays.
         assert_eq!(report.deleted_logs, 1);
@@ -1169,6 +1266,7 @@ mod tests {
         );
         *adapter.meta.lock().unwrap() = Some(meta);
 
+        seen_long_ago(&store, &adapter);
         let report = compactor.compact_now(&adapter).await.unwrap();
 
         // Only the beyond-retention log is GC'd; the within-window one stays.
@@ -1437,6 +1535,7 @@ mod tests {
         adapter.logs.lock().unwrap().extend([grown, applied]);
         *adapter.meta.lock().unwrap() = Some(meta_with_caught_up_peer());
 
+        seen_long_ago(&store, &adapter);
         let report = compactor.compact_now(&adapter).await.unwrap();
 
         assert_eq!(report.deleted_logs, 1);
@@ -1619,6 +1718,7 @@ mod tests {
         let at = Utc::now() - ChronoDuration::days(20);
         let [(whole, _), (grown, _)] = pending_sessions(&adapter, dir.path(), at);
 
+        seen_long_ago(&store, &adapter);
         let report = compactor.compact_now(&adapter).await.unwrap();
 
         assert_eq!(report.deleted_logs, 1);
@@ -1724,6 +1824,107 @@ mod tests {
         });
     }
 
+    /// Every file on the remote, as this device's compactor first saw it at
+    /// its current size long ago: past the retention window.
+    fn seen_long_ago(store: &FakeStore, adapter: &FakeAdapter) {
+        let long_ago: DateTime<Utc> = "2000-01-01T00:00:00Z".parse().unwrap();
+        let seen: HashMap<String, LogSeen> = adapter
+            .logs
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|log| {
+                (
+                    log.name.to_filename(),
+                    LogSeen {
+                        len: log.bytes.len() as u64,
+                        since: long_ago,
+                    },
+                )
+            })
+            .collect();
+        store
+            .set_pref(PREF_LOGS_SEEN, &serde_json::to_string(&seen).unwrap())
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn gc_keeps_a_file_until_it_has_been_there_unchanged_for_the_window() {
+        // Review round 3 of #130: the window counted from when the events
+        // were written, so a session uploaded late with old events went right
+        // away, before a dormant peer fetched it. It counts from arrival now,
+        // and from the last growth.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        store
+            .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+        *adapter.meta.lock().unwrap() = Some(meta_with_caught_up_peer());
+        let old: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
+        adapter.logs.lock().unwrap().push(held_log(&store, old));
+
+        let first = compactor.compact_now(&adapter).await.unwrap();
+        assert_eq!(first.deleted_logs, 0, "just arrived");
+
+        // The window passed — and then the file grew, with an old event.
+        seen_long_ago(&store, &adapter);
+        let (more, more_ids) = log_of(old, "dev-other", 1);
+        store.mark_event_applied(&more_ids[0]).unwrap();
+        {
+            let mut logs = adapter.logs.lock().unwrap();
+            logs[0].bytes.push(b'\n');
+            logs[0].bytes.extend_from_slice(&more.bytes);
+        }
+        let grown = compactor.compact_now(&adapter).await.unwrap();
+        assert_eq!(grown.deleted_logs, 0, "its growth just arrived");
+
+        // As if the window passed with the file unchanged.
+        seen_long_ago(&store, &adapter);
+        let later = compactor.compact_now(&adapter).await.unwrap();
+        assert_eq!(later.deleted_logs, 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_rotation_keeps_every_pending_file_and_its_remote_copy() {
+        // The live file stays below the cut when the writer cannot rotate:
+        // nothing is swept, and no remote copy of a pending file goes.
+        let dir = TempDir::new().unwrap();
+        let store = Arc::new(FakeStore::default());
+        mark_exact(&store);
+        let store_dyn: Arc<dyn SyncStore> = store.clone();
+        let builder = Arc::new(SnapshotBuilder::new(
+            Arc::clone(&store_dyn),
+            Arc::new(FakeSecrets::default()),
+            "1.0.0-test",
+        ));
+        // A writer whose staging dir cannot be made: it never rotates.
+        let blocker = dir.path().join("not-a-dir");
+        std::fs::write(&blocker, b"x").unwrap();
+        let writer = EventLogWriter::spawn(blocker, DeviceId::from_string("dev-this".into()));
+        let pending = dir.path().join("pending");
+        std::fs::create_dir_all(&pending).unwrap();
+        let compactor = Compactor::new(
+            store_dyn,
+            builder,
+            DeviceId::from_string("dev-this".into()),
+            "1.0.0-test",
+            Some(writer),
+            Some(pending.clone()),
+        );
+        let adapter = FakeAdapter::new();
+        let at = Utc::now() - ChronoDuration::days(20);
+        let (session, _) = log_of(at, "dev-this", 1);
+        let local = pending.join(session.name.to_filename());
+        std::fs::write(&local, &session.bytes).unwrap();
+        adapter.logs.lock().unwrap().push(session);
+        seen_long_ago(&store, &adapter);
+
+        let report = compactor.compact_now(&adapter).await.unwrap();
+
+        assert!(local.exists());
+        assert_eq!(report.deleted_logs, 0);
+    }
+
     #[tokio::test]
     async fn snapshot_ts_is_bounded_to_held_content() {
         // The snapshot horizon must be max(own_newest_log, cursor) — real
@@ -1782,6 +1983,7 @@ mod tests {
             adapter.logs.lock().unwrap().push(log);
         }
 
+        seen_long_ago(&store, &adapter);
         let report = compactor.compact_now(&adapter).await.unwrap();
         assert_eq!(report.deleted_logs, 1, "only the below-horizon log folds");
         let remaining = adapter.logs.lock().unwrap();
