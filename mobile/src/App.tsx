@@ -612,8 +612,8 @@ function AppContent() {
   >(undefined);
   // Once the navigation tree is about to paint, arm the startup gate that
   // holds back the app-global scans (badge, day-start, reminder replan)
-  // until the first paint has settled — they otherwise queue their fan-outs
-  // ahead of the visible screen's first read on the serial native queue.
+  // until the first paint has settled — their fan-outs otherwise compete
+  // with the visible screen's first reads.
   useEffect(() => {
     if (!navReady) return;
     return armStartupGate();

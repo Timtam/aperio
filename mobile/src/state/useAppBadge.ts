@@ -15,7 +15,7 @@ import { getTasks, listTaskLists } from '../api/client';
 import { currentUserForList } from './currentUser';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { appBadgeEnabled, loadAppBadgePref, subscribeAppBadge } from './appBadge';
-import { useCacheReload } from './cacheObserver';
+import { useCacheReload, whenPassSettled } from './cacheObserver';
 import { subscribeCalendarChanged } from './calendarMutations';
 import { whenStartupSettled } from './startupGate';
 import { useTaskStore } from './taskStoreContext';
@@ -135,6 +135,13 @@ async function runBadge(): Promise<void> {
   }
 }
 
+/** The badge's compute, or, while an external refresh pass runs, one compute
+ *  when it ends: nobody sees the icon while the app is open, and every flush
+ *  of the pass would otherwise read today's whole catalog again. Stable, so
+ *  any number of triggers during the pass come to one compute. */
+const runBadgeNow = (): void => void runBadge();
+const runBadgeWhenSettled = (): void => whenPassSettled(runBadgeNow);
+
 /**
  * Mount ONCE inside the TaskStore provider (it reads dataVersion). Keeps the
  * app-icon badge in sync with today's load: recomputes on local task mutation,
@@ -147,11 +154,11 @@ export function useAppBadge(): void {
 
   // Every trigger routes through the startup gate: during the launch
   // window the (many) mount + cache-flush triggers collapse into ONE
-  // deferred compute, so the badge's full-catalog fan-out doesn't queue
-  // ahead of the visible screen's first read on the serial native queue.
-  // Once the gate is open this is a plain pass-through.
+  // deferred compute, so the badge's full-catalog fan-out doesn't compete
+  // with the visible screen's first reads. Once the gate is open this is a
+  // plain pass-through — to the end of a running refresh pass, if any.
   const recompute = useCallback(() => {
-    whenStartupSettled('appBadge', () => void runBadge());
+    whenStartupSettled('appBadge', runBadgeWhenSettled);
   }, []);
 
   // Load the stored toggle on mount, then recompute; and recompute whenever the

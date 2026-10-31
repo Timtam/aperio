@@ -526,8 +526,9 @@ function closureParams(after, language) {
 
 /**
  * name → every registration of it in one native module: `Function("…")` or
- * `AsyncFunction("…")`, and how many parameters its closure takes from
- * JavaScript (`null`: unreadable).
+ * `AsyncFunction("…")`, how many parameters its closure takes from
+ * JavaScript (`null`: unreadable), and the queue it runs on (`queue`, see
+ * `queueAfter`).
  *
  * Registrations are expected in the module file itself. Moving some into a
  * helper file reports them as missing, loudly, rather than passing. One
@@ -537,12 +538,28 @@ function closureParams(after, language) {
  */
 function registeredFunctions(source, language) {
   const code = withoutComments(source, { nested: true });
+  const bare = codeOnly(source);
   const out = new Map();
   for (const m of code.matchAll(/\b(Async)?Function\s*\(\s*"([A-Za-z0-9_]+)"\s*\)\s*(\{)?/g)) {
     const params = m[3] ? closureParams(code.slice(m.index + m[0].length), language) : null;
-    out.set(m[2], [...(out.get(m[2]) ?? []), { async: Boolean(m[1]), params }]);
+    const queue = m[3] ? queueAfter(bare, m.index + m[0].length - 1) : null;
+    out.set(m[2], [...(out.get(m[2]) ?? []), { async: Boolean(m[1]), params, queue }]);
   }
   return out;
+}
+
+/**
+ * The queue a registration whose closure opens at `open` runs on: the name
+ * given to `.runOnQueue(…)` right after the closure, or `"default"`, expo's
+ * own serial queue. Read in `bare` (comments and strings blanked), so a brace
+ * inside a string does not end the closure early. `null` when the closure
+ * never closes.
+ */
+function queueAfter(bare, open) {
+  const body = braced(bare, open);
+  if (body === null) return null;
+  const after = bare.slice(open + body.length + 2);
+  return /^\s*\.runOnQueue\s*\(\s*([A-Za-z_]\w*)\s*\)/.exec(after)?.[1] ?? 'default';
 }
 
 /**
@@ -686,6 +703,84 @@ for (const [platform, registered] of nativeModules) {
     }
   }
 }
+/**
+ * Functions that run on a different queue on each platform, each with its
+ * reason. A listed function that runs on the same queue on both again is
+ * reported, as with `ONLY_ON`.
+ */
+const QUEUE_DIFFERS = new Map([
+  [
+    'requestDeviceCalendarAccess',
+    'on iOS it shows the OS prompt and blocks until it is answered (accessQueue); ' +
+      'on Android it only reports the permission, PermissionsAndroid asks',
+  ],
+]);
+
+/**
+ * The queue each async function runs on, by the name both modules give it:
+ * `readQueue` in Swift and `readScope` in Kotlin are both `read`. A slow call
+ * on expo's default queue holds up every other call there, so where each
+ * function runs is chosen once, the same in CalFfiModule.swift and
+ * CalFfiModule.kt (see the comments over `slowQueue` and `slowScope`).
+ * Neither compiler sees the other platform, and the Swift module is compiled
+ * only in an XCFramework build, so a queue that is not declared is caught
+ * here too.
+ */
+const QUEUE_SUFFIX = { android: 'Scope', ios: 'Queue' };
+const QUEUE_KEYWORD = { android: 'val', ios: 'let' };
+const queueSources = new Map([
+  ['android', codeOnly(readFileSync(KOTLIN, 'utf8'))],
+  ['ios', codeOnly(readFileSync(SWIFT, 'utf8'))],
+]);
+const queueOf = new Map([
+  ['android', new Map()],
+  ['ios', new Map()],
+]);
+for (const [platform, registered] of nativeModules) {
+  const where = `the ${MODULE[platform]} module`;
+  const suffix = QUEUE_SUFFIX[platform];
+  for (const [name, [registration]] of registered) {
+    if (!registration.async) continue;
+    const { queue } = registration;
+    if (queue === null) {
+      surface.push(`this check cannot find the end of ${name}() in ${where}, so not its queue`);
+    } else if (queue === 'default') {
+      queueOf.get(platform).set(name, 'default');
+    } else if (!queue.endsWith(suffix) || queue === suffix) {
+      surface.push(
+        `${where} runs ${name}() on ${queue}; its queues are named like slow${suffix}`,
+      );
+    } else if (
+      !new RegExp(String.raw`\b${QUEUE_KEYWORD[platform]}\s+${queue}\s*=`).test(
+        queueSources.get(platform),
+      )
+    ) {
+      surface.push(`${where} runs ${name}() on ${queue}, which it does not declare`);
+    } else {
+      queueOf.get(platform).set(name, queue.slice(0, -suffix.length));
+    }
+  }
+}
+for (const [name, android] of queueOf.get('android')) {
+  const ios = queueOf.get('ios').get(name);
+  if (ios === undefined) continue;
+  if (ios !== android && !QUEUE_DIFFERS.has(name)) {
+    surface.push(
+      `${name}() runs on the ${ios} queue on iOS but on the ${android} queue on Android`,
+    );
+  }
+  if (ios === android && QUEUE_DIFFERS.has(name)) {
+    surface.push(
+      `${name}() is listed in QUEUE_DIFFERS, but runs on the ${ios} queue on both platforms`,
+    );
+  }
+}
+for (const name of QUEUE_DIFFERS.keys()) {
+  if (!queueOf.get('android').has(name) || !queueOf.get('ios').has(name)) {
+    surface.push(`${name}() is listed in QUEUE_DIFFERS, but not both modules register it`);
+  }
+}
+
 for (const [name, [platform]] of ONLY_ON) {
   if (!declaredSurface.members.has(name)) {
     surface.push(
@@ -1120,7 +1215,10 @@ if (surface.length > 0) {
       'CalFfiModule.swift: with AsyncFunction when it returns a Promise, with Function\n' +
       "otherwise, and with one closure parameter per declared parameter (expo's\n" +
       'trailing Promise parameter does not count). A function one platform lacks on\n' +
-      'purpose goes into ONLY_ON in mobile/scripts/check-ffi-bridges.mjs, with its reason.',
+      'purpose goes into ONLY_ON in mobile/scripts/check-ffi-bridges.mjs, with its reason.\n' +
+      'An async function runs on the same queue on both platforms: .runOnQueue(readQueue)\n' +
+      'in Swift is .runOnQueue(readScope) in Kotlin, and no .runOnQueue is the default\n' +
+      'queue. One that differs on purpose goes into QUEUE_DIFFERS, with its reason.',
   );
 }
 
@@ -1179,7 +1277,8 @@ const onlyOn = Object.entries(MODULE)
 console.log(
   `FFI bridges OK — the ${declaredSurface.members.size} functions CalFfiModule.ts declares ` +
     `are registered in both native modules, as the same kind and with the same ` +
-    `parameter count (${onlyOn}), ` +
+    `parameter count (${onlyOn}), each async one on the same queue ` +
+    `(${QUEUE_DIFFERS.size} listed exception), ` +
     `${kotlin.size} Android and ${swift.size} iOS calls agree ` +
     `with the committed bindings and with crates/cal-ffi, and its ` +
     `${rustFree.size} exported free functions ` +

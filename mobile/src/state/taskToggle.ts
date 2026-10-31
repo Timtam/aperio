@@ -11,6 +11,7 @@ import {
 import type { StatusWrite, Task, TaskList, TaskStatus } from '@aperio/shared';
 
 import { updateTask } from '../api/client';
+import { logLine } from '../api/logs';
 import { currentUserForList } from './currentUser';
 import {
   canStoreInProgress,
@@ -289,6 +290,9 @@ export async function applyTaskToggle(
   list: TaskList | undefined,
   allTasks: Task[],
 ): Promise<TaskStatus | null> {
+  // The moment of the tap, for measuring how long the write takes to leave:
+  // the host logs the provider request, this line the start (TODO B13, 218).
+  void logLine('info', 'task check-off: started');
   const behaviour = await readTaskBehaviour();
   const canInProgress = canStoreInProgress(list);
   const nextStatus = nextCheckoffStatus(task.status, behaviour.checkoffMode, canInProgress);
@@ -328,6 +332,7 @@ export async function setTaskStatusTo(
   list: TaskList | undefined,
   allTasks: Task[],
 ): Promise<number> {
+  void logLine('info', `task status change to ${status}: started`);
   const behaviour = await readTaskBehaviour();
   const canInProgress = canStoreInProgress(list);
   const eff = effectiveForList(behaviour, task.list_id);

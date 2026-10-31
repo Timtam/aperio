@@ -47,9 +47,9 @@ let cache: Signature[] = [];
 let loaded = false;
 let loading: Promise<void> | null = null;
 /** Bumped by every local write. A read that started BEFORE a write must not
- *  land after it: the Host answers reads and writes on one serial queue, so a
- *  refresh dispatched just before a tap resolves with the pre-write list and
- *  would put it back over the optimistic one — the row the user just heard
+ *  land after it: the Host answers reads and writes on queues of their own, so
+ *  a refresh dispatched just before a tap can resolve after it with the
+ *  pre-write list and would put it back over the optimistic one — the row the user just heard
  *  announced as added would vanish, and the next edit would write the stale
  *  list back. */
 let writeGeneration = 0;

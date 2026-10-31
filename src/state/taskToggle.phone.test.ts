@@ -12,6 +12,7 @@ import type { StatusWrite, Task } from '@aperio/shared';
 
 const { updateTask } = vi.hoisted(() => ({ updateTask: vi.fn() }));
 vi.mock('../../mobile/src/api/client', () => ({ updateTask }));
+vi.mock('../../mobile/src/api/logs', () => ({ logLine: async () => undefined }));
 vi.mock('../../mobile/src/state/currentUser', () => ({
   currentUserForList: async () => null,
 }));

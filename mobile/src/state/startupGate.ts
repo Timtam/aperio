@@ -3,12 +3,12 @@ import { InteractionManager } from 'react-native';
 /**
  * First-paint gate for the app-global startup scans (app badge, day-start
  * checks, reminder rescheduling). Their launch runs each fan out dozens of
- * FFI calls, and everything crosses ONE serial native queue — so firing
- * them at mount time made the visible screen's first read queue behind
- * minutes-of-day bookkeeping. Deferring them ~1.5s past the first settled
- * paint is imperceptible for what they do (an icon badge, a once-a-day
- * review, OS notifications scheduled days ahead) and hands the queue to
- * the screen the user is actually looking at.
+ * FFI calls, and the host reads at most four at a time (its read pool) — so
+ * firing them at mount time made the visible screen's first reads wait
+ * behind minutes-of-day bookkeeping. Deferring them ~1.5s past the first
+ * settled paint is imperceptible for what they do (an icon badge, a
+ * once-a-day review, OS notifications scheduled days ahead) and hands the
+ * reads to the screen the user is actually looking at.
  *
  * Semantics: `whenStartupSettled(key, run)` runs immediately once the gate
  * is open; before that, the LATEST run per key is parked (same-key calls
@@ -30,7 +30,7 @@ export function whenStartupSettled(key: string, run: () => void): void {
 }
 
 /** Gap between the parked runs at gate-open: each is a full-catalog
- *  fan-out on the SERIAL native queue, so flushing them back-to-back
+ *  fan-out through the same few reads, so flushing them back-to-back
  *  would recreate a (shorter) version of the mount-time burst the gate
  *  exists to prevent. Staggering lets the visible screen's reads slot in
  *  between the scans. */

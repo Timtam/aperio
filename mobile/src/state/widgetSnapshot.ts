@@ -19,7 +19,7 @@ import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { getHiddenCalendars } from './calendarVisibility';
 import { currentUserForList } from './currentUser';
 import { consumeQueuedActionsApplied, drainQueuedActions } from './queuedActions';
-import { useCacheReload } from './cacheObserver';
+import { useCacheReload, useWhenPassSettled } from './cacheObserver';
 import { subscribeCalendarChanged } from './calendarMutations';
 import { whenStartupSettled } from './startupGate';
 import { useTaskStore } from './taskStoreContext';
@@ -224,17 +224,21 @@ export function useWidgetSnapshot(): void {
 
   // Through the startup gate like every other app-global scan: during launch the
   // many mount + cache-flush triggers collapse into ONE deferred pass, so this
-  // full-catalog fan-out never queues ahead of the visible screen's first read
-  // on the serial native queue.
-  const refresh = useCallback(() => {
-    whenStartupSettled('widgetSnapshot', () => {
-      void refreshWidgetSnapshot().then(() => {
-        // A tap performed here — or by the background pass, which had no React
-        // to tell — is a task the open views are now wrong about.
-        if (consumeQueuedActionsApplied()) invalidateData();
-      });
+  // full-catalog fan-out never competes with the visible screen's first reads.
+  // While an external refresh pass runs, the snapshot is written once at its
+  // end, or when the app leaves the foreground: the widget is read on the home
+  // screen, and every flush of the pass would otherwise rebuild it.
+  const refreshNow = useCallback(() => {
+    void refreshWidgetSnapshot().then(() => {
+      // A tap performed here — or by the background pass, which had no React
+      // to tell — is a task the open views are now wrong about.
+      if (consumeQueuedActionsApplied()) invalidateData();
     });
   }, [invalidateData]);
+  const refreshWhenSettled = useWhenPassSettled(refreshNow);
+  const refresh = useCallback(() => {
+    whenStartupSettled('widgetSnapshot', refreshWhenSettled);
+  }, [refreshWhenSettled]);
 
   // Local task mutation + the local-midnight flip (yesterday's rows are no
   // longer next).
