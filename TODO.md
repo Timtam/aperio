@@ -26,6 +26,11 @@
 > Teilen steht oben mit seinen offenen Teilen; sein erledigter Verlauf steht
 > unten unter demselben Titel. Neue Punkte kommen oben in ihren Abschnitt, und
 > wer einen Punkt erledigt, verschiebt ihn nach unten.
+>
+> **Nachgeführt am 2026-10-31**: PR 7 (#128), #130, #131 und #132 sind
+> gemergt. Nach unten gewandert ist, was ohne Rest erledigt ist; alles mit
+> „↻ im Test“ wartet auf eine Prüfung am Gerät (Handy-Builds vom 2026-10-31)
+> und bleibt oben.
 
 ---
 
@@ -894,10 +899,6 @@ Siehe DESIGN §4.2.
       (`server-refused`, `unsafe-to-write`) wird an der Marke erkannt, auf
       beiden. Handy ohne
       Testläufer — ↻ im Test.
-    - ✅ CalDAV `create_task_list`: MKCALENDAR läuft seit PR 7 (7950e08b)
-      über `send_write`. Eine Wiederholung, die 405 bekommt, ist die Liste des
-      ersten Versuchs, jede andere Ablehnung einer Wiederholung unsicher
-      (`a_replayed_mkcalendar_reads_its_answer_as_the_first_attempts`).
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
     Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,
@@ -1260,9 +1261,9 @@ Siehe DESIGN §4.2.
 
 ### B3 · Sync-Restpunkte (§19) `[~]` (Toggle-UI bewusst zurückgestellt)
 - [ ] Per-Einstellung-Sync-Umschalter-UI im `SyncPanel` (§19.2.1; Backend hat eine feste `SYNC_WHITELIST`) — **bewusst zurückgestellt** (auf Wunsch).
-- [~] Schnappschuss nennt seine Ereignisse, jedes Gerät holt einmal nach (DESIGN-sync-snapshot-coverage.md, Toni 2026-10-27/30, Laptop übersprang eine gewachsene Desktop-Sitzung). PR #130, Branch `fix/snapshot-coverage`: R1-R7 gebaut. Offen:
+- [~] Schnappschuss nennt seine Ereignisse, jedes Gerät holt einmal nach (DESIGN-sync-snapshot-coverage.md, Toni 2026-10-27/30, Laptop übersprang eine gewachsene Desktop-Sitzung). PR #130 gemergt (3e2db8cc, 2026-10-31, Version 0.2.0, Sync-Format 2), ohne Live-Test auf Tonis Wunsch. Offen:
   ↳ Sobald ein Gerät Tastenkürzel-Ereignisse schreibt (`shortcut.*`, noch ohne Anwender): Sie gelten als nicht gehalten, halten jede Datei mit ihnen fest und verhindern Kennungen im Schnappschuss. Dann Anwender bauen oder sie als gehalten zählen.
-  ↳ Live prüfen: Nach dem Update holt jedes Gerät einmal nach; auf dem Laptop stimmen die Aufgaben seit dem 19.10., gelöschte verschwinden, kein Konflikt.
+  ↳ Live prüfen (Toni, mit den Builds vom 2026-10-31): Desktop auf 0.2.0, nachholen lassen, einmal von Hand kompaktieren; dann den Laptop neu beitreten lassen; dann das iPhone. Nach dem Update holt jedes Gerät einmal nach; auf dem Laptop stimmen die Aufgaben seit dem 19.10., gelöschte verschwinden, kein Konflikt.
   ↳ Grenzen: Eine Löschung, deren Datei schon aufgeräumt ist, lässt sich nicht nachholen. Eine Zeile ohne bekannte Zeit (Uhr erst ab diesem Update, kein `updated_at`) nimmt eine nie angewendete ältere Änderung noch an — auch aus einer Datei, die ein 0.1.0-Build nach dem Aufräumen erneut hochgeladen hat (Prüfrunde 4: die Regel „älter als `gc_horizon` gilt als gehalten“ verwarf gewöhnliche Änderungen und entfiel).
   ↳ Mehr als 256 Dateien im Sync-Ordner: Die ältesten fallen aus den gemerkten Längen und werden jede Runde neu geholt (richtig, aber Bandbreite). Bei Bedarf Längen nach Auflistung statt nach Anzahl kappen.
   ↳ Eine einzige unlesbare Datei (Lesefehler, oder unter E2E eine nicht entschlüsselbare) lässt den ganzen Abruf scheitern: Beitritt und Wiederaufnahme schlagen fehl, das Nachholen versucht es stündlich. Adapter sollten so eine Datei mit Warnung überspringen und benennen (Prüfrunde 2, U5).
@@ -1534,77 +1535,13 @@ rendert vor den Aktualisierungen der Effekte; das Formular sah darum noch
 unberührt aus, und die Grundform landete hinter dem Prefill. Der Prefill lief
 nicht wieder, weil sich keine seiner Abhängigkeiten änderte (in dev rettete
 StrictMode). Jetzt zählt jeder Reset (`baselineResets`), und der Prefill läuft
-danach noch einmal, im Termin- und im Aufgaben-Editor. Bestätigen im Build von
-main.
+danach noch einmal, im Termin- und im Aufgaben-Editor (#131, 944412de).
+Bestätigen im Build von main.
 
 ### B12 · Gerätekonto nach dem Telefonwechsel (162-173) `[~]`
 
-✅ **PR-A:** Nach dem Umzug per Schnellstart auf ein neues iPhone kamen Aperios
-Daten mit, die iOS-Freigabe für Kalender und Erinnerungen nicht; Aperio fragte
-nur beim Anlegen des Kontos, prüfte den Status nie und hielt den leeren Katalog
-für „lädt noch“. Jetzt fragt Aperio beim Start, wenn es ein Gerätekonto gibt
-und iOS auf diesem Telefon noch nie gefragt hat (`cal_core::os_access`, 166),
-nach dem Entsperren und dem ersten Bild, auf einer eigenen Warteschlange. Nach
-der Freigabe frischt die Brücke ihren `EKEventStore` auf (seit PR-G mit `reset()`
-statt eines neuen Stores), das Konto lädt neu
-(`warm_all_queued`: am Handy ging eine Anfrage während eines Durchlaufs bisher
-verloren), und ein Satz sagt, was erteilt wurde. Das Protokoll nennt den
-Zugriff vorher und nachher sowie, wie sich die Kalenderliste änderte (geblieben,
-weggefallen, neu) oder dass sie nach einem Fehler unverändert wiederkam — daran
-sieht man, ob iOS die Kennungen behalten hat. Konten, die über den Abgleich
-ankommen, gehen einem laufenden Durchlauf ebenfalls nicht mehr verloren.
-↻ im Test (Handy ohne Testläufer).
-
-✅ **PR-B:** Ohne vollen Zugriff verweigert der Adapter jedes Lesen und
-Schreiben (`cal_core::Error::AccessNotGranted`, Marke `access-not-granted`,
-getragen als `forbidden`). Vorher meldete Löschen Erfolg, ohne etwas zu tun
-(und vergaß Gruppierung und private Erinnerungen auf allen Geräten), und „nur
-hinzufügen“ (171: zählt als kein Zugriff) hätte mit seinem einen virtuellen
-Kalender die echten aus dem Zwischenspeicher verdrängt. Am Handy sagt jedes
-Schreiben eine Ablehnung als Satz (`writeErrorMessage`), nicht nur der
-Termin-Editor. ↻ im Test (Handy ohne Testläufer).
-
-✅ **PR-C:** Der Cache merkt sich die Fehlerart (`failure_kind`: access, auth,
-sonst nichts; Migration 46) statt sie aus Wörtern zu raten. Fehlt der Zugriff,
-sperrt das die ganze Familie (Kalender oder Listen) für das Nachladen beim
-Lesen (`access_withheld`); der Warm-Durchlauf fragt weiter, eine Freigabe hebt
-die Sperre. Die Fehlerliste nennt eine gesperrte Familie einmal statt jede
-Kennung, sagt `no_access` und `cause`, und ein Fehler steht nur noch einmal
-im Protokoll, nicht bei jedem gleichen Versuch. „Neu synchronisieren“ behält
-die letzte erfolgreiche Aktualisierung (`last_success_at`). ↻ im Test.
-
-✅ **PR-D1:** Fehlt der Zugriff, trägt die Kontozeile ein Abzeichen, das den
-fehlenden Speicher nennt („Kein Zugriff“, „Kalender ohne Zugriff“,
-„Erinnerungen ohne Zugriff“), und die Aktion „Zugriff erlauben…“. Was sie tut, entscheidet der Kern
-(`cal_core::os_access::repair_for`): fragen, solange das System fragt (unter
-Android, bis es „nicht mehr fragen“ meldet), sonst ein Dialog, der sagt, was in
-den Einstellungen fehlt, und sie öffnet; bei einer Einschränkung nur die
-Erklärung. Kommt Aperio wieder nach vorn und der Zugriff ist da, während der
-Cache das Konto noch sperrt (`restorable`), oder ist seit dem letzten Blick ein
-Speicher lesbar geworden (beim Neustart der gemerkte Blick des letzten Laufs:
-iOS beendet Apps womöglich bei geänderten Rechten), lädt es sofort neu und
-sagt es an; nach einem Weg in die Einstellungen, der nichts änderte, sagt es,
-wofür der Zugriff noch fehlt. Unter Android meldet ein ohne Antwort
-geschlossener Dialog dasselbe wie „nicht mehr fragen“, und nichts trennt beides;
-der Dialog behauptet deshalb nichts darüber. ↻ im Test (Handy ohne Testläufer).
-
-✅ **PR-D2:** Der Satz am Ende eines Durchlaufs nennt, was nicht aktualisiert
-wurde („Externe Daten aktualisiert, außer: …“; nichts gelesen: „konnten nicht
-aktualisiert werden“, dann die Warnung mit Ursache; nichts gelesen und nichts
-bestätigt (erster Netzaussetzer) oder kein Ergebnis: „Aktualisierung externer
-Daten beendet“), aus dem Kern (`CacheRefreshStatus.outcome`, dieselbe
-Menge wie die Fehleranzeige); Genanntes wird nicht noch einmal angesagt, die
-Hinweise erscheinen mit dem Satz (180). Die Ursache ist ein Typ mit Rang im Kern
-(`RefreshCause`, Zugriff vor Anmeldung vor Sonstigem, 181); Banner und Ansagen
-lesen ihn ab, eine schwerere Ursache wird erneut angesagt (185). Fehlt einem
-Konto der Zugriff, steht im Synchronisieren-Bereich eine Zeile mit Knopf „Zu
-den Konten“ (184), am Desktop eine Zeile. „Neu verbinden“ nur bei Anmeldeproblem
-und Kontoart mit Zugangsdaten. Höchstens ein Konto einer Art per
-`single_instance` im Manifest, an allen Konto-Türen (183); „Dieses Gerät“ in der
-Auswahl führt dann zur Reparatur oder zur Zeile (182). Ein Klick in den ersten
-Sekunden am Desktop lässt den Start-Durchlauf erzwungen laufen; sein Satz nennt
-Fehler sofort. Die Typen dafür sind erzeugt
-statt von Hand gespiegelt. ↻ im Test (Handy ohne Testläufer).
+Am iPhone erledigt und im Feldtest bestätigt (PR-A bis PR-D, PR-F, PR-G; siehe
+„Erledigt“). Offen ist nur Android:
 
 ✅ **PR-E:** Android fragt beim Start einmal selbst (172). Weil Android nicht
 sagen kann, ob es je gefragt hat, merkt sich Aperio jede Anfrage auf dem Gerät
@@ -1613,28 +1550,6 @@ leer); ohne Merker meldet die Brücke „noch nie gefragt“, und die Kernregel
 (`ask_on_start`) fragt wie unter iOS. Danach liest sie „unbestimmt“, und
 „Zugriff erlauben…“ fragt bzw. führt in die Einstellungen. ↻ im Test (Handy
 ohne Testläufer).
-
-✅ **PR-F entfällt:** Gemessen am 2026-10-03 auf Tonis iPhone: Nach der Freigabe
-kamen alle 8 Kalender und alle 5 Erinnerungslisten mit ihren alten Kennungen
-zurück (nichts weggefallen, nichts neu). Es gibt nichts zu übernehmen.
-
-✅ **PR-G (186, 187):** Im selben Feldtest meldete iOS für die Erinnerungen eine
-Sekunde nach der Zustimmung wieder „noch nie gefragt“ und blieb dabei, bis
-Aperio neu startete; jede weitere Anfrage beantwortete iOS sofort mit
-„erteilt“, ohne Dialog, und Aperio sagte trotzdem „nicht erteilt“ und schickte
-in die Einstellungen. Zwei Änderungen: Die Brücke hält einen einzigen
-`EKEventStore` für den ganzen Lauf und frischt ihn nach einer Zustimmung mit
-`reset()` auf (186), statt ihn zu ersetzen — der Wechsel hatte binnen einer
-Sekunde zwei neue Stores erzeugt (drei im Lauf) und gerade den mit der frischen
-Zustimmung verworfen. Solange eine Anfrage läuft, setzt nichts den Store zurück;
-kommt danach eine leere Liste, folgt einmal ein weiterer `reset()`. Und eine Zustimmung in diesem Lauf entscheidet ein späteres „noch
-nie gefragt“ (`cal_core::os_access::settled_by_grant`, 187); „verweigert“,
-„eingeschränkt“ und „nur hinzufügen“ gehen immer vor, nichts wird über den Lauf
-hinaus gemerkt. Die Brücke meldet die Zustimmung als `granted_this_run`
-(Vertrag: `shared/contracts/deviceAccessStatus.json`, den Rusts Test liest und
-an dem `check-ffi-bridges.mjs` die Schlüssel beider Brücken prüft), das Protokoll
-nennt, wann sie den Status entschieden hat. ✓ im Einsatz (Build vom 2026-10-04,
-von Toni getestet).
 
 ### B13 · Abhaken am Handy wartet auf den Erinnerungs-Durchlauf (218-220) `[ ]`
 
@@ -4390,6 +4305,13 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
     niemand erfährt (98). Ein stilles Speichern bleibt trotzdem unmöglich,
     solange Aperio kein iTIP selbst verschickt.
 
+- **Folge-PR „Ausnahmen beim Teilen“** (unter „Termin-Wiederholung zieht in den
+  Kern“) — der erledigte Teil; was daran offen ist, steht oben.
+  - ✅ CalDAV `create_task_list`: MKCALENDAR läuft seit PR 7 (7950e08b)
+    über `send_write`. Eine Wiederholung, die 405 bekommt, ist die Liste des
+    ersten Versuchs, jede andere Ablehnung einer Wiederholung unsicher
+    (`a_replayed_mkcalendar_reads_its_answer_as_the_first_attempts`).
+
 ### 🟠 B. Teilweise umgesetzt / kleinere Lücken — erledigt
 
 #### B1 · Woche-Start konfigurierbar (§5.2) ✅ erledigt
@@ -4420,6 +4342,97 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 
 - [-] Per-Vorkommen-Sound-Override, ohne das Vorkommen aus der Serie herauslösen zu müssen.  
   ↳ HINFÄLLIG: §14.4 wurde am 2026-06-04 (27459041) umgeschrieben — der Item-Override ist per Design serien-gebunden. Eine Vorkommen-Ebene wäre ein NEUER Wunsch, keine Lücke.
+#### B12 · Gerätekonto nach dem Telefonwechsel (162-173) `[~]` — erledigte Punkte
+
+✅ **PR-A:** Nach dem Umzug per Schnellstart auf ein neues iPhone kamen Aperios
+Daten mit, die iOS-Freigabe für Kalender und Erinnerungen nicht; Aperio fragte
+nur beim Anlegen des Kontos, prüfte den Status nie und hielt den leeren Katalog
+für „lädt noch“. Jetzt fragt Aperio beim Start, wenn es ein Gerätekonto gibt
+und iOS auf diesem Telefon noch nie gefragt hat (`cal_core::os_access`, 166),
+nach dem Entsperren und dem ersten Bild, auf einer eigenen Warteschlange. Nach
+der Freigabe frischt die Brücke ihren `EKEventStore` auf (seit PR-G mit `reset()`
+statt eines neuen Stores), das Konto lädt neu
+(`warm_all_queued`: am Handy ging eine Anfrage während eines Durchlaufs bisher
+verloren), und ein Satz sagt, was erteilt wurde. Das Protokoll nennt den
+Zugriff vorher und nachher sowie, wie sich die Kalenderliste änderte (geblieben,
+weggefallen, neu) oder dass sie nach einem Fehler unverändert wiederkam — daran
+sieht man, ob iOS die Kennungen behalten hat. Konten, die über den Abgleich
+ankommen, gehen einem laufenden Durchlauf ebenfalls nicht mehr verloren.
+✓ im Einsatz (Feldtest am iPhone, 2026-10-03/04, Toni).
+
+✅ **PR-B:** Ohne vollen Zugriff verweigert der Adapter jedes Lesen und
+Schreiben (`cal_core::Error::AccessNotGranted`, Marke `access-not-granted`,
+getragen als `forbidden`). Vorher meldete Löschen Erfolg, ohne etwas zu tun
+(und vergaß Gruppierung und private Erinnerungen auf allen Geräten), und „nur
+hinzufügen“ (171: zählt als kein Zugriff) hätte mit seinem einen virtuellen
+Kalender die echten aus dem Zwischenspeicher verdrängt. Am Handy sagt jedes
+Schreiben eine Ablehnung als Satz (`writeErrorMessage`), nicht nur der
+Termin-Editor. ✓ im Einsatz (Feldtest am iPhone, 2026-10-03/04, Toni).
+
+✅ **PR-C:** Der Cache merkt sich die Fehlerart (`failure_kind`: access, auth,
+sonst nichts; Migration 46) statt sie aus Wörtern zu raten. Fehlt der Zugriff,
+sperrt das die ganze Familie (Kalender oder Listen) für das Nachladen beim
+Lesen (`access_withheld`); der Warm-Durchlauf fragt weiter, eine Freigabe hebt
+die Sperre. Die Fehlerliste nennt eine gesperrte Familie einmal statt jede
+Kennung, sagt `no_access` und `cause`, und ein Fehler steht nur noch einmal
+im Protokoll, nicht bei jedem gleichen Versuch. „Neu synchronisieren“ behält
+die letzte erfolgreiche Aktualisierung (`last_success_at`). ✓ im Einsatz (Feldtest am iPhone, 2026-10-03/04, Toni).
+
+✅ **PR-D1:** Fehlt der Zugriff, trägt die Kontozeile ein Abzeichen, das den
+fehlenden Speicher nennt („Kein Zugriff“, „Kalender ohne Zugriff“,
+„Erinnerungen ohne Zugriff“), und die Aktion „Zugriff erlauben…“. Was sie tut, entscheidet der Kern
+(`cal_core::os_access::repair_for`): fragen, solange das System fragt (unter
+Android, bis es „nicht mehr fragen“ meldet), sonst ein Dialog, der sagt, was in
+den Einstellungen fehlt, und sie öffnet; bei einer Einschränkung nur die
+Erklärung. Kommt Aperio wieder nach vorn und der Zugriff ist da, während der
+Cache das Konto noch sperrt (`restorable`), oder ist seit dem letzten Blick ein
+Speicher lesbar geworden (beim Neustart der gemerkte Blick des letzten Laufs:
+iOS beendet Apps womöglich bei geänderten Rechten), lädt es sofort neu und
+sagt es an; nach einem Weg in die Einstellungen, der nichts änderte, sagt es,
+wofür der Zugriff noch fehlt. Unter Android meldet ein ohne Antwort
+geschlossener Dialog dasselbe wie „nicht mehr fragen“, und nichts trennt beides;
+der Dialog behauptet deshalb nichts darüber. ✓ im Einsatz (Feldtest am iPhone, 2026-10-03/04, Toni).
+
+✅ **PR-D2:** Der Satz am Ende eines Durchlaufs nennt, was nicht aktualisiert
+wurde („Externe Daten aktualisiert, außer: …“; nichts gelesen: „konnten nicht
+aktualisiert werden“, dann die Warnung mit Ursache; nichts gelesen und nichts
+bestätigt (erster Netzaussetzer) oder kein Ergebnis: „Aktualisierung externer
+Daten beendet“), aus dem Kern (`CacheRefreshStatus.outcome`, dieselbe
+Menge wie die Fehleranzeige); Genanntes wird nicht noch einmal angesagt, die
+Hinweise erscheinen mit dem Satz (180). Die Ursache ist ein Typ mit Rang im Kern
+(`RefreshCause`, Zugriff vor Anmeldung vor Sonstigem, 181); Banner und Ansagen
+lesen ihn ab, eine schwerere Ursache wird erneut angesagt (185). Fehlt einem
+Konto der Zugriff, steht im Synchronisieren-Bereich eine Zeile mit Knopf „Zu
+den Konten“ (184), am Desktop eine Zeile. „Neu verbinden“ nur bei Anmeldeproblem
+und Kontoart mit Zugangsdaten. Höchstens ein Konto einer Art per
+`single_instance` im Manifest, an allen Konto-Türen (183); „Dieses Gerät“ in der
+Auswahl führt dann zur Reparatur oder zur Zeile (182). Ein Klick in den ersten
+Sekunden am Desktop lässt den Start-Durchlauf erzwungen laufen; sein Satz nennt
+Fehler sofort. Die Typen dafür sind erzeugt
+statt von Hand gespiegelt. ✓ im Einsatz (Feldtest am iPhone, 2026-10-03/04, Toni).
+
+✅ **PR-F entfällt:** Gemessen am 2026-10-03 auf Tonis iPhone: Nach der Freigabe
+kamen alle 8 Kalender und alle 5 Erinnerungslisten mit ihren alten Kennungen
+zurück (nichts weggefallen, nichts neu). Es gibt nichts zu übernehmen.
+
+✅ **PR-G (186, 187):** Im selben Feldtest meldete iOS für die Erinnerungen eine
+Sekunde nach der Zustimmung wieder „noch nie gefragt“ und blieb dabei, bis
+Aperio neu startete; jede weitere Anfrage beantwortete iOS sofort mit
+„erteilt“, ohne Dialog, und Aperio sagte trotzdem „nicht erteilt“ und schickte
+in die Einstellungen. Zwei Änderungen: Die Brücke hält einen einzigen
+`EKEventStore` für den ganzen Lauf und frischt ihn nach einer Zustimmung mit
+`reset()` auf (186), statt ihn zu ersetzen — der Wechsel hatte binnen einer
+Sekunde zwei neue Stores erzeugt (drei im Lauf) und gerade den mit der frischen
+Zustimmung verworfen. Solange eine Anfrage läuft, setzt nichts den Store zurück;
+kommt danach eine leere Liste, folgt einmal ein weiterer `reset()`. Und eine Zustimmung in diesem Lauf entscheidet ein späteres „noch
+nie gefragt“ (`cal_core::os_access::settled_by_grant`, 187); „verweigert“,
+„eingeschränkt“ und „nur hinzufügen“ gehen immer vor, nichts wird über den Lauf
+hinaus gemerkt. Die Brücke meldet die Zustimmung als `granted_this_run`
+(Vertrag: `shared/contracts/deviceAccessStatus.json`, den Rusts Test liest und
+an dem `check-ffi-bridges.mjs` die Schlüssel beider Brücken prüft), das Protokoll
+nennt, wann sie den Status entschieden hat. ✓ im Einsatz (Build vom 2026-10-04,
+von Toni getestet).
+
 #### B13 · Abhaken am Handy wartet auf den Erinnerungs-Durchlauf (218-220) `[ ]` — erledigte Punkte
 
 - [-] **219 · Kein 5-Minuten-Speicher am Handy.** Entschieden: Der
