@@ -13,10 +13,59 @@ react to them.
 3. You can add several reminders per entry.
 4. **Save**.
 
+## Notifications on Windows
+
+Windows shows notifications only from programs that have an entry in the
+Start menu. Aperio runs without an installer, so it has no such entry until
+you ask for one. Without it, Windows shows none of Aperio's reminders: no
+banner, and nothing in the notification center. Aperio does not show the
+reminder in its own window instead.
+
+Aperio never creates the entry by itself. Three places offer it:
+
+- **Settings, General, Windows notifications.** This section explains why the
+  entry is needed and says where it stands. **Set up notifications** creates
+  it, and **Remove Start menu entry** removes it again. The section exists
+  only on Windows.
+- **A hint after a hidden reminder.** When a reminder comes due and Windows
+  would hide it, Aperio opens the dialog **Reminders are not showing**. **Set
+  up notifications** creates the entry, and **Not now** closes the dialog.
+  Aperio asks at most once per start. While its window does not have focus,
+  or another dialog is open, the hint waits. After the next start it can ask
+  again, also if you removed the entry or skipped the wizard step.
+- **The first-launch wizard.** On a fresh install it has a step **Reminders
+  on Windows** after the language (see
+  [Chapter 01](/guides/tutorial/01-installation/)). **Next** moves on without
+  setting up.
+
+The entry is a shortcut named Aperio in your own Start menu folder. It needs
+no administrator rights and applies only to your Windows user. Once it
+exists, Aperio also appears in the Start menu, and you can start it from
+there.
+
+If you move Aperio's folder or start another copy of Aperio, the entry still
+points at the old place. At start, Aperio points its entry at itself again.
+It never creates a missing entry at start, and it leaves alone an entry named
+Aperio that it did not make. A shortcut key you set on the entry stays.
+
+Before you delete Aperio's folder, remove the entry under **Settings,
+General, Windows notifications**. Otherwise the Start menu keeps an entry
+that leads nowhere.
+
+A development build started from a build folder (`target\debug` or
+`target\release`) shows its notifications as **Windows PowerShell**. It needs
+no entry, and the section offers no buttons there.
+
+> **Screen-reader note:** The hint dialog opens with focus on its
+> explanation, so you hear why before you hear the buttons. `Tab` moves to
+> **Set up notifications**, then to **Not now**. After setting up, Aperio
+> says "Notifications set up. Windows can now show Aperio's reminders." and
+> the dialog closes.
+
 ## How reminders appear
 
-At the due time, Aperio shows a notification – as a system notification
-and/or as a hint inside the app, depending on your settings. Optionally a
+At the due time, Aperio shows a notification of your operating system. On
+Windows this needs the Start menu entry described above. Optionally a
 **sound** is played.
 
 In the notification you can:
@@ -161,7 +210,8 @@ overrides the one above it:
 
 Every level offers the same choices:
 
-- **System default** — your operating system's notification sound.
+- **System default** — your operating system's notification sound. On
+  Windows this is the Windows default notification sound.
 - **Silent** — a visual-only notification, no sound.
 - **Custom sound** — import your own audio file (`.mp3`, `.ogg`, `.wav`,
   `.m4a`, `.aac`, `.flac`, up to 5 MB). Use **Test** to preview it and
@@ -178,16 +228,11 @@ sounds the same everywhere.
 
 ## Notification settings
 
-In the **settings** under **Notifications** you define:
-
-- whether system notifications are used,
-- whether and which **sound** is played (see *Notification sounds* above),
-- the default snooze duration,
-- the default lead time for new events.
-
-> **Note:** For system notifications to appear, Aperio needs the
-> corresponding permission from your operating system. You are asked for it
-> the first time.
+The desktop settings have no page of their own for notifications. The sound
+is set as described under *Notification sounds* above. Windows asks for no
+permission: whether it shows Aperio's reminders depends on the Start menu
+entry, see *Notifications on Windows* above. On the phone, the permission is
+described under [Mobile app](/guides/mobile/).
 
 > **Screen-reader note:** Reminders are announced through a live region, so
 > you notice them even without a visible focus change. The "Open",

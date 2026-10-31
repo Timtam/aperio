@@ -16,7 +16,10 @@ Aperio wird als Archiv (ZIP) bereitgestellt:
 
 > **Portabel:** Liegt im Programmordner ein Ordner `data/`, speichert
 > Aperio seine Daten dort – praktisch für USB-Sticks. Andernfalls werden
-> die Daten im Standard-Datenverzeichnis deines Systems abgelegt.
+> die Daten im Standard-Datenverzeichnis deines Systems abgelegt. Für
+> Benachrichtigungen unter Windows braucht Aperio einen Eintrag außerhalb
+> seines Ordners: eine Verknüpfung im Startmenü, die nur angelegt wird, wenn
+> du es möchtest (siehe [Kapitel 07](/de/guides/tutorial/07-notifications/)).
 
 ## Der Erststart-Assistent
 
@@ -25,6 +28,12 @@ Daten – führt dich ein kurzer, barrierefreier Assistent durch die
 wichtigsten Punkte:
 
 - **Sprache** der Oberfläche (Standard: deine Systemsprache).
+- **Erinnerungen unter Windows** – nur unter Windows, und nur wenn
+  Benachrichtigungen noch nicht eingerichtet sind: der Startmenü-Eintrag, den
+  Windows braucht, bevor es Erinnerungen von Aperio anzeigt (siehe
+  [Kapitel 07](/de/guides/tutorial/07-notifications/)). **Benachrichtigungen
+  einrichten** legt ihn an; **Weiter** geht ohne ihn weiter. Die
+  Schrittanzeige zählt dann vier Schritte.
 - **Erstes Konto** (oder du überspringst das und legst später eines an –
   siehe [Kapitel 02](/de/guides/tutorial/02-connecting-accounts/)).
 - **Speicherort** – stelle deine Daten von einem vorhandenen Speicherort

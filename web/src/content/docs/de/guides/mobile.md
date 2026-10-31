@@ -122,6 +122,23 @@ damit Erinnerungen (und das App-Symbol-Badge) erscheinen können. Erinnerungstö
 Vorlaufzeiten und Schlummern funktionieren wie unter
 [Benachrichtigungen](/de/guides/tutorial/07-notifications/) beschrieben.
 
+Unter **Einstellungen, Allgemein, Benachrichtigungstöne** sagt eine Zeile, ob
+das Telefon die Benachrichtigungen von Aperio erlaubt: erlaubt; noch nicht
+erlaubt; nicht erlaubt, und erlauben lässt es sich nur in den
+Systemeinstellungen; oder Aperio konnte es nicht prüfen. Darunter steht ein
+Knopf:
+
+- **Benachrichtigungen erlauben**, solange das Telefon noch fragen kann. Er
+  fragt, und erlaubst du es, plant Aperio deine Erinnerungen sofort ein.
+  Danach sagt Aperio „Benachrichtigungen erlaubt.“ oder „Benachrichtigungen
+  sind weiterhin nicht erlaubt.“
+- **Systemeinstellungen öffnen** in allen anderen Fällen. Er öffnet die Seite
+  von Aperio in den Einstellungen des Telefons.
+
+Die Zeile wird neu gelesen, wenn du den Bildschirm öffnest und wenn du zur App
+zurückkehrst. Eine Änderung in den Systemeinstellungen siehst du also auf dem
+Rückweg.
+
 ## Widget auf dem Startbildschirm (iOS)
 
 **Als Nächstes** zeigt die nächsten Termine und fälligen Aufgaben auf dem

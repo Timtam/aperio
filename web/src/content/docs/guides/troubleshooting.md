@@ -125,6 +125,68 @@ already added and moves to it. If **This device** shows twice (added twice by
 an older version), every device calendar appears twice; delete one of the
 two.
 
+## Reminders don't appear on Windows
+
+Windows shows notifications only from programs that have an entry in the
+Start menu. Aperio runs without an installer and creates that entry only when
+you ask. Until then Windows stores every reminder and shows none: no banner,
+and nothing in the notification center.
+
+What you can do: open **Settings, General, Windows notifications** and choose
+**Set up notifications**. The next reminder appears; Aperio does not need a
+restart. The same button is in the hint **Reminders are not showing**, which
+Aperio opens once per start when a reminder came due while Windows would hide
+it.
+
+The section says where the entry stands:
+
+- **Not set up.** There is no entry. Set it up.
+- **Set up.** Windows can show the reminders. If they still do not appear,
+  check Windows itself (below).
+- **Not set up, although an entry named Aperio exists.** That entry was not
+  made for notifications, for example one you made yourself. **Set up
+  notifications** replaces it. **Remove Start menu entry** never touches it.
+- **Set up for another copy of Aperio**, with the path of that copy. This
+  happens after you moved Aperio's folder or started another copy. At the
+  next start Aperio points the entry at itself; **Set up notifications** does
+  it now.
+- **A development build.** Started from a build folder, it shows its
+  notifications as Windows PowerShell. There is nothing to set up.
+- **Aperio could not check the Start menu entry**, with the error. Open the
+  section again later. If the message stays, send the log with your report
+  (see below).
+
+If the entry is set up and reminders still do not appear, check Windows:
+
+- In **Windows Settings, System, Notifications**, notifications must be on,
+  and **Aperio** must not be switched off in the list of apps.
+- **Do not disturb** holds back banners. The notifications then wait in the
+  notification center.
+
+The **Reminders overview** (`Ctrl+Shift+R`) cannot tell you whether a
+notification was shown. It lists the reminders coming up, computed from your
+events and tasks. It is not a record of the notifications Windows delivered.
+
+## Reminders don't appear on the phone
+
+The phone shows Aperio's reminders only if you allow it. The app asks on
+first use; if you declined, the phone drops every reminder without a word.
+
+Under **Settings, General, Notification sounds** a line says where the
+permission stands:
+
+- **Allowed.** The phone shows the reminders; how they appear is up to its
+  system settings.
+- **Not allowed yet.** The button **Allow notifications** asks the phone. If
+  you allow it, Aperio schedules your reminders right away.
+- **Not allowed, and only the system settings can allow it.** The button
+  **Open system settings** opens Aperio's page there.
+- **Aperio could not check** whether it may show notifications. The button
+  then also opens the system settings.
+
+The line is read again when you open the screen and when you come back to
+the app, so a change made in the system settings shows on the way back.
+
 ## A task's time shifted, once
 
 Tasks with a **time of day** on a **CalDAV** account (iCloud Reminders,

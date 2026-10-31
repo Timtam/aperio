@@ -111,6 +111,20 @@ Reminders are delivered as **local notifications**. On first use the app asks fo
 appear. Reminder sounds, lead times and snooze work as described under
 [Notifications](/guides/tutorial/07-notifications/).
 
+Under **Settings, General, Notification sounds** a line says whether the
+phone allows Aperio's notifications: allowed; not allowed yet; not allowed,
+and only the system settings can allow it; or Aperio could not check. Below
+it is one button:
+
+- **Allow notifications**, while the phone can still ask. It asks, and if you
+  allow it, Aperio schedules your reminders right away. Aperio then says
+  "Notifications allowed." or "Notifications are still not allowed."
+- **Open system settings** in every other case. It opens Aperio's page in the
+  phone's settings.
+
+The line is read again when you open the screen and when you come back to
+the app, so a change made in the system settings shows on the way back.
+
 ## Home-screen widget (iOS)
 
 **Up Next** shows your next events and due tasks on the home screen. Add it the

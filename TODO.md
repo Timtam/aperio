@@ -87,7 +87,7 @@
   ↳ Der Installer (inspect → bestätigen → entpacken) ist FERTIG und über Einstellungen ▸ Plugins erreichbar. Offen ist nur die OS-Verknüpfung plus das Start-Argument in diesen bestehenden Flow zu geben.
 - [ ] `webcal://` + `calendar://` URL-Handler (Feed-Abo vs. Einzeltermin unterscheiden) (§17.2)
 - [ ] Plattform-Registrierung per-User ohne Admin: Windows-Registry (HKCU), macOS `CFBundleDocumentTypes`, Linux `.desktop` MimeType (§17.1/§17.2)
-- [ ] Erst-Start-Assistent „Systemintegration einrichten" (Checkboxen .ics / webcal / .aperio + optional Desktop-Verknüpfung; tastatur- + screenreader-bedienbar) (§17.3)
+- [ ] Erst-Start-Assistent „Systemintegration einrichten" (Checkboxen .ics / webcal / .aperio; tastatur- + screenreader-bedienbar) (§17.3; eine Desktop-Verknüpfung gibt es nicht, nur den Startmenü-Eintrag für Benachrichtigungen, §17.5)
 - [ ] CLI-Argument-/Deep-Link-Handling für „mit Datei/URL geöffnet"
 - Einstieg: `src-tauri/tauri.conf.json` (fileAssociations / deep-link), `src-tauri/src/lib.rs` (argv + deep-link), neuer Import-Dialog im Frontend.
 
@@ -134,9 +134,12 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
     `show_main_window`, dann ein Ereignis an die Oberfläche: `getEventById`
     → `occurrenceOfSeries` → `openEventDialog`; Klicks aus dem Info-Center
     erreichen ihn evtl. nicht) oder `aperio://`-Link mit Deep-Link- und
-    Single-Instance-Plugin. Vorher klären: Der Toast nutzt die App-Id
-    `com.aperio.app`, registriert und angeheftet ist `Aperio.Calendar`
-    (`src-tauri/src/platform.rs`).
+    Single-Instance-Plugin. Geklärt am 2026-10-31: Der Toast trägt
+    `com.aperio.app`, und dieselbe Id trägt der Startmenü-Eintrag, ohne den
+    Windows gar nichts zeigt (`src-tauri/src/notification_shortcut.rs`,
+    DESIGN §14.3); `Aperio.Calendar` ist entfernt. Ein `ToastActivatorCLSID`
+    an diesem Eintrag ist die Stelle, an der Klicks aus dem Info-Center
+    andocken würden.
   - **Auch:** die Erinnerungsliste des Desktops trägt weder Kalender noch
     Beginn (`RemindersDialog.openRow` öffnet die Serie statt des Vorkommens,
     externe Termine ohne Kalender-Id evtl. gar nicht). Ein Tipp auf die
@@ -668,7 +671,21 @@ Siehe DESIGN §4.2.
   Gebaut sind Standard-Erinnerungen nur je Kalender. Für Aufgaben gibt es
   keine Standard-Erinnerung am Eintrag, weder global noch je Liste, nur die
   globalen Tagesstart-Erinnerungen an Fristen (Einstellungen → Aufgaben, je
-  Aufgabe überschreibbar als „Frühe Erinnerung“).
+  Aufgabe überschreibbar als „Frühe Erinnerung“).  
+  ↳ Teilweise behoben mit dem Startmenü-Eintrag (2026-10-31): In
+  `07-notifications.md` (beide Sprachen) ersetzt ein Verweis auf den neuen
+  Abschnitt „Benachrichtigungen unter Windows“ die Einstellungsseite
+  „Benachrichtigungen“ (Schalter, Snooze-Dauer, Vorlaufzeit) und die
+  Berechtigungsfrage; der „Hinweis in der App“ ist gestrichen. Alles andere
+  oben ist weiter offen.
+- [ ] **macOS: „Systemsound“ ist dort ebenfalls stumm.** Aus dem Code
+  gelesen: `notify-rust` reicht den Ton-Namen an `mac-notification-sys`
+  weiter, und ohne Namen geht ein leerer Ton hinaus. Den Standardton spielt
+  macOS nur für den exakten Namen `"NSUserNotificationDefaultSoundName"`.
+  Aperio setzt einen Namen nur unter Windows (`SYSTEM_SOUND` in
+  `src-tauri/src/os_notification.rs`); betroffen sind Erinnerungen,
+  Tagesstart und Sync-Konflikte. Zu tun: `SYSTEM_SOUND` unter macOS auf diesen
+  Namen setzen. Ohne Mac noch nicht geändert.
 
 ---
 
@@ -4215,6 +4232,22 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 
 - [-] Per-Vorkommen-Sound-Override, ohne das Vorkommen aus der Serie herauslösen zu müssen.  
   ↳ HINFÄLLIG: §14.4 wurde am 2026-06-04 (27459041) umgeschrieben — der Item-Override ist per Design serien-gebunden. Eine Vorkommen-Ebene wäre ein NEUER Wunsch, keine Lücke.
+- [x] **Windows zeigt Erinnerungen, mit Ton** (2026-10-31, Branch
+  `fix/windows-toast-identity`). Windows legte jeden Toast ab und zeigte
+  keinen: Der portablen App fehlte ein Startmenü-Eintrag mit der App-Id
+  `com.aperio.app`. Aperio legt ihn nur auf Wunsch an, an drei Stellen:
+  Einstellungen → Allgemein → Windows-Benachrichtigungen (auch Entfernen),
+  ein Hinweis einmal pro App-Start nach einer verborgenen Erinnerung, ein
+  Schritt im Erststart-Assistenten. Zeigt der eigene Eintrag auf eine andere
+  Kopie, richtet Aperio ihn beim Start auf sich; einen fehlenden legt es dort
+  nie an, einen fremden fasst es nie an. Der Systemton klingt jetzt unter
+  Windows (`"Default"`), bei Erinnerungen, Tagesstart und Sync-Konflikten
+  (`notify_system`). Der tote Schlüssel `Aperio.Calendar` wird beim Start
+  gelöscht, der Prozess trägt `com.aperio.app`. Am Handy sagt Einstellungen →
+  Allgemein → Benachrichtigungstöne, ob Benachrichtigungen erlaubt sind, mit
+  „Benachrichtigungen erlauben“ oder „Systemeinstellungen öffnen“. DESIGN
+  §14.3, §14.4, §17.5.
+
 #### B9 · Personen einer Liste: ein Fehler wird gesagt (130) `[x]` — erledigt
 
 ✅ Das Feld „Zugewiesen an“ verschwand bei Toni von jeder Vikunja-Aufgabe. Die

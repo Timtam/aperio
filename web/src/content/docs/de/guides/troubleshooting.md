@@ -137,6 +137,77 @@ Konto schon hinzugefügt ist, und springt zu ihm. Steht **Dieses Gerät** zweima
 da (von einer älteren Version zweimal hinzugefügt), erscheint jeder
 Gerätekalender doppelt; lösche eines der beiden.
 
+## Erinnerungen erscheinen unter Windows nicht
+
+Windows zeigt Benachrichtigungen nur von Programmen, die einen Eintrag im
+Startmenü haben. Aperio läuft ohne Installation und legt diesen Eintrag nur
+an, wenn du es möchtest. Bis dahin legt Windows jede Erinnerung ab und zeigt
+keine an: kein Banner und nichts im Benachrichtigungscenter.
+
+Was du tun kannst: Öffne **Einstellungen, Allgemein,
+Windows-Benachrichtigungen** und wähle **Benachrichtigungen einrichten**. Die
+nächste Erinnerung erscheint; Aperio muss dafür nicht neu starten. Denselben
+Knopf hat der Hinweis **Erinnerungen werden nicht angezeigt**, den Aperio
+einmal pro Start öffnet, wenn eine Erinnerung fällig wurde, die Windows
+verborgen hätte.
+
+Der Abschnitt sagt, wie es um den Eintrag steht:
+
+- **Nicht eingerichtet.** Es gibt keinen Eintrag. Richte ihn ein.
+- **Eingerichtet.** Windows kann die Erinnerungen anzeigen. Erscheinen sie
+  trotzdem nicht, prüfe Windows selbst (unten).
+- **Nicht eingerichtet, obwohl es einen Eintrag namens Aperio gibt.** Dieser
+  Eintrag wurde nicht für Benachrichtigungen angelegt, zum Beispiel einer,
+  den du selbst angelegt hast. **Benachrichtigungen einrichten** ersetzt ihn.
+  **Startmenü-Eintrag entfernen** fasst ihn nie an.
+- **Für eine andere Kopie von Aperio eingerichtet**, mit dem Pfad dieser
+  Kopie. Das passiert, wenn du den Ordner von Aperio verschoben oder eine
+  andere Kopie gestartet hast. Beim nächsten Start richtet Aperio den Eintrag
+  auf sich selbst; **Benachrichtigungen einrichten** tut es sofort.
+- **Eine Entwicklungsversion.** Aus einem Build-Ordner gestartet, zeigt sie
+  ihre Benachrichtigungen als Windows PowerShell an. Es gibt nichts
+  einzurichten.
+- **Aperio konnte den Startmenü-Eintrag nicht prüfen**, mit dem Fehler.
+  Öffne den Abschnitt später noch einmal. Bleibt die Meldung, schick das
+  Protokoll mit deinem Bericht (siehe unten).
+
+Ist der Eintrag eingerichtet und erscheinen Erinnerungen trotzdem nicht,
+prüfe Windows:
+
+- Unter **Windows-Einstellungen, System, Benachrichtigungen** müssen
+  Benachrichtigungen an sein, und **Aperio** darf in der Liste der Apps nicht
+  ausgeschaltet sein.
+- **Nicht stören** hält Banner zurück. Die Benachrichtigungen warten dann im
+  Benachrichtigungscenter.
+
+Die **Erinnerungs-Übersicht** (`Strg+Umschalt+R`) kann dir nicht sagen, ob
+eine Benachrichtigung angezeigt wurde. Sie listet die anstehenden
+Erinnerungen, berechnet aus deinen Terminen und Aufgaben. Sie ist kein
+Protokoll der Benachrichtigungen, die Windows zugestellt hat.
+
+## Erinnerungen erscheinen am Handy nicht
+
+Das Telefon zeigt die Erinnerungen von Aperio nur, wenn du es erlaubst. Die
+App fragt bei der ersten Nutzung danach; hast du abgelehnt, verwirft das
+Telefon jede Erinnerung, ohne etwas zu sagen.
+
+Unter **Einstellungen, Allgemein, Benachrichtigungstöne** sagt eine Zeile, wie
+es um die Erlaubnis steht:
+
+- **Erlaubt.** Das Telefon zeigt die Erinnerungen an; wie, bestimmen seine
+  Systemeinstellungen.
+- **Noch nicht erlaubt.** Der Knopf **Benachrichtigungen erlauben** fragt das
+  Telefon. Erlaubst du es, plant Aperio deine Erinnerungen sofort ein.
+- **Nicht erlaubt, und erlauben lässt es sich nur in den
+  Systemeinstellungen.** Der Knopf **Systemeinstellungen öffnen** öffnet dort
+  die Seite von Aperio.
+- **Aperio konnte nicht prüfen**, ob es Benachrichtigungen zeigen darf. Der
+  Knopf öffnet dann ebenfalls die Systemeinstellungen.
+
+Die Zeile wird neu gelesen, wenn du den Bildschirm öffnest und wenn du zur App
+zurückkehrst. Eine Änderung in den Systemeinstellungen siehst du also auf dem
+Rückweg.
+
 ## Eine Aufgabenzeit hat sich einmalig verschoben
 
 Aufgaben mit einer **Uhrzeit** auf einem **CalDAV**-Konto (iCloud Erinnerungen,
