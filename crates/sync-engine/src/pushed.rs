@@ -49,6 +49,6 @@ mod tests {
         assert_eq!(head_until(&bytes, cutoff), early.len() + 1);
         assert_eq!(head_until(format!("{late}\n").as_bytes(), cutoff), 0);
         // A torn last line is never part of it.
-        assert_eq!(head_until(format!("{early}").as_bytes(), cutoff), 0);
+        assert_eq!(head_until(early.as_bytes(), cutoff), 0);
     }
 }
