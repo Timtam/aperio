@@ -147,7 +147,17 @@
     "oauthNoCode": "Die Anmeldung hat keinen Autorisierungscode zurückgegeben. Bitte versuche es erneut.",
     "sftpFieldsRequired": "Bitte Host, Benutzername und Pfad eingeben.",
     "syncFieldsRequired": "Bitte zuerst die erforderlichen Felder ausfüllen.",
-    "syncPreviewStale": "Ziel geändert — prüfe den Datensatz erneut, bevor du beitrittst."
+    "syncPreviewStale": "Ziel geändert — prüfe den Datensatz erneut, bevor du beitrittst.",
+    "notificationPermission": {
+      "statusGranted": "Erlaubt. Das Telefon zeigt die Erinnerungen von Aperio an; wie, bestimmen seine Systemeinstellungen.",
+      "statusAskable": "Noch nicht erlaubt. Ohne Erlaubnis zeigt das Telefon keine Erinnerungen von Aperio an.",
+      "statusBlocked": "Nicht erlaubt. Das Telefon zeigt die Erinnerungen von Aperio nicht an, und erlauben lässt es sich nur in seinen Systemeinstellungen.",
+      "statusUnknown": "Aperio konnte nicht prüfen, ob es Benachrichtigungen zeigen darf.",
+      "allow": "Benachrichtigungen erlauben",
+      "openSettings": "Systemeinstellungen öffnen",
+      "allowedDone": "Benachrichtigungen erlaubt.",
+      "stillNotAllowed": "Benachrichtigungen sind weiterhin nicht erlaubt."
+    }
   },
   "common": {
     "colorComposer": {

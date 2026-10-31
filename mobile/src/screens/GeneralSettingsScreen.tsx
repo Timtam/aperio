@@ -3,7 +3,9 @@ import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  Linking,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -37,12 +39,24 @@ import {
 import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
 import { useAppBadgePref } from '../state/appBadge';
 import { useAppLockPref } from '../state/appLock';
+import { ensurePermission, rescheduleReminders } from '../reminders/scheduler';
+import {
+  useNotificationPermission,
+  type NotificationPermission,
+} from '../state/notificationPermission';
 import { useBackgroundSyncPref } from '../state/backgroundSync';
 import { useHapticsPref } from '../state/haptics';
 import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
 import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { useThemeModePref, type ThemeModeChoice } from '../theme/themeMode';
+
+/** What the notification-permission row says in each state. */
+const PERMISSION_STATUS_KEY = {
+  granted: 'mobile.notificationPermission.statusGranted',
+  askable: 'mobile.notificationPermission.statusAskable',
+  blocked: 'mobile.notificationPermission.statusBlocked',
+} as const satisfies Record<NotificationPermission, string>;
 
 // General settings — the mobile twin of the desktop Settings "General" tab,
 // pushed from the Settings hub so the hub stays a clean list of destinations
@@ -80,6 +94,41 @@ export default function GeneralSettingsScreen() {
   const globalSound = useSoundPref('sound.global');
   // Device-local light/dark/system theme mode (default: follow the OS).
   const [themeMode, setThemeMode] = useThemeModePref();
+  // Whether the phone lets Aperio show its reminders (the twin of the
+  // desktop's Windows-notifications section). Askable: one tap asks the OS,
+  // and a yes schedules the reminders at once. Otherwise only the system
+  // settings can change it; the row is read again on the way back.
+  const { permission, refresh: refreshPermission } = useNotificationPermission();
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  const onPermissionAction = useCallback(() => {
+    if (permissionBusy) return;
+    if (permission !== 'askable') {
+      void Linking.openSettings().catch(() => {});
+      return;
+    }
+    setPermissionBusy(true);
+    void (async () => {
+      try {
+        const granted = await ensurePermission().catch(() => false);
+        await refreshPermission();
+        if (granted) void rescheduleReminders();
+        AccessibilityInfo.announceForAccessibility(
+          t(
+            granted
+              ? 'mobile.notificationPermission.allowedDone'
+              : 'mobile.notificationPermission.stillNotAllowed',
+          ),
+        );
+      } finally {
+        setPermissionBusy(false);
+      }
+    })();
+  }, [permission, permissionBusy, refreshPermission, t]);
+  const permissionActionLabel = t(
+    permission === 'askable'
+      ? 'mobile.notificationPermission.allow'
+      : 'mobile.notificationPermission.openSettings',
+  );
   // Device-local haptic feedback for the external-sync start/end cues (default on).
   const [haptics, setHaptics] = useHapticsPref();
   // Device-local app-icon badge (today's open tasks + upcoming events; default on).
@@ -289,6 +338,29 @@ export default function GeneralSettingsScreen() {
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.settings.notifications.hint')}
         </Text>
+        <Text style={styles.hint} accessibilityRole="text">
+          {t(
+            permission == null
+              ? 'mobile.notificationPermission.statusUnknown'
+              : PERMISSION_STATUS_KEY[permission],
+          )}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={permissionActionLabel}
+          accessibilityState={{ disabled: permissionBusy, busy: permissionBusy }}
+          disabled={permissionBusy}
+          onPress={onPermissionAction}
+          style={({ pressed }) => [
+            styles.button,
+            pressed && styles.pressed,
+            permissionBusy && styles.disabled,
+          ]}
+        >
+          <Text style={styles.buttonText} importantForAccessibility="no">
+            {permissionActionLabel}
+          </Text>
+        </Pressable>
         {!globalSound.loading && (
           <SoundSelect
             label={t('dialogs.settings.notifications.globalLabel')}
@@ -357,4 +429,14 @@ const makeStyles = (c: ThemeColors) =>
     section: { gap: 8 },
     heading: { fontSize: 17, fontWeight: '700', color: c.textLabel },
     hint: { fontSize: 14, color: c.textSecondary, lineHeight: 20 },
+    button: {
+      paddingVertical: 14,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    buttonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    pressed: { opacity: 0.7 },
+    disabled: { opacity: 0.5 },
   });

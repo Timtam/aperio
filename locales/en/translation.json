@@ -147,7 +147,17 @@
     "oauthNoCode": "The sign-in did not return an authorization code. Please try again.",
     "sftpFieldsRequired": "Please enter the host, username and path.",
     "syncFieldsRequired": "Please fill in the required fields first.",
-    "syncPreviewStale": "Target changed — check the dataset again before joining."
+    "syncPreviewStale": "Target changed — check the dataset again before joining.",
+    "notificationPermission": {
+      "statusGranted": "Allowed. The phone shows Aperio's reminders; how they appear is up to its system settings.",
+      "statusAskable": "Not allowed yet. Without permission the phone shows none of Aperio's reminders.",
+      "statusBlocked": "Not allowed. The phone does not show Aperio's reminders, and only its system settings can allow them.",
+      "statusUnknown": "Aperio could not check whether it may show notifications.",
+      "allow": "Allow notifications",
+      "openSettings": "Open system settings",
+      "allowedDone": "Notifications allowed.",
+      "stillNotAllowed": "Notifications are still not allowed."
+    }
   },
   "common": {
     "colorComposer": {
