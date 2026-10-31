@@ -31,6 +31,8 @@ struct RecordingHooks {
     fail: bool,
     /// How many log files the remote held at each heartbeat.
     heartbeats: Mutex<Vec<usize>>,
+    /// Heartbeats and catch-ups, in the order they ran.
+    order: Mutex<Vec<&'static str>>,
 }
 
 #[async_trait::async_trait]
@@ -50,11 +52,13 @@ impl SyncRoundHooks for RecordingHooks {
             .await?
             .len();
         self.heartbeats.lock().unwrap().push(held);
+        self.order.lock().unwrap().push("heartbeat");
         Ok(())
     }
 
     async fn catch_up(&self, _adapter: &dyn SyncAdapter) -> SyncResult<ApplyReport> {
         *self.catch_ups.lock().unwrap() += 1;
+        self.order.lock().unwrap().push("catch_up");
         if self.fail {
             return Err(SyncError::internal("offline"));
         }
@@ -66,6 +70,11 @@ impl SyncRoundHooks for RecordingHooks {
             ..ApplyReport::default()
         })
     }
+}
+
+/// This device.
+fn laptop() -> DeviceId {
+    DeviceId::from_string("dev-laptop".into())
 }
 
 fn mark_exact(store: &FakeStore) {
@@ -122,6 +131,7 @@ async fn device(
         catch_ups: Mutex::new(0),
         fail,
         heartbeats: Mutex::new(Vec::new()),
+        order: Mutex::new(Vec::new()),
     });
     let orchestrator = SyncOrchestrator::new(
         store,
@@ -443,7 +453,7 @@ async fn a_file_an_earlier_parser_could_not_read_is_fetched_again() {
     // meanwhile must not lift the GC's guard on it.
     let raw = hooks.store.get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY).unwrap();
     assert_eq!(
-        crate::UnreadableLogs::names(raw.as_deref()),
+        crate::UnreadableLogs::names(raw.as_deref(), &laptop()),
         vec!["x.jsonl"]
     );
 }
@@ -568,24 +578,36 @@ async fn a_line_this_build_does_not_know_is_named_and_not_fetched_again_and_agai
         Some(bytes.len() as u64)
     );
     let raw = hooks.store.get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY).unwrap();
-    assert_eq!(crate::UnreadableLogs::names(raw.as_deref()), vec![name]);
+    assert_eq!(
+        crate::UnreadableLogs::names(raw.as_deref(), &laptop()),
+        vec![name]
+    );
 }
 
 #[tokio::test]
-async fn a_torn_read_is_fetched_again_and_not_named() {
+async fn a_torn_read_is_fetched_again_and_left_once_torn_again_at_its_size() {
+    // Review round 7 of #130: only a catch-up named a torn file, which an
+    // exact device never runs, so it fetched a file torn for good in every
+    // round.
     let (_tmp, orchestrator, hooks, adapter) = device(fresh_meta(), false).await;
     mark_exact(&hooks.store);
     let whole = String::from_utf8(session("dev-desktop", 1_000, 1).bytes).unwrap();
-    let name = peer_file(&adapter, format!("{whole}\n{{\"id\":\"ev").as_bytes()).await;
+    let torn = format!("{whole}\n{{\"id\":\"ev");
+    let name = peer_file(&adapter, torn.as_bytes()).await;
 
-    orchestrator.sync_now().await.expect("round");
+    orchestrator.sync_now().await.expect("round 1");
+    assert_eq!(
+        applied_length(&hooks.store, &name),
+        Some(0),
+        "fetched again"
+    );
 
-    assert_eq!(applied_length(&hooks.store, &name), Some(0));
-    assert!(hooks
-        .store
-        .get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY)
-        .unwrap()
-        .is_none());
+    orchestrator.sync_now().await.expect("round 2");
+    assert_eq!(
+        applied_length(&hooks.store, &name),
+        Some(torn.len() as u64),
+        "torn again at the same size: no read in progress"
+    );
 }
 
 // ---- Review rounds 5 and 6 of #130: what goes up, once ----------------------
@@ -793,4 +815,217 @@ async fn push_now_pushes_nothing_from_a_plaintext_device_into_an_encrypted_datas
         "{result:?}"
     );
     assert!(remote_logs(&adapter).await.is_empty());
+}
+
+// ---- Review round 7 of #130 ------------------------------------------------
+
+#[tokio::test]
+async fn the_pending_files_are_named_before_the_round_catches_up() {
+    // A catch-up takes minutes; a compactor deleting meanwhile deleted what
+    // this device then pushed again, named only after it.
+    let (tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
+    stage(&tmp, &own_file(&[1_000]));
+
+    orchestrator.sync_now().await.expect("round");
+
+    let order = hooks.order.lock().unwrap().clone();
+    assert_eq!(order.first(), Some(&"heartbeat"), "{order:?}");
+    assert!(order.contains(&"catch_up"), "{order:?}");
+}
+
+#[tokio::test]
+async fn an_older_format_is_locked_out_before_the_round_catches_up() {
+    // Nothing pending to name: the heartbeat still comes first, for the lock-out.
+    let mut meta = fresh_meta();
+    meta.schema_version = 1;
+    let (_tmp, orchestrator, hooks, _adapter) = device(meta, false).await;
+
+    orchestrator.sync_now().await.expect("round");
+
+    let order = hooks.order.lock().unwrap().clone();
+    assert_eq!(order.first(), Some(&"heartbeat"), "{order:?}");
+}
+
+#[tokio::test]
+async fn an_empty_pending_file_is_not_named() {
+    // It never goes up, yet named it cost a meta.json write at every start.
+    let (tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    stage(
+        &tmp,
+        &LogFile {
+            name: LogFileName::new(Utc::now() + chrono::Duration::hours(1), laptop()),
+            bytes: Vec::new(),
+        },
+    );
+
+    orchestrator.sync_now().await.expect("round");
+
+    assert_eq!(
+        hooks.order.lock().unwrap().clone(),
+        vec!["heartbeat"],
+        "only the round's own"
+    );
+}
+
+#[tokio::test]
+async fn a_leftover_still_on_the_remote_goes_up_whole() {
+    // An older build's push after its last round may have torn the remote
+    // copy; tail-only, nothing made it whole again.
+    let (tmp, orchestrator, hooks, adapter) = gc_passed(5_000).await;
+    let log = own_file(&[1_000, 4_000]);
+    stage(&tmp, &log);
+    adapter
+        .push_log(&LogFile {
+            name: log.name.clone(),
+            bytes: log.bytes[..20].to_vec(),
+        })
+        .await
+        .unwrap();
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LAST_ROUND_PREF_KEY,
+            &Utc.timestamp_opt(2_000 + 600, 0).unwrap().to_rfc3339(),
+        )
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    assert_eq!(
+        remote_logs(&adapter).await,
+        vec![(
+            log.name.to_filename(),
+            String::from_utf8(log.bytes.clone()).unwrap()
+        )]
+    );
+}
+
+/// Lists no log names; everything else as the local-FS remote does.
+struct ListlessAdapter {
+    inner: LocalFsSyncAdapter,
+}
+
+#[async_trait::async_trait]
+impl SyncAdapter for ListlessAdapter {
+    async fn test_connection(&self) -> SyncResult<()> {
+        self.inner.test_connection().await
+    }
+    async fn fetch_meta(&self) -> SyncResult<Option<MetaJson>> {
+        self.inner.fetch_meta().await
+    }
+    async fn push_meta(&self, meta: &MetaJson) -> SyncResult<()> {
+        self.inner.push_meta(meta).await
+    }
+    async fn fetch_new_logs(&self, since: &sync_core::DeviceCursor) -> SyncResult<Vec<LogFile>> {
+        self.inner.fetch_new_logs(since).await
+    }
+    async fn push_log(&self, log: &LogFile) -> SyncResult<()> {
+        self.inner.push_log(log).await
+    }
+    async fn fetch_snapshot(&self) -> SyncResult<Option<sync_core::Snapshot>> {
+        self.inner.fetch_snapshot().await
+    }
+    async fn push_snapshot(&self, snapshot: &sync_core::Snapshot) -> SyncResult<()> {
+        self.inner.push_snapshot(snapshot).await
+    }
+    async fn delete_log(&self, name: &LogFileName) -> SyncResult<()> {
+        self.inner.delete_log(name).await
+    }
+    async fn list_log_names(&self) -> SyncResult<Vec<LogFileName>> {
+        Err(SyncError::network("simulated listing outage"))
+    }
+    async fn push_sound_asset(&self, hash: &str, ext: &str, bytes: &[u8]) -> SyncResult<()> {
+        self.inner.push_sound_asset(hash, ext, bytes).await
+    }
+    async fn fetch_sound_asset(&self, hash: &str, ext: &str) -> SyncResult<Option<Vec<u8>>> {
+        self.inner.fetch_sound_asset(hash, ext).await
+    }
+}
+
+#[tokio::test]
+async fn a_leftover_not_settled_yet_stays_and_is_settled_by_its_first_round_later() {
+    // A leftover settle could not decide on went up whole all the same; and
+    // the next try cut it by a round time this build had moved meanwhile, so
+    // what never went up was dropped.
+    let (tmp, orchestrator, hooks, adapter) = gc_passed(5_000).await;
+    let log = own_file(&[1_000, 4_000]);
+    stage(&tmp, &log);
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LAST_ROUND_PREF_KEY,
+            &Utc.timestamp_opt(2_000 + 600, 0).unwrap().to_rfc3339(),
+        )
+        .unwrap();
+    orchestrator.configure(Arc::new(ListlessAdapter {
+        inner: LocalFsSyncAdapter::new(tmp.path().join("remote")),
+    }));
+
+    orchestrator.sync_now().await.expect("round 1");
+    assert!(remote_logs(&adapter).await.is_empty(), "held back");
+    assert!(pending_names(&tmp).contains(&log.name.to_filename()));
+
+    orchestrator.configure(Arc::clone(&adapter));
+    orchestrator.sync_now().await.expect("round 2");
+    let remote = remote_logs(&adapter).await;
+    assert_eq!(remote.len(), 1, "{remote:?}");
+    assert_ne!(remote[0].0, log.name.to_filename());
+    assert!(remote[0].1.contains("ev-own-4000"), "{remote:?}");
+    assert!(!remote[0].1.contains("ev-own-1000"), "{remote:?}");
+}
+
+#[tokio::test]
+async fn an_unreadable_file_is_read_again_only_once_its_length_is_forgotten() {
+    // Stamped with the new parser while the old length stayed, the file was
+    // never fetched again.
+    let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    hooks
+        .store
+        .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &unreadable_by(0))
+        .unwrap();
+    hooks
+        .store
+        .set_pref(crate::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY, r#"{"x.jsonl":1}"#)
+        .unwrap();
+    hooks
+        .store
+        .failing_pref_writes
+        .lock()
+        .unwrap()
+        .insert(crate::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY.to_string());
+
+    orchestrator.sync_now().await.expect("round 1");
+    let raw = hooks.store.get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY).unwrap();
+    assert!(
+        crate::UnreadableLogs::of_this_parser(raw.as_deref()).is_none(),
+        "not stamped while the length stands"
+    );
+
+    hooks.store.failing_pref_writes.lock().unwrap().clear();
+    orchestrator.sync_now().await.expect("round 2");
+    assert_eq!(applied_length(&hooks.store, "x.jsonl"), None);
+    let raw = hooks.store.get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY).unwrap();
+    assert!(crate::UnreadableLogs::of_this_parser(raw.as_deref()).is_some());
+}
+
+#[test]
+fn a_device_names_only_other_devices_files_as_unreadable() {
+    let own = LogFileName::new(Utc.timestamp_opt(1_000, 0).unwrap(), laptop()).to_filename();
+    let other = LogFileName::new(
+        Utc.timestamp_opt(1_000, 0).unwrap(),
+        DeviceId::from_string("dev-desktop".into()),
+    )
+    .to_filename();
+    let raw = serde_json::to_string(&crate::UnreadableLogs {
+        parser: sync_core::PARSER_FINGERPRINT,
+        files: std::collections::HashMap::from([(own, 3), (other.clone(), 4)]),
+    })
+    .unwrap();
+
+    assert_eq!(
+        crate::UnreadableLogs::names(Some(&raw), &laptop()),
+        vec![other]
+    );
 }

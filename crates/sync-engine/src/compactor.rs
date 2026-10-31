@@ -532,6 +532,10 @@ impl Compactor {
             .device(&self.local_device_id)
             .map(|record| record.pending.clone())
             .unwrap_or_default();
+        // Only a resume clears the flag a peer set (review round 7 of #130).
+        let own_stale = meta
+            .device(&self.local_device_id)
+            .is_some_and(|record| record.stale);
         meta.upsert_device(
             &self.local_device_id,
             DeviceRecord {
@@ -544,7 +548,7 @@ impl Compactor {
                 // moment the answer would have gone missing.
                 last_seen: Some(Utc::now()),
                 app_version: self.app_version.clone(),
-                stale: false,
+                stale: own_stale,
                 exact: self.record_exact(),
                 unreadable: crate::UnreadableLogs::names(
                     self.store
@@ -552,6 +556,7 @@ impl Compactor {
                         .ok()
                         .flatten()
                         .as_deref(),
+                    &self.local_device_id,
                 ),
                 // `upsert_device` replaces the whole record: what it named
                 // pending stands until its heartbeat names it anew.
@@ -1262,6 +1267,41 @@ mod tests {
         let meta = adapter.meta.lock().unwrap().clone().unwrap();
         assert_eq!(meta.schema_version, sync_core::SCHEMA_VERSION);
         assert_eq!(meta.min_app_version, "0.5.0");
+    }
+
+    #[tokio::test]
+    async fn a_compaction_keeps_its_own_stale_flag() {
+        // Review round 7 of #130: only a resume clears it, once it took the
+        // snapshot.
+        let (store, compactor) = build_compactor();
+        store
+            .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0-test");
+        meta.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now(),
+                last_seen: None,
+                app_version: "1.0.0-test".into(),
+                stale: true,
+                exact: true,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        *adapter.meta.lock().unwrap() = Some(meta);
+
+        compactor.compact_now(&adapter).await.unwrap();
+
+        let meta = adapter.meta.lock().unwrap().clone().unwrap();
+        assert!(
+            meta.device(&DeviceId::from_string("dev-this".into()))
+                .unwrap()
+                .stale
+        );
     }
 
     #[tokio::test]

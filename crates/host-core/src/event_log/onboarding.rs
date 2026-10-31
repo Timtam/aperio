@@ -638,6 +638,8 @@ impl OnboardingService {
             entry.last_seen_log = cursor;
             entry.exact = pass.complete;
         }
+        // A write of this build, as every other (review round 7 of #130).
+        lock_out_older_builds(&mut meta, &self.app_version);
         adapter.push_meta(&meta).await?;
         report.device_count = meta.devices.len();
 
@@ -771,11 +773,9 @@ impl OnboardingService {
                         );
                         complete = false;
                     }
-                    // Only another device's: this one holds its own events
-                    // whatever its remote copy looks like (review round 6).
-                    if foreign {
-                        unreadable.insert(filename, len);
-                    }
+                    // Own files too, for the rule above (review round 7);
+                    // only another device's are named in meta.json.
+                    unreadable.insert(filename, len);
                 }
             }
         }
@@ -841,7 +841,7 @@ impl OnboardingService {
             .get(SYNC_UNREADABLE_LOGS_PREF_KEY)
             .ok()
             .flatten();
-        sync_engine::UnreadableLogs::names(raw.as_deref())
+        sync_engine::UnreadableLogs::names(raw.as_deref(), &self.local_device_id)
     }
 
     fn save_unreadable_logs(&self, unreadable: &HashMap<String, u64>) {
@@ -1058,7 +1058,6 @@ impl OnboardingService {
                     d.last_seen_log == last_seen_log
                         && d.name == name
                         && d.app_version == self.app_version
-                        && !d.stale
                         && d.exact == exact
                         && d.unreadable == unreadable
                         && pending.as_ref().is_none_or(|names| d.pending == *names)
@@ -1109,6 +1108,12 @@ impl OnboardingService {
             return Ok(());
         }
         lock_out_older_builds(&mut meta, &self.app_version);
+        // A flag a peer set stands: only a resume clears it, once it took the
+        // snapshot (review round 7 of #130). A push between rounds names its
+        // files here too.
+        let stale = meta
+            .device(&self.local_device_id)
+            .is_some_and(|record| record.stale);
         let pending = match pending {
             Some(names) => names,
             // pending/ did not read: what the record named stands.
@@ -1124,7 +1129,7 @@ impl OnboardingService {
                 last_seen_log,
                 last_seen: Some(now),
                 app_version: self.app_version.clone(),
-                stale: false,
+                stale,
                 exact,
                 unreadable,
                 pending,
@@ -1159,8 +1164,8 @@ impl OnboardingService {
         );
     }
 
-    /// The log files in `pending/`, every one, for this device's record;
-    /// `None` when the directory does not read.
+    /// The log files in `pending/` that hold anything, for this device's
+    /// record; `None` when the directory does not read.
     async fn pending_names(&self) -> Option<Vec<String>> {
         let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
             Ok(rd) => rd,
@@ -1175,7 +1180,12 @@ impl OnboardingService {
             match entries.next_entry().await {
                 Ok(Some(entry)) => {
                     let name = entry.file_name().to_string_lossy().into_owned();
-                    if LogFileName::from_filename(&name).is_ok() {
+                    // An empty file never goes up (review round 7 of #130).
+                    let holds_any = entry
+                        .metadata()
+                        .await
+                        .is_ok_and(|metadata| metadata.len() > 0);
+                    if holds_any && LogFileName::from_filename(&name).is_ok() {
                         names.push(name);
                     }
                 }
@@ -1918,6 +1928,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_heartbeat_keeps_the_stale_flag_a_peer_set() {
+        // Review round 7 of #130: a push between rounds names its files through
+        // the heartbeat; clearing the flag there, it kept a device that never
+        // took the snapshot from ever resuming.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0-test");
+        meta.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now() - chrono::Duration::days(30),
+                last_seen: None,
+                app_version: "1.0.0-test".into(),
+                stale: true,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        adapter.install_meta(meta);
+        let now = Utc::now();
+
+        svc.heartbeat_meta(&adapter, now, None).await.unwrap();
+
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        let rec = after
+            .device(&DeviceId::from_string("dev-this".into()))
+            .expect("self entry");
+        assert_eq!(rec.last_seen_log, now, "the record was written");
+        assert!(rec.stale, "only a resume clears the flag");
+    }
+
+    #[tokio::test]
     async fn heartbeat_pushes_when_the_horizon_moved() {
         let (_tmp, db) = fresh_db();
         let svc = build_service(db.shared());
@@ -2198,6 +2243,38 @@ mod tests {
             !after.device(svc.device_id()).unwrap().stale,
             "resume must clear the stale flag even without a snapshot",
         );
+    }
+
+    #[tokio::test]
+    async fn a_resume_locks_older_builds_out() {
+        // Review round 7 of #130: a write of this build, the only one of a
+        // round that resumes before anything else.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.schema_version = 1;
+        meta.min_app_version = "0.1.0".into();
+        meta.upsert_device(
+            svc.device_id(),
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now() - chrono::Duration::days(2),
+                last_seen: None,
+                app_version: "1.0.0".into(),
+                stale: true,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        adapter.install_meta(meta);
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(after.schema_version, sync_core::SCHEMA_VERSION);
+        assert_ne!(after.min_app_version, "0.1.0");
     }
 
     /// The laptop's case (Toni, 2026-10-27): a peer session file named at
@@ -2738,6 +2815,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_own_file_torn_again_at_the_same_size_leaves_the_device_exact() {
+        // Review round 7 of #130: recorded no more, an own file torn for good
+        // kept its device from ever being exact.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        adapter.logs.lock().unwrap().push(LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-this".into()),
+            ),
+            bytes: b"{\"id\":\"ev".to_vec(),
+        });
+
+        svc.catch_up(&adapter).await.unwrap();
+        assert!(exact_since(&db).is_none(), "maybe a torn read: once more");
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert!(exact_since(&db).is_some());
+        assert!(svc.unreadable_names().is_empty(), "and not named");
+    }
+
+    #[tokio::test]
     async fn an_own_file_that_does_not_read_is_not_named() {
         // Review round 6 of #130: this device holds its own events whatever
         // their remote copy looks like; named, the file held the GC back
@@ -2812,7 +2911,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_heartbeat_names_every_pending_file() {
+    async fn the_heartbeat_names_every_pending_file_that_holds_anything() {
+        // An empty one never goes up (review round 7 of #130).
         let (_tmp, db) = fresh_db();
         let pending = TempDir::new().unwrap();
         let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
@@ -2823,6 +2923,11 @@ mod tests {
             &[&envelope("ev-own", "dev-this", at, set_interval("15"))],
         );
         std::fs::write(pending.path().join(own.name.to_filename()), &own.bytes).unwrap();
+        let stub = LogFileName::new(
+            at + chrono::Duration::hours(1),
+            DeviceId::from_string("dev-this".into()),
+        );
+        std::fs::write(pending.path().join(stub.to_filename()), b"").unwrap();
         let adapter = FakeAdapter::new();
         adapter.install_meta(MetaJson::fresh("1.0.0"));
 
