@@ -107,7 +107,6 @@ import {
   seriesTailMayStand,
   seriesTailRemoved,
 } from '@aperio/shared';
-import { calendarPlace, tracePrefill } from '../state/prefillTrace';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
 import { deleteThisAndFuture } from '../state/deleteSeriesFromOccurrence';
@@ -560,10 +559,6 @@ export function EventDialog({
   const [form, setForm] = useState<FormState>(initialState);
   const formRef = useRef(form);
   formRef.current = form;
-  // Temporary (prefillTrace): read by the reset's trace without becoming one
-  // of its dependencies.
-  const traceRef = useRef({ calendars, prefillFrom });
-  traceRef.current = { calendars, prefillFrom };
   // Whether the calendar picked holds the imported appointment already (I4),
   // asked again whenever the pick changes: then it is created as a copy.
   const importedAlone = useMemo(() => (imported ? [imported] : []), [imported]);
@@ -688,12 +683,6 @@ export function EventDialog({
         calendars,
         opts.keepCalendar === true,
       );
-      tracePrefill('editor prefill applied', {
-        offer: calendarPlace(calendars, fill.calendar_id),
-        target: target.kind,
-        to: target.kind === 'offer' ? calendarPlace(calendars, target.id) : '',
-        form: calendarPlace(calendars, formRef.current.calendarId),
-      });
       setForm((prev) => {
         // The DAY stays exactly as it was — it is what makes this a new
         // appointment, and it came from wherever the user opened the editor.
@@ -1085,15 +1074,6 @@ export function EventDialog({
       firstHydrate ||
       formRef.current === baseline ||
       JSON.stringify(formRef.current) === JSON.stringify(baseline);
-    if (traceRef.current.prefillFrom) {
-      const { calendars: catalog } = traceRef.current;
-      tracePrefill('editor reset', {
-        first: firstHydrate,
-        pristine,
-        baseline: calendarPlace(catalog, initialState.calendarId),
-        form: calendarPlace(catalog, formRef.current.calendarId),
-      });
-    }
     if (!pristine) return; // user touched the form → their edits win
     appliedInitialRef.current = initialState;
     landedPrivateSeedRef.current = privateSeed.reminders;
@@ -1156,15 +1136,6 @@ export function EventDialog({
    * touched, because the user chose one there rather than leaving the default.
    */
   useEffect(() => {
-    if (prefillFrom) {
-      tracePrefill('editor prefill effect', {
-        open: isOpen,
-        edit: isEdit,
-        calendars: calendars.length,
-        latched: prefillApplied.current === prefillFrom.id,
-        pinned: targetPinned === true,
-      });
-    }
     if (!isOpen || isEdit || !prefillFrom) {
       if (!isOpen) {
         prefillApplied.current = null;
@@ -1202,14 +1173,6 @@ export function EventDialog({
     t,
     baselineResets,
   ]);
-
-  // Temporary (prefillTrace): every calendar the form holds while a prefill is
-  // in play, as it renders.
-  useEffect(() => {
-    if (isOpen && prefillFrom) {
-      tracePrefill('editor form', { calendar: calendarPlace(calendars, form.calendarId) });
-    }
-  }, [isOpen, prefillFrom, form.calendarId, calendars]);
 
   // The form follows the way an import goes in (I6): an invitation kept as the
   // file has it, one set aside without its people, a new appointment with them.
@@ -2840,11 +2803,6 @@ export function EventDialog({
           <select
             value={form.calendarId}
             onChange={(e) => {
-              if (prefillFrom) {
-                tracePrefill('editor picker moved', {
-                  to: calendarPlace(calendars, e.target.value),
-                });
-              }
               // The user has answered the question the note asked.
               setPrefillCalendarNote(null);
               update('calendarId', e.target.value);

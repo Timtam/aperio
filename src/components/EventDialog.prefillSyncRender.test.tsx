@@ -7,7 +7,7 @@ import type { Calendar, CalendarEvent } from '../api/types';
 /**
  * The prefill has to survive a render that comes BEFORE its own update.
  *
- * Toni's log from a release build (2026-10-31, `prefillTrace`): the reset
+ * Toni's log from a release build (2026-10-31, a trace since removed): the reset
  * took its first-hydrate shortcut, the prefill applied the offer's calendar,
  * and two milliseconds later the reset ran AGAIN, still finding the form
  * pristine — the prefill's update had not rendered yet. An update a store

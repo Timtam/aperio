@@ -11,7 +11,6 @@ import { useTranslation } from 'react-i18next';
 import { useAnnouncer } from '../a11y/announcerContext';
 import { createEvent as apiCreateEvent } from '../api/client';
 import { useCalendarStore } from '../state/calendarStoreContext';
-import { calendarPlace, tracePrefill } from '../state/prefillTrace';
 import { useDialogState } from '../state/dialogStateContext';
 import { useViewState } from '../state/viewStateContext';
 import { timeInputStep } from '../state/timeStep';
@@ -275,19 +274,6 @@ export function QuickAddDialog({
             // the offer named one of them.
             const source = findOffer(titleMatches, key, (e) => e.calendar_id);
             if (!source) return;
-            const pinned = pickedOverOffer(
-              calendarPickedRef.current,
-              calendarId,
-              appliedInitialRef.current?.calendarId,
-            );
-            tracePrefill('quick-add accept', {
-              offer: calendarPlace(calendars, source.calendar_id),
-              picker: calendarPlace(calendars, calendarId),
-              shown: calendarPlace(calendars, appliedInitialRef.current?.calendarId),
-              moved: calendarPickedRef.current,
-              pinned,
-              calendars: calendars.length,
-            });
             // `replace`, like "weitere Details": the editor inherits this
             // dialog's frame, so closing it returns focus where the quick-add
             // was opened from rather than to a dialog that is already gone.
@@ -304,7 +290,11 @@ export function QuickAddDialog({
               // the earlier appointment lived on (decision 160). Compared with
               // the default AS SHOWN: once picked, the baseline stops following
               // the late defaults (see `calendarPickedRef`).
-              targetPinned: pinned,
+              targetPinned: pickedOverOffer(
+                calendarPickedRef.current,
+                calendarId,
+                appliedInitialRef.current?.calendarId,
+              ),
               replace: true,
             });
           }}
@@ -346,9 +336,6 @@ export function QuickAddDialog({
             value={calendarId}
             onChange={(e) => {
               calendarPickedRef.current = true;
-              tracePrefill('quick-add picker moved', {
-                to: calendarPlace(calendars, e.target.value),
-              });
               setCalendarId(e.target.value);
             }}
             required
