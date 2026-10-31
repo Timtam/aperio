@@ -2283,7 +2283,7 @@ export function EventDialog({
           // Someone else's meeting the calendar keeps goes in as theirs, as the
           // file has it; anything else carries what the form holds.
           const people = importEditorPeople(imported, importAs, form.attendees);
-          const created = await apiCreateEvent({
+          const request = {
             calendar_id: form.calendarId,
             title: trimmedTitle,
             description: form.description.trim() || null,
@@ -2307,9 +2307,17 @@ export function EventDialog({
             // again finds it (I4); one the calendar holds already is a copy,
             // with a UID of its own.
             uid_to_keep: importIsHeld ? null : (imported?.uid ?? null),
-            // An imported series keeps the file's zone, or none, as a copy
-            // does (decision 262).
-          }, { preserveRecurrenceZone: imported != null });
+          };
+          // An imported series keeps the file's zone, or none, as a copy does
+          // (decision 262). One whose calendar writes its deletions one by one
+          // is created in steps (decisions 227, 265).
+          const created = await wait(
+            createsInSteps(
+              calendars.find((c) => c.id === form.calendarId),
+              recurrence,
+            ),
+            () => apiCreateEvent(request, { preserveRecurrenceZone: imported != null }),
+          );
           await savePrivate(created);
           if (!storesColorNatively) {
             await setEventColor(

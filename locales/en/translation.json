@@ -2725,6 +2725,10 @@
       "done_other": "{{count}} appointments imported into “{{calendar}}”.",
       "partly_one": "{{done}} of {{count}} appointment imported into “{{calendar}}”. Not imported: {{titles}}.",
       "partly_other": "{{done}} of {{count}} appointments imported into “{{calendar}}”. Not imported: {{titles}}.",
+      "whole_one": "{{done}} of {{count}} appointment imported whole into “{{calendar}}”.",
+      "whole_other": "{{done}} of {{count}} appointments imported whole into “{{calendar}}”.",
+      "standing": "Arrived only in part, check them in the calendar: {{titles}}.",
+      "importedInPart": "imported only in part",
       "failedTitle": "“{{title}}” ({{reason}})",
       "quoted": "“{{title}}”"
     },

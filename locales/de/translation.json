@@ -2725,6 +2725,10 @@
       "done_other": "{{count}} Termine in „{{calendar}}“ importiert.",
       "partly_one": "{{done}} von {{count}} Termin in „{{calendar}}“ importiert. Nicht importiert: {{titles}}.",
       "partly_other": "{{done}} von {{count}} Terminen in „{{calendar}}“ importiert. Nicht importiert: {{titles}}.",
+      "whole_one": "{{done}} von {{count}} Termin ganz in „{{calendar}}“ importiert.",
+      "whole_other": "{{done}} von {{count}} Terminen ganz in „{{calendar}}“ importiert.",
+      "standing": "Nur zum Teil angekommen, prüfe sie im Kalender: {{titles}}.",
+      "importedInPart": "nur zum Teil importiert",
       "failedTitle": "„{{title}}“ ({{reason}})",
       "quoted": "„{{title}}“"
     },

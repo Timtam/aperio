@@ -1993,35 +1993,40 @@ function EventEditorScreen({
         // Someone else's meeting the calendar keeps goes in as theirs, as the
         // file has it; anything else carries what the form holds.
         const people = importEditorPeople(imported, importAs, attendees);
-        const created = await createEvent(
-          {
-            calendar_id: calId,
-            title: trimmedTitle,
-            description: description.trim() || null,
-            location: location.trim() || null,
-            start,
-            end,
-            all_day: allDay,
-            recurrence: recurrenceToSend,
-            color_label: colorToSend,
-            reminders: remindersForWire,
-            sound: null,
-            ...people,
-            send_invitations: sendInvitations,
-            // An untouched editor made no reminder choice: the calendar's
-            // "attach" mode may then write its defaults into the new event.
-            use_calendar_defaults: madeNoReminderChoice(
-              remindersTouchedRef.current,
-              remindersForWire,
-            ),
-            // An imported appointment keeps its file's UID, so importing it
-            // again finds it (I4); one the calendar holds already is a copy,
-            // with a UID of its own.
-            uid_to_keep: importIsHeld ? null : (imported?.uid ?? null),
-          },
-          // An imported series keeps the file's zone, or none, as a copy does
-          // (decision 262).
-          { preserveRecurrenceZone: imported != null },
+        const request = {
+          calendar_id: calId,
+          title: trimmedTitle,
+          description: description.trim() || null,
+          location: location.trim() || null,
+          start,
+          end,
+          all_day: allDay,
+          recurrence: recurrenceToSend,
+          color_label: colorToSend,
+          reminders: remindersForWire,
+          sound: null,
+          ...people,
+          send_invitations: sendInvitations,
+          // An untouched editor made no reminder choice: the calendar's
+          // "attach" mode may then write its defaults into the new event.
+          use_calendar_defaults: madeNoReminderChoice(
+            remindersTouchedRef.current,
+            remindersForWire,
+          ),
+          // An imported appointment keeps its file's UID, so importing it
+          // again finds it (I4); one the calendar holds already is a copy,
+          // with a UID of its own.
+          uid_to_keep: importIsHeld ? null : (imported?.uid ?? null),
+        };
+        // An imported series keeps the file's zone, or none, as a copy does
+        // (decision 262). One whose calendar writes its deletions one by one is
+        // created in steps (decisions 227, 265).
+        const created = await stepWriteWait(
+          createsInSteps(
+            calendars.find((c) => c.id === calId),
+            recurrenceToSend,
+          ),
+          () => createEvent(request, { preserveRecurrenceZone: imported != null }),
         );
         await savePrivate(created);
         if (!isLocalCal) {

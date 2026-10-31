@@ -475,6 +475,15 @@ Ankreuzfeld; **Bearbeiten …** ist eine ihrer Aktionen (unter iOS im Rotor).
   CalDAV-Kalender schreiben Teilnehmer nur zusammen mit ihren Einladungen;
   die Liste, die niemanden benachrichtigt, bringt ein solches Meeting dort
   deshalb ohne sie. Im Editor bleiben sie, und sie werden eingeladen.
+- **Wenn nicht alle ankommen,** sagt die Liste, wie viele es sind, und nennt
+  jeden, der nicht ankam, mit seinem Grund; bei einem ausgelasteten Anbieter
+  endet der Satz mit „Versuche es später noch einmal“, und diese bleiben
+  angehakt. Einer, der nur zum Teil ankam — eine Serie, deren ausgelassene
+  Termine sich nicht alle entfernen ließen, oder eine Einladung, die Exchange
+  aufnahm, aber nicht fertigstellte —, heißt „nur zum Teil importiert“ und
+  wird nicht noch einmal angeboten: Ein zweites Importieren legte ihn doppelt
+  an. Prüfe ihn im Kalender. Eine Serie, die ein Kalender schrittweise
+  schreibt, zeigt solange den Dialog „Vorgang läuft, bitte warten“.
 
 Zeiten behalten ihre Zone, auch die Windows-Zonennamen, die Outlook schreibt.
 Eine Zone, die nur die Datei selbst festlegt (Outlooks „Customized Time

@@ -437,6 +437,13 @@ checkbox; **Edit …** is one of its actions (on iOS in the rotor).
   calendars write attendees only along with their invitations, so the list,
   which tells nobody, brings such a meeting there without them. In the editor
   they stay, and are invited.
+- **When not every one arrives**, the list says how many did, and names each
+  one that did not with its reason; a busy provider's ends with “try again
+  later”, and those stay checked. One that arrived only in part — a series
+  whose skipped occurrences could not all be removed, or an invitation Exchange
+  kept but did not finish — is marked “imported only in part” and not offered
+  again: importing it once more would make it twice. Check it in the calendar.
+  A series a calendar writes in steps shows the “please wait” dialog meanwhile.
 
 Times keep their zone, including the Windows zone names Outlook writes. A
 zone only the file itself defines (Outlook's "Customized Time Zone") gives

@@ -1690,6 +1690,14 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Google: eine importierte Einladungsserie schickt ihre Löschungen als
+      `EXDATE`.** Die Einladung eines anderen geht über `events.import` in
+      einem Aufruf hinein, ihre gelöschten Termine als Löschzeilen. Ob Google
+      die bei einem Import beachtet, ist so wenig gemessen wie bei einer neuen
+      Serie, die darum ohne sie angelegt und Termin für Termin abgesagt wird
+      (Entscheidungen 202-213, 263-269). Messen; beachtet Google sie nicht, die
+      Löschungen der importierten Serie danach absagen wie `series_create`.
+      Aus dem Merge von main in PR 7 (#128, Prüfrunde 15, 2026-10-31).
 - [ ] **Eine Zone, die nur die Datei kennt, wiederholt sich in UTC.** Der
       iCal-Leser löst eine `TZID`, die weder tzdata noch die Windows-Tabelle
       kennt (Outlooks „Customized Time Zone“), über die `VTIMEZONE` der Datei

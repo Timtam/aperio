@@ -14,6 +14,8 @@ const t = (key: string, values?: Record<string, unknown>) => i18n.t(key, values)
  */
 
 const failTitles = vi.hoisted(() => ({ current: new Set<string>() }));
+/** Creates that land and then fail at a later step: they stand in part. */
+const inPartTitles = vi.hoisted(() => ({ current: new Set<string>() }));
 /** Creates held open until the test lets them go: a list that is writing. */
 const heldCreates = vi.hoisted(() => ({ on: false, release: [] as Array<() => void> }));
 /** What each calendar holds when asked (`get_events`): rows, a failure, or an
@@ -38,6 +40,9 @@ const invokeMock = vi.hoisted(() =>
       const request = (payload as { request: { title: string } }).request;
       if (failTitles.current.has(request.title)) {
         return Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' });
+      }
+      if (inPartTitles.current.has(request.title)) {
+        return Promise.reject({ code: 'network', message: 'partly-saved: reply' });
       }
       if (heldCreates.on) {
         return new Promise((resolve) =>
@@ -88,6 +93,7 @@ afterEach(() => {
   invalidateData.mockClear();
   announce.mockClear();
   failTitles.current = new Set();
+  inPartTitles.current = new Set();
   heldCreates.on = false;
   heldCreates.release = [];
   STORE.selectedCalendarIds = new Set(['cal-home', 'cal-work']);
@@ -206,11 +212,11 @@ describe('ImportDialog → several appointments', () => {
     fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
     expect(
       // Each one that did not arrive with its own reason, a busy provider in
-      // its own words (decision 270); nothing after that would say nothing
-      // was created.
+      // its own words and asked to wait (decisions 270, 272); nothing after
+      // that would say nothing was created.
       await screen.findByText(
         '1 von 2 Terminen in „Privat“ importiert. Nicht importiert: „Projektbesprechung“ ' +
-          '(der Anbieter ist gerade ausgelastet).',
+          '(der Anbieter ist gerade ausgelastet). Versuche es später noch einmal.',
       ),
     ).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
@@ -219,6 +225,23 @@ describe('ImportDialog → several appointments', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(1);
     expect(screen.getByText(/Chorprobe, .*, importiert/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '1 Termin importieren' })).toBeTruthy();
+  });
+
+  it('marks one that stands in part and does not offer it again', async () => {
+    // Review round 15 of #128: it read as not imported and stayed checked,
+    // so the next press made it twice.
+    inPartTitles.current = new Set(['Projektbesprechung']);
+    const onClose = await open({ read: READ });
+    await screen.findByText(/In „Privat“ lassen sich Organisator und Teilnehmer/);
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    expect(
+      await screen.findByText(
+        /^1 von 2 Terminen ganz in „Privat“ importiert\. Nur zum Teil angekommen, prüfe sie im Kalender: „Projektbesprechung“/,
+      ),
+    ).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.getByText(/Projektbesprechung, .*, nur zum Teil importiert/)).toBeTruthy();
   });
 
   it('opens one in the editor, as it stands, and marks it once created', async () => {

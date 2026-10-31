@@ -14,6 +14,7 @@ import type { ColorLabel, Section, TaskList } from '@aperio/shared';
 import { listColorLabels } from '../api/colorLabels';
 import { getSections, listTaskLists } from '../api/client';
 import { useCacheReload } from './cacheObserver';
+import { overRead, withWrite, type SectionWrite } from './sectionWrites';
 import { TaskStoreContext } from './taskStoreContext';
 import {
   reconcileSelectionTracked,
@@ -26,10 +27,7 @@ import {
 /** A section write that landed, for the read after it (`loadSections`'
  *  `afterWrite`): the section as written, or the one removed. The desktop's
  *  twin is `CalendarStore`'s. */
-export interface SectionWrite {
-  upsert?: Section;
-  remove?: string;
-}
+export type { SectionWrite } from './sectionWrites';
 
 /**
  * The mobile task store — the single context every task screen consumes.
@@ -109,7 +107,20 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
 
   const sectionsRef = useRef(sectionsByList);
   sectionsRef.current = sectionsByList;
+  // The section writes that landed, per list, until a read shows them. After
+  // a write the host only invalidates an external list: its read serves the
+  // rows from before until the refresh it starts lands, and a refresh a busy
+  // provider turns away leaves them so. Laid over every read of the list,
+  // not only the first (review round 15 of #128); a later write of the same
+  // section takes the earlier one's place.
+  const writtenRef = useRef<Record<string, SectionWrite[]>>({});
   const loadSections = useCallback(async (listId: string, afterWrite?: SectionWrite) => {
+    if (afterWrite) {
+      writtenRef.current = {
+        ...writtenRef.current,
+        [listId]: withWrite(writtenRef.current[listId] ?? [], afterWrite),
+      };
+    }
     // Sorted HERE, once — every screen that renders sections reads this cache
     // (the tasks screen, the task editor, the list editor), so a comparator
     // repeated per screen is one that ends up applied in most of them.
@@ -120,17 +131,11 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
       if (!afterWrite) throw err;
       read = sectionsRef.current[listId] ?? [];
     }
-    // After a section write the host only invalidates an external list: its
-    // read serves the rows from before until the refresh it starts lands (the
-    // `sections` push below reads again). What was written shows meanwhile,
-    // as on the desktop (277).
-    if (afterWrite) {
-      read = read.filter(
-        (s) => s.id !== afterWrite.upsert?.id && s.id !== afterWrite.remove,
-      );
-      if (afterWrite.upsert) read = [...read, afterWrite.upsert];
-    }
-    const secs = sortSections(read);
+    // What was written shows meanwhile, as on the desktop (277); a write the
+    // read shows already is done with.
+    const { rows, open } = overRead(read, writtenRef.current[listId] ?? []);
+    writtenRef.current = { ...writtenRef.current, [listId]: open };
+    const secs = sortSections(rows);
     setSectionsByList((prev) => ({ ...prev, [listId]: secs }));
     return secs;
   }, []);

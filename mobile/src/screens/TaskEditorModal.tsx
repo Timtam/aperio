@@ -917,6 +917,9 @@ export default function TaskEditorModal({
     // names as never created. Drafts exist only for a task this editor
     // creates, or created.
     let unmade: string[] = [...draftSubtasks];
+    // The new task stands: whatever fails after it, saving again would make
+    // it twice (review round 15 of #128).
+    let made = false;
     // The staged subtasks, made under `parent` once it stands (they default
     // to open/medium and inherit its section, matching the edit-mode add),
     // then the parent's derived status recomputed. A parent in a terminal
@@ -1030,6 +1033,7 @@ export default function TaskEditorModal({
           assignees: form.assignees,
           sound: null,
         });
+        made = true;
         // Write any staged draft subtasks under the freshly-created parent (they
         // default to open/medium and inherit the parent's section, matching the
         // edit-mode add), then recompute the new parent's derived status. The
@@ -1212,6 +1216,13 @@ export default function TaskEditorModal({
               })}`
             : sentence,
         );
+        return;
+      }
+      // A step after the create failed — recomputing its parent, say: the
+      // task stands, and so do its drafts. Said in place of the form, which
+      // only closes, so the create is not offered again.
+      if (made) {
+        showNotice(`${t('mobile.added', { title })} ${writeErrorMessage(err, t)}`);
         return;
       }
       const message = writeErrorMessage(err, t);

@@ -238,6 +238,30 @@ describe('partlyImportedSentence', () => {
       /^0 von 1 Termin in „Arbeit“ importiert\./,
     );
   });
+
+  it('ends a busy one with "try again later" (decision 272)', () => {
+    // Review round 15 of #128: the list embedded the busy reason alone.
+    const busy = { code: 'forbidden', message: 'provider-busy: http-429' };
+    expect(partlyImportedSentence([{ title: 'Budget', err: busy }], 1, 2, 'Arbeit', t)).toBe(
+      `1 von 2 Terminen in „Arbeit“ importiert. Nicht importiert: „Budget“ (${t(
+        'dialogs.event.writeError.reason.providerBusy',
+      )}). ${t('common.tryAgainLater')}`,
+    );
+  });
+
+  it('names one that stands in part apart, and offers no try again for it', () => {
+    // Review round 15 of #128: a create that landed and failed later read as
+    // "not imported", and the list offered it again.
+    const inPart = { code: 'network', message: 'partly-saved: reply' };
+    const sentence = partlyImportedSentence([], 1, 2, 'Arbeit', t, [
+      { title: 'Jour fixe', err: inPart },
+    ]);
+    expect(sentence).toBe(
+      `1 von 2 Terminen ganz in „Arbeit“ importiert. Nur zum Teil angekommen, prüfe sie im ` +
+        `Kalender: „Jour fixe“ (${t('dialogs.event.writeError.reason.partlySaved')}).`,
+    );
+    expect(sentence).not.toMatch(/Nicht importiert/);
+  });
 });
 
 describe('rechosenForHeld', () => {

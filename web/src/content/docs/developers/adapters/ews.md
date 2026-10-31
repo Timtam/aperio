@@ -32,8 +32,9 @@ The endpoint is discovered or user-supplied.
   that is busy says busy, never `copy-unreadable`. Where a later request of a
   save is turned away after an earlier one landed, the change stands in part
   (`EwsError::PartlySaved`, 277): an exception detached as a single whose
-  delete is busy, and a contact photo whose old picture was deleted before
-  the upload failed. A new contact whose photo upload fails is still
+  delete is busy, a contact photo whose old picture was deleted before the
+  upload failed, and an invitation from a file once its request stands (see
+  below). A new contact whose photo upload fails is still
   returned, with `has_photo` false, and the editor says so. The GAL walk ends
   at the first busy prefix with that error, so the GAL cached before stays.
 - **Folder-complete events.** EWS keeps a per-folder in-memory view of
@@ -248,7 +249,11 @@ The endpoint is discovered or user-supplied.
   (`MoveItem`, the folder without its change key). A move that fails deletes
   the appointment again, telling nobody, and fails the create: the import
   lands where it was asked to or not at all. Then the adapter reads the
-  appointment back. Live round ICS-7 (run 172507) moved one into a folder of
+  appointment back. Any other step that fails once the request stands — the
+  tentative reply, asking for the folder, the read-back, or a move whose
+  clean-up fails too — leaves something in the mailbox, and the create says
+  it stands in part (`EwsError::PartlySaved`, 277), never that nothing was
+  changed. Live round ICS-7 (run 172507) moved one into a folder of
   its own, keeping its organizer, invitees, tentative answer, UID and
   reminder, with nothing sent; one imported into the default calendar was
   not moved. The mailbox's address is the login where that is an

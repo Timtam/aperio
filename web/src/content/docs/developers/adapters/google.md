@@ -77,7 +77,10 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   UID gets `{uuid}@aperio`. Should Google answer with the account as the
   organizer after all (one report says it may), the appointment stays as
   Google made it, logged: nothing was sent, and it reads as the account's own
-  meeting. An unmarked create never asks who the account is.
+  meeting. An unmarked create never asks who the account is. An import is
+  one call: a series' deleted occurrences go with it as deletion lines,
+  which Google was never measured to heed there, as for a create (see the
+  next point; a follow-up in TODO B14).
 - **Deletions come in several spellings.** Google itself deletes an
   occurrence as a cancelled instance, never as an `EXDATE` line, but other
   apps write `EXDATE` lines into the master's `recurrence`, and Google
