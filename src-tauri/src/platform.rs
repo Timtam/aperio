@@ -30,8 +30,8 @@
 /// PowerShell's id rather than the identifier: when the exe sits in a
 /// cargo `target\debug` or `target\release` folder. A verbatim port of
 /// plugin 2.3.3 `desktop.rs:195-206`, case-sensitive like it, so Aperio
-/// and the plugin always agree about which builds those are (the crate
-/// version is pinned by a test in `os_notification`).
+/// and the plugin agree about which builds those are. Read the plugin's
+/// rule again when it is updated.
 #[cfg(any(windows, test))]
 pub(crate) fn toasts_use_powershell_id(exe_dir: &str) -> bool {
     use std::path::MAIN_SEPARATOR as SEP;

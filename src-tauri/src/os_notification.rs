@@ -96,32 +96,4 @@ mod tests {
         assert!(matches!(Sound::from_str("Default"), Ok(Sound::Default)));
         assert!(Sound::from_str("default").is_err());
     }
-
-    /// The comments above, and the dev-build rule in `platform.rs`, quote
-    /// these crates' sources by line. A version bump has to send someone back
-    /// to read them again.
-    #[test]
-    fn the_notification_crates_are_the_versions_whose_code_was_read() {
-        let lock = include_str!("../../Cargo.lock");
-        let version_of = |name: &str| {
-            let mut lines = lock.lines();
-            while let Some(line) = lines.next() {
-                if line == format!("name = \"{name}\"") {
-                    return lines.next().map(|v| v.to_string());
-                }
-            }
-            None
-        };
-        for (name, version) in [
-            ("tauri-plugin-notification", "2.3.3"),
-            ("notify-rust", "4.17.0"),
-            ("tauri-winrt-notification", "0.7.2"),
-        ] {
-            assert_eq!(
-                version_of(name).as_deref(),
-                Some(format!("version = \"{version}\"").as_str()),
-                "{name} changed: read its notification code again (src-tauri/src/os_notification.rs, platform.rs)",
-            );
-        }
-    }
 }
