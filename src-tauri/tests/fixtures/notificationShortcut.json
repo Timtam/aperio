@@ -1,0 +1,8 @@
+[
+  { "kind": "unsupported", "needs_set_up": false },
+  { "kind": "dev_build", "needs_set_up": false },
+  { "kind": "not_set_up", "needs_set_up": true },
+  { "kind": "foreign", "needs_set_up": true },
+  { "kind": "set_up", "needs_set_up": false },
+  { "kind": "points_elsewhere", "target": "D:\\Aperio\\aperio.exe", "needs_set_up": false }
+]

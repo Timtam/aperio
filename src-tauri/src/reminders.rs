@@ -25,13 +25,14 @@ use std::time::{Duration, Instant};
 use adapter_local::{LocalAdapter, SharedConn};
 use cal_core::SoundSource;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Notify;
 use tracing::{info, warn};
 
 use crate::audio::AudioPlayer;
 use crate::cache::CacheStore;
+use crate::notification_shortcut::{NotificationShortcutState, HINT_EVENT};
 use crate::os_notification::reminder_sound_name;
 use crate::registry::AdapterRegistry;
 // Trigger enumeration + the shared types it produces. Re-exported so existing
@@ -476,6 +477,14 @@ impl ReminderScheduler {
         };
         if let Err(err) = builder.show() {
             warn!(?err, "failed to dispatch notification");
+        }
+        // Windows stores this toast and shows nothing while Aperio has no
+        // Start menu shortcut for notifications: the first such reminder of
+        // an app start asks the page to offer one (`notification_shortcut`).
+        if let Some(shortcut) = app.try_state::<Arc<NotificationShortcutState>>() {
+            if shortcut.note_reminder_fired() {
+                let _ = app.emit(HINT_EVENT, ());
+            }
         }
         let mut fired = self.fired.lock().expect("fired set poisoned");
         fired.insert(FiredKey {

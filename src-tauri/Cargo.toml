@@ -101,10 +101,20 @@ uuid.workspace = true
 keyring.workspace = true
 [target.'cfg(windows)'.dependencies]
 # Pinning the identifier to the process (taskbar grouping, see
-# platform.rs). winreg only deletes the old Aperio.Calendar registration.
+# platform.rs), and the Start menu shortcut that carries it
+# (notification_shortcut/win.rs: IShellLinkW, IPersistFile, IPropertyStore,
+# PKEY_AppUserModel_ID). Every feature the code uses is listed, not left to
+# another crate's feature set. winreg only deletes the old Aperio.Calendar
+# registration.
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_UI_Shell",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Variant",
+  "Win32_Storage_FileSystem",
+  "Win32_Storage_EnhancedStorage",
 ] }
 winreg = "0.55"
 
