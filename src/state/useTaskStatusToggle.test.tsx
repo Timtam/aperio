@@ -135,6 +135,130 @@ describe('useTaskStatusActions — what the user is told', () => {
     expect(said).not.toContain('completedAnnounce');
   });
 
+  it('says a refusal the host rejected with in words, never "[object Object]"', async () => {
+    // A Tauri command rejects with a plain {code, message} object.
+    vi.mocked(invoke).mockRejectedValue({
+      code: 'forbidden',
+      message: 'provider-busy: http-429',
+    });
+    const { result } = renderHook(() => useTaskStatusActions());
+    await act(async () => {
+      await result.current.set(TASKS[0], 'completed');
+    });
+    const said = announce.mock.calls[0][0] as string;
+    expect(said).toContain('statusChangeFailed');
+    expect(said).toContain('dialogs.event.writeError.providerBusy');
+    expect(said).not.toContain('[object Object]');
+    expect(said).not.toContain('provider-busy');
+  });
+
+  it('never says nothing was changed when the root fails after its family changed (277)', async () => {
+    // The root is turned away by a busy provider; the child's write, made
+    // anyway, lands.
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'forbidden', message: 'provider-busy: http-429' })
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useTaskStatusActions());
+    await act(async () => {
+      await result.current.set(TASKS[0], 'completed');
+    });
+    const said = announce.mock.calls[0][0] as string;
+    expect(said).toContain('statusChangeFailed');
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).not.toContain('dialogs.event.writeError.providerBusy');
+  });
+
+  it('never says nothing was changed when the root is busy and its family may have changed (277)', async () => {
+    // The root is turned away by a busy provider; the child's answer is lost,
+    // so its write may have landed.
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'forbidden', message: 'provider-busy: http-429' })
+      .mockRejectedValueOnce({ code: 'network', message: 'connection reset' });
+    const { result } = renderHook(() => useTaskStatusActions());
+    await act(async () => {
+      await result.current.set(TASKS[0], 'completed');
+    });
+    const said = announce.mock.calls[0][0] as string;
+    expect(said).toContain('statusChangeFailed');
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).not.toContain('dialogs.event.writeError.providerBusy');
+  });
+
+  it('says a root saved in part with its status as changed, never "could not change" (277)', async () => {
+    // Vikunja: the task's fields and its done went out, then the assignees
+    // were turned away busy; the child's write lands.
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useTaskStatusActions());
+    let changed: boolean | undefined;
+    await act(async () => {
+      changed = await result.current.set(TASKS[0], 'completed');
+    });
+    expect(changed).toBe(true);
+    const said = announce.mock.calls[0][0] as string;
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).not.toContain('statusChangeFailed');
+  });
+
+  it('says what of the family did not take after a root saved in part with its status', async () => {
+    // Review round 19 of #128: a subtask that kept its status went unsaid.
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })
+      .mockRejectedValueOnce({ code: 'forbidden', message: 'provider-busy: http-429' });
+    const { result } = renderHook(() => useTaskStatusActions());
+    await act(async () => {
+      await result.current.set(TASKS[0], 'completed');
+    });
+    expect(announce).toHaveBeenCalledTimes(1);
+    const said = announce.mock.calls[0][0] as string;
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).toContain('dialogs.task.subtasks.familyNotAll');
+  });
+
+  it('says nothing of a family member whose save stood in part with its status', async () => {
+    // Review round 21 of #128: it took the new status, yet the sentence said
+    // it did not.
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' });
+    const { result } = renderHook(() => useTaskStatusActions());
+    await act(async () => {
+      await result.current.set(TASKS[0], 'completed');
+    });
+    expect(announce).toHaveBeenCalledTimes(1);
+    const said = announce.mock.calls[0][0] as string;
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).not.toContain('dialogs.task.subtasks.familyNotAll');
+  });
+
+  it('hands a failure to the surface that says where it shows', async () => {
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useTaskStatusActions());
+    const said: string[] = [];
+    await act(async () => {
+      await result.current.set(TASKS[0], 'completed', (sentence) => said.push(sentence));
+    });
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('dialogs.event.writeError.partlySaved');
+    expect(announce).not.toHaveBeenCalled();
+  });
+
+  it('still says "could not change" where the status itself was turned away', async () => {
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: status' })
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useTaskStatusActions());
+    let changed: boolean | undefined;
+    await act(async () => {
+      changed = await result.current.set(TASKS[0], 'completed');
+    });
+    expect(changed).toBe(false);
+    expect(announce.mock.calls[0][0] as string).toContain('statusChangeFailed');
+  });
+
   it('reports how much of the cascade landed when only part of it failed', async () => {
     // Root succeeds, the child does not.
     vi.mocked(invoke)

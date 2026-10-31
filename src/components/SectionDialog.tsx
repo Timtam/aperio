@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { writeErrorMessage } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import {
-  createSection,
-  isCommandError,
-  setSectionColor,
-  updateSection,
-} from '../api/client';
+import { createSection, updateSection } from '../api/client';
 import type { Section } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { sectionColorAfterLanded } from '../state/sectionColor';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
 import { ColorLabelSelect } from './ColorLabelSelect';
 import { Modal } from './Modal';
 
@@ -52,6 +51,7 @@ export function SectionDialog({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { notice, showNotice } = useCloseOnlyNotice();
 
   // Re-seed whenever the target changes or the dialog reopens.
   useEffect(() => {
@@ -69,10 +69,22 @@ export function SectionDialog({
     try {
       if (section) {
         await updateSection({ ...section, name: trimmed });
-        if (colorDraft !== (section.color_label ?? null)) {
-          await setSectionColor(section.id, listId, colorDraft);
+        const colorFailure =
+          colorDraft !== (section.color_label ?? null)
+            ? await sectionColorAfterLanded(section.id, listId, colorDraft)
+            : null;
+        // The rename stands: a read that fails after it shows it anyway.
+        await loadSections(listId, {
+          upsert: {
+            ...section,
+            name: trimmed,
+            color_label: colorFailure ? section.color_label : colorDraft,
+          },
+        });
+        if (colorFailure) {
+          showNotice(writeErrorMessage(colorFailure, t));
+          return;
         }
-        await loadSections(listId);
         announce(t('dialogs.task.section.renamed', { name: trimmed }));
       } else {
         const created = await createSection({
@@ -81,10 +93,21 @@ export function SectionDialog({
           // Append to the end — the new section sorts after existing ones.
           position: (sectionsByList[listId] ?? []).length,
         });
-        if (colorDraft) {
-          await setSectionColor(created.id, listId, colorDraft);
+        const colorFailure = colorDraft
+          ? await sectionColorAfterLanded(created.id, listId, colorDraft)
+          : null;
+        // The section stands: a read that fails after it shows it anyway,
+        // and the dialog closes — creating it again would make two.
+        await loadSections(listId, {
+          upsert: {
+            ...created,
+            color_label: colorFailure ? created.color_label : (colorDraft ?? created.color_label),
+          },
+        });
+        if (colorFailure) {
+          showNotice(writeErrorMessage(colorFailure, t));
+          return;
         }
-        await loadSections(listId);
         announce(t('dialogs.task.section.created', { name: trimmed }));
       }
       // Reset the draft before closing so a reused dialog instance never
@@ -94,11 +117,7 @@ export function SectionDialog({
       setColorDraft(section?.color_label ?? null);
       onClose();
     } catch (err) {
-      if (isCommandError(err)) {
-        setError(`${err.code}: ${err.message}`);
-      } else {
-        setError(String(err));
-      }
+      setError(writeErrorMessage(err, t));
     } finally {
       setBusy(false);
     }
@@ -113,17 +132,21 @@ export function SectionDialog({
     announce,
     t,
     onClose,
+    showNotice,
   ]);
+
+  const title = isRename
+    ? t('dialogs.task.section.renameTitle')
+    : t('dialogs.task.section.createTitle');
+  if (notice !== null) {
+    return <CloseOnlyNotice title={title} sentence={notice} onClose={onClose} />;
+  }
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={
-        isRename
-          ? t('dialogs.task.section.renameTitle')
-          : t('dialogs.task.section.createTitle')
-      }
+      title={title}
       className="modal--form"
       dismissOnBackdrop={false}
     >

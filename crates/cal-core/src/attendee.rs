@@ -441,6 +441,7 @@ mod tests {
         fn event(organizer: Option<&str>, attendees: &[&str]) -> Event {
             let at = Utc.with_ymd_and_hms(2026, 10, 6, 7, 0, 0).unwrap();
             Event {
+                original_left_in: None,
                 id: "ev".into(),
                 calendar_id: "cal".into(),
                 title: "Standup".into(),

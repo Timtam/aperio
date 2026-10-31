@@ -366,6 +366,7 @@ fn map_event(
         .unwrap_or(false);
 
     Ok(Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,

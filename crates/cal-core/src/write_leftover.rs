@@ -29,6 +29,16 @@ pub enum WriteLeftover {
     /// [`crate::step_write::step_detail`], as for
     /// [`crate::WriteRefusal::DeletionsNotKept`].
     CreatedMayStand,
+    /// A save of several requests was turned away by a busy provider after an
+    /// earlier request of it had landed (decision 277): part of the change
+    /// stands, the rest does not. It counts as landed — nothing is taken back
+    /// or sent again —, and the surfaces say to check it and try the rest
+    /// later. The detail names the step turned away, and it decides:
+    /// [`crate::STATUS_STEP`] when that was a task's status request (or one
+    /// before it while the status was still due), which
+    /// [`crate::Error::status_landed`] reads as a status that did not land;
+    /// any other step means the status went out with the fields.
+    PartlySaved,
 }
 
 impl WriteLeftover {
@@ -36,6 +46,7 @@ impl WriteLeftover {
     pub const fn token(self) -> &'static str {
         match self {
             Self::CreatedMayStand => "created-may-stand",
+            Self::PartlySaved => "partly-saved",
         }
     }
 
@@ -53,7 +64,7 @@ impl WriteLeftover {
     /// the message as [`crate::WriteRefusal::parse`] reads a refusal.
     pub fn parse(message: &str) -> Option<(Self, &str)> {
         let message = message.trim();
-        for leftover in [Self::CreatedMayStand] {
+        for leftover in [Self::CreatedMayStand, Self::PartlySaved] {
             let Some(rest) = message.strip_prefix(leftover.token()) else {
                 continue;
             };
@@ -92,6 +103,21 @@ mod tests {
         assert_eq!(
             WriteLeftover::parse("created-may-stand"),
             Some((WriteLeftover::CreatedMayStand, ""))
+        );
+    }
+
+    #[test]
+    fn a_save_partly_made_comes_back_from_its_message() {
+        let msg = WriteLeftover::PartlySaved.message("members");
+        assert_eq!(msg, "partly-saved: members");
+        assert_eq!(
+            WriteLeftover::parse(&msg),
+            Some((WriteLeftover::PartlySaved, "members"))
+        );
+        assert_eq!(WriteRefusal::parse(&msg), None);
+        assert_eq!(
+            serde_json::to_value(WriteLeftover::PartlySaved).unwrap(),
+            serde_json::json!("partly-saved")
         );
     }
 

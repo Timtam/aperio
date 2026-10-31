@@ -12,7 +12,11 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   buildReminderGroups,
   daysUntilDeadline,
+  FAILED_WRITE_WATCH_MS,
   occurrenceMoveTarget,
+  writeAfterLanded,
+  writeAll,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -33,6 +37,7 @@ import {
   snoozeDayStartReview,
 } from './dayStartReview';
 import { Modal } from './Modal';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
 
 /**
  * Day-start review dialog (DESIGN.md § 9.5).
@@ -199,6 +204,17 @@ export function DayStartReviewDialog({
   );
 
   const [busy, setBusy] = useState(false);
+  // Whether a row action ran in this opening: a failed one resolves no row,
+  // but its re-read may still take the row away (part of it landed), and
+  // focus must not fall out of the dialog then.
+  const acted = useRef(false);
+  useEffect(() => {
+    if (busy) acted.current = true;
+  }, [busy]);
+  useEffect(() => {
+    if (!isOpen) acted.current = false;
+  }, [isOpen]);
+
   // Rows the user has just handled disappear instantly even though
   // the `update_task` round-trip + cache refresh hasn't landed yet.
   // Without this, rows stick around until invalidateData propagates
@@ -222,6 +238,26 @@ export function DayStartReviewDialog({
   // and the × close without burning a snooze, and the intro copy swaps.
   const remindersOnly = totalRemaining === 0 && hasReminders;
 
+  // The last action's failure, said: where that action cleared the last rows,
+  // "All handled" would speak over it and the dialog close with it unseen.
+  // It then stays on screen with Close instead (Toni, 2026-10-24), as any save
+  // that landed in part does. Every action starts without one.
+  const lastFailure = useRef<{ sentence: string; until: number } | null>(null);
+  // Whether this opening said a failure: the empty-state guard below must not
+  // close over one before the effect shows it.
+  const [failureSaid, setFailureSaid] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const sayFailure = useCallback(
+    (sentence: string) => {
+      // Kept only while its re-read and the refresh after it may still clear
+      // the rows: a later emptying, by another device say, is not its doing.
+      lastFailure.current = { sentence, until: Date.now() + FAILED_WRITE_WATCH_MS };
+      setFailureSaid(true);
+      announce(sentence);
+    },
+    [announce],
+  );
+
   // Close when the actionable list empties out mid-session — the user just
   // cleared everything, no point keeping the modal up.
   //
@@ -232,8 +268,23 @@ export function DayStartReviewDialog({
   // instead (the announce + focus repark below carry the transition).
   useEffect(() => {
     if (!isOpen) return;
-    if (totalRemaining > 0 || resolvedIds.size === 0) return;
+    if (totalRemaining > 0) return;
     if (hasReminders) return;
+    // Also where the action resolved no row and only its re-read took the
+    // last ones away — a write that failed but landed. Mirrors the phone.
+    const kept = lastFailure.current;
+    lastFailure.current = null;
+    if (kept != null && Date.now() < kept.until) {
+      setNotice(`${kept.sentence} ${t('dialogs.dayStartReview.allHandled')}`);
+      return;
+    }
+    if (resolvedIds.size === 0) {
+      // Emptied by a read, not by this opening's actions, or opened with
+      // nothing to show: closed quietly, here alone (the empty-state guard
+      // below only draws nothing).
+      if (!tasksLoading) onClose();
+      return;
+    }
     snoozeDayStartReview(4);
     announce(t('dialogs.dayStartReview.allHandled'));
     onClose();
@@ -242,6 +293,7 @@ export function DayStartReviewDialog({
     totalRemaining,
     resolvedIds.size,
     hasReminders,
+    tasksLoading,
     announce,
     t,
     onClose,
@@ -263,10 +315,18 @@ export function DayStartReviewDialog({
       return;
     }
     if (remindersOnly && !wasRemindersOnly.current) {
+      // The action that cleared the last rows failed in part: its sentence
+      // first, in the same announcement — the live region keeps only the
+      // last of two in a frame. The reminders keep the dialog up.
+      const kept = lastFailure.current;
+      lastFailure.current = null;
+      const failure = kept != null && Date.now() < kept.until ? kept.sentence : null;
       announce(
-        resolvedIds.size > 0
-          ? t('dialogs.dayStartReview.allHandled')
-          : t('dialogs.dayStartReview.hintRemindersOnly'),
+        failure != null
+          ? `${failure} ${t('dialogs.dayStartReview.allHandled')}`
+          : resolvedIds.size > 0
+            ? t('dialogs.dayStartReview.allHandled')
+            : t('dialogs.dayStartReview.hintRemindersOnly'),
       );
     }
     wasRemindersOnly.current = remindersOnly;
@@ -288,7 +348,7 @@ export function DayStartReviewDialog({
   // the dialog just switched into.
   useLayoutEffect(() => {
     if (!isOpen) return;
-    if (resolvedIds.size === 0) return;
+    if (resolvedIds.size === 0 && !acted.current) return;
     const body = introRef.current?.closest('.modal__body') ?? null;
     const active = document.activeElement;
     if (active instanceof HTMLElement && body?.contains(active)) return;
@@ -303,19 +363,25 @@ export function DayStartReviewDialog({
 
   const markCompleted = useCallback(
     async (task: Task): Promise<void> => {
+      // `busy` may never commit as true when the write answers at once.
+      acted.current = true;
+      lastFailure.current = null;
       setBusy(true);
       try {
         // Delegate to the shared status action — it runs the same
         // cascade rules as the rest of the app, applies the
         // completed_at + auto-date dance, and fires its own
-        // announcement. We just need to hide the dialog row.
-        await setTaskStatus(task, 'completed');
-        setResolvedIds((s) => new Set(s).add(task.id));
+        // announcement, a failure's included. We just need to hide the
+        // dialog row — only once the task is done: a row whose completion
+        // was turned away stays, to be tried again (decision 273).
+        if (await setTaskStatus(task, 'completed', sayFailure)) {
+          setResolvedIds((s) => new Set(s).add(task.id));
+        }
       } finally {
         setBusy(false);
       }
     },
-    [setTaskStatus],
+    [setTaskStatus, sayFailure],
   );
 
   // Delete a task that's no longer relevant. The ONLY irreversible action in
@@ -330,6 +396,7 @@ export function DayStartReviewDialog({
       ) {
         return;
       }
+      lastFailure.current = null;
       setBusy(true);
       try {
         await invoke<void>('delete_task', { id: task.id, listId: task.list_id });
@@ -339,13 +406,15 @@ export function DayStartReviewDialog({
         );
         invalidateData();
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('delete_task failed', err);
+        // The person pressed it: said, never only logged (decision 273). A
+        // failed write may still have landed, so the rows read again.
+        invalidateData();
+        sayFailure(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
       }
     },
-    [t, announce, invalidateData],
+    [t, announce, invalidateData, sayFailure],
   );
 
   // The row title + date were plain <span>s inside the role="application" Modal,
@@ -389,6 +458,7 @@ export function DayStartReviewDialog({
    */
   const deadlineToToday = useCallback(
     async (task: Task): Promise<void> => {
+      lastFailure.current = null;
       setBusy(true);
       try {
         const moved = movedToToday(task);
@@ -409,17 +479,20 @@ export function DayStartReviewDialog({
         );
         invalidateData();
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('update_task failed', err);
+        // The person pressed it: said, never only logged (decision 273). A
+        // failed write may still have landed, so the rows read again.
+        invalidateData();
+        sayFailure(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
       }
     },
-    [t, announce, invalidateData],
+    [t, announce, invalidateData, sayFailure],
   );
 
   const backToBacklog = useCallback(
     async (task: Task): Promise<void> => {
+      lastFailure.current = null;
       setBusy(true);
       try {
         const updated: Task = {
@@ -440,36 +513,38 @@ export function DayStartReviewDialog({
         );
         invalidateData();
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('update_task failed', err);
+        // The person pressed it: said, never only logged (decision 273). A
+        // failed write may still have landed, so the rows read again.
+        invalidateData();
+        sayFailure(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
       }
     },
-    [t, announce, invalidateData],
+    [t, announce, invalidateData, sayFailure],
   );
 
   const completeAllOverdue = useCallback(async () => {
+    lastFailure.current = null;
     setBusy(true);
     try {
       const now = new Date().toISOString();
-      await Promise.all(
-        remainingOverdue.map((task) =>
-          invoke<Task>('update_task', {
-            task: {
-              ...task,
-              status: 'completed',
-              completed_at: now,
-              updated_at: now,
-            },
-          }),
-        ),
+      const { landed, failure } = await writeAll('batch', remainingOverdue, (task) =>
+        invoke<Task>('update_task', {
+          task: {
+            ...task,
+            status: 'completed',
+            completed_at: now,
+            updated_at: now,
+          },
+        }),
       );
       setResolvedIds((s) => {
         const next = new Set(s);
-        remainingOverdue.forEach((task) => next.add(task.id));
+        landed.forEach((task) => next.add(task.id));
         return next;
       });
+      if (failure !== null) throw failure;
       announce(
         t('dialogs.dayStartReview.deadlines.announceAllCompleted', {
           count: remainingOverdue.length,
@@ -477,12 +552,13 @@ export function DayStartReviewDialog({
       );
       invalidateData();
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('batch update_task failed', err);
+      // Said, never only logged (decision 273); the rows read again.
+      invalidateData();
+      sayFailure(writeErrorMessage(err, t));
     } finally {
       setBusy(false);
     }
-  }, [remainingOverdue, t, announce, invalidateData]);
+  }, [remainingOverdue, t, announce, invalidateData, sayFailure]);
 
   // ── Carry-over section actions ──────────────────────────────────────
 
@@ -499,6 +575,7 @@ export function DayStartReviewDialog({
       newDate: string | null,
       announcementKey: string,
     ): Promise<void> => {
+      lastFailure.current = null;
       setBusy(true);
       try {
         // Per-list cascade: descendants follow the action iff THIS
@@ -529,13 +606,17 @@ export function DayStartReviewDialog({
               ?.reschedule_single_occurrence ?? true,
           );
           if (move.advanced) advanced = true;
-          await invoke<Task>('update_task', {
-            task: {
-              ...target,
-              scheduled_date: move.date,
-              updated_at: now,
-            },
-          });
+          const write = () =>
+            invoke<Task>('update_task', {
+              task: {
+                ...target,
+                scheduled_date: move.date,
+                updated_at: now,
+              },
+            });
+          // Once the row itself moved, a subtask's failure never reads as
+          // "nothing was changed" (decision 277).
+          await (target === root ? write() : writeAfterLanded('subtasks', write));
         }
         setResolvedIds((s) => {
           const next = new Set(s);
@@ -560,13 +641,15 @@ export function DayStartReviewDialog({
         );
         invalidateData();
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('update_task failed', err);
+        // The person pressed it: said, never only logged (decision 273). A
+        // failed write may still have landed, so the rows read again.
+        invalidateData();
+        sayFailure(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
       }
     },
-    [tasks, taskListById, effectiveForList, t, announce, invalidateData],
+    [tasks, taskListById, effectiveForList, t, announce, invalidateData, sayFailure],
   );
 
   const carryToToday = useCallback(
@@ -627,27 +710,27 @@ export function DayStartReviewDialog({
   }, [remainingSlipped, effectiveForList, meFor, tasks]);
 
   const allCarryToToday = useCallback(async () => {
+    lastFailure.current = null;
     setBusy(true);
     try {
       const now = new Date().toISOString();
       const today = todayIsoKey();
       const targets = collectBulkCarryTargets();
-      await Promise.all(
-        targets.map((task) =>
-          invoke<Task>('update_task', {
-            task: {
-              ...task,
-              scheduled_date: today,
-              updated_at: now,
-            },
-          }),
-        ),
+      const { landed, failure } = await writeAll('batch', targets, (task) =>
+        invoke<Task>('update_task', {
+          task: {
+            ...task,
+            scheduled_date: today,
+            updated_at: now,
+          },
+        }),
       );
       setResolvedIds((s) => {
         const next = new Set(s);
-        targets.forEach((task) => next.add(task.id));
+        landed.forEach((task) => next.add(task.id));
         return next;
       });
+      if (failure !== null) throw failure;
       announce(
         t('dialogs.dayStartReview.carryOver.announceAllToday', {
           count: remainingSlipped.length,
@@ -655,34 +738,35 @@ export function DayStartReviewDialog({
       );
       invalidateData();
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('batch update_task failed', err);
+      // Said, never only logged (decision 273); the rows read again.
+      invalidateData();
+      sayFailure(writeErrorMessage(err, t));
     } finally {
       setBusy(false);
     }
-  }, [remainingSlipped, collectBulkCarryTargets, t, announce, invalidateData]);
+  }, [remainingSlipped, collectBulkCarryTargets, t, announce, invalidateData, sayFailure]);
 
   const allCarryToBacklog = useCallback(async () => {
+    lastFailure.current = null;
     setBusy(true);
     try {
       const now = new Date().toISOString();
       const targets = collectBulkCarryTargets();
-      await Promise.all(
-        targets.map((task) =>
-          invoke<Task>('update_task', {
-            task: {
-              ...task,
-              scheduled_date: null,
-              updated_at: now,
-            },
-          }),
-        ),
+      const { landed, failure } = await writeAll('batch', targets, (task) =>
+        invoke<Task>('update_task', {
+          task: {
+            ...task,
+            scheduled_date: null,
+            updated_at: now,
+          },
+        }),
       );
       setResolvedIds((s) => {
         const next = new Set(s);
-        targets.forEach((task) => next.add(task.id));
+        landed.forEach((task) => next.add(task.id));
         return next;
       });
+      if (failure !== null) throw failure;
       announce(
         t('dialogs.dayStartReview.carryOver.announceAllBacklog', {
           count: remainingSlipped.length,
@@ -690,12 +774,13 @@ export function DayStartReviewDialog({
       );
       invalidateData();
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('batch update_task failed', err);
+      // Said, never only logged (decision 273); the rows read again.
+      invalidateData();
+      sayFailure(writeErrorMessage(err, t));
     } finally {
       setBusy(false);
     }
-  }, [remainingSlipped, collectBulkCarryTargets, t, announce, invalidateData]);
+  }, [remainingSlipped, collectBulkCarryTargets, t, announce, invalidateData, sayFailure]);
 
   // ── Snooze + empty state ────────────────────────────────────────────
 
@@ -706,8 +791,10 @@ export function DayStartReviewDialog({
   }, [t, announce, onClose]);
 
   // Defensive empty-state: caller opened us with nothing to show
-  // (race between the checker and a refetch). Close quietly without
-  // snoozing — there's no reason to suppress a real future trigger.
+  // (race between the checker and a refetch). Nothing is drawn, and the close
+  // effect above closes quietly without snoozing — there's no reason to
+  // suppress a real future trigger. Closing here, during render, updated the
+  // dialog host while this rendered, and the effect closed a second time.
   // Reminders are a valid reason to stay open even with no actionable
   // rows, so a reminders-only review isn't dismissed here.
   //
@@ -722,10 +809,26 @@ export function DayStartReviewDialog({
     !tasksLoading &&
     totalRemaining === 0 &&
     resolvedIds.size === 0 &&
-    !hasReminders
+    !hasReminders &&
+    // A failure whose re-read took the last rows away is shown by the
+    // effect above, not hidden here.
+    !failureSaid
   ) {
-    onClose();
     return null;
+  }
+
+  if (notice != null) {
+    return (
+      <CloseOnlyNotice
+        title={t('dialogs.dayStartReview.title')}
+        sentence={notice}
+        onClose={() => {
+          setNotice(null);
+          snoozeDayStartReview(4);
+          onClose();
+        }}
+      />
+    );
   }
 
   // The intro copy follows the same switch: the default hint promises per-row

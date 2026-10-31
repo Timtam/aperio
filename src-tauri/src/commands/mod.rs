@@ -97,6 +97,29 @@ impl From<cal_core::Error> for CommandError {
     }
 }
 
+impl CommandError {
+    /// What this error becomes when it met a later step of a save whose
+    /// earlier request landed (decision 277): the core's rule
+    /// ([`cal_core::Error::after_landed`]), read back from the code it
+    /// crossed with — a busy answer leaves the save partly saved, never
+    /// "nothing was changed".
+    pub fn after_landed(self, step: &str) -> Self {
+        use cal_core::Error::*;
+        let core = match self.code {
+            "auth" => Authentication(self.message),
+            "forbidden" => Forbidden(self.message),
+            "not_found" => NotFound(self.message),
+            "conflict" => Conflict(self.message),
+            "network" => Network(self.message),
+            "protocol" => Protocol(self.message),
+            "invalid_input" => InvalidInput(self.message),
+            "unsupported" => Unsupported(self.message),
+            _ => Internal(self.message),
+        };
+        core.after_landed(step).into()
+    }
+}
+
 impl From<crate::DbError> for CommandError {
     fn from(err: crate::DbError) -> Self {
         Self {
@@ -247,5 +270,37 @@ pub fn probe_host_key_error_to_command(err: ProbeHostKeyError) -> CommandError {
             code: "network",
             message: msg,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// A host error met after an earlier request landed reads as the core
+    /// reads it: busy is partly saved, a lost answer stays, anything else may
+    /// have landed (decision 277).
+    #[test]
+    fn a_command_error_after_a_landed_step_never_reads_as_never_landed() {
+        let busy = super::CommandError {
+            code: "forbidden",
+            message: "provider-busy: http-429".into(),
+        }
+        .after_landed("event");
+        assert_eq!(
+            (busy.code, busy.message.as_str()),
+            ("network", "partly-saved: event")
+        );
+        let lost = super::CommandError {
+            code: "network",
+            message: "reset".into(),
+        }
+        .after_landed("event");
+        assert_eq!((lost.code, lost.message.as_str()), ("network", "reset"));
+        let gone = super::CommandError {
+            code: "not_found",
+            message: "gone".into(),
+        }
+        .after_landed("event");
+        assert_eq!(gone.code, "network");
+        assert!(gone.message.starts_with("event: "), "{}", gone.message);
     }
 }

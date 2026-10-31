@@ -928,7 +928,8 @@ pub async fn connect_google_account(
     );
     // The boot warm pass may already have run; kick a warm so the new account's
     // calendars/lists load now instead of only after the next pass / restart.
-    refresher.trigger();
+    // Forced for this account only (decision 271).
+    refresher.trigger_account(&created.id);
     Ok(created)
 }
 
@@ -1049,7 +1050,8 @@ pub async fn connect_microsoft_account(
     );
     // The boot warm pass may already have run; kick a warm so the new account's
     // calendars/lists load now instead of only after the next pass / restart.
-    refresher.trigger();
+    // Forced for this account only (decision 271).
+    refresher.trigger_account(&created.id);
     Ok(created)
 }
 
@@ -1292,10 +1294,20 @@ pub async fn test_account(
     registry
         .probe_account(&request.adapter_kind, &plan.probe_config_json(), secret)
         .await
-        .map_err(|err| CommandError {
+        .map_err(probe_error)
+}
+
+/// A failed credential probe as the shells read it: the adapter's own error
+/// keeps its kind and its token first (a busy provider, decision 273); a
+/// failure before the adapter was asked stays `probe_failed`.
+fn probe_error(err: host_core::registry::RegistryError) -> CommandError {
+    match err {
+        host_core::registry::RegistryError::Probe(err) => CommandError::from(err),
+        other => CommandError {
             code: "probe_failed",
-            message: err.to_string(),
-        })
+            message: other.to_string(),
+        },
+    }
 }
 
 /// Create an account for any plugin that declares an account schema.
@@ -1488,7 +1500,7 @@ pub async fn connect_account(
     // blocking cold path.
     let owns_containers = plugin.manifest.has_data_family();
     if owns_containers {
-        refresher.trigger();
+        refresher.trigger_account(&created.id);
     }
     Ok(created)
 }
@@ -1881,7 +1893,25 @@ pub async fn update_account(
         message: err.to_string(),
     })?;
     // New endpoint, new data: refresh so the views reflect the edited account
-    // without waiting for the periodic loop.
-    refresher.trigger();
+    // without waiting for the periodic loop. Forced for this account only.
+    refresher.trigger_account(&request.account_id);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A probe the adapter failed keeps the adapter's kind and its token
+    /// first (decision 273); a failure before the adapter was asked stays
+    /// `probe_failed`.
+    #[test]
+    fn a_busy_probe_keeps_its_token() {
+        let busy = cal_core::Error::provider_busy(cal_core::BusyDetail::TooManyRequests);
+        let err = probe_error(host_core::registry::RegistryError::Probe(busy));
+        assert_eq!(err.code, "forbidden");
+        assert_eq!(err.message, "provider-busy: http-429");
+        let other = probe_error(host_core::registry::RegistryError::Construct("x".into()));
+        assert_eq!(other.code, "probe_failed");
+    }
 }

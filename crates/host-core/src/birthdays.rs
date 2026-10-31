@@ -176,6 +176,7 @@ pub fn events_for_contacts(
             }
             let age = birthday_age(year, &bday);
             out.push(Event {
+                original_left_in: None,
                 keep_attendees: false,
                 keep_fields: Vec::new(),
                 clear_attendees: false,

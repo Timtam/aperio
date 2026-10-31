@@ -14,6 +14,10 @@ const t = (key: string, values?: Record<string, unknown>) => i18n.t(key, values)
  */
 
 const failTitles = vi.hoisted(() => ({ current: new Set<string>() }));
+/** Creates that land and then fail at a later step: they stand in part. */
+const inPartTitles = vi.hoisted(() => ({ current: new Set<string>() }));
+/** Creates whose answer was lost: they may stand. */
+const lostTitles = vi.hoisted(() => ({ current: new Set<string>() }));
 /** Creates held open until the test lets them go: a list that is writing. */
 const heldCreates = vi.hoisted(() => ({ on: false, release: [] as Array<() => void> }));
 /** What each calendar holds when asked (`get_events`): rows, a failure, or an
@@ -38,6 +42,12 @@ const invokeMock = vi.hoisted(() =>
       const request = (payload as { request: { title: string } }).request;
       if (failTitles.current.has(request.title)) {
         return Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' });
+      }
+      if (inPartTitles.current.has(request.title)) {
+        return Promise.reject({ code: 'network', message: 'partly-saved: reply' });
+      }
+      if (lostTitles.current.has(request.title)) {
+        return Promise.reject({ code: 'network', message: 'connection reset' });
       }
       if (heldCreates.on) {
         return new Promise((resolve) =>
@@ -88,6 +98,8 @@ afterEach(() => {
   invalidateData.mockClear();
   announce.mockClear();
   failTitles.current = new Set();
+  inPartTitles.current = new Set();
+  lostTitles.current = new Set();
   heldCreates.on = false;
   heldCreates.release = [];
   STORE.selectedCalendarIds = new Set(['cal-home', 'cal-work']);
@@ -95,6 +107,7 @@ afterEach(() => {
   ownAddress.current = {};
   for (const calendar of CALENDARS) {
     delete (calendar as { invitation_import?: string }).invitation_import;
+    delete (calendar as { recurrence_capabilities?: unknown }).recurrence_capabilities;
     (calendar as { keeps_uid?: boolean }).keeps_uid = true;
   }
   localStorage.clear();
@@ -205,11 +218,12 @@ describe('ImportDialog → several appointments', () => {
     await screen.findByText(/In „Privat“ lassen sich Organisator und Teilnehmer/);
     fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
     expect(
-      // Each one that did not arrive with its own reason; nothing after that
-      // would say nothing was created.
+      // Each one that did not arrive with its own reason, a busy provider in
+      // its own words and asked to wait (decisions 270, 272); nothing after
+      // that would say nothing was created.
       await screen.findByText(
         '1 von 2 Terminen in „Privat“ importiert. Nicht importiert: „Projektbesprechung“ ' +
-          '(der Anbieter erlaubt es nicht (provider-busy: http-429)).',
+          '(der Anbieter ist gerade ausgelastet). Versuche es später noch einmal.',
       ),
     ).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
@@ -218,6 +232,34 @@ describe('ImportDialog → several appointments', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(1);
     expect(screen.getByText(/Chorprobe, .*, importiert/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '1 Termin importieren' })).toBeTruthy();
+  });
+
+  it('marks one that stands in part and does not offer it again', async () => {
+    // Review round 15 of #128: it read as not imported and stayed checked,
+    // so the next press made it twice.
+    inPartTitles.current = new Set(['Projektbesprechung']);
+    const onClose = await open({ read: READ });
+    await screen.findByText(/In „Privat“ lassen sich Organisator und Teilnehmer/);
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    expect(
+      await screen.findByText(
+        /^1 von 2 Terminen ganz in „Privat“ importiert\. Vielleicht nicht ganz angekommen, prüfe ihn im Kalender: „Projektbesprechung“/,
+      ),
+    ).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.getByText(/Projektbesprechung, .*, vielleicht nicht ganz importiert/)).toBeTruthy();
+  });
+
+  it('does not offer again one whose answer was lost', async () => {
+    // Review round 16 of #128: a create that may have landed read as not
+    // imported and stayed checked.
+    lostTitles.current = new Set(['Projektbesprechung']);
+    await open({ read: READ });
+    await screen.findByText(/In „Privat“ lassen sich Organisator und Teilnehmer/);
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    expect(await screen.findByText(/Vielleicht nicht ganz angekommen/)).toBeTruthy();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 
   it('opens one in the editor, as it stands, and marks it once created', async () => {
@@ -267,6 +309,102 @@ describe('ImportDialog → several appointments', () => {
     act(() => options.onImported());
     const done = screen.getByText(/Projektbesprechung, .*, importiert/);
     expect(done.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('holds the "please wait" dialog over every series it writes in steps', async () => {
+    // Review round 16 of #128: it opened and closed again for each series,
+    // and focus went back to the button between them.
+    (CALENDARS[0] as { recurrence_capabilities?: unknown }).recurrence_capabilities = {
+      deletions_in_steps: true,
+    };
+    heldCreates.on = true;
+    const series = (title: string) =>
+      event(title, {
+        recurrence: {
+          rrule: 'FREQ=WEEKLY',
+          exceptions: ['2026-11-25T13:00:00Z'],
+        } as ImportedEvent['recurrence'],
+      });
+    await open({ read: { events: [series('Jour fixe'), series('Chor')], skipped: [] } });
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    const waiting = () => screen.queryByRole('dialog', { name: /Vorgang läuft/ });
+    await waitFor(() => expect(waiting()).toBeTruthy());
+    const opened = waiting();
+    await act(async () => {
+      heldCreates.release.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(createRequests()).toHaveLength(2));
+    // The same dialog, never closed between the two.
+    expect(waiting()).toBe(opened);
+    await act(async () => {
+      heldCreates.release.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(waiting()).toBeNull());
+  });
+
+  it('writes someone else’s series at once where the calendar keeps it as theirs', async () => {
+    // Review round 21 of #128: Exchange and Google take such an invitation
+    // with its deletions; nothing is removed one occurrence at a time. The
+    // account's address is known, so it is surely someone else's.
+    ownAddress.current = { 'cal-home': 'me@example.org' };
+    (CALENDARS[0] as { recurrence_capabilities?: unknown }).recurrence_capabilities = {
+      deletions_in_steps: true,
+    };
+    (CALENDARS[0] as { invitation_import?: string }).invitation_import = 'kept';
+    heldCreates.on = true;
+    const invitation = event('Jour fixe', {
+      organizer: 'erika@example.org',
+      attendees: ['Max <max@example.org>'],
+      recurrence: {
+        rrule: 'FREQ=WEEKLY',
+        exceptions: ['2026-11-25T13:00:00Z'],
+      } as ImportedEvent['recurrence'],
+    });
+    await open({ read: { events: [invitation], skipped: [] } });
+    const button = await screen.findByRole('button', { name: '1 Termin importieren' });
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'));
+    fireEvent.click(button);
+    await waitFor(() => expect(createRequests()).toHaveLength(1));
+    expect(createRequests()[0].keeps_invitation).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole('dialog', { name: /Vorgang läuft/ })).toBeNull();
+    await act(async () => {
+      heldCreates.release.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  });
+
+  it('waits for a series read as someone else’s where the account’s address did not read', async () => {
+    // Review round 22 of #128: it may be the account's own, which Google, asking
+    // for itself, writes in steps.
+    (CALENDARS[0] as { recurrence_capabilities?: unknown }).recurrence_capabilities = {
+      deletions_in_steps: true,
+    };
+    (CALENDARS[0] as { invitation_import?: string }).invitation_import = 'kept';
+    heldCreates.on = true;
+    const invitation = event('Jour fixe', {
+      organizer: 'erika@example.org',
+      attendees: ['Max <max@example.org>'],
+      recurrence: {
+        rrule: 'FREQ=WEEKLY',
+        exceptions: ['2026-11-25T13:00:00Z'],
+      } as ImportedEvent['recurrence'],
+    });
+    await open({ read: { events: [invitation], skipped: [] } });
+    const button = await screen.findByRole('button', { name: '1 Termin importieren' });
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'));
+    fireEvent.click(button);
+    await waitFor(() => expect(createRequests()).toHaveLength(1));
+    expect(createRequests()[0].keeps_invitation).toBe(true);
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /Vorgang läuft/ })).toBeTruthy(),
+    );
+    await act(async () => {
+      heldCreates.release.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
   });
 
   it('holds the calendar and the rows while it writes', async () => {

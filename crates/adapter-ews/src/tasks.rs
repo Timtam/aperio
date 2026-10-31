@@ -853,6 +853,7 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
     }
 
     Ok(Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id,
         list_id: list_id.to_string(),
@@ -1256,6 +1257,7 @@ fn build_task_from_new(
 ) -> Task {
     let now = Utc::now();
     Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id: encode_task_id(item_id, change_key.as_deref()),
         list_id: list_id.to_string(),
@@ -1765,6 +1767,7 @@ mod tests {
     #[test]
     fn update_task_xml_deletes_cleared_fields() {
         let task = Task {
+            original_left_in: None,
             assignees: Vec::new(),
             id: "TID|TCK".into(),
             list_id: "LIST|LCK".into(),
@@ -1919,6 +1922,7 @@ mod tests {
             .create_async()
             .await;
         let starting = Task {
+            original_left_in: None,
             assignees: Vec::new(),
             id: "TID|TCK-V1".into(),
             list_id: "LIST|LCK".into(),

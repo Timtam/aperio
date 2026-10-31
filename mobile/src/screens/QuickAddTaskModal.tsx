@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { writeErrorMessage } from '@aperio/shared';
+import { eventWriteLeftover, writeErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -30,11 +30,13 @@ import {
   useTitleSuggestions,
 } from '../state/useTitleSuggestions';
 import { SelectFieldButton } from '../components/SelectFieldButton';
+import { CloseOnlyNotice } from '../components/CloseOnlyNotice';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { formatLocalDate } from '../intl/dateTimeField';
 import { useShowHiddenTaskListTargets } from '../settings/hiddenTargets';
 import { readLastUsedTaskList, writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useTaskStore } from '../state/taskStoreContext';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -148,7 +150,13 @@ export default function QuickAddTaskModal({
   }, [selectable]);
 
   // Cancel button in the header (first element) so the user can back out fast.
-  useCancelHeader(navigation);
+  // What the screen says in place of the form once a save landed in part:
+  // saving again would write twice what stands (273).
+  const { notice, showNotice } = useCloseOnlyNotice();
+  const closeNotice = useCallback(() => navigation.goBack(), [navigation]);
+  useCancelHeader(navigation, 'mobile.cancel', {
+    close: notice != null ? closeNotice : undefined,
+  });
 
   // Move SR focus into the title field on open AND open the keyboard, so a new
   // task is ready to type immediately (a modal must drive focus or VoiceOver
@@ -231,11 +239,17 @@ export default function QuickAddTaskModal({
       AccessibilityInfo.announceForAccessibility(t('dialogs.task.created', { title: trimmed }));
       navigation.goBack();
     } catch (err) {
+      // A task that stands without one of its steps (273): said in place of
+      // the form, which only closes.
+      if (eventWriteLeftover(err)) {
+        showNotice(writeErrorMessage(err, t));
+        return;
+      }
       fail(writeErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }
-  }, [date, fail, listId, navigation, t, title]);
+  }, [date, fail, listId, navigation, t, title, showNotice]);
 
   // Stable, so the memoised title field is not re-rendered by everything that
   // happens around it — the suggestion list arriving, above all (see
@@ -254,6 +268,10 @@ export default function QuickAddTaskModal({
       initialScheduledDate: date.trim() || undefined,
     });
   }, [date, listId, navigation, title]);
+
+  if (notice != null) {
+    return <CloseOnlyNotice sentence={notice} onClose={closeNotice} />;
+  }
 
   return (
     <FormScrollView

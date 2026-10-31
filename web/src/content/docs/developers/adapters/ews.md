@@ -24,6 +24,19 @@ The endpoint is discovered or user-supplied.
 
 ## Quirks
 
+- **A busy server.** `ErrorServerBusy`, as a response code or as a fault sent
+  with HTTP 500, and HTTP 429 are a busy provider (`busy_detail`, decision
+  270): the request did nothing, and `cal_core::Error::provider_busy` says so
+  on every path, reads included, where it was a refusal (`server-refused`) on
+  a write and a protocol error on a read. A read of the copy a write needs
+  that is busy says busy, never `copy-unreadable`. Where a later request of a
+  save is turned away after an earlier one landed, the change stands in part
+  (`EwsError::PartlySaved`, 277): an exception detached as a single whose
+  delete is busy, a contact photo whose old picture was deleted before the
+  upload failed, and an invitation from a file once its request stands (see
+  below). A new contact whose photo upload fails is still
+  returned, with `has_photo` false, and the editor says so. The GAL walk ends
+  at the first busy prefix with that error, so the GAL cached before stays.
 - **Folder-complete events.** EWS keeps a per-folder in-memory view of
   *every* item it has seen, so its event read is **folder-complete**: it
   emits the full set with `ChangeSet.complete = true`, and the host stores
@@ -174,11 +187,15 @@ The endpoint is discovered or user-supplied.
     the invitation's iCalendar carries the deletions as `EXDATE`, and the
     invitee gets exactly one invitation; 60 deletions took 10.7 s in 123
     requests.
-  - `ErrorServerBusy`, as a response code or an HTTP 500 fault, is waited out
-    by its `BackOffMilliseconds` while it fits (`cal_core::may_send` counts the
-    slowest request so far); a lost delete answer is decided by probing the
-    occurrence; a ChangeKey refusal reads the master's key and sends once
-    more.
+  - `ErrorServerBusy`, as a response code or an HTTP 500 fault, and HTTP 429
+    are waited out by the `BackOffMilliseconds` the answer names (429 names
+    none, so the step backs off on its own clock) while it fits (`cal_core::may_send` counts the
+    slowest request so far). A step that no longer fits right after such a
+    wait, or once the waits took half the time to settle or more, fails as
+    `busy`, not `time` (`cal_core::out_of_time_reason`, 276), and a series
+    taken back for it says the provider was busy. A lost delete answer is
+    decided by probing the occurrence; a ChangeKey refusal reads the master's
+    key and sends once more.
   - The invitation is sent only inside the 15 s; the reads that prove the
     result may borrow a few seconds past them, no write does.
   - Any failure deletes the series again inside the 15 s kept for that,
@@ -198,10 +215,11 @@ The endpoint is discovered or user-supplied.
   - The manifest declares it (`recurrence.deletions_in_steps`), and the
     surfaces show a "please wait" dialog while such a series is created.
 - **A create turned down whole is a refusal.** `create_event` maps through
-  `to_create_error`: a refused HTTP status or a code of
-  `REFUSED_UPDATE_CODES` (also in an HTTP 500 fault) is `server-refused`, as
-  for an update. Plain creates too: a create refused while Exchange throttles
-  said a protocol error before.
+  `to_create_error`, as an update does: a busy server first
+  (`ErrorServerBusy`, also in an HTTP 500 fault, and HTTP 429) is
+  `provider-busy` (decision 270); any other code of `REFUSED_UPDATE_CODES`
+  and the refused statuses 400, 413, 415, 422 and 507 are `server-refused`.
+  Plain creates too: such a create said a protocol error before.
 - **The iCalendar UID comes with the details.** The detail `GetItem` asks for
   `calendar:UID` (live rounds ICS to ICS-4 read it there); `SyncFolderItems`
   does not, as nobody measured whether it may. A row has its `ical_uid` once
@@ -230,8 +248,15 @@ The endpoint is discovered or user-supplied.
   (`item:ParentFolderId`) and, in any other folder, moves it there
   (`MoveItem`, the folder without its change key). A move that fails deletes
   the appointment again, telling nobody, and fails the create: the import
-  lands where it was asked to or not at all. Then the adapter reads the
-  appointment back. Live round ICS-7 (run 172507) moved one into a folder of
+  lands where it was asked to or not at all. With that clean-up done the
+  failure is a refusal (`EwsError::TakenBack`), whatever the move answered —
+  only a busy Exchange stays busy —, so the import list offers the meeting
+  again. Then the adapter reads the
+  appointment back. Any other step that fails once the request stands — the
+  tentative reply, asking for the folder, the read-back, or a move whose
+  clean-up fails too — leaves something in the mailbox, and the create says
+  it stands in part (`EwsError::PartlySaved`, 277), never that nothing was
+  changed. Live round ICS-7 (run 172507) moved one into a folder of
   its own, keeping its organizer, invitees, tentative answer, UID and
   reminder, with nothing sent; one imported into the default calendar was
   not moved. The mailbox's address is the login where that is an

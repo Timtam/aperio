@@ -24,8 +24,10 @@ import CalFfi from '../../modules/cal-ffi';
 
 /** Coarse category a cache scope belongs to — drives the announcement string +
  *  which screens reload. The Host scopes are events/calendars (→ calendar),
- *  tasks/task_lists (→ tasks), contacts/contact_lists (→ contacts). */
-export type CacheCategory = 'calendar' | 'tasks' | 'contacts';
+ *  tasks/task_lists (→ tasks), contacts/contact_lists (→ contacts), and
+ *  sections (→ sections: the task store reads the lists it holds again — a
+ *  section write invalidates them, and only the refresh brings the truth). */
+export type CacheCategory = 'calendar' | 'tasks' | 'contacts' | 'sections';
 
 function categoryForScope(scope: string): CacheCategory | null {
   switch (scope) {
@@ -38,6 +40,8 @@ function categoryForScope(scope: string): CacheCategory | null {
     case 'contacts':
     case 'contact_lists':
       return 'contacts';
+    case 'sections':
+      return 'sections';
     default:
       return null;
   }
@@ -132,6 +136,7 @@ export function notifyDataReload(): void {
   pendingCategories.add('calendar');
   pendingCategories.add('tasks');
   pendingCategories.add('contacts');
+  pendingCategories.add('sections');
   // Immediate flush: the sync UI just reported applied changes (or the user
   // pulled to refresh) — waiting out a pass throttle here reads as "sync
   // done but the screen is stale". Going through the shared flush still

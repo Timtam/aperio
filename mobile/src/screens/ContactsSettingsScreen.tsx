@@ -12,7 +12,13 @@ import {
   View,
 } from 'react-native';
 
-import { ALLOWED_LINK_SCHEMES, schemeOf } from '@aperio/shared';
+import {
+  ALLOWED_LINK_SCHEMES,
+  errorMessage,
+  readFailureSentence,
+  schemeOf,
+  writeErrorMessage,
+} from '@aperio/shared';
 
 import {
   clearContactsCache,
@@ -133,7 +139,7 @@ export default function ContactsSettingsScreen() {
       await syncContactsNow(include);
       await reload();
     } catch (err) {
-      announce(t('mobile.error', { message: errorMessage(err) }));
+      announce(readFailureSentence('views.contacts.syncFailed', err, t));
     } finally {
       setBusySync(false);
     }
@@ -146,7 +152,7 @@ export default function ContactsSettingsScreen() {
         await reload();
         announce(t('dialogs.settings.contacts.intervalChanged', { minutes: clamped }));
       } catch (err) {
-        announce(t('mobile.error', { message: errorMessage(err) }));
+        announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
       }
     },
     [announce, reload, t],
@@ -166,7 +172,7 @@ export default function ContactsSettingsScreen() {
     } catch (err) {
       // Revert on failure.
       setStatus((prev) => (prev ? { ...prev, include_read_only_on_sync: !next } : prev));
-      announce(t('mobile.error', { message: errorMessage(err) }));
+      announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
     }
   }, [announce, status?.include_read_only_on_sync, t]);
 
@@ -334,10 +340,6 @@ export default function ContactsSettingsScreen() {
       </View>
     </ScrollView>
   );
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 const makeStyles = (c: ThemeColors) =>

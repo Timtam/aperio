@@ -100,6 +100,20 @@ differences the adapter bridges:
   allows several), and treat create→409 (already linked) / DELETE→404
   (already gone) as success.
 
+## A busy server
+
+HTTP 429 is a busy provider (`busy_detail`, decision 270): the request did
+nothing. A create or an update writes the task first and then, in requests of
+their own, its assignees, its bucket (the kanban view and the current bucket
+are read first) and its parent relation. Once the task landed, a busy answer
+to any of them leaves the save in part (`VikunjaError::PartlySaved`, 277), and
+an assignee write's failure of any kind does too: creating the task again
+would make a second one. Other failures of the bucket and the parent stay
+best-effort, as before. A busy server is no answer about a project's kanban
+view or its members: the task read and the share list fail instead of
+returning tasks without their sections or nobody. How Vikunja throttles is not
+measured.
+
 ## Collaboration (assignment + membership)
 
 - **Assignees** (multi): read inline on the task; written via the bulk

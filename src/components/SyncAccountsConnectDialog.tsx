@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { isProviderBusy, readErrorMessage } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
@@ -14,7 +15,7 @@ import {
   isCommandError,
   listAdapterKinds,
   reconnectAccount,
-  refreshExternalCache,
+  refreshAccountCache,
   setAccountSecret,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
@@ -192,11 +193,13 @@ export function SyncAccountsConnectDialog({
   );
 
   // Translate a thrown error from the backend reconnect commands
-  // into a short user-visible message. We keep the original
-  // `message` text for codes we don't recognise so the user has
-  // something to act on rather than a generic "failed".
+  // into a short user-visible message. A code we don't recognise
+  // reads as the host said it, so the user has something to act on
+  // rather than a generic "failed".
   const messageForError = useCallback(
     (err: unknown): string => {
+      // A busy provider says so before any code does (decision 273).
+      if (isProviderBusy(err)) return readErrorMessage(err, t);
       if (isCommandError(err)) {
         switch (err.code) {
           case 'auth':
@@ -205,11 +208,9 @@ export function SyncAccountsConnectDialog({
             return t('syncAccountsConnect.errorNetwork');
           case 'invalid_input':
             return t('syncAccountsConnect.errorInvalidInput');
-          default:
-            return err.message;
         }
       }
-      return err instanceof Error ? err.message : String(err);
+      return readErrorMessage(err, t);
     },
     [t],
   );
@@ -237,7 +238,7 @@ export function SyncAccountsConnectDialog({
         // never contacts the provider, so without this kick the refresh-error
         // warning would outlive a successful repair until the next scheduled
         // pass — and a still-wrong password would look identical to success.
-        void refreshExternalCache().catch(() => undefined);
+        void refreshAccountCache(account.id).catch(() => undefined);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('set_account_secret failed', err);
@@ -270,7 +271,7 @@ export function SyncAccountsConnectDialog({
         removeRow(account.id);
         // Same rationale as the password path: retry now so the error
         // surface reflects the repair (or its failure) promptly.
-        void refreshExternalCache().catch(() => undefined);
+        void refreshAccountCache(account.id).catch(() => undefined);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('reconnect_oauth_account failed', err);

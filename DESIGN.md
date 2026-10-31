@@ -1407,20 +1407,23 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     `reply-only-invitation:`, `server-refused:`, `identity-unknown:`,
     `occurrence-not-writable:`, `unsafe-to-write:`, `access-not-granted:`,
     `day-zone-unreadable:`, `copy-unreadable:`, `exceptions-would-be-lost:`,
-    `deletions-not-kept:`), und beide Oberflächen sagen daraus einen Satz in
+    `deletions-not-kept:`, `provider-busy:`), und beide Oberflächen sagen daraus einen Satz in
     der Sprache des Nutzers (`shared/eventWriteError.ts`, am Handy bei jedem
     Schreiben über `writeErrorMessage`). `access-not-granted` kommt vom
     Gerätekonto ohne vollen Zugriff (`cal_core::Error::AccessNotGranted`) und
     reist als `forbidden`. Eine Marke heißt auch: Es wurde sicher
     nichts geschrieben (`writeNeverLanded`); beim Ändern eines Termins melden
-    alle Adapter eine Ablehnung des Servers so (147). `deletions-not-kept`
-    heißt: geschrieben und wieder entfernt — es steht nichts, aber die Serie
-    liegt in den gelöschten Elementen, und mit `invited` im Detail haben
-    Eingeladene Einladung und Absage bekommen (202-213). `CACHE_GENERATION` 4,
+    alle Adapter eine Ablehnung des Servers so (147), beim Anlegen Exchange und
+    Google. `deletions-not-kept` heißt: geschrieben und wieder entfernt — es
+    steht nichts, der Anbieter hat die Serie gelöscht wie jede andere (bei
+    Exchange liegt sie in den gelöschten Elementen), und mit `invited` im
+    Detail können Eingeladene von ihr gehört und ihre Absage bekommen haben
+    (202-213); bei Google mit Benachrichtigen auch je abgesagtem Termin eine
+    Absage (204, 267). `CACHE_GENERATION` 4,
     damit eine gespeicherte Kalenderliste ohne das Merkmal
     `invitations_reply_only` neu gelesen wird.
   - Das Gegenteil einer Ablehnung ist ein Rest (`cal_core::WriteLeftover`:
-    `created-may-stand:`): Es wurde etwas geschrieben, das sich nicht
+    `created-may-stand:`, `partly-saved:`): Es wurde etwas geschrieben, das sich nicht
     zurücknehmen ließ, und steht möglicherweise. Er reist immer als
     `network`, nie als ablehnender Code, und `writeNeverLanded` ist für ihn
     falsch, welcher Code ihn auch trägt: Ein Teilen nähme sonst seinen neuen
@@ -1430,7 +1433,86 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     `cal_core::step_write` (213, 263). Ob ein Kalender eine neue Serie so
     schreibt, sagt sein Manifest (`recurrence.deletions_in_steps`); es wird
     beim Lesen der Kalenderliste gestempelt und braucht keinen neuen
-    `CACHE_GENERATION`.
+    `CACHE_GENERATION`. Eine fremde Einladung aus einer Datei, die der
+    Kalender als ihre behält, geht mit ihren Löschungen hinein: bei Exchange
+    als Anfrage (danach Antwort, Ordner, Zurücklesen; scheitert davon etwas,
+    steht sie zum Teil, 277 — außer ein Verschieben, dessen Aufräumen gelang:
+    Dann steht nichts, eine Ablehnung oder, bei ausgelastetem Exchange,
+    ausgelastet, und die Liste bietet sie wieder an, `EwsError::TakenBack`,
+    Prüfrunde 19), bei Google in einem Import. Kein Schritt
+    entfernt Termine einzeln, darum zeigt keine Oberfläche für sie den
+    Wartedialog (`createRunsInSteps`, Prüfrunde 21 von #128) — außer die
+    Oberfläche kannte die Adresse des Kontos nicht: Dann kann es dessen eigene
+    sein, die der Adapter in Schritten schreibt (Prüfrunde 22).
+  - **Ein ausgelasteter Anbieter (270-278, PR 7).** Weist ein Anbieter eine
+    Anfrage ab, weil in kurzer Zeit zu viele kamen (429, Googles
+    `rateLimitExceeded`, Exchanges `ErrorServerBusy`, ein 503 mit
+    `Retry-After` bei einer Anfrage, die nichts schreibt), ist das die Marke
+    `provider-busy:` mit einem Wort aus `cal_core::BusyDetail` dahinter, als
+    `forbidden` (`Error::provider_busy`, 270). Es wurde nichts getan:
+    `never_landed` gilt, ein Teilen nimmt seinen neuen Teil zurück. Ein
+    Schreiben, dessen Antwort verloren ging und das noch einmal gesendet
+    wurde, ist nie ausgelastet, sondern unsicher (CalDAVs
+    `WriteAnswer::settled`); ein Kontingent, das für Stunden aufgebraucht
+    ist, ist keine Auslastung (275). Die Sätze sagen „Der Anbieter ist
+    gerade ausgelastet. Versuche es später noch einmal.“, beim Schreiben mit
+    „Es wurde nichts geändert“, beim Lesen nie, und nie, wie lange (272,
+    278); die Wartezeit des Anbieters steht nur im Protokoll.
+  - Das Aktualisieren zählt Auslastung wie andere Fehler, nur anders
+    (271): Die Hintergrund-Aktualisierung eines Lesevorgangs zählt sie
+    nicht und hält die weiteren Lesevorgänge des Behälters an, bis ein
+    eigenes Schreiben die Generation weiterzählt (`busy_paused`); ein nie
+    geladener Bereich, auch ein ganzer Behälter ohne Stand (eine Liste, deren
+    erstes Lesen schon auf Auslastung traf), wird je Pause einmal gefragt
+    (`ReadRefresh::Uncovered`, `CacheStore::ask_uncovered`). Weil ein gescheitertes Fragen kein
+    Fenster schreibt, fragte sonst jedes Lesen erneut, auch nach einem
+    eigenen Schreiben, das das Fenster leert. Automatische Runden zählen, aber weniger als eine Minute auseinander nur
+    einmal (`ROUND_SPAN`); eine Runde, die jemand startet, zeigt ihr
+    Ergebnis sofort, und eine Kontoänderung erzwingt nur dieses Konto
+    (`Forcing`). Ein Durchlauf fragt eine Familie, die ausgelastet war,
+    nicht weiter. Die Zeile sagt „Der Anbieter ist ausgelastet.“, mit Rang
+    zwischen „anderes“ und „Anmeldung“ (`RefreshCause::Busy`).
+  - Schritte, die zu lange dauerten, und Schritte, die der Anbieter immer
+    wieder warten ließ, sagen verschiedene Gründe: `time` und `busy`
+    (`out_of_time_reason`, 276). Wer warten ließ, war ausgelastet, nicht zu
+    langsam.
+  - Speichert ein Adapter in mehreren Anfragen und scheitert eine spätere,
+    nachdem eine frühere angekommen ist, liest der Kern den Fehler über
+    `Error::after_landed` (277): Ausgelastet wird zum Rest `partly-saved:`
+    (die Änderung steht zum Teil), ein Netzwerkfehler, der angekommen sein
+    kann, bleibt, alles andere wird ein Netzwerkfehler mit dem Schritt
+    davor — nie eine Ablehnung, die „Es wurde nichts geändert“ sagte. Die
+    Oberflächen tun dasselbe für Speichern in mehreren Aufrufen
+    (`afterLanded`, `writeAfterLanded`, `writeAll`), an denselben Zeilen von
+    `writeOutcome.json` festgemacht. Mehrere Schreibvorgänge einer Aktion
+    (Sammelknöpfe, Kaskaden) lesen ihren ersten Fehler so, sobald einer
+    angekommen ist oder angekommen sein kann (`failureOfWrites`), wie die
+    Gänge im Kern eine Antwort behalten, die angekommen sein kann. Ein
+    Editor, dessen Speichern zum Teil
+    steht, zeigt den Satz in einem Hinweis, der sich nur schließen lässt
+    (`CloseOnlyNotice`), und lädt neu; scheitern Entwürfe von
+    Unteraufgaben, bearbeitet der Editor die angelegte Aufgabe weiter, und
+    Speichern schreibt ihre Felder und legt die übrigen Entwürfe an (Toni,
+    2026-10-24). Ein Verschieben, dessen
+    Original der Anbieter wegen Auslastung nicht löschen konnte, steht und
+    nennt die Liste oder den Kalender des Originals (`original_left_in`).
+    Das Lesen nach einem Abschnitt, der angelegt, umbenannt oder gelöscht
+    wurde, ist ein Lesen: Scheitert es, zeigt die Auswahl, was geschrieben
+    wurde — bei einer Liste, deren Abschnitte nie gelesen wurden, neben dem
+    Lesestand (`sectionsWritten`), damit die Ansichten sie weiter als
+    ungelesen fragen —, und am Desktop sagt die Abschnittsauswahl, warum die
+    übrigen fehlen (`sectionsReadFailure`). Am Handy legt der Speicher das
+    Geschriebene über die Zeilen, die der Host bis zur Aktualisierung noch
+    liefert; deren Push `sections` liest die gehaltenen Listen neu. Die Farbe
+    eines Abschnitts ist ein eigener, lokaler Schritt nach ihm
+    (`sectionColorAfterLanded`).
+  - Jede Oberfläche liest Fehler nur über die geteilten Helfer (273):
+    `writeErrorMessage` und `eventWriteErrorMessage` beim Schreiben,
+    `readErrorMessage` und `readFailureSentence` beim Lesen,
+    `writeFailureSentence` für ein Schreiben im Rahmen des Aufrufers (das
+    Rückgängig im Hinweis, Meetings über `meetingFailureSentence`). Am Handy reicht `hostCoded` jeden
+    Fehler des Rust-Hosts mit dem Code des Desktops weiter; auf iOS kommt in
+    Expo 56 nur der Text in JavaScript an, dort tragen die Marken (TODO).
 
 **Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit
 prüfen" — sichtbar bei scheduling-fähigem Kalender und vorhandenen
@@ -1440,7 +1522,8 @@ Benachrichtigen-Schalter verlangt zusätzlich, dass das Konto organisiert
 Teilnehmer im aktuell eingegebenen Zeitfenster. Pro Teilnehmer wird frei/belegt
 angezeigt plus eine Zusammenfassung; das Ergebnis wird über die Live-Region
 angekündigt. Best-Effort: Ein Anbieter, der nicht antworten darf (fehlende
-Berechtigung, kein Outbox), liefert leere Slots ⇒ „frei/unbekannt" statt Fehler.
+Berechtigung, kein Outbox), liefert leere Slots ⇒ „frei/unbekannt" statt Fehler;
+ein ausgelasteter Anbieter wird gesagt, nie als „alle frei“ gelesen (270).
 Die Abfrage läuft über `CalendarFeature::get_free_busy(emails, range)` und den
 Host-Befehl `query_free_busy`.
 
@@ -1513,7 +1596,7 @@ Beide Operationen werden atomar in der lokalen Sync-Queue eingetragen, sodass be
 
 | Fall | Verhalten |
 |---|---|
-| **Innerhalb desselben Kontos (Verschieben)** | Direktes Verschieben via API (z.B. Google `calendarId`-Patch), kein Neu-Anlegen nötig |
+| **Innerhalb desselben Kontos (Verschieben)** | Anlegen am Ziel, dann Löschen am Ursprung, wie zwischen Konten; eine Serie mit Löschungen schreibt Google dabei in Schritten (202). Googles eigenes `events.move` würde die Löschungen mitnehmen, ist aber nicht gebaut (TODO). |
 | **Zwischen verschiedenen Konten (Verschieben)** | Zweistufig: CREATE + DELETE (siehe oben) |
 | **Kopieren** | Immer CREATE im Ziel; keine native API-Optimierung |
 | **Wiederkehrende Terminserie** | Nutzer wird gefragt: "Nur diesen Termin" oder "Gesamte Serie" (gilt für Verschieben und Kopieren) |

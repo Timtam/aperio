@@ -41,6 +41,43 @@ Apple's well-known endpoints.
 
 ## Quirks
 
+- **A busy server, and a write sent twice.** A request is sent again once
+  when its connection broke (`http.rs`). Then the first attempt may have
+  reached the server, and the replay's answer may be about it. Every write is
+  sent through `send_write`, and a replay answered with any failure is unsure
+  (`WriteAnswer::settled`, a network error that says it may have been saved),
+  never a refusal or a busy server. A caller's own reading goes first: a
+  replayed 404 on a delete is gone, a 405 on a MKCALENDAR is the collection
+  the first attempt made, a 412 on a create guarded by `If-None-Match` is the
+  first attempt's resource when Aperio named the resource (a minted UID, or
+  the fresh `{uuid}.ics` of a kept UID that is no plain name); the 412 of a
+  resource a kept UID names is `uid-taken`, replay or not (see below). A first attempt answered 429 did
+  nothing: a busy
+  provider (`busy_detail`, decision 270), and an update says so before any
+  refusal. A walk over every calendar or address book (delete, EXDATE) stops
+  at the first busy answer; a delete walk that met a replayed 404 before it is
+  unsure, never done, and so is one where another calendar refused the
+  delete: the event may be gone already. A failure on an earlier calendar that may have landed
+  (a lost answer, a server error) stays what it was, whatever a later
+  calendar answers (`WalkFailures`). A contact's PUT replaces the whole vCard, so a busy read
+  of its photo sends nothing rather than wiping the avatar.
+- **A busy server on a read.** A read answered 429, or 503 with
+  `Retry-After` (`http::read_failure`; a write answered so may have been
+  carried out, so writes never read it that way), is a busy provider, and it
+  starts no fallback: a delta does not fall back to a full bootstrap, the
+  bootstrap's PROPFIND not to a windowed read, a multiget batch is not asked
+  again one resource at a time, a busy sync-token read does not fall back to
+  the CTag (the collection would stay on it), and a bootstrap that cannot
+  read its token fails rather than storing a snapshot without one. The scheduling probe met
+  by a busy server is asked again, never cached as "does not schedule", and a
+  write that needs it while the server is still busy stops as busy rather than
+  dropping a meeting's invitees. A free/busy query says busy instead of
+  "availability unknown", which read as every attendee free. An answer to
+  an invitation whose read is busy sent nothing and says busy. Well-known
+  discovery reads a 429, or a 503 with `Retry-After`, as busy, not as a
+  missing well-known, and a busy
+  home-set probe fails discovery rather than caching the account without
+  calendars or contacts. How iCloud throttles is not measured.
 - **Both homes are best-effort.** Discovery probes `calendar-home-set`
   AND `addressbook-home-set` independently and fails only when **neither**
   is found. A CalDAV-only server (no address books) and a CardDAV-only

@@ -23,6 +23,20 @@ export type { RefreshCause } from './generated/RefreshCause';
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
 
+/**
+ * What a failing container's row says about its error: a busy provider in
+ * words (decision 272) — never the recorded "access denied: provider-busy:
+ * …" — and anything else as the host recorded it, through the shell's
+ * `clamp`. `busy` is the shell's sentence for it.
+ */
+export function refreshErrorRowText(
+  err: Pick<ContainerRefreshError, 'cause' | 'error'>,
+  busy: string,
+  clamp: (raw: string) => string,
+): string {
+  return err.cause === 'busy' ? busy : clamp(err.error);
+}
+
 /** An account's cause with the core's rank of it. */
 export interface RankedCause {
   cause: RefreshCause;

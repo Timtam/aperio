@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -94,6 +95,14 @@ interface PersistedSelection {
   contactListOrigins?: Record<string, string>;
 }
 
+/** A section write that landed, for the read after it
+ *  (`loadSections`' `afterWrite`): the section as written, or the one
+ *  removed. */
+export interface SectionWrite {
+  upsert?: Section;
+  remove?: string;
+}
+
 export interface CalendarStoreState {
   calendars: Calendar[];
   selectedCalendarIds: Set<string>;
@@ -110,9 +119,24 @@ export interface CalendarStoreState {
    *  panel calls it for the list it's showing. Section-less lists cache
    *  an empty array, so a present-but-empty entry means "fetched, none".*/
   sectionsByList: Record<string, Section[]>;
+  /** Sections written to a list whose sections could not be read yet: the
+   *  read after the write failed, and so did every read before it. Kept
+   *  apart from `sectionsByList`, so its readers still see the list unread
+   *  and ask again; the pickers that write sections show them. The next read
+   *  that works replaces them. */
+  sectionsWritten: Record<string, Section[]>;
+  /** Why the sections of a list never read could not be read: the failure of
+   *  its last read, for the section pickers to say (decision 273). The next
+   *  read that works removes it. */
+  sectionsReadFailure: Record<string, unknown>;
   /** Fetch (and cache) the sections of one list. Returns them so a
-   *  caller can use the result without waiting for the state update. */
-  loadSections: (listId: string) => Promise<Section[]>;
+   *  caller can use the result without waiting for the state update.
+   *  A read that fails never rejects: it returns what an earlier read
+   *  found, and a list never read keeps the failure in
+   *  `sectionsReadFailure`. After a section write that landed, `afterWrite`
+   *  names it: a read that fails then shows what was written (decision
+   *  277) — in `sectionsWritten` while the list was never read. */
+  loadSections: (listId: string, afterWrite?: SectionWrite) => Promise<Section[]>;
   /** Each section's resolved *live* color hex, keyed by section id — the
    *  middle level of the task-color chain (task → section → list). A
    *  section with no bound label is absent. Re-derives when sections or
@@ -190,6 +214,12 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [sectionsByList, setSectionsByList] = useState<
     Record<string, Section[]>
+  >({});
+  const [sectionsWritten, setSectionsWritten] = useState<
+    Record<string, Section[]>
+  >({});
+  const [sectionsReadFailure, setSectionsReadFailure] = useState<
+    Record<string, unknown>
   >({});
   const [calendarSel, setCalendarSel] = useState<SelectionSlice>(() => {
     const persisted = readPersisted();
@@ -296,13 +326,67 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     setAccounts(list);
   }, [i18n.language]);
 
-  const loadSections = useCallback(async (listId: string) => {
+  const sectionsRef = useRef(sectionsByList);
+  sectionsRef.current = sectionsByList;
+  const writtenRef = useRef(sectionsWritten);
+  writtenRef.current = sectionsWritten;
+  const loadSections = useCallback(async (listId: string, afterWrite?: SectionWrite) => {
     // Sorted HERE, once, rather than at each of the half-dozen places that
     // render `sectionsByList` — the task view, the backlog rail, the day and
     // month grids, the task editor, the section editor. A comparator repeated
     // per consumer is a comparator that ends up applied in five of six.
-    const secs = sortSections(await getSections(listId));
+    let secs: Section[];
+    try {
+      secs = sortSections(await getSections(listId));
+    } catch (err) {
+      const known = sectionsRef.current[listId];
+      // A list never read keeps why, for the pickers to say (273); its
+      // readers still see it unread, and the next of them asks again.
+      if (known === undefined) {
+        setSectionsReadFailure((prev) => ({ ...prev, [listId]: err }));
+      }
+      if (!afterWrite) {
+        // Its readers call this without waiting: what an earlier read found
+        // stays, rather than a rejection nobody handles.
+        // eslint-disable-next-line no-console
+        console.warn('reading the sections failed', err);
+        return known ?? writtenRef.current[listId] ?? [];
+      }
+      // The write landed; only the read after it failed — a busy provider,
+      // say. That is no reason to say the write failed, nor to show the list
+      // as it was (decision 277): what was written shows, and the next read
+      // corrects it.
+      // eslint-disable-next-line no-console
+      console.warn('reading the sections after a write failed; showing what was written', err);
+      const withWrite = (base: Section[]) => {
+        const kept = base.filter(
+          (s) => s.id !== afterWrite.upsert?.id && s.id !== afterWrite.remove,
+        );
+        return sortSections(afterWrite.upsert ? [...kept, afterWrite.upsert] : kept);
+      };
+      if (known === undefined) {
+        // Never read: the written section alone would stand as the whole
+        // list, and no reader would ask again, its guard seeing the list
+        // read. So it is kept apart, for the picker that wrote it, and the
+        // next read asks.
+        const shown = withWrite(writtenRef.current[listId] ?? []);
+        writtenRef.current = { ...writtenRef.current, [listId]: shown };
+        setSectionsWritten((prev) => ({ ...prev, [listId]: shown }));
+        return shown;
+      }
+      secs = withWrite(known);
+    }
     setSectionsByList((prev) => ({ ...prev, [listId]: secs }));
+    if (listId in writtenRef.current) {
+      const { [listId]: _read, ...rest } = writtenRef.current;
+      writtenRef.current = rest;
+      setSectionsWritten(rest);
+    }
+    setSectionsReadFailure((prev) => {
+      if (!(listId in prev)) return prev;
+      const { [listId]: _read, ...rest } = prev;
+      return rest;
+    });
     return secs;
   }, []);
 
@@ -432,6 +516,8 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       toggleTaskList,
       refreshTaskLists,
       sectionsByList,
+      sectionsWritten,
+      sectionsReadFailure,
       loadSections,
       sectionColorById,
       contactLists: resolvedContactLists,
@@ -457,6 +543,8 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       toggleTaskList,
       refreshTaskLists,
       sectionsByList,
+      sectionsWritten,
+      sectionsReadFailure,
       loadSections,
       sectionColorById,
       resolvedContactLists,

@@ -18,6 +18,18 @@ pub fn refresh_external_cache(refresher: State<'_, Arc<CacheRefresher>>) -> Comm
     Ok(())
 }
 
+/// [`refresh_external_cache`] after a change of ONE account (a password or
+/// a sign-in stored again): the pass runs forced for that account only, and
+/// counts as an automatic round for the others (decision 271).
+#[tauri::command]
+pub fn refresh_account_cache(
+    account_id: String,
+    refresher: State<'_, Arc<CacheRefresher>>,
+) -> CommandResult<()> {
+    refresher.trigger_account(&account_id);
+    Ok(())
+}
+
 /// Current refresher status (whether a pass is running + the last
 /// completed timestamp). Seeds the toolbar indicator on mount so it
 /// reflects the persisted "last updated" before the first live event.
@@ -73,6 +85,6 @@ pub fn reset_account_sync(
     cache
         .reset_account_sync(&account_id)
         .map_err(CommandError::from)?;
-    refresher.trigger();
+    refresher.trigger_account(&account_id);
     Ok(())
 }

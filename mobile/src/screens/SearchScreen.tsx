@@ -9,6 +9,8 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  AccessibilityInfo,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,6 +22,7 @@ import {
 import {
   eventInstanceKey,
   isBirthdayEventId,
+  readErrorMessage,
   statusI18nKey,
   type TaskStatus,
 } from '@aperio/shared';
@@ -52,10 +55,6 @@ const TASK_STATUSES: TaskStatus[] = ['open', 'in_progress', 'completed', 'cancel
 
 const DEBOUNCE_MS = 200;
 const EMPTY: SearchResults = { events: [], tasks: [] };
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function SearchScreen({ navigation }: RootStackScreenProps<'Search'>) {
   const { t, i18n } = useTranslation();
@@ -165,15 +164,19 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
           setError(null);
         } catch (err) {
           if (reqToken.current !== token) return;
-          setError(errorMessage(err));
+          const message = readErrorMessage(err, t);
+          setError(message);
           setResults(EMPTY);
+          // The line's live region is ANDROID ONLY: VoiceOver is told here,
+          // so a busy provider is heard on both (decision 272).
+          if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(message);
         } finally {
           if (reqToken.current === token) setLoading(false);
         }
       })();
     }, DEBOUNCE_MS);
     return () => clearTimeout(handle);
-  }, [query, filters]);
+  }, [query, filters, t]);
 
   const total = results.events.length + results.tasks.length;
   const hasQuery = query.trim() !== '';

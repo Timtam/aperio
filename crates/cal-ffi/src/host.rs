@@ -51,8 +51,8 @@ use cal_core::{
 };
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::cache::{
-    event_self_warm_needed, has_snapshot, is_stale, refresh_contacts, refresh_events,
-    refresh_sections, refresh_tasks, spawn_item_refresh, spawn_refresh, CacheObserver,
+    event_self_warm, has_snapshot, is_stale, refresh_contacts, refresh_events, refresh_sections,
+    refresh_tasks, spawn_item_refresh, spawn_read_refresh, spawn_refresh, CacheObserver,
     CacheRefresher, CacheStore, CacheUpdatedPayload, RefreshCoordinator, SyncScope, SWR_TTL_SECS,
 };
 use host_core::conflicts::{
@@ -424,7 +424,7 @@ fn append_account_event(
     true
 }
 
-use crate::{from_json, map_store_err, to_json, StoreError};
+use crate::{from_json, map_store_err, store_after_landed, to_json, StoreError};
 
 /// Errors the foreign keychain implementation can raise. Mirrors
 /// [`sync_engine::SecretError`] so the `NotFound` distinction the
@@ -1481,24 +1481,12 @@ impl Host {
         config_json: &str,
         secret: Option<&str>,
     ) -> Result<(), StoreError> {
-        use host_core::registry::RegistryError as Re;
-        match self.runtime.block_on(
-            self.registry
-                .probe_account(adapter_kind, config_json, secret),
-        ) {
-            Ok(()) | Err(Re::Unsupported(_)) => Ok(()),
-            Err(Re::Secret(detail)) => Err(StoreError::InvalidField {
-                field: "secret".to_string(),
-                detail,
-            }),
-            Err(Re::Config(detail)) => Err(StoreError::InvalidField {
-                field: "config".to_string(),
-                detail,
-            }),
-            Err(other) => Err(StoreError::Storage {
-                detail: other.to_string(),
-            }),
-        }
+        probe_outcome(
+            self.runtime.block_on(
+                self.registry
+                    .probe_account(adapter_kind, config_json, secret),
+            ),
+        )
     }
 
     /// Write the chosen target down as the account row this device syncs
@@ -2082,6 +2070,29 @@ fn parse_day_key(day: &str) -> Result<chrono::NaiveDate, StoreError> {
         field: "day".to_string(),
         detail: format!("not a YYYY-MM-DD day: {day}"),
     })
+}
+
+/// A credential probe's outcome as the phone reads it: a non-credential kind
+/// (Local / OAuth) is a silent skip, a missing/invalid field is an
+/// InvalidField, the adapter's own failure keeps its kind and its token first
+/// (a busy provider, decision 273), and anything else surfaces its message.
+fn probe_outcome(result: Result<(), host_core::registry::RegistryError>) -> Result<(), StoreError> {
+    use host_core::registry::RegistryError as Re;
+    match result {
+        Ok(()) | Err(Re::Unsupported(_)) => Ok(()),
+        Err(Re::Secret(detail)) => Err(StoreError::InvalidField {
+            field: "secret".to_string(),
+            detail,
+        }),
+        Err(Re::Config(detail)) => Err(StoreError::InvalidField {
+            field: "config".to_string(),
+            detail,
+        }),
+        Err(Re::Probe(err)) => Err(map_store_err(err)),
+        Err(other) => Err(StoreError::Storage {
+            detail: other.to_string(),
+        }),
+    }
 }
 
 #[uniffi::export]
@@ -3139,7 +3150,7 @@ impl Host {
             // trying to first-paint. Whether to self-warm (stale, OR a
             // coverage miss outside the brief cooldown that prevents the
             // cold-cache refresh -> re-read feedback loop) is the SHARED
-            // `event_self_warm_needed`, identical to the desktop get_events.
+            // `event_self_warm`, identical to the desktop get_events.
             Some(ext) => {
                 let account = self
                     .registry
@@ -3194,12 +3205,12 @@ impl Host {
                     (range.start, range.end),
                 );
                 apply_color_to_events(&overrides, &mut events);
-                if event_self_warm_needed(&state, range) {
+                if let Some(why) = event_self_warm(&state, range) {
                     let cache_bg = Arc::clone(&self.cache);
                     let ext_bg = Arc::clone(&ext);
                     let acc = account.clone();
                     let cal = req.calendar_id.clone();
-                    spawn_item_refresh(
+                    spawn_read_refresh(
                         self.runtime.handle(),
                         self.observer(),
                         Arc::clone(&self.cache),
@@ -3207,6 +3218,7 @@ impl Host {
                         SyncScope::Events,
                         account,
                         req.calendar_id.clone(),
+                        why,
                         move || async move {
                             refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range).await
                         },
@@ -3565,7 +3577,7 @@ impl Host {
             cal_core::attendee::invitees_of_moved_copy(&mut new_payload);
             let target_calendar_id = event.calendar_id.clone();
             let source_event_id = event.id.clone();
-            let created = self.runtime.block_on(async {
+            let (created, kept) = self.runtime.block_on(async {
                 let created = match self.route(&target_calendar_id)? {
                     None => self
                         .adapter
@@ -3597,17 +3609,16 @@ impl Host {
                 // create → a spurious failure + a duplicate on retry + skipped
                 // sync-log appends). cal-ffi has no logger, so a delete error is
                 // swallowed too; the user resolves any duplicate manually.
-                match self.route(&previous) {
-                    Ok(None) => {
-                        let _ = self.adapter.delete_event(&source_event_id, false).await;
-                    }
-                    Ok(Some(ext)) => {
-                        let _ = ext.delete_event(&source_event_id, false).await;
-                    }
+                let deleted = match self.route(&previous) {
+                    Ok(None) => self.adapter.delete_event(&source_event_id, false).await,
+                    Ok(Some(ext)) => ext.delete_event(&source_event_id, false).await,
                     // Source account gone — nothing to clean up; the move stands.
-                    Err(_) => {}
-                }
-                Ok::<_, StoreError>(created)
+                    Err(_) => Ok(()),
+                };
+                // A busy provider kept the original: the move stands, and the
+                // surfaces say to delete it (decision 277). Said on the row
+                // returned below, never in the sync event.
+                Ok::<_, StoreError>((created, host_core::moves::original_kept(&deleted)))
             })?;
 
             // Carry the grouping over to the copy at the target: a
@@ -3650,10 +3661,15 @@ impl Host {
             // invalidate).
             self.invalidate_events_cache(&previous);
             self.invalidate_events_cache(&target_calendar_id);
+            let mut created = created;
+            if kept {
+                created.original_left_in = Some(previous.clone());
+            }
             return to_json(&created);
         }
 
         // Plain in-place update — no calendar change.
+        let calendar_id = event.calendar_id.clone();
         let updated = self.runtime.block_on(async {
             match self.route(&event.calendar_id)? {
                 None => self
@@ -3663,7 +3679,17 @@ impl Host {
                     .map_err(map_store_err),
                 Some(ext) => ext.update_event(event).await.map_err(map_store_err),
             }
-        })?;
+        });
+        let updated = match updated {
+            Ok(updated) => updated,
+            Err(err) => {
+                // A failed update may have landed in part — an occurrence
+                // detached into a single whose old exception stayed (decision
+                // 277): the next read shows what the provider holds.
+                self.invalidate_events_cache(&calendar_id);
+                return Err(err);
+            }
+        };
         if self.is_local_calendar(&updated.calendar_id) {
             if let Ok(fields) = serde_json::to_value(&updated) {
                 self.writer.append(SyncEvent::EventUpdated(EventPayload {
@@ -3691,20 +3717,30 @@ impl Host {
         let is_local = calendar_id
             .as_deref()
             .is_none_or(|cid| self.is_local_calendar(cid));
-        self.runtime.block_on(async {
-            let route = match calendar_id.as_deref() {
-                Some(cid) => self.route(cid)?,
-                None => None,
-            };
-            match route {
-                None => self
-                    .adapter
-                    .delete_event(&id, false)
-                    .await
-                    .map_err(map_store_err),
-                Some(ext) => ext.delete_event(&id, send).await.map_err(map_store_err),
-            }
-        })?;
+        self.runtime
+            .block_on(async {
+                let route = match calendar_id.as_deref() {
+                    Some(cid) => self.route(cid)?,
+                    None => None,
+                };
+                match route {
+                    None => self
+                        .adapter
+                        .delete_event(&id, false)
+                        .await
+                        .map_err(map_store_err),
+                    Some(ext) => ext.delete_event(&id, send).await.map_err(map_store_err),
+                }
+            })
+            .inspect_err(|_| {
+                // A delete that failed may have landed in part — a calendar
+                // walk that lost an answer, a meeting cancelled before its
+                // DELETE failed (decision 277): the next read asks the
+                // provider what it holds. Mirrors the desktop.
+                if let Some(cid) = calendar_id.as_deref() {
+                    self.invalidate_events_cache(cid);
+                }
+            })?;
         if is_local {
             self.writer
                 .append(SyncEvent::EventDeleted(IdPayload { id: id.clone() }));
@@ -3766,7 +3802,14 @@ impl Host {
                 // occurrence + notify attendees" (vs a silent local skip).
                 self.runtime
                     .block_on(async { ext.add_event_exdate(&id, occ, send_cancellations).await })
-                    .map_err(map_store_err)?;
+                    .map_err(map_store_err)
+                    .inspect_err(|_| {
+                        // A skip whose answer was lost may have landed
+                        // (decision 277): the next read asks the provider.
+                        if let Some(cid) = calendar_id.as_deref() {
+                            self.invalidate_events_cache(cid);
+                        }
+                    })?;
             }
         }
         if let Some(cid) = calendar_id.as_deref() {
@@ -4106,10 +4149,16 @@ impl Host {
                 to_json(&task)
             }
             Some(ext) => {
-                let task = self
+                let created = self
                     .runtime
-                    .block_on(async { ext.create_task(&list_id, new).await })
-                    .map_err(map_store_err)?;
+                    .block_on(async { ext.create_task(&list_id, new).await });
+                if created.is_err() {
+                    // A create that failed may still have written: a task that
+                    // stands without one of its follow-up steps (decision 273).
+                    // The next read shows what the provider holds.
+                    self.invalidate_tasks_cache(&list_id);
+                }
+                let task = created.map_err(map_store_err)?;
                 // Invalidate-only, NOT write-through: a created row's id may
                 // not match the read path's later id for the same task
                 // (CalDAV create → bare uid, reads → `{href}|{uid}`), so
@@ -4230,10 +4279,17 @@ impl Host {
                     .adapter
                     .create_task_sync(&target_list_id, new_payload)
                     .map_err(map_store_err)?,
-                Some(ext) => self
-                    .runtime
-                    .block_on(async { ext.create_task(&target_list_id, new_payload).await })
-                    .map_err(map_store_err)?,
+                Some(ext) => {
+                    let created = self
+                        .runtime
+                        .block_on(async { ext.create_task(&target_list_id, new_payload).await });
+                    if created.is_err() {
+                        // The copy at the target may stand without one of its
+                        // steps (decision 273): the next read shows it.
+                        self.invalidate_tasks_cache(&target_list_id);
+                    }
+                    created.map_err(map_store_err)?
+                }
             };
 
             // Delete from the source. Best-effort: the create already succeeded,
@@ -4244,18 +4300,18 @@ impl Host {
             // `?` (an erroring `?` here would return Err after a successful create
             // → a spurious failure + a duplicate on retry + skipped sync-log
             // appends). cal-ffi has no logger, so a delete error is swallowed too.
-            match self.route_task_list(&previous) {
-                Ok(None) => {
-                    let _ = self.adapter.delete_task_sync(&source_task_id);
-                }
-                Ok(Some(ext)) => {
-                    let _ = self
-                        .runtime
-                        .block_on(async { ext.delete_task(&source_task_id).await });
-                }
+            let deleted = match self.route_task_list(&previous) {
+                Ok(None) => self.adapter.delete_task_sync(&source_task_id),
+                Ok(Some(ext)) => self
+                    .runtime
+                    .block_on(async { ext.delete_task(&source_task_id).await }),
                 // Source account gone — nothing to clean up; the move stands.
-                Err(_) => {}
-            }
+                Err(_) => Ok(()),
+            };
+            // A busy provider kept the original: the move stands, and the
+            // surfaces say to delete it (decision 277). Said on the row
+            // returned below, never in the sync event.
+            let kept = host_core::moves::original_kept(&deleted);
 
             // Each LOCAL side emits its own event-log entry; external sides stay
             // silent (the provider's own sync mesh propagates the change).
@@ -4279,12 +4335,18 @@ impl Host {
             // `{href}|{uid}` — so a write-through would plant a duplicate);
             // the moved task surfaces on the next refresh. Local sides are
             // invalidate-only regardless (the local store isn't cached).
-            if source_local {
+            if source_local || kept {
+                // A kept original still stands: read the list again, never
+                // remove a row the provider still has.
                 self.invalidate_tasks_cache(&previous);
             } else {
                 self.write_through_task_removal(&previous, &source_task_id);
             }
             self.invalidate_tasks_cache(&target_list_id);
+            let mut created = created;
+            if kept {
+                created.original_left_in = Some(previous.clone());
+            }
             return to_json(&created);
         }
 
@@ -4322,12 +4384,36 @@ impl Host {
                 // update — an external on-demand/backlog recurring task that just
                 // completed needs Aperio to spawn its next instance (§9.12).
                 let completed = task.clone();
+                let list_id = task.list_id.clone();
+                let account = self
+                    .registry
+                    .account_for_task_list(&completed.list_id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
                 let updated = self.runtime.block_on(async {
-                    let updated = ext.update_task(task).await.map_err(map_store_err)?;
-                    let account = self
-                        .registry
-                        .account_for_task_list(&completed.list_id)
-                        .unwrap_or_else(|| LOCAL_ID.to_string());
+                    let updated = match ext.update_task(task).await {
+                        Ok(updated) => updated,
+                        Err(err) => {
+                            // A completion that went out with the fields
+                            // still recurs (decision 277), against the
+                            // snapshot from before the save; a device
+                            // reminder recurs by itself (see below).
+                            if !self.is_device_account(&account) {
+                                host_core::tasks::after_failed_external_update(
+                                    ext.as_ref(),
+                                    &self.cache,
+                                    &account,
+                                    &completed,
+                                    &err,
+                                )
+                                .await;
+                            }
+                            // A save that failed may have landed in part
+                            // (decision 273): the next read shows what the
+                            // provider holds.
+                            self.invalidate_tasks_cache(&list_id);
+                            return Err(map_store_err(err));
+                        }
+                    };
                     // A DEVICE reminder (iOS/Android) owns its own recurrence
                     // lifecycle: the OS spawns the next turn and keeps the
                     // completed history itself. Recording Aperio's terminal
@@ -4389,7 +4475,14 @@ impl Host {
             Some(ext) => {
                 self.runtime
                     .block_on(async { ext.delete_task(&id).await })
-                    .map_err(map_store_err)?;
+                    .map_err(map_store_err)
+                    .inspect_err(|_| {
+                        // A delete whose answer was lost may have landed
+                        // (decision 277): the next read asks the provider.
+                        if let Some(lid) = list_id.as_deref() {
+                            self.invalidate_tasks_cache(lid);
+                        }
+                    })?;
                 if let Some(lid) = list_id.as_deref() {
                     // Write-through removal: the retained snapshot would
                     // otherwise resurrect the deleted row on the next read.
@@ -6258,6 +6351,32 @@ impl Host {
         });
     }
 
+    /// The OS background round's warm pass (BGTaskScheduler, WorkManager):
+    /// automatic, so UN-forced — a busy provider or a blip needs a second
+    /// round before it shows, as on the desktop (decision 271) — but queued
+    /// like [`Self::refresh_external_cache`], because the round was woken for
+    /// data a running pass may already have read past.
+    pub fn refresh_external_cache_in_background(&self) {
+        let refresher = Arc::clone(&self.cache_refresher);
+        self.runtime.handle().spawn(async move {
+            refresher.warm_all_queued(false).await;
+        });
+    }
+
+    /// [`Self::refresh_external_cache`] after a change of ONE account
+    /// (added, edited, a sign-in or password stored again, a reset): the pass
+    /// runs forced for that account only, and counts as an automatic round
+    /// for the others (decision 271). Mirrors the desktop
+    /// `refresh_account_cache`.
+    pub fn refresh_account_cache(&self, account_id: String) {
+        let refresher = Arc::clone(&self.cache_refresher);
+        self.runtime.handle().spawn(async move {
+            refresher
+                .warm_all_queued(host_core::cache::Forcing::account(&account_id))
+                .await;
+        });
+    }
+
     /// Write one line into the app's own rolling log — the file the Logs
     /// screen shows and the support bundle exports.
     ///
@@ -6338,7 +6457,7 @@ impl Host {
             .map_err(|e| StoreError::Storage {
                 detail: e.to_string(),
             })?;
-        self.refresh_external_cache();
+        self.refresh_account_cache(account_id);
         Ok(())
     }
 
@@ -6464,9 +6583,11 @@ impl Host {
             "device calendar access requested: before {before}, after {}",
             Self::device_access_words(provider.as_ref())
         );
-        // Spawns nothing: the caller refreshes (`refresh_external_cache`),
-        // as adding the account does. A command unit tests call must not
-        // leave a task running into the runtime's teardown.
+        // Spawns nothing: the caller refreshes. Adding an account refreshes
+        // that one (`refresh_account_cache`, decision 271); the device-access
+        // gate still forces every account (`refresh_external_cache`, TODO
+        // B14). A command unit tests call must not leave a task running into
+        // the runtime's teardown.
         granted
     }
 
@@ -6887,21 +7008,25 @@ impl Host {
 
     /// Attendee free/busy over `[range_start, range_end]` for the account owning
     /// the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
-    /// [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
-    /// calendar, an unroutable account, or a provider that can't answer (no
-    /// scheduling / permission denied) returns `[]` — the UI reads that as
-    /// "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+    /// [{start, end}]}`). Best-effort: a LOCAL calendar, an unroutable
+    /// account, and any failure other than a busy provider (no scheduling,
+    /// permission denied) return `[]`. A busy provider is an error (decision
+    /// 270): the editor says the check could not be made, never "all free".
+    /// Mirrors the desktop `query_free_busy`.
     pub fn query_free_busy_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: FreeBusyRequest = from_json("request", &request_json)?;
-        let Some(ext) = self.route(&req.calendar_id).ok().flatten() else {
-            return to_json(&Vec::<cal_core::FreeBusy>::new());
-        };
+        let ext = self.route(&req.calendar_id).ok().flatten();
         let range = DateRange::new(req.range_start, req.range_end);
         let refs: Vec<&str> = req.emails.iter().map(String::as_str).collect();
+        // The rule once, in the core (decision 270): a busy provider is said.
         let fb = self
             .runtime
-            .block_on(async { ext.get_free_busy(&refs, range).await })
-            .unwrap_or_default();
+            .block_on(host_core::free_busy::query_free_busy(
+                ext.as_deref(),
+                &refs,
+                range,
+            ))
+            .map_err(map_store_err)?;
         to_json(&fb)
     }
 
@@ -7965,17 +8090,17 @@ impl Host {
     ) -> Result<String, StoreError> {
         let new: cal_core::NewContact = from_json("contact", &contact_json)?;
         let route = self.route_contact_list(&list_id)?;
-        let contact = self
-            .runtime
-            .block_on(async {
-                match route {
-                    None => self.adapter.create_contact(&list_id, new).await,
-                    Some(ext) => ext.create_contact(&list_id, new).await,
-                }
-            })
-            .map_err(map_store_err)?;
-        self.invalidate_contacts_cache(&contact.list_id);
-        to_json(&contact)
+        let created = self.runtime.block_on(async {
+            match route {
+                None => self.adapter.create_contact(&list_id, new).await,
+                Some(ext) => ext.create_contact(&list_id, new).await,
+            }
+        });
+        // After a failure too: a contact or group may stand without one of its
+        // steps (decision 273), and the next read shows what the provider
+        // holds.
+        self.invalidate_contacts_cache(&list_id);
+        to_json(&created.map_err(map_store_err)?)
     }
 
     /// Update a contact from a JSON `cal_core::Contact`; returns the updated
@@ -7983,20 +8108,19 @@ impl Host {
     pub fn update_contact_json(&self, contact_json: String) -> Result<String, StoreError> {
         let contact: cal_core::Contact = from_json("contact", &contact_json)?;
         let route = self.route_contact_list(&contact.list_id)?;
-        let updated = self
-            .runtime
-            .block_on(async {
-                match route {
-                    None => self.adapter.update_contact(contact).await,
-                    Some(ext) => ext.update_contact(contact).await,
-                }
-            })
-            .map_err(map_store_err)?;
+        let list_id = contact.list_id.clone();
+        let updated = self.runtime.block_on(async {
+            match route {
+                None => self.adapter.update_contact(contact).await,
+                Some(ext) => ext.update_contact(contact).await,
+            }
+        });
         // The update API carries no previous list (a contact can't move between
         // books in one call here, unlike a task/event move), so only the
-        // contact's own list needs invalidating.
-        self.invalidate_contacts_cache(&updated.list_id);
-        to_json(&updated)
+        // contact's own list needs invalidating — after a failure too, as a
+        // save may have landed in part (decision 273).
+        self.invalidate_contacts_cache(&list_id);
+        to_json(&updated.map_err(map_store_err)?)
     }
 
     /// Delete a contact, routed by the optional `list_id` (omit → local). Callers
@@ -8007,18 +8131,22 @@ impl Host {
             Some(lid) => self.route_contact_list(lid)?,
             None => None,
         };
-        self.runtime
+        let deleted = self
+            .runtime
             .block_on(async {
                 match route {
                     None => self.adapter.delete_contact(&id).await,
                     Some(ext) => ext.delete_contact(&id).await,
                 }
             })
-            .map_err(map_store_err)?;
+            .map_err(map_store_err);
+        // Failed or not: a delete whose answer was lost may have landed
+        // (decision 277), so the next read asks the provider. Mirrors the
+        // desktop.
         if let Some(lid) = list_id.as_deref() {
             self.invalidate_contacts_cache(lid);
         }
-        Ok(())
+        deleted
     }
 
     /// A contact's avatar as JSON `Option<ContactPhoto>` — `{content_type,
@@ -8061,20 +8189,22 @@ impl Host {
             Some(lid) => self.route_contact_list(lid)?,
             None => None,
         };
-        self.runtime
+        let set = self
+            .runtime
             .block_on(async {
                 match route {
                     None => self.adapter.set_contact_photo(&id, photo).await,
                     Some(ext) => ext.set_contact_photo(&id, photo).await,
                 }
             })
-            .map_err(map_store_err)?;
+            .map_err(map_store_err);
         // A photo change alters the cached contact — invalidate so the next read
-        // re-fetches it.
+        // re-fetches it; one that failed may stand in part, the old picture
+        // gone (decision 277).
         if let Some(lid) = list_id.as_deref() {
             self.invalidate_contacts_cache(lid);
         }
-        Ok(())
+        set
     }
 
     /// Remove a contact's avatar (other fields untouched), routed by the
@@ -8088,20 +8218,21 @@ impl Host {
             Some(lid) => self.route_contact_list(lid)?,
             None => None,
         };
-        self.runtime
+        let deleted = self
+            .runtime
             .block_on(async {
                 match route {
                     None => self.adapter.delete_contact_photo(&id).await,
                     Some(ext) => ext.delete_contact_photo(&id).await,
                 }
             })
-            .map_err(map_store_err)?;
+            .map_err(map_store_err);
         // A photo change alters the cached contact — invalidate so the next read
-        // re-fetches it.
+        // re-fetches it; one that failed may stand in part (decision 277).
         if let Some(lid) = list_id.as_deref() {
             self.invalidate_contacts_cache(lid);
         }
-        Ok(())
+        deleted
     }
 
     /// Create a top-level LOCAL address book; returns it as a `ContactListRow`.
@@ -8391,6 +8522,9 @@ impl Host {
                         ?cleanup,
                         "could not roll back a meeting after the event failed to save"
                     );
+                    // The meeting stands without the event carrying it: never
+                    // "nothing was changed" (decision 277).
+                    return Err(store_after_landed(err, "event"));
                 }
                 return Err(err);
             }
@@ -8465,7 +8599,12 @@ impl Host {
             .unbind(&req.event_id)
             .map_err(meetings_err)?;
 
-        let Some(event) = self.read_event_for_meeting(&req.event_id, &req.calendar_id)? else {
+        // The meeting is gone by then: what fails now is a later step, never
+        // "nothing was changed" (decision 277). Mirrors the desktop.
+        let Some(event) = self
+            .read_event_for_meeting(&req.event_id, &req.calendar_id)
+            .map_err(|err| store_after_landed(err, "event"))?
+        else {
             return Ok("null".to_string());
         };
         let mut updated = event.clone();
@@ -8481,7 +8620,9 @@ impl Host {
         // announces, it has to announce that the link is gone too. Otherwise
         // the attendees keep a join URL that now leads nowhere.
         updated.send_invitations = can_invite && !attendee_addresses(&updated.attendees).is_empty();
-        let saved = self.save_event_for_meeting(updated)?;
+        let saved = self
+            .save_event_for_meeting(updated)
+            .map_err(|err| store_after_landed(err, "event"))?;
         to_json(&saved)
     }
 
@@ -8924,8 +9065,9 @@ impl Host {
                 detail: e.to_string(),
             })?;
             // No warm kick here: like the create path, the JS layer follows a
-            // successful connect/edit with its own refreshExternalCache() —
-            // the one owner of that trigger on mobile.
+            // successful connect/edit with its own refreshAccountCache(id),
+            // forced for that account only (decision 271) — the one owner of
+            // that trigger on mobile.
             return to_json(&updated);
         }
 
@@ -9625,6 +9767,9 @@ fn meetings_err(err: host_core::meetings::MeetingsError) -> StoreError {
     }
 }
 
+/// A meeting adapter's error under the code the desktop gives it
+/// (`CommandError`'s `From<VcError>`), so both shells read a refusal token
+/// and a lost answer alike.
 fn vc_err(err: vc_core::VcError) -> StoreError {
     match err {
         vc_core::VcError::Authentication(detail) => StoreError::Auth { detail },
@@ -9634,9 +9779,10 @@ fn vc_err(err: vc_core::VcError) -> StoreError {
             field: "meeting".to_string(),
             detail,
         },
-        other => StoreError::Storage {
-            detail: other.to_string(),
-        },
+        vc_core::VcError::Network(detail) => StoreError::Network { detail },
+        vc_core::VcError::Protocol(detail) => StoreError::Protocol { detail },
+        vc_core::VcError::Unsupported(detail) => StoreError::Unsupported { detail },
+        vc_core::VcError::Internal(detail) => StoreError::Storage { detail },
     }
 }
 
@@ -9832,6 +9978,24 @@ fn unbuildable_err(err: host_core::sync_target::Unbuildable) -> StoreError {
 
 #[cfg(test)]
 mod tests {
+
+    /// A probe the adapter failed keeps the adapter's kind and its token: a
+    /// busy provider is said as one (decision 273), never as a storage error;
+    /// a missing secret or config stays a field error.
+    #[test]
+    fn a_busy_probe_keeps_its_token() {
+        use host_core::registry::RegistryError as Re;
+        let busy = cal_core::Error::provider_busy(cal_core::BusyDetail::TooManyRequests);
+        match super::probe_outcome(Err(Re::Probe(busy))) {
+            Err(StoreError::Forbidden { detail }) => assert_eq!(detail, "provider-busy: http-429"),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            super::probe_outcome(Err(Re::Secret("x".into()))),
+            Err(StoreError::InvalidField { .. })
+        ));
+        assert!(matches!(super::probe_outcome(Ok(())), Ok(())));
+    }
     use super::*;
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -10498,7 +10662,7 @@ mod tests {
             Err((self.0)())
         }
         async fn update_event(&self, _event: Event) -> cal_core::Result<Event> {
-            unreachable!("no update")
+            Err((self.0)())
         }
         async fn delete_event(&self, _event_id: &str, _send: bool) -> cal_core::Result<()> {
             Ok(())
@@ -10513,6 +10677,259 @@ mod tests {
         fn calendar_color(&self, _calendar_id: &str) -> Option<cal_core::ContainerColor> {
             None
         }
+    }
+
+    /// A task account whose lists L1 and L2 take a create, and whose delete
+    /// the provider turns away busy.
+    struct BusyDeletes;
+
+    #[async_trait::async_trait]
+    impl cal_core::Adapter for BusyDeletes {
+        async fn authenticate(
+            &self,
+            _: cal_core::Credentials,
+        ) -> cal_core::Result<cal_core::AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[cal_core::Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl cal_core::TasksFeature for BusyDeletes {
+        async fn list_task_lists(&self) -> cal_core::Result<Vec<cal_core::TaskList>> {
+            Ok(Vec::new())
+        }
+        async fn get_tasks(&self, _: &str) -> cal_core::Result<Vec<cal_core::Task>> {
+            Ok(Vec::new())
+        }
+        async fn create_task(
+            &self,
+            list_id: &str,
+            new: cal_core::NewTask,
+        ) -> cal_core::Result<cal_core::Task> {
+            let now = chrono::Utc::now();
+            Ok(cal_core::Task {
+                original_left_in: None,
+                assignees: Vec::new(),
+                id: "t-new".into(),
+                list_id: list_id.into(),
+                title: new.title,
+                description: None,
+                status: cal_core::TaskStatus::Open,
+                priority: cal_core::TaskPriority::Medium,
+                effort: cal_core::TaskEffort::Medium,
+                deadline_reminder_days: None,
+                scheduled_date: None,
+                scheduled_time: None,
+                scheduled_end_time: None,
+                deadline_date: None,
+                deadline_time: None,
+                recurrence: None,
+                resurface_date: None,
+                series_id: None,
+                parent_id: None,
+                section_id: None,
+                color_label: None,
+                reminders: Vec::new(),
+                sound: None,
+                created_at: now,
+                updated_at: now,
+                completed_at: None,
+                etag: None,
+            })
+        }
+        async fn update_task(&self, _: cal_core::Task) -> cal_core::Result<cal_core::Task> {
+            unreachable!()
+        }
+        async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
+            Err(cal_core::Error::provider_busy(
+                cal_core::BusyDetail::TooManyRequests,
+            ))
+        }
+    }
+
+    /// A move whose source delete a busy provider turned away stands, and
+    /// names the list the original stayed in (decision 277; Toni,
+    /// 2026-10-23): never an error, which would invite moving again. The
+    /// source list is read again rather than the original removed from it.
+    #[test]
+    fn a_move_whose_source_delete_is_busy_names_the_list_the_original_stayed_in() {
+        let (_dir, host, _) = open_host();
+        host.registry.register_host_adapter(
+            "acc-x",
+            None,
+            Some(Arc::new(BusyDeletes) as Arc<dyn cal_core::TasksFeature>),
+        );
+        host.registry.note_task_list_route("L1", "acc-x");
+        host.registry.note_task_list_route("L2", "acc-x");
+        // The original, cached in L1 under an account the cache rows hang on.
+        host.db
+            .with_conn(|c| {
+                c.execute(
+                    "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                     VALUES ('acc-x', 'caldav', 'Work', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+            })
+            .unwrap();
+        let original: cal_core::Task = serde_json::from_value(serde_json::json!({
+            "id": "t-old", "list_id": "L1", "title": "Einkaufen", "description": null,
+            "status": "open", "priority": "medium", "scheduled_date": null,
+            "scheduled_time": null, "scheduled_end_time": null, "deadline_date": null,
+            "deadline_time": null, "recurrence": null, "resurface_date": null,
+            "series_id": null, "parent_id": null, "section_id": null, "color_label": null,
+            "reminders": [], "sound": null, "deadline_reminder_days": null,
+            "created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z",
+            "completed_at": null, "etag": null
+        }))
+        .unwrap();
+        host.cache
+            .replace_list_tasks("acc-x", "L1", &[original])
+            .unwrap();
+        let before = host
+            .cache
+            .refresh_generation("acc-x", SyncScope::Tasks, "L1");
+        let task = serde_json::json!({
+            "id": "t-old", "list_id": "L2", "title": "Einkaufen", "description": null,
+            "status": "open", "priority": "medium", "scheduled_date": null,
+            "scheduled_time": null, "scheduled_end_time": null, "deadline_date": null,
+            "deadline_time": null, "recurrence": null, "resurface_date": null,
+            "series_id": null, "parent_id": null, "section_id": null, "color_label": null,
+            "reminders": [], "sound": null, "deadline_reminder_days": null,
+            "created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z",
+            "completed_at": null, "etag": null
+        });
+        let moved = host
+            .update_task_json(task.to_string(), Some("L1".into()))
+            .expect("the move stands");
+        let moved: serde_json::Value = serde_json::from_str(&moved).unwrap();
+        assert_eq!(moved["id"], "t-new");
+        assert_eq!(moved["original_left_in"], "L1");
+        assert!(
+            host.cache
+                .refresh_generation("acc-x", SyncScope::Tasks, "L1")
+                > before,
+            "the source list is read again"
+        );
+        // The original still stands at the provider: its row is not removed.
+        let left = host.cache.read_tasks("acc-x", "L1").unwrap();
+        assert_eq!(
+            left.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["t-old"]
+        );
+    }
+
+    /// A meeting adapter's errors keep the desktop's code on the phone: a
+    /// busy Webex keeps its token for the surfaces to translate, a lost answer
+    /// is a network error, never "internal" (decisions 270, 273).
+    #[test]
+    fn a_meeting_error_keeps_its_code() {
+        assert!(matches!(
+            vc_err(vc_core::VcError::Forbidden("provider-busy: http-429".into())),
+            StoreError::Forbidden { detail } if detail == "provider-busy: http-429"
+        ));
+        assert!(matches!(
+            vc_err(vc_core::VcError::Network("reset".into())),
+            StoreError::Network { .. }
+        ));
+    }
+
+    /// A provider whose task writes land without a follow-up step.
+    struct PartlySavedTasks;
+
+    #[async_trait::async_trait]
+    impl cal_core::Adapter for PartlySavedTasks {
+        async fn authenticate(
+            &self,
+            _: cal_core::Credentials,
+        ) -> cal_core::Result<cal_core::AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[cal_core::Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl cal_core::TasksFeature for PartlySavedTasks {
+        async fn list_task_lists(&self) -> cal_core::Result<Vec<cal_core::TaskList>> {
+            Ok(Vec::new())
+        }
+        async fn get_tasks(&self, _: &str) -> cal_core::Result<Vec<cal_core::Task>> {
+            Ok(Vec::new())
+        }
+        async fn create_task(
+            &self,
+            _: &str,
+            _: cal_core::NewTask,
+        ) -> cal_core::Result<cal_core::Task> {
+            Err(cal_core::Error::partly_saved("assignees"))
+        }
+        async fn update_task(&self, _: cal_core::Task) -> cal_core::Result<cal_core::Task> {
+            Err(cal_core::Error::partly_saved("assignees"))
+        }
+        async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
+            Err(cal_core::Error::Network("connection reset".into()))
+        }
+    }
+
+    /// Decision 273 on the phone: a task create or save that failed may have
+    /// landed in part — the task stands without its assignees — and a delete
+    /// whose answer was lost may have landed, so its list is read again, and a
+    /// refresh in flight drops its write.
+    #[test]
+    fn a_failed_external_task_write_still_invalidates_its_list() {
+        let (_dir, host, _) = open_host();
+        host.registry.register_host_adapter(
+            "acc-x",
+            None,
+            Some(Arc::new(PartlySavedTasks) as Arc<dyn cal_core::TasksFeature>),
+        );
+        host.registry.note_task_list_route("L1", "acc-x");
+        let generation = || {
+            host.cache
+                .refresh_generation("acc-x", SyncScope::Tasks, "L1")
+        };
+
+        let before = generation();
+        let new = serde_json::json!({
+            "title": "Einkaufen", "description": null, "status": "open",
+            "priority": "medium", "scheduled_date": null, "scheduled_time": null,
+            "deadline_date": null, "deadline_time": null, "recurrence": null,
+            "parent_id": null, "section_id": null, "color_label": null, "reminders": []
+        });
+        let err = host
+            .create_task_json("L1".into(), new.to_string())
+            .expect_err("the create failed");
+        assert!(err.to_string().contains("partly-saved"), "{err}");
+        assert!(
+            generation() > before,
+            "a failed create reads the list again"
+        );
+
+        let before = generation();
+        let task = serde_json::json!({
+            "id": "t-1", "list_id": "L1", "title": "Einkaufen", "description": null,
+            "status": "open", "priority": "medium", "scheduled_date": null,
+            "scheduled_time": null, "scheduled_end_time": null, "deadline_date": null,
+            "deadline_time": null, "recurrence": null, "resurface_date": null,
+            "series_id": null, "parent_id": null, "section_id": null, "color_label": null,
+            "reminders": [], "sound": null, "deadline_reminder_days": null,
+            "created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z",
+            "completed_at": null, "etag": null
+        });
+        assert!(host.update_task_json(task.to_string(), None).is_err());
+        assert!(generation() > before, "a failed save reads the list again");
+
+        // A delete whose answer was lost may have landed (277).
+        let before = generation();
+        assert!(host.delete_task("t-1".into(), Some("L1".into())).is_err());
+        assert!(
+            generation() > before,
+            "a failed delete reads the list again"
+        );
     }
 
     /// Decisions 203 and 210 on the phone: a create that failed may still have
@@ -10547,6 +10964,235 @@ mod tests {
                 fail()
             );
         }
+    }
+
+    /// Decision 277 on the phone: an update that failed after part of it
+    /// landed — a detached occurrence's new single, its old exception kept by
+    /// a busy server — reads its calendar again, as a create does.
+    #[test]
+    fn a_failed_external_update_still_invalidates_its_calendar() {
+        let (_dir, host, _) = open_host();
+        let local = make_calendar(&host);
+        let created = host
+            .create_event_json(new_event_json(&local, "Weekly"))
+            .unwrap();
+        host.registry.register_host_adapter(
+            "acc-x",
+            Some(Arc::new(FailingCreates(|| {
+                cal_core::Error::Network("partly-saved: delete".into())
+            }))),
+            None,
+        );
+        host.registry.note_calendar_route("cal-x", "acc-x");
+        let mut event: serde_json::Value = serde_json::from_str(&created).unwrap();
+        event["calendar_id"] = serde_json::json!("cal-x");
+        let before = host
+            .cache
+            .refresh_generation("acc-x", SyncScope::Events, "cal-x");
+        let err = host
+            .update_event_json(event.to_string(), None)
+            .expect_err("the update failed");
+        assert!(err.to_string().contains("partly-saved"), "{err}");
+        assert!(
+            host.cache
+                .refresh_generation("acc-x", SyncScope::Events, "cal-x")
+                > before,
+            "a failed update reads the calendar again"
+        );
+    }
+
+    /// A calendar adapter whose deletes and skips lose their answer: they may
+    /// have landed.
+    struct LostDeletes;
+
+    #[async_trait::async_trait]
+    impl cal_core::Adapter for LostDeletes {
+        async fn authenticate(
+            &self,
+            _credentials: cal_core::Credentials,
+        ) -> cal_core::Result<cal_core::AuthToken> {
+            unreachable!("never signed in")
+        }
+        fn capabilities(&self) -> &[cal_core::Capability] {
+            &[cal_core::Capability::Calendar]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CalendarFeature for LostDeletes {
+        async fn list_calendars(&self) -> cal_core::Result<Vec<cal_core::Calendar>> {
+            Ok(Vec::new())
+        }
+        async fn get_events(
+            &self,
+            _calendar_id: &str,
+            _range: DateRange,
+        ) -> cal_core::Result<Vec<Event>> {
+            Ok(Vec::new())
+        }
+        async fn create_event(
+            &self,
+            _calendar_id: &str,
+            _event: NewEvent,
+        ) -> cal_core::Result<Event> {
+            unreachable!("nothing is created")
+        }
+        async fn update_event(&self, _event: Event) -> cal_core::Result<Event> {
+            unreachable!("nothing is updated")
+        }
+        async fn delete_event(&self, _event_id: &str, _send: bool) -> cal_core::Result<()> {
+            Err(cal_core::Error::Network("connection reset".into()))
+        }
+        async fn add_event_exdate(
+            &self,
+            _event_id: &str,
+            _occurrence: chrono::DateTime<chrono::Utc>,
+            _send_cancellations: bool,
+        ) -> cal_core::Result<()> {
+            Err(cal_core::Error::Network("connection reset".into()))
+        }
+        async fn get_free_busy(
+            &self,
+            _emails: &[&str],
+            _range: DateRange,
+        ) -> cal_core::Result<Vec<cal_core::FreeBusy>> {
+            Ok(Vec::new())
+        }
+        fn calendar_color(&self, _calendar_id: &str) -> Option<cal_core::ContainerColor> {
+            None
+        }
+    }
+
+    /// Decision 277 on the phone: a delete or a skip whose answer was lost may
+    /// have landed — a calendar walk, a meeting cancelled before its DELETE
+    /// failed — so its calendar is read again, as after a failed update.
+    #[test]
+    fn a_failed_external_delete_still_invalidates_its_calendar() {
+        let (_dir, host, _) = open_host();
+        host.registry
+            .register_host_adapter("acc-x", Some(Arc::new(LostDeletes)), None);
+        host.registry.note_calendar_route("cal-x", "acc-x");
+        let generation = || {
+            host.cache
+                .refresh_generation("acc-x", SyncScope::Events, "cal-x")
+        };
+        let before = generation();
+        assert!(host
+            .delete_event("ev-1".into(), Some("cal-x".into()), None)
+            .is_err());
+        assert!(
+            generation() > before,
+            "a failed delete reads the calendar again"
+        );
+        let before = generation();
+        assert!(host
+            .add_event_exdate_json(
+                "ev-1".into(),
+                "2026-06-15T08:00:00Z".into(),
+                Some("cal-x".into()),
+                false,
+            )
+            .is_err());
+        assert!(
+            generation() > before,
+            "a failed skip reads the calendar again"
+        );
+    }
+
+    /// A contacts account whose deletes and photo writes lose their answer:
+    /// they may have landed.
+    struct LostContactWrites;
+
+    #[async_trait::async_trait]
+    impl cal_core::Adapter for LostContactWrites {
+        async fn authenticate(
+            &self,
+            _credentials: cal_core::Credentials,
+        ) -> cal_core::Result<cal_core::AuthToken> {
+            unreachable!("never signed in")
+        }
+        fn capabilities(&self) -> &[cal_core::Capability] {
+            &[cal_core::Capability::Contacts]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl cal_core::ContactsFeature for LostContactWrites {
+        async fn list_contact_lists(&self) -> cal_core::Result<Vec<cal_core::ContactList>> {
+            Ok(Vec::new())
+        }
+        async fn get_contacts(&self, _: &str) -> cal_core::Result<Vec<cal_core::Contact>> {
+            Ok(Vec::new())
+        }
+        async fn search_contacts(&self, _: &str) -> cal_core::Result<Vec<cal_core::Contact>> {
+            Ok(Vec::new())
+        }
+        async fn create_contact(
+            &self,
+            _: &str,
+            _: cal_core::NewContact,
+        ) -> cal_core::Result<cal_core::Contact> {
+            unreachable!("nothing is created")
+        }
+        async fn update_contact(
+            &self,
+            _: cal_core::Contact,
+        ) -> cal_core::Result<cal_core::Contact> {
+            unreachable!("nothing is updated")
+        }
+        async fn delete_contact(&self, _: &str) -> cal_core::Result<()> {
+            Err(cal_core::Error::Network("connection reset".into()))
+        }
+        async fn set_contact_photo(
+            &self,
+            _: &str,
+            _: cal_core::ContactPhoto,
+        ) -> cal_core::Result<()> {
+            Err(cal_core::Error::partly_saved("photo"))
+        }
+        async fn delete_contact_photo(&self, _: &str) -> cal_core::Result<()> {
+            Err(cal_core::Error::partly_saved("photo"))
+        }
+    }
+
+    /// Decision 277 on the phone: a contact delete whose answer was lost, or
+    /// a photo write that stands in part (the old picture gone), may have
+    /// landed, so its address book is read again.
+    #[test]
+    fn a_failed_external_contact_write_still_invalidates_its_list() {
+        let (_dir, host, _) = open_host();
+        host.registry
+            .register_host_contacts("acc-x", Arc::new(LostContactWrites));
+        host.registry.note_contact_list_route("AB1", "acc-x");
+        let generation = || {
+            host.cache
+                .refresh_generation("acc-x", SyncScope::Contacts, "AB1")
+        };
+        let before = generation();
+        assert!(host
+            .delete_contact("c-1".into(), Some("AB1".into()))
+            .is_err());
+        assert!(
+            generation() > before,
+            "a failed delete reads the list again"
+        );
+        let before = generation();
+        let photo = serde_json::json!({ "content_type": "image/jpeg", "data": "/9j/" });
+        assert!(host
+            .set_contact_photo_json("c-1".into(), Some("AB1".into()), photo.to_string())
+            .is_err());
+        assert!(
+            generation() > before,
+            "a failed photo write reads the list again"
+        );
+        let before = generation();
+        assert!(host
+            .delete_contact_photo("c-1".into(), Some("AB1".into()))
+            .is_err());
+        assert!(
+            generation() > before,
+            "a failed photo removal reads the list again"
+        );
     }
 
     /// A minimal valid `CreateEventRequest` JSON (NewEvent flattened). Omits
@@ -10858,6 +11504,7 @@ mod tests {
                 .unwrap()
                 .with_timezone(&chrono::Utc);
             Event {
+                original_left_in: None,
                 keep_attendees: false,
                 keep_fields: Vec::new(),
                 clear_attendees: false,
@@ -13582,7 +14229,13 @@ mod tests {
         let host = open_named(&dir, "restored");
         let account = with_device_account(&host);
         host.cache
-            .mark_failure(&account, SyncScope::Events, "device-cal", &withheld, false)
+            .mark_failure(
+                &account,
+                SyncScope::Events,
+                "device-cal",
+                &withheld,
+                host_core::cache::Attempt::Background { generation: 0 },
+            )
             .unwrap();
 
         host.set_device_event_store(Arc::new(AccessBridge(
@@ -13654,7 +14307,13 @@ mod tests {
         let host = open_named(&dir, "settled");
         let account = with_device_account(&host);
         host.cache
-            .mark_failure(&account, SyncScope::TaskLists, "", &withheld, false)
+            .mark_failure(
+                &account,
+                SyncScope::TaskLists,
+                "",
+                &withheld,
+                host_core::cache::Attempt::Background { generation: 0 },
+            )
             .unwrap();
         host.set_device_event_store(Arc::new(AccessBridge(
             r#"{"events":"full_access","reminders":"not_determined","granted_this_run":{"events":true,"reminders":true}}"#,

@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 
-import { expandAll } from '@aperio/shared';
+import { expandAll, readErrorMessage } from '@aperio/shared';
 
 import { getEvents, listCalendars } from '../api/calendar';
 import { CalendarActions } from '../components/CalendarActions';
@@ -33,10 +33,6 @@ import { chrome } from '../theme/uiScale';
 // recurring series count per occurrence). Events only — the year overview's
 // natural granularity (tasks have their own screen). Both audiences: a visible
 // count for sighted users, the full count folded into each button's a11y label.
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function YearScreen({ navigation, route }: RootStackScreenProps<'Year'>) {
   const { t, i18n } = useTranslation();
@@ -90,7 +86,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
       setCounts(next);
     } catch (err) {
       if (reqToken.current !== token) return;
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {

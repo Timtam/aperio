@@ -225,6 +225,14 @@ pub struct Event {
     /// name them; empty everywhere else. NOT persisted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deletions_not_restored: Vec<DateTime<Utc>>,
+    /// Transient read-only result of a move to another calendar or list: the
+    /// container the original stayed in, because the provider was busy and
+    /// turned its delete away after the copy at the target landed (decision
+    /// 277; Toni, 2026-10-23). The move stands; the surfaces say to delete the
+    /// original and not to move again. Set only on the row a move returns;
+    /// `None` everywhere else. NOT persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_left_in: Option<String>,
     /// Transient write-only signal: the edit did not change who is invited, so
     /// the adapter leaves the provider's attendee list exactly as it is
     /// (decision 71a). The host sets it (`attendee::guard_update`) by comparing
@@ -681,6 +689,14 @@ pub struct Task {
     pub updated_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
     pub etag: Option<String>,
+    /// Transient read-only result of a move to another calendar or list: the
+    /// container the original stayed in, because the provider was busy and
+    /// turned its delete away after the copy at the target landed (decision
+    /// 277; Toni, 2026-10-23). The move stands; the surfaces say to delete the
+    /// original and not to move again. Set only on the row a move returns;
+    /// `None` everywhere else. NOT persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_left_in: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

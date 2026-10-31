@@ -91,7 +91,7 @@ export type DialogMode =
       importNote?: string | null;
       /** Told once the imported appointment was created, so the list it came
        *  from can mark it. */
-      onImported?: () => void;
+      onImported?: (inPart?: boolean) => void;
     }
   | {
       // Outlook-style "this occurrence vs the whole series?" prompt shown
@@ -234,7 +234,7 @@ export interface OpenEventOptions {
   /** The import's note beside it. */
   importNote?: string | null;
   /** Told once the imported appointment was created. */
-  onImported?: () => void;
+  onImported?: (inPart?: boolean) => void;
   /** Replace the current top dialog frame instead of stacking on top — used by
    *  the quick-add's "weitere Details" hand-off so the editor inherits the
    *  quick-add's trigger and focus returns to the original opener (the

@@ -158,7 +158,13 @@ linked build registers the hook with `register!(your_crate, import_file)`.
   a plugin in its own repository feels that four times over otherwise.
 - **Safety:** you write `async fn` trait methods returning
   `cal_core::Result<T>`; the SDK turns `Err(Error::Unsupported(…))` etc.
-  into the wire error contract.
+  into the wire error contract. A busy provider, a save that landed in part
+  and a refused write each have a constructor there
+  (`Error::provider_busy`, `Error::after_landed`,
+  `WriteRefusal::turned_down_by_status`); the surfaces translate what they
+  build — see [When a provider is busy, or a save lands in part](/developers/adapters/overview/#when-a-provider-is-busy-or-a-save-lands-in-part).
+  A sign-in phase says its failure through `plugin_sdk::auth_error`, which
+  keeps such a token first.
 - **Defaults:** trait methods you don't implement use `cal-core`'s defaults
   (e.g. `search_users` → empty, `add_task_list_member` → `Unsupported`), so
   you only wire the slots you actually support.

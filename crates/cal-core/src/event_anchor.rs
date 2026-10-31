@@ -312,6 +312,7 @@ mod tests {
 
     fn event(id: &str, calendar_id: &str, title: &str, start: DateTime<Utc>) -> Event {
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

@@ -1,8 +1,9 @@
 // A series created in steps (decisions 202-213, 227, 265).
 //
-// Exchange creates a series without its deleted occurrences; the adapter then
-// deletes them again one by one, proves it, and only then invites — which can
-// take up to half a minute. The calendar says so on its row
+// Some calendars take a new series without its deleted occurrences, or Aperio
+// does not trust how they take them; the adapter then removes them again one
+// by one and checks the result — which can take up to half a minute. The
+// calendar says so on its row
 // (`recurrence_capabilities.deletions_in_steps`, from the adapter's manifest),
 // and every surface that creates such a series shows a "please wait" dialog
 // while it runs: decided here, once.
@@ -40,6 +41,31 @@ export function createsInSteps(
       recurrence?.rrule &&
       (recurrence.exceptions?.length ?? 0) > 0,
   );
+}
+
+/** A create, as far as `createRunsInSteps` asks. */
+export interface StepWriteCreate {
+  recurrence?: StepWriteRecurrence | null;
+  keeps_invitation?: boolean;
+}
+
+/**
+ * Whether this CREATE runs in steps in that calendar (`createsInSteps`) —
+ * never one that keeps someone else's meeting from a file as theirs (I6): its
+ * deletions go in with the request that creates it (Exchange then sends the
+ * reply, moves it and reads it back; Google imports it in one call), and
+ * nothing is removed one occurrence at a time. Only where the surface knew
+ * the account's address (`own`): without it a meeting read as someone else's
+ * may be the account's own, which the adapter, asking for itself, then writes
+ * in steps (review round 22 of #128).
+ */
+export function createRunsInSteps(
+  target: StepWriteTarget | null | undefined,
+  create: StepWriteCreate,
+  own: string | null | undefined,
+): boolean {
+  const theirs = create.keeps_invitation === true && Boolean(own?.trim());
+  return !theirs && createsInSteps(target, create.recurrence);
 }
 
 /**

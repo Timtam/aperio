@@ -12,7 +12,8 @@
 // when the provider said there is nobody; a read that failed has to be an
 // error, or this field states something the code does not know.
 
-import { codedError, errorMessageText } from './eventWriteError';
+import { readFailureSentence } from './errors';
+import { codedError, errorMessageText, isProviderBusy } from './eventWriteError';
 import type { ReadRefusal } from './generated/ReadRefusal';
 import type { TaskAssignment } from './generated/TaskAssignment';
 import type { TaskUser } from './generated/TaskUser';
@@ -75,6 +76,11 @@ type Translate = (key: string, values?: Record<string, unknown>) => string;
 export function assigneePoolErrorMessage(err: unknown, t: Translate): string {
   const refusal = readRefusal(err);
   if (refusal) return t(refusal.key, { permission: refusal.detail });
+  // A busy provider is said in words, and that trying later may work
+  // (decision 273), never as "forbidden: provider-busy: …".
+  if (isProviderBusy(err)) {
+    return readFailureSentence('dialogs.task.assignees.loadFailed', err, t, 'detail');
+  }
   const known = codedError(err);
   const text = errorMessageText(err);
   return t('dialogs.task.assignees.loadFailed', {

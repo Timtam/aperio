@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { eventWriteLeftover, writeErrorMessage } from '@aperio/shared';
+import {
+  eventWriteLeftover,
+  type MovedRow,
+  originalKeptSentence,
+  readErrorMessage,
+  writeErrorMessage,
+} from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
-  findNodeHandle,
   Pressable,
   StyleSheet,
   Text,
@@ -17,10 +22,10 @@ import { isSeriesOccurrence, selectableTaskLists } from '@aperio/shared';
 import { Calendar, listCalendars } from '../api/calendar';
 import {
   createSection,
-  getSections,
   getTaskById,
   getTasks,
 } from '../api/client';
+import { CloseOnlyNotice } from '../components/CloseOnlyNotice';
 import { FormScrollView } from '../components/FormScrollView';
 import { SelectFieldButton } from '../components/SelectFieldButton';
 import { SegmentedSelect } from '../components/SegmentedSelect';
@@ -41,6 +46,7 @@ import { useCalendarVisibility } from '../state/calendarVisibility';
 import { stepWriteWait } from '../state/stepWriteWait';
 import { canAssignSection } from '../state/taskBehaviour';
 import { useTaskStore } from '../state/taskStoreContext';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -75,7 +81,7 @@ function MoveCopyScreen({
   const params = route.params;
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const { taskLists, selectedTaskListIds, invalidateData } = useTaskStore();
+  const { taskLists, selectedTaskListIds, invalidateData, loadSections } = useTaskStore();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
   const showHiddenCalendarTargets = useShowHiddenCalendarTargets();
   const showHiddenTaskListTargets = useShowHiddenTaskListTargets();
@@ -85,30 +91,15 @@ function MoveCopyScreen({
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [mode, setMode] = useState<MoveCopyMode>('move');
   const [scope, setScope] = useState<MoveCopyScope>('occurrence');
-  // A new series that may stand (decisions 203, 210): said in place of the
-  // form, focused, with only Close — doing it again would create another.
-  const [mayStand, setMayStand] = useState<string | null>(null);
-  // Whether the screen is still there: one left while its write runs gets no
-  // notice, so what may stand is said instead.
-  const shown = useRef(true);
-  useEffect(() => {
-    shown.current = true;
-    return () => {
-      shown.current = false;
-    };
-  }, []);
-  const mayStandRef = useRef<Text | null>(null);
-  useEffect(() => {
-    if (mayStand == null) return;
-    requestAnimationFrame(() => {
-      const tag = findNodeHandle(mayStandRef.current);
-      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-    });
-  }, [mayStand]);
+  // What a move or a copy left that doing it again would write twice: a new
+  // series that may stand (210), a task without one of its follow-up steps
+  // (273), an original the provider was too busy to delete (277). Said in
+  // place of the form, focused, with only Close.
+  const { notice, showNotice } = useCloseOnlyNotice();
   // Every way out of the notice is its Close, as in the editor's: the header
   // button says Close, not Cancel — nothing is cancelled any more — and the
   // swipe is off (set with the header, below).
-  const closeMayStand = useCallback(() => navigation.goBack(), [navigation]);
+  const closeNotice = useCallback(() => navigation.goBack(), [navigation]);
   const [targetContainerId, setTargetContainerId] = useState(
     params.kind === 'task' ? params.listId : params.event.calendar_id,
   );
@@ -117,6 +108,10 @@ function MoveCopyScreen({
   const [sections, setSections] = useState<Section[]>([]);
   /** Non-null while the "new section" name box is open. */
   const [sectionDraft, setSectionDraft] = useState<string | null>(null);
+  /** A failed "new section", said at its field: the next try clears it, and
+   *  the move's own failure is not touched. */
+  const [sectionError, setSectionError] = useState<string | null>(null);
+  const sectionBusy = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // The header: Cancel; Close while the notice is up; and while a move or
@@ -125,7 +120,7 @@ function MoveCopyScreen({
   // may stand would never be said on screen.
   useCancelHeader(navigation, 'mobile.cancel', {
     writing: submitting,
-    close: mayStand != null ? closeMayStand : undefined,
+    close: notice != null ? closeNotice : undefined,
   });
 
   const initialContainerId =
@@ -157,7 +152,7 @@ function MoveCopyScreen({
           if (!cancelled) setCalendars(cals);
         }
       } catch (err) {
-        if (!cancelled) setError(writeErrorMessage(err, t));
+        if (!cancelled) setError(readErrorMessage(err, t));
       }
     })();
     return () => {
@@ -183,12 +178,16 @@ function MoveCopyScreen({
     // target drops the choice rather than carrying a stale one across.
     setTargetSectionId('');
     setSectionDraft(null);
+    setSectionError(null);
     if (!sectionsEnabled) {
       setSections([]);
       return;
     }
     let cancelled = false;
-    void getSections(targetContainerId)
+    // Through the store, as every other section picker: a section written
+    // here or in the list editor shows over the host's rows from before until
+    // its refresh lands (review round 18 of #128). Mirrors the desktop.
+    void loadSections(targetContainerId)
       .then((rows) => {
         if (!cancelled) setSections(rows);
       })
@@ -199,7 +198,7 @@ function MoveCopyScreen({
     return () => {
       cancelled = true;
     };
-  }, [targetContainerId, sectionsEnabled]);
+  }, [targetContainerId, sectionsEnabled, loadSections]);
 
   /**
    * Make a section in the target list and select it.
@@ -209,27 +208,46 @@ function MoveCopyScreen({
    * in passing at the top, where the thing being filed is about to be.
    */
   const createTargetSection = useCallback(async () => {
+    // One at a time: a second press while the first is on its way would make
+    // the section twice.
+    if (sectionBusy.current) return;
     const name = (sectionDraft ?? '').trim();
     if (!name) {
       setSectionDraft(null);
       return;
     }
+    sectionBusy.current = true;
+    setSectionError(null);
     try {
       const created = await createSection({
         list_id: targetContainerId,
         name,
         position: 0,
       });
-      setSections(await getSections(targetContainerId));
+      // The section stands (277). The read after it serves the list's kept
+      // rows until its refresh lands, or fails: the store lays it over them,
+      // there and on every other screen. Offered at the top where it was
+      // made, and selected.
+      const rows = await loadSections(targetContainerId, { upsert: created }).catch(
+        () => null,
+      );
+      setSections((prev) => [
+        created,
+        ...(rows ?? prev).filter((section) => section.id !== created.id),
+      ]);
       setTargetSectionId(created.id);
       setSectionDraft(null);
       AccessibilityInfo.announceForAccessibility(
         t('dialogs.task.section.created', { name: created.name }),
       );
     } catch (err) {
-      setError(writeErrorMessage(err, t));
+      const message = writeErrorMessage(err, t);
+      setSectionError(message);
+      AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
+    } finally {
+      sectionBusy.current = false;
     }
-  }, [sectionDraft, targetContainerId, t]);
+  }, [sectionDraft, targetContainerId, t, loadSections]);
 
   const sectionOptions = useMemo(
     () => [
@@ -308,13 +326,15 @@ function MoveCopyScreen({
     }
     setSubmitting(true);
     try {
+      let moved: MovedRow[] = [];
       if (params.kind === 'event') {
-        await moveOrCopyEvent(params.event, targetContainerId, mode, scope, {
+        const row = await moveOrCopyEvent(params.event, targetContainerId, mode, scope, {
           wait: stepWriteWait,
           target: calendars.find((c) => c.id === targetContainerId),
         });
+        if (row != null) moved = [row];
       } else if (task != null) {
-        await moveOrCopyTask(
+        moved = await moveOrCopyTask(
           task,
           targetContainerId,
           mode,
@@ -323,6 +343,18 @@ function MoveCopyScreen({
         );
       }
       invalidateData();
+      // An original the provider was too busy to delete (277): said, and
+      // only closed — moving it again would make a second copy.
+      const kept = originalKeptSentence(
+        moved,
+        (id) =>
+          (params.kind === 'event' ? calendars : taskLists).find((c) => c.id === id)?.name,
+        t,
+      );
+      if (kept != null) {
+        showNotice(kept);
+        return;
+      }
       AccessibilityInfo.announceForAccessibility(
         t(mode === 'move' ? 'dialogs.moveCopy.moved' : 'dialogs.moveCopy.copied', {
           title: itemTitle,
@@ -332,17 +364,15 @@ function MoveCopyScreen({
     } catch (err) {
       // A failed move or copy may still have written at the target: it shows
       // on the next read.
-      if (params.kind === 'event') invalidateData();
+      invalidateData();
       const message =
         err instanceof SeriesNotLoadedError
           ? t('dialogs.event.seriesLoadFailed', { title: itemTitle })
           : writeErrorMessage(err, t);
-      if (params.kind === 'event' && eventWriteLeftover(err)) {
-        if (!shown.current) {
-          AccessibilityInfo.announceForAccessibility(message);
-          return;
-        }
-        setMayStand(message);
+      // Something stands — a new series (210), a task without one of its
+      // steps (273): said in place of the form and only closed.
+      if (eventWriteLeftover(err)) {
+        showNotice(message);
         return;
       }
       setError(message);
@@ -366,31 +396,15 @@ function MoveCopyScreen({
     targetSectionId,
     submitting,
     calendars,
+    taskLists,
+    showNotice,
   ]);
 
   // A task move/copy isn't actionable until its row has loaded.
   const blocked = submitting || (params.kind === 'task' && task == null);
 
-  if (mayStand != null) {
-    return (
-      <FormScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.content}
-        accessibilityViewIsModal
-      >
-        <Text ref={mayStandRef} style={styles.error} accessibilityRole="text">
-          {mayStand}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('dialogs.close')}
-          onPress={() => navigation.goBack()}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-        >
-          <Text style={styles.buttonText}>{t('dialogs.close')}</Text>
-        </Pressable>
-      </FormScrollView>
-    );
+  if (notice != null) {
+    return <CloseOnlyNotice sentence={notice} onClose={closeNotice} />;
   }
 
   return (
@@ -507,6 +521,11 @@ function MoveCopyScreen({
             </Text>
           </Pressable>
         </View>
+      )}
+      {sectionsManageable && sectionError != null && (
+        <Text style={styles.error} accessibilityRole="text">
+          {sectionError}
+        </Text>
       )}
 
       {params.kind === 'task' && children.length > 0 && (

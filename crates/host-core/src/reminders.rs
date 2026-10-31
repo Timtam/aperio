@@ -3089,6 +3089,7 @@ mod tests {
 
     fn make_event(reminders: Vec<Reminder>) -> Event {
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -3371,6 +3372,7 @@ mod tests {
         reminders: Vec<Reminder>,
     ) -> Task {
         Task {
+            original_left_in: None,
             assignees: Vec::new(),
             id: "task-1".into(),
             list_id: "list-1".into(),

@@ -152,7 +152,10 @@
   "common": {
     "colorComposer": {
       "invalidHex": "Bitte einen gültigen Hex-Wert eingeben, z. B. #e53935."
-    }
+    },
+    "providerBusy": "Der Anbieter ist gerade ausgelastet. Versuche es später noch einmal.",
+    "tryAgainLater": "Versuche es später noch einmal.",
+    "accessNotGranted": "Aperio hat keinen Zugriff auf die Kalender und Erinnerungen dieses Geräts. Erlaube ihn in der App „Einstellungen“ bei Aperio."
   },
   "descriptionLinks": {
     "label": "Links in dieser Beschreibung",
@@ -207,12 +210,17 @@
     "duplicatedSeries": "Die ganze Serie „{{title}}“ wurde dupliziert.",
     "copyMayStand": "„{{title}}“ steht möglicherweise doppelt im Kalender: Die neue Kopie ließ sich weder fertigstellen noch wieder entfernen. Bitte prüfe den Kalender und wiederhole es nicht.",
     "moveMayStand": "„{{title}}“ steht möglicherweise im Zielkalender und noch in seinem eigenen: Die verschobene Serie ließ sich dort weder fertigstellen noch wieder entfernen. Bitte prüfe beide Kalender und wiederhole es nicht.",
+    "originalKept": "„{{title}}“ wurde verschoben, aber das Original in „{{source}}“ ließ sich nicht entfernen, weil der Anbieter gerade ausgelastet ist. Lösche es dort selbst; verschiebe es nicht noch einmal.",
+    "occurrenceKept": "„{{title}}“ ist als eigener Termin gespeichert, aber der Termin der Serie in „{{source}}“ ließ sich nicht auslassen, weil der Anbieter gerade ausgelastet ist. Lösche diesen Termin der Serie dort selbst; speichere nicht noch einmal.",
+    "originalsKept": "Verschoben, aber diese Originale in „{{source}}“ ließen sich nicht entfernen, weil der Anbieter gerade ausgelastet ist: {{titles}}. Lösche sie dort selbst; verschiebe sie nicht noch einmal.",
+    "quotedTitle": "„{{title}}“",
     "duplicateFailed": "„{{title}}“ konnte nicht dupliziert werden: {{reason}}."
   },
   "toast": {
     "regionLabel": "Benachrichtigungen",
     "undoLabel": "Rückgängig",
     "undoInFlight": "Wird rückgängig gemacht …",
+    "undoFailed": "Das ließ sich nicht rückgängig machen: {{reason}}",
     "dismissLabel": "Schließen"
   },
   "birthdays": {
@@ -382,7 +390,11 @@
       "tasks": "Aufgabenliste",
       "sections": "Abschnitte",
       "contacts": "Adressbuch"
-    }
+    },
+    "announceBusy": "Achtung: Die Aktualisierung mindestens eines Kontos schlägt fehl, weil ein Anbieter gerade ausgelastet ist. Aperio versucht es beim nächsten Aktualisieren erneut. Details im Bereich Synchronisierung.",
+    "bannerBusy": "Einige Konten werden nicht aktualisiert, weil ein Anbieter ausgelastet ist. Details im Bereich Synchronisierung.",
+    "busyHint": "Der Anbieter ist gerade ausgelastet und lehnt Aktualisierungen ab. Du musst nichts tun: Aperio versucht es beim nächsten Aktualisieren erneut, zum Beispiel wenn du die App wieder öffnest. Die Warnung verschwindet, sobald eine Aktualisierung gelingt.",
+    "busyEntry": "Der Anbieter ist ausgelastet."
   },
   "syncStatus": {
     "label": "Sync-Status",
@@ -582,6 +594,7 @@
       "save": "Speichern",
       "create": "Anlegen",
       "created": "Kontakt {{name}} angelegt.",
+      "createdWithoutPhoto": "Kontakt {{name}} angelegt, aber ohne Foto: Das Foto ließ sich nicht speichern. Füge es später noch einmal hinzu.",
       "updated": "Kontakt {{name}} gespeichert.",
       "deleted": "Kontakt {{name}} gelöscht.",
       "deleteTitle": "Kontakt löschen?",
@@ -1393,6 +1406,8 @@
       "regroupFailed_other": "Die {{count}} Kopien wurden geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
       "newPartMayStand": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ließ sich weder fertigstellen noch wieder löschen, und der alte läuft weiter. Bitte dort prüfen.",
       "maybeShownTwice": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Die alte ließ sich nicht kürzen und ihr neuer Teil nicht wieder löschen. Bitte dort prüfen.",
+      "tailMayStand": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ob ihr neuer Teil angelegt wurde, ist unklar ({{reason}}). Bitte dort prüfen.",
+      "standaloneMayStand": "In {{calendar}} steht der Termin am {{date}} möglicherweise doppelt: Ob seine Einzelkopie angelegt wurde, ist unklar ({{reason}}). Bitte dort prüfen.",
       "shiftRefused": "In {{calendar}} kann die Wiederholung nicht mit dem neuen Datum oder der neuen Uhrzeit wandern: {{reason}}.",
       "unsureCut": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ist angelegt, aber ob der alte jetzt davor endet, ist unklar. Bitte dort prüfen.",
       "skippedInvitation": "Die Kopie in {{calendar}} wurde nicht geändert – sie organisiert jemand anderes."
@@ -1618,7 +1633,8 @@
         "someBusy_one": "{{count}} Teilnehmer ist zu dieser Zeit beschäftigt.",
         "someBusy_other": "{{count}} Teilnehmer sind zu dieser Zeit beschäftigt.",
         "busy": "Beschäftigt",
-        "free": "Frei"
+        "free": "Frei",
+        "failed": "Die Verfügbarkeit ließ sich nicht prüfen: {{reason}}."
       },
       "rsvp": {
         "yourResponseLabel": "Deine Antwort",
@@ -1749,22 +1765,28 @@
         "invitationsCancelledToo": "Falls Einladungen verschickt wurden, haben die Eingeladenen auch die Absage bekommen.",
         "createdMayStand": "Im Kalender wurde eine neue Serie angelegt, ließ sich aber nicht fertigstellen, und Aperio konnte sie nicht wieder entfernen. Sie steht dort möglicherweise zusätzlich. Bitte prüfe den Kalender.",
         "invitationsMayHaveGone": "Möglicherweise haben die Eingeladenen eine Einladung bekommen.",
+        "providerBusy": "Der Anbieter ist gerade ausgelastet. Es wurde nichts geändert. Versuche es später noch einmal.",
+        "deletionsNotKeptBusy": "Der Anbieter war ausgelastet, deshalb konnte Aperio die neue Serie nicht rechtzeitig fertigstellen und hat sie wieder entfernt. Es wurde nichts geändert. Versuche es später noch einmal.",
+        "partlySaved": "Die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist. Prüfe sie und versuche den Rest später noch einmal.",
         "reason": {
           "replyOnly": "nur der Organisator kann diese Besprechung ändern",
           "serverRefused": "der Kalenderserver hat es abgelehnt ({{detail}})",
           "identityUnknown": "Aperio konnte die eigenen Adressen dieses Kontos auf dem Kalenderserver nicht lesen",
           "occurrenceNotWritable": "dieser eine Termin lässt sich in seiner Serie nicht einzeln ändern",
-          "unsafeToWrite": "Aperio kann ihn auf dem Server nicht sicher ändern",
+          "unsafeToWrite": "Aperio kann das auf dem Server nicht sicher ändern",
           "accessNotGranted": "Aperio hat keinen Zugriff auf die Kalender und Erinnerungen dieses Geräts",
           "dayZoneUnreadable": "Exchange speichert sie in einer Zeitzone, die Aperio nicht lesen kann, deshalb lässt sich ihr Tag hier nicht ändern",
-          "copyUnreadable": "Aperio konnte ihren aktuellen Stand nicht vom Server lesen",
+          "copyUnreadable": "Aperio konnte den aktuellen Stand nicht vom Server lesen",
           "exceptionsWouldBeLost": "Exchange würde dabei ihre geänderten und gelöschten Vorkommen verwerfen",
           "forbidden": "der Anbieter erlaubt es nicht ({{detail}})",
-          "changedOnServer": "sie wurde auf dem Server geändert, seit du sie geöffnet hast",
-          "deletionsNotKeptTime": "ihre gelöschten Termine einzeln wieder zu löschen, hat zu lange gedauert",
-          "deletionsNotKept": "der Kalender hat ihre gelöschten Termine nicht übernommen",
+          "changedOnServer": "der Stand auf dem Server hat sich inzwischen geändert",
+          "deletionsNotKeptTime": "die gelöschten Termine der neuen Serie einzeln wieder zu löschen, hat zu lange gedauert",
+          "deletionsNotKept": "der Kalender hat die gelöschten Termine der neuen Serie nicht übernommen",
           "uidTaken": "er steht schon in diesem Kalender",
-          "createdMayStand": "eine neue Serie wurde angelegt, ließ sich aber weder fertigstellen noch wieder entfernen"
+          "createdMayStand": "eine neue Serie wurde angelegt, ließ sich aber weder fertigstellen noch wieder entfernen",
+          "providerBusy": "der Anbieter ist gerade ausgelastet",
+          "deletionsNotKeptBusy": "der Anbieter war ausgelastet, deshalb ließ sich die neue Serie nicht rechtzeitig fertigstellen",
+          "partlySaved": "die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist"
         }
       },
       "deleteAndDecline": "Löschen und absagen"
@@ -1800,7 +1822,9 @@
         "renameLabel": "Abschnitt umbenennen",
         "created": "Abschnitt „{{name}}\" wurde angelegt.",
         "renamed": "Abschnitt in „{{name}}\" umbenannt.",
-        "deleted": "Abschnitt „{{name}}\" gelöscht; seine Aufgaben sind jetzt ohne Abschnitt."
+        "deleted": "Abschnitt „{{name}}\" gelöscht; seine Aufgaben sind jetzt ohne Abschnitt.",
+        "unread": "Die Abschnitte dieser Liste konnten nicht geladen werden: {{reason}}",
+        "unreadCurrent": "Bisheriger Abschnitt (nicht geladen)"
       },
       "assignees": {
         "nobody": "Niemand",
@@ -1878,7 +1902,18 @@
         "listAria": "Unteraufgaben. Pfeiltasten zur Navigation, Leertaste zum Umschalten, Umschalt+F10 für Aktionen.",
         "rowLabel": "{{title}}, {{state}}{{priority}}",
         "removeAria": "Unteraufgabe „{{title}}\" entfernen",
-        "listNoSubtasks": "Die gewählte Liste unterstützt keine Unteraufgaben. Entferne die Entwürfe oder wähle eine andere Liste."
+        "listNoSubtasks": "Die gewählte Liste unterstützt keine Unteraufgaben. Entferne die Entwürfe oder wähle eine andere Liste.",
+        "draftsFailed_one": "„{{title}}“ wurde angelegt, die Unteraufgabe {{titles}} aber nicht: {{reason}}. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an.",
+        "draftsFailed_other": "„{{title}}“ wurde angelegt, die Unteraufgaben {{titles}} aber nicht: {{reason}}. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt diese Unteraufgaben mit an.",
+        "draftsLeftHeading": "Noch nicht angelegte Unteraufgaben",
+        "draftPartlyThenRest_one": "„{{title}}“ wurde angelegt, die Unteraufgabe {{draft}} aber nur zum Teil, weil der Anbieter gerade ausgelastet ist; prüfe sie. Die Unteraufgabe {{titles}} wurde danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an. Versuche es später noch einmal.",
+        "draftPartlyThenRest_other": "„{{title}}“ wurde angelegt, die Unteraufgabe {{draft}} aber nur zum Teil, weil der Anbieter gerade ausgelastet ist; prüfe sie. Die Unteraufgaben {{titles}} wurden danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt diese Unteraufgaben mit an. Versuche es später noch einmal.",
+        "familyNotAll": "Nicht jede Aufgabe darüber oder darunter hat den neuen Status übernommen: {{reason}}.",
+        "draftMayStand": "„{{title}}“ wurde angelegt. Die Unteraufgabe {{draft}} wurde vielleicht auch angelegt; prüfe sie ({{reason}}).",
+        "draftMayStandThenRest_one": "„{{title}}“ wurde angelegt. Die Unteraufgabe {{draft}} wurde vielleicht auch angelegt; prüfe sie ({{reason}}). Die Unteraufgabe {{titles}} wurde danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an.",
+        "draftMayStandThenRest_other": "„{{title}}“ wurde angelegt. Die Unteraufgabe {{draft}} wurde vielleicht auch angelegt; prüfe sie ({{reason}}). Die Unteraufgaben {{titles}} wurden danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt diese Unteraufgaben mit an.",
+        "draftsNotCreated_one": "Die Unteraufgabe {{titles}} wurde nicht angelegt.",
+        "draftsNotCreated_other": "Diese {{count}} Unteraufgaben wurden nicht angelegt: {{titles}}."
       },
       "status": {
         "open": "Offen",
@@ -2038,7 +2073,7 @@
       "browseFailed": "Der Auswahl-Dialog ließ sich nicht öffnen: {{message}}. Du kannst den Pfad stattdessen eintippen.",
       "localCannotDelete": "Das lokale Konto kann nicht entfernt werden.",
       "deleteTitle": "Konto entfernen",
-      "deleteMessage": "Konto „{{name}}\" wirklich entfernen? Zugehörige lokale Kalender, Aufgabenlisten, Termine und Aufgaben werden mitgelöscht.",
+      "deleteMessage": "Konto „{{name}}“ wirklich entfernen? Zugehörige lokale Kalender, Aufgabenlisten, Termine und Aufgaben werden mitgelöscht.",
       "created": "Konto „{{name}}\" wurde angelegt.",
       "deleted": "Konto „{{name}}\" wurde entfernt.",
       "privacyNotice": {
@@ -2078,7 +2113,10 @@
           "tasks": "Aufgabenliste",
           "sections": "Abschnitte",
           "contacts": "Adressbuch"
-        }
+        },
+        "announceBusy": "Achtung: Die Aktualisierung mindestens eines Kontos schlägt fehl, weil ein Anbieter gerade ausgelastet ist. Aperio versucht es von selbst erneut. Details unter Einstellungen, Konten.",
+        "busyHint": "Der Anbieter ist gerade ausgelastet und lehnt Aktualisierungen ab. Du musst nichts tun: Aperio versucht es von selbst erneut, und die Warnung verschwindet, sobald eine Aktualisierung gelingt.",
+        "busyEntry": "Der Anbieter ist ausgelastet."
       },
       "missingPluginBadge": "Plugin fehlt",
       "missingCredentials_one": "1 Konto benötigt auf diesem Gerät Zugangsdaten.",
@@ -2297,7 +2335,8 @@
       "needsConnect": "Achtung: Dieses Gerät ist bei diesem Konto nicht angemeldet — bitte unter Einstellungen, Konten neu anmelden. Bis dahin wird nichts abgerufen.",
       "sectionLabel": "{{name}}",
       "empty": "Noch keine Kalender oder Aufgabenlisten — über „Konten verwalten\" die Verbindung prüfen.",
-      "contextMenuHint": "Mit den Pfeiltasten navigieren, Leertaste zum Ein-/Ausblenden, Umschalt+F10 oder Menü-Taste für Aktionen."
+      "contextMenuHint": "Mit den Pfeiltasten navigieren, Leertaste zum Ein-/Ausblenden, Umschalt+F10 oder Menü-Taste für Aktionen.",
+      "refreshErrorBusy": "Achtung: Die Aktualisierung dieses Kontos schlägt fehl, weil der Anbieter gerade ausgelastet ist; angezeigte Daten sind möglicherweise veraltet."
     },
     "taskListDeleted": "Aufgabenliste „{{name}}\" wurde gelöscht.",
     "menu": {
@@ -2518,7 +2557,8 @@
       "refreshing": "Wird aktualisiert …",
       "refreshAria": "Kontakte jetzt abgleichen",
       "lastSynced": "Letzter Abgleich: {{time}}",
-      "neverSynced": "Noch kein Abgleich durchgeführt."
+      "neverSynced": "Noch kein Abgleich durchgeführt.",
+      "syncFailed": "Der Abgleich der Kontakte ließ sich nicht starten: {{reason}}"
     }
   },
   "widgets": {
@@ -2692,6 +2732,11 @@
       "done_other": "{{count}} Termine in „{{calendar}}“ importiert.",
       "partly_one": "{{done}} von {{count}} Termin in „{{calendar}}“ importiert. Nicht importiert: {{titles}}.",
       "partly_other": "{{done}} von {{count}} Terminen in „{{calendar}}“ importiert. Nicht importiert: {{titles}}.",
+      "whole_one": "{{done}} von {{count}} Termin ganz in „{{calendar}}“ importiert.",
+      "whole_other": "{{done}} von {{count}} Terminen ganz in „{{calendar}}“ importiert.",
+      "standing_one": "Vielleicht nicht ganz angekommen, prüfe ihn im Kalender: {{titles}}.",
+      "standing_other": "Vielleicht nicht ganz angekommen, prüfe sie im Kalender: {{titles}}.",
+      "importedInPart": "vielleicht nicht ganz importiert",
       "failedTitle": "„{{title}}“ ({{reason}})",
       "quoted": "„{{title}}“"
     },

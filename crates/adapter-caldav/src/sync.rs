@@ -71,7 +71,9 @@ pub async fn sync_collection(
 
 /// Read a collection's current `DAV:sync-token` via a cheap PROPFIND
 /// depth 0. `None` means the server doesn't support sync-collection (the
-/// property is absent) — the caller then stays on the CTag path.
+/// property is absent) — the caller then stays on the CTag path. A busy
+/// server is an error instead: taken as "no support", it would put the
+/// collection on the CTag path for good (decision 270).
 pub async fn read_sync_token(
     client: &Client,
     collection_url: &Url,
@@ -93,8 +95,12 @@ pub async fn read_sync_token(
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
-        // A 4xx here just means "no sync-token support" — degrade to the
-        // CTag path rather than failing the whole refresh.
+        let err = crate::http::read_failure(response).await;
+        if crate::busy_detail(&err).is_some() {
+            return Err(err);
+        }
+        // Any other refusal just means "no sync-token support" — degrade to
+        // the CTag path rather than failing the whole refresh.
         return Ok(None);
     }
     let xml = response.text().await?;
@@ -134,15 +140,7 @@ pub async fn list_resource_hrefs(
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
-        let text = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if text.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                text.chars().take(200).collect()
-            },
-        });
+        return Err(crate::http::read_failure(response).await);
     }
     let xml = response.text().await?;
     Ok(parse_sync_collection(&xml)?.changed)
@@ -234,15 +232,7 @@ async fn send_report(
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
-        let text = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if text.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                text.chars().take(200).collect()
-            },
-        });
+        return Err(crate::http::read_failure(response).await);
     }
     Ok(response.text().await?)
 }

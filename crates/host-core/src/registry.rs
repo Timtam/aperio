@@ -551,6 +551,18 @@ impl AdapterRegistry {
         }
     }
 
+    /// Insert a host-constructed contacts surface under `account_id`, as
+    /// [`Self::register_host_adapter`] does for calendars and tasks: for a
+    /// host's own adapter, and for the hosts' tests of what a contact write
+    /// does to the cache. Re-registering an account id overwrites the prior
+    /// entry.
+    pub fn register_host_contacts(&self, account_id: &str, contacts: Arc<dyn ContactsFeature>) {
+        self.external_contacts
+            .write()
+            .expect("registry contacts poison")
+            .insert(account_id.to_string(), contacts);
+    }
+
     /// Drop the adapter for `account_id`. Called from
     /// `delete_account` so the registry doesn't hand out a stale
     /// reference after deletion.
@@ -956,7 +968,7 @@ impl AdapterRegistry {
                 .list_calendars()
                 .await
                 .map(|_| ())
-                .map_err(|err| RegistryError::Probe(err.to_string()))
+                .map_err(RegistryError::Probe)
         } else if caps.contains(&plugin_core::Capability::Tasks) {
             let adapter = FfiTasksAdapter::new(instance).ok_or_else(|| {
                 RegistryError::Construct("plugin doesn't expose the TasksFeature surface".into())
@@ -965,7 +977,7 @@ impl AdapterRegistry {
                 .list_task_lists()
                 .await
                 .map(|_| ())
-                .map_err(|err| RegistryError::Probe(err.to_string()))
+                .map_err(RegistryError::Probe)
         } else {
             // Nothing cheap to list. Opening the instance already exercised the
             // config, which is most of what a probe is for, so this is a pass
@@ -1350,10 +1362,11 @@ pub enum RegistryError {
     #[error("adapter construction failed: {0}")]
     Construct(String),
     /// A credential smoke-test reached the adapter but its read probe failed —
-    /// bad auth, an unreachable host, a protocol error. The string is the
-    /// underlying adapter error, surfaced to the user.
+    /// bad auth, an unreachable host, a protocol error, a busy provider. The
+    /// adapter's error itself, so the shells say it by its kind and its token
+    /// (decision 273): a busy provider is no failed probe of the credentials.
     #[error("{0}")]
-    Probe(String),
+    Probe(cal_core::Error),
     /// The plugin id referenced by the account isn't loaded into
     /// the host's [`PluginManager`] — typically because the user's
     /// other device installed a community plugin Aperio doesn't

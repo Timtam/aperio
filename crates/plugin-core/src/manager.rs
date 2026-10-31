@@ -1617,12 +1617,23 @@ impl PluginManager {
         if status == PLUGIN_CALL_OK {
             Ok(bytes)
         } else {
-            let msg = String::from_utf8_lossy(&bytes).into_owned();
-            Err(InteractiveAuthError::Plugin(format!(
-                "plugin status {status}: {msg}",
-            )))
+            Err(plugin_auth_failure(status, &bytes))
         }
     }
+}
+
+/// A sign-in phase's failure as the plugin said it. A message that starts
+/// with a refusal or a leftover token (`plugin_sdk::auth_error`) keeps it
+/// first, so the shells read it: a busy token endpoint says the provider is
+/// busy, not "sign in again" (decision 270). Anything else names the status.
+fn plugin_auth_failure(status: i32, bytes: &[u8]) -> InteractiveAuthError {
+    let msg = String::from_utf8_lossy(bytes).into_owned();
+    if cal_core::WriteRefusal::parse(&msg).is_some()
+        || cal_core::WriteLeftover::parse(&msg).is_some()
+    {
+        return InteractiveAuthError::Plugin(msg);
+    }
+    InteractiveAuthError::Plugin(format!("plugin status {status}: {msg}"))
 }
 
 /// Reasons [`PluginManager::unload_plugin`] can fail.
@@ -2054,6 +2065,30 @@ pub mod test_support {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// A busy token endpoint's failure reaches the shells with its token
+    /// first (decision 270); any other failure names the plugin's status.
+    #[test]
+    fn a_sign_in_failure_keeps_a_token_first() {
+        let busy = cal_core::WriteRefusal::ProviderBusy
+            .message(cal_core::BusyDetail::TooManyRequests.word());
+        match plugin_auth_failure(crate::ffi::PLUGIN_CALL_ERR_AUTH, busy.as_bytes()) {
+            InteractiveAuthError::Plugin(msg) => assert_eq!(msg, busy),
+            other => panic!("{other:?}"),
+        }
+        match plugin_auth_failure(crate::ffi::PLUGIN_CALL_ERR_AUTH, b"invalid_grant") {
+            InteractiveAuthError::Plugin(msg) => {
+                assert_eq!(
+                    msg,
+                    format!(
+                        "plugin status {}: invalid_grant",
+                        crate::ffi::PLUGIN_CALL_ERR_AUTH
+                    )
+                )
+            }
+            other => panic!("{other:?}"),
+        }
+    }
 
     /// scan_dir on a non-existent path is silent — first-run
     /// behaviour where `plugins/user/` hasn't been created yet.
