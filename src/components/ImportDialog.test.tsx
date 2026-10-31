@@ -205,11 +205,12 @@ describe('ImportDialog → several appointments', () => {
     await screen.findByText(/In „Privat“ lassen sich Organisator und Teilnehmer/);
     fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
     expect(
-      // Each one that did not arrive with its own reason; nothing after that
-      // would say nothing was created.
+      // Each one that did not arrive with its own reason, a busy provider in
+      // its own words (decision 270); nothing after that would say nothing
+      // was created.
       await screen.findByText(
         '1 von 2 Terminen in „Privat“ importiert. Nicht importiert: „Projektbesprechung“ ' +
-          '(der Anbieter erlaubt es nicht (provider-busy: http-429)).',
+          '(der Anbieter ist gerade ausgelastet).',
       ),
     ).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
