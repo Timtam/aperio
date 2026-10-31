@@ -353,14 +353,6 @@ pub struct SyncOrchestrator {
     /// `Option<String>` carrying the required version so the
     /// status indicator can name it.
     schema_too_old: Mutex<Option<String>>,
-    /// Byte length last successfully PUSHED per pending filename, so a
-    /// round skips re-uploading a session file that hasn't grown since
-    /// (the writer only appends, so length equality means content
-    /// equality). Deliberately IN-MEMORY: every file still pending is
-    /// pushed at least once per app session. A finished session (from an
-    /// earlier app start) is removed once pushed whole, so a file the GC
-    /// deleted does not come back.
-    pushed_lengths: Mutex<std::collections::HashMap<String, u64>>,
     /// §19.10: latched stale-device state. Set when a sync
     /// round notices our `meta.devices[me].stale == true`;
     /// cleared by `resume_from_stale` after the snapshot
@@ -407,6 +399,13 @@ fn is_stale_empty_stub(file_session: DateTime<Utc>, boot_at: DateTime<Utc>) -> b
         < boot_at.with_nanosecond(0).unwrap_or(boot_at)
 }
 
+/// One file in `pending/`, read.
+struct PendingFile {
+    path: PathBuf,
+    name: String,
+    log: LogFile,
+}
+
 /// Whether the §19.10 held-horizon backstop must force a snapshot resume:
 /// this device's `held` horizon — `max(foreign cursor, own newest log)` — is
 /// below the dataset's GC high-water mark, i.e. the compactor has DELETED
@@ -447,7 +446,6 @@ impl SyncOrchestrator {
             schema_too_old: Mutex::new(None),
             stale_device_since: Mutex::new(None),
             in_flight: Mutex::new(false),
-            pushed_lengths: Mutex::new(std::collections::HashMap::new()),
             boot_at,
         }
     }
@@ -474,13 +472,8 @@ impl SyncOrchestrator {
     pub fn configure(&self, adapter: Arc<dyn SyncAdapter>) {
         let mut guard = self.adapter.lock().expect("adapter mutex poison");
         *guard = Some(adapter);
-        // A (re)configured backend may point at a DIFFERENT remote that
-        // doesn't hold our files — forget the per-session pushed lengths
-        // so the next round re-pushes everything once.
-        self.pushed_lengths
-            .lock()
-            .expect("pushed_lengths mutex poison")
-            .clear();
+        // What was pushed is recorded for good (`crate::pushed`); a join or
+        // a start over, the ways onto another dataset, write it empty.
     }
 
     /// Tear down the adapter (user picked "Disconnect" in
@@ -602,6 +595,7 @@ impl SyncOrchestrator {
         // then on — the heartbeat must re-fetch or it would push the old
         // copy back, re-flagging this device as stale.
         let mut resumed = false;
+        let mut caught_up = false;
         // What a resume or a catch-up below applied, for this round's report.
         let mut recovered: Vec<ApplyReport> = Vec::new();
         if let Some(meta) = &round_meta {
@@ -731,6 +725,7 @@ impl SyncOrchestrator {
                 {
                     warn!(?err, "couldn't record the catch-up attempt");
                 }
+                caught_up = true;
                 match self.hooks.catch_up(adapter.as_ref()).await {
                     Ok(applied) => {
                         info!("caught up once over every log file");
@@ -743,6 +738,17 @@ impl SyncOrchestrator {
                 }
             }
         }
+        // The push judges what may be gone from the remote by gc_horizon: a
+        // resume or a catch-up can take minutes, and a compactor elsewhere
+        // may have raised it meanwhile (review round 5 of #130).
+        let push_meta = if resumed || caught_up {
+            match adapter.fetch_meta().await {
+                Ok(Some(meta)) => Some(meta),
+                _ => round_meta.clone(),
+            }
+        } else {
+            round_meta.clone()
+        };
         if resumed {
             round_meta = None;
         }
@@ -756,7 +762,10 @@ impl SyncOrchestrator {
         }
 
         // 1. Push pending logs.
-        match self.push_pending(adapter.as_ref()).await {
+        match self
+            .push_pending(adapter.as_ref(), push_meta.as_ref())
+            .await
+        {
             Ok(count) => report.pushed_logs = count,
             Err(err) => {
                 warn!(?err, "push phase of sync round failed");
@@ -991,153 +1000,155 @@ impl SyncOrchestrator {
                 return Err(sync_core::SyncError::internal("no sync adapter configured"));
             }
         };
-        self.push_pending(adapter.as_ref()).await
+        // The round's gates, and its meta for what may be gone from the
+        // remote (review round 5 of #130): a plaintext device pushes nothing
+        // into an encrypted dataset, a locked-out build nothing at all.
+        let meta = adapter.fetch_meta().await?;
+        if let Some(meta) = &meta {
+            sync_core::ensure_compatible(meta, &self.hooks.app_version())?;
+            if meta.e2e_enabled && !self.store.e2e_enabled() {
+                return Err(sync_core::SyncError::EncryptionRequired);
+            }
+        }
+        self.push_pending(adapter.as_ref(), meta.as_ref()).await
     }
 
-    /// Walk the pending directory and push every `.jsonl` file
-    /// up to the adapter. Returns the number of successful
-    /// pushes; per-file errors get a warning + skip rather
-    /// than sinking the whole batch.
+    /// Push what this device has not pushed yet. Returns the number of
+    /// successful pushes; per-file errors get a warning + skip rather than
+    /// sinking the whole batch.
     ///
-    /// We do NOT delete the local file after a successful push.
-    /// The writer is still appending to the current-session file
-    /// for the rest of this app run, and we'd lose those
-    /// additions. Older session files are kept around too — Phase
-    /// Sg's compaction handles their eventual GC.
-    async fn push_pending(&self, adapter: &dyn SyncAdapter) -> SyncResult<usize> {
-        let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
-            Ok(rd) => rd,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                // Nothing to push — the writer hasn't run yet
-                // this session.
-                return Ok(0);
+    /// A file pushed once does not go up again (review round 5 of #130,
+    /// [`crate::pushed`]): a finished session pushed whole is only removed.
+    /// Once `gc_horizon` has passed a file's name, a compactor may have
+    /// deleted its remote copy, and the peers holding its events would take
+    /// them again as unknown. So the writer rotates away from a live file
+    /// there, and of a finished one only what never went up is pushed, in a
+    /// file of its own. The live file stays: the writer appends to it.
+    async fn push_pending(
+        &self,
+        adapter: &dyn SyncAdapter,
+        meta: Option<&sync_core::MetaJson>,
+    ) -> SyncResult<usize> {
+        let gc_horizon = meta.and_then(|meta| meta.gc_horizon);
+        let writer = self.compactor.writer();
+        if let (Some(horizon), Some(writer)) = (gc_horizon, writer) {
+            if writer.session_at() < horizon {
+                let now = Utc::now().with_nanosecond(0).unwrap_or_else(Utc::now);
+                if writer.rotate(now).await.is_none() {
+                    warn!("couldn't rotate away from a session file below the GC horizon");
+                }
             }
-            Err(err) => return Err(sync_core::SyncError::io(err.to_string())),
-        };
+        }
+        let live_at = writer.map_or(self.boot_at, |writer| writer.session_at());
+        let files = self.read_pending().await?;
+        let raw = self
+            .store
+            .get_pref(crate::SYNC_PUSHED_LENGTHS_PREF_KEY)
+            .ok()
+            .flatten();
+        let mut record = crate::pushed::parse(raw.as_deref()).unwrap_or_else(|| {
+            // The first push of this build: what an earlier one pushed, as
+            // this device's record in meta.json tells it, kept from now on.
+            let own = meta.and_then(|meta| meta.device(&self.local_device_id));
+            let logs: Vec<LogFile> = files.iter().map(|file| file.log.clone()).collect();
+            crate::pushed::legacy(&logs, own)
+        });
 
         let mut pushed = 0usize;
+        let mut present: std::collections::HashSet<String> = std::collections::HashSet::new();
         // Track the newest own-written session file we see so the held
         // horizon (max(cursor, own_newest)) stays current. We record EVERY
         // own session file's timestamp — even an empty current-session stub
         // we skip pushing below — because the file's mere existence means
         // this device holds events up to that session's start.
         let mut newest_own: Option<DateTime<Utc>> = None;
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|err| sync_core::SyncError::io(err.to_string()))?
-        {
-            let path = entry.path();
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            let parsed = match sync_core::LogFileName::from_filename(name) {
-                Ok(p) => p,
-                Err(_) => {
-                    debug!(name = name, "skipping pending entry: not a log file");
-                    continue;
-                }
-            };
-            if parsed.device_id == self.local_device_id {
+        for file in files {
+            let PendingFile { path, name, log } = file;
+            if log.name.device_id == self.local_device_id {
                 newest_own =
-                    Some(newest_own.map_or(parsed.timestamp, |cur| cur.max(parsed.timestamp)));
+                    Some(newest_own.map_or(log.name.timestamp, |cur| cur.max(log.name.timestamp)));
             }
-            let bytes = match tokio::fs::read(&path).await {
-                Ok(b) => b,
-                Err(err) => {
-                    warn!(name = name, ?err, "couldn't read pending log");
-                    continue;
-                }
-            };
-            // The EventLogWriter pre-creates a session file at
-            // app start, before knowing whether the session will
-            // produce any events. If it doesn't (e.g. the user
-            // opens Aperio, browses, closes), we end up with a
-            // 0-byte file in `pending/`. Pushing those would
-            // clutter the remote sync folder with empty
-            // placeholders — skip + delete the local stub.
-            // We can only safely delete the file if the writer
-            // for THIS session has already rotated away from it.
-            // Cheap check: if the timestamp in the filename is
-            // older than this app launch, the writer can't be
-            // appending to it. We use the parsed timestamp
-            // directly; the writer mints a fresh name per
-            // session so this never races with the active
-            // session file.
-            if bytes.is_empty() {
-                if is_stale_empty_stub(parsed.timestamp, self.boot_at) {
+            // The EventLogWriter pre-creates a session file at app start,
+            // before knowing whether the session will produce any events. If
+            // it doesn't (e.g. the user opens Aperio, browses, closes), we
+            // end up with a 0-byte file in `pending/`. Pushing those would
+            // clutter the remote sync folder with empty placeholders — skip
+            // + delete the local stub, once the writer can no longer append
+            // to it: its session is older than this app launch.
+            if log.bytes.is_empty() {
+                if is_stale_empty_stub(log.name.timestamp, self.boot_at) {
                     if let Err(err) = tokio::fs::remove_file(&path).await {
-                        debug!(name = name, ?err, "couldn't remove empty pending log",);
+                        debug!(name = %name, ?err, "couldn't remove empty pending log");
                     } else {
-                        debug!(name = name, "skipped + removed empty pending log");
+                        debug!(name = %name, "skipped + removed empty pending log");
                     }
                 } else {
-                    debug!(name = name, "skipping empty pending log (current session)",);
+                    debug!(name = %name, "skipping empty pending log (current session)");
+                    present.insert(name);
                 }
                 continue;
             }
-            let byte_count = bytes.len();
-            // A session from an earlier app start: the writer no longer
-            // appends to it, so once pushed whole it is done here.
-            let finished = parsed.device_id == self.local_device_id
-                && is_stale_empty_stub(parsed.timestamp, self.boot_at);
-            // Skip a file whose byte length matches what this SESSION
-            // already pushed — the writer only appends, so equal length
-            // means identical content, and re-uploading the whole (all-day
-            // growing) session file every round was often the slowest
-            // request of the round. The map is in-memory by design: a
-            // fresh app session pushes once more what is still pending.
-            let already_pushed = self
-                .pushed_lengths
-                .lock()
-                .expect("pushed_lengths mutex poison")
-                .get(name)
-                .is_some_and(|len| *len == byte_count as u64);
-            if already_pushed {
-                debug!(
-                    name = name,
-                    "pending log unchanged since last push; skipping"
-                );
+            // Finished: named before the file the writer appends to, so
+            // nothing appends to it any more — this device's work, whatever
+            // id its name carries (a session under a transient id).
+            let finished = is_stale_empty_stub(log.name.timestamp, live_at);
+            let byte_count = log.bytes.len() as u64;
+            let before = record.get(&name).copied().unwrap_or(0);
+            if before == byte_count {
+                if finished {
+                    self.remove_pending(&path, &name, &mut record).await;
+                } else {
+                    present.insert(name.clone());
+                    debug!(name = %name, "pending log unchanged since last push; skipping");
+                }
                 continue;
             }
-            let Some(log) = outgoing_log(
-                LogFile {
-                    name: parsed,
-                    bytes,
-                },
-                self.store.e2e_enabled(),
-            ) else {
-                warn!(
-                    name = name,
-                    "pending log does not parse while E2E is off; not pushed this round",
-                );
-                continue;
-            };
-            match adapter.push_log(&log).await {
-                Ok(()) => {
+            let may_be_gone = finished
+                && before > 0
+                && gc_horizon.is_some_and(|horizon| log.name.timestamp < horizon);
+            if may_be_gone {
+                let head = crate::pushed::complete(&log.bytes, before);
+                let tail = log.bytes[head..].to_vec();
+                if tail.trim_ascii().is_empty() {
+                    self.remove_pending(&path, &name, &mut record).await;
+                    continue;
+                }
+                let Some(tail_log) = self.write_tail(&log, tail, live_at).await else {
+                    present.insert(name);
+                    continue;
+                };
+                self.remove_pending(&path, &name, &mut record).await;
+                let tail_name = tail_log.name.to_filename();
+                let tail_path = self.pending_dir.join(&tail_name);
+                if self.push_one(adapter, tail_log.clone()).await {
                     pushed += 1;
-                    self.pushed_lengths
-                        .lock()
-                        .expect("pushed_lengths mutex poison")
-                        .insert(name.to_string(), byte_count as u64);
-                    // Bump the compactor's "logs since snapshot"
-                    // counters so its threshold check picks up the
-                    // new push without an extra round-trip.
-                    self.compactor.record_pushed_log(byte_count);
-                    // Kept, it went up again after every start, and a file
-                    // the GC had deleted came back, for an exact device to
-                    // take in as unknown (review round 2 of #130).
-                    if finished {
-                        match tokio::fs::remove_file(&path).await {
-                            Ok(()) => debug!(name = name, "pushed a finished session; removed it"),
-                            Err(err) => {
-                                debug!(name = name, ?err, "couldn't remove a pushed pending log")
-                            }
-                        }
-                    }
+                    record.insert(tail_name.clone(), tail_log.bytes.len() as u64);
+                    self.remove_pending(&tail_path, &tail_name, &mut record)
+                        .await;
+                } else {
+                    present.insert(tail_name);
                 }
-                Err(err) => warn!(name = name, ?err, "push_log failed"),
+                continue;
             }
+            if self.push_one(adapter, log).await {
+                pushed += 1;
+                record.insert(name.clone(), byte_count);
+                // Kept, it went up again after every start, and a file the GC
+                // had deleted came back, for an exact device to take in as
+                // unknown (review round 2 of #130).
+                if finished {
+                    self.remove_pending(&path, &name, &mut record).await;
+                    continue;
+                }
+            }
+            present.insert(name);
+        }
+        record.retain(|name, _| present.contains(name));
+        if let Err(err) = self.store.set_pref(
+            crate::SYNC_PUSHED_LENGTHS_PREF_KEY,
+            &crate::pushed::encode(&record),
+        ) {
+            warn!(?err, "couldn't record what was pushed");
         }
         // Persist the newest own-written session timestamp so the held
         // horizon and the compactor's content-bounded snapshot timestamp
@@ -1157,6 +1168,138 @@ impl SyncOrchestrator {
             }
         }
         Ok(pushed)
+    }
+
+    /// Every log file in `pending/`, read.
+    async fn read_pending(&self) -> SyncResult<Vec<PendingFile>> {
+        let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
+            Ok(rd) => rd,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                // Nothing to push — the writer hasn't run yet this session.
+                return Ok(Vec::new());
+            }
+            Err(err) => return Err(sync_core::SyncError::io(err.to_string())),
+        };
+        let mut files = Vec::new();
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|err| sync_core::SyncError::io(err.to_string()))?
+        {
+            let path = entry.path();
+            let Some(name) = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let parsed = match sync_core::LogFileName::from_filename(&name) {
+                Ok(p) => p,
+                Err(_) => {
+                    debug!(name = %name, "skipping pending entry: not a log file");
+                    continue;
+                }
+            };
+            let bytes = match tokio::fs::read(&path).await {
+                Ok(b) => b,
+                Err(err) => {
+                    warn!(name = %name, ?err, "couldn't read pending log");
+                    continue;
+                }
+            };
+            files.push(PendingFile {
+                path,
+                name,
+                log: LogFile {
+                    name: parsed,
+                    bytes,
+                },
+            });
+        }
+        Ok(files)
+    }
+
+    /// Push one file, as it may go out (`outgoing_log`); whether it went.
+    async fn push_one(&self, adapter: &dyn SyncAdapter, log: LogFile) -> bool {
+        let name = log.name.to_filename();
+        let byte_count = log.bytes.len();
+        let Some(log) = outgoing_log(log, self.store.e2e_enabled()) else {
+            warn!(
+                name = %name,
+                "pending log does not parse while E2E is off; not pushed this round",
+            );
+            return false;
+        };
+        match adapter.push_log(&log).await {
+            Ok(()) => {
+                // Bump the compactor's "logs since snapshot" counters so its
+                // threshold check picks up the new push without an extra
+                // round-trip.
+                self.compactor.record_pushed_log(byte_count);
+                true
+            }
+            Err(err) => {
+                warn!(name = %name, ?err, "push_log failed");
+                false
+            }
+        }
+    }
+
+    /// What never went up of a finished file whose remote copy may be gone,
+    /// as a pending file of its own: named by its first event, before the
+    /// live file, under a name no pending file has.
+    async fn write_tail(
+        &self,
+        log: &LogFile,
+        tail: Vec<u8>,
+        live_at: DateTime<Utc>,
+    ) -> Option<LogFile> {
+        let live_at = live_at.with_nanosecond(0).unwrap_or(live_at);
+        let first = LogFile {
+            name: log.name.clone(),
+            bytes: tail.clone(),
+        }
+        .into_envelopes()
+        .ok()
+        .and_then(|envelopes| envelopes.first().map(|envelope| envelope.timestamp));
+        let mut at = first
+            .unwrap_or(log.name.timestamp)
+            .with_nanosecond(0)
+            .unwrap_or(log.name.timestamp)
+            .min(live_at - chrono::Duration::seconds(1));
+        let name = loop {
+            let name = sync_core::LogFileName::new(at, log.name.device_id.clone());
+            if !tokio::fs::try_exists(self.pending_dir.join(name.to_filename()))
+                .await
+                .unwrap_or(true)
+            {
+                break name;
+            }
+            at -= chrono::Duration::seconds(1);
+        };
+        let path = self.pending_dir.join(name.to_filename());
+        if let Err(err) = tokio::fs::write(&path, &tail).await {
+            warn!(name = %name.to_filename(), ?err, "couldn't write what was never pushed");
+            return None;
+        }
+        Some(LogFile { name, bytes: tail })
+    }
+
+    /// Remove a finished pending file, and its entry in the push record.
+    async fn remove_pending(
+        &self,
+        path: &std::path::Path,
+        name: &str,
+        record: &mut std::collections::HashMap<String, u64>,
+    ) {
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => {
+                record.remove(name);
+                debug!(name = name, "removed a finished pending log");
+            }
+            Err(err) => debug!(name = name, ?err, "couldn't remove a pending log"),
+        }
     }
 
     /// Whether the catch-up is due ([`SYNC_CATCH_UP_TRIED_AT_PREF_KEY`]):

@@ -90,9 +90,12 @@ device made offline and uploads late arrives at the others too.
 After the update that brought this, every device **catches up once**: it goes
 through every change still kept, its own included. Changes it had missed
 arrive, and entries deleted elsewhere disappear. A change only counts where it
-is newer than what the device already has, so nothing newer is overwritten and
-no conflict is reported. That one round can take a little longer. Nothing that
-exists only on this device is removed.
+is newer than what the device already has, and no conflict is reported. Only
+where the device cannot tell when an entry last changed (a setting, a list, a
+calendar or a colour, untouched since an older version) can an older change
+win once; if something looks set back after the update, set it again. That one
+round can take a little longer. Nothing that exists only on this device is
+removed.
 
 Aperio keeps the change logs for at least two weeks, and deletes none while a
 device still has to catch up over them. If you compact by hand, it names the

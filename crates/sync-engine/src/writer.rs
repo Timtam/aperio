@@ -78,6 +78,9 @@ pub struct EventLogWriter {
     /// Set once the store exists ([`Self::set_row_clock`]); shared by every
     /// clone of the handle.
     row_clock: Arc<OnceLock<Arc<dyn SyncStore>>>,
+    /// The time the file the writer appends to is named by: this launch's
+    /// boot, then each rotation's. Shared by every clone of the handle.
+    session_at: Arc<std::sync::Mutex<DateTime<Utc>>>,
 }
 
 impl std::fmt::Debug for EventLogWriter {
@@ -129,10 +132,17 @@ impl EventLogWriter {
             sender,
             kick,
             row_clock: Arc::new(OnceLock::new()),
+            session_at: Arc::new(std::sync::Mutex::new(session_at)),
         });
         let pending_dir = data_dir.join("sync").join("log").join("pending");
         tokio::spawn(drain_loop(pending_dir, device_id, session_at, receiver));
         writer
+    }
+
+    /// The time the file the writer appends to is named by. A pending file
+    /// named before it is finished: nothing appends to it any more.
+    pub fn session_at(&self) -> DateTime<Utc> {
+        *self.session_at.lock().expect("session_at mutex poison")
     }
 
     /// Borrow the device id this writer is tagging events with.
@@ -206,7 +216,12 @@ impl EventLogWriter {
         }
         // `Err` here means the drain task dropped the ack without replying (it
         // exited mid-rotation) — treat as "no rotation".
-        rx.await.ok().flatten()
+        let closed = rx.await.ok().flatten();
+        if closed.is_some() {
+            // Only after the swap: until then the old file is the live one.
+            *self.session_at.lock().expect("session_at mutex poison") = new_session_at;
+        }
+        closed
     }
 }
 

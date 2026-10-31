@@ -3657,13 +3657,21 @@ Die Prüfung erfolgt bei jedem Sync-Durchlauf. Auslösendes Gerät ist dasjenige
    Eintreffen und neu ab jedem Wachstum). Nicht
    nach dem Namen gegen den Cursor: Eine Sitzungsdatei mit altem Namen
    kann gestern gewachsen sein. Eine leere oder unlesbare Datei wird nie
-   gelöscht.
+   gelöscht, und keine, die ein aktives Gerät in meta.json als für seinen
+   Build unlesbar nennt (`unreadable`): Ein Update dort liest sie wieder.
 
 Die eigenen ausstehenden Dateien (pending/, Stempel vor dem Schnitt)
 räumt der Compactor nur weg, wenn ihre Kopie im Sync-Speicher
 mindestens so lang ist. Eine längere bleibt für den Push der nächsten
 Runde, und ihre entfernte Kopie wird in Schritt 8 nicht gelöscht: Die
 anderen Geräte lesen Logs, nicht den Snapshot.
+
+Der Push lädt nichts zweimal hoch: Er merkt sich je ausstehender Datei,
+wie viel davon oben ist (`sync.push.pushedLengths`, über App-Starts
+hinweg; Beitritt und „Neu beginnen“ setzen es leer). Hat `gc_horizon` den
+Namen einer Datei überholt, kann ihre entfernte Kopie gelöscht sein: Dann
+geht nur, was nie oben war, in einer eigenen Datei, und von der laufenden
+rotiert der Writer vorher weg (DESIGN-sync-snapshot-coverage.md, C).
 ```
 
 #### Umgang mit veralteten Geräten ("stale")
@@ -3894,7 +3902,7 @@ Erkennt die App, dass ihre Version kleiner als `min_app_version` ist, wird der S
 - "Jetzt aktualisieren" öffnet den Update-Dialog (Abschnitt 21)
 - "Offline fortfahren" erlaubt die Nutzung der App ohne Sync – lokale Daten bleiben lesbar, kein Schreiben in den Sync-Speicher bis zum Update
 - Der Dialog ist vollständig per Tastatur und Screen Reader bedienbar
-- Auch „Jetzt kompaktieren“ prüft die Mindestversion, bevor es etwas hochlädt oder löscht (ab 0.2.0; ein 0.1.0-Build prüft dort noch nicht, siehe `DESIGN-sync-snapshot-coverage.md`)
+- Auch „Jetzt kompaktieren“ und der schnelle Push nach einer Änderung (`push_now`) prüfen die Mindestversion und die Verschlüsselung des Datensatzes, bevor sie etwas hochladen oder löschen (ab 0.2.0; ein 0.1.0-Build prüft dort noch nicht, siehe `DESIGN-sync-snapshot-coverage.md`)
 
 #### Schema-Migration
 

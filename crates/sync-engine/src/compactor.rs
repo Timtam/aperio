@@ -282,6 +282,11 @@ impl Compactor {
         }
     }
 
+    /// The event-log writer this compactor rotates, if any.
+    pub fn writer(&self) -> Option<&Arc<EventLogWriter>> {
+        self.writer.as_ref()
+    }
+
     /// Should we run compaction right now? Reads each threshold
     /// from `user_prefs` (with defaults) and compares against
     /// either `meta.snapshot_timestamp` (age check) or the local

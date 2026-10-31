@@ -39,6 +39,7 @@ mod coverage_round_tests;
 #[cfg(test)]
 mod growth_refetch_tests;
 mod orchestrator;
+pub mod pushed;
 mod snapshot;
 mod writer;
 pub use applier::{conflict_still_genuine, ApplyReport, EventLogApplier, PassContext};
@@ -53,6 +54,7 @@ pub use orchestrator::{
     SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, SYNC_CURSOR_PREF_KEY, SYNC_LAST_ROUND_PREF_KEY,
     SYNC_OWN_NEWEST_LOG_PREF_KEY, SYNC_UNREADABLE_LOGS_PREF_KEY,
 };
+pub use pushed::SYNC_PUSHED_LENGTHS_PREF_KEY;
 pub use snapshot::{
     AperioSnapshotBody, SnapshotAccount, SnapshotApplyOutcome, SnapshotBuilder, SnapshotCredential,
     SnapshotRowClock,

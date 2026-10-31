@@ -62,7 +62,7 @@ use crate::event_log::{
     SYNC_CURSOR_PREF_KEY,
 };
 use crate::user_prefs::UserPrefsRepo;
-use sync_engine::SYNC_UNREADABLE_LOGS_PREF_KEY;
+use sync_engine::{SYNC_PUSHED_LENGTHS_PREF_KEY, SYNC_UNREADABLE_LOGS_PREF_KEY};
 
 /// `user_prefs` key holding the user-chosen device name. Surfaces in
 /// other devices' "known devices" lists via `meta.json`. Optional —
@@ -483,7 +483,12 @@ impl OnboardingService {
         // Every log file, not only those named after the snapshot: a session
         // named before it may have grown after it (Toni's laptop,
         // 2026-10-27).
-        let pass = self.apply_every_log(logs, &mut report).await?;
+        // Nothing is pushed to this dataset yet: every pending file goes up
+        // whole, and an own change in it is weighed (review round 5 of #130).
+        self.reset_pushed()?;
+        let pass = self
+            .apply_every_log(logs, &mut report, Some(HashMap::new()))
+            .await?;
         info!(
             count = report.fetched_logs,
             snapshot_applied = snapshot_applied,
@@ -608,7 +613,12 @@ impl OnboardingService {
             remote_was_empty: false,
             ..Default::default()
         };
-        let pass = self.apply_every_log(logs, &mut report).await?;
+        // What this device pushed counts as on the remote, a 0.1.0 leftover
+        // as its record in meta.json tells it (review round 5 of #130).
+        let pushed = self.pushed_record(meta.device(&self.local_device_id)).await;
+        let pass = self
+            .apply_every_log(logs, &mut report, Some(pushed))
+            .await?;
         info!(
             count = report.fetched_logs,
             "stale resume applied every log",
@@ -669,7 +679,8 @@ impl OnboardingService {
             ..Default::default()
         };
         let logs = self.fetch_every_log(adapter).await?;
-        let pass = self.apply_every_log(logs, &mut report).await?;
+        // No snapshot here: the rows hold every own change, or a newer one.
+        let pass = self.apply_every_log(logs, &mut report, None).await?;
         if let Some(newest) = pass.newest_foreign {
             self.save_cursor(self.read_cursor().max(newest))?;
         }
@@ -699,15 +710,23 @@ impl OnboardingService {
     /// leaves the device as it was. Records the foreign files' lengths for
     /// the growth refetch and returns the newest foreign file's name time,
     /// and whether every file read: only then is the device exact.
+    ///
+    /// `pushed` is what this device pushed of its pending files, where the
+    /// pass applied a snapshot (a join, a resume): an own change not on the
+    /// remote yet is weighed, as the peers will weigh it once it is. `None`
+    /// where no snapshot came first (the round's catch-up): the rows hold
+    /// every own change, or a newer one, so each is held (review round 5 of
+    /// #130).
     async fn apply_every_log(
         &self,
         logs: Vec<LogFile>,
         report: &mut OnboardingReport,
+        pushed: Option<HashMap<String, u64>>,
     ) -> SyncResult<Pass> {
         let unreadable_before = self.read_unreadable_logs();
         let mut unreadable: HashMap<String, u64> = HashMap::new();
         let mut envelopes = Vec::new();
-        let mut pushed: HashSet<String> = HashSet::new();
+        let mut on_remote: HashSet<String> = HashSet::new();
         let mut lengths: Vec<(String, u64)> = Vec::new();
         let mut newest_foreign: Option<DateTime<Utc>> = None;
         let mut complete = true;
@@ -720,7 +739,7 @@ impl OnboardingService {
             match log.into_envelopes() {
                 Ok(mut parsed) => {
                     if !foreign {
-                        pushed.extend(parsed.iter().map(|envelope| envelope.id.clone()));
+                        on_remote.extend(parsed.iter().map(|envelope| envelope.id.clone()));
                     }
                     envelopes.append(&mut parsed);
                     if foreign {
@@ -763,12 +782,21 @@ impl OnboardingService {
             }
         }
         // Our own changes not on the remote yet are weighed, not held.
-        let pending = self.pending_envelopes().await;
-        let unpushed = pending
-            .iter()
-            .filter(|envelope| !pushed.contains(&envelope.id))
-            .map(|envelope| envelope.id.clone())
-            .collect();
+        let pending_files = self.pending_files().await;
+        let pending = envelopes_of(&pending_files);
+        let unpushed = match &pushed {
+            Some(record) => {
+                for file in &pending_files {
+                    on_remote.extend(sync_engine::pushed::pushed_ids(file, record));
+                }
+                pending
+                    .iter()
+                    .filter(|envelope| !on_remote.contains(&envelope.id))
+                    .map(|envelope| envelope.id.clone())
+                    .collect()
+            }
+            None => HashSet::new(),
+        };
         envelopes.extend(pending);
         // A pending file may already be uploaded: each change once.
         let mut seen = HashSet::new();
@@ -849,18 +877,18 @@ impl OnboardingService {
     /// read error gets logged + skipped, the rest of the directory is still
     /// read. The files themselves stay on disk so the next sync round can
     /// still push them to the remote.
-    async fn pending_envelopes(&self) -> Vec<EventEnvelope> {
-        let mut envelopes = Vec::new();
+    async fn pending_files(&self) -> Vec<LogFile> {
+        let mut logs = Vec::new();
         let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
             Ok(rd) => rd,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 // No writer has flushed anything this install.
                 debug!("no pending dir; nothing of our own to add");
-                return envelopes;
+                return logs;
             }
             Err(err) => {
                 warn!(?err, "couldn't open the pending dir");
-                return envelopes;
+                return logs;
             }
         };
         let mut files = 0usize;
@@ -898,20 +926,35 @@ impl OnboardingService {
                     continue;
                 }
             };
-            let log = LogFile {
+            files += 1;
+            logs.push(LogFile {
                 name: parsed,
                 bytes,
-            };
-            match log.into_envelopes() {
-                Ok(mut parsed) => {
-                    files += 1;
-                    envelopes.append(&mut parsed);
-                }
-                Err(err) => warn!(name = name, ?err, "couldn't parse pending log"),
-            }
+            });
         }
         debug!(files, "read our own pending logs");
-        envelopes
+        logs
+    }
+
+    /// What this device pushed of its pending files
+    /// (`sync_engine::pushed`): the record, or — none yet — what a build
+    /// before this one pushed, as `own` tells it.
+    async fn pushed_record(&self, own: Option<&DeviceRecord>) -> HashMap<String, u64> {
+        let raw = UserPrefsRepo::new(&self.db)
+            .get(SYNC_PUSHED_LENGTHS_PREF_KEY)
+            .ok()
+            .flatten();
+        match sync_engine::pushed::parse(raw.as_deref()) {
+            Some(record) => record,
+            None => sync_engine::pushed::legacy(&self.pending_files().await, own),
+        }
+    }
+
+    /// Nothing is pushed to the dataset this device is onto now.
+    fn reset_pushed(&self) -> SyncResult<()> {
+        UserPrefsRepo::new(&self.db)
+            .set(SYNC_PUSHED_LENGTHS_PREF_KEY, "{}")
+            .map_err(|err| SyncError::internal(format!("reset the push record: {err}")))
     }
 
     /// "Neu beginnen" path. Deletes the old dataset's log files, pushes a
@@ -970,8 +1013,10 @@ impl OnboardingService {
             crate::credential_sync::strip_credentials_from_snapshot(&mut snapshot);
         }
         adapter.push_snapshot(&snapshot).await?;
-        // Its own state is the dataset now: nothing to catch up over.
+        // Its own state is the dataset now: nothing to catch up over, and
+        // nothing pushed to it yet (review round 5 of #130).
         self.save_coverage_exact_since(snapshot_ts)?;
+        self.reset_pushed()?;
 
         let mut meta = MetaJson::fresh(&self.app_version);
         meta.snapshot_timestamp = snapshot_ts;
@@ -1241,6 +1286,18 @@ fn snapshot_ts_if_real(meta: &MetaJson) -> Option<String> {
     } else {
         None
     }
+}
+
+/// The envelopes of `files`; one that does not parse is left out.
+fn envelopes_of(files: &[LogFile]) -> Vec<EventEnvelope> {
+    let mut envelopes = Vec::new();
+    for file in files {
+        match file.into_envelopes() {
+            Ok(mut parsed) => envelopes.append(&mut parsed),
+            Err(err) => warn!(name = %file.name.to_filename(), ?err, "couldn't parse pending log"),
+        }
+    }
+    envelopes
 }
 
 #[cfg(test)]
@@ -2574,6 +2631,118 @@ mod tests {
             meta.device(svc.device_id())
                 .map(|record| record.unreadable.clone()),
             Some(Vec::new()),
+        );
+    }
+
+    #[tokio::test]
+    async fn the_catch_up_holds_an_own_change_its_peers_took_before_a_gc() {
+        // Review round 5 of #130: an old session, pushed and deleted by a
+        // peer's GC, still pending here (a 0.1.0 leftover), counted as not
+        // on the remote and was weighed: on a row of unknown time its
+        // months-old value won here, and the peers kept theirs.
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at: DateTime<Utc> = "2026-09-01T08:00:00Z".parse().unwrap();
+        let own = envelope("ev-own-old", "dev-this", at, set_interval("30"));
+        let own_file = file_of("dev-this", at, &[&own]);
+        std::fs::write(
+            pending.path().join(own_file.name.to_filename()),
+            &own_file.bytes,
+        )
+        .unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set("sync.intervalMinutes", "90")
+            .unwrap();
+        let adapter = FakeAdapter::with_logs(Vec::new());
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("90"));
+    }
+
+    #[tokio::test]
+    async fn a_resume_holds_an_own_change_it_pushed_before() {
+        // The record says the change went up: the snapshot's value, of
+        // unknown time, stays.
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let own = envelope("ev-own", "dev-this", at, set_interval("15"));
+        let own_file = file_of("dev-this", at, &[&own]);
+        std::fs::write(
+            pending.path().join(own_file.name.to_filename()),
+            &own_file.bytes,
+        )
+        .unwrap();
+        let record = HashMap::from([(own_file.name.to_filename(), own_file.bytes.len() as u64)]);
+        UserPrefsRepo::new(&db.shared())
+            .set(
+                SYNC_PUSHED_LENGTHS_PREF_KEY,
+                &sync_engine::pushed::encode(&record),
+            )
+            .unwrap();
+        let later = at + chrono::Duration::hours(2);
+        let body = sync_engine::AperioSnapshotBody {
+            settings: std::collections::BTreeMap::from([(
+                "sync.intervalMinutes".to_string(),
+                "45".to_string(),
+            )]),
+            ..Default::default()
+        };
+        let adapter = FakeAdapter::with_logs(Vec::new());
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = later;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(Snapshot::new(
+            later,
+            "1.0.0",
+            serde_json::to_value(body).unwrap(),
+        ));
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn joining_and_starting_over_push_every_pending_file_again() {
+        // A record from the dataset this device left says nothing about the
+        // one it is onto now.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let old = HashMap::from([("old.jsonl".to_string(), 12u64)]);
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        prefs
+            .set(
+                SYNC_PUSHED_LENGTHS_PREF_KEY,
+                &sync_engine::pushed::encode(&old),
+            )
+            .unwrap();
+        let adapter = FakeAdapter::new();
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+        assert_eq!(
+            prefs.get(SYNC_PUSHED_LENGTHS_PREF_KEY).unwrap().as_deref(),
+            Some("{}"),
+        );
+
+        prefs
+            .set(
+                SYNC_PUSHED_LENGTHS_PREF_KEY,
+                &sync_engine::pushed::encode(&old),
+            )
+            .unwrap();
+        svc.adopt_local(&FakeAdapter::new(), None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            prefs.get(SYNC_PUSHED_LENGTHS_PREF_KEY).unwrap().as_deref(),
+            Some("{}"),
         );
     }
 

@@ -77,17 +77,25 @@ enden im selben Durchgang (`OnboardingService::apply_every_log`):
 4. Eine Änderung gilt nur, wenn sie neuer ist als ihre Zeile (siehe E), ohne
    Konfliktmeldung. Schon Angewendetes wird erneut gewogen. So bekommt eine
    Zeile, die ein Schnappschuss zurückgesetzt hat, ihre neuere Änderung zurück.
-5. Längen der fremden Dateien merken. Eine unlesbare (abgerissen gelesen, oder
-   von einer neueren Version) nicht: Dann ist der Durchgang unvollständig, und
-   das nächste Nachholen nimmt sie wieder, nach seinen Regeln statt denen einer
-   Runde. Ist sie beim nächsten Mal in derselben Größe wieder unlesbar
-   (`sync.cursor.unreadableLogs`), ist es kein abgerissenes Lesen: Dann wird
-   ihre Länge gemerkt, und sie hält das Gerät nicht mehr vom Genau-Sein ab.
-   Der Merker trägt die App-Version, die es versucht hat. Nach einem Update
-   gilt er nicht: Das Gerät ist nicht mehr genau, holt einmal nach, und der
-   neue Build liest die Datei vielleicht. Cursor = Maximum aus bisherigem
-   Cursor (beim Beitritt und bei der Wiederaufnahme: Schnappschuss) und
-   neuester fremder Datei, nie zurück.
+5. Längen der fremden Dateien merken. Eine abgerissen gelesene (die letzte
+   Zeile ohne Zeilenende, alles davor lesbar) nicht: Dann ist der Durchgang
+   unvollständig, und das nächste Nachholen nimmt sie wieder, nach seinen
+   Regeln statt denen einer Runde. Ist sie beim nächsten Mal in derselben
+   Größe wieder so, schreibt niemand mehr daran: Ihre Länge wird gemerkt.
+   Eine Datei mit einer Zeile, die dieser Build nicht kennt (ein neuerer
+   schrieb sie), ist kein abgerissenes Lesen, in keiner Größe: Ihre Länge wird
+   gemerkt, sie hält kein Gerät vom Genau-Sein ab, auch in gewöhnlichen
+   Runden wird sie nicht jedes Mal neu geholt, und das Gerät nennt sie in
+   seinem Eintrag in `meta.json` (`unreadable`); kein Compactor löscht sie,
+   solange ein aktives Gerät sie nennt (F). Der Merker
+   (`sync.cursor.unreadableLogs`) trägt den Parser, der es versucht hat
+   (`sync_core::PARSER_FINGERPRINT`, ein Hash von Ereigniskatalog und Leser):
+   Die App-Version bleibt über Builds gleich und taugt dafür nicht. Hat ein
+   Update den Parser geändert, setzt die Runde die Länge der Datei auf 0, und
+   der nächste Abruf liest sie wieder; ein Merker, der sich nicht lesen
+   lässt, lässt das Gerät einmal nachholen (Prüfrunde 5). Cursor = Maximum
+   aus bisherigem Cursor (beim Beitritt und bei der Wiederaufnahme:
+   Schnappschuss) und neuester fremder Datei, nie zurück.
 6. Danach ist das Gerät **genau** (`sync.cursor.coverageExactSince`), wenn jede
    Datei lesbar war.
 
@@ -111,11 +119,25 @@ still, und nur Neueres gewinnt.
   hochgeladene Sitzung, oder eine nach dem Aufräumen erneut hochgeladene mit
   Namen unter `gc_horizon`. Ein nicht genaues Gerät behält die alte Regel, bis
   es nachgeholt hat.
-- **Fertige Sitzungen.** Der Push entfernt eine eigene ausstehende Datei aus
-  einem früheren App-Start, sobald sie ganz hochgeladen ist: Sie wächst nicht
-  mehr. Bisher ging sie nach jedem Start wieder hoch, und eine Datei, die der
-  Compactor gelöscht hatte, kam zurück; ein genaues Gerät nahm sie dann als
-  unbekannt herein.
+- **Was oben war, geht nicht wieder hoch** (Prüfrunde 5). Der Push merkt
+  sich je ausstehender Datei, wie viel davon hochgeladen ist
+  (`sync.push.pushedLengths`), über App-Starts hinweg; Beitritt und „Neu
+  beginnen“ setzen das leer. Fertig ist eine Datei, die vor der Datei
+  benannt ist, an die der Writer anhängt. Eine fertige, ganz hochgeladene
+  wird nur entfernt. Bisher ging jede nach jedem Start wieder hoch, und eine,
+  die der Compactor gelöscht hatte, kam zurück; ein genaues Gerät nahm sie
+  dann als unbekannt herein und übernahm monatealte Änderungen. Hat
+  `gc_horizon` den Namen einer Datei überholt, kann ein Compactor ihre
+  entfernte Kopie gelöscht haben: Von einer fertigen geht dann nur, was nie
+  oben war, in einer eigenen Datei; von einer laufenden rotiert der Writer
+  vorher weg. 0.1.0 führte kein Protokoll: Beim ersten Push dieses Builds
+  gilt als hochgeladen, was vor der letzten Runde lag, die der eigene Eintrag
+  in `meta.json` nennt (abzüglich zehn Minuten), danach führt das Protokoll.
+  Auch `push_now`, der Push nach jeder Änderung und auf dem Handy der übliche,
+  holt dafür `meta.json` und prüft Mindestversion und Verschlüsselung wie die
+  Runde. Nach einem Nachholen oder einer Wiederaufnahme holt die Runde
+  `meta.json` vor dem Push neu: Ein Compactor kann den Horizont inzwischen
+  angehoben haben.
 - **Gemerkte Längen.** Die 256 neuesten (nach Namen), nicht nach `gc_horizon`
   beschnitten: Eine noch laufende Sitzung mit altem Namen muss ihr Wachstum
   weiter zeigen. Grenze: Liegen mehr als 256 Dateien vor, ist die älteste jede
@@ -176,25 +198,40 @@ halten. Beim Nachholen wird darum für so eine Zeile eine schon angewendete
 oder eigene Änderung, ein Löschen eingeschlossen, **nicht** erneut
 angewendet; die Uhr der Zeile geht knapp hinter ihre Zeit, damit dieselbe
 Änderung später nicht doch gewinnt (ein Schnappschuss trägt die Uhr weiter).
-Fehlt die Zeile, wurde sie danach gelöscht: Die Uhr merkt ein Löschen. Ist
-sie nach einem angewendeten Löschen da, wurde sie neu angelegt. Eigene
-Änderungen gelten als angewendet, denn die Zeilen des Geräts halten sie —
-nicht aber eigene, die noch nicht im Sync-Speicher liegen: Ein Schnappschuss
-dieses Durchgangs kann einen älteren Wert zurückgesetzt haben, und die anderen
-Geräte übernehmen die Änderung, sobald sie hochgeladen ist; sie wird gewogen
-wie dort. Ein Löschen eines Termins oder einer Aufgabe wiegt das `updated_at`
-der Zeile mit, wenn ein Schnappschuss sie zurückgebracht hat.
+Fehlt die Zeile, wurde sie danach gelöscht: Die Uhr merkt ein Löschen —
+außer bei einem Termin oder einer Aufgabe, deren Kalender, Liste oder
+Eltern-Aufgabe ebenfalls fehlt. Die kann sie beim Löschen mitgenommen haben:
+Die Zeile gilt als nicht gelöscht, und eine verpasste Verschiebung gilt. Die
+neueste gehaltene Änderung der Zeile entscheidet (Prüfrunde 5). Ist sie nach
+einem angewendeten Löschen da, wurde sie neu angelegt. Die Uhr merkt sich,
+dass sie nur gesetzt ist (`seeded`): Auch ein späteres Nachholen hält dort
+eine angewendete Änderung. Das Merkmal folgt der neuesten Änderung: Erst eine
+neuere übernommene macht die Zeit bekannt; bei gleicher Zeit übernimmt ein
+Setzen weder ein echtes Schreiben noch die Lösch-Entscheidung eines früheren
+Setzens. Ein Schnappschuss trägt es weiter. Eigene Änderungen gelten als
+angewendet, denn die Zeilen des Geräts halten sie. Nur wo derselbe Durchgang
+einen Schnappschuss angewendet hat (Beitritt, Wiederaufnahme), wird eine
+eigene gewogen, die noch nicht hochgeladen ist (laut Push-Protokoll, C): Der
+Schnappschuss kann einen älteren Wert zurückgesetzt haben, und die anderen
+Geräte übernehmen sie, sobald sie oben ist. Das gewöhnliche Nachholen hat
+keinen Schnappschuss und hält jede eigene (Prüfrunde 5). Ein Löschen eines
+Termins oder einer Aufgabe wiegt das `updated_at` der Zeile mit, wenn ein
+Schnappschuss sie zurückgebracht hat.
 
 Eine Regel „älter als `gc_horizon` gilt als gehalten“ gibt es nicht
 (Prüfrunde 4): Die Grenze folgt Dateinamen, nicht gelöschten Dateien, und
 verwürfe späte und gewöhnliche Änderungen. Dateien, die 0.1.0-Builds nach dem
 Aufräumen erneut hochgeladen haben, können darum beim ersten Nachholen eines
 Geräts eine Zeile ohne bekannte Zeit auf einen älteren Wert setzen. Neue
-Builds laden fertige Sitzungen nicht erneut hoch; 0.1.0-Builds sind ab der
-ersten Verdichtung auf Format 2 ausgesperrt. Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
-angewendeten Änderung, werden spätere angewendete wieder gewogen. Grenze: Eine
-nie angewendete ältere Änderung auf so einer Zeile gewinnt noch, wie in jeder
-Runde zuvor.
+Builds laden nichts zweimal hoch (C); 0.1.0-Builds sind ab der ersten
+Verdichtung auf Format 2 ausgesperrt, laden aber bis zu ihrem Update weiter
+hoch. Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
+angewendeten Änderung, werden spätere angewendete wieder gewogen. Grenzen:
+Eine nie angewendete ältere Änderung auf so einer Zeile gewinnt noch, wie in
+jeder Runde zuvor. Fehlt die Datei der letzten Verschiebung, entscheidet der
+Behälter einer älteren gehaltenen Änderung. Eine Aufgabe, selbst gelöscht,
+deren Liste danach gelöscht wurde, gilt als mitgenommen; eine nie angewendete
+Verschiebung legt sie dann wieder an.
 
 ### F. Aufräumen (nach Prüfrunde 2)
 
@@ -213,6 +250,8 @@ Runde zuvor.
   des Schnappschusses angewendet war. So zählt das Fenster ab dem Eintreffen:
   Eine spät hochgeladene Sitzung mit alten Einträgen bleibt, bis jedes Gerät
   sie holen konnte.
+- **Unlesbares.** Eine Datei, die ein aktives Gerät als unlesbar nennt
+  (B.5), bleibt: Ein Update dort liest sie wieder (Prüfrunde 5).
 - **Ausstehende Dateien.** Der Compactor lädt nichts hoch. Er räumt eine
   ausstehende Datei nur weg, wenn ihre entfernte Kopie mindestens so lang
   ist; sonst bleibt sie für den Push der Runde, und ihre entfernte Kopie
@@ -425,3 +464,37 @@ bestätigt), ein Kritiker. Einzelheiten: scratchpad `coverage/review_r4.json`.
 - Alte Builds: Ein ausgesperrter 0.1.0-Build kann „Jetzt kompaktieren“ noch
   ausführen und nach Namen löschen. Das lässt sich nur durch das Update
   verhindern: alle Geräte aktualisieren, dort nicht von Hand kompaktieren.
+
+## Prüfrunde 5 (PR #130, 2026-10-31)
+
+Wie Runde 4: 3 Prüfer auf die Commits nach Runde 4, 6 gegengeprüft (alle
+bestätigt), ein Kritiker. Vor dem Umbau prüften 3 Kritiker den Plan.
+Einzelheiten: scratchpad `coverage/review_r5.json`, `coverage/r5_plan.md`.
+
+- **Mitgenommen statt gelöscht.** Eine gehaltene Änderung auf einer fehlenden
+  Zeile setzte „gelöscht“, auch wenn ihre Liste, ihr Kalender oder ihre
+  Eltern-Aufgabe sie mitgenommen hatte; eine verpasste Verschiebung blieb
+  draußen (Runde 3, Befund 4, kam im Nachholen zurück). Siehe E.
+- **Gesetzt bleibt unbekannt.** Eine im ersten Nachholen gesetzte Uhr galt im
+  nächsten als bekannte Zeit: Eine spätere angewendete Änderung, die der erste
+  Durchgang nicht erreicht hatte, gewann. Siehe E.
+- **Eigene Änderungen.** Alte eigene Sitzungen, längst hochgeladen und vom GC
+  gelöscht, galten beim Nachholen als „nicht hochgeladen“ und gewannen auf
+  Zeilen ohne bekannte Zeit. Das Nachholen hält jetzt jede eigene; Beitritt
+  und Wiederaufnahme fragen das Push-Protokoll. Siehe E.
+- **Doppelt hochgeladen.** Neue Builds luden alte und vom GC gelöschte eigene
+  Sitzungen doch wieder hoch: beim ersten Start, bei jedem Neustart, und eine
+  laufende Sitzung, die ein Compactor gelöscht hatte, beim nächsten Anhängen
+  ganz. Siehe C.
+- **Unlesbare Dateien.** Der Merker hing an der App-Version, die über Builds
+  gleich bleibt; eine wachsende Datei eines neueren Builds hielt ein Gerät nie
+  genau; in gewöhnlichen Runden wurde sie jede Runde neu geholt. Siehe B.5.
+- **Verschlüsselung.** „Jetzt kompaktieren“ und `push_now` prüften nicht, ob
+  der Datensatz verschlüsselt ist: Ein unverschlüsseltes Gerät schrieb seinen
+  Schnappschuss oder seine Protokolle lesbar hinein.
+- Von mir entschieden (Toni sagen): Die Gegenrichtung (Gerät verschlüsselt,
+  Datensatz nicht mehr) und das Fenster während des Einschaltens bleiben, wie
+  sie vor diesem PR waren, und stehen in TODO B3: Sie brauchen eine eigene
+  Meldung in beiden Oberflächen. Ebenso das „Neu beginnen“ eines anderen
+  Geräts: Wer weiterläuft, lädt seine laufende Datei mit den alten
+  Ereignissen in den neuen Datensatz.

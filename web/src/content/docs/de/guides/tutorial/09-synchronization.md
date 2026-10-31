@@ -93,10 +93,13 @@ anderen an.
 Nach dem Update, das dies mitbringt, **holt jedes Gerät einmal nach**: Es geht
 alle noch aufbewahrten Änderungen durch, seine eigenen eingeschlossen.
 Verpasste Änderungen kommen an, und anderswo Gelöschtes verschwindet. Eine
-Änderung zählt nur, wo sie neuer ist als das, was das Gerät schon hat. So wird
-nichts Neueres überschrieben, und es wird kein Konflikt gemeldet. Diese eine
-Runde kann etwas länger dauern. Was es nur auf diesem Gerät gibt, wird nicht
-entfernt.
+Änderung zählt nur, wo sie neuer ist als das, was das Gerät schon hat, und es
+wird kein Konflikt gemeldet. Nur wo das Gerät nicht weiß, wann ein Eintrag
+zuletzt geändert wurde (eine Einstellung, eine Liste, ein Kalender oder eine
+Farbe, seit einer älteren Version unverändert), kann einmal eine ältere
+Änderung gewinnen; sieht danach etwas zurückgesetzt aus, stelle es neu ein.
+Diese eine Runde kann etwas länger dauern. Was es nur auf diesem Gerät gibt,
+wird nicht entfernt.
 
 Aperio bewahrt die Änderungsprotokolle mindestens zwei Wochen auf und löscht
 keines, solange ein Gerät darüber noch nachholen muss. Wenn du von Hand
