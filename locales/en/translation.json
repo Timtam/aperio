@@ -489,7 +489,8 @@
       "accountAdd": "Add an account",
       "next": "Next",
       "back": "Back",
-      "finish": "Finish"
+      "finish": "Finish",
+      "notificationsHeading": "Reminders on Windows"
     },
     "contact": {
       "emailValueFor": "Email address {{index}}",
@@ -2283,7 +2284,26 @@
         "pacific": "Pacific"
       }
     },
-    "readOnlyField": "{{label}}: {{value}}"
+    "readOnlyField": "{{label}}: {{value}}",
+    "notificationShortcut": {
+      "heading": "Windows notifications",
+      "intro": "Windows shows notifications only from programs that have an entry in the Start menu. Aperio runs without an installer, so it adds this entry only when you ask: a shortcut named Aperio in your own Start menu folder.",
+      "statusSetUp": "Set up. Windows can show Aperio's reminders; whether it does also depends on Windows' own notification settings.",
+      "statusNotSetUp": "Not set up. Windows does not show Aperio's reminders, neither as a banner nor in the notification center.",
+      "statusForeign": "Not set up. A Start menu entry named Aperio exists, but it was not made for notifications, so Windows does not show Aperio's reminders. Setting up replaces this entry.",
+      "statusPointsElsewhere": "Set up for another copy of Aperio: {{target}}. At start, Aperio points the entry at itself; set it up again to point it at this copy now.",
+      "statusDevBuild": "This is a development build started from a build folder. Windows shows its notifications under Windows PowerShell, so there is nothing to set up.",
+      "statusUnknown": "Aperio could not check the Start menu entry: {{error}}",
+      "setUp": "Set up notifications",
+      "remove": "Remove Start menu entry",
+      "removeHint": "Before you delete Aperio's folder, remove the entry here. Otherwise the Start menu keeps an entry that leads nowhere.",
+      "setUpDone": "Notifications set up. Windows can now show Aperio's reminders.",
+      "removeDone": "Start menu entry removed. Windows no longer shows Aperio's reminders.",
+      "failed": "The Start menu entry could not be changed: {{error}}",
+      "hintTitle": "Reminders are not showing",
+      "hintBody": "A reminder came due, but Windows did not show it, because Aperio has no Start menu entry for notifications yet. Aperio can add one now. You can also do this later under Settings, General, Windows notifications. Aperio does not ask again until it is started again.",
+      "hintLater": "Not now"
+    }
   },
   "sidebar": {
     "label": "Sidebar",
