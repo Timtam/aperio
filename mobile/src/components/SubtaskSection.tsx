@@ -44,6 +44,7 @@ import { FAILED_FOCUS_WATCH_MS } from '../state/reviewFocus';
 import { canStoreInProgress } from '../state/taskBehaviour';
 import {
   applyTaskToggle,
+  checkOffErrorMessage,
   recomputeAncestors,
   setTaskStatusTo,
   statusAnnounce,
@@ -252,7 +253,7 @@ export function SubtaskSection({
         // real: the list reads again, as on the desktop (decision 277).
         void reload();
         onChanged();
-        announce(writeErrorMessage(err, t));
+        announce(checkOffErrorMessage(err, t));
       }
     },
     [all, list, reload, onChanged, t],
@@ -275,7 +276,7 @@ export function SubtaskSection({
         // As a check-off: what landed shows (decision 277).
         void reload();
         onChanged();
-        announce(writeErrorMessage(err, t));
+        announce(checkOffErrorMessage(err, t));
       }
     },
     [all, list, reload, onChanged, t],

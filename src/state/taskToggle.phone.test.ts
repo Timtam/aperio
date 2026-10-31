@@ -106,3 +106,54 @@ describe('the family after a root saved in part with its status', () => {
     expect(updateTask).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('the phone check-off of a task saved in part with its status', () => {
+  it('says the task, then what of its family did not take', async () => {
+    // Review round 20 of #128: the family's failure was dropped, unlike on
+    // the desktop.
+    const kid = { ...task('kid'), parent_id: 'root' } as unknown as Task;
+    updateTask
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })
+      .mockRejectedValueOnce(BUSY);
+    const phoneModule = (await import(/* @vite-ignore */ PHONE_TASK_TOGGLE)) as {
+      setTaskStatusTo: (task: Task, status: string, list: undefined, all: Task[]) => Promise<number>;
+      checkOffErrorMessage: (err: unknown, t: (key: string) => string) => string;
+    };
+    const failure = await phoneModule
+      .setTaskStatusTo(task('root'), 'completed', undefined, [task('root'), kid])
+      .then(() => null, (err: unknown) => err);
+    const said = phoneModule.checkOffErrorMessage(failure, (key) => key);
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).toContain('dialogs.task.subtasks.familyNotAll');
+  });
+});
+
+describe('the phone editor cascade after a list change', () => {
+  it('writes each moved subtask as the move returned it', async () => {
+    // Review round 20 of #128: written under the id the move deleted, it
+    // failed on every external list.
+    const kid = { ...task('kid'), parent_id: 'root' } as unknown as Task;
+    const movedKid = { ...kid, id: 'kid-new', list_id: 'L2' } as unknown as Task;
+    updateTask.mockResolvedValue({});
+    const phoneModule = (await import(/* @vite-ignore */ PHONE_TASK_TOGGLE)) as {
+      cascadeEditorStatus: (
+        taskId: string,
+        status: string,
+        listId: string,
+        list: undefined,
+        snapshot: Task[],
+        since: Map<string, Task>,
+      ) => Promise<void>;
+    };
+    await phoneModule.cascadeEditorStatus(
+      'root',
+      'completed',
+      'L2',
+      undefined,
+      [{ ...task('root'), status: 'completed' } as Task, kid],
+      new Map([['kid', movedKid]]),
+    );
+    expect(updateTask).toHaveBeenCalledTimes(1);
+    expect(updateTask.mock.calls[0][0]).toMatchObject({ id: 'kid-new', list_id: 'L2' });
+  });
+});

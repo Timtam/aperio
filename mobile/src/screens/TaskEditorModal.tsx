@@ -1203,15 +1203,19 @@ export default function TaskEditorModal({
         // The rows a list change moved: one whose original the provider was
         // too busy to delete says so (decision 277).
         const movedRows = [saved];
+        // The same by the id the cascade below is planned under: it writes
+        // each as the move returned it, a new id on an external list (review
+        // round 20 of #128). Mirrors the desktop.
+        const movedById = new Map<string, Task>();
         if (listChanged) {
           for (const child of collectDescendants(loaded.id, familyTasks)) {
             // The task itself was saved: a later write's failure never reads
             // as "nothing was changed" (decision 277). Mirrors the desktop.
-            movedRows.push(
-              await writeAfterLanded('subtasks', () =>
-                updateTask({ ...child, list_id: form.listId }, child.list_id),
-              ),
+            const row = await writeAfterLanded('subtasks', () =>
+              updateTask({ ...child, list_id: form.listId }, child.list_id),
             );
+            movedRows.push(row);
+            movedById.set(child.id, row);
           }
         }
         if (statusChanged) {
@@ -1237,6 +1241,7 @@ export default function TaskEditorModal({
               form.listId,
               taskLists.find((l) => l.id === form.listId),
               cascadeSnapshot,
+              movedById,
             ),
           );
         }

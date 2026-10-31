@@ -1,9 +1,12 @@
 import {
+  eventWriteFailureReason,
   failureOfWrites,
   planAncestorRecompute,
   planStatusCascade,
   selfAssignOnStatusChange,
   todayIsoKey,
+  writeErrorMessage,
+  writeStatusLanded,
 } from '@aperio/shared';
 import type { StatusWrite, Task, TaskList, TaskStatus } from '@aperio/shared';
 
@@ -28,19 +31,30 @@ export async function applyStatusWrites(
   writes: StatusWrite[],
   snapshot: Task[],
   autoSelfAssign: boolean,
+  since?: Map<string, Task>,
 ): Promise<void> {
-  const { failures, landed } = await tryStatusWrites(writes, snapshot, autoSelfAssign);
-  if (failures.length > 0) throw failureOfWrites('cascade', failures, landed);
+  const { failures, landed } = await tryStatusWrites(writes, snapshot, autoSelfAssign, since);
+  if (failures.length > 0) {
+    throw failureOfWrites(
+      'cascade',
+      failures.map((failure) => failure.err),
+      landed,
+    );
+  }
 }
 
 /** [`applyStatusWrites`]'s writes, every one attempted: the failures as they
- *  came, and whether any write landed. */
+ *  came, by the task each write was planned for, and whether any write
+ *  landed. `since`: rows written after the plan, by the id it names them
+ *  under — a task a list change moved has a new id there (review round 20 of
+ *  #128). */
 async function tryStatusWrites(
   writes: StatusWrite[],
   snapshot: Task[],
   autoSelfAssign: boolean,
-): Promise<{ failures: unknown[]; landed: boolean }> {
-  const failures: unknown[] = [];
+  since: Map<string, Task> = new Map(),
+): Promise<{ failures: { taskId: string; err: unknown }[]; landed: boolean }> {
+  const failures: { taskId: string; err: unknown }[] = [];
   let landed = false;
   if (writes.length === 0) return { failures, landed };
   const byId = new Map(snapshot.map((t) => [t.id, t]));
@@ -53,7 +67,7 @@ async function tryStatusWrites(
   // announces exactly as before — but where another write landed, it never
   // says "nothing was changed" (decision 277). Mirrors the desktop.
   for (const w of writes) {
-    const target = byId.get(w.taskId);
+    const target = since.get(w.taskId) ?? byId.get(w.taskId);
     if (target == null) continue;
     // "me" is resolved per the task's list (session-cached); a list with no
     // identity yields null → the helper no-ops, as does the setting being off.
@@ -75,10 +89,58 @@ async function tryStatusWrites(
       });
       landed = true;
     } catch (err) {
-      failures.push(err);
+      failures.push({ taskId: w.taskId, err });
     }
   }
   return { failures, landed };
+}
+
+/**
+ * A check-off whose task changed — its save stood in part with its status —
+ * while part of its family did not (review round 20 of #128): said as the
+ * task's own sentence, then the family's, by [`checkOffErrorMessage`].
+ */
+export class CheckOffFailure {
+  constructor(
+    readonly task: unknown,
+    readonly family: unknown,
+  ) {}
+}
+
+/** What a failed check-off or status change says: the desktop's
+ *  `useTaskStatusActions` sentences. */
+export function checkOffErrorMessage(
+  err: unknown,
+  t: (key: string, vars?: Record<string, unknown>) => string,
+): string {
+  if (err instanceof CheckOffFailure) {
+    return `${writeErrorMessage(err.task, t)} ${t('dialogs.task.subtasks.familyNotAll', {
+      reason: eventWriteFailureReason(err.family, t),
+    })}`;
+  }
+  return writeErrorMessage(err, t);
+}
+
+/** A check-off's writes, `task` first: where its own save stood in part with
+ *  its status, what of the family failed goes with it, as on the desktop. */
+async function applyCheckOff(
+  task: Task,
+  writes: StatusWrite[],
+  snapshot: Task[],
+  autoSelfAssign: boolean,
+): Promise<void> {
+  const { failures, landed } = await tryStatusWrites(writes, snapshot, autoSelfAssign);
+  if (failures.length === 0) return;
+  const own = failures.find((failure) => failure.taskId === task.id);
+  if (own && writeStatusLanded(own.err)) {
+    const rest = failures.filter((failure) => failure !== own);
+    throw rest.length > 0 ? new CheckOffFailure(own.err, rest[0].err) : own.err;
+  }
+  throw failureOfWrites(
+    'cascade',
+    failures.map((failure) => failure.err),
+    landed,
+  );
 }
 
 /**
@@ -144,6 +206,7 @@ export async function cascadeEditorStatus(
   listId: string,
   list: TaskList | undefined,
   snapshot: Task[],
+  since?: Map<string, Task>,
 ): Promise<void> {
   const { writes, autoSelfAssign } = await planEditorStatus(
     taskId,
@@ -152,7 +215,7 @@ export async function cascadeEditorStatus(
     list,
     snapshot,
   );
-  await applyStatusWrites(writes, snapshot, autoSelfAssign);
+  await applyStatusWrites(writes, snapshot, autoSelfAssign, since);
 }
 
 /**
@@ -175,7 +238,9 @@ export async function followEditorStatus(
     list,
     snapshot,
   );
-  return (await tryStatusWrites(writes, snapshot, autoSelfAssign)).failures;
+  return (await tryStatusWrites(writes, snapshot, autoSelfAssign)).failures.map(
+    (failure) => failure.err,
+  );
 }
 
 /** The family's writes an editor's status change makes, the root's own left
@@ -235,7 +300,7 @@ export async function applyTaskToggle(
     ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   });
   if (writes.length === 0) return null;
-  await applyStatusWrites(writes, allTasks, behaviour.autoSelfAssign);
+  await applyCheckOff(task, writes, allTasks, behaviour.autoSelfAssign);
   return nextStatus;
 }
 
@@ -267,7 +332,7 @@ export async function setTaskStatusTo(
     // applies it to such writes only); skip where the provider can't store it.
     ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   });
-  await applyStatusWrites(writes, allTasks, behaviour.autoSelfAssign);
+  await applyCheckOff(task, writes, allTasks, behaviour.autoSelfAssign);
   return Math.max(0, writes.length - 1);
 }
 

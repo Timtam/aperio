@@ -1102,8 +1102,6 @@ fn is_success(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
-/// Whether Google asked to slow down ([`crate::api::throttled`]): not a
-/// quota used up for a while, which waiting seconds does not help.
 /// One line in the normal log for an answer that asks to slow down, with the
 /// wait Google names: the sentences never say how long (decision 278).
 fn log_if_busy(step: &str, answer: &Answer) {
@@ -1117,6 +1115,8 @@ fn log_if_busy(step: &str, answer: &Answer) {
     }
 }
 
+/// Whether Google asked to slow down ([`crate::api::throttled`]): not a
+/// quota used up for a while, which waiting seconds does not help.
 fn rate_limited(answer: &Answer) -> bool {
     matches!(
         crate::api::throttled(answer.status, answer.retry_after, &answer.body),

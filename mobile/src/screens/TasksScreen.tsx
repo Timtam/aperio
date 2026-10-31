@@ -55,7 +55,12 @@ import {
   focusAfterFailedAction,
   type FailedAction,
 } from '../state/reviewFocus';
-import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
+import {
+  applyTaskToggle,
+  checkOffErrorMessage,
+  recomputeAncestors,
+  statusAnnounce,
+} from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
 import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -480,7 +485,7 @@ export default function TasksScreen({
           until: Date.now() + FAILED_FOCUS_WATCH_MS,
         };
         invalidateData();
-        announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
+        announce(t('mobile.error', { message: checkOffErrorMessage(err, t) }));
       }
     },
     [announce, entries, invalidateData, t, tasks, taskListById],

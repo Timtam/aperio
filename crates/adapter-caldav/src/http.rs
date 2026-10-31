@@ -22,7 +22,10 @@
 //! answer the one way ([`WriteAnswer::settled`]): it may have been saved. A
 //! caller's own reading of a replay's answer goes first: a replayed 404 on a
 //! delete is gone, a 405 on a MKCALENDAR is a collection that exists, a 412
-//! on a create guarded by `If-None-Match` is the first attempt's resource.
+//! on a create guarded by `If-None-Match` is the first attempt's resource
+//! where Aperio named it (a minted UID, or the fresh `{uuid}.ics` of a kept
+//! UID that is no plain name); where a kept UID names it, the 412 is
+//! `uid-taken`, replay or not.
 //!
 //! Deliberately NOT retried: timeouts (the server may be mid-processing
 //! — replaying a write could double-apply it), redirect-policy errors,

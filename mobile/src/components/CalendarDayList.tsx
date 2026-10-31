@@ -120,7 +120,7 @@ import { confirmDeleteTask } from '../state/taskDeleteScope';
 import { usePullRefresh } from '../state/usePullRefresh';
 import { editEventWithScope } from '../state/eventEditScope';
 import { priorityScaleFor, readTaskBehaviour } from '../state/taskBehaviour';
-import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
+import { applyTaskToggle, checkOffErrorMessage, statusAnnounce } from '../state/taskToggle';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { getDayLogsInRange, listDayMarkers } from '../api/dayMarkers';
 import { DayLogDialog } from './DayLogDialog';
@@ -1279,7 +1279,7 @@ export function CalendarDayList({
         // A check-off that landed in part is real: the day reads again, as on
         // the desktop (decision 277).
         void load();
-        announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
+        announce(t('mobile.error', { message: checkOffErrorMessage(err, t) }));
       }
     },
     [announce, listsById, load, t, tasks],

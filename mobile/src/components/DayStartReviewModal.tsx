@@ -29,7 +29,6 @@ import {
   todayIsoKey,
   writeAfterLanded,
   writeAll,
-  writeErrorMessage,
 } from '@aperio/shared';
 import type { Task } from '@aperio/shared';
 
@@ -51,7 +50,7 @@ import {
   taskBehaviourDefaults,
   type TaskBehaviour,
 } from '../state/taskBehaviour';
-import { setTaskStatusTo, statusAnnounce } from '../state/taskToggle';
+import { checkOffErrorMessage, setTaskStatusTo, statusAnnounce } from '../state/taskToggle';
 import { useCurrentUserByList } from '../state/currentUser';
 import { useTaskStore } from '../state/taskStoreContext';
 import { useTasks } from '../state/useTasks';
@@ -348,7 +347,9 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
           : null;
       pendingFocusId.current = null;
       invalidateData();
-      const message = writeErrorMessage(err, t);
+      // A check-off's own sentences, the family's after a status saved in
+      // part (review round 20 of #128); any other failure as itself.
+      const message = checkOffErrorMessage(err, t);
       // Kept only while its re-read and the refresh after it may still clear
       // the rows: a later emptying, by another device say, is not its doing.
       lastFailure.current = { sentence: message, until: Date.now() + FAILED_FOCUS_WATCH_MS };
