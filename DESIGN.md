@@ -3894,6 +3894,7 @@ Erkennt die App, dass ihre Version kleiner als `min_app_version` ist, wird der S
 - "Jetzt aktualisieren" öffnet den Update-Dialog (Abschnitt 21)
 - "Offline fortfahren" erlaubt die Nutzung der App ohne Sync – lokale Daten bleiben lesbar, kein Schreiben in den Sync-Speicher bis zum Update
 - Der Dialog ist vollständig per Tastatur und Screen Reader bedienbar
+- Auch „Jetzt kompaktieren“ prüft die Mindestversion, bevor es etwas hochlädt oder löscht (ab 0.2.0; ein 0.1.0-Build prüft dort noch nicht, siehe `DESIGN-sync-snapshot-coverage.md`)
 
 #### Schema-Migration
 

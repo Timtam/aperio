@@ -82,9 +82,12 @@ enden im selben Durchgang (`OnboardingService::apply_every_log`):
    das nächste Nachholen nimmt sie wieder, nach seinen Regeln statt denen einer
    Runde. Ist sie beim nächsten Mal in derselben Größe wieder unlesbar
    (`sync.cursor.unreadableLogs`), ist es kein abgerissenes Lesen: Dann wird
-   ihre Länge gemerkt, und sie hält das Gerät nicht mehr vom Genau-Sein ab. Cursor = Maximum aus bisherigem Cursor (beim Beitritt
-   und bei der Wiederaufnahme: Schnappschuss) und neuester fremder Datei, nie
-   zurück.
+   ihre Länge gemerkt, und sie hält das Gerät nicht mehr vom Genau-Sein ab.
+   Der Merker trägt die App-Version, die es versucht hat. Nach einem Update
+   gilt er nicht: Das Gerät ist nicht mehr genau, holt einmal nach, und der
+   neue Build liest die Datei vielleicht. Cursor = Maximum aus bisherigem
+   Cursor (beim Beitritt und bei der Wiederaufnahme: Schnappschuss) und
+   neuester fremder Datei, nie zurück.
 6. Danach ist das Gerät **genau** (`sync.cursor.coverageExactSince`), wenn jede
    Datei lesbar war.
 
@@ -414,7 +417,11 @@ bestätigt), ein Kritiker. Einzelheiten: scratchpad `coverage/review_r4.json`.
   gelesen; „Jetzt kompaktieren“ prüft die Mindestversion nicht; eine
   gescheiterte zweite Auflistung löschte die Sichtungsliste; der Beitritt
   schob die `meta.json` zurück, die er vor seinem langen Durchgang gelesen
-  hatte (und hob damit eine gleichzeitige Aussperrung auf).
+  hatte (und hob damit eine gleichzeitige Aussperrung auf). Alle vier behoben:
+  Der Merker unlesbarer Dateien trägt die App-Version; „Jetzt kompaktieren“
+  bricht bei zu alter Version ab, bevor es etwas hochlädt; die Sichtungsliste
+  bleibt bei gescheiterter Auflistung, wie sie ist; der Beitritt trägt sich in
+  eine frisch geholte `meta.json` ein.
 - Alte Builds: Ein ausgesperrter 0.1.0-Build kann „Jetzt kompaktieren“ noch
   ausführen und nach Namen löschen. Das lässt sich nur durch das Update
   verhindern: alle Geräte aktualisieren, dort nicht von Hand kompaktieren.

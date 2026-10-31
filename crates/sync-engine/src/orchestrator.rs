@@ -107,6 +107,23 @@ pub const SYNC_APPLIED_LOG_LENGTHS_PREF_KEY: &str = "sync.cursor.appliedLogLengt
 /// the files 14 days of retention keep (one per device and session).
 pub const APPLIED_LOG_LENGTHS_CAP: usize = 256;
 
+/// The log files the last pass over every log could not read, with their
+/// sizes and the app version that tried (JSON, [`UnreadableLogs`]; review
+/// rounds 3 and 4 of #130). One unreadable again at the same size is no torn
+/// read and no longer keeps the device from being exact. A newer build may
+/// read it: while the record names files under another version, the device
+/// counts as not exact and catches up once more. Device-local.
+pub const SYNC_UNREADABLE_LOGS_PREF_KEY: &str = "sync.cursor.unreadableLogs";
+
+/// The record behind [`SYNC_UNREADABLE_LOGS_PREF_KEY`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UnreadableLogs {
+    /// The app version that could not read them.
+    pub version: String,
+    /// Filename to size.
+    pub files: std::collections::HashMap<String, u64>,
+}
+
 /// When this device last tried its one-time catch-up
 /// (DESIGN-sync-snapshot-coverage.md). One that fails or meets a file it
 /// cannot read leaves the device not exact; it is tried again after
@@ -1114,14 +1131,27 @@ impl SyncOrchestrator {
     /// ([`SYNC_COVERAGE_EXACT_SINCE_PREF_KEY`]). An unreadable record counts
     /// as exact: guessing "not exact" would catch the device up every round
     /// for as long as the read fails.
+    ///
+    /// Files an earlier build could not read make it not exact again: this
+    /// one may read them, and only a catch-up fetches them once more.
     fn coverage_exact(&self) -> bool {
-        match self.store.get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY) {
+        let exact = match self.store.get_pref(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY) {
             Ok(mark) => mark.is_some(),
             Err(err) => {
                 warn!(?err, "couldn't read whether this device's record is exact");
                 true
             }
-        }
+        };
+        let unread_by_another_build = self
+            .store
+            .get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY)
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str::<UnreadableLogs>(&raw).ok())
+            .is_some_and(|record| {
+                !record.files.is_empty() && record.version != self.hooks.app_version()
+            });
+        exact && !unread_by_another_build
     }
 
     /// This device's held horizon: the newest point up to which it holds

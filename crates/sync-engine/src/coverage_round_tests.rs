@@ -20,6 +20,7 @@ use crate::test_support::{FakeSecrets, FakeStore};
 use crate::{
     ApplyReport, Compactor, EventLogApplier, SnapshotBuilder, SyncOrchestrator, SyncRoundHooks,
     SyncStore, CATCH_UP_RETRY, SYNC_CATCH_UP_TRIED_AT_PREF_KEY, SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
+    SYNC_UNREADABLE_LOGS_PREF_KEY,
 };
 
 /// Counts catch-ups; a successful one marks the record exact, as the
@@ -388,4 +389,44 @@ async fn an_ordinary_round_takes_a_late_change_older_than_the_gc_horizon() {
 
     assert_eq!(report.fetched_logs, 1, "unknown, below the cursor");
     assert_eq!(report.applied, 1);
+}
+
+/// One file, unreadable to the build `version`.
+fn unreadable_by(version: &str) -> String {
+    serde_json::to_string(&crate::UnreadableLogs {
+        version: version.into(),
+        files: std::collections::HashMap::from([("x.jsonl".to_string(), 1)]),
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_file_an_earlier_build_could_not_read_makes_the_device_catch_up_again() {
+    // Review round 4 of #130: a file this build cannot read is recorded and
+    // never fetched again; after an update that can read it, only another
+    // catch-up takes it.
+    let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    hooks
+        .store
+        .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &unreadable_by("0.0.1"))
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    assert_eq!(*hooks.catch_ups.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn a_file_this_build_could_not_read_does_not_make_it_catch_up_again() {
+    let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    hooks
+        .store
+        .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &unreadable_by("1.0.0-test"))
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    assert_eq!(*hooks.catch_ups.lock().unwrap(), 0);
 }

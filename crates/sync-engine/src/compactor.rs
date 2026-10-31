@@ -398,6 +398,9 @@ impl Compactor {
         // it could not have deleted any log in our window, so the worst case is
         // one redundant resume, not data loss.)
         if let Some(existing) = adapter.fetch_meta().await? {
+            // A build the dataset locked out compacts nothing, by hand
+            // neither (review round 4 of #130).
+            sync_core::ensure_compatible(&existing, &self.app_version)?;
             if content_horizon < existing.gc_horizon_or_min() {
                 return Err(sync_core::SyncError::StaleDevice {
                     snapshot_at: existing.snapshot_timestamp.to_rfc3339(),
@@ -646,8 +649,11 @@ impl Compactor {
         let current = match adapter.fetch_new_logs(&DeviceCursor::epoch()).await {
             Ok(logs) => logs,
             Err(err) => {
+                // Not an empty listing: the record of when each file was
+                // first seen stays as it is (review round 4 of #130).
                 warn!(?err, "couldn't list the logs again; no GC this time");
-                Vec::new()
+                self.finish(&mut report, snapshot_ts, &coverage, names);
+                return Ok(report);
             }
         };
         let held: HashSet<&str> = coverage.held.iter().map(String::as_str).collect();
@@ -984,6 +990,9 @@ mod tests {
         /// An event this device applies while the snapshot goes out: a round
         /// running beside the compaction.
         apply_on_snapshot: Mutex<Option<(Arc<FakeStore>, String)>>,
+        /// Listing fails once the snapshot is out.
+        fail_listing_after_snapshot: Mutex<bool>,
+        listing_fails: Mutex<bool>,
     }
 
     impl FakeAdapter {
@@ -995,6 +1004,8 @@ mod tests {
                 pushed: Mutex::new(Vec::new()),
                 grow_on_snapshot: Mutex::new(None),
                 apply_on_snapshot: Mutex::new(None),
+                fail_listing_after_snapshot: Mutex::new(false),
+                listing_fails: Mutex::new(false),
             }
         }
     }
@@ -1012,6 +1023,9 @@ mod tests {
             Ok(())
         }
         async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
+            if *self.listing_fails.lock().unwrap() {
+                return Err(sync_core::SyncError::internal("offline"));
+            }
             Ok(self
                 .logs
                 .lock()
@@ -1040,6 +1054,9 @@ mod tests {
             }
             if let Some((store, id)) = self.apply_on_snapshot.lock().unwrap().take() {
                 store.mark_event_applied(&id).unwrap();
+            }
+            if *self.fail_listing_after_snapshot.lock().unwrap() {
+                *self.listing_fails.lock().unwrap() = true;
             }
             Ok(())
         }
@@ -1950,6 +1967,47 @@ mod tests {
 
         assert!(local.exists());
         assert_eq!(report.deleted_logs, 0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_second_listing_keeps_when_each_file_was_first_seen() {
+        // Review round 4 of #130: the failure read as an empty listing and
+        // the record of first sightings started over for every file.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        *adapter.meta.lock().unwrap() = Some(meta_with_caught_up_peer());
+        let old: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
+        let log = held_log(&store, old);
+        let filename = log.name.to_filename();
+        adapter.logs.lock().unwrap().push(log);
+        seen_long_ago(&store, &adapter);
+        *adapter.fail_listing_after_snapshot.lock().unwrap() = true;
+
+        compactor.compact_now(&adapter).await.unwrap();
+
+        let seen: HashMap<String, LogSeen> =
+            serde_json::from_str(&store.get_pref(PREF_LOGS_SEEN).unwrap().unwrap()).unwrap();
+        let long_ago: DateTime<Utc> = "2000-01-01T00:00:00Z".parse().unwrap();
+        assert_eq!(seen.get(&filename).map(|entry| entry.since), Some(long_ago));
+    }
+
+    #[tokio::test]
+    async fn a_build_the_dataset_locked_out_does_not_compact() {
+        // Review round 4 of #130: compacting by hand skipped the version
+        // check, so a locked-out build could still delete files.
+        let (_store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        let mut meta = meta_with_caught_up_peer();
+        meta.min_app_version = "9.0.0".into();
+        *adapter.meta.lock().unwrap() = Some(meta);
+
+        let result = compactor.compact_now(&adapter).await;
+
+        assert!(matches!(
+            result,
+            Err(sync_core::SyncError::SchemaTooOld { .. })
+        ));
+        assert!(adapter.snapshot.lock().unwrap().is_none());
     }
 
     #[tokio::test]

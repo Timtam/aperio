@@ -62,6 +62,7 @@ use crate::event_log::{
     SYNC_CURSOR_PREF_KEY,
 };
 use crate::user_prefs::UserPrefsRepo;
+use sync_engine::SYNC_UNREADABLE_LOGS_PREF_KEY;
 
 /// `user_prefs` key holding the user-chosen device name. Surfaces in
 /// other devices' "known devices" lists via `meta.json`. Optional —
@@ -175,12 +176,6 @@ impl OnboardingReport {
         self.apply_failures += report.failed;
     }
 }
-
-/// The log files the last pass over every log could not read, with their
-/// sizes (JSON; review round 3 of #130). One unreadable again at the same
-/// size is no torn read and no longer keeps the device from being exact.
-/// Device-local, like every `sync.cursor.*` key.
-const PREF_UNREADABLE_LOGS: &str = "sync.cursor.unreadableLogs";
 
 /// What [`OnboardingService::apply_every_log`] found.
 struct Pass {
@@ -424,7 +419,7 @@ impl OnboardingService {
         device_name: Option<&str>,
     ) -> SyncResult<OnboardingReport> {
         adapter.test_connection().await?;
-        let mut meta = adapter.fetch_meta().await?.ok_or_else(|| {
+        let meta = adapter.fetch_meta().await?.ok_or_else(|| {
             SyncError::not_found("remote has no meta.json — use adopt_local for a fresh dataset")
         })?;
 
@@ -507,7 +502,10 @@ impl OnboardingService {
             self.save_coverage_exact_since(Utc::now())?;
         }
 
-        // Persist + push the device registration.
+        // Persist + push the device registration — into a fresh copy: the
+        // pass above took a while, and a compaction meanwhile may have raised
+        // the GC horizon or locked older builds out (review round 4 of #130).
+        let mut meta = adapter.fetch_meta().await?.unwrap_or(meta);
         self.register_self_in_meta(&mut meta, device_name);
         adapter.push_meta(&meta).await?;
         report.device_count = meta.devices.len();
@@ -799,24 +797,32 @@ impl OnboardingService {
     }
 
     /// The log files the last pass over every log could not read, with
-    /// their sizes ([`PREF_UNREADABLE_LOGS`]). A record that does not read
-    /// is empty: every unreadable file then counts as a first sighting.
+    /// their sizes ([`SYNC_UNREADABLE_LOGS_PREF_KEY`]) — only if this build
+    /// tried: another one may read what that one could not. A record that
+    /// does not read is empty. Either way every unreadable file then counts
+    /// as a first sighting.
     fn read_unreadable_logs(&self) -> HashMap<String, u64> {
         UserPrefsRepo::new(&self.db)
-            .get(PREF_UNREADABLE_LOGS)
+            .get(SYNC_UNREADABLE_LOGS_PREF_KEY)
             .ok()
             .flatten()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .and_then(|raw| serde_json::from_str::<sync_engine::UnreadableLogs>(&raw).ok())
+            .filter(|record| record.version == self.app_version)
+            .map(|record| record.files)
             .unwrap_or_default()
     }
 
     fn save_unreadable_logs(&self, unreadable: &HashMap<String, u64>) {
         let prefs = UserPrefsRepo::new(&self.db);
         let saved = if unreadable.is_empty() {
-            prefs.delete(PREF_UNREADABLE_LOGS)
+            prefs.delete(SYNC_UNREADABLE_LOGS_PREF_KEY)
         } else {
-            match serde_json::to_string(unreadable) {
-                Ok(raw) => prefs.set(PREF_UNREADABLE_LOGS, &raw),
+            let record = sync_engine::UnreadableLogs {
+                version: self.app_version.clone(),
+                files: unreadable.clone(),
+            };
+            match serde_json::to_string(&record) {
+                Ok(raw) => prefs.set(SYNC_UNREADABLE_LOGS_PREF_KEY, &raw),
                 Err(err) => {
                     warn!(?err, "couldn't encode the unreadable log files");
                     return;
@@ -1242,6 +1248,9 @@ mod tests {
         snapshot: Mutex<Option<Snapshot>>,
         /// Fetching the logs fails, as offline.
         fail_fetch: Mutex<bool>,
+        /// The meta.json a compaction elsewhere writes while the logs are
+        /// fetched.
+        meta_while_fetching: Mutex<Option<MetaJson>>,
     }
 
     impl FakeAdapter {
@@ -1255,6 +1264,7 @@ mod tests {
                 logs: Mutex::new(logs),
                 snapshot: Mutex::new(None),
                 fail_fetch: Mutex::new(false),
+                meta_while_fetching: Mutex::new(None),
             }
         }
 
@@ -1282,6 +1292,9 @@ mod tests {
         async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
             if *self.fail_fetch.lock().unwrap() {
                 return Err(SyncError::internal("offline"));
+            }
+            if let Some(meta) = self.meta_while_fetching.lock().unwrap().take() {
+                *self.meta.lock().unwrap() = Some(meta);
             }
             Ok(self
                 .logs
@@ -2436,6 +2449,57 @@ mod tests {
         svc.resume_from_stale(&adapter).await.unwrap();
 
         assert!(exact_since(&db).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_file_another_build_could_not_read_is_a_first_sighting() {
+        // Review round 4 of #130: what an earlier build recorded as unreadable
+        // says nothing about this one, which may read it.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let broken = LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"not json".to_vec(),
+        };
+        let record = sync_engine::UnreadableLogs {
+            version: "0.0.1".into(),
+            files: HashMap::from([(broken.name.to_filename(), broken.bytes.len() as u64)]),
+        };
+        UserPrefsRepo::new(&db.shared())
+            .set(
+                SYNC_UNREADABLE_LOGS_PREF_KEY,
+                &serde_json::to_string(&record).unwrap(),
+            )
+            .unwrap();
+        adapter.logs.lock().unwrap().push(broken);
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert!(exact_since(&db).is_none(), "once more, under this build");
+    }
+
+    #[tokio::test]
+    async fn a_join_registers_itself_in_the_meta_a_compaction_wrote_meanwhile() {
+        // Review round 4 of #130: the join pushed back the meta.json it read
+        // before its long pass, undoing a lock-out and a raised GC horizon.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        adapter.install_meta(MetaJson::fresh("0.2.0"));
+        let mut compacted = MetaJson::fresh("0.2.0");
+        compacted.min_app_version = "0.2.0".into();
+        compacted.gc_horizon = Some("2026-10-05T16:07:24Z".parse().unwrap());
+        *adapter.meta_while_fetching.lock().unwrap() = Some(compacted.clone());
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(meta.gc_horizon, compacted.gc_horizon);
+        assert_eq!(meta.min_app_version, "0.2.0");
+        assert!(meta.device(svc.device_id()).is_some());
     }
 
     #[tokio::test]
