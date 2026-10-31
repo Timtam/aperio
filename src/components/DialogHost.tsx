@@ -5,6 +5,7 @@ import { DayStartReviewDialog } from './DayStartReviewDialog';
 import { EditEventScopeDialog } from './EditEventScopeDialog';
 import { EventDialog } from './EventDialog';
 import { FirstLaunchWizardDialog } from './FirstLaunchWizardDialog';
+import { NotificationShortcutHintDialog } from './NotificationShortcutHintDialog';
 import { ImportDialog } from './ImportDialog';
 import { EventGroupCarryDialog } from './EventGroupCarryDialog';
 import { EventGroupDialog } from './EventGroupDialog';
@@ -218,6 +219,8 @@ export function DialogHost() {
       );
     case 'firstLaunchWizard':
       return <FirstLaunchWizardDialog isOpen onClose={close} />;
+    case 'notificationShortcutHint':
+      return <NotificationShortcutHintDialog isOpen onClose={close} />;
     case 'none':
     default:
       return null;

@@ -193,6 +193,9 @@ export type DialogMode =
       reason?: 'restore' | 'repair';
     }
   | { kind: 'firstLaunchWizard' }
+  /** A reminder came due while Windows would hide it: offer the Start menu
+   *  shortcut, once per app start (`NotificationShortcutHintChecker`). */
+  | { kind: 'notificationShortcutHint' }
   /** The "please wait" dialog of a surface that has none of its own — a drop
    *  in the sidebar, Ctrl+D (decisions 227, 265) —, and the notice it turns
    *  into when the write failed (210). `id` tells one wait's frame from any
@@ -389,6 +392,9 @@ export interface DialogStateValue {
    *  fresh instance: language → sync (restore / create / skip) → first
    *  account. */
   openFirstLaunchWizard: () => void;
+  /** Offer the Start menu shortcut Windows needs before it shows Aperio's
+   *  notifications. Opened by `NotificationShortcutHintChecker`. */
+  openNotificationShortcutHint: () => void;
   close: () => void;
   /**
    * Counter that bumps whenever data on the wire might have changed.
@@ -768,6 +774,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     () => push({ kind: 'firstLaunchWizard' }),
     [push],
   );
+  const openNotificationShortcutHint = useCallback(
+    () => push({ kind: 'notificationShortcutHint' }),
+    [push],
+  );
 
   // The wait of a surface without a dialog: pushed while the write runs,
   // replaced by its notice when it fails. Another dialog may open above it
@@ -892,6 +902,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openSyncStaleResume,
       openSyncAccountsConnect,
       openFirstLaunchWizard,
+      openNotificationShortcutHint,
       close,
       dataVersion,
       invalidateData,
@@ -925,6 +936,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openSyncStaleResume,
       openSyncAccountsConnect,
       openFirstLaunchWizard,
+      openNotificationShortcutHint,
       close,
       dataVersion,
       invalidateData,
