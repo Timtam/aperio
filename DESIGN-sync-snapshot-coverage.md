@@ -220,6 +220,14 @@ Runde zuvor.
 - Zwischen dem neuen Auflisten und dem Löschen bleibt ein kurzes Fenster:
   Hängt ein Gerät genau dann an, geht das Angehängte verloren. Ohne Sperre im
   Sync-Speicher lässt sich das nicht schließen.
+- Eine nie angewendete Anlage, älter als `gc_horizon`, gilt auf einer
+  fehlenden Zeile als gehalten: Jedes Gerät wiegt sie gleich, sie bleiben
+  gleich. Es fehlen dann Anlagen eines Geräts, das länger als das Fenster
+  offline war und vor dem Update geschrieben hat (Prüfrunde 3, C4).
+- Auf dem Handy E2E auf einem Ziel ohne `meta.json` einzuschalten, ist
+  „Neu beginnen“: Dort liegende Protokolldateien werden gelöscht (U10).
+- Die Anhebung des Stempels einer eigenen Änderung (Uhrversatz) misst gegen
+  die Uhr der Zeile, nicht gegen ihr `updated_at` (U12).
 - Varianten, die diese Version nicht anwendet (Tastenkürzel), gelten als
   nicht gehalten: Eine Datei mit ihnen bliebe stehen, und das Gerät nennte
   keine Kennungen. Noch schreibt kein Gerät solche Ereignisse.
