@@ -94,6 +94,20 @@ async fn device(
     Arc<RecordingHooks>,
     Arc<dyn SyncAdapter>,
 ) {
+    device_booted(meta, fail, Utc::now()).await
+}
+
+/// [`device`], its app started at `boot_at`.
+async fn device_booted(
+    meta: MetaJson,
+    fail: bool,
+    boot_at: DateTime<Utc>,
+) -> (
+    TempDir,
+    SyncOrchestrator,
+    Arc<RecordingHooks>,
+    Arc<dyn SyncAdapter>,
+) {
     let tmp = TempDir::new().expect("tempdir");
     let remote = tmp.path().join("remote");
     std::fs::create_dir_all(&remote).unwrap();
@@ -140,7 +154,7 @@ async fn device(
         applier,
         hooks.clone(),
         compactor,
-        Utc::now(),
+        boot_at,
     );
     orchestrator.configure(Arc::clone(&adapter));
     (tmp, orchestrator, hooks, adapter)
@@ -602,6 +616,14 @@ async fn a_torn_read_is_fetched_again_and_left_once_torn_again_at_its_size() {
         "fetched again"
     );
 
+    // Review round 8 of #130: not in the record a catch-up trusts, which
+    // would take it as no read in progress minutes later.
+    assert!(hooks
+        .store
+        .get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY)
+        .unwrap()
+        .is_none());
+
     orchestrator.sync_now().await.expect("round 2");
     assert_eq!(
         applied_length(&hooks.store, &name),
@@ -681,9 +703,22 @@ async fn gc_passed(
     Arc<RecordingHooks>,
     Arc<dyn SyncAdapter>,
 ) {
+    gc_passed_booted(horizon, Utc::now()).await
+}
+
+/// [`gc_passed`], the app started at `boot_at`.
+async fn gc_passed_booted(
+    horizon: i64,
+    boot_at: DateTime<Utc>,
+) -> (
+    TempDir,
+    SyncOrchestrator,
+    Arc<RecordingHooks>,
+    Arc<dyn SyncAdapter>,
+) {
     let mut meta = fresh_meta();
     meta.gc_horizon = Some(Utc.timestamp_opt(horizon, 0).unwrap());
-    let (tmp, orchestrator, hooks, adapter) = device(meta, false).await;
+    let (tmp, orchestrator, hooks, adapter) = device_booted(meta, false, boot_at).await;
     mark_exact(&hooks.store);
     hooks
         .store
@@ -904,6 +939,8 @@ async fn a_leftover_still_on_the_remote_goes_up_whole() {
 /// Lists no log names; everything else as the local-FS remote does.
 struct ListlessAdapter {
     inner: LocalFsSyncAdapter,
+    /// How often it was asked to list.
+    lists: Arc<Mutex<usize>>,
 }
 
 #[async_trait::async_trait]
@@ -933,6 +970,7 @@ impl SyncAdapter for ListlessAdapter {
         self.inner.delete_log(name).await
     }
     async fn list_log_names(&self) -> SyncResult<Vec<LogFileName>> {
+        *self.lists.lock().unwrap() += 1;
         Err(SyncError::network("simulated listing outage"))
     }
     async fn push_sound_asset(&self, hash: &str, ext: &str, bytes: &[u8]) -> SyncResult<()> {
@@ -958,16 +996,31 @@ async fn a_leftover_not_settled_yet_stays_and_is_settled_by_its_first_round_late
             &Utc.timestamp_opt(2_000 + 600, 0).unwrap().to_rfc3339(),
         )
         .unwrap();
+    let lists = Arc::new(Mutex::new(0));
     orchestrator.configure(Arc::new(ListlessAdapter {
         inner: LocalFsSyncAdapter::new(tmp.path().join("remote")),
+        lists: Arc::clone(&lists),
     }));
 
     orchestrator.sync_now().await.expect("round 1");
     assert!(remote_logs(&adapter).await.is_empty(), "held back");
     assert!(pending_names(&tmp).contains(&log.name.to_filename()));
-
-    orchestrator.configure(Arc::clone(&adapter));
+    // Review round 8 of #130: on most adapters the listing fetches every
+    // file; it was tried again in every round and push.
     orchestrator.sync_now().await.expect("round 2");
+    assert_eq!(*lists.lock().unwrap(), 1, "not again right away");
+    assert!(remote_logs(&adapter).await.is_empty(), "still held back");
+
+    let earlier = Utc::now() - CATCH_UP_RETRY - chrono::Duration::minutes(1);
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LEFTOVERS_TRIED_AT_PREF_KEY,
+            &earlier.to_rfc3339(),
+        )
+        .unwrap();
+    orchestrator.configure(Arc::clone(&adapter));
+    orchestrator.sync_now().await.expect("an hour later");
     let remote = remote_logs(&adapter).await;
     assert_eq!(remote.len(), 1, "{remote:?}");
     assert_ne!(remote[0].0, log.name.to_filename());
@@ -979,7 +1032,7 @@ async fn a_leftover_not_settled_yet_stays_and_is_settled_by_its_first_round_late
 async fn an_unreadable_file_is_read_again_only_once_its_length_is_forgotten() {
     // Stamped with the new parser while the old length stayed, the file was
     // never fetched again.
-    let (_tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
+    let (_tmp, orchestrator, hooks, adapter) = device(fresh_meta(), false).await;
     mark_exact(&hooks.store);
     hooks
         .store
@@ -995,12 +1048,24 @@ async fn an_unreadable_file_is_read_again_only_once_its_length_is_forgotten() {
         .lock()
         .unwrap()
         .insert(crate::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY.to_string());
+    // Review round 8 of #130: a file the round adds to the record replaced
+    // the one not stamped yet.
+    let added = peer_file(&adapter, b"{\"from\":\"a newer build\"}\n").await;
 
     orchestrator.sync_now().await.expect("round 1");
     let raw = hooks.store.get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY).unwrap();
     assert!(
         crate::UnreadableLogs::of_this_parser(raw.as_deref()).is_none(),
         "not stamped while the length stands"
+    );
+    assert_eq!(
+        crate::UnreadableLogs::names(raw.as_deref(), &laptop()),
+        {
+            let mut names = vec![added, "x.jsonl".to_string()];
+            names.sort();
+            names
+        },
+        "still named, the round's addition too"
     );
 
     hooks.store.failing_pref_writes.lock().unwrap().clear();
@@ -1028,4 +1093,196 @@ fn a_device_names_only_other_devices_files_as_unreadable() {
         crate::UnreadableLogs::names(Some(&raw), &laptop()),
         vec![other]
     );
+}
+
+// ---- Review round 8 of #130 ------------------------------------------------
+
+/// [`own_file`] staged, the device's last 0.1.0 round at 2 600 (cutoff
+/// 2 000): only `ev-own-4000` never went up, and the remote lost the file.
+async fn with_a_leftover(
+    boot_at: DateTime<Utc>,
+) -> (
+    TempDir,
+    SyncOrchestrator,
+    Arc<RecordingHooks>,
+    Arc<dyn SyncAdapter>,
+    LogFile,
+) {
+    let (tmp, orchestrator, hooks, adapter) = gc_passed_booted(5_000, boot_at).await;
+    let log = own_file(&[1_000, 4_000]);
+    stage(&tmp, &log);
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LAST_ROUND_PREF_KEY,
+            &Utc.timestamp_opt(2_000 + 600, 0).unwrap().to_rfc3339(),
+        )
+        .unwrap();
+    (tmp, orchestrator, hooks, adapter, log)
+}
+
+#[tokio::test]
+async fn the_round_waits_while_the_leftovers_cutoff_cannot_be_frozen() {
+    // A round recorded itself though the cutoff was not kept; the next try
+    // read this build's round time and dropped what never went up.
+    let (_tmp, orchestrator, hooks, adapter, _log) = with_a_leftover(Utc::now()).await;
+    hooks
+        .store
+        .failing_pref_writes
+        .lock()
+        .unwrap()
+        .insert(crate::SYNC_LEFTOVERS_CUTOFF_PREF_KEY.to_string());
+
+    orchestrator.sync_now().await.expect("round 1");
+    assert!(remote_logs(&adapter).await.is_empty(), "nothing settled");
+    assert_eq!(
+        hooks
+            .store
+            .get_pref(crate::SYNC_LAST_ROUND_PREF_KEY)
+            .unwrap()
+            .as_deref(),
+        Some(Utc.timestamp_opt(2_600, 0).unwrap().to_rfc3339().as_str()),
+        "the older build's round stands"
+    );
+
+    hooks.store.failing_pref_writes.lock().unwrap().clear();
+    orchestrator.sync_now().await.expect("round 2");
+    let remote = remote_logs(&adapter).await;
+    assert_eq!(remote.len(), 1, "{remote:?}");
+    assert!(remote[0].1.contains("ev-own-4000"), "{remote:?}");
+    assert!(!remote[0].1.contains("ev-own-1000"), "{remote:?}");
+}
+
+#[tokio::test]
+async fn a_tail_takes_no_name_a_file_on_the_remote_has() {
+    // A tail an earlier try pushed is gone from pending/: its name was taken
+    // again, and the remote copy overwritten.
+    let boot = Utc.timestamp_opt(Utc::now().timestamp(), 0).unwrap();
+    let (_tmp, orchestrator, _hooks, adapter, log) = with_a_leftover(boot).await;
+    let earlier_tail = LogFile {
+        name: LogFileName::new(boot - chrono::Duration::seconds(1), laptop()),
+        bytes: b"{\"pushed\":\"before\"}\n".to_vec(),
+    };
+    adapter.push_log(&earlier_tail).await.unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    let remote = remote_logs(&adapter).await;
+    assert!(
+        remote.contains(&(
+            earlier_tail.name.to_filename(),
+            "{\"pushed\":\"before\"}\n".to_string()
+        )),
+        "{remote:?}"
+    );
+    assert!(
+        remote
+            .iter()
+            .any(|(name, bytes)| *name != log.name.to_filename() && bytes.contains("ev-own-4000")),
+        "{remote:?}"
+    );
+}
+
+/// Holds `path` open so that it does not read (Windows: shared with nobody;
+/// elsewhere: no permission) until dropped.
+struct Unreadable {
+    #[cfg(windows)]
+    _file: std::fs::File,
+    #[cfg(not(windows))]
+    path: std::path::PathBuf,
+}
+
+impl Unreadable {
+    fn hold(path: std::path::PathBuf) -> Self {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&path)
+                .unwrap();
+            Self { _file: file }
+        }
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+            Self { path }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+impl Drop for Unreadable {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o644));
+    }
+}
+
+#[tokio::test]
+async fn a_leftover_that_does_not_read_is_neither_settled_nor_pushed() {
+    // Skipped by the read, it was no leftover to settle: the mark was set,
+    // and a later push sent it whole.
+    let (tmp, orchestrator, hooks, adapter, log) = with_a_leftover(Utc::now()).await;
+    let path = tmp.path().join("pending").join(log.name.to_filename());
+    {
+        let _held = Unreadable::hold(path);
+        orchestrator.sync_now().await.expect("round 1");
+    }
+    assert!(hooks
+        .store
+        .get_pref(crate::SYNC_LEFTOVERS_SETTLED_PREF_KEY)
+        .unwrap()
+        .is_none());
+
+    orchestrator
+        .push_now()
+        .await
+        .expect("push, the file reads again");
+    let remote = remote_logs(&adapter).await;
+    assert!(
+        remote
+            .iter()
+            .all(|(name, _)| *name != log.name.to_filename()),
+        "{remote:?}"
+    );
+    assert!(
+        remote
+            .iter()
+            .any(|(_, bytes)| bytes.contains("ev-own-4000")),
+        "settled now: {remote:?}"
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn a_leftover_that_will_not_go_is_emptied_so_no_later_try_cuts_it_again() {
+    // Kept whole, every later try wrote and pushed its tail once more.
+    use std::os::windows::fs::OpenOptionsExt;
+    let (tmp, orchestrator, hooks, adapter, log) = with_a_leftover(Utc::now()).await;
+    let path = tmp.path().join("pending").join(log.name.to_filename());
+    {
+        // Shared for reading and writing, not for deleting.
+        let _held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1 | 0x2)
+            .open(&path)
+            .unwrap();
+        orchestrator.sync_now().await.expect("round 1");
+    }
+    orchestrator.sync_now().await.expect("round 2");
+
+    assert!(hooks
+        .store
+        .get_pref(crate::SYNC_LEFTOVERS_SETTLED_PREF_KEY)
+        .unwrap()
+        .is_some());
+    let tails: Vec<_> = remote_logs(&adapter)
+        .await
+        .into_iter()
+        .filter(|(_, bytes)| bytes.contains("ev-own-4000"))
+        .collect();
+    assert_eq!(tails.len(), 1, "{tails:?}");
 }

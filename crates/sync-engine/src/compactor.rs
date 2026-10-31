@@ -412,7 +412,13 @@ impl Compactor {
             if existing.e2e_enabled && !self.store.e2e_enabled() {
                 return Err(sync_core::SyncError::EncryptionRequired);
             }
-            if content_horizon < existing.gc_horizon_or_min() {
+            // Flagged stale, it lacks what the GC deleted: its snapshot would
+            // replace the one its own resume must take (review round 8 of
+            // #130).
+            let flagged = existing
+                .device(&self.local_device_id)
+                .is_some_and(|record| record.stale);
+            if flagged || content_horizon < existing.gc_horizon_or_min() {
                 return Err(sync_core::SyncError::StaleDevice {
                     snapshot_at: existing.snapshot_timestamp.to_rfc3339(),
                 });
@@ -1270,9 +1276,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_compaction_keeps_its_own_stale_flag() {
-        // Review round 7 of #130: only a resume clears it, once it took the
-        // snapshot.
+    async fn a_device_flagged_stale_does_not_compact() {
+        // Review rounds 7 and 8 of #130: only a resume clears the flag, once it
+        // took the snapshot; compacting, the device replaced that snapshot
+        // with its own, which lacks what the GC deleted.
         let (store, compactor) = build_compactor();
         store
             .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
@@ -1294,8 +1301,13 @@ mod tests {
         );
         *adapter.meta.lock().unwrap() = Some(meta);
 
-        compactor.compact_now(&adapter).await.unwrap();
+        let result = compactor.compact_now(&adapter).await;
 
+        assert!(
+            matches!(result, Err(sync_core::SyncError::StaleDevice { .. })),
+            "{result:?}"
+        );
+        assert!(adapter.snapshot.lock().unwrap().is_none(), "no snapshot");
         let meta = adapter.meta.lock().unwrap().clone().unwrap();
         assert!(
             meta.device(&DeviceId::from_string("dev-this".into()))

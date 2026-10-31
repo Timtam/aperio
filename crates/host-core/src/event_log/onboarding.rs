@@ -779,13 +779,21 @@ impl OnboardingService {
                 }
             }
         }
-        // Our own changes not on the remote yet are weighed, not held.
+        // Our own changes not on the remote yet are weighed, not held. What
+        // an older build left pending up to the leftovers' cutoff counts as on
+        // the remote: it went up then and the peers applied it, whether a GC
+        // deleted the file since or a later push tore it (review round 8 of
+        // #130).
         let pending_files = self.pending_files().await;
         let pending = envelopes_of(&pending_files);
+        let pushed_before = self.leftovers_cutoff();
         let unpushed: HashSet<String> = match &holds {
             Some(holds) => pending
                 .iter()
-                .filter(|envelope| !on_remote.contains(&envelope.id))
+                .filter(|envelope| {
+                    !on_remote.contains(&envelope.id)
+                        && pushed_before.is_none_or(|cutoff| envelope.timestamp > cutoff)
+                })
                 .chain(envelopes.iter().filter(|envelope| !holds.holds(envelope)))
                 .map(|envelope| envelope.id.clone())
                 .collect(),
@@ -833,6 +841,18 @@ impl OnboardingService {
         sync_engine::UnreadableLogs::of_this_parser(raw.as_deref())
             .map(|record| record.files)
             .unwrap_or_default()
+    }
+
+    /// The time up to which an older build's leftovers went up, as the
+    /// round froze it (`sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY`); `None`
+    /// where none is frozen or known.
+    fn leftovers_cutoff(&self) -> Option<DateTime<Utc>> {
+        UserPrefsRepo::new(&self.db)
+            .get(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)
+            .ok()
+            .flatten()
+            .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
+            .map(|at| at.with_timezone(&Utc))
     }
 
     /// The files this device names as unreadable in `meta.json`.
@@ -2887,6 +2907,52 @@ mod tests {
         svc.accept_remote(&adapter, None).await.unwrap();
 
         assert_eq!(interval(&db).as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_join_holds_what_an_older_build_left_pending_up_to_its_cutoff() {
+        // Review round 8 of #130: a leftover not settled yet, or left whole
+        // for its torn remote copy, was weighed whole; what it held up to the
+        // older build's last round went up then, and peers took newer values
+        // since.
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = at - chrono::Duration::days(30);
+        let own = envelope("ev-own", "dev-this", old, set_interval("70"));
+        let leftover = file_of("dev-this", old, &[&own]);
+        std::fs::write(
+            pending.path().join(leftover.name.to_filename()),
+            &leftover.bytes,
+        )
+        .unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set(
+                sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY,
+                &(old + chrono::Duration::days(1)).to_rfc3339(),
+            )
+            .unwrap();
+        let body = sync_engine::AperioSnapshotBody {
+            settings: std::collections::BTreeMap::from([(
+                "sync.intervalMinutes".to_string(),
+                "45".to_string(),
+            )]),
+            ..Default::default()
+        };
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = at;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(Snapshot::new(
+            at,
+            "1.0.0",
+            serde_json::to_value(body).unwrap(),
+        ));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
     }
 
     #[tokio::test]

@@ -86,7 +86,10 @@ enden im selben Durchgang (`OnboardingService::apply_every_log`):
    fremde (F); eine eigene, oben für immer abgerissene, hielt ihr Gerät sonst
    für immer vom Genau-Sein ab (Prüfrunde 7). Auch eine gewöhnliche Runde
    merkt eine abgerissen gelesene Datei mit ihrer Größe: Findet die nächste
-   sie gleich, holt sie sie nicht mehr in jeder Runde.
+   sie gleich, holt sie sie nicht mehr in jeder Runde. Sie merkt sie in einem
+   eigenen Merker (`sync.cursor.tornSeen`), den das Nachholen nicht liest:
+   Eine Sichtung Minuten zuvor sagt nicht, dass niemand mehr daran schreibt
+   (Prüfrunde 8).
    Eine Datei mit einer Zeile, die dieser Build nicht kennt (ein neuerer
    schrieb sie), ist kein abgerissenes Lesen, in keiner Größe: Ihre Länge wird
    gemerkt, sie hält kein Gerät vom Genau-Sein ab, auch in gewöhnlichen
@@ -98,7 +101,8 @@ enden im selben Durchgang (`OnboardingService::apply_every_log`):
    Die App-Version bleibt über Builds gleich und taugt dafür nicht. Hat ein
    Update den Parser geändert, vergisst die Runde die gemerkte Länge der
    Datei, und der nächste Abruf liest sie wieder; erst dann trägt der Merker
-   den neuen Parser (Prüfrunde 7). Ein Merker, der sich nicht lesen
+   den neuen Parser (Prüfrunde 7). Bis dahin ergänzt eine Runde ihn unter dem
+   alten, statt ihn zu ersetzen (Prüfrunde 8). Ein Merker, der sich nicht lesen
    lässt, lässt das Gerät einmal nachholen (Prüfrunde 5). Cursor = Maximum
    aus bisherigem Cursor (beim Beitritt und bei der Wiederaufnahme:
    Schnappschuss) und neuester fremder Datei, nie zurück.
@@ -152,10 +156,16 @@ still, und nur Neueres gewinnt.
   die alte Datei geht (`sync.push.leftoversSettled`, danach nie wieder). Ist
   keine solche Runde bekannt, gilt nichts als oben. Hat der Sync-Speicher die
   Datei noch, geht sie ganz hoch: Gelöscht hat sie niemand, und ein späterer
-  Push von 0.1.0 kann sie halb geschrieben haben (Prüfrunde 7). Lässt sich der
-  Sync-Speicher nicht auflisten, oder scheitert das Ordnen einer Datei, bleibt
-  sie liegen, ungepusht, bis ein späterer Versuch sie ordnet. Das Auflisten
-  holt bei den meisten Speichern einmal jede Datei.
+  Push von 0.1.0 kann sie halb geschrieben haben (Prüfrunde 7). Bis alles
+  geordnet ist, geht keine fertige Datei unter `gc_horizon` hoch, auch keine,
+  die sich nicht lesen ließ (Prüfrunde 8). Die Grenze wird als Erstes
+  eingefroren; lässt sie sich nicht halten, ordnet der Versuch nichts, und die
+  Runde zählt nicht als erfolgreich, damit die Zeit dieses Builds die des
+  alten nicht ersetzt. Das Auflisten holt bei den meisten Speichern einmal
+  jede Datei; scheitert es, versucht erst eine Runde eine Stunde später es
+  wieder (`sync.push.leftoversTriedAt`). Lässt sich ein geordneter Rest nicht
+  löschen, wird er geleert, damit kein späterer Versuch ihn noch einmal teilt;
+  ein Rest nimmt keinen Namen, den der Sync-Speicher schon hat.
   Auch `push_now`, der Push nach jeder Änderung und auf dem Handy der übliche,
   holt `meta.json` und prüft Mindestversion und Verschlüsselung wie die Runde.
 - **Gemerkte Längen.** Die 256 neuesten (nach Namen), nicht nach `gc_horizon`
@@ -235,7 +245,10 @@ angewendet, denn die Zeilen des Geräts halten sie. Nur wo derselbe Durchgang
 einen Schnappschuss angewendet hat (Beitritt, Wiederaufnahme), wird eine
 eigene gewogen, die in keiner eigenen Datei oben steht: Der
 Schnappschuss kann einen älteren Wert zurückgesetzt haben, und die anderen
-Geräte übernehmen sie, sobald sie oben ist. Ebenso jede eigene oder schon
+Geräte übernehmen sie, sobald sie oben ist. Was ein älterer Build bis zur
+eingefrorenen Grenze seiner Reste (C) hielt, gilt dabei als oben: Es ging
+damals hoch, und die anderen Geräte übernahmen es, ob ein Aufräumen die Datei
+seither löschte oder ein späterer Push sie halb schrieb (Prüfrunde 8). Ebenso jede eigene oder schon
 angewendete Änderung, die der Schnappschuss nicht hält: nicht unter seinen
 Kennungen, oder, nennt er keine, jünger als er (Prüfrunde 6). Das gewöhnliche Nachholen hat
 keinen Schnappschuss und hält jede eigene (Prüfrunde 5). Ein Löschen eines
@@ -285,7 +298,9 @@ Verschiebung legt sie dann wieder an.
   die Wiederaufnahme zurück, nachdem sie den Schnappschuss geholt hat;
   Herzschlag und Compactor übernehmen sie (Prüfrunde 7). Ein Push zwischen den
   Runden nennt seine Dateien über den Herzschlag und nahm sie sonst zurück:
-  Das Gerät holte den Schnappschuss nie.
+  Das Gerät holte den Schnappschuss nie. Ein markiertes Gerät verdichtet
+  nicht, auch nicht von Hand: Sein Schnappschuss ersetzte den, den seine
+  Wiederaufnahme holen muss (Prüfrunde 8).
 - **Ausstehende Dateien.** Der Compactor lädt nichts hoch. Er räumt eine
   ausstehende Datei nur weg, wenn ihre entfernte Kopie mindestens so lang
   ist; sonst bleibt sie für den Push der Runde, und ihre entfernte Kopie
@@ -591,3 +606,27 @@ widerlegt), ein Kritiker. Einzelheiten: scratchpad `coverage/review_r7.json`.
   Sync-Speicher, was bei den meisten Speichern einmal jede Datei holt; ein
   0.1.0-Verdichten, das beim Aussperren schon läuft, kann noch nach Namen
   löschen (TODO B3).
+
+## Prüfrunde 8 (PR #130, 2026-10-31)
+
+Vier Prüfer auf den Commit nach Runde 7, 8 gegengeprüft (alle bestätigt), ein
+Kritiker. Einzelheiten: scratchpad `coverage/review_r8.json`.
+
+- **Ein markiertes Gerät verdichtet nicht** (F): Von Hand ersetzte es den
+  Schnappschuss, den seine Wiederaufnahme holen muss, durch seinen eigenen,
+  dem fehlte, was das Aufräumen gelöscht hatte.
+- **0.1.0-Reste** (C): Zurückgehalten wird nach Zeit, nicht nach Namen, auch
+  eine, die sich nicht lesen ließ; die Grenze zuerst eingefroren und, wo das
+  scheitert, die Runde nicht als erfolgreich vermerkt; das Auflisten nach
+  einem Fehlschlag erst eine Stunde später; ein Rest, der sich nicht löschen
+  lässt, geleert; kein Restname, den der Sync-Speicher hat. Was ein Rest bis
+  zur Grenze hielt, gilt beim Beitritt und bei der Wiederaufnahme als oben
+  (E): Sonst gewann es, ganz gewogen, über den Schnappschuss, und kein anderes
+  Gerät bekam es je.
+- **Unlesbares** (B.5): Eine Runde ergänzt einen Merker, den ein
+  Parser-Wechsel noch nicht neu gestempelt hat, statt ihn zu ersetzen; ihre
+  eigenen Sichtungen abgerissener Dateien stehen in einem eigenen Merker, den
+  das Nachholen nicht liest.
+- Von mir entschieden (Toni sagen): Scheitert beim Ordnen eines Rests das
+  Löschen und das Leeren, kann ein späterer Versuch seinen Rest ein zweites
+  Mal hochladen (doppelte Ereignisse, harmlos; TODO B3).
