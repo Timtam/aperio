@@ -14,7 +14,7 @@ use chrono::{TimeZone, Utc};
 use rusqlite::params;
 use sync_core::{DeviceId, EventEnvelope, EventPayload, IdPayload, SettingsPayload, SyncEvent};
 use sync_engine::test_support::FakeSecrets;
-use sync_engine::EventLogApplier;
+use sync_engine::{EventLogApplier, PassContext};
 
 use crate::conflicts::ConflictKind;
 use crate::db::SharedConn;
@@ -230,82 +230,6 @@ fn applying_own_device_envelopes_skips_them() {
         )
         .unwrap();
     assert_eq!(count, 0);
-}
-
-#[test]
-fn force_own_re_applies_own_device_envelopes() {
-    // §19.10 stale-resume invariant: after a snapshot apply
-    // overwrites local rows, our own pending logs should be
-    // replayable through the applier so offline edits come
-    // back. `apply_envelopes_force_own` is the path that
-    // makes this possible — bypass the skip_own filter that
-    // a normal sync round honours.
-    let (adapter, db) = fixture();
-    let me = DeviceId::from_string("dev-me".into());
-    let applier = make_applier(&db, &adapter, me.clone());
-
-    let cal = fixture_calendar("cal-x");
-    let envelopes = vec![
-        fixture_envelope(
-            me.clone(),
-            SyncEvent::CalendarCreated(EventPayload {
-                id: cal.id.clone(),
-                fields: serde_json::to_value(&cal).unwrap(),
-            }),
-            1000,
-        ),
-        fixture_envelope(
-            me,
-            SyncEvent::EventCreated(EventPayload {
-                id: "ev-1".into(),
-                fields: serde_json::to_value(fixture_event("ev-1", "cal-x")).unwrap(),
-            }),
-            2000,
-        ),
-    ];
-    let report = applier.apply_envelopes_force_own(envelopes).unwrap();
-    // Both envelopes flowed through the dispatch instead of
-    // being skipped — calendar + event landed in SQLite.
-    assert_eq!(report.applied, 2);
-    assert_eq!(report.skipped_own, 0);
-    let conn = db.lock().unwrap();
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM calendars WHERE id = 'cal-x'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(count, 1);
-}
-
-#[test]
-fn force_own_honours_already_applied_check() {
-    // A second `apply_envelopes_force_own` pass over the
-    // same envelopes is idempotent — the first pass writes
-    // to `sync_applied_events`, so the second sees them as
-    // already-applied and counts them in the right bucket.
-    // Important because stale-resume might re-run if the
-    // user dismisses and re-triggers.
-    let (adapter, db) = fixture();
-    let me = DeviceId::from_string("dev-me".into());
-    let applier = make_applier(&db, &adapter, me.clone());
-    let cal = fixture_calendar("cal-y");
-    let env = fixture_envelope(
-        me,
-        SyncEvent::CalendarCreated(EventPayload {
-            id: cal.id.clone(),
-            fields: serde_json::to_value(&cal).unwrap(),
-        }),
-        3000,
-    );
-    let first = applier
-        .apply_envelopes_force_own(vec![env.clone()])
-        .unwrap();
-    assert_eq!(first.applied, 1);
-    let second = applier.apply_envelopes_force_own(vec![env]).unwrap();
-    assert_eq!(second.applied, 0);
-    assert_eq!(second.skipped_already_applied, 1);
 }
 
 #[test]
@@ -1171,5 +1095,1188 @@ fn a_group_travels_between_devices_and_a_dissolve_sticks() {
         EventGroupsRepo::new(&db).get(&group.id).unwrap(),
         None,
         "a dissolved group must stay dissolved",
+    );
+}
+
+// ---- The row's clock (DESIGN-sync-snapshot-coverage.md, review round 1 of
+// #130; Toni, 2026-10-30: fix it in this PR) -----------------------------
+
+fn set_dark_mode(device: &DeviceId, value: bool, at: i64) -> EventEnvelope {
+    fixture_envelope(
+        device.clone(),
+        SyncEvent::SettingsUpdated(SettingsPayload {
+            key: "appearance.darkMode".into(),
+            value: serde_json::json!(value),
+        }),
+        at,
+    )
+}
+
+fn label_event(id: &str, name: &str, at: i64, created: bool) -> EventEnvelope {
+    let label = ColorLabel {
+        id: cal_core::ColorLabelId::new(id),
+        name: name.into(),
+        hex: "#ff0000".into(),
+        ad_hoc: false,
+    };
+    let payload = EventPayload {
+        id: id.into(),
+        fields: serde_json::to_value(&label).unwrap(),
+    };
+    fixture_envelope(
+        DeviceId::from_string("dev-other".into()),
+        if created {
+            SyncEvent::ColorLabelCreated(payload)
+        } else {
+            SyncEvent::ColorLabelUpdated(payload)
+        },
+        at,
+    )
+}
+
+fn label_deleted(id: &str, at: i64) -> EventEnvelope {
+    fixture_envelope(
+        DeviceId::from_string("dev-other".into()),
+        SyncEvent::ColorLabelDeleted(IdPayload { id: id.into() }),
+        at,
+    )
+}
+
+fn label_name(db: &SharedConn, id: &str) -> Option<String> {
+    let conn = db.lock().unwrap();
+    conn.query_row(
+        "SELECT name FROM color_labels WHERE id = ?",
+        params![id],
+        |row| row.get(0),
+    )
+    .ok()
+}
+
+#[test]
+fn an_older_setting_arriving_late_does_not_overwrite_a_newer_one() {
+    // A whole-row kind: the newer change already reached the row, so a
+    // change written earlier and uploaded late is skipped, in its own pass
+    // as in a later one.
+    let (adapter, db) = fixture();
+    let other = DeviceId::from_string("dev-other".into());
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![set_dark_mode(&other, true, 2000)])
+        .unwrap();
+    let older = set_dark_mode(&other, false, 1000);
+    let older_id = older.id.clone();
+    let report = applier.apply_envelopes(vec![older]).unwrap();
+    assert_eq!(report.skipped_older, 1);
+    assert_eq!(report.applied, 0);
+    let shared = db.clone();
+    assert_eq!(
+        UserPrefsRepo::new(&shared)
+            .get("appearance.darkMode")
+            .unwrap()
+            .as_deref(),
+        Some("true"),
+    );
+    // Recorded as applied: a re-fetch does not weigh it again, and the
+    // compactor counts it as held (else its file would never go).
+    let recorded: i64 = db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM sync_applied_events WHERE event_id = ?",
+            params![older_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(recorded, 1);
+}
+
+#[test]
+fn an_older_delete_spares_a_row_changed_after_it_and_a_delete_keeps_its_clock() {
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    // Changed at 2000; a delete from 1000 arriving late does not remove it.
+    applier
+        .apply_envelopes(vec![label_event("lbl-kept", "Arbeit", 2000, true)])
+        .unwrap();
+    applier
+        .apply_envelopes(vec![label_deleted("lbl-kept", 1000)])
+        .unwrap();
+    assert_eq!(label_name(&db, "lbl-kept").as_deref(), Some("Arbeit"));
+    // Deleted at 3000; a create from 2500 arriving late does not bring it back.
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-gone", "Privat", 1000, true),
+            label_deleted("lbl-gone", 3000),
+        ])
+        .unwrap();
+    applier
+        .apply_envelopes(vec![label_event("lbl-gone", "Privat", 2500, true)])
+        .unwrap();
+    assert_eq!(label_name(&db, "lbl-gone"), None);
+}
+
+#[test]
+fn an_older_update_of_a_kind_without_its_own_time_is_a_conflict_not_a_win() {
+    // Colour labels have no `updated_at`; the merge used the envelope's own
+    // time, so any late update won. With a clock, it is weighed like an
+    // event's: the newer value stays and the user is asked.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-a", "Work", 1000, true),
+            label_event("lbl-a", "Arbeit", 3000, false),
+        ])
+        .unwrap();
+    let report = applier
+        .apply_envelopes(vec![label_event("lbl-a", "Job", 2000, false)])
+        .unwrap();
+    assert_eq!(label_name(&db, "lbl-a").as_deref(), Some("Arbeit"));
+    assert_eq!(report.conflicts, 1);
+}
+
+#[test]
+fn the_catch_up_keeps_a_newer_row_quietly_and_brings_a_reverted_one_back() {
+    // DESIGN-sync-snapshot-coverage.md (Toni, 2026-10-30): the catch-up
+    // takes every event again — already applied ones too — and a change
+    // wins only where it is newer than its row, without a conflict.
+    let (adapter, db) = fixture();
+    let me = DeviceId::from_string("dev-me".into());
+    let other = DeviceId::from_string("dev-other".into());
+    let applier = make_applier(&db, &adapter, me);
+    seed_event(&adapter, "ev-catch");
+    let at = |hour: u32| {
+        Utc.with_ymd_and_hms(2026, 5, 12, hour, 0, 0)
+            .unwrap()
+            .timestamp()
+    };
+    let title = |text: &str, hour: u32| {
+        fixture_envelope(
+            other.clone(),
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-catch".into(),
+                fields: serde_json::json!({ "title": text }),
+            }),
+            at(hour),
+        )
+    };
+    // Applied once at 10:00 …
+    applier.apply_envelopes(vec![title("Zehn", 10)]).unwrap();
+    // … then reverted under the record, as an old snapshot's upsert does.
+    let mut reverted = adapter.get_event_by_id("ev-catch").unwrap().unwrap();
+    reverted.title = "Original".into();
+    reverted.updated_at = Utc.with_ymd_and_hms(2026, 5, 12, 9, 0, 0).unwrap();
+    adapter.upsert_event_from_sync(&reverted).unwrap();
+
+    // The catch-up: an older change (08:00) differs from the row and stays
+    // out without a conflict; the applied 10:00 change comes back.
+    let report = applier
+        .catch_up_envelopes(
+            vec![title("Acht", 8), title("Zehn", 10)],
+            &PassContext::default(),
+        )
+        .unwrap();
+    assert_eq!(report.conflicts, 0);
+    assert_eq!(
+        adapter.get_event_by_id("ev-catch").unwrap().unwrap().title,
+        "Zehn",
+    );
+    let shared = db.clone();
+    assert_eq!(ConflictsRepo::new(&shared).unresolved_count().unwrap(), 0);
+}
+
+#[test]
+fn a_rows_clock_never_goes_back_and_a_field_merge_leaves_its_whole_row_time() {
+    use sync_engine::{RowClock, RowWrite, SyncStore};
+    let (adapter, db) = fixture();
+    let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
+    let key = sync_core::RowKey {
+        kind: "color_label",
+        id: "lbl-a".into(),
+    };
+    let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+    let clock = |changed: i64, written: Option<i64>| {
+        Some(RowClock {
+            changed: at(changed),
+            written: written.map(at),
+            deleted: false,
+            seeded: false,
+        })
+    };
+    // A field merge alone writes no whole-row time.
+    store
+        .advance_row_clock(&key, at(2000), RowWrite::Fields)
+        .unwrap();
+    assert_eq!(store.row_clock(&key).unwrap(), clock(2000, None));
+    // An older whole-row write: its time comes, the change time stays.
+    store
+        .advance_row_clock(&key, at(1000), RowWrite::Whole)
+        .unwrap();
+    assert_eq!(store.row_clock(&key).unwrap(), clock(2000, Some(1000)));
+    // A newer field merge leaves the whole-row time.
+    store
+        .advance_row_clock(&key, at(3000), RowWrite::Fields)
+        .unwrap();
+    assert_eq!(store.row_clock(&key).unwrap(), clock(3000, Some(1000)));
+    // Nothing goes back.
+    store
+        .advance_row_clock(&key, at(500), RowWrite::Whole)
+        .unwrap();
+    assert_eq!(store.row_clock(&key).unwrap(), clock(3000, Some(1000)));
+}
+
+#[test]
+fn a_delete_wins_over_a_newer_field_edit() {
+    // An edit cannot bring the row back on the device that deleted it: if
+    // the delete lost here, the two devices would part for good. It loses
+    // only to a newer write of the whole row.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-edit", "Arbeit", 1000, true),
+            label_event("lbl-edit", "Job", 3000, false),
+        ])
+        .unwrap();
+    let report = applier
+        .apply_envelopes(vec![label_deleted("lbl-edit", 2000)])
+        .unwrap();
+    assert_eq!(report.applied, 1);
+    assert_eq!(label_name(&db, "lbl-edit"), None);
+}
+
+#[test]
+fn an_older_create_does_not_overwrite_a_newer_appointment() {
+    // An appointment keeps its own time: a snapshot wrote the row, not the
+    // clock. A create from before it — a file the join fetches whole — is
+    // older than the row and does not reset it.
+    let (adapter, db) = fixture();
+    seed_event(&adapter, "ev-newer");
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let mut created = fixture_event("ev-newer", "cal-merge");
+    created.title = "Created".into();
+    let report = applier
+        .apply_envelopes(vec![fixture_envelope(
+            DeviceId::from_string("dev-other".into()),
+            SyncEvent::EventCreated(EventPayload {
+                id: "ev-newer".into(),
+                fields: serde_json::to_value(&created).unwrap(),
+            }),
+            Utc.with_ymd_and_hms(2026, 5, 12, 8, 0, 0)
+                .unwrap()
+                .timestamp(),
+        )])
+        .unwrap();
+    assert_eq!(report.skipped_older, 1);
+    assert_eq!(
+        adapter.get_event_by_id("ev-newer").unwrap().unwrap().title,
+        "Original",
+    );
+}
+
+fn set_interval(value: &str, at: i64) -> EventEnvelope {
+    fixture_envelope(
+        DeviceId::from_string("dev-other".into()),
+        SyncEvent::SettingsUpdated(SettingsPayload {
+            key: "sync.intervalMinutes".into(),
+            value: serde_json::json!(value),
+        }),
+        at,
+    )
+}
+
+fn interval(db: &SharedConn) -> Option<String> {
+    UserPrefsRepo::new(db).get("sync.intervalMinutes").unwrap()
+}
+
+/// The clocks before this version: none.
+fn forget_clocks(db: &SharedConn) {
+    db.lock()
+        .unwrap()
+        .execute("DELETE FROM sync_row_clock", [])
+        .unwrap();
+}
+
+#[test]
+fn the_catch_up_leaves_a_row_of_unknown_time_as_it_is() {
+    // A row no change has stamped (its clock came with this version) holds
+    // what it applied or something newer, maybe from a file already gone:
+    // an applied change is not taken again, its time becomes the clock.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![set_interval("30", 1000)])
+        .unwrap();
+    forget_clocks(&db);
+    UserPrefsRepo::new(&db)
+        .set("sync.intervalMinutes", "90")
+        .unwrap();
+
+    applier
+        .catch_up_envelopes(vec![set_interval("30", 1000)], &PassContext::default())
+        .unwrap();
+
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+    // From here on the row has a time: an older change no longer wins.
+    let report = applier
+        .apply_envelopes(vec![set_interval("15", 500)])
+        .unwrap();
+    assert_eq!(report.skipped_older, 1);
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+}
+
+#[test]
+fn the_catch_up_weighs_applied_changes_again_once_it_changed_the_row() {
+    // A change never applied comes in between two applied ones: once it
+    // changed the row, the later applied change is taken again, in order.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![set_interval("30", 1000), set_interval("60", 3000)])
+        .unwrap();
+    forget_clocks(&db);
+
+    applier
+        .catch_up_envelopes(
+            vec![
+                set_interval("30", 1000),
+                set_interval("45", 2000),
+                set_interval("60", 3000),
+            ],
+            &PassContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(interval(&db).as_deref(), Some("60"));
+}
+
+// ---- Review round 2 of #130 --------------------------------------------
+
+#[test]
+fn an_older_merge_does_not_lower_the_rows_time() {
+    // The merge took an older patch's `updated_at` as bookkeeping: the row
+    // lost its time, and the next older change won over it.
+    let (adapter, db) = fixture();
+    seed_event(&adapter, "ev-time");
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let edit = |title: &str, hour: u32, minute: u32| {
+        let at = Utc.with_ymd_and_hms(2026, 5, 12, hour, minute, 0).unwrap();
+        fixture_envelope(
+            DeviceId::from_string("dev-other".into()),
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-time".into(),
+                fields: serde_json::json!({ "title": title, "updated_at": at.to_rfc3339() }),
+            }),
+            at.timestamp(),
+        )
+    };
+    // The row is from 09:00; both edits are older.
+    applier.apply_envelopes(vec![edit("Acht", 8, 0)]).unwrap();
+    applier
+        .apply_envelopes(vec![edit("Halb neun", 8, 30)])
+        .unwrap();
+    assert_eq!(
+        adapter.get_event_by_id("ev-time").unwrap().unwrap().title,
+        "Original",
+    );
+}
+
+#[test]
+fn the_catch_up_keeps_a_newer_row_against_this_devices_own_older_change() {
+    // Our own change counts as applied: our rows hold it. On a row of
+    // unknown time, holding something newer from a file already gone, it is
+    // not taken again.
+    let (adapter, db) = fixture();
+    let me = DeviceId::from_string("dev-me".into());
+    let applier = make_applier(&db, &adapter, me.clone());
+    UserPrefsRepo::new(&db)
+        .set("sync.intervalMinutes", "90")
+        .unwrap();
+    let own = fixture_envelope(
+        me,
+        SyncEvent::SettingsUpdated(SettingsPayload {
+            key: "sync.intervalMinutes".into(),
+            value: serde_json::json!("30"),
+        }),
+        1000,
+    );
+
+    applier
+        .catch_up_envelopes(vec![own], &PassContext::default())
+        .unwrap();
+
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+}
+
+#[test]
+fn the_catch_up_keeps_a_row_set_again_after_an_applied_delete() {
+    // A delete applied long ago, the label set again by a change whose file
+    // is gone, no time known: the delete is not taken again.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-back", "Rot", 500, true),
+            label_deleted("lbl-back", 1000),
+        ])
+        .unwrap();
+    applier
+        .apply_envelopes(vec![label_event("lbl-back", "Wieder da", 2000, true)])
+        .unwrap();
+    forget_clocks(&db);
+
+    applier
+        .catch_up_envelopes(
+            vec![label_deleted("lbl-back", 1000)],
+            &PassContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(label_name(&db, "lbl-back").as_deref(), Some("Wieder da"));
+}
+
+#[test]
+fn a_field_edit_does_not_bring_back_a_label_deleted_here() {
+    // Review round 2 of #130: a merge onto a missing row upserted it, so the
+    // device that deleted it had it again while the editing device deleted
+    // it. Older or newer, the edit stays out.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-gone", "Rot", 1000, true),
+            label_deleted("lbl-gone", 3000),
+        ])
+        .unwrap();
+
+    let report = applier
+        .apply_envelopes(vec![
+            label_event("lbl-gone", "Älter", 2000, false),
+            label_event("lbl-gone", "Neuer", 4000, false),
+        ])
+        .unwrap();
+
+    assert_eq!(report.skipped_older, 2);
+    assert_eq!(label_name(&db, "lbl-gone"), None);
+}
+
+#[test]
+fn a_field_edit_does_not_bring_back_an_appointment_deleted_here() {
+    let (adapter, db) = fixture();
+    adapter
+        .upsert_calendar_from_sync(&fixture_calendar("cal-gone"))
+        .unwrap();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let other = DeviceId::from_string("dev-other".into());
+    let row = fixture_event("ev-gone", "cal-gone");
+    let full = || EventPayload {
+        id: "ev-gone".into(),
+        fields: serde_json::to_value(&row).unwrap(),
+    };
+    applier
+        .apply_envelopes(vec![
+            fixture_envelope(other.clone(), SyncEvent::EventCreated(full()), 1000),
+            fixture_envelope(
+                other.clone(),
+                SyncEvent::EventDeleted(IdPayload {
+                    id: "ev-gone".into(),
+                }),
+                3000,
+            ),
+        ])
+        .unwrap();
+
+    applier
+        .apply_envelopes(vec![fixture_envelope(
+            other,
+            SyncEvent::EventUpdated(full()),
+            4000,
+        )])
+        .unwrap();
+
+    assert!(adapter.get_event_by_id("ev-gone").unwrap().is_none());
+}
+
+#[test]
+fn a_device_catching_up_over_create_delete_and_a_later_edit_ends_deleted() {
+    // A third device sees all three: it ends like the device that deleted
+    // and the one that edited, deleted.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-third".into()));
+
+    applier
+        .catch_up_envelopes(
+            vec![
+                label_event("lbl-third", "Rot", 1000, true),
+                label_deleted("lbl-third", 3000),
+                label_event("lbl-third", "Neuer", 4000, false),
+            ],
+            &PassContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(label_name(&db, "lbl-third"), None);
+}
+
+#[test]
+fn a_snapshots_clocks_never_move_a_row_back() {
+    use sync_engine::{RowClock, RowWrite, SyncStore};
+    let (adapter, db) = fixture();
+    let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
+    let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+    let key = sync_core::RowKey {
+        kind: "task_list",
+        id: "list-1".into(),
+    };
+    store
+        .advance_row_clock(&key, at(5000), RowWrite::Fields)
+        .unwrap();
+    store
+        .advance_row_clocks(&[(
+            key.clone(),
+            RowClock {
+                changed: at(3000),
+                written: Some(at(2000)),
+                deleted: false,
+                seeded: false,
+            },
+        )])
+        .unwrap();
+    assert_eq!(
+        store.row_clock(&key).unwrap(),
+        Some(RowClock {
+            changed: at(5000),
+            written: Some(at(2000)),
+            deleted: false,
+            seeded: false,
+        }),
+    );
+    assert_eq!(store.row_clocks().unwrap().len(), 1);
+}
+
+// ---- Review round 3 of #130 --------------------------------------------
+
+#[test]
+fn a_delete_takes_away_an_appointment_a_snapshot_brought_back() {
+    // The row is there again, with its own time: the applied delete is
+    // weighed, not taken as a row of unknown time.
+    let (adapter, db) = fixture();
+    adapter
+        .upsert_calendar_from_sync(&fixture_calendar("cal-back"))
+        .unwrap();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let other = DeviceId::from_string("dev-other".into());
+    let row = fixture_event("ev-back", "cal-back");
+    let delete = fixture_envelope(
+        other.clone(),
+        SyncEvent::EventDeleted(IdPayload {
+            id: "ev-back".into(),
+        }),
+        3000,
+    );
+    applier
+        .apply_envelopes(vec![
+            fixture_envelope(
+                other,
+                SyncEvent::EventCreated(EventPayload {
+                    id: "ev-back".into(),
+                    fields: serde_json::to_value(&row).unwrap(),
+                }),
+                1000,
+            ),
+            delete.clone(),
+        ])
+        .unwrap();
+    forget_clocks(&db);
+    adapter.upsert_event_from_sync(&row).unwrap();
+
+    applier
+        .catch_up_envelopes(vec![delete], &PassContext::default())
+        .unwrap();
+
+    assert!(adapter.get_event_by_id("ev-back").unwrap().is_none());
+}
+
+#[test]
+fn an_appointment_moved_out_of_a_calendar_deleted_meanwhile_stays() {
+    // Review round 3 of #130: the calendar's delete took the appointment
+    // along, without a delete of its own; the move from another device
+    // brings it into the other calendar there, so it must here too. Only a
+    // row deleted itself keeps an edit out.
+    let (adapter, db) = fixture();
+    for id in ["cal-old", "cal-new"] {
+        adapter
+            .upsert_calendar_from_sync(&fixture_calendar(id))
+            .unwrap();
+    }
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let other = DeviceId::from_string("dev-other".into());
+    let row = fixture_event("ev-moved", "cal-old");
+    applier
+        .apply_envelopes(vec![
+            fixture_envelope(
+                other.clone(),
+                SyncEvent::EventCreated(EventPayload {
+                    id: "ev-moved".into(),
+                    fields: serde_json::to_value(&row).unwrap(),
+                }),
+                1000,
+            ),
+            fixture_envelope(
+                other.clone(),
+                SyncEvent::CalendarDeleted(IdPayload {
+                    id: "cal-old".into(),
+                }),
+                2000,
+            ),
+        ])
+        .unwrap();
+    assert!(adapter.get_event_by_id("ev-moved").unwrap().is_none());
+
+    let mut moved = row.clone();
+    moved.calendar_id = "cal-new".into();
+    applier
+        .apply_envelopes(vec![fixture_envelope(
+            other,
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-moved".into(),
+                fields: serde_json::to_value(&moved).unwrap(),
+            }),
+            3000,
+        )])
+        .unwrap();
+
+    assert_eq!(
+        adapter
+            .get_event_by_id("ev-moved")
+            .unwrap()
+            .map(|event| event.calendar_id),
+        Some("cal-new".to_string()),
+    );
+}
+
+#[test]
+fn the_delete_mark_follows_the_newest_whole_row_write() {
+    use sync_engine::{RowWrite, SyncStore};
+    let (adapter, db) = fixture();
+    let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
+    let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+    let key = sync_core::RowKey {
+        kind: "color_label",
+        id: "lbl-mark".into(),
+    };
+    let deleted = || store.row_clock(&key).unwrap().unwrap().deleted;
+    store
+        .advance_row_clock(&key, at(2000), RowWrite::Delete)
+        .unwrap();
+    assert!(deleted());
+    store
+        .advance_row_clock(&key, at(1000), RowWrite::Whole)
+        .unwrap();
+    assert!(deleted(), "an older write does not undo it");
+    store
+        .advance_row_clock(&key, at(3000), RowWrite::Whole)
+        .unwrap();
+    assert!(!deleted(), "a newer one does");
+    store
+        .advance_row_clock(&key, at(4000), RowWrite::Fields)
+        .unwrap();
+    assert!(!deleted(), "a field merge leaves it");
+}
+
+// ---- Review round 4 of #130 --------------------------------------------
+
+#[test]
+fn a_held_change_does_not_win_when_it_is_met_again() {
+    // The seeded clock stood exactly on the change, and a snapshot carried
+    // it on: a device meeting the change again, never applied there, took
+    // it and went back to the older value. The clock goes just past it.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let old = set_interval("30", 1000);
+    applier.apply_envelopes(vec![old.clone()]).unwrap();
+    forget_clocks(&db);
+    UserPrefsRepo::new(&db)
+        .set("sync.intervalMinutes", "90")
+        .unwrap();
+    applier
+        .catch_up_envelopes(vec![old.clone()], &PassContext::default())
+        .unwrap();
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+    // As on a device taking this one's snapshot: the change is new to it.
+    db.lock()
+        .unwrap()
+        .execute("DELETE FROM sync_applied_events", [])
+        .unwrap();
+
+    applier.apply_envelopes(vec![old]).unwrap();
+
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+}
+
+#[test]
+fn a_held_create_of_a_missing_row_marks_it_deleted() {
+    // The create was applied, the row is gone: it was deleted after it, by
+    // a change whose file is gone. A later edit must not bring it back.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let create = label_event("lbl-zombie", "Rot", 1000, true);
+    applier.apply_envelopes(vec![create.clone()]).unwrap();
+    forget_clocks(&db);
+    db.lock()
+        .unwrap()
+        .execute("DELETE FROM color_labels WHERE id = 'lbl-zombie'", [])
+        .unwrap();
+
+    applier
+        .catch_up_envelopes(vec![create], &PassContext::default())
+        .unwrap();
+    applier
+        .apply_envelopes(vec![label_event("lbl-zombie", "Neu", 2000, false)])
+        .unwrap();
+
+    assert_eq!(label_name(&db, "lbl-zombie"), None);
+}
+
+#[test]
+fn a_held_delete_of_a_row_made_again_is_not_marked_deleted() {
+    // The row is there after an applied delete: it was made again, so its
+    // newest whole-row write is no delete, and an edit moving it out of a
+    // container deleted later still applies.
+    use sync_engine::SyncStore;
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let delete = label_deleted("lbl-again", 2000);
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-again", "Rot", 1000, true),
+            delete.clone(),
+        ])
+        .unwrap();
+    applier
+        .apply_envelopes(vec![label_event("lbl-again", "Wieder", 3000, true)])
+        .unwrap();
+    forget_clocks(&db);
+
+    applier
+        .catch_up_envelopes(vec![delete], &PassContext::default())
+        .unwrap();
+
+    let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
+    let key = sync_core::RowKey {
+        kind: "color_label",
+        id: "lbl-again".into(),
+    };
+    assert!(!store.row_clock(&key).unwrap().unwrap().deleted);
+    assert_eq!(label_name(&db, "lbl-again").as_deref(), Some("Wieder"));
+}
+
+// ---- Review round 5 of #130 --------------------------------------------
+
+#[test]
+fn the_catch_up_brings_back_an_appointment_moved_out_of_a_calendar_deleted_meanwhile() {
+    // The calendar's delete took the appointment along, with no delete of its
+    // own; the move another device made before it was missed. A held create
+    // of the missing row seeded "deleted", and the move then stayed out.
+    let (adapter, db) = fixture();
+    for id in ["cal-old", "cal-new"] {
+        adapter
+            .upsert_calendar_from_sync(&fixture_calendar(id))
+            .unwrap();
+    }
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let other = DeviceId::from_string("dev-other".into());
+    let row = fixture_event("ev-moved", "cal-old");
+    let create = fixture_envelope(
+        other.clone(),
+        SyncEvent::EventCreated(EventPayload {
+            id: "ev-moved".into(),
+            fields: serde_json::to_value(&row).unwrap(),
+        }),
+        1000,
+    );
+    let calendar_gone = fixture_envelope(
+        other.clone(),
+        SyncEvent::CalendarDeleted(IdPayload {
+            id: "cal-old".into(),
+        }),
+        2000,
+    );
+    applier
+        .apply_envelopes(vec![create.clone(), calendar_gone.clone()])
+        .unwrap();
+    forget_clocks(&db);
+    let mut moved = row.clone();
+    moved.calendar_id = "cal-new".into();
+    let move_it = fixture_envelope(
+        other.clone(),
+        SyncEvent::EventUpdated(EventPayload {
+            id: "ev-moved".into(),
+            fields: serde_json::to_value(&moved).unwrap(),
+        }),
+        1500,
+    );
+
+    applier
+        .catch_up_envelopes(
+            vec![create, move_it, calendar_gone],
+            &PassContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        adapter
+            .get_event_by_id("ev-moved")
+            .unwrap()
+            .map(|event| event.calendar_id),
+        Some("cal-new".to_string()),
+    );
+    // And a later edit still applies.
+    let mut renamed = moved;
+    renamed.title = "Later".into();
+    applier
+        .apply_envelopes(vec![fixture_envelope(
+            other,
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-moved".into(),
+                fields: serde_json::to_value(&renamed).unwrap(),
+            }),
+            // After the row's own `updated_at`.
+            1_800_000_000,
+        )])
+        .unwrap();
+    assert_eq!(
+        adapter
+            .get_event_by_id("ev-moved")
+            .unwrap()
+            .map(|event| event.title),
+        Some("Later".to_string()),
+    );
+}
+
+#[test]
+fn the_catch_up_brings_back_a_task_moved_out_of_a_list_deleted_meanwhile() {
+    let (adapter, db) = fixture();
+    for id in ["list-old", "list-new"] {
+        adapter
+            .upsert_task_list_from_sync(&cal_core::TaskList {
+                color_label: None,
+                id: id.into(),
+                name: id.into(),
+                color: None,
+                default_sound: None,
+                embedded_in_calendar: None,
+                parent_id: None,
+                read_only: false,
+            })
+            .unwrap();
+    }
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let other = DeviceId::from_string("dev-other".into());
+    let task = |list: &str| {
+        serde_json::json!({
+            "id": "task-moved",
+            "list_id": list,
+            "title": "Milch",
+            "status": "open",
+            "priority": "medium",
+            "reminders": [],
+            "created_at": "2026-10-28T08:00:00Z",
+            "updated_at": "2026-10-28T08:00:00Z",
+        })
+    };
+    let create = fixture_envelope(
+        other.clone(),
+        SyncEvent::TaskCreated(EventPayload {
+            id: "task-moved".into(),
+            fields: task("list-old"),
+        }),
+        1000,
+    );
+    let list_gone = fixture_envelope(
+        other.clone(),
+        SyncEvent::TaskListDeleted(IdPayload {
+            id: "list-old".into(),
+        }),
+        2000,
+    );
+    applier
+        .apply_envelopes(vec![create.clone(), list_gone.clone()])
+        .unwrap();
+    assert!(adapter.get_task_by_id("task-moved").unwrap().is_none());
+    forget_clocks(&db);
+    let move_it = fixture_envelope(
+        other,
+        SyncEvent::TaskUpdated(EventPayload {
+            id: "task-moved".into(),
+            fields: task("list-new"),
+        }),
+        1500,
+    );
+
+    applier
+        .catch_up_envelopes(vec![create, move_it, list_gone], &PassContext::default())
+        .unwrap();
+
+    assert_eq!(
+        adapter
+            .get_task_by_id("task-moved")
+            .unwrap()
+            .map(|task| task.list_id),
+        Some("list-new".to_string()),
+    );
+}
+
+#[test]
+fn a_clock_seeded_in_an_earlier_catch_up_still_holds_an_applied_change() {
+    // The first catch-up did not reach the second change (its file was torn,
+    // or the pass was cut short) and seeded the row from the first. The next
+    // took the seed for a known time and the second change won: the value a
+    // change whose file is gone had set since was lost here alone.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let first = set_interval("30", 1000);
+    let second = set_interval("45", 2000);
+    applier
+        .apply_envelopes(vec![first.clone(), second.clone()])
+        .unwrap();
+    forget_clocks(&db);
+    UserPrefsRepo::new(&db)
+        .set("sync.intervalMinutes", "90")
+        .unwrap();
+
+    applier
+        .catch_up_envelopes(vec![first.clone()], &PassContext::default())
+        .unwrap();
+    applier
+        .catch_up_envelopes(vec![first, second], &PassContext::default())
+        .unwrap();
+
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+}
+
+#[test]
+fn a_seed_marks_only_a_clock_of_unknown_time() {
+    use sync_engine::{RowWrite, SyncStore};
+    let (adapter, db) = fixture();
+    let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
+    let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+    let key = |id: &str| sync_core::RowKey {
+        kind: "color_label",
+        id: id.into(),
+    };
+    let seeded = |id: &str| store.row_clock(&key(id)).unwrap().unwrap().seeded;
+
+    store
+        .seed_row_clock(&key("lbl-a"), at(1000), RowWrite::Whole)
+        .unwrap();
+    assert!(seeded("lbl-a"));
+    store
+        .seed_row_clock(&key("lbl-a"), at(2000), RowWrite::Whole)
+        .unwrap();
+    assert!(seeded("lbl-a"), "a second seed keeps it unknown");
+    store
+        .advance_row_clock(&key("lbl-a"), at(1500), RowWrite::Fields)
+        .unwrap();
+    assert!(
+        seeded("lbl-a"),
+        "an older change taken left the row as it was"
+    );
+    store
+        .advance_row_clock(&key("lbl-a"), at(2500), RowWrite::Fields)
+        .unwrap();
+    assert!(
+        !seeded("lbl-a"),
+        "a newer change taken makes the time known"
+    );
+
+    store
+        .advance_row_clock(&key("lbl-b"), at(2000), RowWrite::Whole)
+        .unwrap();
+    store
+        .seed_row_clock(&key("lbl-b"), at(2000), RowWrite::Whole)
+        .unwrap();
+    assert!(
+        !seeded("lbl-b"),
+        "a seed does not make a known time unknown"
+    );
+    // A resume: its own older, known clock under a snapshot's seeded one.
+    store
+        .seed_row_clock(&key("lbl-b"), at(3000), RowWrite::Whole)
+        .unwrap();
+    assert!(seeded("lbl-b"), "a newer seed is the row's time now");
+
+    // A change held again keeps its first decision about the delete.
+    let deleted = |id: &str| store.row_clock(&key(id)).unwrap().unwrap().deleted;
+    store
+        .seed_row_clock(&key("lbl-c"), at(1000), RowWrite::Delete)
+        .unwrap();
+    store
+        .seed_row_clock(&key("lbl-c"), at(1000), RowWrite::Whole)
+        .unwrap();
+    assert!(deleted("lbl-c"));
+    store
+        .advance_row_clock(&key("lbl-c"), at(1000), RowWrite::Whole)
+        .unwrap();
+    assert!(!deleted("lbl-c"), "a real write at the same time decides");
+}
+
+#[test]
+fn an_older_change_taken_between_two_catch_ups_does_not_make_the_seed_known() {
+    // The first catch-up seeded the label from its second applied change; an
+    // older, never applied edit then changed nothing (the row is newer), but
+    // made the seed a known time, and the next catch-up let a later applied
+    // change win over what a change whose file is gone had set since.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let made = label_event("lbl-z", "A", 1000, true);
+    let named = label_event("lbl-z", "B", 2000, false);
+    let later = label_event("lbl-z", "D", 4000, false);
+    applier
+        .apply_envelopes(vec![made.clone(), named.clone(), later.clone()])
+        .unwrap();
+    forget_clocks(&db);
+    db.lock()
+        .unwrap()
+        .execute("UPDATE color_labels SET name = 'Z' WHERE id = 'lbl-z'", [])
+        .unwrap();
+
+    applier
+        .catch_up_envelopes(vec![made.clone(), named.clone()], &PassContext::default())
+        .unwrap();
+    let older = label_event("lbl-z", "N", 1500, false);
+    applier
+        .catch_up_envelopes(vec![made, older, named, later], &PassContext::default())
+        .unwrap();
+
+    assert_eq!(label_name(&db, "lbl-z").as_deref(), Some("Z"));
+}
+
+fn task_fields(id: &str, list: &str, parent: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "list_id": list,
+        "parent_id": parent,
+        "title": id,
+        "status": "open",
+        "priority": "medium",
+        "reminders": [],
+        // Before every change below: the changes are newer than the row.
+        "created_at": "1970-01-01T00:00:00Z",
+        "updated_at": "1970-01-01T00:00:00Z",
+    })
+}
+
+fn task_lists(adapter: &Arc<LocalAdapter>, ids: &[&str]) {
+    for id in ids {
+        adapter
+            .upsert_task_list_from_sync(&cal_core::TaskList {
+                color_label: None,
+                id: (*id).into(),
+                name: (*id).into(),
+                color: None,
+                default_sound: None,
+                embedded_in_calendar: None,
+                parent_id: None,
+                read_only: false,
+            })
+            .unwrap();
+    }
+}
+
+fn task_event(id: &str, fields: serde_json::Value, at: i64, created: bool) -> EventEnvelope {
+    let payload = EventPayload {
+        id: id.into(),
+        fields,
+    };
+    fixture_envelope(
+        DeviceId::from_string("dev-other".into()),
+        if created {
+            SyncEvent::TaskCreated(payload)
+        } else {
+            SyncEvent::TaskUpdated(payload)
+        },
+        at,
+    )
+}
+
+#[test]
+fn the_catch_up_brings_back_a_subtask_promoted_before_its_parent_was_deleted() {
+    // Deleting a task takes its subtasks along, with no delete of their own;
+    // the parent is their container as a list is.
+    let (adapter, db) = fixture();
+    task_lists(&adapter, &["list-a"]);
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let parent = task_event("task-p", task_fields("task-p", "list-a", None), 900, true);
+    let child = task_event(
+        "task-s",
+        task_fields("task-s", "list-a", Some("task-p")),
+        1000,
+        true,
+    );
+    let parent_gone = fixture_envelope(
+        DeviceId::from_string("dev-other".into()),
+        SyncEvent::TaskDeleted(IdPayload {
+            id: "task-p".into(),
+        }),
+        2000,
+    );
+    applier
+        .apply_envelopes(vec![parent.clone(), child.clone(), parent_gone.clone()])
+        .unwrap();
+    assert!(adapter.get_task_by_id("task-s").unwrap().is_none());
+    forget_clocks(&db);
+    let promoted = task_event("task-s", task_fields("task-s", "list-a", None), 1500, false);
+
+    applier
+        .catch_up_envelopes(
+            vec![parent, child, promoted, parent_gone],
+            &PassContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        adapter
+            .get_task_by_id("task-s")
+            .unwrap()
+            .map(|task| task.parent_id),
+        Some(None),
+    );
+}
+
+#[test]
+fn the_newest_held_change_decides_whether_a_missing_task_was_taken_along() {
+    // Made in a list that is still there, moved into one deleted since: the
+    // move, held after the create, decides — not deleted itself, so the
+    // move elsewhere that this device missed still applies.
+    let (adapter, db) = fixture();
+    task_lists(&adapter, &["list-l", "list-m", "list-n"]);
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let made = task_event("task-t", task_fields("task-t", "list-l", None), 1000, true);
+    let into_m = task_event("task-t", task_fields("task-t", "list-m", None), 2000, false);
+    let m_gone = fixture_envelope(
+        DeviceId::from_string("dev-other".into()),
+        SyncEvent::TaskListDeleted(IdPayload {
+            id: "list-m".into(),
+        }),
+        3000,
+    );
+    applier
+        .apply_envelopes(vec![made.clone(), into_m.clone(), m_gone.clone()])
+        .unwrap();
+    assert!(adapter.get_task_by_id("task-t").unwrap().is_none());
+    forget_clocks(&db);
+    let into_n = task_event("task-t", task_fields("task-t", "list-n", None), 2500, false);
+
+    applier
+        .catch_up_envelopes(vec![made, into_m, into_n, m_gone], &PassContext::default())
+        .unwrap();
+
+    assert_eq!(
+        adapter
+            .get_task_by_id("task-t")
+            .unwrap()
+            .map(|task| task.list_id),
+        Some("list-n".to_string()),
     );
 }

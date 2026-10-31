@@ -46,6 +46,7 @@
 //!   no-op rather than failing, so a forward-compat dataset
 //!   from a future Aperio doesn't break us.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use adapter_local::LocalAdapter;
@@ -54,13 +55,14 @@ use serde::Serialize;
 use serde_json::Value;
 use sync_core::{
     AccountPayload, CredentialPayload, CredentialSlotPayload, DeviceId, EventEnvelope,
-    EventPayload, IdPayload, LogFile, PluginPayload, SettingsPayload, SyncError, SyncEvent,
+    EventPayload, IdPayload, LogFile, PluginPayload, RowKey, SettingsPayload, SyncError, SyncEvent,
     SyncResult,
 };
 use tracing::{debug, warn};
 
 use crate::{
-    ConflictKind, NewConflict, SecretSlot, SecretStore, SnapshotAccount, StoreError, SyncStore,
+    ConflictKind, NewConflict, RowWrite, SecretSlot, SecretStore, SnapshotAccount, StoreError,
+    SyncStore,
 };
 
 /// Fields the merge path treats as metadata — never user-surfaced
@@ -138,6 +140,11 @@ pub struct ApplyReport {
     /// Variants we don't have a handler for yet (plugin.*,
     /// shortcut.*). Logged at debug.
     pub skipped_unsupported: usize,
+    /// Envelopes older than their row's clock (`sync_row_clock`): a newer
+    /// change already reached the row, so this one does not win — a change
+    /// written offline and uploaded late, or a grown file fetched again
+    /// (DESIGN-sync-snapshot-coverage.md).
+    pub skipped_older: usize,
     /// Per-envelope failures. Doesn't sink the run — we keep
     /// applying the remaining envelopes; a single bad row
     /// shouldn't strand a 1000-row log file. The number here
@@ -232,40 +239,39 @@ impl EventLogApplier {
     /// (timestamp, id) before dispatching, so the same input set
     /// produces the same final state regardless of source order.
     pub fn apply_envelopes(&self, envelopes: Vec<EventEnvelope>) -> SyncResult<ApplyReport> {
-        self.apply_envelopes_inner(envelopes, false)
+        self.apply_envelopes_inner(envelopes, false, &PassContext::default())
     }
 
-    /// Like [`apply_envelopes`] but ignores the local-device-id
-    /// filter — every envelope goes through the apply pipeline
-    /// even if it was minted by this device.
+    /// The catch-up (DESIGN-sync-snapshot-coverage.md, Toni 2026-10-30): a
+    /// device whose record is not exact takes every event again — its own
+    /// included, already-applied ones included — and a change wins only
+    /// where it is newer than its row, without a conflict: what the row
+    /// holds is either the same change or a newer one. Nothing is reset, and
+    /// a row an old snapshot upsert reverted gets its newer change back.
     ///
-    /// Normal sync rounds always skip own-device envelopes
-    /// because they were already applied at write time. The
-    /// §19.10 stale-resume flow needs the opposite: after a
-    /// snapshot apply has overwritten local SQLite to the
-    /// snapshot state, our own pending logs (which carry edits
-    /// the user made while offline) must be replayed to bring
-    /// those edits back. The applier's existing field-level
-    /// merge — using `local_updated_at vs env.timestamp` —
-    /// handles the snapshot-vs-edit ordering correctly without
-    /// any special "force" semantics.
+    /// This device's own changes count as applied: its rows hold them. An
+    /// applied change is weighed again only against a known time. A row no
+    /// change has stamped yet (its clock came with this version, and its
+    /// table keeps no `updated_at`) holds this change or a newer one, maybe
+    /// from a file already gone: it stays as it is and its clock goes just
+    /// past the change — until the catch-up itself changes the row.
     ///
-    /// Callers MUST limit this to the stale-resume path. Using
-    /// it during a steady-state round would re-apply own events
-    /// twice (once at write time, once via the applier) and
-    /// could trigger spurious conflicts via the merge_fields
-    /// timestamp comparison.
-    pub fn apply_envelopes_force_own(
+    /// Not one of this device's own changes that is not on the remote yet,
+    /// though ([`PassContext`]): the peers will take it, so it is weighed as
+    /// they will weigh it (review round 3 of #130).
+    pub fn catch_up_envelopes(
         &self,
         envelopes: Vec<EventEnvelope>,
+        context: &PassContext,
     ) -> SyncResult<ApplyReport> {
-        self.apply_envelopes_inner(envelopes, true)
+        self.apply_envelopes_inner(envelopes, true, context)
     }
 
     fn apply_envelopes_inner(
         &self,
         mut envelopes: Vec<EventEnvelope>,
-        force_own: bool,
+        catch_up: bool,
+        context: &PassContext,
     ) -> SyncResult<ApplyReport> {
         // Reset the per-pass conflict counter. `merge_fields`
         // bumps it on every recorded conflict; we fold the final
@@ -279,16 +285,22 @@ impl EventLogApplier {
 
         let mut report = ApplyReport::default();
         for env in envelopes {
-            if !force_own && env.device_id == self.local_device_id {
+            let own = env.device_id == self.local_device_id;
+            if own && !catch_up {
                 report.skipped_own += 1;
                 continue;
             }
-            match self.is_already_applied(&env.id) {
-                Ok(true) => {
+            let applied = match self.is_already_applied(&env.id) {
+                Ok(true) if !catch_up => {
                     report.skipped_already_applied += 1;
                     continue;
                 }
-                Ok(false) => {}
+                // Our own change is in our rows: held, as the compactor
+                // counts it (review round 2 of #130) — unless it is not on
+                // the remote yet. A snapshot this pass applied may have put
+                // an older value back, and the peers will take the change:
+                // it is weighed as they will weigh it (review round 3).
+                Ok(applied) => !context.unpushed.contains(&env.id) && (applied || own),
                 Err(err) => {
                     warn!(
                         event_id = %env.id,
@@ -298,10 +310,90 @@ impl EventLogApplier {
                     report.failed += 1;
                     continue;
                 }
+            };
+
+            // The row's time. An older change does not win: a whole-row
+            // write or a create is skipped behind any newer change, a delete
+            // only behind a newer whole-row write, and a field merge weighs
+            // it as the row's time — but stays out of a row that was written
+            // here and is gone: it was deleted, and an edit does not bring it
+            // back on the device that deleted it.
+            let key = env.event.row_key();
+            let RowTime {
+                changed,
+                written,
+                deleted,
+                present,
+                absent,
+                container_gone,
+                seeded,
+            } = match self.row_time(key.as_ref(), &env.event) {
+                Ok(time) => time,
+                Err(err) => {
+                    warn!(event_id = %env.id, ?err, "could not read the row's time; skipping envelope");
+                    report.failed += 1;
+                    continue;
+                }
+            };
+            let write = RowWrite::of(&env.event);
+            let whole = write != RowWrite::Fields;
+            // A row whose clock is only seeded is still of unknown time, in
+            // this pass and in a later one (review round 5 of #130).
+            if applied && (changed.is_none() || seeded) {
+                // A row of unknown time keeps what it holds: this change or
+                // a newer one. Its clock goes just past the change, so the
+                // change itself, met again in a later pass or by a device
+                // taking a snapshot of this row, does not win over it. A row
+                // that is missing was deleted after it; one still there after
+                // a delete was made again (review round 4 of #130). But a
+                // task or appointment whose list, calendar or parent task is
+                // gone too may have been taken along: not deleted itself, so
+                // an edit moving it elsewhere still applies (review round 5).
+                if let Some(key) = key {
+                    let seed = match (present, write) {
+                        (false, RowWrite::Delete) => RowWrite::Delete,
+                        (false, _) if container_gone => RowWrite::Whole,
+                        (false, _) => RowWrite::Delete,
+                        (true, RowWrite::Delete) => RowWrite::Whole,
+                        (true, write) => write,
+                    };
+                    let past = env.timestamp + chrono::Duration::microseconds(1);
+                    if let Err(err) = self.store.seed_row_clock(&key, past, seed) {
+                        warn!(event_id = %env.id, ?err, "couldn't seed the row's clock");
+                    }
+                }
+                report.skipped_already_applied += 1;
+                continue;
+            }
+            let older = if env.event.is_delete() {
+                written.is_some_and(|at| at > env.timestamp)
+            } else if whole {
+                changed.is_some_and(|at| at > env.timestamp)
+            } else {
+                absent && deleted
+            };
+            if older {
+                report.skipped_older += 1;
+                // Recorded, so a re-fetch does not weigh it again.
+                if let Err(err) = self.mark_applied(&env.id) {
+                    warn!(event_id = %env.id, ?err, "couldn't record an older envelope as applied");
+                }
+                continue;
             }
 
-            match self.apply_one(&env) {
+            match self.apply_one(
+                &env,
+                Merge {
+                    clock: changed,
+                    quiet: catch_up,
+                },
+            ) {
                 Ok(true) => {
+                    if let Some(key) = &key {
+                        if let Err(err) = self.store.advance_row_clock(key, env.timestamp, write) {
+                            warn!(event_id = %env.id, ?err, "couldn't advance the row's clock");
+                        }
+                    }
                     // Mark as applied. If marking itself fails we
                     // log + count as `failed` so callers know to
                     // raise a "sync state inconsistent" alert —
@@ -362,7 +454,7 @@ impl EventLogApplier {
     /// `Ok(true)` when something was actually applied,
     /// `Ok(false)` when the variant is one we don't handle yet
     /// (plugin.*, shortcut.*), `Err` on a real failure.
-    fn apply_one(&self, env: &EventEnvelope) -> SyncResult<bool> {
+    fn apply_one(&self, env: &EventEnvelope, merge: Merge) -> SyncResult<bool> {
         match &env.event {
             SyncEvent::EventCreated(payload) => {
                 self.apply_event_upsert(payload)?;
@@ -372,7 +464,7 @@ impl EventLogApplier {
             // merge path. The envelope timestamp + device id steer
             // conflict detection.
             SyncEvent::EventUpdated(payload) => {
-                self.apply_event_merge(payload, env)?;
+                self.apply_event_merge(payload, env, merge)?;
                 Ok(true)
             }
             SyncEvent::EventDeleted(payload) => {
@@ -384,7 +476,7 @@ impl EventLogApplier {
                 Ok(true)
             }
             SyncEvent::TaskUpdated(payload) => {
-                self.apply_task_merge(payload, env)?;
+                self.apply_task_merge(payload, env, merge)?;
                 Ok(true)
             }
             SyncEvent::TaskDeleted(payload) => {
@@ -396,7 +488,7 @@ impl EventLogApplier {
                 Ok(true)
             }
             SyncEvent::TaskListUpdated(payload) => {
-                self.apply_task_list_merge(payload, env)?;
+                self.apply_task_list_merge(payload, env, merge)?;
                 Ok(true)
             }
             SyncEvent::TaskListDeleted(payload) => {
@@ -418,7 +510,7 @@ impl EventLogApplier {
                 Ok(true)
             }
             SyncEvent::CalendarUpdated(payload) => {
-                self.apply_calendar_merge(payload, env)?;
+                self.apply_calendar_merge(payload, env, merge)?;
                 Ok(true)
             }
             SyncEvent::CalendarDeleted(payload) => {
@@ -463,7 +555,7 @@ impl EventLogApplier {
                 Ok(true)
             }
             SyncEvent::ColorLabelUpdated(payload) => {
-                self.apply_color_label_merge(payload, env)?;
+                self.apply_color_label_merge(payload, env, merge)?;
                 Ok(true)
             }
             SyncEvent::ColorLabelDeleted(payload) => {
@@ -713,7 +805,12 @@ impl EventLogApplier {
     // same row) IS caught.
     // -----------------------------------------------------------------
 
-    fn apply_event_merge(&self, payload: &EventPayload, env: &EventEnvelope) -> SyncResult<()> {
+    fn apply_event_merge(
+        &self,
+        payload: &EventPayload,
+        env: &EventEnvelope,
+        merge: Merge,
+    ) -> SyncResult<()> {
         let local = self
             .adapter
             .get_event_by_id(&payload.id)
@@ -724,8 +821,9 @@ impl EventLogApplier {
         let merged = self.merge_fields(
             &local,
             &payload.fields,
-            local.updated_at,
+            merge.row_time(Some(local.updated_at), env),
             env,
+            merge.quiet,
             ConflictKind::Event,
             &payload.id,
         )?;
@@ -738,7 +836,12 @@ impl EventLogApplier {
             .map_err(core_to_sync)
     }
 
-    fn apply_task_merge(&self, payload: &EventPayload, env: &EventEnvelope) -> SyncResult<()> {
+    fn apply_task_merge(
+        &self,
+        payload: &EventPayload,
+        env: &EventEnvelope,
+        merge: Merge,
+    ) -> SyncResult<()> {
         let local = self
             .adapter
             .get_task_by_id(&payload.id)
@@ -749,8 +852,9 @@ impl EventLogApplier {
         let merged = self.merge_fields(
             &local,
             &payload.fields,
-            local.updated_at,
+            merge.row_time(Some(local.updated_at), env),
             env,
+            merge.quiet,
             ConflictKind::Task,
             &payload.id,
         )?;
@@ -763,7 +867,12 @@ impl EventLogApplier {
             .map_err(core_to_sync)
     }
 
-    fn apply_task_list_merge(&self, payload: &EventPayload, env: &EventEnvelope) -> SyncResult<()> {
+    fn apply_task_list_merge(
+        &self,
+        payload: &EventPayload,
+        env: &EventEnvelope,
+        merge: Merge,
+    ) -> SyncResult<()> {
         let local = self
             .adapter
             .get_task_list_by_id(&payload.id)
@@ -779,8 +888,9 @@ impl EventLogApplier {
         let merged = self.merge_fields(
             &local,
             &payload.fields,
-            env.timestamp,
+            merge.row_time(None, env),
             env,
+            merge.quiet,
             ConflictKind::TaskList,
             &payload.id,
         )?;
@@ -793,7 +903,12 @@ impl EventLogApplier {
             .map_err(core_to_sync)
     }
 
-    fn apply_calendar_merge(&self, payload: &EventPayload, env: &EventEnvelope) -> SyncResult<()> {
+    fn apply_calendar_merge(
+        &self,
+        payload: &EventPayload,
+        env: &EventEnvelope,
+        merge: Merge,
+    ) -> SyncResult<()> {
         let local = self
             .adapter
             .get_calendar_by_id(&payload.id)
@@ -804,8 +919,9 @@ impl EventLogApplier {
         let merged = self.merge_fields(
             &local,
             &payload.fields,
-            env.timestamp,
+            merge.row_time(None, env),
             env,
+            merge.quiet,
             ConflictKind::Calendar,
             &payload.id,
         )?;
@@ -822,6 +938,7 @@ impl EventLogApplier {
         &self,
         payload: &EventPayload,
         env: &EventEnvelope,
+        merge: Merge,
     ) -> SyncResult<()> {
         // Try to extract the id from the payload — color labels use
         // the wire id from the payload directly since `EventPayload`
@@ -836,8 +953,9 @@ impl EventLogApplier {
         let merged = self.merge_fields(
             &local,
             &payload.fields,
-            env.timestamp,
+            merge.row_time(None, env),
             env,
+            merge.quiet,
             ConflictKind::ColorLabel,
             &payload.id,
         )?;
@@ -863,6 +981,7 @@ impl EventLogApplier {
         patch: &Value,
         local_updated_at: DateTime<Utc>,
         env: &EventEnvelope,
+        quiet: bool,
         kind: ConflictKind,
         row_id: &str,
     ) -> SyncResult<Value> {
@@ -904,10 +1023,18 @@ impl EventLogApplier {
             // row is consistent. They're never user-surfaced as
             // conflicts.
             if METADATA_FIELDS.contains(&field.as_str()) {
-                merged.insert(field.clone(), patch_val.clone());
+                // `updated_at` only from a patch at least as new as the row:
+                // an older one would lower the row's time, and the next older
+                // change would win over it (review round 2 of #130).
+                if field != "updated_at" || local_updated_at <= env.timestamp {
+                    merged.insert(field.clone(), patch_val.clone());
+                }
                 continue;
             }
-            if local_updated_at > env.timestamp {
+            if local_updated_at > env.timestamp && quiet {
+                // The catch-up: the row already holds this change or a
+                // newer one. Keep it, say nothing.
+            } else if local_updated_at > env.timestamp {
                 // Local was edited AFTER the remote envelope was
                 // minted — divergent timelines on this field.
                 // Record a conflict, keep local value.
@@ -1123,6 +1250,172 @@ impl EventLogApplier {
         self.store
             .mark_event_applied(event_id)
             .map_err(store_to_sync)
+    }
+
+    /// The row's time: the newest change its clock has seen — raised to its
+    /// own `updated_at` where its table keeps one (appointments, tasks; a
+    /// snapshot writes that, not the clock) — the newest whole-row write,
+    /// and, for a field merge, whether the row is missing.
+    fn row_time(&self, key: Option<&RowKey>, event: &SyncEvent) -> SyncResult<RowTime> {
+        let clock = match key {
+            Some(key) => self.store.row_clock(key).map_err(store_to_sync)?,
+            None => None,
+        };
+        // (whether the row exists, its own `updated_at`)
+        let mut container_gone = false;
+        let (present, updated_at) = match event {
+            SyncEvent::EventCreated(payload) | SyncEvent::EventUpdated(payload) => {
+                let row = self
+                    .adapter
+                    .get_event_by_id(&payload.id)
+                    .map_err(core_to_sync)?;
+                if row.is_none() {
+                    if let Some(calendar) =
+                        payload.fields.get("calendar_id").and_then(|v| v.as_str())
+                    {
+                        container_gone = !self.calendar_exists(calendar)?;
+                    }
+                }
+                (row.is_some(), row.map(|row| row.updated_at))
+            }
+            SyncEvent::TaskCreated(payload) | SyncEvent::TaskUpdated(payload) => {
+                let row = self
+                    .adapter
+                    .get_task_by_id(&payload.id)
+                    .map_err(core_to_sync)?;
+                if row.is_none() {
+                    // Its list, or its parent task: deleting either takes it
+                    // along.
+                    let field = |name: &str| payload.fields.get(name).and_then(|v| v.as_str());
+                    let list_gone = match field("list_id") {
+                        Some(list) => !self.task_list_exists(list)?,
+                        None => false,
+                    };
+                    let parent_gone = match field("parent_id") {
+                        Some(parent) => self
+                            .adapter
+                            .get_task_by_id(parent)
+                            .map_err(core_to_sync)?
+                            .is_none(),
+                        None => false,
+                    };
+                    container_gone = list_gone || parent_gone;
+                }
+                (row.is_some(), row.map(|row| row.updated_at))
+            }
+            // A delete of a row that is there — a snapshot brought it back —
+            // weighs the row's own time too (review round 3 of #130).
+            SyncEvent::EventDeleted(payload) => {
+                let row = self
+                    .adapter
+                    .get_event_by_id(&payload.id)
+                    .map_err(core_to_sync)?;
+                (row.is_some(), row.map(|row| row.updated_at))
+            }
+            SyncEvent::TaskDeleted(payload) => {
+                let row = self
+                    .adapter
+                    .get_task_by_id(&payload.id)
+                    .map_err(core_to_sync)?;
+                (row.is_some(), row.map(|row| row.updated_at))
+            }
+            SyncEvent::TaskListCreated(payload) | SyncEvent::TaskListUpdated(payload) => {
+                (self.task_list_exists(&payload.id)?, None)
+            }
+            SyncEvent::TaskListDeleted(payload) => (self.task_list_exists(&payload.id)?, None),
+            SyncEvent::CalendarCreated(payload) | SyncEvent::CalendarUpdated(payload) => {
+                (self.calendar_exists(&payload.id)?, None)
+            }
+            SyncEvent::CalendarDeleted(payload) => (self.calendar_exists(&payload.id)?, None),
+            SyncEvent::ColorLabelCreated(payload) | SyncEvent::ColorLabelUpdated(payload) => {
+                (self.color_label_exists(&payload.id)?, None)
+            }
+            SyncEvent::ColorLabelDeleted(payload) => (self.color_label_exists(&payload.id)?, None),
+            _ => (true, None),
+        };
+        Ok(RowTime {
+            changed: clock.map(|clock| clock.changed).max(updated_at),
+            written: clock.and_then(|clock| clock.written),
+            deleted: clock.is_some_and(|clock| clock.deleted),
+            present,
+            absent: event.merges_fields() && !present,
+            container_gone,
+            seeded: clock.is_some_and(|clock| clock.seeded),
+        })
+    }
+
+    fn task_list_exists(&self, id: &str) -> SyncResult<bool> {
+        Ok(self
+            .adapter
+            .get_task_list_by_id(id)
+            .map_err(core_to_sync)?
+            .is_some())
+    }
+
+    fn calendar_exists(&self, id: &str) -> SyncResult<bool> {
+        Ok(self
+            .adapter
+            .get_calendar_by_id(id)
+            .map_err(core_to_sync)?
+            .is_some())
+    }
+
+    fn color_label_exists(&self, id: &str) -> SyncResult<bool> {
+        Ok(self
+            .adapter
+            .get_color_label_by_id(id)
+            .map_err(core_to_sync)?
+            .is_some())
+    }
+}
+
+/// What a pass knows beyond the envelopes it weighs
+/// (DESIGN-sync-snapshot-coverage.md).
+#[derive(Debug, Clone, Default)]
+pub struct PassContext {
+    /// This device's own changes that are not on the remote yet (the
+    /// catch-up): the peers will take them, so they are weighed as the
+    /// peers will weigh them, never held.
+    pub unpushed: HashSet<String>,
+}
+
+/// A row's time as the pass weighs it ([`EventLogApplier::row_time`]).
+struct RowTime {
+    changed: Option<DateTime<Utc>>,
+    written: Option<DateTime<Utc>>,
+    /// The newest whole-row write was a delete.
+    deleted: bool,
+    /// The row is there (assumed so for the kinds not looked up).
+    present: bool,
+    /// A field merge's row is missing.
+    absent: bool,
+    /// The row is missing, and so is the list, calendar or parent task the
+    /// change names: it may have taken the row along (no delete of its own).
+    container_gone: bool,
+    /// The clock is only seeded ([`crate::RowClock::seeded`]).
+    seeded: bool,
+}
+
+/// What a field merge weighs besides the row: the row's time, and whether a
+/// newer row is kept quietly.
+#[derive(Debug, Clone, Copy)]
+struct Merge {
+    clock: Option<DateTime<Utc>>,
+    quiet: bool,
+}
+
+impl Merge {
+    /// The row's time for the merge: the newer of its own `updated_at` and
+    /// its clock. A kind with no `updated_at` of its own (lists, calendars,
+    /// colour labels) and no clock yet keeps the old stand-in, the
+    /// envelope's time — the remote wins, as before.
+    fn row_time(&self, updated_at: Option<DateTime<Utc>>, env: &EventEnvelope) -> DateTime<Utc> {
+        match (updated_at, self.clock) {
+            (Some(row), Some(clock)) => row.max(clock),
+            (Some(row), None) => row,
+            (None, Some(clock)) => clock,
+            (None, None) => env.timestamp,
+        }
     }
 }
 

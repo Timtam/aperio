@@ -3425,6 +3425,8 @@ Da zwei Geräte dasselbe Objekt gleichzeitig ändern können, wird folgende Stra
 
 Konflikte werden per `aria-live` angekündigt und sind vollständig per Tastatur auflösbar.
 
+**Neuer gewinnt** (DESIGN-sync-snapshot-coverage.md, Abschnitt E): Jede Zeile hat eine Uhr (`sync_row_clock`), die jede eigene und jede übernommene Änderung stempelt. Eine Änderung, die älter ist als ihre Zeile, gewinnt nicht, auch wenn sie spät ankommt (offline geschrieben, gewachsene Datei): Eine Schreibung der ganzen Zeile wird übersprungen, eine Feld-Zusammenführung wägt die Uhr wie `updated_at`. Ein Löschen verliert nur gegen eine neuere Schreibung der ganzen Zeile, nie gegen eine Feldänderung, sonst liefen löschendes und bearbeitendes Gerät auseinander.
+
 ### 19.4 Lokaler SQLite-Cache & Zustandsrekonstruktion
 
 Beim Start liest die App alle noch nicht lokal angewandten Log-Ereignisse vom Sync-Speicher, wendet sie auf den lokalen SQLite-Cache an und hat damit den aktuellen Stand. Das Log ist die **Quelle der Wahrheit** (Source of Truth); SQLite ist der schnelle lokale Spiegel.
@@ -3504,7 +3506,7 @@ Konfigurierbar pro Sync-Adapter: Der Nutzer kann ein Passwort (oder einen Schlü
 
 - **Single Chokepoint:** Genau eine Stelle (`credential_sync.rs`) verwandelt ein Secret in ein Ereignis, doppelt gegated (E2E muss an sein **und** der Slot muss syncbar sein).
 - **Syncbare Slots:** nur `password`, `refresh_token`, `api_token`. Kurzlebige Access-Tokens (pro Gerät aus dem Refresh-Token neu ableitbar) und der E2E-Schlüssel selbst werden **nie** synchronisiert — sowohl beim Senden als auch beim Anwenden per Allowlist erzwungen.
-- **Übergänge:** E2E nachträglich aktivieren → alle bestehenden lokalen Zugangsdaten werden in den jetzt verschlüsselten Log gepusht. E2E deaktivieren → der lokale E2E-Pref wird **zuerst** gelöscht (das stoppt weitere Credential-Emits, gated die Kompaktierung, und der für den Downgrade gebaute Adapter ist dadurch echt unverschlüsselt), dann werden die Credential-Ereignisse aus den Logs **und** der `credentials`-Block aus dem Snapshot entfernt (Strip/Purge); lokal bleiben die Zugangsdaten im Keyring erhalten.
+- **Übergänge:** E2E nachträglich aktivieren → alle bestehenden lokalen Zugangsdaten werden in den jetzt verschlüsselten Log gepusht. E2E deaktivieren → der lokale E2E-Pref wird **zuerst** gelöscht (das stoppt weitere Credential-Emits, gated die Kompaktierung, und der für den Downgrade gebaute Adapter ist dadurch echt unverschlüsselt), dann werden die Credential-Ereignisse aus den Logs **und** der `credentials`-Block aus dem Snapshot entfernt (Strip/Purge); lokal bleiben die Zugangsdaten im Keyring erhalten. Die lokalen, noch ausstehenden Dateien (`pending/`) tragen ihre Credential-Ereignisse weiter: Der Push lässt sie weg, solange E2E aus ist (`outgoing_log`, der eine Weg nach draußen), und der Compactor misst gegen dieselbe ausgehende Form (DESIGN-sync-snapshot-coverage.md, Prüfrunde 2).
 
 **Robustheit der Übergänge.** Der Deaktivieren-Vorgang ist **idempotent**: Wird er unterbrochen (z. B. Netzwerkabbruch, nachdem ein Teil der Logs bereits als Klartext neu geschrieben wurde), kann er gefahrlos erneut ausgeführt werden — bereits als Klartext vorliegende Logs werden beim erneuten Lauf toleriert (AES-GCM authentifiziert; ein Klartext-Blob scheitert an der Entschlüsselung und wird unverändert übernommen) statt einen Entschlüsselungsfehler auszulösen, der den Datensatz halb-konvertiert blockieren würde. Gleichzeitige, **gegenläufige** Übergänge auf zwei Geräten (eines aktiviert, eines deaktiviert) werden nur über `meta.json` koordiniert (Last-Write-Wins); da der Sync-Speicher keine atomare Vergleichs-und-Setze-Operation bietet, ist dieser seltene Fall nicht vollständig ausschließbar — das unterlegene Gerät erkennt die Diskrepanz beim nächsten Abgleich und richtet sich neu ein (kein Datenverlust und kein Klartext-Leak von Credentials, da deren Emit fest an den lokalen E2E-Pref gekoppelt ist).
 
@@ -3571,7 +3573,7 @@ sync/
 }
 ```
 
-Nach jedem erfolgreichen Sync-Durchlauf aktualisiert ein Gerät seinen eigenen `last_seen_log`- und `app_version`-Eintrag. `last_seen_log` ist der **„held horizon"** des Geräts — `max(Fetch-Cursor, eigenes neuestes Log)`, also der Zeitpunkt, bis zu dem es jedes Ereignis hält (angewendete fremde + selbst geschriebene). `stale: true` wird gesetzt, wenn der `last_seen_log` eines Geräts unter den `gc_horizon` fällt — die Logs, die es zum inkrementellen Aufholen bräuchte, sind bereits gelöscht (Schritt 6 des Kompaktierungs-Algorithmus). `gc_horizon` ist die (monoton steigende) **GC-Obergrenze**: jede Log-Datei mit `timestamp < gc_horizon` wurde gelöscht und kann nicht mehr inkrementell nachgeladen werden — abwesend (`null`) bedeutet, dass noch nie ein Log gelöscht wurde (frischer ODER Alt-Datensatz), sodass die Stale-Prüfung niemandem auslöst. `min_app_version` wird bei einem Schema-Upgrade auf die aktuelle App-Version gesetzt (Abschnitt 19.13).
+Nach jedem erfolgreichen Sync-Durchlauf aktualisiert ein Gerät seinen eigenen `last_seen_log`- und `app_version`-Eintrag, dazu ob es genau ist (`exact`), welche Dateien es nicht lesen kann (`unreadable`) und welche in seinem `pending/` liegen (`pending`; DESIGN-sync-snapshot-coverage.md). `last_seen_log` ist der **„held horizon"** des Geräts — `max(Fetch-Cursor, eigenes neuestes Log)`, also der Zeitpunkt, bis zu dem es jedes Ereignis hält (angewendete fremde + selbst geschriebene). `stale: true` wird gesetzt, wenn der `last_seen_log` eines Geräts unter den `gc_horizon` fällt — die Logs, die es zum inkrementellen Aufholen bräuchte, sind bereits gelöscht (Schritt 6 des Kompaktierungs-Algorithmus). Zurück nimmt es nur die Wiederaufnahme, nachdem sie den Snapshot geholt hat; Herzschlag und Compactor übernehmen es, und ein so markiertes Gerät verdichtet nicht, auch nicht von Hand. `gc_horizon` ist die (monoton steigende) **GC-Obergrenze**: jede Log-Datei mit `timestamp < gc_horizon` wurde gelöscht und kann nicht mehr inkrementell nachgeladen werden — abwesend (`null`) bedeutet, dass noch nie ein Log gelöscht wurde (frischer ODER Alt-Datensatz), sodass die Stale-Prüfung niemandem auslöst. `min_app_version` wird bei einem Schema-Upgrade auf die aktuelle App-Version gesetzt (Abschnitt 19.13).
 
 #### `last_seen` — die Wanduhr neben dem Horizont
 
@@ -3639,10 +3641,37 @@ Die Prüfung erfolgt bei jedem Sync-Durchlauf. Auslösendes Gerät ist dasjenige
    gelöscht. Ein Gerät nur HINTER dem Snapshot, aber ≥ gc_horizon,
    bleibt unmarkiert (es holt über die aufbewahrten Logs auf).
 
-7. Jede Log-Datei mit Zeitstempel STRIKT < safe_cutoff löschen, die
-   der Snapshot abdeckt (eigene Logs immer; fremde nur bis zum Cursor —
-   ein fremdes Log neuer als der Cursor wurde nie angewendet und steckt
-   nicht im Snapshot).
+7. Nichts löschen, solange ein aktives Gerät (nicht "stale", Horizont
+   im Aufbewahrungsfenster) in meta.json nicht als "genau" eingetragen
+   ist, dieses eingeschlossen: Es muss erst über alle Dateien
+   nachholen (DESIGN-sync-snapshot-coverage.md). Dann auch gc_horizon
+   nicht anheben und niemanden als "stale" markieren (Schritte 5 und 6
+   entfallen), denn es wurde nichts gelöscht.
+
+8. Sonst die Logs NEU auflisten (ein Gerät kann während der
+   Kompaktierung angehängt haben) und jede Log-Datei mit Zeitstempel
+   STRIKT < safe_cutoff löschen, deren JEDES Ereignis, wie es jetzt
+   dasteht, eigenes ist oder beim Bau des Snapshots angewendet war, deren
+   jüngstes Ereignis älter ist als das Aufbewahrungsfenster, und die dieser
+   Compactor so lange unverändert gesehen hat (das Fenster zählt ab dem
+   Eintreffen und neu ab jedem Wachstum). Nicht
+   nach dem Namen gegen den Cursor: Eine Sitzungsdatei mit altem Namen
+   kann gestern gewachsen sein. Eine leere oder unlesbare Datei wird nie
+   gelöscht, und keine, die ein aktives Gerät in meta.json als für seinen
+   Build unlesbar nennt (`unreadable`): Ein Update dort liest sie wieder.
+
+Die eigenen ausstehenden Dateien (pending/, Stempel vor dem Schnitt)
+räumt der Compactor nur weg, wenn ihre Kopie im Sync-Speicher
+mindestens so lang ist. Eine längere bleibt für den Push der nächsten
+Runde, und ihre entfernte Kopie wird in Schritt 8 nicht gelöscht: Die
+anderen Geräte lesen Logs, nicht den Snapshot.
+
+Jedes Gerät nennt in meta.json die Dateien in seinem pending/
+(`pending`), bevor eine davon hochgeht, und Schritt 8 löscht keine Datei,
+die ein Gerät so nennt: Es lädt sie vielleicht noch einmal ganz hoch, und
+eine gelöschte käme so zurück. Genannt wird zu Beginn jeder Runde und vor
+jedem Push; eine leere Datei nicht, sie geht nie hoch. Was ein Build vor 0.2.0
+dort hinterließ, wird einmal geordnet (DESIGN-sync-snapshot-coverage.md, C).
 ```
 
 #### Umgang mit veralteten Geräten ("stale")
@@ -3664,7 +3693,7 @@ Wenn ein Gerät länger offline war als der Kompaktierungszeitraum, fehlen ihm L
 └─────────────────────────────────────────────────────┘
 ```
 
-Lokale Änderungen des veralteten Geräts (die es noch nicht hochgeladen hatte) werden als neue Log-Ereignisse auf den frischen Snapshot angewendet – mit normaler Konfliktauflösung (Abschnitt 19.3).
+Danach wendet es alle noch vorhandenen Log-Dateien, seine eigenen eingeschlossen, und seine noch nicht hochgeladenen Änderungen in einem Durchgang nach Zeit an (DESIGN-sync-snapshot-coverage.md): Eine Änderung gilt nur, wo sie neuer ist als ihre Zeile (Abschnitt 19.3), ohne Konfliktmeldung. So kommen lokale Änderungen und schon übernommene zurück, die der Snapshot überschrieben hat. Dasselbe Nachholen läuft einmal in der Runde auf jedem Gerät, dessen Anwendungsprotokoll nicht als genau gilt (beigetreten oder wiederaufgenommen vor dieser Regel).
 
 ### 19.11 Onboarding: Neue Instanz verbindet sich mit bestehendem Datensatz
 
@@ -3693,7 +3722,7 @@ Die App prüft, ob `meta.json` im Sync-Speicher existiert. Ist dies der Fall, ze
 └─────────────────────────────────────────────────────┘
 ```
 
-"Neu beginnen" legt einen frischen Datensatz an und überschreibt den bestehenden – mit expliziter Warnung und Bestätigung.
+"Neu beginnen" legt einen frischen Datensatz an und überschreibt den bestehenden – mit expliziter Warnung und Bestätigung. Dabei löscht es die Log-Dateien des alten Datensatzes (nur nach Namen, auch unter einem anderen Schlüssel) und ersetzt seinen Snapshot durch den Stand dieses Geräts; sonst holte das Nachholen sie wieder herein, hier oder auf einem später beitretenden Gerät (DESIGN-sync-snapshot-coverage.md).
 
 #### Schritt 4 – E2E-Passwort (falls aktiv)
 
@@ -3705,7 +3734,7 @@ Die App lädt `snapshot.json` herunter, entschlüsselt ihn falls nötig, und bef
 
 #### Schritt 6 – Neuere Log-Ereignisse anwenden
 
-Alle Log-Dateien mit einem Zeitstempel nach `snapshot_timestamp` werden heruntergeladen und chronologisch auf den SQLite-Cache angewendet. Das Gerät ist damit vollständig auf dem aktuellen Stand.
+Alle vorhandenen Log-Dateien werden heruntergeladen, auch solche mit einem Namen vor `snapshot_timestamp`: Eine Sitzung kann nach dem Snapshot weitergewachsen sein. Ihre Ereignisse werden gemeinsam nach Zeit angewendet. Was der Snapshot als enthalten nennt (`covered_event_ids`), gilt als angewendet; sonst gilt eine Änderung nur, wo sie neuer ist als ihre Zeile (Abschnitt 19.3). Das Gerät ist damit vollständig auf dem aktuellen Stand, und sein Anwendungsprotokoll ist genau (DESIGN-sync-snapshot-coverage.md).
 
 #### Schritt 7 – Sound-Dateien nachladen
 
@@ -3873,6 +3902,7 @@ Erkennt die App, dass ihre Version kleiner als `min_app_version` ist, wird der S
 - "Jetzt aktualisieren" öffnet den Update-Dialog (Abschnitt 21)
 - "Offline fortfahren" erlaubt die Nutzung der App ohne Sync – lokale Daten bleiben lesbar, kein Schreiben in den Sync-Speicher bis zum Update
 - Der Dialog ist vollständig per Tastatur und Screen Reader bedienbar
+- Auch „Jetzt kompaktieren“ und der schnelle Push nach einer Änderung (`push_now`) prüfen die Mindestversion und die Verschlüsselung des Datensatzes, bevor sie etwas hochladen oder löschen (ab 0.2.0; ein 0.1.0-Build prüft dort noch nicht, siehe `DESIGN-sync-snapshot-coverage.md`)
 
 #### Schema-Migration
 

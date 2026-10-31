@@ -84,6 +84,16 @@ pub struct DeviceCursor {
     /// there until rotation). `serde(default)` keeps the wire compatible.
     #[serde(default)]
     pub known_lengths: Vec<KnownLogLength>,
+    /// Fetch a file at/below the cursor that has NO recorded length
+    /// (DESIGN-sync-snapshot-coverage.md). The cursor goes by file name, so
+    /// a session file a peer wrote offline and pushed late, named before the
+    /// cursor, was never fetched by anyone; nor one pushed again after a GC
+    /// deleted it. Set only by a device whose applied record is exact —
+    /// there re-applying weighs each change against its row. No floor: such
+    /// a file can be named below the GC horizon. `false` = the old rule: an
+    /// unknown file at/below the cursor is never fetched.
+    #[serde(default)]
+    pub fetch_unknown: bool,
 }
 
 /// One applied-length record for [`DeviceCursor::known_lengths`].
@@ -104,6 +114,7 @@ impl DeviceCursor {
             last_seen_log: DateTime::<Utc>::MIN_UTC,
             exclude_device: None,
             known_lengths: Vec::new(),
+            fetch_unknown: false,
         }
     }
 
@@ -112,16 +123,17 @@ impl DeviceCursor {
     /// device. The single filter every adapter's listing loop applies,
     /// so the exclusion semantics can't drift between backends.
     pub fn wants(&self, name: &crate::log::LogFileName) -> bool {
-        name.timestamp > self.last_seen_log && self.exclude_device.as_ref() != Some(&name.device_id)
+        self.wants_sized(name, &name.to_filename(), None)
     }
 
     /// Size-aware variant of [`Self::wants`] for adapters whose listing
     /// reports byte sizes: additionally re-fetches a file at/below the
     /// cursor whose listed size GREW past the recorded applied length
     /// (a peer's live session file gaining appended events). A file with
-    /// no recorded length is never growth-refetched — it was applied
-    /// before length tracking existed, and treating "unknown" as grown
-    /// would re-download the whole history once per upgrade.
+    /// no recorded length at/below the cursor is fetched only under
+    /// [`Self::fetch_unknown`]: without it, it counts as applied before
+    /// length tracking existed, and treating "unknown" as grown would
+    /// re-download the whole history once per upgrade.
     pub fn wants_sized(
         &self,
         name: &crate::log::LogFileName,
@@ -134,12 +146,9 @@ impl DeviceCursor {
         if name.timestamp > self.last_seen_log {
             return true;
         }
-        match listed_len {
-            Some(listed) => self
-                .known_lengths
-                .iter()
-                .any(|k| k.name == filename && listed > k.len),
-            None => false,
+        match self.known_lengths.iter().find(|k| k.name == filename) {
+            Some(known) => listed_len.is_some_and(|listed| listed > known.len),
+            None => self.fetch_unknown,
         }
     }
 }
@@ -211,6 +220,20 @@ pub trait SyncAdapter: Send + Sync {
     /// universal.
     async fn delete_log(&self, name: &crate::log::LogFileName) -> SyncResult<()>;
 
+    /// The names of every log file on the remote, whatever they hold — for
+    /// "Neu beginnen", which deletes them all (DESIGN-sync-snapshot-coverage.md).
+    /// The default fetches every file and keeps the names; a wrapper that
+    /// transforms contents passes this through, so a file it cannot read
+    /// (another dataset's key) is still named.
+    async fn list_log_names(&self) -> SyncResult<Vec<crate::log::LogFileName>> {
+        Ok(self
+            .fetch_new_logs(&DeviceCursor::epoch())
+            .await?
+            .into_iter()
+            .map(|log| log.name)
+            .collect())
+    }
+
     /// Upload a binary asset (sound file). Keyed by its sha256
     /// hash so the adapter writes to
     /// `assets/sounds/<hash>.<ext>`. Returns `Ok` if the file
@@ -244,6 +267,7 @@ mod tests {
             last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
             exclude_device: Some(DeviceId::from_string("me".into())),
             known_lengths: Vec::new(),
+            fetch_unknown: false,
         };
         // Newer + foreign → fetch.
         assert!(cursor.wants(&name(2_000, "peer")));
@@ -258,6 +282,40 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_file_below_the_cursor_is_fetched_on_an_exact_device() {
+        // DESIGN-sync-snapshot-coverage.md: a peer's session pushed late,
+        // named before the cursor, with no recorded length.
+        let cursor = DeviceCursor {
+            last_seen_log: Utc.timestamp_opt(5_000, 0).unwrap(),
+            exclude_device: Some(DeviceId::from_string("me".into())),
+            known_lengths: vec![KnownLogLength {
+                name: "known.jsonl".into(),
+                len: 100,
+            }],
+            fetch_unknown: true,
+        };
+        let late = name(3_000, "peer");
+        assert!(cursor.wants_sized(&late, "late.jsonl", Some(10)));
+        assert!(
+            cursor.wants_sized(&late, "late.jsonl", None),
+            "no size needed to be unknown"
+        );
+        assert!(cursor.wants(&late));
+        // No floor: pushed again after a GC, named below its horizon.
+        assert!(cursor.wants_sized(&name(999, "peer"), "old.jsonl", Some(10)));
+        // Known and unchanged: still skipped.
+        assert!(!cursor.wants_sized(&late, "known.jsonl", Some(100)));
+        // Own: still excluded.
+        assert!(!cursor.wants_sized(&name(3_000, "me"), "own.jsonl", Some(10)));
+        // Not exact: the old rule.
+        let legacy = DeviceCursor {
+            fetch_unknown: false,
+            ..cursor
+        };
+        assert!(!legacy.wants_sized(&late, "late.jsonl", Some(10)));
+    }
+
+    #[test]
     fn wants_sized_refetches_grown_files_only() {
         let file = name(1_000, "peer");
         let filename = "the-file.jsonl";
@@ -269,6 +327,7 @@ mod tests {
                 name: filename.into(),
                 len: 100,
             }],
+            fetch_unknown: false,
         };
         // Listed size grew past the applied length → refetch.
         assert!(cursor.wants_sized(&file, filename, Some(150)));

@@ -48,7 +48,8 @@ pub use sync_engine::{
     PREF_MAX_AGE_DAYS, PREF_MAX_BYTES, PREF_MAX_LOGS,
 };
 pub use sync_engine::{
-    SyncOrchestrator, SyncRoundHooks, SyncRoundReport, SyncStatus, SYNC_CURSOR_PREF_KEY,
+    SyncOrchestrator, SyncRoundHooks, SyncRoundReport, SyncStatus,
+    SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, SYNC_CURSOR_PREF_KEY,
 };
 
 /// The event-log writer lives in the reusable `sync-engine` crate.

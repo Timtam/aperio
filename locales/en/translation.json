@@ -874,6 +874,7 @@
         "compactNow": "Compact now",
         "compacting": "Compacting …",
         "compactDone": "Snapshot taken, {{deleted}} old log files deleted.",
+        "compactWaiting": "Snapshot taken. Old log files stay until these devices have caught up: {{devices}}.",
         "intervalLabel": "Sync interval",
         "intervalOption_one": "{{minutes}} minute",
         "intervalOption_other": "{{minutes}} minutes",

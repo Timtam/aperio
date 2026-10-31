@@ -12,7 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sync_core::{MetaJson, SyncAdapter, SyncError, SyncResult};
-use sync_engine::{CompactionReport, SyncRoundHooks};
+use sync_engine::{ApplyReport, CompactionReport, SyncRoundHooks};
 use tracing::{info, warn};
 
 use crate::db::SharedConn;
@@ -55,11 +55,21 @@ impl SyncRoundHooks for DesktopSyncRoundHooks {
             .await
     }
 
-    async fn resume_from_stale(&self, adapter: &dyn SyncAdapter) -> SyncResult<()> {
+    async fn resume_from_stale(&self, adapter: &dyn SyncAdapter) -> SyncResult<ApplyReport> {
         // §19.10 auto-resume: re-pull the snapshot, replay our pending logs over
         // it, and clear the stale flag. The report (rows applied etc.) isn't
         // needed by the round — it just needs to know the recovery succeeded.
-        self.onboarding.resume_from_stale(adapter).await.map(|_| ())
+        self.onboarding
+            .resume_from_stale(adapter)
+            .await
+            .map(|report| report.detail)
+    }
+
+    async fn catch_up(&self, adapter: &dyn SyncAdapter) -> SyncResult<ApplyReport> {
+        self.onboarding
+            .catch_up(adapter)
+            .await
+            .map(|report| report.detail)
     }
 
     async fn sync_sound_assets(&self, adapter: &dyn SyncAdapter) -> SyncResult<()> {

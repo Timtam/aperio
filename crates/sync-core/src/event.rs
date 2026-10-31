@@ -364,6 +364,137 @@ pub enum SyncEvent {
     SettingsUpdated(SettingsPayload),
 }
 
+/// The synced row an event writes, for the per-row clock
+/// (`sync_row_clock`, DESIGN-sync-snapshot-coverage.md): an event older than
+/// its row's clock no longer wins. `kind` names the kind of row, `id` the row
+/// (a setting's key, an account and slot for a credential).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RowKey {
+    pub kind: &'static str,
+    pub id: String,
+}
+
+impl RowKey {
+    /// Every kind of row [`SyncEvent::row_key`] names.
+    pub const KINDS: &'static [&'static str] = &[
+        "event",
+        "event_group",
+        "event_local_reminders",
+        "task",
+        "task_list",
+        "section",
+        "calendar",
+        "color_label",
+        "day_marker",
+        "day_log",
+        "plugin",
+        "account",
+        "credential",
+        "setting",
+    ];
+
+    /// The key for a kind read back as text — from the clock table or a
+    /// snapshot. `None` for a kind this version does not know.
+    pub fn named(kind: &str, id: String) -> Option<RowKey> {
+        Self::KINDS
+            .iter()
+            .find(|known| **known == kind)
+            .map(|kind| RowKey { kind, id })
+    }
+}
+
+impl SyncEvent {
+    /// The row this event writes. `None` for an append-only record (a
+    /// declined suggestion: nothing newer replaces it) and for the shortcut
+    /// events, which no device emits yet.
+    pub fn row_key(&self) -> Option<RowKey> {
+        let row = |kind: &'static str, id: &str| {
+            debug_assert!(
+                RowKey::KINDS.contains(&kind),
+                "row kind {kind} is missing from RowKey::KINDS"
+            );
+            Some(RowKey {
+                kind,
+                id: id.to_string(),
+            })
+        };
+        match self {
+            SyncEvent::EventCreated(p) | SyncEvent::EventUpdated(p) => row("event", &p.id),
+            SyncEvent::EventDeleted(p) => row("event", &p.id),
+            SyncEvent::EventGroupUpdated(p) => row("event_group", &p.id),
+            SyncEvent::EventGroupDissolved(p) => row("event_group", &p.id),
+            SyncEvent::EventLocalRemindersSet(p) => row("event_local_reminders", &p.id),
+            SyncEvent::TaskCreated(p) | SyncEvent::TaskUpdated(p) => row("task", &p.id),
+            SyncEvent::TaskDeleted(p) => row("task", &p.id),
+            SyncEvent::TaskListCreated(p) | SyncEvent::TaskListUpdated(p) => {
+                row("task_list", &p.id)
+            }
+            SyncEvent::TaskListDeleted(p) => row("task_list", &p.id),
+            SyncEvent::SectionCreated(p) | SyncEvent::SectionUpdated(p) => row("section", &p.id),
+            SyncEvent::SectionDeleted(p) => row("section", &p.id),
+            SyncEvent::CalendarCreated(p) | SyncEvent::CalendarUpdated(p) => row("calendar", &p.id),
+            SyncEvent::CalendarDeleted(p) => row("calendar", &p.id),
+            SyncEvent::ColorLabelCreated(p) | SyncEvent::ColorLabelUpdated(p) => {
+                row("color_label", &p.id)
+            }
+            SyncEvent::ColorLabelDeleted(p) => row("color_label", &p.id),
+            SyncEvent::DayMarkerWritten(p) => row("day_marker", &p.id),
+            SyncEvent::DayMarkerDeleted(p) => row("day_marker", &p.id),
+            SyncEvent::DayLogSet(p) => row("day_log", &p.id),
+            SyncEvent::PluginInstalled(p) | SyncEvent::PluginUpdated(p) => row("plugin", &p.id),
+            SyncEvent::PluginUninstalled(p) => row("plugin", &p.id),
+            SyncEvent::AccountCreated(p) | SyncEvent::AccountUpdated(p) => row("account", &p.id),
+            SyncEvent::AccountDeleted(p) => row("account", &p.id),
+            SyncEvent::CredentialSet(p) => {
+                row("credential", &format!("{}/{}", p.account_id, p.slot))
+            }
+            SyncEvent::CredentialCleared(p) => {
+                row("credential", &format!("{}/{}", p.account_id, p.slot))
+            }
+            SyncEvent::SettingsUpdated(p) => row("setting", &p.key),
+            SyncEvent::EventGroupSuggestionDeclined(_)
+            | SyncEvent::ShortcutSet(_)
+            | SyncEvent::ShortcutReset(_)
+            | SyncEvent::ShortcutCleared(_) => None,
+        }
+    }
+
+    /// Whether this event removes its row. A delete keeps the row's clock,
+    /// so an older create arriving after it stays deleted; it loses only to
+    /// a newer write of the whole row (see [`Self::merges_fields`]).
+    pub fn is_delete(&self) -> bool {
+        matches!(
+            self,
+            SyncEvent::EventDeleted(_)
+                | SyncEvent::EventGroupDissolved(_)
+                | SyncEvent::TaskDeleted(_)
+                | SyncEvent::TaskListDeleted(_)
+                | SyncEvent::SectionDeleted(_)
+                | SyncEvent::CalendarDeleted(_)
+                | SyncEvent::ColorLabelDeleted(_)
+                | SyncEvent::DayMarkerDeleted(_)
+                | SyncEvent::PluginUninstalled(_)
+                | SyncEvent::AccountDeleted(_)
+                | SyncEvent::CredentialCleared(_)
+        )
+    }
+
+    /// Whether this event merges into its row field by field, reporting a
+    /// conflict where both sides changed a field, rather than writing the
+    /// whole row. A delete does not lose to such a change: it cannot bring
+    /// the row back on the device that deleted it, so the two would part.
+    pub fn merges_fields(&self) -> bool {
+        matches!(
+            self,
+            SyncEvent::EventUpdated(_)
+                | SyncEvent::TaskUpdated(_)
+                | SyncEvent::TaskListUpdated(_)
+                | SyncEvent::CalendarUpdated(_)
+                | SyncEvent::ColorLabelUpdated(_)
+        )
+    }
+}
+
 /// Payload for `*.created` events — carries the full row as
 /// `serde_json::Value`. We keep it untyped at this layer so the
 /// log schema doesn't have to be bumped every time a `cal-core`

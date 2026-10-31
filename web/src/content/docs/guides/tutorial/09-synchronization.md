@@ -79,6 +79,34 @@ it over a share on the local network.
   next reconciliation, no restart. If the settings page happens to be open, the
   change is announced.
 
+## A new device, and catching up
+
+Every so often a device folds the change log into a **snapshot**, so a new
+device does not have to replay months of changes. A new device takes that
+snapshot and then every change made since — including those another device
+wrote in a session that had already begun before the snapshot. A change a
+device made offline and uploads late arrives at the others too.
+
+After the update that brought this, every device **catches up once**: it goes
+through every change still kept, its own included. Changes it had missed
+arrive, and entries deleted elsewhere mostly disappear. A change only counts where it
+is newer than what the device already has, and no conflict is reported. Only
+where the device cannot tell when an entry last changed — a setting, a list, a
+calendar or a colour untouched since an older version, or a task or
+appointment deleted meanwhile — can an older change win once: something may
+look set back, or a deleted entry come back. Set it again, or delete it again.
+That one round can take a little longer. Nothing that exists only on this
+device is removed.
+
+Aperio keeps the change logs for at least two weeks, and deletes none while a
+device still has to catch up over them. If you compact by hand, it names the
+devices it is waiting for. Once a device on this version has synced,
+devices on an older version are asked to update before they sync again.
+
+The same rule holds every day: a change that arrives late — written offline,
+say — does not win over a newer one. Deleting an entry wins over an edit made
+elsewhere at the same time, so both devices end up the same.
+
 ## Your devices
 
 Every device that connects to your dataset registers itself there. **Settings →

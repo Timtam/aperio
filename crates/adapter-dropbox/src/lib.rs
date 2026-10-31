@@ -587,6 +587,7 @@ mod tests {
             last_seen_log: Utc.timestamp_opt(1_500, 0).unwrap(),
             exclude_device: None,
             known_lengths: Vec::new(),
+            fetch_unknown: false,
         };
         let newer = log_name(2_000, "peer");
         let older = log_name(1_000, "peer");
@@ -606,6 +607,7 @@ mod tests {
             last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
             exclude_device: Some(DeviceId::from_string("me".into())),
             known_lengths: Vec::new(),
+            fetch_unknown: false,
         };
         let own = log_name(2_000, "me");
         assert!(select_wanted_logs(&cursor, &[(own.to_filename(), Some(50))]).is_empty());
@@ -627,6 +629,7 @@ mod tests {
                 name: filename.clone(),
                 len: 100,
             }],
+            fetch_unknown: false,
         };
         // Listed size grew past the applied length → re-selected.
         assert_eq!(
