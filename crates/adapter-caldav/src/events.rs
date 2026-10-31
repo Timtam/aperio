@@ -201,17 +201,22 @@ pub async fn create_event(
         .body(body)
         .send_write()
         .await?;
+    // Whether Aperio named the resource itself: after a minted UID, or a
+    // fresh `{uuid}.ics` for a kept UID that is no plain name. Nobody else
+    // can own that resource (review round 17 of #128).
+    let minted_resource = given.is_none() || !own_slug;
     let etag = if answer.replayed
-        && given.is_none()
+        && minted_resource
         && answer.response.status() == StatusCode::PRECONDITION_FAILED
     {
         // First PUT landed; a 412 carries no ETag — the next read refreshes it.
-        // Only for a minted UID: a kept one may be the calendar's own copy of
-        // the appointment, refused as taken below, replay or not.
+        // Only for a resource Aperio named: one a kept UID names may be the
+        // calendar's own copy of the appointment, refused as taken below,
+        // replay or not.
         None
-    } else if given.is_some() && answer.response.status() == StatusCode::PRECONDITION_FAILED {
-        // Not a minted UID: the resource named by it is there already, so the
-        // calendar holds this appointment.
+    } else if !minted_resource && answer.response.status() == StatusCode::PRECONDITION_FAILED {
+        // The resource a kept UID names is there already, so the calendar
+        // holds this appointment.
         return Err(CaldavError::Http {
             status: StatusCode::PRECONDITION_FAILED.as_u16(),
             message: cal_core::WriteRefusal::UidTaken.message(&uid),
@@ -2298,6 +2303,32 @@ END:VCALENDAR</c:calendar-data>
     /// A kept UID is no UID only this create can own: a 412 on the replay may
     /// be the calendar's own copy of the appointment, so it is refused as
     /// taken, as without the replay — never reported as created.
+    #[tokio::test]
+    async fn a_kept_uid_that_is_no_plain_name_answering_412_after_a_retry_landed() {
+        // Review round 17 of #128: its resource is a fresh `{uuid}.ics`, which
+        // only the first attempt can have made; "taken", the import offered it
+        // again.
+        let base = crate::http::first_attempt_lost_then(
+            b"HTTP/1.1 412 Precondition Failed\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let cal_url = Url::parse(&format!("{base}/calendars/alice/work/")).unwrap();
+        let event = NewEvent {
+            uid_to_keep: Some("urn:uuid:6f1c0a2e".into()),
+            ..sample_new_event()
+        };
+        let created = create_event(
+            &client(),
+            &cal_url,
+            event,
+            &creds(&base),
+            &WriteCtx::default(),
+        )
+        .await
+        .expect("the first attempt made it");
+        assert!(created.id.ends_with("|urn:uuid:6f1c0a2e"), "{}", created.id);
+    }
+
     #[tokio::test]
     async fn a_kept_uid_answering_412_after_a_retry_is_taken() {
         let base = crate::http::first_attempt_lost_then(

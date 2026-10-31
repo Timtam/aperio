@@ -1405,6 +1405,7 @@
       "regroupFailed_other": "Die {{count}} Kopien wurden geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
       "newPartMayStand": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ließ sich weder fertigstellen noch wieder löschen, und der alte läuft weiter. Bitte dort prüfen.",
       "maybeShownTwice": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Die alte ließ sich nicht kürzen und ihr neuer Teil nicht wieder löschen. Bitte dort prüfen.",
+      "standaloneMayStand": "In {{calendar}} steht der Termin am {{date}} möglicherweise doppelt: Ob seine Einzelkopie angelegt wurde, ist unklar ({{reason}}). Bitte dort prüfen.",
       "shiftRefused": "In {{calendar}} kann die Wiederholung nicht mit dem neuen Datum oder der neuen Uhrzeit wandern: {{reason}}.",
       "unsureCut": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ist angelegt, aber ob der alte jetzt davor endet, ist unklar. Bitte dort prüfen.",
       "skippedInvitation": "Die Kopie in {{calendar}} wurde nicht geändert – sie organisiert jemand anderes."
@@ -1905,6 +1906,10 @@
         "draftsLeftHeading": "Noch nicht angelegte Unteraufgaben",
         "draftPartlyThenRest_one": "„{{title}}“ wurde angelegt, die Unteraufgabe {{draft}} aber nur zum Teil, weil der Anbieter gerade ausgelastet ist; prüfe sie. Die Unteraufgabe {{titles}} wurde danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an. Versuche es später noch einmal.",
         "draftPartlyThenRest_other": "„{{title}}“ wurde angelegt, die Unteraufgabe {{draft}} aber nur zum Teil, weil der Anbieter gerade ausgelastet ist; prüfe sie. Die Unteraufgaben {{titles}} wurden danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt diese Unteraufgaben mit an. Versuche es später noch einmal.",
+        "familyNotAll": "Nicht jede Aufgabe darüber oder darunter hat den neuen Status übernommen: {{reason}}.",
+        "draftMayStand": "„{{title}}“ wurde angelegt. Die Unteraufgabe {{draft}} wurde vielleicht auch angelegt; prüfe sie ({{reason}}).",
+        "draftMayStandThenRest_one": "„{{title}}“ wurde angelegt. Die Unteraufgabe {{draft}} wurde vielleicht auch angelegt; prüfe sie ({{reason}}). Die Unteraufgabe {{titles}} wurde danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an.",
+        "draftMayStandThenRest_other": "„{{title}}“ wurde angelegt. Die Unteraufgabe {{draft}} wurde vielleicht auch angelegt; prüfe sie ({{reason}}). Die Unteraufgaben {{titles}} wurden danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt diese Unteraufgaben mit an.",
         "draftsNotCreated_one": "Die Unteraufgabe {{titles}} wurde nicht angelegt.",
         "draftsNotCreated_other": "Diese {{count}} Unteraufgaben wurden nicht angelegt: {{titles}}."
       },

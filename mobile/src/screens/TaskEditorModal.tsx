@@ -15,6 +15,8 @@ import {
   withLaterForBusy,
   writeAfterLanded,
   writeErrorMessage,
+  writeNeverLanded,
+  writeStatusLanded,
 } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
@@ -917,9 +919,13 @@ export default function TaskEditorModal({
     // names as never created. Drafts exist only for a task this editor
     // creates, or created.
     let unmade: string[] = [...draftSubtasks];
-    // The new task stands: whatever fails after it, saving again would make
-    // it twice (review round 15 of #128).
-    let made = false;
+    // The new task stands, or the staged subtasks of the task this editor
+    // created do: whatever fails after them, saving again would make them
+    // twice (review rounds 15 and 17 of #128). Said as added or as saved.
+    let made: 'added' | 'saved' | null = null;
+    // What the family's status writes did not take, after a root whose save
+    // stood in part with its status: said after the root's sentence.
+    let familyFailed = '';
     // The staged subtasks, made under `parent` once it stands (they default
     // to open/medium and inherit its section, matching the edit-mode add),
     // then the parent's derived status recomputed. A parent in a terminal
@@ -959,11 +965,24 @@ export default function TaskEditorModal({
           });
         } catch (err) {
           // A draft that stands without a step of its own is made, and is
-          // named by itself: the drafts after it were not sent. Mirrors the
-          // desktop.
-          const partly = eventWriteLeftover(err) ? left.shift() : undefined;
+          // named by itself: the drafts after it were not sent. So is one
+          // that may stand. Mirrors the desktop.
+          const leftover = eventWriteLeftover(err) != null;
+          const mayStand = !leftover && !writeNeverLanded(err);
+          const partly = leftover || mayStand ? left.shift() : undefined;
+          const draft =
+            partly != null ? t('actions.quotedTitle', { title: partly }) : '';
+          const reason = eventWriteFailureReason(err, t);
           if (left.length === 0) {
-            showNotice(writeErrorMessage(err, t));
+            showNotice(
+              mayStand
+                ? t('dialogs.task.subtasks.draftMayStand', {
+                    title: parent.title,
+                    draft,
+                    reason,
+                  })
+                : writeErrorMessage(err, t),
+            );
             return false;
           }
           // The editor edits what stands from here: the form takes the task
@@ -977,11 +996,18 @@ export default function TaskEditorModal({
             left.map((name) => t('actions.quotedTitle', { title: name })),
             t,
           );
-          const message =
-            partly != null
+          const message = mayStand
+            ? t('dialogs.task.subtasks.draftMayStandThenRest', {
+                title: parent.title,
+                draft,
+                reason,
+                count: left.length,
+                titles,
+              })
+            : partly != null
               ? t('dialogs.task.subtasks.draftPartlyThenRest', {
                   title: parent.title,
-                  draft: t('actions.quotedTitle', { title: partly }),
+                  draft,
                   count: left.length,
                   titles,
                 })
@@ -990,7 +1016,7 @@ export default function TaskEditorModal({
                     title: parent.title,
                     count: left.length,
                     titles,
-                    reason: eventWriteFailureReason(err, t),
+                    reason,
                   }),
                   err,
                   t,
@@ -1001,6 +1027,7 @@ export default function TaskEditorModal({
         }
         left.shift();
       }
+      if (made == null) made = 'saved';
       await writeAfterLanded('cascade', async () =>
         recomputeAncestors(parent.id, await getTasks(parent.list_id)),
       );
@@ -1033,7 +1060,7 @@ export default function TaskEditorModal({
           assignees: form.assignees,
           sound: null,
         });
-        made = true;
+        made = 'added';
         // Write any staged draft subtasks under the freshly-created parent (they
         // default to open/medium and inherit the parent's section, matching the
         // edit-mode add), then recompute the new parent's derived status. The
@@ -1096,7 +1123,8 @@ export default function TaskEditorModal({
         // Pass loaded.list_id as the previous list so a list-picker change is
         // detected as a cross-list move (create-on-target + delete-from-source)
         // rather than an in-place PATCH at the wrong resource (412/404 external).
-        const saved = await updateTask(
+        const root = (): Promise<Task> =>
+          updateTask(
           {
             ...loaded,
             title,
@@ -1134,6 +1162,34 @@ export default function TaskEditorModal({
           },
           loaded.list_id,
         );
+        let saved: Task;
+        try {
+          saved = await root();
+        } catch (err) {
+          // Its save stood in part with the status — a later step of it
+          // (Vikunja's assignees, Graph's extension) was turned away: the
+          // family still follows, as on a check-off; saving again could not,
+          // the status being set (review round 17 of #128). Mirrors the
+          // desktop.
+          if (statusChanged && writeStatusLanded(err)) {
+            try {
+              await cascadeEditorStatus(
+                loaded.id,
+                form.status,
+                loaded.list_id,
+                taskLists.find((l) => l.id === loaded.list_id),
+                familyTasks.map((row) =>
+                  row.id === loaded.id ? { ...row, status: form.status } : row,
+                ),
+              );
+            } catch (cascadeErr) {
+              familyFailed = ` ${t('dialogs.task.subtasks.familyNotAll', {
+                reason: eventWriteFailureReason(cascadeErr, t),
+              })}`;
+            }
+          }
+          throw err;
+        }
         // Mirror the desktop TaskDialog: a parent's list change drags its whole
         // family along, and a status change made via the editor cascades through
         // the family (the root was just written above with its full field set).
@@ -1204,7 +1260,7 @@ export default function TaskEditorModal({
       // which only closes. A new task's staged subtasks were never made, and
       // are named so nothing goes unsaid.
       if (eventWriteLeftover(err)) {
-        const sentence = writeErrorMessage(err, t);
+        const sentence = `${writeErrorMessage(err, t)}${familyFailed}`;
         showNotice(
           unmade.length > 0
             ? `${sentence} ${t('dialogs.task.subtasks.draftsNotCreated', {
@@ -1221,8 +1277,10 @@ export default function TaskEditorModal({
       // A step after the create failed — recomputing its parent, say: the
       // task stands, and so do its drafts. Said in place of the form, which
       // only closes, so the create is not offered again.
-      if (made) {
-        showNotice(`${t('mobile.added', { title })} ${writeErrorMessage(err, t)}`);
+      if (made != null) {
+        showNotice(
+          `${t(made === 'added' ? 'mobile.added' : 'mobile.saved', { title })} ${writeErrorMessage(err, t)}`,
+        );
         return;
       }
       const message = writeErrorMessage(err, t);

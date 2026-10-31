@@ -27,12 +27,15 @@ export function withWrite(writes: readonly SectionWrite[], write: SectionWrite):
   return [...writes.filter((w) => writtenId(w) !== id), write];
 }
 
-/** The rows as the host serves them: alike when the same sections stand. */
+/** The rows as the host serves them: alike when the same sections stand as
+ *  the provider keeps them. A section's colour is not among it: on an
+ *  external list it is this device's own, laid over every read at once, a
+ *  refresh or not (review round 17 of #128). */
 function sameRows(a: readonly Section[], b: readonly Section[]): boolean {
   const key = (rows: readonly Section[]) =>
     JSON.stringify(
       rows
-        .map((s) => [s.id, s.name, s.order, s.color_label ?? null])
+        .map((s) => [s.id, s.name, s.order])
         .sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
     );
   return key(a) === key(b);

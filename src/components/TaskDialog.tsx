@@ -47,9 +47,12 @@ import {
   selfAssignOnStatusChange,
   taskAssignmentMode,
   taskPrefillFrom,
+  failureOfWrites,
   withLaterForBusy,
   writeAfterLanded,
   writeErrorMessage,
+  writeNeverLanded,
+  writeStatusLanded,
 } from '@aperio/shared';
 import { CloseOnlyNotice } from './CloseOnlyNotice';
 import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
@@ -1350,6 +1353,30 @@ export function TaskDialog({
       // next recompute). One that fails leaves the editor on the parent, as
       // its edit, with the drafts not yet made (273); a subtask that stands
       // without a step of its own is made. `true` when all were made.
+      // The family's status writes after a root whose save stood in part
+      // with its status: every one attempted; what did not take, as a
+      // sentence to follow the root's, empty when every one did.
+      const followFamily = async (
+        writes: StatusWrite[],
+        rows: Task[],
+      ): Promise<string> => {
+        const byId = new Map(rows.map((row) => [row.id, row]));
+        const failures: unknown[] = [];
+        for (const w of writes) {
+          const target = byId.get(w.taskId);
+          if (!target) continue;
+          try {
+            await writeAncestor(target, w);
+          } catch (err) {
+            failures.push(err);
+          }
+        }
+        if (failures.length === 0) return '';
+        return ` ${t('dialogs.task.subtasks.familyNotAll', {
+          reason: eventWriteFailureReason(failureOfWrites('cascade', failures, true), t),
+        })}`;
+      };
+
       const makeDrafts = async (parent: Task): Promise<boolean> => {
         const draftStatus =
           parent.status === 'completed' || parent.status === 'cancelled'
@@ -1382,10 +1409,25 @@ export function TaskDialog({
             invalidateData();
             // A draft that stands without a step of its own is made, and is
             // named by itself: the drafts after it were not sent (Toni,
-            // 2026-10-24).
-            const partly = eventWriteLeftover(err) ? left.shift() : undefined;
+            // 2026-10-24). So is one that may stand — its answer was lost,
+            // say: only one that surely never landed is offered again
+            // (review round 17 of #128).
+            const leftover = eventWriteLeftover(err) != null;
+            const mayStand = !leftover && !writeNeverLanded(err);
+            const partly = leftover || mayStand ? left.shift() : undefined;
+            const draft =
+              partly != null ? t('actions.quotedTitle', { title: partly }) : '';
+            const reason = eventWriteFailureReason(err, t);
             if (left.length === 0) {
-              showNotice(writeErrorMessage(err, t));
+              showNotice(
+                mayStand
+                  ? t('dialogs.task.subtasks.draftMayStand', {
+                      title: parent.title,
+                      draft,
+                      reason,
+                    })
+                  : writeErrorMessage(err, t),
+              );
               return false;
             }
             // The editor edits what stands from here: the form takes the
@@ -1410,23 +1452,31 @@ export function TaskDialog({
               t,
             );
             setError(
-              partly != null
-                ? t('dialogs.task.subtasks.draftPartlyThenRest', {
+              mayStand
+                ? t('dialogs.task.subtasks.draftMayStandThenRest', {
                     title: parent.title,
-                    draft: t('actions.quotedTitle', { title: partly }),
+                    draft,
+                    reason,
                     count: left.length,
                     titles,
                   })
-                : withLaterForBusy(
-                    t('dialogs.task.subtasks.draftsFailed', {
+                : partly != null
+                  ? t('dialogs.task.subtasks.draftPartlyThenRest', {
                       title: parent.title,
+                      draft,
                       count: left.length,
                       titles,
-                      reason: eventWriteFailureReason(err, t),
-                    }),
-                    err,
-                    t,
-                  ),
+                    })
+                  : withLaterForBusy(
+                      t('dialogs.task.subtasks.draftsFailed', {
+                        title: parent.title,
+                        count: left.length,
+                        titles,
+                        reason,
+                      }),
+                      err,
+                      t,
+                    ),
             );
             return false;
           }
@@ -1435,6 +1485,9 @@ export function TaskDialog({
         return true;
       };
 
+      // What the family's status writes did not take, after a root whose
+      // save stood in part with its status: said after the root's sentence.
+      let familyFailed = '';
       setSubmitting(true);
       try {
         if (isEdit && task) {
@@ -1497,6 +1550,22 @@ export function TaskDialog({
             assignees: rootAssignees,
             completed_at: completedAtToWrite,
           };
+          // Status cascade: if the user changed the Status dropdown
+          // on the form, propagate the change through the family
+          // (cascade-down for completed/cancelled; cascade-up for
+          // every status). Skip the root write — it goes below with
+          // its full field set. The snapshot we hand the planner
+          // reflects the *new* status so up-cascade reads a coherent
+          // state.
+          const snapshot = tasks.map((row) =>
+            row.id === task.id ? { ...row, status: form.status } : row,
+          );
+          const cascadeWrites = statusChanged
+            ? planStatusCascade(task.id, form.status, snapshot, {
+                cascadeEnabled,
+                ...(autoDate ? { todayKey: todayIsoKey() } : {}),
+              }).filter((w) => w.taskId !== task.id)
+            : [];
           // Pass the *original* list_id as the move hint so the
           // backend can tell an in-place edit (list picker
           // untouched) apart from a cross-list move (picker
@@ -1505,10 +1574,23 @@ export function TaskDialog({
           // resource URL and iCloud-shaped servers reject the
           // precondition with 412 / Conflict — same root cause
           // the event-side `previousCalendarId` hint addresses.
-          const saved = await invoke<Task>('update_task', {
-            task: updated,
-            previousListId: task.list_id,
-          });
+          let saved: Task;
+          try {
+            saved = await invoke<Task>('update_task', {
+              task: updated,
+              previousListId: task.list_id,
+            });
+          } catch (err) {
+            // Its save stood in part with the status — a later step of it
+            // (Vikunja's assignees, Graph's extension) was turned away: the
+            // family still follows, every write attempted, as on a
+            // check-off; saving again could not, the status being set
+            // (review round 17 of #128).
+            if (writeStatusLanded(err) && cascadeWrites.length > 0) {
+              familyFailed = await followFamily(cascadeWrites, snapshot);
+            }
+            throw err;
+          }
           // The rows a list change moved: one whose original the provider
           // was too busy to delete says so (decision 277).
           const moved = [saved];
@@ -1539,26 +1621,7 @@ export function TaskDialog({
               );
             }
           }
-          // Status cascade: if the user changed the Status dropdown
-          // on the form, propagate the change through the family
-          // (cascade-down for completed/cancelled; cascade-up for
-          // every status). Skip the root write — we just did it
-          // above with the full field set. The snapshot we hand the
-          // planner reflects the *new* status so up-cascade reads
-          // a coherent state.
           if (statusChanged) {
-            const snapshot = tasks.map((row) =>
-              row.id === task.id ? { ...row, status: form.status } : row,
-            );
-            const cascadeWrites = planStatusCascade(
-              task.id,
-              form.status,
-              snapshot,
-              {
-                cascadeEnabled,
-                ...(autoDate ? { todayKey: todayIsoKey() } : {}),
-              },
-            ).filter((w) => w.taskId !== task.id);
             await writeAfterLanded('cascade', () =>
               applyAncestorWrites(cascadeWrites, snapshot),
             );
@@ -1621,7 +1684,7 @@ export function TaskDialog({
           invalidateData();
           // Drafts exist only for a task this editor creates, or created.
           const unmade = draftSubtasks;
-          const sentence = writeErrorMessage(err, t);
+          const sentence = `${writeErrorMessage(err, t)}${familyFailed}`;
           showNotice(
             unmade.length > 0
               ? `${sentence} ${t('dialogs.task.subtasks.draftsNotCreated', {
@@ -2704,21 +2767,24 @@ async function applyAncestorWrites(
   for (const w of writes) {
     const target = byId.get(w.taskId);
     if (!target) continue;
-    await invoke<Task>('update_task', {
-      task: {
-        ...target,
-        status: w.status,
-        completed_at:
-          w.status === 'completed' ? new Date().toISOString() : null,
-        // Honour the planner's auto-date companion write — see the
-        // matching block in useTaskStatusToggle.applyCascade.
-        scheduled_date:
-          w.scheduledDate !== undefined
-            ? w.scheduledDate
-            : target.scheduled_date,
-      },
-    });
+    await writeAncestor(target, w);
   }
+}
+
+/** One planned status write of the family, onto `target` as the snapshot
+ *  holds it. */
+async function writeAncestor(target: Task, w: StatusWrite): Promise<Task> {
+  return invoke<Task>('update_task', {
+    task: {
+      ...target,
+      status: w.status,
+      completed_at: w.status === 'completed' ? new Date().toISOString() : null,
+      // Honour the planner's auto-date companion write — see the
+      // matching block in useTaskStatusToggle.applyCascade.
+      scheduled_date:
+        w.scheduledDate !== undefined ? w.scheduledDate : target.scheduled_date,
+    },
+  });
 }
 
 function collectDescendants(parentId: string, all: Task[]): Task[] {

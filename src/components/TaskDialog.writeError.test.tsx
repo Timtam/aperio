@@ -203,6 +203,43 @@ describe('TaskDialog → a save that failed', () => {
     expect(screen.getByText('Brot')).toBeTruthy();
   });
 
+  it('names a draft whose answer was lost as one that may stand, and offers only the rest', async () => {
+    // Review round 17 of #128: said "was not created" and offered again, it
+    // was made twice.
+    answers.create_task = [
+      () => Promise.resolve(created('t-1', 'Einkaufen')),
+      () => Promise.reject({ code: 'network', message: 'timed out' }),
+    ];
+    await openNew(vi.fn());
+    addDraft('Milch');
+    addDraft('Brot');
+    create();
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain(
+      '„Einkaufen“ wurde angelegt. Die Unteraufgabe „Milch“ wurde vielleicht auch angelegt; prüfe sie (',
+    );
+    expect(alert.textContent).toContain(
+      'Die Unteraufgabe „Brot“ wurde danach nicht mehr angelegt. Du bearbeitest jetzt die angelegte Aufgabe; Speichern legt die Unteraufgabe mit an.',
+    );
+    expect(screen.queryByText('Milch')).toBeNull();
+    expect(screen.getByText('Brot')).toBeTruthy();
+  });
+
+  it('only closes on a last draft whose answer was lost, saying it may stand', async () => {
+    answers.create_task = [
+      () => Promise.resolve(created('t-1', 'Einkaufen')),
+      () => Promise.reject({ code: 'network', message: 'timed out' }),
+    ];
+    await openNew(vi.fn());
+    addDraft('Milch');
+    create();
+    const note = await screen.findByText(/wurde vielleicht auch angelegt/);
+    expect(note.textContent).toContain('„Einkaufen“ wurde angelegt. Die Unteraufgabe „Milch“');
+    expect(screen.queryByRole('button', { name: 'Anlegen' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Speichern' })).toBeNull();
+    expect(createCalls()).toHaveLength(2);
+  });
+
   it('edits a created task whose subtasks did not all follow, and saves its changes with them', async () => {
     answers.create_task = [
       // Stored with a day its create derived (started → pinned to today).
@@ -256,6 +293,56 @@ describe('TaskDialog → a save that failed', () => {
       ['Brot', 't-1'],
     ]);
     expect(announce).toHaveBeenCalledWith(expect.stringContaining('Einkaufen Samstag'));
+  });
+});
+
+describe('TaskDialog: a status change whose save stood in part', () => {
+  // Review round 17 of #128: the family's cascade came after the root and was
+  // skipped, and saving again could not run it, the status being set.
+  const parent = created('t-1', 'Umzug');
+  const kids = [created('t-2', 'Kisten', 't-1'), created('t-3', 'Strom', 't-1')];
+
+  async function completeParent() {
+    CASCADE.enabled = true;
+    TASKS.current = [parent, ...kids];
+    const { TaskDialog } = await import('./TaskDialog');
+    render(<TaskDialog isOpen onClose={vi.fn()} task={parent} defaultListId="L1" />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), {
+      target: { value: 'completed' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+  }
+
+  const updates = () =>
+    invokeMock.mock.calls
+      .filter((call) => call[0] === 'update_task')
+      .map((call) => (call[1] as { task: Task }).task);
+
+  it('still completes the subtasks', async () => {
+    answers.update_task = [
+      () => Promise.reject({ code: 'network', message: 'partly-saved: assignees' }),
+      (args) => Promise.resolve((args as { task: Task }).task),
+    ];
+    await completeParent();
+    const note = await screen.findByText(/nur zum Teil gespeichert/);
+    expect(note.textContent).not.toContain('Nicht jede Aufgabe');
+    expect(updates().map((u) => [u.id, u.status])).toEqual([
+      ['t-1', 'completed'],
+      ['t-2', 'completed'],
+      ['t-3', 'completed'],
+    ]);
+  });
+
+  it('says what of the family did not take, after every write was tried', async () => {
+    answers.update_task = [
+      () => Promise.reject({ code: 'network', message: 'partly-saved: assignees' }),
+      () => Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' }),
+      (args) => Promise.resolve((args as { task: Task }).task),
+    ];
+    await completeParent();
+    const note = await screen.findByText(/Nicht jede Aufgabe darüber oder darunter/);
+    expect(note.textContent).toMatch(/^Die Änderung ist nur zum Teil gespeichert/);
+    expect(updates()).toHaveLength(3);
   });
 });
 

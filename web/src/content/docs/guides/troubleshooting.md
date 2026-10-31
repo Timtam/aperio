@@ -369,7 +369,12 @@ without it, and Aperio says so.
 When you create a task with subtasks and one of the subtasks fails, the
 editor now edits the created task: the subtasks not yet created stay listed
 under their own heading, and saving keeps your changes to the task and
-creates the subtasks still missing.
+creates the subtasks still missing. A subtask whose answer was lost may have
+been created: Aperio says so and does not offer it again; check it.
+
+When a task's status change was saved only in part, the tasks above and below
+it still take the new status, as when you check it off; one that does not is
+named after the message.
 
 What you can do: open the item again later and add what is missing.
 

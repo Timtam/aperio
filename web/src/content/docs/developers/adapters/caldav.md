@@ -49,8 +49,9 @@ Apple's well-known endpoints.
   never a refusal or a busy server. A caller's own reading goes first: a
   replayed 404 on a delete is gone, a 405 on a MKCALENDAR is the collection
   the first attempt made, a 412 on a create guarded by `If-None-Match` is the
-  first attempt's resource when Aperio minted the UID; a kept UID's 412 is
-  `uid-taken`, replay or not (see below). A first attempt answered 429 did
+  first attempt's resource when Aperio named the resource (a minted UID, or
+  the fresh `{uuid}.ics` of a kept UID that is no plain name); the 412 of a
+  resource a kept UID names is `uid-taken`, replay or not (see below). A first attempt answered 429 did
   nothing: a busy
   provider (`busy_detail`, decision 270), and an update says so before any
   refusal. A walk over every calendar or address book (delete, EXDATE) stops

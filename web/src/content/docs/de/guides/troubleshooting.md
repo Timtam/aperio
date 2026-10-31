@@ -399,6 +399,12 @@ Legst du eine Aufgabe mit Unteraufgaben an und scheitert eine Unteraufgabe,
 bearbeitet der Editor danach die angelegte Aufgabe: Die noch nicht angelegten
 Unteraufgaben stehen unter einer eigenen Überschrift, und Speichern übernimmt
 deine Änderungen an der Aufgabe und legt die noch fehlenden Unteraufgaben an.
+Eine Unteraufgabe, deren Antwort verloren ging, wurde vielleicht angelegt:
+Aperio sagt das und bietet sie nicht noch einmal an; prüfe sie.
+
+Wurde die Statusänderung einer Aufgabe nur zum Teil gespeichert, übernehmen
+die Aufgaben darüber und darunter den neuen Status trotzdem, wie beim
+Abhaken; eine, die es nicht tut, nennt die Meldung danach.
 
 Was du tun kannst: Öffne das Element später noch einmal und ergänze, was
 fehlt.

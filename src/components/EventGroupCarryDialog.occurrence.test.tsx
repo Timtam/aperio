@@ -162,6 +162,18 @@ describe('EventGroupCarryDialog → "only this occurrence" to a copy', () => {
     expect(calls('add_event_exdate')).toHaveLength(0);
   });
 
+  it('says a standalone whose answer was lost as one that may stand, and offers it not again', async () => {
+    // Review round 17 of #128: "not changed", and trying again made a second
+    // standalone.
+    createFails.current = { code: 'network', message: 'connection reset' };
+    await carry();
+    const mayStand = /In Privat steht der Termin am .* möglicherweise doppelt|In Privat, the appointment may now show twice/;
+    await waitFor(() => expect(announced.some((line) => mayStand.test(line))).toBe(true));
+    expect(screen.queryByText(/Nicht geändert|Not changed/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /erneut|again/i })).toBeNull();
+    expect(calls('add_event_exdate')).toHaveLength(0);
+  });
+
   it("says the copy's kept occurrence when a busy provider refused the skip after its standalone (277)", async () => {
     skipFails.current = BUSY;
     await carry();

@@ -103,12 +103,56 @@ describe('ContactDialog → a create that landed in part', () => {
     // notice says a false failure. Mirrors the phone.
     onFile.hasPhoto = false;
     const onClose = vi.fn();
-    await createContact(onClose, true, () =>
-      fireEvent.click(screen.getByRole('checkbox', { name: 'Verteilerliste (Gruppe)' })),
-    );
+    await createContact(onClose, true, () => {
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Verteilerliste (Gruppe)' }));
+      // Nor is one offered for a group (review round 17 of #128): the
+      // editor showed a photo that was then dropped without a word.
+      expect(screen.queryByRole('button', { name: 'Foto ersetzen' })).toBeNull();
+      expect(document.querySelector('input[type="file"]')).toBeNull();
+    });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     const sent = invokeMock.mock.calls.find((c) => c[0] === 'create_contact');
     expect((sent?.[1] as { request: { photo: unknown } }).request.photo).toBeNull();
+  });
+
+  it('writes no photo for a contact saved as a group', async () => {
+    const person = {
+      id: 'c-1',
+      list_id: 'book-1',
+      display_name: 'Anna',
+      given_name: 'Anna',
+      family_name: null,
+      name_prefix: null,
+      name_suffix: null,
+      organization: null,
+      emails: [],
+      phone_numbers: [],
+      urls: [],
+      birthday: null,
+      anniversary: null,
+      job_title: null,
+      department: null,
+      notes: null,
+      members: null,
+      has_photo: false,
+      addresses: [],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      etag: null,
+    };
+    const onClose = vi.fn();
+    const { ContactDialog } = await import('./ContactDialog');
+    render(<ContactDialog isOpen onClose={onClose} contact={person as never} />);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File([new Uint8Array([0xff, 0xd8, 0xff])], 'anna.jpg', { type: 'image/jpeg' })] },
+    });
+    await screen.findByRole('button', { name: 'Foto ersetzen' });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Verteilerliste (Gruppe)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(invokeMock.mock.calls.filter((c) => c[0] === 'update_contact')).toHaveLength(1);
+    expect(invokeMock.mock.calls.filter((c) => c[0] === 'set_contact_photo')).toHaveLength(0);
   });
 
   it('closes as before when the photo stands too', async () => {

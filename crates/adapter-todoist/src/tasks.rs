@@ -180,11 +180,12 @@ pub async fn create_task(
     if needs_close {
         let path = format!("/tasks/{}/close", urlencoding(&result.id));
         // The task stands: a failed close leaves it saved in part (decision
-        // 277), and creating it again would make a second one.
+        // 277), and creating it again would make a second one. Its status is
+        // a request of its own, as on an update (review round 17 of #128).
         client
             .post_empty(&path)
             .await
-            .map_err(|err| err.after_landed("close"))?;
+            .map_err(|err| err.after_landed(cal_core::STATUS_STEP))?;
         // Mirror the close in the returned struct so the caller
         // sees a consistent picture — saves a follow-up GET.
         result.status = TaskStatus::Completed;
@@ -2512,7 +2513,10 @@ mod tests {
         let err = create_task(&fixture_client(&server.url()), "P1", new)
             .await
             .unwrap_err();
-        assert!(crate::to_core_error_for_tests(err).is_partly_saved());
+        let core = crate::to_core_error_for_tests(err);
+        assert!(core.is_partly_saved());
+        // The task stands open: its status did not go out with the fields.
+        assert!(!core.status_landed());
     }
 
     /// A busy server is no answer about a project's members.

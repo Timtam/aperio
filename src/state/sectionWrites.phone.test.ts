@@ -53,6 +53,18 @@ describe('section writes over a list\'s reads', () => {
     expect(moved.rows.map((s) => s.name)).toEqual(['Später']);
   });
 
+  it('keeps a write open while only a colour of the rows from before changed', async () => {
+    // Review round 17 of #128: a rename saved with a new colour showed the
+    // old name again, as the colour, stored at once, made the read differ.
+    const { overRead, withWrite } = await load();
+    const before = [section('sec-a', 'Alt'), section('sec-b', 'B')];
+    const written = withWrite([], { upsert: section('sec-a', 'Neu'), before });
+    const coloured = [{ ...section('sec-a', 'Alt'), color_label: 'blue' }, section('sec-b', 'B')];
+    const read = overRead(coloured, written);
+    expect(read.open).toHaveLength(1);
+    expect(read.rows.map((s) => s.name).sort()).toEqual(['B', 'Neu']);
+  });
+
   it('keeps a deleted section out, and a later write of it takes its place', async () => {
     const { overRead, withWrite } = await load();
     const renamed = withWrite([], { upsert: section('sec-a', 'Neu') });

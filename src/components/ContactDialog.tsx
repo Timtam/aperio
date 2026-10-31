@@ -573,7 +573,7 @@ export function ContactDialog({
           // survive the field update without us doing anything.
           // The contact itself was saved: a photo the provider turned away
           // never reads as "nothing was changed" (decision 277).
-          if (photoDirty) {
+          if (photoDirty && !form.isGroup) {
             if (photo) {
               await writeAfterLanded('photo', () =>
                 apiSetContactPhoto(contact.id, photo, form.listId),
@@ -709,71 +709,75 @@ export function ContactDialog({
             </p>
           )}
 
-          <div className="form__field form__field--photo">
-            <span className="form__label">
-              {t('dialogs.contact.photoSectionLabel')}
-            </span>
-            <div className="contact-photo">
-              {photo ? (
-                <img
-                  className="contact-photo__preview"
-                  src={photoToDataUrl(photo)}
-                  alt={t('dialogs.contact.photoAltSet', {
-                    name: form.displayName || t('dialogs.contact.photoNone'),
-                  })}
-                />
-              ) : (
-                <div
-                  className="contact-photo__placeholder"
-                  role="img"
-                  aria-label={t('dialogs.contact.photoAltNone', {
-                    name: form.displayName || '',
-                  })}
-                >
-                  {photoLoading
-                    ? t('dialogs.contact.photoLoading')
-                    : t('dialogs.contact.photoNone')}
-                </div>
-              )}
-              {!viewOnly && (
-                <div className="contact-photo__actions">
-                  <input
-                    ref={photoInputRef}
-                    id={photoInputId}
-                    type="file"
-                    accept={ALLOWED_PHOTO_TYPES.join(',')}
-                    className="sr-only"
-                    onChange={(e) => void onPickPhoto(e)}
+          {/* A person only: a group keeps no photo, as on the phone (review
+              round 17 of #128). */}
+          {!form.isGroup && (
+            <div className="form__field form__field--photo">
+              <span className="form__label">
+                {t('dialogs.contact.photoSectionLabel')}
+              </span>
+              <div className="contact-photo">
+                {photo ? (
+                  <img
+                    className="contact-photo__preview"
+                    src={photoToDataUrl(photo)}
+                    alt={t('dialogs.contact.photoAltSet', {
+                      name: form.displayName || t('dialogs.contact.photoNone'),
+                    })}
                   />
-                  <button
-                    type="button"
-                    className="form__action"
-                    onClick={() => photoInputRef.current?.click()}
-                    aria-disabled={submitting || photoLoading || undefined}
+                ) : (
+                  <div
+                    className="contact-photo__placeholder"
+                    role="img"
+                    aria-label={t('dialogs.contact.photoAltNone', {
+                      name: form.displayName || '',
+                    })}
                   >
-                    {photo
-                      ? t('dialogs.contact.photoReplace')
-                      : t('dialogs.contact.photoChoose')}
-                  </button>
-                  {photo && (
+                    {photoLoading
+                      ? t('dialogs.contact.photoLoading')
+                      : t('dialogs.contact.photoNone')}
+                  </div>
+                )}
+                {!viewOnly && (
+                  <div className="contact-photo__actions">
+                    <input
+                      ref={photoInputRef}
+                      id={photoInputId}
+                      type="file"
+                      accept={ALLOWED_PHOTO_TYPES.join(',')}
+                      className="sr-only"
+                      onChange={(e) => void onPickPhoto(e)}
+                    />
                     <button
                       type="button"
                       className="form__action"
-                      onClick={onRemovePhoto}
-                      aria-disabled={submitting || undefined}
+                      onClick={() => photoInputRef.current?.click()}
+                      aria-disabled={submitting || photoLoading || undefined}
                     >
-                      {t('dialogs.contact.photoRemove')}
+                      {photo
+                        ? t('dialogs.contact.photoReplace')
+                        : t('dialogs.contact.photoChoose')}
                     </button>
-                  )}
-                </div>
-              )}
-              {photoError && (
-                <p role="alert" className="form__error">
-                  {photoError}
-                </p>
-              )}
+                    {photo && (
+                      <button
+                        type="button"
+                        className="form__action"
+                        onClick={onRemovePhoto}
+                        aria-disabled={submitting || undefined}
+                      >
+                        {t('dialogs.contact.photoRemove')}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {photoError && (
+                  <p role="alert" className="form__error">
+                    {photoError}
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {viewOnly && (
             <p className="form__hint form__hint--note">

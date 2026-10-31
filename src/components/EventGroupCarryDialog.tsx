@@ -22,6 +22,8 @@ import {
   type CarryScope,
   type EventGroup,
   eventWriteErrorMessage,
+  eventWriteFailureReason,
+  writeNeverLanded,
   deletionsNotRestoredSentence,
   exceptionsLossOf,
   exceptionsLossSentences,
@@ -305,6 +307,9 @@ export function EventGroupCarryDialog({
         // Whether part of this copy's carry stands already (its standalone):
         // a failure after that is never "not changed".
         let landed = false;
+        // Whether its standalone went out: one whose answer was lost may
+        // stand (review round 17 of #128).
+        let standaloneSent = false;
         try {
           const current = await getEventById(target.event_id, target.calendar_id);
           if (current == null) {
@@ -348,6 +353,7 @@ export function EventGroupCarryDialog({
             // The standalone first, then the skip, as the move and the
             // editors do: a create that fails leaves the copy whole, and a skip
             // that fails after it is a later step (decision 277).
+            standaloneSent = true;
             const standalone = await createEvent({
               calendar_id: target.calendar_id,
               title: row.title,
@@ -664,6 +670,18 @@ export function EventGroupCarryDialog({
             done += 1;
             unsure.push(
               `${calendarName(target.calendar_id)}: ${eventWriteErrorMessage(err, t)}`,
+            );
+            continue;
+          }
+          if (standaloneSent && occurrence && !writeNeverLanded(err)) {
+            // Its standalone may stand, its answer lost, say: said, and not
+            // offered again, which would make a second one.
+            unsure.push(
+              t('dialogs.eventGroupCarry.standaloneMayStand', {
+                calendar: calendarName(target.calendar_id),
+                date: cutoffDay(occurrence, i18n.language),
+                reason: eventWriteFailureReason(err, t),
+              }),
             );
             continue;
           }

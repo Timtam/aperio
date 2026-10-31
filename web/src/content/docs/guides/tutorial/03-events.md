@@ -440,11 +440,13 @@ checkbox; **Edit …** is one of its actions (on iOS in the rotor).
 - **When not every one arrives**, the list says how many did, and names each
   one that did not with its reason; a busy provider's ends with “try again
   later”, and those stay checked. One that may not have arrived whole — a
-  series whose skipped occurrences could not all be removed, an invitation
-  Exchange kept but did not finish, or one whose answer was lost — is marked
-  “maybe not imported whole” and not offered again, from the list or from its
-  editor: importing it once more could make it twice. Check it in the
-  calendar.
+  series Aperio could neither finish nor remove again, an invitation Exchange
+  kept but did not finish, or one whose answer was lost — is marked “maybe not
+  imported whole” and not offered again, from the list or from its editor:
+  importing it once more could make it twice. Check it in the calendar. A
+  series whose skipped occurrences could not all be removed, and that Aperio
+  therefore removed again, reads “not imported” with its reason, and can be
+  imported again.
   A series a calendar writes in steps shows the “please wait” dialog meanwhile.
 
 Times keep their zone, including the Windows zone names Outlook writes. A

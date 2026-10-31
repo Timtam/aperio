@@ -475,16 +475,20 @@ Ankreuzfeld; **Bearbeiten …** ist eine ihrer Aktionen (unter iOS im Rotor).
   CalDAV-Kalender schreiben Teilnehmer nur zusammen mit ihren Einladungen;
   die Liste, die niemanden benachrichtigt, bringt ein solches Meeting dort
   deshalb ohne sie. Im Editor bleiben sie, und sie werden eingeladen.
-- **Wenn nicht alle ankommen,** sagt die Liste, wie viele es sind, und nennt
+- **Wenn nicht alle ankommen,** sagt die Liste, wie viele ankamen, und nennt
   jeden, der nicht ankam, mit seinem Grund; bei einem ausgelasteten Anbieter
   endet der Satz mit „Versuche es später noch einmal“, und diese bleiben
-  angehakt. Einer, der vielleicht nicht ganz ankam — eine Serie, deren
-  ausgelassene Termine sich nicht alle entfernen ließen, eine Einladung, die
+  angehakt. Einer, der vielleicht nicht ganz ankam — eine Serie, die Aperio
+  weder fertigstellen noch wieder entfernen konnte, eine Einladung, die
   Exchange aufnahm, aber nicht fertigstellte, oder einer, dessen Antwort
   verloren ging —, heißt „vielleicht nicht ganz importiert“ und wird nicht noch
   einmal angeboten, weder in der Liste noch aus seinem Editor: Ein zweites
-  Importieren könnte ihn doppelt anlegen. Prüfe ihn im Kalender. Eine Serie, die ein Kalender schrittweise
-  schreibt, zeigt solange den Dialog „Vorgang läuft, bitte warten“.
+  Importieren könnte ihn doppelt anlegen. Prüfe ihn im Kalender. Eine Serie,
+  deren ausgelassene Termine sich nicht alle entfernen ließen und die Aperio
+  darum wieder entfernt hat, heißt „nicht importiert“, mit ihrem Grund, und
+  lässt sich noch einmal importieren. Eine Serie, die ein Kalender
+  schrittweise schreibt, zeigt solange den Dialog „Vorgang läuft, bitte
+  warten“.
 
 Zeiten behalten ihre Zone, auch die Windows-Zonennamen, die Outlook schreibt.
 Eine Zone, die nur die Datei selbst festlegt (Outlooks „Customized Time
