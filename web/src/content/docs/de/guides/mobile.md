@@ -62,7 +62,10 @@ von VoiceOver und TalkBack:
     wischen) und wählst eine Aktion.
 - **Live-Ansagen.** Statusänderungen werden ohne Fokuswechsel angesagt –
   „Aufgabe erledigt", „Termin gespeichert", das Synchronisationsergebnis, fällige
-  Erinnerungen – genau wie am Desktop.
+  Erinnerungen – genau wie am Desktop. Blätterst du zu Tagen, deren Termine die
+  App noch nicht gelesen hat, sagt sie nach einer halben Sekunde „Lädt …", und
+  die Tage füllen sich, sobald ihre Termine gelesen sind – auch während deine
+  Konten aktualisiert werden.
 - **Gruppenüberschriften** (z. B. eine Aufgabenliste oder ein Abschnitt) sind
   zusammenklappbare Schalter, die ansagen, ob sie auf- oder zugeklappt sind.
 - **Die Verwaltungslisten** – Kalender, Aufgabenlisten, Adressbücher – geben

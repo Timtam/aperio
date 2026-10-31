@@ -58,7 +58,10 @@ concepts), adapted to the way VoiceOver and TalkBack work:
     choose an action.
 - **Live announcements.** Status changes are announced without moving the focus
   – "Task done", "Event saved", the synchronization result, due reminders –
-  exactly as on the desktop.
+  exactly as on the desktop. When you page to days whose events the app has
+  not read yet, it says "Loading …" after half a second, and the days fill in
+  as soon as their events are read – also while your accounts are being
+  refreshed.
 - **Group headings** (e.g. a task list or a section) are collapsible buttons
   that announce whether they are expanded or collapsed.
 - **The catalogues** – calendars, task lists, address books – give each entry a

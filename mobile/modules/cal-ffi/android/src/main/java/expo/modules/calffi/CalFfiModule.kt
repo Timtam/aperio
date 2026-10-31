@@ -91,10 +91,14 @@ class CalFfiModule : Module() {
   // sit on "Loading…" until the launch sync finishes, even with a warm SWR
   // cache. The long NETWORK-bound operations therefore run on their own
   // single-thread scope: sync rounds stay mutually exclusive among themselves,
-  // while the short reads/writes on the default queue flow past them. (The
-  // Rust Host is Send+Sync — uniffi's contract — and its SQLite access is
-  // mutex-guarded, so both dispatchers may safely call into it concurrently.)
-  // Mirrors the iOS module's `slowQueue`.
+  // while the reads, writes and lookups on the scopes below flow past them.
+  // (The Rust Host is Send+Sync — uniffi's contract — and its SQLite access is
+  // mutex-guarded, so every dispatcher may safely call into it concurrently.)
+  // What is left on the default queue is short: preferences, logs, sounds,
+  // the widget, account settings, and the calls that only start a refresh.
+  // Mirrors the iOS module's `slowQueue`; each scope here has its twin there,
+  // and check-ffi-bridges.mjs holds every function to the same one on both
+  // platforms.
   // The dispatcher is kept separately so OnDestroy can close it — expo-modules
   // only cancels its OWN queues on teardown, so without this every React-host
   // re-creation (dev reload) would leak one "calffi.slow" thread.
@@ -104,6 +108,49 @@ class CalFfiModule : Module() {
   private val slowScope = CoroutineScope(
     slowDispatcher + SupervisorJob() + CoroutineName("calffi.slow"),
   )
+
+  // Reads of what the host already holds, the cache and the local store, run
+  // side by side: paging a view during an account refresh used to wait behind
+  // whatever else was queued, and the new days stayed empty until it finished.
+  // Four at a time, as many as the host's read pool has WAL connections. The
+  // reads never ask a provider: a container that is not cached serves what it
+  // has and starts a refresh in the background. Mirrors `readQueue`.
+  private val readDispatcher = ownThreads("calffi.read", 4)
+  private val readScope = CoroutineScope(
+    readDispatcher + SupervisorJob() + CoroutineName("calffi.read"),
+  )
+
+  // Every change to calendars, events, tasks, contacts and what hangs on
+  // them (colours, groups, markers, local reminders), one after another in
+  // the order JavaScript sent them: a colour set right after a save must not
+  // land before it, nor a binding before the id it names. Apart from the
+  // reads, so a slow provider write holds up no view. Mirrors `writeQueue`.
+  private val writeDispatcher = ownThreads("calffi.write")
+  private val writeScope = CoroutineScope(
+    writeDispatcher + SupervisorJob() + CoroutineName("calffi.write"),
+  )
+
+  // Reads that ask a provider live (contact search and photos, list members
+  // and shares, the signed-in user, the sync devices). Seconds on a slow
+  // network, so they wait neither for the cache reads nor in front of them.
+  // Mirrors `lookupQueue`.
+  private val lookupDispatcher = ownThreads("calffi.lookup")
+  private val lookupScope = CoroutineScope(
+    lookupDispatcher + SupervisorJob() + CoroutineName("calffi.lookup"),
+  )
+
+  // The reminder scan, `upcomingRemindersJson`, reads every account live,
+  // three to five seconds. On the default queue a check-off waited behind it
+  // (TODO B13, 218); on `slowScope` it would wait for sync rounds and they for
+  // it. Mirrors `remindersQueue`.
+  private val remindersDispatcher = ownThreads("calffi.reminders")
+  private val remindersScope = CoroutineScope(
+    remindersDispatcher + SupervisorJob() + CoroutineName("calffi.reminders"),
+  )
+
+  /** A dispatcher on `count` threads of its own, named for the logs; OnDestroy closes it. */
+  private fun ownThreads(name: String, count: Int = 1) =
+    Executors.newFixedThreadPool(count) { r -> Thread(r, name) }.asCoroutineDispatcher()
 
   // The full on-device engine: tasks + lists + sections + accounts + the
   // statically-embedded adapter registry + cross-device sync, all over one
@@ -287,11 +334,19 @@ class CalFfiModule : Module() {
       }
     }
 
-    // Release the slow-ops thread when the module is torn down (dev reload /
+    // Release the module's own threads when it is torn down (dev reload /
     // React-host restart) — expo-modules cancels only its own queues.
     OnDestroy {
       slowScope.cancel()
       slowDispatcher.close()
+      readScope.cancel()
+      readDispatcher.close()
+      writeScope.cancel()
+      writeDispatcher.close()
+      lookupScope.cancel()
+      lookupDispatcher.close()
+      remindersScope.cancel()
+      remindersDispatcher.close()
     }
 
     // Calls the Rust `cal_ffi::parse_attendee` through the UniFFI-generated
@@ -326,7 +381,7 @@ class CalFfiModule : Module() {
       hostCoded {
         host.upcomingRemindersJson(horizonMinutes.toUInt())
       }
-    }
+    }.runOnQueue(remindersScope)
 
     soundFunctions()
 
@@ -626,55 +681,55 @@ class CalFfiModule : Module() {
       hostCoded {
         host.taskListsJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("createTaskListJson") { name: String ->
       hostCoded {
         host.createTaskListJson(name)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("reparentTaskList") { id: String, parentId: String? ->
       hostCoded {
         host.reparentTaskList(id, parentId)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("deleteTaskList") { id: String ->
       hostCoded {
         host.deleteTaskList(id)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("tasksJson") { listId: String ->
       hostCoded {
         host.tasksJson(listId)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("taskJson") { id: String ->
       hostCoded {
         host.taskJson(id)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("createTaskJson") { listId: String, newTaskJson: String ->
       hostCoded { host.createTaskJson(listId, newTaskJson) }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("updateTaskJson") { taskJson: String, previousListId: String? ->
       hostCoded { host.updateTaskJson(taskJson, previousListId) }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("deleteTask") { taskId: String, listId: String? ->
       hostCoded { host.deleteTask(taskId, listId) }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("sectionsJson") { listId: String ->
       hostCoded {
         host.sectionsJson(listId)
       }
-    }
+    }.runOnQueue(readScope)
 
     // `position` arrives from JS as a Number; the Rust signature takes a u32
     // (Kotlin UInt), which Expo can't coerce a JS Number to directly, so take
@@ -683,19 +738,19 @@ class CalFfiModule : Module() {
       hostCoded {
         host.createSectionJson(listId, name, position.toUInt(), colorLabel)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("updateSectionJson") { sectionJson: String ->
       hostCoded {
         host.updateSectionJson(sectionJson)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("deleteSection") { id: String, listId: String? ->
       hostCoded {
         host.deleteSection(id, listId)
       }
-    }
+    }.runOnQueue(writeScope)
   }
 
   /** Lifted out of `definition()` — see the note there. Accounts: the full engine, external adapters and secrets. */
@@ -710,7 +765,7 @@ class CalFfiModule : Module() {
       hostCoded {
         host.accountsJson(lang)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("createAccountJson") { requestJson: String ->
       hostCoded {
@@ -722,13 +777,13 @@ class CalFfiModule : Module() {
       hostCoded {
         host.testAccountJson(requestJson)
       }
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("testAccountValuesJson") { requestJson: String ->
       hostCoded {
         host.testAccountValuesJson(requestJson)
       }
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("runAccountActionJson") { requestJson: String ->
       hostCoded {
@@ -788,7 +843,7 @@ class CalFfiModule : Module() {
       hostCoded {
         host.listAccountsMissingCredentialsJson(lang)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("setAccountSecret") { accountId: String, secret: String ->
       hostCoded {
@@ -809,31 +864,31 @@ class CalFfiModule : Module() {
       hostCoded {
         host.listCalendarsJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("createCalendarJson") { requestJson: String ->
       hostCoded {
         host.createCalendarJson(requestJson)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("deleteCalendar") { id: String ->
       hostCoded {
         host.deleteCalendar(id)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("getEventsJson") { requestJson: String ->
       hostCoded {
         host.getEventsJson(requestJson)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("getEventByIdJson") { id: String, calendarId: String? ->
       hostCoded {
         host.getEventByIdJson(id, calendarId)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("queryFreeBusyJson") { requestJson: String ->
       hostCoded {
@@ -843,19 +898,19 @@ class CalFfiModule : Module() {
 
     AsyncFunction("createEventJson") { requestJson: String ->
       hostCoded { host.createEventJson(requestJson) }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("updateEventJson") { eventJson: String, previousCalendarId: String? ->
       hostCoded { host.updateEventJson(eventJson, previousCalendarId) }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("deleteEvent") { id: String, calendarId: String?, sendCancellations: Boolean? ->
       hostCoded { host.deleteEvent(id, calendarId, sendCancellations) }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("addEventExdateJson") { id: String, occurrence: String, calendarId: String?, sendCancellations: Boolean ->
       hostCoded { host.addEventExdateJson(id, occurrence, calendarId, sendCancellations) }
-    }
+    }.runOnQueue(writeScope)
   }
 
   /** Lifted out of `definition()` — see the note there. Importing a file (DESIGN-file-import.md). */
@@ -1018,107 +1073,107 @@ class CalFfiModule : Module() {
       hostCoded {
         host.listDayMarkersJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("createDayMarkerJson") { name: String, symbol: String?, colorLabel: String? ->
       hostCoded {
         host.createDayMarkerJson(name, symbol, colorLabel)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("updateDayMarkerJson") { markerJson: String ->
       hostCoded {
         host.updateDayMarkerJson(markerJson)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("deleteDayMarker") { id: String ->
       hostCoded {
         host.deleteDayMarker(id)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("dayLogJson") { day: String ->
       hostCoded {
         host.dayLogJson(day)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("dayLogsInRangeJson") { from: String, to: String ->
       hostCoded {
         host.dayLogsInRangeJson(from, to)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("setDayLogJson") { logJson: String ->
       hostCoded {
         host.setDayLogJson(logJson)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("listColorLabelsJson") { ->
       hostCoded {
         host.listColorLabelsJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("createColorLabelJson") { name: String, hex: String ->
       hostCoded {
         host.createColorLabelJson(name, hex)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("getOrCreateAdHocColorLabelJson") { hex: String ->
       hostCoded {
         host.getOrCreateAdHocColorLabelJson(hex)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("updateColorLabelJson") { labelJson: String ->
       hostCoded {
         host.updateColorLabelJson(labelJson)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("deleteColorLabel") { id: String ->
       hostCoded {
         host.deleteColorLabel(id)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("groupEventsJson") { membersJson: String ->
       groupCoded { host.groupEventsJson(membersJson) }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("ungroupEventJson") { calendarId: String, eventId: String, bookkeeping: Boolean ->
       hostCoded {
         host.ungroupEventJson(calendarId, eventId, bookkeeping)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("dissolveEventGroup") { groupId: String ->
       hostCoded {
         host.dissolveEventGroup(groupId)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("eventGroupsForEventsJson") { eventsJson: String ->
       hostCoded {
         host.eventGroupsForEventsJson(eventsJson)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("declineGroupSuggestionJson") { firstJson: String, secondJson: String ->
       hostCoded {
         host.declineGroupSuggestionJson(firstJson, secondJson)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("groupSuggestionDeclinesJson") { ->
       hostCoded {
         host.groupSuggestionDeclinesJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     // Reminders Aperio keeps for one event and tells no provider about
     // (migration 0043).
@@ -1126,64 +1181,64 @@ class CalFfiModule : Module() {
       hostCoded {
         host.eventLocalRemindersJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("setEventLocalRemindersJson") {
       calendarId: String, eventId: String, remindersJson: String, title: String, startsAt: String ->
       hostCoded {
         host.setEventLocalRemindersJson(calendarId, eventId, remindersJson, title, startsAt)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("healEventLocalReminders") {
       calendarId: String, oldEventId: String, newEventId: String ->
       hostCoded {
         host.healEventLocalReminders(calendarId, oldEventId, newEventId)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("refreshEventLocalReminderSignature") {
       calendarId: String, eventId: String, title: String, startsAt: String ->
       hostCoded {
         host.refreshEventLocalReminderSignature(calendarId, eventId, title, startsAt)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("setContainerColorLabel") { containerId: String, kind: String, colorLabelId: String? ->
       hostCoded {
         host.setContainerColorLabel(containerId, kind, colorLabelId)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("renameContainer") { containerId: String, kind: String, name: String ->
       hostCoded {
         host.renameContainer(containerId, kind, name)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("setSectionColor") { sectionId: String, listId: String, colorLabelId: String? ->
       hostCoded {
         host.setSectionColor(sectionId, listId, colorLabelId)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("setEventColor") { eventId: String, calendarId: String, colorLabelId: String? ->
       hostCoded {
         host.setEventColor(eventId, calendarId, colorLabelId)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("searchJson") { query: String, filtersJson: String ->
       hostCoded {
         host.searchJson(query, filtersJson)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("searchContactsJson") { query: String ->
       hostCoded {
         host.searchContactsJson(query)
       }
-    }
+    }.runOnQueue(lookupScope)
   }
 
   /** Lifted out of `definition()` — see the note there. Collaboration: RSVP and task-list members and sharing. */
@@ -1198,53 +1253,53 @@ class CalFfiModule : Module() {
       hostCoded {
         host.calendarCurrentUserEmail(calendarId)
       }
-    }
+    }.runOnQueue(lookupScope)
 
     AsyncFunction("respondToEvent") { calendarId: String, eventId: String, status: String, sendResponse: Boolean ->
       hostCoded { host.respondToEvent(calendarId, eventId, status, sendResponse) }
-    }
+    }.runOnQueue(writeScope)
 
     // Coded, so a refused read keeps its token (`cal_core::ReadRefusal`) and
     // the editor can say which permission the account's token lacks.
     AsyncFunction("taskListMembersJson") { listId: String ->
       hostCoded { host.taskListMembersJson(listId) }
-    }
+    }.runOnQueue(lookupScope)
 
     AsyncFunction("taskCurrentUserJson") { listId: String ->
       hostCoded {
         host.taskCurrentUserJson(listId)
       }
-    }
+    }.runOnQueue(lookupScope)
 
     AsyncFunction("taskListSharesJson") { listId: String ->
       hostCoded {
         host.taskListSharesJson(listId)
       }
-    }
+    }.runOnQueue(lookupScope)
 
     AsyncFunction("taskSearchUsersJson") { listId: String, query: String ->
       hostCoded {
         host.taskSearchUsersJson(listId, query)
       }
-    }
+    }.runOnQueue(lookupScope)
 
     AsyncFunction("taskAddMember") { listId: String, memberRef: String, right: String? ->
       hostCoded {
         host.taskAddMember(listId, memberRef, right)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("taskRemoveMember") { listId: String, memberRef: String ->
       hostCoded {
         host.taskRemoveMember(listId, memberRef)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("taskSetMemberRight") { listId: String, memberRef: String, right: String ->
       hostCoded {
         host.taskSetMemberRight(listId, memberRef, right)
       }
-    }
+    }.runOnQueue(writeScope)
   }
 
   /** Lifted out of `definition()` — see the note there. OAuth, discovery, sync-target OAuth and end-to-end encryption. */
@@ -1331,7 +1386,7 @@ class CalFfiModule : Module() {
 
     AsyncFunction("syncStatusJson") {
       hostCoded { host.syncStatusJson() }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("syncNowJson") { trigger: String ->
       hostCoded { host.syncNowJson(trigger) }
@@ -1347,7 +1402,7 @@ class CalFfiModule : Module() {
       hostCoded {
         host.getSyncAdapterSummaryJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("pushNow") { trigger: String ->
       hostCoded {
@@ -1359,7 +1414,7 @@ class CalFfiModule : Module() {
       hostCoded {
         host.listSyncLogJson(limit.toUInt())
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("clearSyncLog") {
       hostCoded {
@@ -1393,14 +1448,14 @@ class CalFfiModule : Module() {
       hostCoded {
         host.getCacheRefreshStatusJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     // Per-account refresh-error surface (silent-staleness warning).
     AsyncFunction("refreshErrorsJson") {
       hostCoded {
         host.refreshErrorsJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("warmCacheOnForeground") {
       hostCoded {
@@ -1418,7 +1473,7 @@ class CalFfiModule : Module() {
       hostCoded {
         host.getContactsSyncStatusJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("setContactsSyncInterval") { minutes: Int ->
       hostCoded {
@@ -1477,19 +1532,19 @@ class CalFfiModule : Module() {
 
     AsyncFunction("syncConflictCount") {
       hostCoded { host.syncConflictCount().toInt() }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("listSyncConflictsJson") {
       hostCoded {
         host.listSyncConflictsJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("resolveSyncConflict") { id: Int, choice: String ->
       hostCoded {
         host.resolveSyncConflict(id.toLong(), choice)
       }
-    }
+    }.runOnQueue(writeScope)
   }
 
   /** Lifted out of `definition()` — see the note there. */
@@ -1509,7 +1564,7 @@ class CalFfiModule : Module() {
       hostCoded {
         host.listCustomSoundsJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("customSoundPath") { sha256: String ->
       hostCoded {
@@ -1577,61 +1632,61 @@ class CalFfiModule : Module() {
       hostCoded {
         host.contactListsJson()
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("contactsJson") { listId: String ->
       hostCoded {
         host.contactsJson(listId)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("createContactJson") { listId: String, contactJson: String ->
       hostCoded {
         host.createContactJson(listId, contactJson)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("updateContactJson") { contactJson: String ->
       hostCoded {
         host.updateContactJson(contactJson)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("deleteContact") { id: String, listId: String? ->
       hostCoded {
         host.deleteContact(id, listId)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("getContactPhotoJson") { id: String, listId: String? ->
       hostCoded {
         host.getContactPhotoJson(id, listId)
       }
-    }
+    }.runOnQueue(lookupScope)
 
     AsyncFunction("setContactPhotoJson") { id: String, listId: String?, photoJson: String ->
       hostCoded {
         host.setContactPhotoJson(id, listId, photoJson)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("deleteContactPhoto") { id: String, listId: String? ->
       hostCoded {
         host.deleteContactPhoto(id, listId)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("createContactListJson") { name: String ->
       hostCoded {
         host.createContactListJson(name)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("deleteContactList") { id: String ->
       hostCoded {
         host.deleteContactList(id)
       }
-    }
+    }.runOnQueue(writeScope)
   }
 
   /** Lifted out of `definition()` — see the note there. */
@@ -1661,13 +1716,13 @@ class CalFfiModule : Module() {
       hostCoded {
         host.adoptMeetingJson(requestJson)
       }
-    }
+    }.runOnQueue(writeScope)
 
     AsyncFunction("eventMeetingJson") { eventId: String, calendarId: String? ->
       hostCoded {
         host.eventMeetingJson(eventId, calendarId)
       }
-    }
+    }.runOnQueue(readScope)
 
     AsyncFunction("listAdapterKindsJson") { lang: String? ->
       hostCoded {
@@ -1800,11 +1855,11 @@ class CalFfiModule : Module() {
 
     AsyncFunction("listSyncDevicesJson") {
       hostCoded { host.listSyncDevicesJson() }
-    }
+    }.runOnQueue(lookupScope)
 
     AsyncFunction("forgetSyncDevice") { deviceId: String ->
       hostCoded { host.forgetSyncDevice(deviceId) }
-    }
+    }.runOnQueue(slowScope)
   }
 
   /** Lifted out of `definition()` — see the note there. */

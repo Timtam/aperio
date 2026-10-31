@@ -460,8 +460,8 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
 
   const run = useCallback(() => {
     // Startup-gated: the deadline-pin + review passes fan out over every
-    // list, and at launch that queued ahead of the visible screen's first
-    // read on the serial native queue. Pre-gate triggers coalesce into one
+    // list, and at launch that competed with the visible screen's first
+    // reads. Pre-gate triggers coalesce into one
     // deferred run (the fire-markers make repeats no-ops anyway); once the
     // gate is open this is a plain pass-through (foreground resumes).
     // The cache-settle wait lives INSIDE runInner, after its marker

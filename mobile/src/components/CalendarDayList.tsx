@@ -246,6 +246,34 @@ function retainWindowSnapshot(key: string, snap: WindowSnapshot): void {
   }
 }
 
+/**
+ * A snapshot for the window `key` names (`start|end`, as the snapshots are
+ * keyed) taken from the newest snapshot of a wider window that holds it whole
+ * — the week a day lies in, the month a week does — or `null` when none
+ * does. Those rows were expanded across the wider window, so every
+ * occurrence inside this one is among them; only the ones that touch this
+ * window are kept. Tasks, sections and the catalogs do not depend on the
+ * window and come along as they are.
+ */
+function coveringSnapshot(key: string): WindowSnapshot | null {
+  const [from, to] = key.split('|').map((iso) => Date.parse(iso));
+  for (const [snapKey, snap] of Array.from(windowSnapshotCache).reverse()) {
+    const [snapStart, snapEnd] = snapKey.split('|').map((iso) => Date.parse(iso));
+    if (!(snapStart <= from && snapEnd >= to)) continue;
+    const events = snap.events.filter((ev) => {
+      const evStart = Date.parse(ev.start);
+      const evEnd = Date.parse(ev.end);
+      return evStart < to && (evEnd > from || evStart >= from);
+    });
+    return { ...snap, events };
+  }
+  return null;
+}
+
+/** How long a page step onto a window nothing on hand covers waits before it
+ *  says it is loading: a warm read lands well inside it and says nothing. */
+const PENDING_CUE_MS = 500;
+
 // ── Single-day compact-list geometry (dayLayout='list') ──────────────────────
 // The lighter alternative to the hour-grid: a chronological list where a timed
 // EVENT block's STRICT height reflects its DURATION (via the shared, platform-
@@ -400,10 +428,10 @@ export function CalendarDayList({
   // on the SAME mount (a page step) re-seeds in the layout effect below.
   const seedRef = useRef<WindowSnapshot | null | undefined>(undefined);
   if (seedRef.current === undefined) {
-    seedRef.current =
-      windowSnapshotCache.get(
-        `${range.start.toISOString()}|${range.end.toISOString()}`,
-      ) ?? null;
+    const mountKey = `${range.start.toISOString()}|${range.end.toISOString()}`;
+    // A day first opened from its week (or a week from its month) paints the
+    // wider window's rows for it rather than "Loading …".
+    seedRef.current = windowSnapshotCache.get(mountKey) ?? coveringSnapshot(mountKey);
   }
   const seed = seedRef.current;
 
@@ -414,6 +442,10 @@ export function CalendarDayList({
   const [tasks, setTasks] = useState<Task[]>(() => seed?.tasks ?? []);
   const [sections, setSections] = useState<Section[]>(() => seed?.sections ?? []);
   const [loading, setLoading] = useState(seed == null);
+  // A page step onto a window whose events nothing on hand covers: the days
+  // show no events because they are not read yet, not because there are none.
+  // Cleared when that window's load lands.
+  const [eventsPending, setEventsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // A failed write's line, apart from a load's: a load clears only its own,
   // so a refresh after the write leaves it. It goes with the list's next
@@ -424,6 +456,7 @@ export function CalendarDayList({
   // useDeferredLoading, ported): a warm host-cache round trip stays silent
   // instead of flashing the text for a frame or two.
   const showLoading = useDeferredLoading(loading);
+  const showEventsPending = useDeferredLoading(eventsPending, PENDING_CUE_MS);
   // The synced "show effort as tile size" pref (default on). Hydrated on mount
   // and re-read on focus so a Settings toggle / peer sync reflects without a
   // restart. Purely visual — the SR effort suffix is always appended below.
@@ -652,17 +685,21 @@ export function CalendarDayList({
 
   // A page step changes `range` on the same mount. Until the debounced reload
   // lands (300 ms + the fetch) the PREVIOUS window's rows stayed in state and
-  // were bucketed under the NEW window's days — a multi-day event spanning
-  // both windows read as the new day's content, and a row touched meanwhile
-  // announced a stale count (the desktop useEvents fix, mirrored). Re-seed
-  // synchronously from the window snapshot instead: a warm window paints its
-  // last loaded content before the frame is drawn (a layout effect commits
-  // before paint), a cold one drops the old rows so the new days read as
-  // empty until the reload lands — NOT as "loading": that branch replaces
-  // the whole day list, and swapping the accessibility tree out on every
-  // cold page step is exactly the VoiceOver churn the reload debounce exists
-  // to avoid. The catalogs (calendars, labels, lists) are window-independent
-  // and stay.
+  // were bucketed under the NEW window's days — an occurrence the old window
+  // did not expand was missing, and a row touched meanwhile announced a stale
+  // count (the desktop useEvents fix, mirrored). Re-seed synchronously
+  // instead, before the frame is drawn (a layout effect commits before
+  // paint): a window loaded before paints its last content; one a wider
+  // loaded window holds (the week of a day, the month of a week) paints that
+  // window's rows for it. Only a window nothing covers drops the old events
+  // and says "Loading …" — after PENDING_CUE_MS, in place of the empty text
+  // or above the tasks, and politely queued. Not the whole-list "loading"
+  // branch: it would swap the accessibility tree out on every cold page step,
+  // exactly the VoiceOver churn the reload debounce exists to avoid. Tasks
+  // and sections stay: a list's tasks are read whole, whatever the window. So
+  // do the catalogs (calendars, labels, lists). A load still under way for
+  // the old window is dropped (`reqToken`): its rows would land under the new
+  // days.
   const windowKey = `${range.start.toISOString()}|${range.end.toISOString()}`;
   useEffect(() => {
     setWriteError(null);
@@ -671,16 +708,25 @@ export function CalendarDayList({
   useLayoutEffect(() => {
     if (seededWindowKeyRef.current === windowKey) return;
     seededWindowKeyRef.current = windowKey;
+    reqToken.current += 1;
     const snap = windowSnapshotCache.get(windowKey);
+    const covering = snap ? null : coveringSnapshot(windowKey);
     if (snap) {
       setEvents(snap.events);
       setTasks(snap.tasks);
       setSections(snap.sections);
     } else {
-      setEvents([]);
-      setTasks([]);
+      setEvents(covering?.events ?? []);
     }
+    setEventsPending(snap == null && covering == null);
   }, [windowKey]);
+
+  // The days say they are loading once that is worth saying (see above):
+  // queued, so it does not cut off the period VoiceOver is reading out.
+  useEffect(() => {
+    if (!showEventsPending) return;
+    AccessibilityInfo.announceForAccessibilityWithOptions(t('views.loading'), { queue: true });
+  }, [showEventsPending, t]);
 
   // ── Grid auto-scroll (dayLayout='grid' only; sighted/low-vision nicety) ──────
   // The grid renders a windowed-height canvas (dayHours × HOUR_PX) inside this
@@ -855,6 +901,7 @@ export function CalendarDayList({
       setEvents(expandedEvents);
       setTasks(flatTasks);
       setSections(flatSections);
+      setEventsPending(false);
       hasLoadedRef.current = true;
       // Remember the loaded window so the NEXT mount of this window (a view
       // switch re-mounts the list) paints instantly instead of blanking to
@@ -874,7 +921,11 @@ export function CalendarDayList({
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
-      if (reqToken.current === token) setLoading(false);
+      if (reqToken.current === token) {
+        setLoading(false);
+        // A failed load ends the wait too: its error line says why.
+        setEventsPending(false);
+      }
       // Balances the hapticLoadBegin above — always, even for a superseded load.
       hapticLoadEnd();
     }
@@ -882,8 +933,8 @@ export function CalendarDayList({
 
   // Coalesce reload requests: the two cache-reload subscriptions (calendar +
   // tasks) usually fire TOGETHER (a warm pass refreshes both) and focus can race
-  // them, so without this each triggers its own full, SERIALIZED FFI pass over
-  // every calendar + list. It ALSO coalesces rapid PAGING: a VoiceOver
+  // them, so without this each triggers its own full FFI pass over every
+  // calendar + list. It ALSO coalesces rapid PAGING: a VoiceOver
   // three-finger swipe (or the ‹ › buttons held down) steps the period fast, and
   // reloading the whole day/week/month on every step churned VoiceOver's
   // accessibility tree mid-swipe — delaying the period announcement and blocking
@@ -2106,6 +2157,15 @@ export function CalendarDayList({
         </Text>
       )}
 
+      {/* The days' events are still being read, the tasks are there already:
+          said above them, so nobody takes the days for free (see
+          eventsPending). With no rows at all it stands in their place. */}
+      {!loading && showEventsPending && totalItems > 0 && (
+        <Text style={styles.muted} accessibilityRole="text">
+          {t('views.loading')}
+        </Text>
+      )}
+
       {loading ? (
         // Deferred: a fast (warm-cache) load never shows the text at all —
         // and crucially, "no events" must not show either while the answer
@@ -2116,9 +2176,19 @@ export function CalendarDayList({
           </Text>
         ) : null
       ) : totalItems === 0 ? (
-        <Text style={styles.muted} accessibilityRole="text">
-          {emptyText}
-        </Text>
+        // Not "nothing here" while the window's events are still being read:
+        // nothing at first, then "Loading …" (see eventsPending).
+        eventsPending ? (
+          showEventsPending ? (
+            <Text style={styles.muted} accessibilityRole="text">
+              {t('views.loading')}
+            </Text>
+          ) : null
+        ) : (
+          <Text style={styles.muted} accessibilityRole="text">
+            {emptyText}
+          </Text>
+        )
       ) : (
         <ScrollView
           ref={scrollRef}

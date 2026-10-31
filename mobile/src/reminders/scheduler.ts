@@ -9,8 +9,9 @@ import { logLine } from '../api/logs';
 import { UpcomingReminder, upcomingReminders } from '../api/reminders';
 import { customSoundPath } from '../api/sounds';
 import { getHiddenCalendars } from '../state/calendarVisibility';
-import { setRemindersRefreshHook } from '../state/cacheObserver';
+import { setRemindersRefreshHook, whenPassSettled } from '../state/cacheReloadBus';
 import { settleExternalCaches } from '../state/cacheSettle';
+import { withFollowUp } from '../state/followUpRun';
 import { whenStartupSettled } from '../state/startupGate';
 import { upcomingDayStartNotifications } from './dayStartSchedule';
 
@@ -141,8 +142,6 @@ export async function ensurePermission(): Promise<boolean> {
   return next.granted;
 }
 
-let inFlight = false;
-
 /**
  * The once-per-session external-cache settle every reschedule waits behind.
  *
@@ -164,9 +163,10 @@ let inFlight = false;
  * would slip past a trigger-side settle. Inside the reschedule itself no
  * path can bypass it. One settle per session: later calls await the
  * already-resolved promise (a no-op), so mutation/foreground replans stay
- * as immediate as before. Mutations arriving DURING the settle are safe
- * even though their own call bails on `inFlight` — the pending first pass
- * reads the caches only after the settle, so it sees their writes.
+ * as immediate as before. Mutations arriving DURING the settle are safe:
+ * their call queues one more run behind the pending first one (see
+ * `rescheduleReminders`), and that first one reads the caches only after
+ * the settle anyway.
  */
 let launchSettle: Promise<void> | null = null;
 function ensureLaunchSettle(): Promise<void> {
@@ -196,12 +196,17 @@ export function markExternalCachesSettled(): void {
 }
 
 /** Re-read the upcoming reminders from the core and replace the scheduled OS
- *  notifications with the soonest `MAX_SCHEDULED` future ones. Idempotent +
- *  guarded against overlap; never throws. The first run of a session waits
- *  for the external caches to settle first (see ensureLaunchSettle). */
-export async function rescheduleReminders(): Promise<void> {
-  if (inFlight) return;
-  inFlight = true;
+ *  notifications with the soonest `MAX_SCHEDULED` future ones. Idempotent;
+ *  never throws. The first run of a session waits for the external caches to
+ *  settle first (see ensureLaunchSettle).
+ *
+ *  A call while a run is under way is not dropped: one more run follows it
+ *  (`withFollowUp`). The run under way may have read before the write that
+ *  made the call — a task checked off while the scan was reading would keep
+ *  its reminder until the next occasion (TODO B13, 218). */
+export const rescheduleReminders: () => Promise<void> = withFollowUp(rescheduleOnce);
+
+async function rescheduleOnce(): Promise<void> {
   try {
     if (!(await ensurePermission())) return;
     await ensureLaunchSettle();
@@ -271,20 +276,30 @@ export async function rescheduleReminders(): Promise<void> {
   } catch {
     // Best-effort: a permission denial / bridge hiccup must never crash a
     // background reschedule. The next trigger (launch/foreground) retries.
-  } finally {
-    inFlight = false;
   }
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 
+/** The debounced reschedule, once it is due. Stable, so a run deferred to the
+ *  end of a pass is deferred once; it also takes back a debounce armed by the
+ *  pass-end flush itself, which would otherwise scan a second time. */
+function rescheduleWhenDue(): void {
+  if (timer != null) clearTimeout(timer);
+  timer = null;
+  void rescheduleReminders();
+}
+
 /** Debounced reschedule — call after a local mutation (a burst of edits
- *  coalesces into one reschedule `DEBOUNCE_MS` after the last). */
+ *  coalesces into one reschedule `DEBOUNCE_MS` after the last). While an
+ *  external refresh pass runs, the scan waits for its end: it reads every
+ *  account live, the pass is about to change what it would read, and each
+ *  flush of the pass would start another (decision 218). */
 export function refreshRemindersSoon(): void {
   if (timer != null) clearTimeout(timer);
   timer = setTimeout(() => {
     timer = null;
-    void rescheduleReminders();
+    whenPassSettled(rescheduleWhenDue);
   }, DEBOUNCE_MS);
 }
 
@@ -302,10 +317,11 @@ setRemindersRefreshHook(() => whenStartupSettled('reminders', refreshRemindersSo
 /** Mount once near the app root: reschedule on launch + every foreground-resume
  *  (the latter catches reminders synced in from a peer while we were away).
  *  The LAUNCH run is startup-gated: `upcomingRemindersJson` is a heavy
- *  trigger-enumeration pass on the serial native queue, and the OS
+ *  trigger-enumeration pass that reads every account live, and the OS
  *  notifications it plans sit days ahead — running it ~1.5s after first
- *  paint changes nothing for the user but keeps the queue clear for the
- *  visible screen's first read. The session's FIRST reschedule additionally
+ *  paint changes nothing for the user but keeps the providers free for the
+ *  visible screen's first refresh. (It no longer holds up the reads: it runs
+ *  on a native queue of its own.) The session's FIRST reschedule additionally
  *  waits for the external caches to settle before its cancel-and-rewrite
  *  (see ensureLaunchSettle). Foreground resumes pass straight through (the
  *  gate is open by then). */

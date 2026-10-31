@@ -10,141 +10,31 @@
 // coalesced so a warm pass touching many containers speaks once per category,
 // not once per calendar.
 
-import { useEffect, useRef } from 'react';
+import { NavigationContext } from '@react-navigation/native';
+import { useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { AppState } from 'react-native';
 
 import { passEndSentence } from '@aperio/shared';
 
 import { announceAround } from '../a11y/speechHold';
 import type { CacheRefreshStatus } from '../api/sync';
+import {
+  cancelWhenPassSettled,
+  endCacheUpdates,
+  noteCacheUpdated,
+  notePassRefreshing,
+  runSettledWork,
+  subscribeScreenReload,
+  whenPassSettled,
+} from './cacheReloadBus';
+import type { CacheCategory, ScreenFocus } from './cacheReloadBus';
 import { setCacheRefreshProgress } from './cacheRefreshProgress';
 import { notePassEndSpoken } from './useRefreshErrors';
 import { hapticLoadBegin, hapticLoadEnd, loadHapticsPref } from './haptics';
 import CalFfi from '../../modules/cal-ffi';
 
-/** Coarse category a cache scope belongs to — drives the announcement string +
- *  which screens reload. The Host scopes are events/calendars (→ calendar),
- *  tasks/task_lists (→ tasks), contacts/contact_lists (→ contacts), and
- *  sections (→ sections: the task store reads the lists it holds again — a
- *  section write invalidates them, and only the refresh brings the truth). */
-export type CacheCategory = 'calendar' | 'tasks' | 'contacts' | 'sections';
-
-function categoryForScope(scope: string): CacheCategory | null {
-  switch (scope) {
-    case 'events':
-    case 'calendars':
-      return 'calendar';
-    case 'tasks':
-    case 'task_lists':
-      return 'tasks';
-    case 'contacts':
-    case 'contact_lists':
-      return 'contacts';
-    case 'sections':
-      return 'sections';
-    default:
-      return null;
-  }
-}
-
-// Module-level bus: the root observer fans coalesced category notifications out
-// to whichever screens are subscribed (via useCacheReload).
-type BusListener = (category: CacheCategory) => void;
-const busListeners = new Set<BusListener>();
-
-// Reminder-scheduler hook — REGISTERED by the scheduler at its module init
-// (a direct import here would close a module cycle through the api layer).
-// Invoked whenever data lands that can change what should be scheduled: a
-// peer sync round applied changes, or an external-cache refresh finished.
-let remindersRefreshHook: (() => void) | null = null;
-export function setRemindersRefreshHook(cb: () => void): void {
-  remindersRefreshHook = cb;
-}
-
-/**
- * Non-hook subscription for a MODULE-LEVEL store (a screen uses
- * `useCacheReload`). A store that hydrates once and holds its value in memory
- * — the signature list — has to hear about a sync round that rewrote its row,
- * or every consumer (editors included) keeps the pre-round value until the
- * next launch. Returns the unsubscribe.
- */
-export function subscribeCacheReload(category: CacheCategory, cb: () => void): () => void {
-  return subscribeBus((cat) => {
-    if (cat === category) cb();
-  });
-}
-
-function subscribeBus(cb: BusListener): () => void {
-  busListeners.add(cb);
-  return () => {
-    busListeners.delete(cb);
-  };
-}
-
-/** Coalesce window: a burst of per-container events (no warm pass running)
- *  waits this long after the FIRST event before reloading once per category. */
-const COALESCE_MS = 700;
-
-/** Max flush cadence while a backend warm pass is in flight. A pass spreads
- *  its per-container emissions over seconds, which used to defeat the short
- *  coalesce window and turn one pass into many full reload waves — each
- *  re-exposing whatever intermediate cache state existed at that moment (the
- *  app-start entry-count oscillation). The pass-end status flushes
- *  immediately, so the settled state paints exactly once; a hung pass can't
- *  starve the UI because the throttle keeps its own cadence. */
-const PASS_THROTTLE_MS = 2500;
-
-// Module-level coalescer state, shared by the native listeners (below) and
-// notifyDataReload so EVERY reload producer rides the same gating.
-const pendingCategories = new Set<CacheCategory>();
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
-let passRefreshing = false;
-
-function flushPending(): void {
-  flushTimer = null;
-  if (pendingCategories.size === 0) return;
-  const categories = Array.from(pendingCategories);
-  pendingCategories.clear();
-  for (const cat of categories) busListeners.forEach((l) => l(cat));
-  // Fresh data can change reminder-relevant state (provider-side edits,
-  // peer-synced tasks) — re-plan the scheduled OS notifications. Coalesced
-  // here + debounced in the scheduler, so a warm pass costs one reschedule.
-  remindersRefreshHook?.();
-}
-
-// Collect-then-flush: the FIRST category of a window arms the timer; later
-// ones just accumulate (no per-event reset, so a drip of events can't
-// postpone the flush forever and latency stays bounded).
-function scheduleFlush(): void {
-  if (flushTimer != null) return;
-  flushTimer = setTimeout(
-    flushPending,
-    passRefreshing ? PASS_THROTTLE_MS : COALESCE_MS,
-  );
-}
-
-/**
- * Ask every screen subscribed via `useCacheReload` to reload, across ALL
- * categories. Use after a CROSS-DEVICE sync round (or onboarding) applies a
- * peer's data: that path writes straight to the local store and never goes
- * through the Host's external `onCacheUpdated` push, so without this the open
- * screens stay stale until the app restarts. Silent — it's a data reload, not
- * the external-refresh cue. Routed through the SAME coalescer as the native
- * push, so a sync round landing mid-warm-pass can't bypass the reload gating.
- */
-export function notifyDataReload(): void {
-  pendingCategories.add('calendar');
-  pendingCategories.add('tasks');
-  pendingCategories.add('contacts');
-  pendingCategories.add('sections');
-  // Immediate flush: the sync UI just reported applied changes (or the user
-  // pulled to refresh) — waiting out a pass throttle here reads as "sync
-  // done but the screen is stale". Going through the shared flush still
-  // clears `pendingCategories`, so a running pass's own emissions aren't
-  // replayed on top.
-  if (flushTimer != null) clearTimeout(flushTimer);
-  flushPending();
-}
+export { notifyDataReload, subscribeCacheReload, whenPassSettled } from './cacheReloadBus';
 
 /**
  * Mount ONCE near the app root. Subscribes to the native external-cache push,
@@ -172,7 +62,7 @@ export function useCacheUpdates(): void {
   useEffect(() => {
     // (Re)subscribe keeps the module flag honest even if a previous mount
     // was torn down mid-pass (e.g. fast refresh in dev).
-    passRefreshing = refreshing.current;
+    notePassRefreshing(refreshing.current);
     // Per-container writes → live-reload the focused view (coalesced +
     // pass-throttled, see scheduleFlush). NO announcement here: a slow warm
     // pass touching many containers seconds apart spoke once per source — the
@@ -185,10 +75,7 @@ export function useCacheUpdates(): void {
       } catch {
         return;
       }
-      const category = categoryForScope(scope);
-      if (category == null) return;
-      pendingCategories.add(category);
-      scheduleFlush();
+      noteCacheUpdated(scope);
     });
 
     // ONE polite cue at the start of an external refresh pass + ONE at the end
@@ -206,13 +93,8 @@ export function useCacheUpdates(): void {
       const next = status.refreshing;
       if (next === refreshing.current) return;
       refreshing.current = next;
-      passRefreshing = next;
-      if (!next) {
-        // Pass end: paint the settled state NOW instead of waiting out a long
-        // throttle window armed mid-pass.
-        if (flushTimer != null) clearTimeout(flushTimer);
-        flushPending();
-      }
+      // Pass end: the settled state paints now, then what waited for it.
+      notePassRefreshing(next);
       // Behind a held sentence (the start check's), not through it. The end
       // names the accounts left not current (decision 180). Without an
       // outcome (it could not be read) it only says the refresh ended, and
@@ -228,14 +110,17 @@ export function useCacheUpdates(): void {
       if (next) hapticLoadBegin();
       else hapticLoadEnd();
     });
+    // Leaving the foreground: what waits for the pass end runs now. iOS
+    // suspends the JS in the background, and the home screen, where the
+    // widget is read, is where the user is going.
+    const subApp = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') runSettledWork();
+    });
     return () => {
       subData.remove();
       subStatus.remove();
-      // True unmount (app teardown): flush whatever is pending so no
-      // subscriber is left stale, then disarm.
-      if (flushTimer != null) clearTimeout(flushTimer);
-      flushPending();
-      passRefreshing = false;
+      subApp.remove();
+      endCacheUpdates();
     };
   }, []);
 }
@@ -243,15 +128,29 @@ export function useCacheUpdates(): void {
 /**
  * Screen hook: live-reload when the external cache for `category` refreshes.
  * Pass the screen's (stable, useCallback) load fn — it's called coalesced on a
- * relevant background-refresh push. Pair with the screen's existing
- * focus-reload; together they cover "fresh while open" + "fresh on return".
+ * relevant background-refresh push, while the screen is in view; a screen out
+ * of view reloads once when it comes back (see `subscribeScreenReload`).
+ * Outside a screen (the app root's stores) every push reloads.
  */
 export function useCacheReload(category: CacheCategory, reload: () => void): void {
+  // `undefined` outside a screen; the hook form would throw there.
+  const navigation = useContext(NavigationContext) as ScreenFocus | undefined;
   useEffect(
-    () =>
-      subscribeBus((cat) => {
-        if (cat === category) reload();
-      }),
-    [category, reload],
+    () => subscribeScreenReload(category, reload, navigation),
+    [category, reload, navigation],
   );
+}
+
+/**
+ * `work`, deferred while a warm pass runs (see `whenPassSettled`): the
+ * returned function is stable for the component's life and runs the latest
+ * `work` once at the end of the pass, or at once when none runs. What it
+ * deferred is dropped when the component unmounts.
+ */
+export function useWhenPassSettled(work: () => void): () => void {
+  const latest = useRef(work);
+  latest.current = work;
+  const run = useMemo(() => () => latest.current(), []);
+  useEffect(() => () => cancelWhenPassSettled(run), [run]);
+  return useCallback(() => whenPassSettled(run), [run]);
 }

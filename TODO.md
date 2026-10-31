@@ -1665,19 +1665,6 @@ Funktion ausgelassen. Der Desktop ist nicht betroffen (eigener
 tokio-Arbeiter). Die Lücke von etwa 0,9 s nach dem Nachladen der Liste ist
 gewollt (dieselben 700 ms) und kommt nach der Ansage.
 
-- [ ] **218 · Eigene Warteschlange für den Erinnerungs-Durchlauf (iOS und
-  Android).** `upcomingRemindersJson` bekommt eine eigene serielle
-  Warteschlange: unter iOS eine `DispatchQueue` wie `accessQueue`, unter
-  Android einen eigenen Thread wie `slowScope`. Nicht `slowQueue`, sonst warten
-  Senden und Synchronisieren (`pushNow`, `syncNowJson`) auf den Durchlauf und
-  er auf sie. Dazu `rescheduleReminders` (`mobile/src/reminders/scheduler.ts`):
-  Heute verwirft es eine Anfrage, die während eines Durchlaufs kommt
-  (`if (inFlight) return;`). Künftig läuft danach noch einer, sonst kann ein
-  Durchlauf, der vor dem Schreiben gelesen hat, eine Erinnerung für eine schon
-  erledigte Aufgabe stehen lassen; mit eigener Warteschlange wird das häufiger.
-  Und eine Protokollzeile, wann das Abhaken ausgelöst wurde, damit die nächste
-  Messung die Zeit vom Tippen bis zum PATCH direkt zeigt; heute ist sie nur
-  erschlossen. Braucht einen Handy-Build.
 - [ ] **220 · Nur Geändertes senden.** `TasksFeature::update_task`
   (`cal-core`) bekommt die vorige Zeile als optionalen, allgemeinen Parameter;
   beide Hosts lesen sie vor jedem Schreiben aus dem Cache und geben sie mit.
@@ -4431,6 +4418,36 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Synchronisieren), ohne zusätzlich auf einen bis zu 5 Minuten alten Speicher
   zu warten. Der Preis: im Protokoll etwa 6 volle Durchläufe in einer Minute
   Benutzung; nach 218 halten sie nichts mehr auf.
+
+- [x] **218 · Eigene Warteschlange für den Erinnerungs-Durchlauf (iOS und
+  Android).** `upcomingRemindersJson` läuft auf `remindersQueue` (iOS) und
+  `remindersScope` (Android), nicht mehr auf der Standard-Warteschlange und
+  nicht auf `slow`. `rescheduleReminders` verwirft keinen Aufruf mehr, der
+  während eines Durchlaufs kommt: Danach läuft genau einer nach
+  (`withFollowUp`, `mobile/src/state/followUpRun.ts`). Während einer
+  Aktualisierungsrunde wartet der Durchlauf bis zu ihrem Ende. Abhaken und
+  Status setzen schreiben beim Start eine Protokollzeile („task check-off:
+  started“), damit die Zeit vom Tippen bis zum PATCH direkt im Protokoll steht.
+
+  Im selben PR, Anlass Toni am 2026-10-31: Während die Konten aktualisierten,
+  waren gewischte Tage im Kalender leer. Die ganze Brücke hat jetzt ihre
+  Schlangen, auf beiden Plattformen gleich. Cache-Lesen läuft nebeneinander
+  (`readQueue`, unter Android vier eigene Threads; der Lese-Pool des Hosts hat
+  vier Verbindungen). Alle Änderungen an Daten laufen der Reihe nach auf
+  `writeQueue`. Live-Abfragen beim Anbieter (Kontaktsuche, Kontaktfotos,
+  Mitglieder, Freigaben, angemeldeter Nutzer, Sync-Geräte) laufen auf
+  `lookupQueue`. `forgetSyncDevice` und unter Android `testAccountJson` liegen
+  jetzt auf `slow`, wie unter iOS. Auf der Standard-Warteschlange bleiben nur
+  kurze Aufrufe. `check-ffi-bridges.mjs` hält jede Funktion auf beiden
+  Plattformen auf derselben Schlange; die einzige Ausnahme ist
+  `requestDeviceCalendarAccess` mit seinem Grund. Bei einem Cache-Schub lädt
+  nur der sichtbare Bildschirm neu, ein verdeckter einmal bei seiner Rückkehr
+  (`mobile/src/state/cacheReloadBus.ts`). Badge und Widget rechnen einmal am
+  Ende der Runde, spätestens nach 30 s und sofort, wenn die App in den
+  Hintergrund geht. Die Tagesliste füllt einen noch nicht geladenen Zeitraum
+  aus einem größeren schon geladenen (der Tag aus seiner Woche, die Woche aus
+  ihrem Monat) und behält beim Blättern die Aufgaben. Hält nichts den Zeitraum,
+  sagt sie nach 0,5 s „Lädt …“.
 
 #### B14 · Folgeaufgaben aus Prüfungen und Nebenbefunden — erledigte Punkte
 
