@@ -15,7 +15,8 @@
 //! moved there afterwards (Toni, 2026-10-26). Then it is read back as it now
 //! stands. Once the request stands, a later step that fails leaves something
 //! in the mailbox: the import was saved in part (decision 277), never
-//! "nothing was changed" — but for a move whose clean-up went.
+//! "nothing was changed" — but for a move whose clean-up went: then nothing
+//! stands, whatever the move's answer was (review round 19 of #128).
 
 use base64::Engine as _;
 use cal_core::{Event, NewEvent};
@@ -143,7 +144,12 @@ async fn into_folder(
             .post_soap(delete_calendar_item(&appointment.id, None, false))
             .await
         {
-            Ok(_) => Err(err),
+            // Deleted by its old id: no move landed, which gives the item a
+            // new one.
+            Ok(_) => Err(EwsError::TakenBack {
+                step: "move",
+                cause: Box::new(err),
+            }),
             Err(cleanup) => {
                 tracing::warn!(target: "adapter_ews::invitation", %cleanup, "the imported invitation stayed in the default calendar after its move failed");
                 Err(err.after_landed("move"))
@@ -524,6 +530,39 @@ mod tests {
         moved.assert_async().await;
         taken_out.assert_async().await;
         read.assert_async().await;
+    }
+
+    /// Review round 19 of #128: a move whose answer was not one of a refusal
+    /// — lost, or a code of Exchange's own — read as "maybe imported" once
+    /// its clean-up went, and the list never offered the meeting again.
+    #[tokio::test]
+    async fn a_failed_move_whose_clean_up_went_imported_nothing() {
+        let mut server = Server::new_async().await;
+        let _way = way_in(&mut server, "DEFAULT").await;
+        let _moved = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("<m:MoveItem>".into()))
+            .with_status(200)
+            .with_body(MOVE_REFUSED.replace("ErrorFolderNotFound", "ErrorMoveCopyFailed"))
+            .create_async()
+            .await;
+        let _taken_out = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                "DeleteType=\"MoveToDeletedItems\"".into(),
+            ))
+            .with_status(200)
+            .with_body(OK_DELETE)
+            .create_async()
+            .await;
+
+        let failed =
+            crate::api::create_event(&client_of(&server), "FOLDER|FCK", invitation(&[]), None)
+                .await
+                .unwrap_err();
+        let core = crate::to_core_error_for_tests(failed);
+        assert!(core.never_landed(), "{core:?}");
+        assert!(!core.is_provider_busy(), "{core:?}");
     }
 
     const BUSY_FAULT: &str = r#"<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultcode xmlns:a="http://schemas.microsoft.com/exchange/services/2006/types">a:ErrorServerBusy</faultcode><faultstring>busy</faultstring></s:Fault></s:Body></s:Envelope>"#;

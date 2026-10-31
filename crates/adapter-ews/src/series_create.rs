@@ -362,6 +362,7 @@ fn why_of(err: &EwsError) -> String {
         EwsError::Config(_) | EwsError::DiscoveryFailed(_) => "config".to_string(),
         EwsError::NotKept { .. } => "not-kept".to_string(),
         EwsError::PartlySaved { step, .. } => format!("partly-saved-{step}"),
+        EwsError::TakenBack { step, .. } => format!("taken-back-{step}"),
     }
 }
 

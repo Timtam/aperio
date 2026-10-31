@@ -293,10 +293,11 @@ impl CacheRefresher {
         });
     }
 
-    /// Wake the worker for an immediate pass on an explicit USER action
-    /// (manual refresh, settings/account change). No-op if a pass is
-    /// already running. The pass runs FORCED, so its failures surface at
-    /// once instead of waiting for a confirming second attempt.
+    /// Wake the worker for an immediate pass on the user's manual refresh.
+    /// No-op if a pass is already running. The pass runs forced for every
+    /// account, so its failures surface at once instead of waiting for a
+    /// confirming second attempt. A change of one account goes through
+    /// [`Self::trigger_account`], which forces only that one (decision 271).
     pub fn trigger(&self) {
         self.latch(Forcing::All);
         self.notify.notify_one();
@@ -366,11 +367,12 @@ impl CacheRefresher {
     /// then refresh their items with bounded concurrency so a slow provider can't
     /// gate the rest. Dedup-guarded; runs on the background runtime so it never
     /// blocks a command.
-    /// `forced` = the pass was requested by an explicit user action
-    /// (manual refresh, post-account-change trigger) rather than the
-    /// app-start / periodic schedule. A forced pass's failures surface on
-    /// the error screen at once instead of waiting for a confirming second
-    /// attempt (see `CacheStore::mark_error`).
+    /// `forcing` = which accounts an explicit user action asked for
+    /// ([`Forcing`]): every one after a manual refresh, the listed ones after
+    /// a change of an account, none on the app-start or periodic schedule.
+    /// A forced account's failures surface on the error screen at once
+    /// instead of waiting for a confirming second attempt; every other
+    /// account counts as an automatic round (see `CacheStore::mark_failure`).
     pub async fn warm_all(self: &Arc<Self>, forcing: impl Into<Forcing>) {
         let forcing = forcing.into();
         // Single-flight: a periodic tick that lands while a manual pass
@@ -454,7 +456,9 @@ impl CacheRefresher {
     async fn pass(self: &Arc<Self>, forcing: Forcing) -> (DateTime<Utc>, u32) {
         // Record the pass's forced-ness for the failure paths. Safe under
         // single-flight: only this pass writes it, and the concurrent SWR
-        // path passes its own (false) flag to mark_error directly.
+        // path records its own failures through `mark_failure` with
+        // `Attempt::Read`, where a busy answer does not count and pauses the
+        // container (`busy_paused`).
         *self.pass_forcing.lock().expect("cache refresher poisoned") = forcing;
         self.pass_succeeded.store(false, Ordering::Relaxed);
         self.busy_families

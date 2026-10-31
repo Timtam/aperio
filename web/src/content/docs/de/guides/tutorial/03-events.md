@@ -373,9 +373,11 @@ zur Gruppe.
 Geht dabei etwas schief, bleibt der Dialog offen und sagt, welche Kalender
 nicht geschrieben werden konnten; **Rest erneut versuchen** nimmt genau die noch
 einmal vor. Halb mitgezogen ist der eine Zustand, den Sie sehen müssen. Anders
-eine Kopie, deren Serie ab dem Schnitt möglicherweise doppelt steht: Ihr neuer
-Teil ist angelegt, deshalb wird sie nicht noch einmal angeboten, und ein Hinweis
-nennt stattdessen ihren Kalender und den Tag. Bleiben nur solche Hinweise, bleibt
+eine Kopie, deren Serie ab dem Schnitt oder deren Einzelkopie an ihrem Tag
+möglicherweise doppelt steht: Ihr neuer Teil oder ihre Kopie ist angelegt, oder
+vielleicht, wenn die Antwort verloren ging; deshalb wird sie nicht noch einmal
+angeboten, und ein Hinweis nennt stattdessen ihren Kalender und den Tag. Prüfen
+Sie sie dort. Bleiben nur solche Hinweise, bleibt
 der Dialog mit ihnen offen, ohne **Rest erneut versuchen**.
 
 Bei Exchange kann das Mitziehen an die ganze Serie einer Kopie dazu führen, dass

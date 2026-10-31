@@ -344,8 +344,10 @@ what makes them a group.
 If something goes wrong along the way, the dialog stays open and says which
 calendars could not be written; **Try the rest again** retries exactly those.
 Half-carried is the one state you have to see. A copy whose series may now show
-twice from the cut is different: its new part was created, so it is not offered
-again, and a note names its calendar and the day instead. When only such notes
+twice from the cut, or whose single copy may show twice on its day, is
+different: its new part or its copy was created, or may have been when its
+answer was lost, so it is not offered again, and a note names its calendar and
+the day instead; check it there. When only such notes
 are left, the dialog stays open with them and without **Try the rest again**.
 
 On Exchange, carrying a change to a copy's whole series can make Exchange drop

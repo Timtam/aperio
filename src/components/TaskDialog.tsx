@@ -1600,6 +1600,10 @@ export function TaskDialog({
           // Otherwise a subsequent reload would surface a parent in
           // list B with children stranded in list A — exactly the
           // split-state the move/copy invariant prevents elsewhere.
+          // The rows the list change moved, by the id the cascade was
+          // planned under: it writes each as it stands now, never back on
+          // the old list (review round 19 of #128). Mirrors the phone.
+          const movedRows = new Map<string, Task>();
           if (
             !isSubtask &&
             form.listId !== task.list_id
@@ -1612,19 +1616,19 @@ export function TaskDialog({
               // form.listId.
               // The task itself was saved: a later write's failure never
               // reads as "nothing was changed" (decision 277).
-              moved.push(
-                await writeAfterLanded('subtasks', () =>
-                  invoke<Task>('update_task', {
-                    task: { ...child, list_id: form.listId },
-                    previousListId: child.list_id,
-                  }),
-                ),
+              const row = await writeAfterLanded('subtasks', () =>
+                invoke<Task>('update_task', {
+                  task: { ...child, list_id: form.listId },
+                  previousListId: child.list_id,
+                }),
               );
+              moved.push(row);
+              movedRows.set(child.id, row);
             }
           }
           if (statusChanged) {
             await writeAfterLanded('cascade', () =>
-              applyAncestorWrites(cascadeWrites, snapshot),
+              applyAncestorWrites(cascadeWrites, snapshot, movedRows),
             );
           }
           // A task this editor created whose subtasks did not all follow:
@@ -2762,11 +2766,13 @@ interface DeadlineFields {
 async function applyAncestorWrites(
   writes: StatusWrite[],
   snapshot: Task[],
+  // Rows written since the plan, by the id it names them under.
+  since: Map<string, Task> = new Map(),
 ): Promise<void> {
   if (writes.length === 0) return;
   const byId = new Map(snapshot.map((row) => [row.id, row]));
   for (const w of writes) {
-    const target = byId.get(w.taskId);
+    const target = since.get(w.taskId) ?? byId.get(w.taskId);
     if (!target) continue;
     await writeAncestor(target, w);
   }

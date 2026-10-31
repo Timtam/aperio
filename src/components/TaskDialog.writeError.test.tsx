@@ -350,6 +350,37 @@ describe('TaskDialog: a status change whose save stood in part', () => {
   });
 });
 
+describe('TaskDialog: a list change and a status change in one save', () => {
+  it('cascades the moved subtasks on the new list, never back on the old one', async () => {
+    // Review round 19 of #128: the cascade wrote each subtask as the store
+    // held it before the move, and put it back on the old list.
+    const OTHER: TaskList = { ...LIST, id: 'L3', name: 'Garten' } as unknown as TaskList;
+    STORE.taskLists = [LIST, OTHER];
+    STORE.selectedTaskListIds = new Set(['L1', 'L3']);
+    CASCADE.enabled = true;
+    const parent = created('t-1', 'Umzug');
+    TASKS.current = [parent, created('t-2', 'Kisten', 't-1'), created('t-3', 'Strom', 't-1')];
+    answers.update_task = [(args) => Promise.resolve((args as { task: Task }).task)];
+    const onClose = vi.fn();
+    const { TaskDialog } = await import('./TaskDialog');
+    render(<TaskDialog isOpen onClose={onClose} task={parent} defaultListId="L1" />);
+    fireEvent.change(screen.getByRole('combobox', { name: /^liste$/i }), {
+      target: { value: 'L3' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), {
+      target: { value: 'completed' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    const updates = invokeMock.mock.calls
+      .filter((call) => call[0] === 'update_task')
+      .map((call) => (call[1] as { task: Task }).task);
+    const cascaded = updates.filter((u) => u.status === 'completed' && u.id !== 't-1');
+    expect(cascaded.map((u) => u.id).sort()).toEqual(['t-2', 't-3']);
+    expect(cascaded.every((u) => u.list_id === 'L3')).toBe(true);
+  });
+});
+
 describe('TaskDialog: the edit of a created task keeps the drafts guard', () => {
   it('blocks a save that would make the drafts left on a list without subtasks', async () => {
     STORE.taskLists = [LIST, FLAT_LIST];

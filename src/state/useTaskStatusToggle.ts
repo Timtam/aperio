@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import {
+  eventWriteFailureReason,
   failureOfWrites,
   selfAssignOnStatusChange,
   writeErrorMessage,
@@ -117,9 +118,19 @@ export function useTaskStatusActions(): TaskStatusActions {
       if (rootFailure && writeStatusLanded(rootFailure.err)) {
         // Its own save stood in part with the status — a later step of it
         // (Vikunja's assignees, Graph's extension) was turned away: the task
-        // did change. Said as the leftover alone, never "could not change"
-        // (decision 277), as `writeFailureSentence` does.
-        sayFailure(writeErrorMessage(rootFailure.err, t));
+        // did change. Said as the leftover, never "could not change"
+        // (decision 277), as `writeFailureSentence` does — and what of the
+        // family did not take after it, as the editor says it (review round
+        // 19 of #128).
+        const rest = outcome.failed.filter((f) => f !== rootFailure);
+        const sentence = writeErrorMessage(rootFailure.err, t);
+        sayFailure(
+          rest.length > 0
+            ? `${sentence} ${t('dialogs.task.subtasks.familyNotAll', {
+                reason: eventWriteFailureReason(rest[0].err, t),
+              })}`
+            : sentence,
+        );
         return true;
       }
       if (rootFailure) {

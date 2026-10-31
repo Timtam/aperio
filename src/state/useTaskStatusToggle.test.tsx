@@ -201,6 +201,21 @@ describe('useTaskStatusActions — what the user is told', () => {
     expect(said).not.toContain('statusChangeFailed');
   });
 
+  it('says what of the family did not take after a root saved in part with its status', async () => {
+    // Review round 19 of #128: a subtask that kept its status went unsaid.
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })
+      .mockRejectedValueOnce({ code: 'forbidden', message: 'provider-busy: http-429' });
+    const { result } = renderHook(() => useTaskStatusActions());
+    await act(async () => {
+      await result.current.set(TASKS[0], 'completed');
+    });
+    expect(announce).toHaveBeenCalledTimes(1);
+    const said = announce.mock.calls[0][0] as string;
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).toContain('dialogs.task.subtasks.familyNotAll');
+  });
+
   it('hands a failure to the surface that says where it shows', async () => {
     vi.mocked(invoke)
       .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })

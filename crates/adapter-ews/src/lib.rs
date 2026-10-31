@@ -1568,7 +1568,8 @@ pub(crate) fn names_sign_in_or_gone(err: &EwsError) -> bool {
         | EwsError::Protocol(_)
         | EwsError::Config(_)
         | EwsError::NotKept { .. }
-        | EwsError::PartlySaved { .. } => false,
+        | EwsError::PartlySaved { .. }
+        | EwsError::TakenBack { .. } => false,
     }
 }
 
@@ -1620,6 +1621,14 @@ fn to_core_error(err: EwsError) -> CoreError {
             tracing::debug!(step, %cause, "Exchange saved the change in part");
             to_core_error(*cause).after_landed(step)
         }
+        // Nothing stands: a refusal, whatever the failed step said — but a
+        // busy Exchange says so, as trying again later may work.
+        TakenBack { step, cause } => match to_core_error(*cause) {
+            busy if busy.is_provider_busy() => busy,
+            other => CoreError::Forbidden(
+                cal_core::WriteRefusal::ServerRefused.message(&format!("{step}: {other}")),
+            ),
+        },
         Network(m) | Unreached(m) => CoreError::Network(m),
         // Taken back, nothing stands: a refusal (203). Not taken back, the
         // series may stand: a network error naming the leftover, which no

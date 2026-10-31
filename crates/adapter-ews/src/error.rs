@@ -65,6 +65,16 @@ pub enum EwsError {
         step: &'static str,
         cause: Box<EwsError>,
     },
+
+    /// A later step of a save failed, and what the earlier ones made was
+    /// taken back (review round 19 of #128): nothing stands. `step` names the
+    /// request that failed, `cause` is why. Mapped to a refusal — or, where
+    /// Exchange was busy, to that, as trying again later may work.
+    #[error("the {step} step failed, and the save was taken back: {cause}")]
+    TakenBack {
+        step: &'static str,
+        cause: Box<EwsError>,
+    },
 }
 
 pub type EwsResult<T> = std::result::Result<T, EwsError>;

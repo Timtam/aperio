@@ -248,7 +248,10 @@ The endpoint is discovered or user-supplied.
   (`item:ParentFolderId`) and, in any other folder, moves it there
   (`MoveItem`, the folder without its change key). A move that fails deletes
   the appointment again, telling nobody, and fails the create: the import
-  lands where it was asked to or not at all. Then the adapter reads the
+  lands where it was asked to or not at all. With that clean-up done the
+  failure is a refusal (`EwsError::TakenBack`), whatever the move answered —
+  only a busy Exchange stays busy —, so the import list offers the meeting
+  again. Then the adapter reads the
   appointment back. Any other step that fails once the request stands — the
   tentative reply, asking for the folder, the read-back, or a move whose
   clean-up fails too — leaves something in the mailbox, and the create says

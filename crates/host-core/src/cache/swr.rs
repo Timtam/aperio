@@ -115,7 +115,9 @@ fn container_refresh(
 /// snapshot cache, then the observer is notified — but ONLY when the
 /// write reports that cached content actually changed, so no-op refreshes
 /// don't trigger frontend reload waves. On a fetch failure the error is
-/// recorded via `mark_error` and the stale snapshot is left in place.
+/// recorded through `mark_failure` with `Attempt::Read` — a busy answer does
+/// not count and pauses the container — and the stale snapshot is left in
+/// place.
 /// Deduplicated through the [`RefreshCoordinator`] so concurrent reads of
 /// the same container don't stack refreshes.
 pub fn spawn_refresh<T, Fut, Fetch, Write>(
@@ -220,8 +222,8 @@ pub fn spawn_item_refresh<F, Fut>(
 /// Spawn a deduplicated background refresh whose body already writes the
 /// cache (the delta-aware `refresh_*` helpers below). Notifies the
 /// observer only when the refresh reports changed content (no-op
-/// refreshes stay UI-silent); on a genuine provider failure records
-/// `mark_error`.
+/// refreshes stay UI-silent); on a genuine provider failure records it
+/// through `mark_failure` with `Attempt::Read`, as [`spawn_refresh`] does.
 pub fn spawn_read_refresh<F, Fut>(
     rt: &tokio::runtime::Handle,
     observer: Arc<dyn CacheObserver>,
