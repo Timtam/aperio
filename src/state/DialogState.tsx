@@ -192,7 +192,11 @@ export type DialogMode =
        *  present but rejected (refresh-error surface). */
       reason?: 'restore' | 'repair';
     }
-  | { kind: 'firstLaunchWizard' }
+  /** `notificationStep`: whether the wizard asks about the Start menu
+   *  shortcut Windows needs before it shows notifications (Windows, and only
+   *  while setting up is needed). Decided before it opens, so its step count
+   *  stays put. */
+  | { kind: 'firstLaunchWizard'; notificationStep: boolean }
   /** A reminder came due while Windows would hide it: offer the Start menu
    *  shortcut, once per app start (`NotificationShortcutHintChecker`). */
   | { kind: 'notificationShortcutHint' }
@@ -389,9 +393,9 @@ export interface DialogStateValue {
     reason?: 'restore' | 'repair',
   ) => void;
   /** §19.11 first-launch wizard. Opened by `FirstLaunchWizardChecker` on a
-   *  fresh instance: language → sync (restore / create / skip) → first
-   *  account. */
-  openFirstLaunchWizard: () => void;
+   *  fresh instance: language → (Windows notifications) → first account →
+   *  sync (restore / create / skip). */
+  openFirstLaunchWizard: (options: { notificationStep: boolean }) => void;
   /** Offer the Start menu shortcut Windows needs before it shows Aperio's
    *  notifications. Opened by `NotificationShortcutHintChecker`. */
   openNotificationShortcutHint: () => void;
@@ -771,7 +775,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [push],
   );
   const openFirstLaunchWizard = useCallback(
-    () => push({ kind: 'firstLaunchWizard' }),
+    ({ notificationStep }: { notificationStep: boolean }) =>
+      push({ kind: 'firstLaunchWizard', notificationStep }),
     [push],
   );
   const openNotificationShortcutHint = useCallback(

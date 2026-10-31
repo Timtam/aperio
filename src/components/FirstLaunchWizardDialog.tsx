@@ -15,6 +15,7 @@ import {
 } from '../intl/language';
 import { useDialogState } from '../state/dialogStateContext';
 import { Modal } from './Modal';
+import { NotificationShortcutSection } from './NotificationShortcutSection';
 import {
   SyncTargetSchemaForm,
   type SyncConnectOutcome,
@@ -23,9 +24,11 @@ import {
 interface FirstLaunchWizardDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Ask about Windows notifications (see `FirstLaunchWizardChecker`). */
+  notificationStep: boolean;
 }
 
-type WizardStep = 'language' | 'sync' | 'account';
+type WizardStep = 'language' | 'notifications' | 'account' | 'sync';
 
 const LANGUAGE_OPTIONS: readonly LanguagePref[] = ['system', 'de', 'en'];
 
@@ -34,8 +37,13 @@ const LANGUAGE_OPTIONS: readonly LanguagePref[] = ['system', 'de', 'en'];
  * multi-step dialog shown once on a fresh instance:
  *
  *   1. **Language** — reuse the synced `locale` pref (default = system).
- *   2. **First account** — hand off to the add-account flow, or skip.
- *   3. **Sync** — restore from / create / skip a sync target via
+ *   2. **Windows notifications** — only where they need setting up: the Start
+ *      menu shortcut Windows needs before it shows a reminder
+ *      ([`NotificationShortcutSection`](./NotificationShortcutSection.tsx)).
+ *      Before the account step, because the account and sync steps can end
+ *      the wizard.
+ *   3. **First account** — hand off to the add-account flow, or skip.
+ *   4. **Sync** — restore from / create / skip a sync target via
  *      [`SyncTargetSchemaForm`](./sync/SyncTargetSchemaForm.tsx), whose fields
  *      come from the chosen backend's own account schema. Last either way:
  *      restoring brings the accounts down with the dataset, and creating has
@@ -47,6 +55,7 @@ const LANGUAGE_OPTIONS: readonly LanguagePref[] = ['system', 'de', 'en'];
 export function FirstLaunchWizardDialog({
   isOpen,
   onClose,
+  notificationStep,
 }: FirstLaunchWizardDialogProps) {
   const { t } = useTranslation();
   const { openAccounts, openSyncAccountsConnect } = useDialogState();
@@ -117,7 +126,12 @@ export function FirstLaunchWizardDialog({
     openAccounts();
   }, [onClose, openAccounts]);
 
-  const stepNumber = step === 'language' ? 1 : step === 'account' ? 2 : 3;
+  const steps: readonly WizardStep[] = notificationStep
+    ? ['language', 'notifications', 'account', 'sync']
+    : ['language', 'account', 'sync'];
+  const stepNumber = steps.indexOf(step) + 1;
+  const next = () => setStep(steps[Math.min(steps.indexOf(step) + 1, steps.length - 1)]);
+  const back = () => setStep(steps[Math.max(steps.indexOf(step) - 1, 0)]);
 
   return (
     <Modal
@@ -131,7 +145,7 @@ export function FirstLaunchWizardDialog({
         <FocusableNote className="first-launch-wizard__step-indicator">
           {t('dialogs.firstLaunchWizard.stepIndicator', {
             current: stepNumber,
-            total: 3,
+            total: steps.length,
           })}
         </FocusableNote>
 
@@ -159,7 +173,24 @@ export function FirstLaunchWizardDialog({
               ))}
             </fieldset>
             <div className="first-launch-wizard__actions">
-              <button type="button" onClick={() => setStep('account')}>
+              <button type="button" onClick={next}>
+                {t('dialogs.firstLaunchWizard.next')}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {step === 'notifications' && (
+          <section className="first-launch-wizard__step">
+            <h3 ref={headingRef} tabIndex={-1}>
+              {t('dialogs.firstLaunchWizard.notificationsHeading')}
+            </h3>
+            <NotificationShortcutSection variant="wizard" />
+            <div className="first-launch-wizard__actions">
+              <button type="button" onClick={back}>
+                {t('dialogs.firstLaunchWizard.back')}
+              </button>
+              <button type="button" onClick={next}>
                 {t('dialogs.firstLaunchWizard.next')}
               </button>
             </div>
@@ -176,7 +207,7 @@ export function FirstLaunchWizardDialog({
             </FocusableNote>
             <SyncTargetSchemaForm onConnected={onSyncConnected} />
             <div className="first-launch-wizard__actions">
-              <button type="button" onClick={() => setStep('account')}>
+              <button type="button" onClick={back}>
                 {t('dialogs.firstLaunchWizard.back')}
               </button>
               {/* Last step now, so skipping storage ends the wizard rather
@@ -197,13 +228,13 @@ export function FirstLaunchWizardDialog({
               {t('dialogs.firstLaunchWizard.accountHint')}
             </FocusableNote>
             <div className="first-launch-wizard__actions">
-              <button type="button" onClick={() => setStep('language')}>
+              <button type="button" onClick={back}>
                 {t('dialogs.firstLaunchWizard.back')}
               </button>
               <button type="button" onClick={onAddAccount}>
                 {t('dialogs.firstLaunchWizard.accountAdd')}
               </button>
-              <button type="button" onClick={() => setStep('sync')}>
+              <button type="button" onClick={next}>
                 {t('dialogs.firstLaunchWizard.next')}
               </button>
             </div>

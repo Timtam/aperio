@@ -218,7 +218,13 @@ export function DialogHost() {
         />
       );
     case 'firstLaunchWizard':
-      return <FirstLaunchWizardDialog isOpen onClose={close} />;
+      return (
+        <FirstLaunchWizardDialog
+          isOpen
+          onClose={close}
+          notificationStep={mode.notificationStep}
+        />
+      );
     case 'notificationShortcutHint':
       return <NotificationShortcutHintDialog isOpen onClose={close} />;
     case 'none':
