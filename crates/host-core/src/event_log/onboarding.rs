@@ -803,25 +803,43 @@ impl OnboardingService {
         // Up to the older build's last round itself: a line it wrote just
         // before went up with that round (review round 9). One a snapshot
         // naming nothing is younger than is weighed all the same: it cannot
-        // hold it. Only for a file whose remote copy is gone or torn: one
-        // that reads shows what went up (review round 10). Read now, after
-        // the snapshot apply: a change made meanwhile is weighed too.
-        let (pending_files, _) = self.pending_files().await;
+        // hold it. Where the file's own remote copy reads, it shows what went
+        // up — but a later push of that build may have cut it short, so up to
+        // ten minutes before its last round a line went up with that round all
+        // the same (review rounds 10 and 11). Read again after the snapshot
+        // apply: a change made meanwhile is weighed too, and a file gone since
+        // the first read keeps its lines. A credential change never goes up
+        // while E2E is off: it is weighed by no peer.
+        let (fresh, _) = self.pending_files().await;
+        let mut files: std::collections::BTreeMap<String, LogFile> = own
+            .files
+            .into_iter()
+            .map(|file| (file.name.to_filename(), file))
+            .collect();
+        files.extend(
+            fresh
+                .into_iter()
+                .map(|file| (file.name.to_filename(), file)),
+        );
+        let credentials_stay = !crate::credential_sync::e2e_enabled(&self.db);
         let mut pending = Vec::new();
         let mut unpushed: HashSet<String> = HashSet::new();
-        for file in &pending_files {
+        for (name, file) in &files {
             let lines = envelopes_of(std::slice::from_ref(file));
             if let Some(holds) = &holds {
-                let shown = own_read.contains(&file.name.to_filename());
+                let until = if own_read.contains(name) {
+                    own.pushed_until
+                        .map(|at| at - chrono::Duration::minutes(10))
+                } else {
+                    own.pushed_until
+                };
                 unpushed.extend(
                     lines
                         .iter()
                         .filter(|envelope| {
                             !on_remote.contains(&envelope.id)
-                                && (shown
-                                    || own
-                                        .pushed_until
-                                        .is_none_or(|until| envelope.timestamp > until)
+                                && !(credentials_stay && is_credential(envelope))
+                                && (until.is_none_or(|until| envelope.timestamp > until)
                                     || holds.provably_lacks(envelope))
                         })
                         .map(|envelope| envelope.id.clone()),
@@ -896,7 +914,7 @@ impl OnboardingService {
     /// does not hold, or old ones over its own (review round 9). `new_dataset`:
     /// nothing went up to it.
     async fn own_pending(&self, strict: bool, new_dataset: bool) -> SyncResult<OwnPending> {
-        let (_, all_read) = self.pending_files().await;
+        let (files, all_read) = self.pending_files().await;
         if strict && !all_read {
             return Err(SyncError::io(
                 "a pending log file does not read; trying again later".to_string(),
@@ -911,7 +929,10 @@ impl OnboardingService {
                 Err(_) => None,
             }
         };
-        Ok(OwnPending { pushed_until })
+        Ok(OwnPending {
+            files,
+            pushed_until,
+        })
     }
 
     /// Up to when what an older build left pending went up: its last
@@ -926,12 +947,18 @@ impl OnboardingService {
                 .get(key)
                 .map_err(|err| SyncError::internal(format!("read {key}: {err}")))
         };
+        let settled = read(sync_engine::SYNC_LEFTOVERS_SETTLED_PREF_KEY)?.is_some();
         if let Some(raw) = read(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)? {
-            return sync_engine::LeftoversCutoff::parse(&raw)
-                .map(|cutoff| cutoff.last_round)
-                .ok_or_else(|| SyncError::internal("the leftovers' cutoff does not read"));
+            return match sync_engine::LeftoversCutoff::parse(&raw) {
+                Some(cutoff) => Ok(cutoff.last_round),
+                // Settled, nothing an older build left is pending any more
+                // (review round 11 of #130); not settled, the next round
+                // freezes it anew.
+                None if settled => Ok(None),
+                None => Err(SyncError::internal("the leftovers' cutoff does not read")),
+            };
         }
-        if read(sync_engine::SYNC_LEFTOVERS_SETTLED_PREF_KEY)?.is_some() {
+        if settled {
             return Ok(None);
         }
         Ok(read(sync_engine::SYNC_LAST_ROUND_PREF_KEY)?
@@ -1510,10 +1537,20 @@ impl SnapshotHolds {
     }
 }
 
-/// Up to when what an older build left pending went up, for a pass over
-/// every log ([`OnboardingService::own_pending`]).
+/// This device's own pending files as read before anything changed, and up
+/// to when what an older build left among them went up, for a pass over every
+/// log ([`OnboardingService::own_pending`]).
 struct OwnPending {
+    files: Vec<LogFile>,
     pushed_until: Option<DateTime<Utc>>,
+}
+
+/// Whether `envelope` changes an account's secret.
+fn is_credential(envelope: &EventEnvelope) -> bool {
+    matches!(
+        envelope.event,
+        sync_core::SyncEvent::CredentialSet(_) | sync_core::SyncEvent::CredentialCleared(_)
+    )
 }
 
 /// The envelopes of `files`; one that does not parse is left out.
@@ -1674,7 +1711,7 @@ mod tests {
         );
         let applier = Arc::new(EventLogApplier::new(
             Arc::clone(&store),
-            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+            secrets.clone(),
             Arc::clone(&adapter),
             device_id.clone(),
         ));
@@ -3060,6 +3097,8 @@ mod tests {
         dir_in_pending: bool,
         /// The leftover's own remote copy, readable, without its change.
         own_remote: bool,
+        /// The leftover's own remote copy, empty: a push cut it to nothing.
+        own_remote_empty: bool,
         /// A snapshot that does not apply.
         broken_snapshot: bool,
     }
@@ -3133,6 +3172,11 @@ mod tests {
                 set_interval("60"),
             );
             FakeAdapter::with_logs(vec![file_of("dev-this", change_at, &[&earlier])])
+        } else if case.own_remote_empty {
+            FakeAdapter::with_logs(vec![LogFile {
+                name: LogFileName::new(change_at, DeviceId::from_string("dev-this".into())),
+                bytes: Vec::new(),
+            }])
         } else {
             FakeAdapter::new()
         };
@@ -3377,6 +3421,145 @@ mod tests {
         .await;
         result.unwrap();
         assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn an_empty_own_remote_copy_shows_no_line_of_the_older_builds_rounds_missing() {
+        // Review round 11 of #130: cut to nothing by a later push, it counted
+        // as proof that nothing of the leftover ever went up, and its old
+        // lines won over the snapshot.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let round = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(round));
+        let (result, interval, _db, _dirs) = join_with(
+            round - chrono::Duration::hours(3),
+            JoinCase {
+                cutoff: Some(&cutoff),
+                member: true,
+                own_remote_empty: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn a_join_with_e2e_off_weighs_no_credential_change_of_its_own() {
+        // Review round 11 of #130: it never goes up while E2E is off, so no
+        // peer weighs it; weighed here, an old password went back into the
+        // keychain.
+        use sync_engine::{SecretSlot, SecretStore};
+        let (_tmp, db) = fresh_db();
+        db.shared()
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'caldav', 'Fastmail', '{}', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        let secrets = Arc::new(sync_engine::test_support::FakeSecrets::default());
+        secrets
+            .store("acc-1", SecretSlot::Password, "newer")
+            .unwrap();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with(db.shared(), pending.path().to_path_buf(), secrets.clone());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let round = at - chrono::Duration::days(30);
+        let change_at = round - chrono::Duration::minutes(2);
+        let own = envelope(
+            "ev-secret",
+            "dev-this",
+            change_at,
+            sync_core::SyncEvent::CredentialSet(sync_core::CredentialPayload {
+                account_id: "acc-1".into(),
+                slot: "password".into(),
+                secret: "older".into(),
+            }),
+        );
+        let leftover = file_of("dev-this", change_at, &[&own]);
+        std::fs::write(
+            pending.path().join(leftover.name.to_filename()),
+            &leftover.bytes,
+        )
+        .unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set(
+                sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY,
+                &frozen(Some(round)),
+            )
+            .unwrap();
+        let adapter = FakeAdapter::with_logs(vec![LogFile {
+            name: leftover.name.clone(),
+            bytes: Vec::new(),
+        }]);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = at;
+        meta.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: at,
+                last_seen: None,
+                app_version: "1.0.0".into(),
+                stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(at, None));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(
+            secrets.retrieve("acc-1", SecretSlot::Password).unwrap(),
+            "newer"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_settled_device_joins_though_its_leftovers_cutoff_does_not_read() {
+        // Review round 11 of #130: settled, it is never frozen anew, and every
+        // join and resume failed on it for good.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let prefs_conn = db.shared();
+        let prefs = UserPrefsRepo::new(&prefs_conn);
+        prefs
+            .set(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY, "not a cutoff")
+            .unwrap();
+        prefs
+            .set(sync_engine::SYNC_LEFTOVERS_SETTLED_PREF_KEY, "1")
+            .unwrap();
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = at;
+        // A dataset it is part of: the cutoff is read.
+        meta.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: at,
+                last_seen: None,
+                app_version: "1.0.0".into(),
+                stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(at, None));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+        drop((tmp, pending));
     }
 
     #[tokio::test]

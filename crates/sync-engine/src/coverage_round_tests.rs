@@ -1471,8 +1471,10 @@ async fn the_session_that_froze_the_cutoff_is_this_builds_own() {
 }
 
 #[tokio::test]
-async fn a_leftovers_cutoff_that_does_not_read_is_frozen_anew() {
-    // Kept, it held every join and resume back for good.
+async fn a_leftovers_cutoff_that_does_not_read_is_frozen_anew_with_no_round_known() {
+    // Kept, it held every join and resume back for good. Frozen anew from
+    // sync.lastSuccessfulRound, it read this build's round time, which counts
+    // what never went up as pushed (review round 11 of #130).
     let (_tmp, orchestrator, hooks, _adapter, _log) = with_a_leftover(Utc::now()).await;
     hooks
         .store
@@ -1491,7 +1493,7 @@ async fn a_leftovers_cutoff_that_does_not_read_is_frozen_anew() {
         .unwrap();
     assert_eq!(
         crate::LeftoversCutoff::parse(&raw).map(|cutoff| cutoff.last_round),
-        Some(Some(Utc.timestamp_opt(2_600, 0).unwrap()))
+        Some(None)
     );
 }
 

@@ -165,7 +165,8 @@ still, und nur Neueres gewinnt.
   Pushs eingefroren, bevor etwas sie verschieben kann, auch ohne `meta.json`
   (Prüfrunde 9); lässt sie sich nicht halten, ordnet der Versuch nichts, und
   die Runde zählt nicht als erfolgreich; eine, die sich nicht lesen lässt,
-  wird neu eingefroren (Prüfrunde 10). Ein Rest ist eine Datei, die vor dem
+  wird neu eingefroren, ohne bekannte Runde: Diesen Wert haben die Runden
+  dieses Builds inzwischen überschrieben (Prüfrunden 10 und 11). Ein Rest ist eine Datei, die vor dem
   ersten Lauf dieses Builds benannt ist (auf die Sekunde, wie Dateien heißen)
   und unter `gc_horizon` liegt; ein Rest, den das Ordnen schrieb, ist keiner
   (`sync.push.leftoverTails`). Bis alle
@@ -261,11 +262,14 @@ seiner letzten erfolgreichen Runde (C, ohne die zehn Minuten) hielt, gilt
 dabei als oben: Es ging damals hoch, und die anderen Geräte übernahmen es, ob
 ein Aufräumen die Datei seither löschte oder ein späterer Push sie halb
 schrieb (Prüfrunde 8) — außer ein Schnappschuss, der nichts nennt, ist älter
-als die Änderung: Der kann sie nicht halten (Prüfrunde 9). Das gilt nur für
-eine Datei, deren eigene Fernkopie fehlt oder abgerissen ist: Eine lesbare
-zeigt, was hochging (Prüfrunde 10). Die ausstehenden Dateien liest der
-Durchgang nach dem Schnappschuss, damit eine Änderung währenddessen gewogen
-wird; geprüft, ob sie lesbar sind, wird vorher. Ist die Grenze
+als die Änderung: Der kann sie nicht halten (Prüfrunde 9). Wo die eigene
+Fernkopie einer Datei lesbar ist, zeigt sie, was hochging — doch ein späterer
+Push des alten Builds kann sie gekürzt haben: Bis zehn Minuten vor dessen
+letzter Runde gilt eine fehlende Zeile darum trotzdem als oben (Prüfrunden 10
+und 11). Die ausstehenden Dateien liest der Durchgang vorher und nach dem
+Schnappschuss noch einmal, damit eine Änderung währenddessen gewogen wird und
+eine inzwischen hochgeladene Datei ihre Zeilen behält. Eine Änderung eines
+Zugangs geht bei ausgeschaltetem E2E nie hoch und wird darum nicht gewogen. Ist die Grenze
 noch nicht eingefroren, gilt `sync.lastSuccessfulRound`, wie der alte Build
 ihn hinterließ. Lässt sich die Grenze oder eine ausstehende Datei nicht
 lesen, scheitern Beitritt und Wiederaufnahme, bevor sie etwas ändern (was in
@@ -702,3 +706,20 @@ widerlegt), ein Kritiker. Einzelheiten: scratchpad `coverage/review_r10.json`.
   Sync-Speicher nicht mehr hat, als oben (TODO B3). Eine ausstehende Datei,
   die sich dauerhaft nicht lesen lässt, hält Beitritt und Wiederaufnahme auf,
   bis sie lesbar ist oder entfernt wird (TODO B3).
+
+## Prüfrunde 11 (PR #130, 2026-10-31)
+
+Vier Prüfer auf den Commit nach Runde 10, 8 gegengeprüft (7 bestätigt, einer
+widerlegt), ein Kritiker; alle Befunde klein. Einzelheiten: scratchpad
+`coverage/review_r11.json`.
+
+- **Lesbare Fernkopie** (E): Sie zeigt, was hochging, außer für Zeilen bis
+  zehn Minuten vor der letzten Runde des alten Builds; eine leere oder
+  gekürzte Kopie brachte sonst dessen alte Zeilen über den Schnappschuss
+  zurück. Zugangsdaten bei ausgeschaltetem E2E werden nicht gewogen.
+- **Ausstehende Dateien** (E): Der Durchgang nimmt beide Lesungen zusammen.
+- **Grenze** (C): neu eingefroren ohne bekannte Runde; ein geordnetes Gerät
+  braucht sie nicht mehr und tritt trotzdem bei.
+- Von mir entschieden (Toni sagen): Ist die eingefrorene Grenze beschädigt,
+  gilt keine Runde des alten Builds als bekannt: Seine Reste gehen ganz hoch
+  (TODO B3).

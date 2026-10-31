@@ -1563,9 +1563,17 @@ impl SyncOrchestrator {
             Ok(Some(raw)) => {
                 // One that does not read is frozen anew: kept, it held every
                 // join and resume back for good (review round 10 of #130).
+                // With no round known — this build's rounds have moved the
+                // pref it was read from (review round 11).
                 match LeftoversCutoff::parse(&raw) {
                     Some(cutoff) => return Ok(Some(cutoff)),
-                    None => warn!("the leftovers' cutoff does not read; freezing it anew"),
+                    None => {
+                        warn!("the leftovers' cutoff does not read; freezing it anew");
+                        return self.store_leftovers_cutoff(LeftoversCutoff {
+                            last_round: None,
+                            before: self.boot_at,
+                        });
+                    }
                 }
             }
             Ok(None) => {}
@@ -1583,10 +1591,16 @@ impl SyncOrchestrator {
                 return Err(());
             }
         };
-        let cutoff = LeftoversCutoff {
+        self.store_leftovers_cutoff(LeftoversCutoff {
             last_round,
             before: self.boot_at,
-        };
+        })
+    }
+
+    fn store_leftovers_cutoff(
+        &self,
+        cutoff: LeftoversCutoff,
+    ) -> Result<Option<LeftoversCutoff>, ()> {
         let raw = serde_json::to_string(&cutoff).map_err(|err| {
             warn!(?err, "couldn't encode the leftovers' cutoff");
         })?;
