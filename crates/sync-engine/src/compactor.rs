@@ -1046,6 +1046,8 @@ mod tests {
         /// Listing fails once the snapshot is out.
         fail_listing_after_snapshot: Mutex<bool>,
         listing_fails: Mutex<bool>,
+        /// A peer flags this device stale while the snapshot goes out.
+        flag_on_snapshot: Mutex<Option<DeviceId>>,
     }
 
     impl FakeAdapter {
@@ -1059,6 +1061,7 @@ mod tests {
                 apply_on_snapshot: Mutex::new(None),
                 fail_listing_after_snapshot: Mutex::new(false),
                 listing_fails: Mutex::new(false),
+                flag_on_snapshot: Mutex::new(None),
             }
         }
     }
@@ -1110,6 +1113,13 @@ mod tests {
             }
             if *self.fail_listing_after_snapshot.lock().unwrap() {
                 *self.listing_fails.lock().unwrap() = true;
+            }
+            if let Some(flagged) = self.flag_on_snapshot.lock().unwrap().take() {
+                if let Some(meta) = self.meta.lock().unwrap().as_mut() {
+                    if let Some(record) = meta.devices.get_mut(flagged.as_str()) {
+                        record.stale = true;
+                    }
+                }
             }
             Ok(())
         }
@@ -1308,6 +1318,43 @@ mod tests {
             "{result:?}"
         );
         assert!(adapter.snapshot.lock().unwrap().is_none(), "no snapshot");
+        let meta = adapter.meta.lock().unwrap().clone().unwrap();
+        assert!(
+            meta.device(&DeviceId::from_string("dev-this".into()))
+                .unwrap()
+                .stale
+        );
+    }
+
+    #[tokio::test]
+    async fn a_compaction_keeps_a_stale_flag_a_peer_set_meanwhile() {
+        // Review round 9 of #130: only a resume clears it; flagged between the
+        // compaction's first look at meta.json and its write, the device kept
+        // its own flag only by this keep.
+        let (store, compactor) = build_compactor();
+        store
+            .set_pref(SYNC_CURSOR_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0-test");
+        meta.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now(),
+                last_seen: None,
+                app_version: "1.0.0-test".into(),
+                stale: false,
+                exact: true,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        *adapter.meta.lock().unwrap() = Some(meta);
+        *adapter.flag_on_snapshot.lock().unwrap() = Some(DeviceId::from_string("dev-this".into()));
+
+        compactor.compact_now(&adapter).await.unwrap();
+
         let meta = adapter.meta.lock().unwrap().clone().unwrap();
         assert!(
             meta.device(&DeviceId::from_string("dev-this".into()))

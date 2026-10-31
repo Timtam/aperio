@@ -159,10 +159,9 @@ impl UnreadableLogs {
 /// Device-local.
 pub const SYNC_LEFTOVERS_SETTLED_PREF_KEY: &str = "sync.push.leftoversSettled";
 
-/// The time up to which an older build's leftovers went up, as the first
-/// try to settle them read it; empty where no round was known
-/// (`SyncOrchestrator::leftovers_cutoff`, review round 7 of #130).
-/// Device-local.
+/// The leftovers' cutoff, frozen once ([`LeftoversCutoff`], as JSON;
+/// `SyncOrchestrator::freeze_leftovers_cutoff`, review rounds 7 to 9 of
+/// #130). Device-local.
 pub const SYNC_LEFTOVERS_CUTOFF_PREF_KEY: &str = "sync.push.leftoversCutoff";
 
 /// When settling an older build's leftovers last failed to list the remote
@@ -196,6 +195,25 @@ impl LeftoverHold {
         below: None,
         cutoff_frozen: true,
     };
+}
+
+/// What the first try to settle an older build's leftovers froze
+/// ([`SYNC_LEFTOVERS_CUTOFF_PREF_KEY`], review rounds 7 to 9 of #130).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LeftoversCutoff {
+    /// The older build's last successful round (`sync.lastSuccessfulRound`
+    /// as it was then), if one is known: what it wrote before went up then.
+    pub last_round: Option<DateTime<Utc>>,
+    /// The start of the app session that froze it, this build's first: a
+    /// pending file named before it is an older build's.
+    pub before: DateTime<Utc>,
+}
+
+impl LeftoversCutoff {
+    /// The frozen cutoff as `raw` holds it; `None` where it does not read.
+    pub fn parse(raw: &str) -> Option<Self> {
+        serde_json::from_str(raw).ok()
+    }
 }
 
 /// When this device last tried its one-time catch-up
@@ -423,6 +441,9 @@ pub struct SyncOrchestrator {
     /// re-pull. Carries the snapshot timestamp so the resume
     /// dialog can render it.
     stale_device_since: Mutex<Option<DateTime<Utc>>>,
+    /// The older build's leftovers whose tail this app session wrote: a later
+    /// try only removes the old file (review round 9 of #130).
+    tails_written: Mutex<HashSet<String>>,
     /// One-at-a-time guard against overlapping sync rounds.
     /// `try_lock` failure → return early; the user's second
     /// click while a round is in flight produces an
@@ -510,6 +531,7 @@ impl SyncOrchestrator {
             schema_too_old: Mutex::new(None),
             pushed_lengths: Mutex::new(std::collections::HashMap::new()),
             stale_device_since: Mutex::new(None),
+            tails_written: Mutex::new(HashSet::new()),
             in_flight: Mutex::new(false),
             boot_at,
         }
@@ -667,8 +689,11 @@ impl SyncOrchestrator {
         let mut resumed = false;
         // What a resume or a catch-up below applied, for this round's report.
         let mut recovered: Vec<ApplyReport> = Vec::new();
-        // Leftovers of an older build not settled yet: not pushed.
-        let mut hold = LeftoverHold::SETTLED;
+        // Leftovers of an older build not settled yet: not pushed. Their
+        // cutoff is frozen before anything else of the round (review round 9
+        // of #130).
+        let frozen = self.freeze_leftovers_cutoff();
+        let mut hold = self.first_hold(frozen);
         if let Some(meta) = &round_meta {
             // Returns `Err(SchemaTooOld)` when the running version
             // is older than meta.min_app_version.
@@ -702,7 +727,7 @@ impl SyncOrchestrator {
                 .await;
             // What a build before this one left in pending/, once, before a
             // resume or a catch-up weighs it (review round 6 of #130).
-            hold = self.settle_leftovers(adapter.as_ref(), meta).await;
+            hold = self.settle_leftovers(adapter.as_ref(), meta, frozen).await;
 
             // §19.10 stale detection + AUTO-RESUME. A device is stale when
             // either the compactor flagged its `meta.devices[me].stale`, OR our
@@ -959,8 +984,19 @@ impl SyncOrchestrator {
                         }
                     }
                 }
+                // Named first: a file this build cannot read whose name did
+                // not keep has no length recorded, so the next round fetches
+                // and names it again (review round 9 of #130).
+                let unnamed: HashSet<String> =
+                    unreadable.iter().map(|(name, _)| name.clone()).collect();
+                if !self.update_unreadable(unreadable, &read) {
+                    for (name, len) in &mut applied_lengths {
+                        if unnamed.contains(name) {
+                            *len = 0;
+                        }
+                    }
+                }
                 self.record_applied_lengths(&applied_lengths);
-                self.update_unreadable(unreadable, &read);
                 self.update_torn_seen(torn, &read);
 
                 // 3. Advance cursor. Persist as RFC 3339 to keep
@@ -1109,8 +1145,9 @@ impl SyncOrchestrator {
         // The round's gates (review round 5 of #130): a plaintext device
         // pushes nothing into an encrypted dataset, a locked-out build
         // nothing at all. And its meta, to name the pending files first.
+        let frozen = self.freeze_leftovers_cutoff();
         let meta = adapter.fetch_meta().await?;
-        let mut hold = LeftoverHold::SETTLED;
+        let mut hold = self.first_hold(frozen);
         if let Some(meta) = &meta {
             sync_core::ensure_compatible(meta, &self.hooks.app_version())?;
             if encryption_gate && meta.e2e_enabled && !self.store.e2e_enabled() {
@@ -1118,7 +1155,7 @@ impl SyncOrchestrator {
             }
             self.name_pending(adapter.as_ref(), Some(meta), &self.pending_names().await)
                 .await;
-            hold = self.settle_leftovers(adapter.as_ref(), meta).await;
+            hold = self.settle_leftovers(adapter.as_ref(), meta, frozen).await;
         }
         self.push_pending(adapter.as_ref(), meta.as_ref(), hold.below)
             .await
@@ -1305,36 +1342,34 @@ impl SyncOrchestrator {
     /// named nothing as pending, and their compactors deleted by name: a
     /// finished leftover named below `gc_horizon` may be gone from the
     /// remote, and pushing it whole would bring its old events back. Of such
-    /// a file the complete lines up to this device's last successful round
-    /// (`sync.lastSuccessfulRound` as the first try read it, less ten
-    /// minutes: a round pushes before it ends, and an event written during it
-    /// may have missed its push) went up; the rest goes into a pending file of
-    /// its own, named just before the live file, and the old file goes. With
-    /// no such round known, nothing counts as pushed.
+    /// a file the complete lines up to the older build's last successful
+    /// round (`frozen`, less ten minutes: a round pushes before it ends, and
+    /// an event written during it may have missed its push) went up; the rest
+    /// goes into a pending file of its own, named just before the live file,
+    /// and the old file goes. With no such round known, nothing counts as
+    /// pushed.
     ///
     /// Only where the remote no longer has the file (review round 7): a copy
     /// still there was deleted by no one, and pushed whole again it brings
     /// nothing back — but a later push of an older build may have torn it,
     /// and only the whole file makes it whole again.
     ///
-    /// Until every leftover is settled, no finished file named below
-    /// `gc_horizon` goes up — one that did not read, too (review round 8). A
-    /// listing that fails is tried again after [`CATCH_UP_RETRY`]: on most
-    /// adapters it fetches every file. Done for good once nothing is left.
+    /// A leftover is a file named before this build first ran and below
+    /// `gc_horizon`; until every one is settled, none goes up — one that did
+    /// not read, too (review rounds 8 and 9). A try that does not finish is
+    /// repeated after [`CATCH_UP_RETRY`]: its listing fetches every file on
+    /// most adapters. Done for good once nothing is left.
     async fn settle_leftovers(
         &self,
         adapter: &dyn SyncAdapter,
         meta: &sync_core::MetaJson,
+        frozen: Result<Option<LeftoversCutoff>, ()>,
     ) -> LeftoverHold {
-        if self
-            .store
-            .get_pref(SYNC_LEFTOVERS_SETTLED_PREF_KEY)
-            .ok()
-            .flatten()
-            .is_some()
-        {
-            return LeftoverHold::SETTLED;
-        }
+        let cutoff = match frozen {
+            Ok(None) => return LeftoverHold::SETTLED,
+            Ok(Some(cutoff)) => cutoff,
+            Err(()) => return self.unfrozen_hold(),
+        };
         let mark = |store: &dyn SyncStore| {
             if let Err(err) = store.set_pref(SYNC_LEFTOVERS_SETTLED_PREF_KEY, "1") {
                 warn!(?err, "couldn't record that the leftovers are settled");
@@ -1345,17 +1380,10 @@ impl SyncOrchestrator {
             mark(self.store.as_ref());
             return LeftoverHold::SETTLED;
         };
+        let below = horizon.min(cutoff.before);
         let hold = LeftoverHold {
-            below: Some(horizon),
+            below: Some(below),
             cutoff_frozen: true,
-        };
-        // Frozen first, before anything else of the try can fail and this
-        // build's round time moves the pref it is read from.
-        let Ok(cutoff) = self.leftovers_cutoff() else {
-            return LeftoverHold {
-                cutoff_frozen: false,
-                ..hold
-            };
         };
         let live_at = self.live_at();
         let files = match self.read_pending().await {
@@ -1369,7 +1397,7 @@ impl SyncOrchestrator {
             }
         };
         let is_leftover = |name: &sync_core::LogFileName| {
-            is_stale_empty_stub(name.timestamp, live_at) && name.timestamp < horizon
+            is_stale_empty_stub(name.timestamp, live_at) && name.timestamp < below
         };
         let read: HashSet<&str> = files.iter().map(|file| file.name.as_str()).collect();
         let unread = self.pending_names().await.into_iter().any(|name| {
@@ -1380,11 +1408,14 @@ impl SyncOrchestrator {
             warn!("a pending file an older build may have left does not read; settled later");
             return hold;
         }
+        let head_cutoff = cutoff
+            .last_round
+            .map(|at| at - chrono::Duration::minutes(10));
         let leftovers: Vec<(PendingFile, usize)> = files
             .into_iter()
             .filter(|file| !file.log.bytes.is_empty() && is_leftover(&file.log.name))
             .filter_map(|file| {
-                let head = cutoff.map_or(0, |cutoff| {
+                let head = head_cutoff.map_or(0, |cutoff| {
                     crate::pushed::head_until(&file.log.bytes, cutoff)
                 });
                 // Nothing of it known to have gone up: it goes up whole.
@@ -1392,7 +1423,7 @@ impl SyncOrchestrator {
             })
             .collect();
         if !leftovers.is_empty() {
-            if !self.leftovers_listing_due() {
+            if !self.leftovers_try_due() {
                 return hold;
             }
             let on_remote: HashSet<String> = match adapter.list_log_names().await {
@@ -1405,12 +1436,7 @@ impl SyncOrchestrator {
                         ?err,
                         "couldn't list the remote to settle what an older build left"
                     );
-                    if let Err(err) = self
-                        .store
-                        .set_pref(SYNC_LEFTOVERS_TRIED_AT_PREF_KEY, &Utc::now().to_rfc3339())
-                    {
-                        warn!(?err, "couldn't record the try to list the remote");
-                    }
+                    self.record_leftovers_try();
                     return hold;
                 }
             };
@@ -1419,15 +1445,28 @@ impl SyncOrchestrator {
                 if on_remote.contains(&name) {
                     continue;
                 }
-                let tail = log.bytes[head..].to_vec();
-                if !tail.trim_ascii().is_empty()
-                    && self
-                        .write_tail(&log, tail, live_at, &on_remote)
-                        .await
-                        .is_none()
-                {
-                    all = false;
-                    continue;
+                // A tail this app session wrote already: only the old file
+                // is left to go.
+                let tail_written = self
+                    .tails_written
+                    .lock()
+                    .expect("tails_written mutex poison")
+                    .contains(&name);
+                if !tail_written {
+                    let tail = log.bytes[head..].to_vec();
+                    if !tail.trim_ascii().is_empty()
+                        && self
+                            .write_tail(&log, tail, live_at, &on_remote)
+                            .await
+                            .is_none()
+                    {
+                        all = false;
+                        continue;
+                    }
+                    self.tails_written
+                        .lock()
+                        .expect("tails_written mutex poison")
+                        .insert(name.clone());
                 }
                 if let Err(err) = tokio::fs::remove_file(&path).await {
                     // Emptied, it is no leftover to a later try, which would
@@ -1440,6 +1479,7 @@ impl SyncOrchestrator {
                 }
             }
             if !all {
+                self.record_leftovers_try();
                 return hold;
             }
         }
@@ -1447,10 +1487,32 @@ impl SyncOrchestrator {
         LeftoverHold::SETTLED
     }
 
-    /// Whether settling the leftovers may list the remote now
-    /// ([`SYNC_LEFTOVERS_TRIED_AT_PREF_KEY`]): never failed, or failed more
-    /// than [`CATCH_UP_RETRY`] ago. A mark that does not read counts as due.
-    fn leftovers_listing_due(&self) -> bool {
+    /// Where the leftovers' cutoff is not certain: nothing an earlier app
+    /// session left goes up, and the round records no successful round.
+    fn unfrozen_hold(&self) -> LeftoverHold {
+        LeftoverHold {
+            below: Some(self.boot_at),
+            cutoff_frozen: false,
+        }
+    }
+
+    /// The hold a round or a push starts with, before settling refines it.
+    fn first_hold(&self, frozen: Result<Option<LeftoversCutoff>, ()>) -> LeftoverHold {
+        match frozen {
+            Ok(None) => LeftoverHold::SETTLED,
+            Ok(Some(cutoff)) => LeftoverHold {
+                below: Some(cutoff.before),
+                cutoff_frozen: true,
+            },
+            Err(()) => self.unfrozen_hold(),
+        }
+    }
+
+    /// Whether settling the leftovers may try again now
+    /// ([`SYNC_LEFTOVERS_TRIED_AT_PREF_KEY`]): no try failed, or the last
+    /// failed more than [`CATCH_UP_RETRY`] ago. A mark that does not read
+    /// counts as due.
+    fn leftovers_try_due(&self) -> bool {
         self.store
             .get_pref(SYNC_LEFTOVERS_TRIED_AT_PREF_KEY)
             .ok()
@@ -1459,43 +1521,63 @@ impl SyncOrchestrator {
             .is_none_or(|at| Utc::now() - at.with_timezone(&Utc) >= CATCH_UP_RETRY)
     }
 
-    /// The time up to which an older build's leftovers went up
-    /// ([`Self::settle_leftovers`]): `sync.lastSuccessfulRound` less ten
-    /// minutes, as the first try read it — this build's rounds move that
-    /// pref, and a later try must not count their time (review rounds 7 and
-    /// 8 of #130). `Ok(None)` where no round is known; `Err` where it is not
-    /// certain what the first try read, or the try could not keep it: nothing
-    /// is settled then. Kept after the leftovers are settled: the pass over
-    /// every log reads it ([`SYNC_LEFTOVERS_CUTOFF_PREF_KEY`]).
-    fn leftovers_cutoff(&self) -> Result<Option<DateTime<Utc>>, ()> {
-        let parse = |raw: &str| {
-            DateTime::parse_from_rfc3339(raw)
-                .ok()
-                .map(|at| at.with_timezone(&Utc))
-        };
+    fn record_leftovers_try(&self) {
+        if let Err(err) = self
+            .store
+            .set_pref(SYNC_LEFTOVERS_TRIED_AT_PREF_KEY, &Utc::now().to_rfc3339())
+        {
+            warn!(?err, "couldn't record the try to settle the leftovers");
+        }
+    }
+
+    /// The leftovers' cutoff ([`LeftoversCutoff`]), frozen by the first call
+    /// that finds none: at the start of a round or a push, before anything
+    /// of it can move `sync.lastSuccessfulRound` (review rounds 7 to 9 of
+    /// #130). `Ok(None)` once the leftovers are settled; `Err` where it is
+    /// not certain what was frozen, or the freeze could not be kept. Kept
+    /// after the leftovers are settled: a join or a resume reads it.
+    fn freeze_leftovers_cutoff(&self) -> Result<Option<LeftoversCutoff>, ()> {
+        match self.store.get_pref(SYNC_LEFTOVERS_SETTLED_PREF_KEY) {
+            Ok(Some(_)) => return Ok(None),
+            Ok(None) => {}
+            Err(err) => {
+                warn!(?err, "couldn't read whether the leftovers are settled");
+                return Err(());
+            }
+        }
         match self.store.get_pref(SYNC_LEFTOVERS_CUTOFF_PREF_KEY) {
-            Ok(Some(raw)) => return Ok(parse(&raw)),
+            Ok(Some(raw)) => {
+                return LeftoversCutoff::parse(&raw).map(Some).ok_or_else(|| {
+                    warn!("the leftovers' cutoff does not read");
+                });
+            }
             Ok(None) => {}
             Err(err) => {
                 warn!(?err, "couldn't read the leftovers' cutoff");
                 return Err(());
             }
         }
-        let cutoff = match self.store.get_pref(SYNC_LAST_ROUND_PREF_KEY) {
+        let last_round = match self.store.get_pref(SYNC_LAST_ROUND_PREF_KEY) {
             Ok(raw) => raw
-                .and_then(|raw| parse(&raw))
-                .map(|at| at - chrono::Duration::minutes(10)),
+                .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
+                .map(|at| at.with_timezone(&Utc)),
             Err(err) => {
                 warn!(?err, "couldn't read the last successful round");
                 return Err(());
             }
         };
-        let raw = cutoff.map(|at| at.to_rfc3339()).unwrap_or_default();
+        let cutoff = LeftoversCutoff {
+            last_round,
+            before: self.boot_at,
+        };
+        let raw = serde_json::to_string(&cutoff).map_err(|err| {
+            warn!(?err, "couldn't encode the leftovers' cutoff");
+        })?;
         if let Err(err) = self.store.set_pref(SYNC_LEFTOVERS_CUTOFF_PREF_KEY, &raw) {
             warn!(?err, "couldn't record the leftovers' cutoff");
             return Err(());
         }
-        Ok(cutoff)
+        Ok(Some(cutoff))
     }
 
     /// The names of the log files in `pending/` that hold anything, without
@@ -1697,19 +1779,21 @@ impl SyncOrchestrator {
     /// a parser change did not stamp anew yet still names what the new parser
     /// is to read (review round 8 of #130). A record that does not read stays
     /// as it is.
-    fn update_unreadable(&self, added: Vec<(String, u64)>, read: &[String]) {
+    /// Whether the record holds `added` now — not so where it does not read
+    /// or does not save (review round 9 of #130).
+    fn update_unreadable(&self, added: Vec<(String, u64)>, read: &[String]) -> bool {
         let raw = match self.store.get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY) {
             Ok(raw) => raw,
             Err(err) => {
                 warn!(?err, "couldn't read the record of unreadable log files");
-                return;
+                return added.is_empty();
             }
         };
         let before = raw
             .as_deref()
             .and_then(|raw| serde_json::from_str::<UnreadableLogs>(raw).ok());
         if before.is_none() && added.is_empty() {
-            return;
+            return true;
         }
         let mut record = before.clone().unwrap_or(UnreadableLogs {
             parser: sync_core::PARSER_FINGERPRINT,
@@ -1719,9 +1803,7 @@ impl SyncOrchestrator {
             record.files.remove(name);
         }
         record.files.extend(added);
-        if Some(&record) != before.as_ref() {
-            self.save_unreadable(&record);
-        }
+        Some(&record) == before.as_ref() || self.save_unreadable(&record)
     }
 
     /// The torn sightings of ordinary rounds ([`SYNC_TORN_SEEN_PREF_KEY`]);
@@ -1763,7 +1845,8 @@ impl SyncOrchestrator {
         }
     }
 
-    fn save_unreadable(&self, record: &UnreadableLogs) {
+    /// Whether `record` was saved.
+    fn save_unreadable(&self, record: &UnreadableLogs) -> bool {
         let saved = if record.files.is_empty() {
             self.store.delete_pref(SYNC_UNREADABLE_LOGS_PREF_KEY)
         } else {
@@ -1771,13 +1854,15 @@ impl SyncOrchestrator {
                 Ok(raw) => self.store.set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &raw),
                 Err(err) => {
                     warn!(?err, "couldn't encode the unreadable log files");
-                    return;
+                    return false;
                 }
             }
         };
         if let Err(err) = saved {
             warn!(?err, "couldn't record the unreadable log files");
+            return false;
         }
+        true
     }
 
     /// This device's held horizon: the newest point up to which it holds

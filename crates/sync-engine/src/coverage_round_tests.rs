@@ -1286,3 +1286,143 @@ async fn a_leftover_that_will_not_go_is_emptied_so_no_later_try_cuts_it_again() 
         .collect();
     assert_eq!(tails.len(), 1, "{tails:?}");
 }
+
+// ---- Review round 9 of #130 ------------------------------------------------
+
+#[tokio::test]
+async fn a_file_this_build_cannot_read_and_could_not_name_is_fetched_again() {
+    // Its length was recorded before the record failed to read: never fetched
+    // again, never named, never read by a later parser.
+    let (_tmp, orchestrator, hooks, adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    let bytes = b"{\"from\":\"a newer build\"}\n";
+    let name = peer_file(&adapter, bytes).await;
+    hooks
+        .store
+        .failing_pref_reads
+        .lock()
+        .unwrap()
+        .insert(SYNC_UNREADABLE_LOGS_PREF_KEY.to_string());
+
+    orchestrator.sync_now().await.expect("round 1");
+    assert_eq!(applied_length(&hooks.store, &name), Some(0));
+
+    hooks.store.failing_pref_reads.lock().unwrap().clear();
+    orchestrator.sync_now().await.expect("round 2");
+    assert_eq!(
+        applied_length(&hooks.store, &name),
+        Some(bytes.len() as u64)
+    );
+    let raw = hooks.store.get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY).unwrap();
+    assert_eq!(
+        crate::UnreadableLogs::names(raw.as_deref(), &laptop()),
+        vec![name]
+    );
+}
+
+#[tokio::test]
+async fn while_the_leftovers_wait_this_builds_own_finished_files_go_up() {
+    // Held by time, every finished file below the horizon waited, this
+    // build's sessions too, for as long as settling did.
+    let first_run = Utc::now() - chrono::Duration::hours(2);
+    let (tmp, orchestrator, hooks, adapter) =
+        gc_passed_booted(Utc::now().timestamp() + 3_600, Utc::now()).await;
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LEFTOVERS_CUTOFF_PREF_KEY,
+            &serde_json::to_string(&crate::LeftoversCutoff {
+                last_round: Some(Utc.timestamp_opt(2_600, 0).unwrap()),
+                before: first_run,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let leftover = own_file(&[1_000, 4_000]);
+    stage(&tmp, &leftover);
+    let earlier_session = own_file(&[(first_run + chrono::Duration::minutes(30)).timestamp()]);
+    stage(&tmp, &earlier_session);
+    orchestrator.configure(Arc::new(ListlessAdapter {
+        inner: LocalFsSyncAdapter::new(tmp.path().join("remote")),
+        lists: Arc::new(Mutex::new(0)),
+    }));
+
+    orchestrator.sync_now().await.expect("round");
+
+    let remote = remote_logs(&adapter).await;
+    assert!(
+        remote
+            .iter()
+            .any(|(name, _)| *name == earlier_session.name.to_filename()),
+        "{remote:?}"
+    );
+    assert!(
+        remote
+            .iter()
+            .all(|(name, _)| *name != leftover.name.to_filename()),
+        "the leftover waits: {remote:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_round_without_meta_json_freezes_the_leftovers_cutoff_too() {
+    // It recorded this build's time as the last successful round before
+    // anything froze the older build's.
+    let (tmp, orchestrator, hooks, _adapter) = device(fresh_meta(), false).await;
+    std::fs::remove_file(tmp.path().join("remote").join("meta.json")).unwrap();
+    let round = Utc.timestamp_opt(2_600, 0).unwrap();
+    hooks
+        .store
+        .set_pref(crate::SYNC_LAST_ROUND_PREF_KEY, &round.to_rfc3339())
+        .unwrap();
+
+    let _ = orchestrator.sync_now().await;
+
+    let raw = hooks
+        .store
+        .get_pref(crate::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)
+        .unwrap()
+        .expect("frozen");
+    assert_eq!(
+        crate::LeftoversCutoff::parse(&raw).unwrap().last_round,
+        Some(round)
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn a_leftover_that_will_neither_go_nor_empty_sends_its_tail_once() {
+    // Each try listed the remote again and pushed one more copy of its tail.
+    use std::os::windows::fs::OpenOptionsExt;
+    let (tmp, orchestrator, hooks, adapter, log) = with_a_leftover(Utc::now()).await;
+    let path = tmp.path().join("pending").join(log.name.to_filename());
+    // Shared for reading only: it can be neither removed nor emptied.
+    let _held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x1)
+        .open(&path)
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round 1");
+    assert!(hooks
+        .store
+        .get_pref(crate::SYNC_LEFTOVERS_TRIED_AT_PREF_KEY)
+        .unwrap()
+        .is_some());
+    let earlier = Utc::now() - CATCH_UP_RETRY - chrono::Duration::minutes(1);
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LEFTOVERS_TRIED_AT_PREF_KEY,
+            &earlier.to_rfc3339(),
+        )
+        .unwrap();
+    orchestrator.sync_now().await.expect("round 2");
+
+    let tails: Vec<_> = remote_logs(&adapter)
+        .await
+        .into_iter()
+        .filter(|(_, bytes)| bytes.contains("ev-own-4000"))
+        .collect();
+    assert_eq!(tails.len(), 1, "{tails:?}");
+}

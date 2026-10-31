@@ -102,7 +102,9 @@ enden im selben Durchgang (`OnboardingService::apply_every_log`):
    Update den Parser geändert, vergisst die Runde die gemerkte Länge der
    Datei, und der nächste Abruf liest sie wieder; erst dann trägt der Merker
    den neuen Parser (Prüfrunde 7). Bis dahin ergänzt eine Runde ihn unter dem
-   alten, statt ihn zu ersetzen (Prüfrunde 8). Ein Merker, der sich nicht lesen
+   alten, statt ihn zu ersetzen (Prüfrunde 8). Eine unlesbare Datei, deren Name
+   sich nicht merken ließ, bekommt auch keine Länge: Die nächste Runde holt und
+   nennt sie wieder (Prüfrunde 9). Ein Merker, der sich nicht lesen
    lässt, lässt das Gerät einmal nachholen (Prüfrunde 5). Cursor = Maximum
    aus bisherigem Cursor (beim Beitritt und bei der Wiederaufnahme:
    Schnappschuss) und neuester fremder Datei, nie zurück.
@@ -156,16 +158,21 @@ still, und nur Neueres gewinnt.
   die alte Datei geht (`sync.push.leftoversSettled`, danach nie wieder). Ist
   keine solche Runde bekannt, gilt nichts als oben. Hat der Sync-Speicher die
   Datei noch, geht sie ganz hoch: Gelöscht hat sie niemand, und ein späterer
-  Push von 0.1.0 kann sie halb geschrieben haben (Prüfrunde 7). Bis alles
-  geordnet ist, geht keine fertige Datei unter `gc_horizon` hoch, auch keine,
-  die sich nicht lesen ließ (Prüfrunde 8). Die Grenze wird als Erstes
-  eingefroren; lässt sie sich nicht halten, ordnet der Versuch nichts, und die
-  Runde zählt nicht als erfolgreich, damit die Zeit dieses Builds die des
-  alten nicht ersetzt. Das Auflisten holt bei den meisten Speichern einmal
-  jede Datei; scheitert es, versucht erst eine Runde eine Stunde später es
-  wieder (`sync.push.leftoversTriedAt`). Lässt sich ein geordneter Rest nicht
+  Push von 0.1.0 kann sie halb geschrieben haben (Prüfrunde 7). Die Grenze
+  (`LeftoversCutoff`: die letzte erfolgreiche Runde des alten Builds und der
+  Start der App-Sitzung, die sie einfror) wird zu Beginn jeder Runde und jedes
+  Pushs eingefroren, bevor etwas sie verschieben kann, auch ohne `meta.json`
+  (Prüfrunde 9); lässt sie sich nicht halten, ordnet der Versuch nichts, und
+  die Runde zählt nicht als erfolgreich. Ein Rest ist eine Datei, die vor dem
+  ersten Lauf dieses Builds benannt ist und unter `gc_horizon` liegt. Bis alle
+  geordnet sind, geht keiner hoch, auch keiner, der sich nicht lesen ließ
+  (Prüfrunde 8); die späteren Dateien dieses Builds warten nicht (Prüfrunde 9).
+  Das Auflisten holt bei den meisten Speichern einmal jede Datei; ein Versuch,
+  der nicht fertig wird, wiederholt sich erst eine Stunde später
+  (`sync.push.leftoversTriedAt`). Lässt sich ein geordneter Rest nicht
   löschen, wird er geleert, damit kein späterer Versuch ihn noch einmal teilt;
-  ein Rest nimmt keinen Namen, den der Sync-Speicher schon hat.
+  einen Rest, den diese App-Sitzung schon schrieb, schreibt sie nicht noch
+  einmal; ein Rest nimmt keinen Namen, den der Sync-Speicher schon hat.
   Auch `push_now`, der Push nach jeder Änderung und auf dem Handy der übliche,
   holt `meta.json` und prüft Mindestversion und Verschlüsselung wie die Runde.
 - **Gemerkte Längen.** Die 256 neuesten (nach Namen), nicht nach `gc_horizon`
@@ -245,10 +252,17 @@ angewendet, denn die Zeilen des Geräts halten sie. Nur wo derselbe Durchgang
 einen Schnappschuss angewendet hat (Beitritt, Wiederaufnahme), wird eine
 eigene gewogen, die in keiner eigenen Datei oben steht: Der
 Schnappschuss kann einen älteren Wert zurückgesetzt haben, und die anderen
-Geräte übernehmen sie, sobald sie oben ist. Was ein älterer Build bis zur
-eingefrorenen Grenze seiner Reste (C) hielt, gilt dabei als oben: Es ging
-damals hoch, und die anderen Geräte übernahmen es, ob ein Aufräumen die Datei
-seither löschte oder ein späterer Push sie halb schrieb (Prüfrunde 8). Ebenso jede eigene oder schon
+Geräte übernehmen sie, sobald sie oben ist. Was ein älterer Build bis zu
+seiner letzten erfolgreichen Runde (C, ohne die zehn Minuten) hielt, gilt
+dabei als oben: Es ging damals hoch, und die anderen Geräte übernahmen es, ob
+ein Aufräumen die Datei seither löschte oder ein späterer Push sie halb
+schrieb (Prüfrunde 8) — außer ein Schnappschuss, der nichts nennt, ist älter
+als die Änderung: Der kann sie nicht halten (Prüfrunde 9). Ist die Grenze
+noch nicht eingefroren, gilt `sync.lastSuccessfulRound`, wie der alte Build
+ihn hinterließ. Lässt sich die Grenze oder eine ausstehende Datei nicht
+lesen, scheitern Beitritt und Wiederaufnahme, bevor sie etwas ändern. Tritt
+das Gerät einem Datensatz bei, in dem es nie war, gilt nichts davon als oben,
+und seine Reste werden gegen diesen neu geordnet. Ebenso jede eigene oder schon
 angewendete Änderung, die der Schnappschuss nicht hält: nicht unter seinen
 Kennungen, oder, nennt er keine, jünger als er (Prüfrunde 6). Das gewöhnliche Nachholen hat
 keinen Schnappschuss und hält jede eigene (Prüfrunde 5). Ein Löschen eines
@@ -630,3 +644,29 @@ Kritiker. Einzelheiten: scratchpad `coverage/review_r8.json`.
 - Von mir entschieden (Toni sagen): Scheitert beim Ordnen eines Rests das
   Löschen und das Leeren, kann ein späterer Versuch seinen Rest ein zweites
   Mal hochladen (doppelte Ereignisse, harmlos; TODO B3).
+
+## Prüfrunde 9 (PR #130, 2026-10-31)
+
+Vier Prüfer auf den Commit nach Runde 8, 8 gegengeprüft (7 bestätigt, einer
+widerlegt), ein Kritiker. Einzelheiten: scratchpad `coverage/review_r9.json`.
+
+- **Die Grenze der Reste** (C) wird zu Beginn jeder Runde und jedes Pushs
+  eingefroren, auch ohne `meta.json`, und hält neben der letzten Runde des
+  alten Builds fest, ab wann die Dateien von diesem stammen: Nur die älteren
+  warten; vorher hielt ein Ordnen, das nie fertig wurde, auch die eigenen
+  späteren Sitzungen zurück.
+- **Beitritt und Wiederaufnahme** (E) halten die Zeilen eines Rests bis zur
+  letzten Runde selbst, nicht zehn Minuten davor: Was die Runde hochschob,
+  gewann sonst über den Schnappschuss. Ein Schnappschuss, der nichts nennt und
+  älter ist, hält sie nicht; ohne eingefrorene Grenze gilt die Runde, wie der
+  alte Build sie hinterließ; eine Grenze oder ausstehende Datei, die sich
+  nicht lesen lässt, lässt den Durchgang scheitern, bevor er etwas ändert; ein
+  fremder Datensatz setzt die Grenze zurück.
+- Kleiner: ein Versuch, der nicht fertig wird, erst nach einer Stunde
+  wieder, und ein schon geschriebener Rest nicht noch einmal; eine unlesbare
+  Datei, deren Name nicht hielt, ohne Länge; die Übernahme einer Markierung
+  mitten im Verdichten ist durch einen Test gehalten.
+- Von mir entschieden (Toni sagen): Was 0.1.0 nach seiner letzten Runde noch
+  per Push hochschob (beim Beenden, auf dem Handy nach jeder Änderung), wiegt
+  ein Beitritt oder eine Wiederaufnahme weiterhin über den Schnappschuss
+  (TODO B3).

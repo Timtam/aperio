@@ -440,12 +440,20 @@ impl OnboardingService {
         // round 3 of #130).
         let snapshot = adapter.fetch_snapshot().await?;
         let logs = self.fetch_every_log(adapter).await?;
+        // A dataset this device was never part of had nothing of what an older
+        // build left pending: nothing of it counts as pushed there, and it is
+        // settled against this dataset anew (review round 9 of #130).
+        let new_dataset = meta.device(&self.local_device_id).is_none();
+        let own = self.own_pending(true, new_dataset).await?;
         // Whatever this device knew of another dataset says nothing here; the
         // pass over every file below makes the record exact again. Nor do its
         // row clocks: they would let that dataset's times keep this one's
         // changes out (review round 2 of #130). The snapshot brings its own.
         self.clear_coverage_exact()?;
         self.clear_row_clocks()?;
+        if new_dataset {
+            self.forget_leftovers_cutoff()?;
+        }
         match snapshot {
             Some(snapshot) => {
                 info!(
@@ -485,7 +493,7 @@ impl OnboardingService {
         // Every log file, not only those named after the snapshot: a session
         // named before it may have grown after it (Toni's laptop,
         // 2026-10-27).
-        let pass = self.apply_every_log(logs, &mut report, holds).await?;
+        let pass = self.apply_every_log(logs, &mut report, holds, own).await?;
         info!(
             count = report.fetched_logs,
             snapshot_applied = snapshot_applied,
@@ -583,6 +591,7 @@ impl OnboardingService {
         // snapshot sits behind the bailing round.
         let snapshot = adapter.fetch_snapshot().await?;
         let logs = self.fetch_every_log(adapter).await?;
+        let own = self.own_pending(true, false).await?;
         // Exact again only once this pass read every file (review round 3
         // of #130): an earlier mark says nothing after the snapshot apply.
         self.clear_coverage_exact()?;
@@ -612,7 +621,7 @@ impl OnboardingService {
             remote_was_empty: false,
             ..Default::default()
         };
-        let pass = self.apply_every_log(logs, &mut report, holds).await?;
+        let pass = self.apply_every_log(logs, &mut report, holds, own).await?;
         info!(
             count = report.fetched_logs,
             "stale resume applied every log",
@@ -676,7 +685,8 @@ impl OnboardingService {
         };
         let logs = self.fetch_every_log(adapter).await?;
         // No snapshot here: the rows hold every own change, or a newer one.
-        let pass = self.apply_every_log(logs, &mut report, None).await?;
+        let own = self.own_pending(false, false).await?;
+        let pass = self.apply_every_log(logs, &mut report, None, own).await?;
         if let Some(newest) = pass.newest_foreign {
             self.save_cursor(self.read_cursor().max(newest))?;
         }
@@ -718,6 +728,7 @@ impl OnboardingService {
         logs: Vec<LogFile>,
         report: &mut OnboardingReport,
         holds: Option<SnapshotHolds>,
+        own: OwnPending,
     ) -> SyncResult<Pass> {
         let unreadable_before = self.read_unreadable_logs();
         let mut unreadable: HashMap<String, u64> = HashMap::new();
@@ -784,15 +795,20 @@ impl OnboardingService {
         // the remote: it went up then and the peers applied it, whether a GC
         // deleted the file since or a later push tore it (review round 8 of
         // #130).
-        let pending_files = self.pending_files().await;
-        let pending = envelopes_of(&pending_files);
-        let pushed_before = self.leftovers_cutoff();
+        // Up to the older build's last round itself: a line it wrote just
+        // before went up with that round (review round 9). One a snapshot
+        // naming nothing is younger than is weighed all the same: it cannot
+        // hold it.
+        let pending = envelopes_of(&own.files);
         let unpushed: HashSet<String> = match &holds {
             Some(holds) => pending
                 .iter()
                 .filter(|envelope| {
                     !on_remote.contains(&envelope.id)
-                        && pushed_before.is_none_or(|cutoff| envelope.timestamp > cutoff)
+                        && (own
+                            .pushed_until
+                            .is_none_or(|until| envelope.timestamp > until)
+                            || holds.provably_lacks(envelope))
                 })
                 .chain(envelopes.iter().filter(|envelope| !holds.holds(envelope)))
                 .map(|envelope| envelope.id.clone())
@@ -843,16 +859,85 @@ impl OnboardingService {
             .unwrap_or_default()
     }
 
-    /// The time up to which an older build's leftovers went up, as the
-    /// round froze it (`sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY`); `None`
-    /// where none is frozen or known.
-    fn leftovers_cutoff(&self) -> Option<DateTime<Utc>> {
-        UserPrefsRepo::new(&self.db)
-            .get(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)
-            .ok()
-            .flatten()
+    /// This device's own pending files and what of them went up, for a pass
+    /// over every log ([`OwnPending`]), read before anything changes. `strict`
+    /// where a snapshot comes first (a join, a resume): a pending file that
+    /// does not read, or a cutoff that does not, fails the pass — weighed
+    /// without them, the snapshot's values would win over changes it does not
+    /// hold, or old ones over its own (review round 9 of #130). `new_dataset`:
+    /// nothing went up to it.
+    async fn own_pending(&self, strict: bool, new_dataset: bool) -> SyncResult<OwnPending> {
+        let (files, all_read) = self.pending_files().await;
+        if strict && !all_read {
+            return Err(SyncError::io(
+                "a pending log file does not read; trying again later".to_string(),
+            ));
+        }
+        let pushed_until = if new_dataset {
+            None
+        } else {
+            match self.leftovers_pushed_until() {
+                Ok(until) => until,
+                Err(err) if strict => return Err(err),
+                Err(_) => None,
+            }
+        };
+        Ok(OwnPending {
+            files,
+            pushed_until,
+        })
+    }
+
+    /// Up to when what an older build left pending went up: its last
+    /// successful round, as the round froze it
+    /// (`sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY`) — or, not frozen yet,
+    /// as that build left `sync.lastSuccessfulRound`: no round of this build
+    /// records itself before freezing it. `None` where none is known.
+    fn leftovers_pushed_until(&self) -> SyncResult<Option<DateTime<Utc>>> {
+        let prefs = UserPrefsRepo::new(&self.db);
+        let read = |key: &str| {
+            prefs
+                .get(key)
+                .map_err(|err| SyncError::internal(format!("read {key}: {err}")))
+        };
+        if let Some(raw) = read(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)? {
+            return sync_engine::LeftoversCutoff::parse(&raw)
+                .map(|cutoff| cutoff.last_round)
+                .ok_or_else(|| SyncError::internal("the leftovers' cutoff does not read"));
+        }
+        if read(sync_engine::SYNC_LEFTOVERS_SETTLED_PREF_KEY)?.is_some() {
+            return Ok(None);
+        }
+        Ok(read(sync_engine::SYNC_LAST_ROUND_PREF_KEY)?
             .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
-            .map(|at| at.with_timezone(&Utc))
+            .map(|at| at.with_timezone(&Utc)))
+    }
+
+    /// Joined to a dataset it was never part of, this device's older
+    /// leftovers count as pushed nowhere, and are settled against it anew.
+    fn forget_leftovers_cutoff(&self) -> SyncResult<()> {
+        let prefs = UserPrefsRepo::new(&self.db);
+        let failed = |err| SyncError::internal(format!("reset the leftovers' cutoff: {err}"));
+        let before = prefs
+            .get(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)
+            .map_err(failed)?
+            .and_then(|raw| sync_engine::LeftoversCutoff::parse(&raw))
+            .map_or_else(Utc::now, |cutoff| cutoff.before);
+        let raw = serde_json::to_string(&sync_engine::LeftoversCutoff {
+            last_round: None,
+            before,
+        })
+        .map_err(|err| SyncError::internal(format!("encode the leftovers' cutoff: {err}")))?;
+        prefs
+            .set(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY, &raw)
+            .map_err(failed)?;
+        prefs
+            .delete(sync_engine::SYNC_LEFTOVERS_SETTLED_PREF_KEY)
+            .map_err(failed)?;
+        prefs
+            .delete(sync_engine::SYNC_LEFTOVERS_TRIED_AT_PREF_KEY)
+            .map_err(failed)?;
+        Ok(())
     }
 
     /// The files this device names as unreadable in `meta.json`.
@@ -891,18 +976,19 @@ impl OnboardingService {
     /// read error gets logged + skipped, the rest of the directory is still
     /// read. The files themselves stay on disk so the next sync round can
     /// still push them to the remote.
-    async fn pending_files(&self) -> Vec<LogFile> {
+    async fn pending_files(&self) -> (Vec<LogFile>, bool) {
         let mut logs = Vec::new();
+        let mut all_read = true;
         let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
             Ok(rd) => rd,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 // No writer has flushed anything this install.
                 debug!("no pending dir; nothing of our own to add");
-                return logs;
+                return (logs, true);
             }
             Err(err) => {
                 warn!(?err, "couldn't open the pending dir");
-                return logs;
+                return (logs, false);
             }
         };
         let mut files = 0usize;
@@ -912,6 +998,7 @@ impl OnboardingService {
                 Ok(None) => break,
                 Err(err) => {
                     warn!(?err, "read_dir entry error in the pending dir");
+                    all_read = false;
                     break;
                 }
             };
@@ -937,6 +1024,7 @@ impl OnboardingService {
                 Ok(b) => b,
                 Err(err) => {
                     warn!(name = name, ?err, "couldn't read pending log");
+                    all_read = false;
                     continue;
                 }
             };
@@ -947,7 +1035,7 @@ impl OnboardingService {
             });
         }
         debug!(files, "read our own pending logs");
-        logs
+        (logs, all_read)
     }
 
     /// "Neu beginnen" path. Deletes the old dataset's log files, pushes a
@@ -1378,6 +1466,21 @@ impl SnapshotHolds {
             SnapshotHolds::Until(at) => envelope.timestamp <= *at,
         }
     }
+
+    /// Whether it cannot hold `envelope`: a snapshot naming nothing that is
+    /// older. Not naming a change says nothing — a snapshot names only what
+    /// is in a file still present (review round 9 of #130).
+    fn provably_lacks(&self, envelope: &EventEnvelope) -> bool {
+        matches!(self, SnapshotHolds::Until(at) if envelope.timestamp > *at)
+    }
+}
+
+/// This device's own pending files for a pass over every log, and up to when
+/// what an older build left among them went up
+/// ([`OnboardingService::own_pending`]).
+struct OwnPending {
+    files: Vec<LogFile>,
+    pushed_until: Option<DateTime<Utc>>,
 }
 
 /// The envelopes of `files`; one that does not parse is left out.
@@ -2909,30 +3012,54 @@ mod tests {
         assert_eq!(interval(&db).as_deref(), Some("70"));
     }
 
-    #[tokio::test]
-    async fn a_join_holds_what_an_older_build_left_pending_up_to_its_cutoff() {
-        // Review round 8 of #130: a leftover not settled yet, or left whole
-        // for its torn remote copy, was weighed whole; what it held up to the
-        // older build's last round went up then, and peers took newer values
-        // since.
-        let (_tmp, db) = fresh_db();
+    /// A join, the snapshot at `at` holding interval 45 and naming nothing,
+    /// of a device whose pending leftover sets 70 at `change_at`. `cutoff`:
+    /// the older build's last round as the round froze it; `last_round`: as
+    /// that build left it, not frozen yet. `member`: the dataset knows this
+    /// device. Returns the join's result and the interval after it.
+    async fn join_with_a_leftover(
+        change_at: DateTime<Utc>,
+        cutoff: Option<&str>,
+        last_round: Option<DateTime<Utc>>,
+        member: bool,
+        unreadable_pending: bool,
+    ) -> (
+        SyncResult<OnboardingReport>,
+        Option<String>,
+        DbHandle,
+        (TempDir, TempDir),
+    ) {
+        let (tmp, db) = fresh_db();
         let pending = TempDir::new().unwrap();
         let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
-        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
-        let old = at - chrono::Duration::days(30);
-        let own = envelope("ev-own", "dev-this", old, set_interval("70"));
-        let leftover = file_of("dev-this", old, &[&own]);
+        let own = envelope("ev-own", "dev-this", change_at, set_interval("70"));
+        let leftover = file_of("dev-this", change_at, &[&own]);
         std::fs::write(
             pending.path().join(leftover.name.to_filename()),
             &leftover.bytes,
         )
         .unwrap();
-        UserPrefsRepo::new(&db.shared())
-            .set(
-                sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY,
-                &(old + chrono::Duration::days(1)).to_rfc3339(),
-            )
-            .unwrap();
+        if unreadable_pending {
+            // A directory named as a log file: it lists, and does not read.
+            let other = LogFileName::new(
+                change_at + chrono::Duration::seconds(1),
+                DeviceId::from_string("dev-this".into()),
+            );
+            std::fs::create_dir(pending.path().join(other.to_filename())).unwrap();
+        }
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        if let Some(raw) = cutoff {
+            prefs
+                .set(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY, raw)
+                .unwrap();
+        }
+        if let Some(at) = last_round {
+            prefs
+                .set(sync_engine::SYNC_LAST_ROUND_PREF_KEY, &at.to_rfc3339())
+                .unwrap();
+        }
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
         let body = sync_engine::AperioSnapshotBody {
             settings: std::collections::BTreeMap::from([(
                 "sync.intervalMinutes".to_string(),
@@ -2943,6 +3070,21 @@ mod tests {
         let adapter = FakeAdapter::new();
         let mut meta = MetaJson::fresh("1.0.0");
         meta.snapshot_timestamp = at;
+        if member {
+            meta.upsert_device(
+                &DeviceId::from_string("dev-this".into()),
+                DeviceRecord {
+                    name: None,
+                    last_seen_log: at,
+                    last_seen: None,
+                    app_version: "1.0.0".into(),
+                    stale: false,
+                    exact: false,
+                    unreadable: Vec::new(),
+                    pending: Vec::new(),
+                },
+            );
+        }
         adapter.install_meta(meta);
         adapter.install_snapshot(Snapshot::new(
             at,
@@ -2950,9 +3092,141 @@ mod tests {
             serde_json::to_value(body).unwrap(),
         ));
 
-        svc.accept_remote(&adapter, None).await.unwrap();
+        let result = svc.accept_remote(&adapter, None).await;
+        let after = interval(&db);
+        (result, after, db, (tmp, pending))
+    }
 
-        assert_eq!(interval(&db).as_deref(), Some("45"));
+    /// The cutoff the round freezes, as JSON.
+    fn frozen(last_round: Option<DateTime<Utc>>) -> String {
+        serde_json::to_string(&sync_engine::LeftoversCutoff {
+            last_round,
+            before: "2026-10-31T00:00:00Z".parse().unwrap(),
+        })
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_join_holds_what_an_older_build_left_pending_up_to_its_cutoff() {
+        // Review round 8 of #130: a leftover not settled yet, or left whole
+        // for its torn remote copy, was weighed whole; what it held up to the
+        // older build's last round went up then, and peers took newer values
+        // since.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(old + chrono::Duration::days(1)));
+        let (result, interval, _db, _dirs) =
+            join_with_a_leftover(old, Some(&cutoff), None, true, false).await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn a_join_holds_a_leftover_line_the_older_builds_last_round_pushed() {
+        // Review round 9 of #130: the pass took settle's cutoff, ten minutes
+        // before that round, and weighed what the round itself pushed.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let round = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(round));
+        let (result, interval, _db, _dirs) = join_with_a_leftover(
+            round - chrono::Duration::minutes(3),
+            Some(&cutoff),
+            None,
+            true,
+            false,
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn a_join_weighs_a_leftover_line_a_snapshot_naming_nothing_is_older_than() {
+        // Review round 9 of #130: it cannot hold the line, which the peers
+        // applied after it.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let cutoff = frozen(Some(at + chrono::Duration::hours(2)));
+        let (result, interval, _db, _dirs) = join_with_a_leftover(
+            at + chrono::Duration::hours(1),
+            Some(&cutoff),
+            None,
+            true,
+            false,
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_join_before_any_round_froze_the_cutoff_reads_the_older_builds_round() {
+        // Review round 9 of #130: no cutoff, and the leftover was weighed
+        // whole; no round of this build records itself before freezing it.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = at - chrono::Duration::days(30);
+        let (result, interval, _db, _dirs) = join_with_a_leftover(
+            old,
+            None,
+            Some(old + chrono::Duration::days(1)),
+            true,
+            false,
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn a_join_fails_and_changes_nothing_when_the_cutoff_does_not_read() {
+        // Review round 9 of #130: read as no cutoff, the leftover was weighed
+        // whole over the snapshot.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with_a_leftover(
+            at - chrono::Duration::days(30),
+            Some("not a cutoff"),
+            None,
+            true,
+            false,
+        )
+        .await;
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(interval, None, "nothing applied");
+    }
+
+    #[tokio::test]
+    async fn a_join_fails_and_changes_nothing_when_a_pending_file_does_not_read() {
+        // Review round 9 of #130: left out, its changes were never weighed,
+        // and the snapshot's older values stayed on this device alone.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) =
+            join_with_a_leftover(at + chrono::Duration::hours(1), None, None, true, true).await;
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(interval, None, "nothing applied");
+    }
+
+    #[tokio::test]
+    async fn a_join_of_a_dataset_this_device_never_was_part_of_weighs_its_leftovers() {
+        // Review round 9 of #130: the cutoff of another dataset held them,
+        // though nothing of them ever went up here.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(old + chrono::Duration::days(1)));
+        let (result, interval, db, _dirs) =
+            join_with_a_leftover(old, Some(&cutoff), None, false, false).await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        let raw = prefs
+            .get(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            sync_engine::LeftoversCutoff::parse(&raw)
+                .unwrap()
+                .last_round,
+            None
+        );
     }
 
     #[tokio::test]
