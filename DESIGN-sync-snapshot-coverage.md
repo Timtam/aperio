@@ -171,18 +171,24 @@ beginnt mit leeren Uhren: Die eines früheren Datensatzes hielten die
 kein `updated_at`) kann einen neueren Stand aus einer schon gelöschten Datei
 halten. Beim Nachholen wird darum für so eine Zeile eine schon angewendete
 oder eigene Änderung, ein Löschen eingeschlossen, **nicht** erneut
-angewendet; ihre Zeit wird die Uhr der Zeile, und sie wird als angewendet
-vermerkt. Eigene Änderungen gelten als angewendet, denn die Zeilen des Geräts
-halten sie — nicht aber eigene, die noch nicht im Sync-Speicher liegen: Ein
-Schnappschuss dieses Durchgangs kann einen älteren Wert zurückgesetzt haben,
-und die anderen Geräte übernehmen die Änderung, sobald sie hochgeladen ist;
-sie wird gewogen wie dort. Als gehalten gilt in **jedem** Durchgang auch eine
-Änderung, die älter ist als `gc_horizon`: Ihre Datei war gelöscht, der
-Schnappschuss hält, was sie tat, und sie liegt nur da, weil ein Gerät sie
-erneut hochgeladen hat (ältere Builds tun das nach jedem Start). Weil jedes
-Gerät sie gleich wiegt, bleiben die Geräte gleich. Ein Löschen eines Termins
-oder einer Aufgabe wiegt das `updated_at` der Zeile mit, wenn ein Schnappschuss
-sie zurückgebracht hat. Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
+angewendet; die Uhr der Zeile geht knapp hinter ihre Zeit, damit dieselbe
+Änderung später nicht doch gewinnt (ein Schnappschuss trägt die Uhr weiter).
+Fehlt die Zeile, wurde sie danach gelöscht: Die Uhr merkt ein Löschen. Ist
+sie nach einem angewendeten Löschen da, wurde sie neu angelegt. Eigene
+Änderungen gelten als angewendet, denn die Zeilen des Geräts halten sie —
+nicht aber eigene, die noch nicht im Sync-Speicher liegen: Ein Schnappschuss
+dieses Durchgangs kann einen älteren Wert zurückgesetzt haben, und die anderen
+Geräte übernehmen die Änderung, sobald sie hochgeladen ist; sie wird gewogen
+wie dort. Ein Löschen eines Termins oder einer Aufgabe wiegt das `updated_at`
+der Zeile mit, wenn ein Schnappschuss sie zurückgebracht hat.
+
+Eine Regel „älter als `gc_horizon` gilt als gehalten“ gibt es nicht
+(Prüfrunde 4): Die Grenze folgt Dateinamen, nicht gelöschten Dateien, und
+verwürfe späte und gewöhnliche Änderungen. Dateien, die 0.1.0-Builds nach dem
+Aufräumen erneut hochgeladen haben, können darum beim ersten Nachholen eines
+Geräts eine Zeile ohne bekannte Zeit auf einen älteren Wert setzen. Neue
+Builds laden fertige Sitzungen nicht erneut hoch; 0.1.0-Builds sind ab der
+ersten Verdichtung auf Format 2 ausgesperrt. Erst wenn das Nachholen die Zeile selbst ändert, mit einer nie
 angewendeten Änderung, werden spätere angewendete wieder gewogen. Grenze: Eine
 nie angewendete ältere Änderung auf so einer Zeile gewinnt noch, wie in jeder
 Runde zuvor.
@@ -220,10 +226,6 @@ Runde zuvor.
 - Zwischen dem neuen Auflisten und dem Löschen bleibt ein kurzes Fenster:
   Hängt ein Gerät genau dann an, geht das Angehängte verloren. Ohne Sperre im
   Sync-Speicher lässt sich das nicht schließen.
-- Eine nie angewendete Anlage, älter als `gc_horizon`, gilt auf einer
-  fehlenden Zeile als gehalten: Jedes Gerät wiegt sie gleich, sie bleiben
-  gleich. Es fehlen dann Anlagen eines Geräts, das länger als das Fenster
-  offline war und vor dem Update geschrieben hat (Prüfrunde 3, C4).
 - Auf dem Handy E2E auf einem Ziel ohne `meta.json` einzuschalten, ist
   „Neu beginnen“: Dort liegende Protokolldateien werden gelöscht (U10).
 - Die Anhebung des Stempels einer eigenen Änderung (Uhrversatz) misst gegen
@@ -387,3 +389,32 @@ gegengeprüft, ein Kritiker. Einzelheiten: scratchpad `coverage/review_r3.json`.
   synchronisieren dann nicht mehr und zeigen „Update nötig“. Bis dahin können
   sie noch nach Namen löschen: nach dem Update einmal „Jetzt kompaktieren“.
 - Danach eine Prüfrunde wie Runde 3.
+
+## Prüfrunde 4 (PR #130, 2026-10-31)
+
+Wie Runde 3: 3 Prüfer auf die Commits nach Runde 3, 6 gegengeprüft (alle
+bestätigt), ein Kritiker. Einzelheiten: scratchpad `coverage/review_r4.json`.
+
+- **Die Regel „älter als `gc_horizon` gilt als gehalten“ ist falsch.**
+  `gc_horizon` folgt Dateinamen, nicht gelöschten Dateien: Eine gewöhnliche
+  Änderung, in einer lang laufenden Sitzung vor einer fremden Verdichtung
+  geschrieben, oder die Offline-Änderungen eines lange abwesenden Geräts,
+  wurden auf jedem Gerät verworfen, beim Urheber aber behalten. Die Regel
+  entfällt ganz (Runden und Nachholen). Was sie abwehren sollte — Dateien,
+  die 0.1.0-Builds nach dem Aufräumen erneut hochgeladen haben — bleibt eine
+  Grenze des Übergangs: Neue Builds laden fertige Sitzungen nicht erneut hoch,
+  und 0.1.0-Builds sind ab der ersten Verdichtung auf Format 2 ausgesperrt.
+- **Die gesetzte Uhr einer gehaltenen Änderung** stand genau auf ihrer Zeit;
+  ein Schnappschuss trug sie weiter, und ein Beitretender wandte die Änderung
+  dann doch an. Sie steht jetzt knapp danach.
+- **Eine gehaltene Anlage auf einer fehlenden Zeile** setzte „geschrieben,
+  nicht gelöscht“, und eine spätere Bearbeitung legte die gelöschte Zeile neu
+  an. Fehlt die Zeile, gilt sie als gelöscht.
+- Kleiner: eine dauerhaft unlesbare Datei wurde nach einem Update nie wieder
+  gelesen; „Jetzt kompaktieren“ prüft die Mindestversion nicht; eine
+  gescheiterte zweite Auflistung löschte die Sichtungsliste; der Beitritt
+  schob die `meta.json` zurück, die er vor seinem langen Durchgang gelesen
+  hatte (und hob damit eine gleichzeitige Aussperrung auf).
+- Alte Builds: Ein ausgesperrter 0.1.0-Build kann „Jetzt kompaktieren“ noch
+  ausführen und nach Namen löschen. Das lässt sich nur durch das Update
+  verhindern: alle Geräte aktualisieren, dort nicht von Hand kompaktieren.

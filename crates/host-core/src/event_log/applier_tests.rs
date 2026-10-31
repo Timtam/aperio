@@ -1651,92 +1651,7 @@ fn a_snapshots_clocks_never_move_a_row_back() {
     assert_eq!(store.row_clocks().unwrap().len(), 1);
 }
 
-#[test]
-fn the_catch_up_does_not_take_an_old_change_from_a_file_pushed_again_after_the_gc() {
-    // Review round 2 of #130: a device pushed a file again that the GC had
-    // deleted. On a row of unknown time its change, older than the GC
-    // horizon, is held by the snapshot and does not win; a newer one does.
-    let (adapter, db) = fixture();
-    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
-    UserPrefsRepo::new(&db)
-        .set("sync.intervalMinutes", "90")
-        .unwrap();
-    let horizon = Some(Utc.timestamp_opt(2000, 0).unwrap());
-
-    applier
-        .catch_up_envelopes(
-            vec![set_interval("30", 1000)],
-            &PassContext {
-                held_before: horizon,
-                ..PassContext::default()
-            },
-        )
-        .unwrap();
-    assert_eq!(interval(&db).as_deref(), Some("90"));
-
-    applier
-        .catch_up_envelopes(
-            vec![set_interval("45", 3000)],
-            &PassContext {
-                held_before: horizon,
-                ..PassContext::default()
-            },
-        )
-        .unwrap();
-    assert_eq!(interval(&db).as_deref(), Some("45"));
-}
-
 // ---- Review round 3 of #130 --------------------------------------------
-
-#[test]
-fn a_held_change_is_recorded_so_a_later_round_does_not_take_it() {
-    // The catch-up held a change older than the GC horizon but did not
-    // record it, and the next ordinary round that fetched its file applied
-    // it and reverted the row.
-    let (adapter, db) = fixture();
-    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
-    UserPrefsRepo::new(&db)
-        .set("sync.intervalMinutes", "90")
-        .unwrap();
-    let old = set_interval("30", 1000);
-    applier
-        .catch_up_envelopes(
-            vec![old.clone()],
-            &PassContext {
-                held_before: Some(Utc.timestamp_opt(2000, 0).unwrap()),
-                ..PassContext::default()
-            },
-        )
-        .unwrap();
-
-    let report = applier.apply_envelopes(vec![old]).unwrap();
-
-    assert_eq!(report.skipped_already_applied, 1);
-    assert_eq!(interval(&db).as_deref(), Some("90"));
-}
-
-#[test]
-fn an_ordinary_round_holds_a_change_older_than_the_gc_horizon_too() {
-    // Every pass weighs it the same way, so the devices stay alike.
-    let (adapter, db) = fixture();
-    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
-    UserPrefsRepo::new(&db)
-        .set("sync.intervalMinutes", "90")
-        .unwrap();
-    let horizon = Some(Utc.timestamp_opt(2000, 0).unwrap());
-    let file = |env: EventEnvelope| {
-        sync_core::LogFile::from_envelopes(env.device_id.clone(), env.timestamp, &[env]).unwrap()
-    };
-
-    applier
-        .apply_log_file(&file(set_interval("30", 1000)), horizon)
-        .unwrap();
-    assert_eq!(interval(&db).as_deref(), Some("90"));
-    applier
-        .apply_log_file(&file(set_interval("45", 3000)), horizon)
-        .unwrap();
-    assert_eq!(interval(&db).as_deref(), Some("45"));
-}
 
 #[test]
 fn a_delete_takes_away_an_appointment_a_snapshot_brought_back() {
@@ -1864,4 +1779,91 @@ fn the_delete_mark_follows_the_newest_whole_row_write() {
         .advance_row_clock(&key, at(4000), RowWrite::Fields)
         .unwrap();
     assert!(!deleted(), "a field merge leaves it");
+}
+
+// ---- Review round 4 of #130 --------------------------------------------
+
+#[test]
+fn a_held_change_does_not_win_when_it_is_met_again() {
+    // The seeded clock stood exactly on the change, and a snapshot carried
+    // it on: a device meeting the change again, never applied there, took
+    // it and went back to the older value. The clock goes just past it.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let old = set_interval("30", 1000);
+    applier.apply_envelopes(vec![old.clone()]).unwrap();
+    forget_clocks(&db);
+    UserPrefsRepo::new(&db)
+        .set("sync.intervalMinutes", "90")
+        .unwrap();
+    applier
+        .catch_up_envelopes(vec![old.clone()], &PassContext::default())
+        .unwrap();
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+    // As on a device taking this one's snapshot: the change is new to it.
+    db.lock()
+        .unwrap()
+        .execute("DELETE FROM sync_applied_events", [])
+        .unwrap();
+
+    applier.apply_envelopes(vec![old]).unwrap();
+
+    assert_eq!(interval(&db).as_deref(), Some("90"));
+}
+
+#[test]
+fn a_held_create_of_a_missing_row_marks_it_deleted() {
+    // The create was applied, the row is gone: it was deleted after it, by
+    // a change whose file is gone. A later edit must not bring it back.
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let create = label_event("lbl-zombie", "Rot", 1000, true);
+    applier.apply_envelopes(vec![create.clone()]).unwrap();
+    forget_clocks(&db);
+    db.lock()
+        .unwrap()
+        .execute("DELETE FROM color_labels WHERE id = 'lbl-zombie'", [])
+        .unwrap();
+
+    applier
+        .catch_up_envelopes(vec![create], &PassContext::default())
+        .unwrap();
+    applier
+        .apply_envelopes(vec![label_event("lbl-zombie", "Neu", 2000, false)])
+        .unwrap();
+
+    assert_eq!(label_name(&db, "lbl-zombie"), None);
+}
+
+#[test]
+fn a_held_delete_of_a_row_made_again_is_not_marked_deleted() {
+    // The row is there after an applied delete: it was made again, so its
+    // newest whole-row write is no delete, and an edit moving it out of a
+    // container deleted later still applies.
+    use sync_engine::SyncStore;
+    let (adapter, db) = fixture();
+    let applier = make_applier(&db, &adapter, DeviceId::from_string("dev-me".into()));
+    let delete = label_deleted("lbl-again", 2000);
+    applier
+        .apply_envelopes(vec![
+            label_event("lbl-again", "Rot", 1000, true),
+            delete.clone(),
+        ])
+        .unwrap();
+    applier
+        .apply_envelopes(vec![label_event("lbl-again", "Wieder", 3000, true)])
+        .unwrap();
+    forget_clocks(&db);
+
+    applier
+        .catch_up_envelopes(vec![delete], &PassContext::default())
+        .unwrap();
+
+    let store = DesktopSyncStore::new(db.clone(), Arc::clone(&adapter));
+    let key = sync_core::RowKey {
+        kind: "color_label",
+        id: "lbl-again".into(),
+    };
+    assert!(!store.row_clock(&key).unwrap().unwrap().deleted);
+    assert_eq!(label_name(&db, "lbl-again").as_deref(), Some("Wieder"));
 }

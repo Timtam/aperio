@@ -488,9 +488,7 @@ impl OnboardingService {
         // Every log file, not only those named after the snapshot: a session
         // named before it may have grown after it (Toni's laptop,
         // 2026-10-27).
-        let pass = self
-            .apply_every_log(logs, meta.gc_horizon, &mut report)
-            .await?;
+        let pass = self.apply_every_log(logs, &mut report).await?;
         info!(
             count = report.fetched_logs,
             snapshot_applied = snapshot_applied,
@@ -612,9 +610,7 @@ impl OnboardingService {
             remote_was_empty: false,
             ..Default::default()
         };
-        let pass = self
-            .apply_every_log(logs, meta.gc_horizon, &mut report)
-            .await?;
+        let pass = self.apply_every_log(logs, &mut report).await?;
         info!(
             count = report.fetched_logs,
             "stale resume applied every log",
@@ -674,9 +670,8 @@ impl OnboardingService {
             remote_was_empty: false,
             ..Default::default()
         };
-        let gc_horizon = adapter.fetch_meta().await?.and_then(|meta| meta.gc_horizon);
         let logs = self.fetch_every_log(adapter).await?;
-        let pass = self.apply_every_log(logs, gc_horizon, &mut report).await?;
+        let pass = self.apply_every_log(logs, &mut report).await?;
         if let Some(newest) = pass.newest_foreign {
             self.save_cursor(self.read_cursor().max(newest))?;
         }
@@ -702,10 +697,6 @@ impl OnboardingService {
     /// (`EventLogApplier::catch_up_envelopes`). Joining, resuming and the
     /// round's catch-up all end here.
     ///
-    /// A change older than the dataset's GC horizon (`gc_horizon`) counts
-    /// as held on a row of unknown time: its file came back only because a
-    /// device pushed it again.
-    ///
     /// Everything is fetched before anything changes, so a failed fetch
     /// leaves the device as it was. Records the foreign files' lengths for
     /// the growth refetch and returns the newest foreign file's name time,
@@ -713,7 +704,6 @@ impl OnboardingService {
     async fn apply_every_log(
         &self,
         logs: Vec<LogFile>,
-        gc_horizon: Option<DateTime<Utc>>,
         report: &mut OnboardingReport,
     ) -> SyncResult<Pass> {
         let unreadable_before = self.read_unreadable_logs();
@@ -783,13 +773,9 @@ impl OnboardingService {
         // A pending file may already be uploaded: each change once.
         let mut seen = HashSet::new();
         envelopes.retain(|envelope| seen.insert(envelope.id.clone()));
-        let applied = self.applier.catch_up_envelopes(
-            envelopes,
-            &sync_engine::PassContext {
-                held_before: gc_horizon,
-                unpushed,
-            },
-        )?;
+        let applied = self
+            .applier
+            .catch_up_envelopes(envelopes, &sync_engine::PassContext { unpushed })?;
         report.detail = applied.clone();
         report.merge_apply(applied);
         self.record_applied_lengths(&lengths);
@@ -2332,27 +2318,6 @@ mod tests {
             .unwrap()
             .unwrap_or_default();
         assert!(!lengths.contains(&torn_name));
-    }
-
-    #[tokio::test]
-    async fn the_catch_up_weighs_old_changes_against_the_gc_horizon() {
-        // A peer pushed a session again that the GC had deleted: its change
-        // older than the horizon does not win on a row of unknown time.
-        let (_tmp, db) = fresh_db();
-        let svc = build_service(db.shared());
-        UserPrefsRepo::new(&db.shared())
-            .set("sync.intervalMinutes", "90")
-            .unwrap();
-        let old: DateTime<Utc> = "2026-10-01T08:00:00Z".parse().unwrap();
-        let change = envelope("ev-old", "dev-other", old, set_interval("30"));
-        let adapter = FakeAdapter::with_logs(vec![file_of("dev-other", old, &[&change])]);
-        let mut meta = MetaJson::fresh("1.0.0");
-        meta.gc_horizon = Some("2026-10-05T16:07:24Z".parse().unwrap());
-        adapter.install_meta(meta);
-
-        svc.catch_up(&adapter).await.unwrap();
-
-        assert_eq!(interval(&db).as_deref(), Some("90"));
     }
 
     #[tokio::test]

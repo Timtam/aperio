@@ -362,11 +362,12 @@ async fn a_finished_session_goes_once_pushed_and_the_live_one_stays() {
 }
 
 #[tokio::test]
-async fn an_ordinary_round_holds_what_is_older_than_the_gc_horizon() {
-    // Review round 3 of #130: a file the GC deleted, pushed again by an
-    // older build, reached an exact device as unknown; its old change won
-    // on a row of unknown time in a normal pass. The round passes the
-    // dataset's horizon, as the catch-up does.
+async fn an_ordinary_round_takes_a_late_change_older_than_the_gc_horizon() {
+    // Review round 4 of #130: holding every change older than the horizon
+    // dropped the offline work of a device away past the retention window —
+    // and ordinary changes in a long session named before a peer's
+    // compaction — on every device but the one that made them. The horizon
+    // follows file names, not deleted files: such a change is weighed.
     let mut meta = fresh_meta();
     meta.gc_horizon = Some(Utc.timestamp_opt(3_000, 0).unwrap());
     let (_tmp, orchestrator, hooks, adapter) = device(meta, true).await;
@@ -386,6 +387,5 @@ async fn an_ordinary_round_holds_what_is_older_than_the_gc_horizon() {
     let report = orchestrator.sync_now().await.expect("round");
 
     assert_eq!(report.fetched_logs, 1, "unknown, below the cursor");
-    assert_eq!(report.applied, 0);
-    assert_eq!(report.skipped_already_applied, 1, "held, and recorded");
+    assert_eq!(report.applied, 1);
 }

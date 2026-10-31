@@ -228,23 +228,9 @@ impl EventLogApplier {
     /// Apply every envelope in one log file. Convenience wrapper
     /// around `apply_envelopes` that handles the JSONL → envelope
     /// decoding via `LogFile::into_envelopes`.
-    ///
-    /// `held_before` is the dataset's GC horizon: a change older than it
-    /// does not win on a row of unknown time (see [`PassContext`]).
-    pub fn apply_log_file(
-        &self,
-        log: &LogFile,
-        held_before: Option<DateTime<Utc>>,
-    ) -> SyncResult<ApplyReport> {
+    pub fn apply_log_file(&self, log: &LogFile) -> SyncResult<ApplyReport> {
         let envelopes = log.into_envelopes()?;
-        self.apply_envelopes_inner(
-            envelopes,
-            false,
-            &PassContext {
-                held_before,
-                ..PassContext::default()
-            },
-        )
+        self.apply_envelopes(envelopes)
     }
 
     /// Apply a batch of envelopes. The caller can hand in
@@ -267,12 +253,11 @@ impl EventLogApplier {
     /// applied change is weighed again only against a known time. A row no
     /// change has stamped yet (its clock came with this version, and its
     /// table keeps no `updated_at`) holds this change or a newer one, maybe
-    /// from a file already gone: it stays as it is and takes the change's
-    /// time as its clock — until the catch-up itself changes the row.
+    /// from a file already gone: it stays as it is and its clock goes just
+    /// past the change — until the catch-up itself changes the row.
     ///
-    /// So does a change older than the dataset's GC horizon on such a row
-    /// ([`PassContext`]). But not one of this device's own changes that is
-    /// not on the remote yet: the peers will take it, so it is weighed as
+    /// Not one of this device's own changes that is not on the remote yet,
+    /// though ([`PassContext`]): the peers will take it, so it is weighed as
     /// they will weigh it (review round 3 of #130).
     pub fn catch_up_envelopes(
         &self,
@@ -341,6 +326,7 @@ impl EventLogApplier {
                 changed,
                 written,
                 deleted,
+                present,
                 absent,
             } = match self.row_time(key.as_ref(), &env.event) {
                 Ok(time) => time,
@@ -352,23 +338,26 @@ impl EventLogApplier {
             };
             let write = RowWrite::of(&env.event);
             let whole = write != RowWrite::Fields;
-            let older_than_gc = context
-                .held_before
-                .is_some_and(|before| env.timestamp < before)
-                && !context.unpushed.contains(&env.id);
-            let held = applied || older_than_gc;
-            if held && (changed.is_none() || key.as_ref().is_some_and(|key| seeded.contains(key))) {
-                // A row of unknown time keeps what it holds and takes this
-                // change's time as its clock. Recorded as applied, so a later
-                // pass does not weigh it again (review round 3 of #130).
+            if applied
+                && (changed.is_none() || key.as_ref().is_some_and(|key| seeded.contains(key)))
+            {
+                // A row of unknown time keeps what it holds: this change or
+                // a newer one. Its clock goes just past the change, so the
+                // change itself, met again in a later pass or by a device
+                // taking a snapshot of this row, does not win over it. A row
+                // that is missing was deleted after it; one still there after
+                // a delete was made again (review round 4 of #130).
                 if let Some(key) = key {
-                    if let Err(err) = self.store.advance_row_clock(&key, env.timestamp, write) {
+                    let seed = match (present, write) {
+                        (false, _) => RowWrite::Delete,
+                        (true, RowWrite::Delete) => RowWrite::Whole,
+                        (true, write) => write,
+                    };
+                    let past = env.timestamp + chrono::Duration::microseconds(1);
+                    if let Err(err) = self.store.advance_row_clock(&key, past, seed) {
                         warn!(event_id = %env.id, ?err, "couldn't seed the row's clock");
                     }
                     seeded.insert(key);
-                }
-                if let Err(err) = self.mark_applied(&env.id) {
-                    warn!(event_id = %env.id, ?err, "couldn't record a held envelope as applied");
                 }
                 report.skipped_already_applied += 1;
                 continue;
@@ -1302,35 +1291,51 @@ impl EventLogApplier {
                     .map_err(core_to_sync)?;
                 (row.is_some(), row.map(|row| row.updated_at))
             }
-            SyncEvent::TaskListUpdated(payload) => (
-                self.adapter
-                    .get_task_list_by_id(&payload.id)
-                    .map_err(core_to_sync)?
-                    .is_some(),
-                None,
-            ),
-            SyncEvent::CalendarUpdated(payload) => (
-                self.adapter
-                    .get_calendar_by_id(&payload.id)
-                    .map_err(core_to_sync)?
-                    .is_some(),
-                None,
-            ),
-            SyncEvent::ColorLabelUpdated(payload) => (
-                self.adapter
-                    .get_color_label_by_id(&payload.id)
-                    .map_err(core_to_sync)?
-                    .is_some(),
-                None,
-            ),
+            SyncEvent::TaskListCreated(payload) | SyncEvent::TaskListUpdated(payload) => {
+                (self.task_list_exists(&payload.id)?, None)
+            }
+            SyncEvent::TaskListDeleted(payload) => (self.task_list_exists(&payload.id)?, None),
+            SyncEvent::CalendarCreated(payload) | SyncEvent::CalendarUpdated(payload) => {
+                (self.calendar_exists(&payload.id)?, None)
+            }
+            SyncEvent::CalendarDeleted(payload) => (self.calendar_exists(&payload.id)?, None),
+            SyncEvent::ColorLabelCreated(payload) | SyncEvent::ColorLabelUpdated(payload) => {
+                (self.color_label_exists(&payload.id)?, None)
+            }
+            SyncEvent::ColorLabelDeleted(payload) => (self.color_label_exists(&payload.id)?, None),
             _ => (true, None),
         };
         Ok(RowTime {
             changed: clock.map(|clock| clock.changed).max(updated_at),
             written: clock.and_then(|clock| clock.written),
             deleted: clock.is_some_and(|clock| clock.deleted),
+            present,
             absent: event.merges_fields() && !present,
         })
+    }
+
+    fn task_list_exists(&self, id: &str) -> SyncResult<bool> {
+        Ok(self
+            .adapter
+            .get_task_list_by_id(id)
+            .map_err(core_to_sync)?
+            .is_some())
+    }
+
+    fn calendar_exists(&self, id: &str) -> SyncResult<bool> {
+        Ok(self
+            .adapter
+            .get_calendar_by_id(id)
+            .map_err(core_to_sync)?
+            .is_some())
+    }
+
+    fn color_label_exists(&self, id: &str) -> SyncResult<bool> {
+        Ok(self
+            .adapter
+            .get_color_label_by_id(id)
+            .map_err(core_to_sync)?
+            .is_some())
     }
 }
 
@@ -1338,11 +1343,6 @@ impl EventLogApplier {
 /// (DESIGN-sync-snapshot-coverage.md).
 #[derive(Debug, Clone, Default)]
 pub struct PassContext {
-    /// The dataset's GC horizon. A change older than it does not win on a
-    /// row of unknown time, in any pass: its file was deleted, the snapshot
-    /// holds what it did, and it is present only because a device pushed it
-    /// again. Every device weighs it the same way, so they stay alike.
-    pub held_before: Option<DateTime<Utc>>,
     /// This device's own changes that are not on the remote yet (the
     /// catch-up): the peers will take them, so they are weighed as the
     /// peers will weigh them, never held.
@@ -1355,6 +1355,8 @@ struct RowTime {
     written: Option<DateTime<Utc>>,
     /// The newest whole-row write was a delete.
     deleted: bool,
+    /// The row is there (assumed so for the kinds not looked up).
+    present: bool,
     /// A field merge's row is missing.
     absent: bool,
 }
