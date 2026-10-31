@@ -1361,11 +1361,14 @@ impl OnboardingService {
             match entries.next_entry().await {
                 Ok(Some(entry)) => {
                     let name = entry.file_name().to_string_lossy().into_owned();
-                    // An empty file never goes up (review round 7 of #130).
-                    let holds_any = entry
-                        .metadata()
-                        .await
-                        .is_ok_and(|metadata| metadata.len() > 0);
+                    // An empty file never goes up (review round 7 of #130),
+                    // nor what is no file (review round 14).
+                    let no_file = entry.file_type().await.is_ok_and(|kind| !kind.is_file());
+                    let holds_any = !no_file
+                        && entry
+                            .metadata()
+                            .await
+                            .is_ok_and(|metadata| metadata.len() > 0);
                     if holds_any && LogFileName::from_filename(&name).is_ok() {
                         names.push(name);
                     }
@@ -1583,28 +1586,16 @@ fn merged_pending(
         .collect()
 }
 
-/// What a pending file holds: a read that met a line being written keeps
-/// the whole lines before it (review round 13 of #130).
+/// What a pending file holds: every whole line (`sync_engine::written_lines`)
+/// — a read that met a line being written keeps the lines before it (review
+/// round 13 of #130), a line a crash or a full disk left half written the
+/// lines around it, as they go up (review round 14).
 fn whole_lines_of(file: &LogFile) -> Vec<EventEnvelope> {
-    match file.into_envelopes() {
-        Ok(parsed) => parsed,
-        Err(err) => {
-            let whole = file
-                .is_torn()
-                .then(|| file.bytes.iter().rposition(|byte| *byte == b'\n'))
-                .flatten()
-                .and_then(|end| {
-                    LogFile {
-                        name: file.name.clone(),
-                        bytes: file.bytes[..=end].to_vec(),
-                    }
-                    .into_envelopes()
-                    .ok()
-                });
-            if whole.is_none() {
-                warn!(name = %file.name.to_filename(), ?err, "couldn't parse pending log");
-            }
-            whole.unwrap_or_default()
+    match sync_engine::written_lines(file) {
+        Some((lines, _)) => lines,
+        None => {
+            warn!(name = %file.name.to_filename(), "couldn't parse pending log");
+            Vec::new()
         }
     }
 }
@@ -3175,6 +3166,9 @@ mod tests {
         emptied_while_fetching: bool,
         /// A stale resume instead of a join.
         resume: bool,
+        /// A half line before the leftover's change: a full disk cut an
+        /// earlier append short.
+        damaged_before: bool,
     }
 
     /// A join, the snapshot at `at` holding interval 45 and naming nothing,
@@ -3194,11 +3188,12 @@ mod tests {
         let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
         let own = envelope("ev-own", "dev-this", change_at, set_interval("70"));
         let leftover = file_of("dev-this", change_at, &[&own]);
-        std::fs::write(
-            pending.path().join(leftover.name.to_filename()),
-            &leftover.bytes,
-        )
-        .unwrap();
+        let mut written = Vec::new();
+        if case.damaged_before {
+            written.extend_from_slice(b"{\"id\":\"ev-half\n");
+        }
+        written.extend_from_slice(&leftover.bytes);
+        std::fs::write(pending.path().join(leftover.name.to_filename()), &written).unwrap();
         let other = LogFileName::new(
             change_at + chrono::Duration::seconds(1),
             DeviceId::from_string("dev-this".into()),
@@ -3624,6 +3619,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_resume_weighs_the_whole_lines_of_a_file_a_full_disk_damaged() {
+        // Review round 14 of #130: a half line before them dropped every
+        // line of the file, and the snapshot's older value stayed.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                resume: true,
+                damaged_before: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
     async fn a_join_weighs_a_change_written_while_it_fetched() {
         // Review rounds 11 and 12 of #130: the pending files are read again
         // after the snapshot apply.
@@ -3745,6 +3759,23 @@ mod tests {
         UserPrefsRepo::new(&db.shared())
             .set(crate::credential_sync::PREF_E2E_ENABLED, "true")
             .unwrap();
+
+        svc.resume_from_stale(&a_dataset_with(at, true))
+            .await
+            .unwrap();
+
+        assert_eq!(held_password(&secrets), "newer");
+    }
+
+    #[tokio::test]
+    async fn a_resume_with_e2e_off_here_weighs_no_own_credential_line() {
+        // Review round 14 of #130: this device's own flag decides the
+        // resume, as it decides the next push, whatever meta.json says.
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let change_at = at + chrono::Duration::hours(1);
+        let (svc, secrets, _pending) =
+            an_own_credential_line(&db, change_at, older_password(), "newer");
 
         svc.resume_from_stale(&a_dataset_with(at, true))
             .await

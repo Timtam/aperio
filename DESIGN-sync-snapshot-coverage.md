@@ -114,7 +114,12 @@ enden im selben Durchgang (`OnboardingService::apply_every_log`):
 
 Erst holen, dann ändern: Ein abgebrochener Abruf lässt den Bestand unberührt,
 auch Uhren und das „genau“-Zeichen. Die Wiederaufnahme nimmt ein früheres
-„genau“ zurück und setzt es nur neu, wenn jede Datei lesbar war.
+„genau“ zurück und setzt es nur neu, wenn jede Datei lesbar war. Die von Hand
+gestartete („Fortfahren“) läuft nie neben einer Runde: Sie wartet, bis eine
+laufende fertig ist, und hält Runden und Pushs an, solange sie läuft
+(`SyncOrchestrator::hold_rounds`, Prüfrunde 14); ihr späteres Anwenden des
+Schnappschusses setzte sonst zurück, was die Runde inzwischen angewendet
+hatte.
 Das löst auch, was „Ursache“ gegen das Wiederabspielen einwandte: Es geschieht
 still, und nur Neueres gewinnt.
 
@@ -147,6 +152,13 @@ still, und nur Neueres gewinnt.
   Runde 5 hatte statt dessen geraten, ob die entfernte Kopie noch da ist
   (ein Protokoll des Hochgeladenen, nur der Rest unter `gc_horizon`, Rotation
   des Writers); Runde 6 fand, dass das halb geschriebene Kopien nie heilte.
+  Eine Zeile, die ein Absturz oder eine volle Platte halb geschrieben ließ,
+  geht nicht mit hoch, die ganzen Zeilen um sie herum schon
+  (`sync_engine::written_lines`): So ging die Datei bei ausgeschaltetem E2E nie
+  hoch, und bei eingeschaltetem las sie kein anderes Gerät. Eine ganze Zeile,
+  die dieser Build nicht kennt, ist kein Schaden. Nach einem gescheiterten
+  Schreiben beginnt der Writer die nächste Zeile neu, statt sie an die halbe zu
+  hängen (Prüfrunde 14).
 - **Was 0.1.0 hinterließ, einmal.** Diese Builds entfernten nichts aus
   `pending/`, nannten nichts, und ihre Compactors löschten nach Namen. Bevor
   dieser Build zum ersten Mal pusht, nachholt oder wiederaufnimmt, gilt von
@@ -173,6 +185,8 @@ still, und nur Neueres gewinnt.
   (`sync.push.leftoverTails`). Bis alle
   geordnet sind, geht keiner hoch, auch keiner, der sich nicht lesen ließ
   (Prüfrunde 8); die späteren Dateien dieses Builds warten nicht (Prüfrunde 9).
+  Was in `pending/` keine Datei ist, hält auch das Ordnen nicht auf: Ein
+  Verzeichnis ist nicht überall 0 Byte groß (Prüfrunde 14).
   Das Auflisten holt bei den meisten Speichern einmal jede Datei; ein Versuch,
   der nicht fertig wird, wiederholt sich erst eine Stunde später
   (`sync.push.leftoversTriedAt`). Lässt sich ein geordneter Rest nicht
@@ -273,7 +287,8 @@ wird und eine Datei, die eine Runde inzwischen hochlud und entfernte, ihre
 Zeilen behält (Prüfrunden 11 und 12). Die spätere Lesung fügt hinzu, nimmt
 aber nichts weg: Auch eine Datei, die das Ordnen inzwischen leerte, oder die
 sie mitten im Schreiben einer Zeile traf, behält, was die frühere hatte, und
-von einer halb geschriebenen gelten die ganzen Zeilen (Prüfrunde 13). Eine eigene Änderung eines Zugangs geht
+von einer halb geschriebenen gelten die ganzen Zeilen (Prüfrunde 13), auch
+um eine halbe Zeile mitten in der Datei, wie sie hochgehen (Prüfrunde 14). Eine eigene Änderung eines Zugangs geht
 nur in einen Datensatz mit E2E hoch, ein Beitritt fragt den Datensatz, dem er
 beitritt; geht sie nicht hoch, lässt der Durchgang sie ganz weg: Der
 Schlüsselbund hält dann den neuesten eigenen Wert (Prüfrunde 12). Ist die
@@ -765,3 +780,28 @@ Kritiker; alle Befunde klein, vier davon Testlücken. Einzelheiten: scratchpad
 - **Tests**: Die Wiederaufnahme liest ihre Dateien vor dem Abholen, geprüft
   wie der Beitritt (Prüfrunde 12 nannte nur ihn); Zugänge, die hochgehen,
   werden bei Beitritt, Wiederaufnahme und Nachholen gewogen.
+
+## Prüfrunde 14 (PR #130, 2026-10-31)
+
+Vier Prüfer auf den Commit nach Runde 13, gegengeprüft (3 bestätigt, 2
+widerlegt), ein Kritiker mit zwei weiteren; alle klein bis auf einen.
+Einzelheiten: scratchpad `coverage/review_r14.json`.
+
+- **Wiederaufnahme von Hand** (B): wartet auf eine laufende Runde und hält
+  Runden und Pushs an, solange sie läuft (Desktop und Handy). Daneben setzte
+  ihr Schnappschuss Änderungen zurück, die die Runde inzwischen angewendet
+  hatte, und das Gerät galt als genau.
+- **Beschädigte ausstehende Dateien** (C, E): Eine halbe Zeile, am Ende oder
+  mitten in der Datei, nimmt die ganzen nicht mehr mit: Sie gehen hoch, und
+  der Durchgang wiegt sie. Der Writer beginnt nach einem gescheiterten
+  Schreiben eine neue Zeile. Tonis Platte war am 31.10. voll.
+- **Verzeichnis in `pending/`** (C): hält das Ordnen nicht auf, wird nicht
+  genannt (Linux, macOS, Handy; unter Windows ist es 0 Byte groß).
+- **Test**: Die Wiederaufnahme fragt das eigene E2E-Merkmal, nicht
+  `meta.json`.
+- Von mir entschieden (Toni sagen): Eine halbe Zeile wird verworfen, die
+  ganzen um sie herum gehen hoch; eine ganze, die dieser Build nicht kennt,
+  bleibt, wie sie ist. „Fortfahren“ wartet bis zu zehn Minuten auf eine
+  laufende Runde. Eine Datei, die ein früherer Build beschädigt hochlud (E2E
+  an), lesen Geräte, die ihre Länge schon kennen, nicht neu; eine fertige
+  Datei ohne eine ganze Zeile bleibt in `pending/` (TODO B3).

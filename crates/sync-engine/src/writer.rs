@@ -32,9 +32,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use chrono::{DateTime, Utc};
-use sync_core::{DeviceId, EventEnvelope, LogFileName, SyncEvent};
+use sync_core::{DeviceId, EventEnvelope, LogFile, LogFileName, SyncEvent};
 use tokio::fs::{File, OpenOptions};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, Notify};
 use tracing::{debug, warn};
 
@@ -250,18 +250,22 @@ async fn drain_loop(
     let Some(mut file) = open_append(&path).await else {
         return;
     };
+    // An append that failed may have left part of its line in the file.
+    let mut cut_short = false;
 
     while let Some(msg) = receiver.recv().await {
         match msg {
-            DrainMsg::Event(envelope) => {
-                if let Err(err) = write_one(&mut file, &envelope).await {
+            DrainMsg::Event(envelope) => match write_one(&mut file, &envelope, cut_short).await {
+                Ok(()) => cut_short = false,
+                Err(err) => {
+                    cut_short = true;
                     warn!(
                         event_id = %envelope.id,
                         ?err,
                         "failed to write event to log; dropping it",
                     );
                 }
-            }
+            },
             DrainMsg::Rotate {
                 new_session_at,
                 ack,
@@ -276,6 +280,7 @@ async fn drain_loop(
                     Some(new_file) => {
                         let old_path = std::mem::replace(&mut path, new_path);
                         file = new_file;
+                        cut_short = false;
                         debug!(
                             old = %old_path.display(),
                             new = %path.display(),
@@ -336,13 +341,48 @@ async fn open_append(path: &Path) -> Option<File> {
 /// Serialise one envelope and append it as a JSONL line. Flushes after every
 /// write — mutations happen at user speed (one at a time, not bursts), so the
 /// per-event flush cost is invisible and gives durability across crashes.
-async fn write_one(file: &mut File, envelope: &EventEnvelope) -> Result<(), std::io::Error> {
-    let line = serde_json::to_vec(envelope)
+/// `after_failure`: the last append failed and may have left part of its
+/// line; this one starts on a line of its own, so it is not glued to that
+/// half (review round 14 of #130).
+async fn write_one(
+    file: &mut (impl AsyncWrite + Unpin),
+    envelope: &EventEnvelope,
+    after_failure: bool,
+) -> Result<(), std::io::Error> {
+    let mut line = Vec::new();
+    if after_failure {
+        line.push(b'\n');
+    }
+    serde_json::to_writer(&mut line, envelope)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+    line.push(b'\n');
     file.write_all(&line).await?;
-    file.write_all(b"\n").await?;
     file.flush().await?;
     Ok(())
+}
+
+/// What this device's writer put into a pending file: every line that
+/// parses, and whether any did not (review round 14 of #130). Such a line is
+/// damage — a crash or a full disk left it half written, at the end or, before
+/// this build, with the next line glued to it —, and the lines around it
+/// stand. `None` where a line is whole JSON this build cannot read: a newer
+/// build's, no damage, and not this build's to drop.
+pub fn written_lines(log: &LogFile) -> Option<(Vec<EventEnvelope>, bool)> {
+    let text = String::from_utf8_lossy(&log.bytes);
+    let mut lines = Vec::new();
+    let mut damaged = false;
+    for raw in text.lines() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<EventEnvelope>(trimmed) {
+            Ok(envelope) => lines.push(envelope),
+            Err(_) if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() => return None,
+            Err(_) => damaged = true,
+        }
+    }
+    Some((lines, damaged))
 }
 
 #[cfg(test)]
@@ -573,5 +613,108 @@ mod tests {
             }
         }
         panic!("no log file created");
+    }
+
+    /// Takes `room` more bytes, then fails as a full disk does.
+    struct FullDisk {
+        written: Vec<u8>,
+        room: usize,
+    }
+
+    impl AsyncWrite for FullDisk {
+        fn poll_write(
+            mut self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            if self.room == 0 {
+                return std::task::Poll::Ready(Err(std::io::Error::other("no space left")));
+            }
+            let taken = buf.len().min(self.room);
+            self.written.extend_from_slice(&buf[..taken]);
+            self.room -= taken;
+            std::task::Poll::Ready(Ok(taken))
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    fn deleted(id: &str) -> EventEnvelope {
+        EventEnvelope::new(
+            DeviceId::from_string("dev-test".into()),
+            SyncEvent::EventDeleted(IdPayload { id: id.into() }),
+        )
+    }
+
+    fn pending(bytes: Vec<u8>) -> LogFile {
+        LogFile {
+            name: LogFileName::new(chrono::Utc::now(), DeviceId::from_string("dev-test".into())),
+            bytes,
+        }
+    }
+
+    fn ids(lines: &[EventEnvelope]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|envelope| match &envelope.event {
+                SyncEvent::EventDeleted(payload) => payload.id.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn an_append_after_a_failed_one_starts_on_a_line_of_its_own() {
+        // Review round 14 of #130: glued to the half line a full disk left,
+        // the next change was lost with it.
+        let mut disk = FullDisk {
+            written: Vec::new(),
+            room: 10,
+        };
+        assert!(write_one(&mut disk, &deleted("a"), false).await.is_err());
+        disk.room = usize::MAX;
+        write_one(&mut disk, &deleted("b"), true).await.unwrap();
+        write_one(&mut disk, &deleted("c"), false).await.unwrap();
+
+        let (lines, damaged) = written_lines(&pending(disk.written)).unwrap();
+        assert_eq!(ids(&lines), ["b", "c"]);
+        assert!(damaged);
+    }
+
+    #[test]
+    fn the_whole_lines_of_a_damaged_file_stand() {
+        // Review round 14 of #130: a half line in the middle, and a tail a
+        // crash filled with zeros.
+        let mut bytes = Vec::new();
+        for (id, tail) in [("a", "\n{\"id\":\"half\n"), ("b", "\n\0\0\0")] {
+            bytes.extend(serde_json::to_vec(&deleted(id)).unwrap());
+            bytes.extend(tail.as_bytes());
+        }
+        let (lines, damaged) = written_lines(&pending(bytes)).unwrap();
+        assert_eq!(ids(&lines), ["a", "b"]);
+        assert!(damaged);
+        let whole = serde_json::to_vec(&deleted("a")).unwrap();
+        let (lines, damaged) = written_lines(&pending(whole)).unwrap();
+        assert_eq!(ids(&lines), ["a"]);
+        assert!(!damaged);
+    }
+
+    #[test]
+    fn a_line_of_a_newer_build_is_no_damage() {
+        let mut bytes = serde_json::to_vec(&deleted("a")).unwrap();
+        bytes.extend(b"\n{\"id\":\"x\",\"type\":\"from.a.newer.build\"}\n");
+        assert!(written_lines(&pending(bytes)).is_none());
     }
 }

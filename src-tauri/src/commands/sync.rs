@@ -2974,10 +2974,14 @@ pub async fn resume_stale_device(
         code: "not_configured",
         message: "no sync adapter configured".into(),
     })?;
+    // No round beside it: a round's changes would be reverted by this
+    // resume's later snapshot apply (review round 14 of #130).
+    let hold = orchestrator.hold_rounds().await.map_err(sync_err)?;
     let report = onboarding
         .resume_from_stale(adapter.as_ref())
         .await
         .map_err(sync_err)?;
+    drop(hold);
     // Drop the latched stale flag so subsequent sync rounds run
     // normally + the status badge clears.
     orchestrator.clear_stale_device();

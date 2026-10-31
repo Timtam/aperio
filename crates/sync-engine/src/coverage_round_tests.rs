@@ -731,6 +731,97 @@ async fn gc_passed_booted(
 }
 
 #[tokio::test]
+async fn a_finished_pending_file_a_full_disk_damaged_goes_up_as_its_whole_lines() {
+    // Review round 14 of #130: a half line in the middle kept the file from
+    // ever going up, and the changes after it never reached a peer.
+    let (tmp, orchestrator, hooks, adapter) = device(fresh_meta(), true).await;
+    mark_exact(&hooks.store);
+    let whole = own_file(&[2_000, 2_001]);
+    let text = String::from_utf8(whole.bytes.clone()).unwrap();
+    let (first, second) = text.split_once('\n').unwrap();
+    let damaged = LogFile {
+        name: whole.name.clone(),
+        bytes: format!("{first}\n{{\"id\":\"ev-half\n{second}").into_bytes(),
+    };
+    stage(&tmp, &damaged);
+
+    orchestrator.sync_now().await.expect("round");
+
+    let remote = remote_logs(&adapter).await;
+    assert_eq!(remote.len(), 1, "{remote:?}");
+    assert!(remote[0].1.contains("ev-own-2000"));
+    assert!(remote[0].1.contains("ev-own-2001"));
+    assert!(!remote[0].1.contains("ev-half"));
+    assert!(pending_names(&tmp).is_empty(), "pushed whole, it is gone");
+}
+
+#[tokio::test]
+async fn a_directory_named_as_a_leftover_holds_no_settle_back() {
+    // Review round 14 of #130: a directory's size is not 0 everywhere; named
+    // as a leftover it was never read, and every leftover stayed held. (On
+    // Windows its size is 0: this test bites on Linux and macOS.)
+    let (tmp, orchestrator, hooks, adapter) = gc_passed(5_000).await;
+    stage(&tmp, &own_file(&[1_000, 4_000]));
+    let dir = LogFileName::new(
+        Utc.timestamp_opt(1_500, 0).unwrap(),
+        DeviceId::from_string("dev-laptop".into()),
+    );
+    std::fs::create_dir(tmp.path().join("pending").join(dir.to_filename())).unwrap();
+    std::fs::write(
+        tmp.path()
+            .join("pending")
+            .join(dir.to_filename())
+            .join("inside"),
+        b"x",
+    )
+    .unwrap();
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LAST_ROUND_PREF_KEY,
+            &Utc.timestamp_opt(2_000 + 600, 0).unwrap().to_rfc3339(),
+        )
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    assert!(hooks
+        .store
+        .get_pref(crate::SYNC_LEFTOVERS_SETTLED_PREF_KEY)
+        .unwrap()
+        .is_some());
+    assert!(remote_logs(&adapter)
+        .await
+        .iter()
+        .any(|(_, text)| text.contains("ev-own-4000")));
+}
+
+#[tokio::test]
+async fn no_round_runs_while_rounds_are_held() {
+    // Review round 14 of #130: the manual resume ran beside a round, and its
+    // later snapshot apply reverted what the round had applied.
+    let (_tmp, orchestrator, _hooks, _adapter) = device(fresh_meta(), true).await;
+    let hold = orchestrator.hold_rounds().await.expect("held");
+
+    assert!(orchestrator.sync_now().await.is_err());
+    drop(hold);
+    orchestrator.sync_now().await.expect("a round once let go");
+}
+
+#[tokio::test]
+async fn holding_rounds_waits_for_the_running_one() {
+    let (_tmp, orchestrator, _hooks, _adapter) = device(fresh_meta(), true).await;
+    let running = orchestrator.hold_rounds().await.expect("held");
+
+    let (second, ()) = tokio::join!(orchestrator.hold_rounds(), async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        drop(running);
+    });
+
+    assert!(second.is_ok());
+}
+
+#[tokio::test]
 async fn the_pending_files_are_named_before_any_goes_up() {
     // Review round 6 of #130: no compactor deletes a file a device names as
     // pending, so the names must be in meta.json before the file is on the

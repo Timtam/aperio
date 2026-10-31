@@ -241,26 +241,35 @@ pub const CATCH_UP_RETRY: chrono::Duration = chrono::Duration::hours(1);
 /// credential events while E2E is off (review round 2 of #130). Those exist
 /// only from before an E2E downgrade, which purged them from the remote;
 /// pushed again from `pending/` after a restart, their secrets would land
-/// there in the clear. `None` for a file that does not parse while E2E is
-/// off: what it holds cannot be vouched for. The one rule for every way a
-/// pending file goes out, and for the compactor weighing whether it has.
+/// there in the clear. A line a crash or a full disk left half written goes
+/// up as the whole lines around it ([`crate::written_lines`]): as it was, the
+/// file never went up while E2E is off and no peer read it while it is on
+/// (review round 14). `None` for a file with a line this build cannot read
+/// while E2E is off: what it holds cannot be vouched for; and for one with no
+/// whole line. The one rule for
+/// every way a pending file goes out, and for the compactor weighing whether
+/// it has.
 pub(crate) fn outgoing_log(log: LogFile, e2e_enabled: bool) -> Option<LogFile> {
-    if e2e_enabled {
-        return Some(log);
+    let Some((envelopes, damaged)) = crate::written_lines(&log) else {
+        return e2e_enabled.then_some(log);
+    };
+    // Nothing whole yet — a line being written: nothing goes up.
+    if damaged && envelopes.is_empty() {
+        return None;
     }
-    let envelopes = log.into_envelopes().ok()?;
     let is_credential = |envelope: &sync_core::EventEnvelope| {
         matches!(
             envelope.event,
             sync_core::SyncEvent::CredentialSet(_) | sync_core::SyncEvent::CredentialCleared(_)
         )
     };
-    if !envelopes.iter().any(is_credential) {
+    let credentials_stay = !e2e_enabled && envelopes.iter().any(is_credential);
+    if !damaged && !credentials_stay {
         return Some(log);
     }
     let kept: Vec<_> = envelopes
         .into_iter()
-        .filter(|e| !is_credential(e))
+        .filter(|e| e2e_enabled || !is_credential(e))
         .collect();
     LogFile::from_envelopes(log.name.device_id.clone(), log.name.timestamp, &kept).ok()
 }
@@ -647,6 +656,23 @@ impl SyncOrchestrator {
             .stale_device_since
             .lock()
             .expect("stale_device_since mutex poison")
+    }
+
+    /// Holds rounds and pushes off while something outside a round reads and
+    /// writes what they do — the manual stale resume (review round 14 of
+    /// #130): beside a round, its later snapshot apply reverted changes the
+    /// round had applied, which its earlier listing could not bring back, and
+    /// it marked the device exact. Waits for a running round to end, up to
+    /// [`HOLD_ROUNDS_WAIT`].
+    pub async fn hold_rounds(&self) -> SyncResult<RoundHold<'_>> {
+        let deadline = tokio::time::Instant::now() + HOLD_ROUNDS_WAIT;
+        loop {
+            match InFlightGuard::acquire(&self.in_flight) {
+                Ok(guard) => return Ok(RoundHold { _guard: guard }),
+                Err(err) if tokio::time::Instant::now() >= deadline => return Err(err),
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
+            }
+        }
     }
 
     /// Clear the stale-device latch. Called by the resume
@@ -1612,7 +1638,9 @@ impl SyncOrchestrator {
     }
 
     /// The names of the log files in `pending/` that hold anything, without
-    /// reading them; none where the directory does not read.
+    /// reading them; none where the directory does not read. What is no file
+    /// is none (review round 14 of #130): a directory's size is not 0
+    /// everywhere, and named as a leftover it held the settle back for good.
     async fn pending_names(&self) -> Vec<String> {
         let Ok(mut entries) = tokio::fs::read_dir(&self.pending_dir).await else {
             return Vec::new();
@@ -1620,10 +1648,13 @@ impl SyncOrchestrator {
         let mut names = Vec::new();
         while let Ok(Some(entry)) = entries.next_entry().await {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let holds_any = entry
-                .metadata()
-                .await
-                .is_ok_and(|metadata| metadata.len() > 0);
+            // An entry whose kind does not read may be a file: it holds back.
+            let no_file = entry.file_type().await.is_ok_and(|kind| !kind.is_file());
+            let holds_any = !no_file
+                && entry
+                    .metadata()
+                    .await
+                    .is_ok_and(|metadata| metadata.len() > 0);
             if holds_any && sync_core::LogFileName::from_filename(&name).is_ok() {
                 names.push(name);
             }
@@ -1662,6 +1693,10 @@ impl SyncOrchestrator {
                     continue;
                 }
             };
+            if entry.file_type().await.is_ok_and(|kind| !kind.is_file()) {
+                debug!(name = %name, "skipping pending entry: not a file");
+                continue;
+            }
             let bytes = match tokio::fs::read(&path).await {
                 Ok(b) => b,
                 Err(err) => {
@@ -2111,6 +2146,15 @@ struct InFlightGuard<'a> {
     flag: &'a Mutex<bool>,
 }
 
+/// How long [`SyncOrchestrator::hold_rounds`] waits for a running round: a
+/// round over a slow WebDAV share can take minutes.
+pub const HOLD_ROUNDS_WAIT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// No round or push runs while this is held ([`SyncOrchestrator::hold_rounds`]).
+pub struct RoundHold<'a> {
+    _guard: InFlightGuard<'a>,
+}
+
 impl<'a> InFlightGuard<'a> {
     fn acquire(flag: &'a Mutex<bool>) -> SyncResult<Self> {
         let mut guard = flag.lock().expect("in-flight mutex poison");
@@ -2167,6 +2211,48 @@ mod tests {
             bytes: b"{\"id\":".to_vec(),
         };
         assert_eq!(outgoing_log(torn, false), None);
+    }
+
+    #[test]
+    fn a_pending_log_a_crash_damaged_goes_up_as_its_whole_lines() {
+        // Review round 14 of #130: it never went up while E2E was off, and
+        // no peer read it while it was on.
+        let device = DeviceId::from_string("dev-a".into());
+        let at = Utc::now();
+        let setting = |key: &str| {
+            sync_core::EventEnvelope::new(
+                device.clone(),
+                sync_core::SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+                    key: key.into(),
+                    value: serde_json::json!(true),
+                }),
+            )
+        };
+        let secret = sync_core::EventEnvelope::new(
+            device.clone(),
+            sync_core::SyncEvent::CredentialCleared(sync_core::CredentialSlotPayload {
+                account_id: "acc-1".into(),
+                slot: "password".into(),
+            }),
+        );
+        let (a, b) = (setting("a"), setting("b"));
+        let mut bytes = Vec::new();
+        for (envelope, after) in [(&a, "\n{\"id\":\"half\n"), (&secret, "\n"), (&b, "\n\0\0")] {
+            bytes.extend(serde_json::to_vec(envelope).unwrap());
+            bytes.extend(after.as_bytes());
+        }
+        let log = LogFile {
+            name: sync_core::LogFileName::new(at, device.clone()),
+            bytes,
+        };
+
+        let on = outgoing_log(log.clone(), true).unwrap();
+        assert_eq!(
+            on.into_envelopes().unwrap(),
+            vec![a.clone(), secret, b.clone()]
+        );
+        let off = outgoing_log(log, false).unwrap();
+        assert_eq!(off.into_envelopes().unwrap(), vec![a, b]);
     }
 
     use super::{
