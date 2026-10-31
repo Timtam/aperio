@@ -352,12 +352,17 @@ async fn parse_token_response(
     requested_at: DateTime<Utc>,
 ) -> GraphResult<TokenSet> {
     let status = response.status();
+    let wait = crate::api::retry_after(response.headers());
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(GraphError::Http {
-            status: status.as_u16(),
-            message: text.chars().take(300).collect(),
-        });
+        // The token endpoint writes nothing: a 429, or a 503 with a wait, is a
+        // busy provider (decision 270).
+        return Err(crate::api::answer_error(
+            status.as_u16(),
+            wait,
+            &text,
+            false,
+        ));
     }
 
     #[derive(Deserialize)]

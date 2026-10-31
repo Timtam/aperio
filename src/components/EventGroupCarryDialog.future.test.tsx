@@ -398,6 +398,19 @@ describe('EventGroupCarryDialog → a copy whose split fails half way', () => {
     expect(calls('delete_event')).toHaveLength(0);
     expect(screen.queryByRole('button', { name: /erneut|again/i })).toBeNull();
   });
+
+  it('does not offer a copy again whose new part lost its answer, and cuts nothing', async () => {
+    // Review round 18 of #128: "not changed", and trying again wrote the new
+    // series a second time.
+    createFails.current = { code: 'network', message: 'connection reset' };
+    await carryWhileTheCutFailsWith(null);
+    const said = await screen.findByText(/Ob ihr neuer Teil angelegt wurde|whether its new part was created/);
+
+    expect(said.textContent).toMatch(/Privat/);
+    expect(calls('update_event')).toHaveLength(0);
+    expect(screen.queryByText(/Nicht geändert|Not changed/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /erneut|again/i })).toBeNull();
+  });
 });
 
 describe('EventGroupCarryDialog → where a copy with rows of its own is cut (141)', () => {

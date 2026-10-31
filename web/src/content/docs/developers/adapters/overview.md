@@ -204,8 +204,9 @@ when caching:
 > `schedule-response`), Google `POST /freeBusy`, Graph `POST
 > /me/calendar/getSchedule`. All degrade gracefully: a mailbox the server
 > can't resolve (or a provider that can't answer) yields an empty slot list
-> — "availability unknown" — rather than failing the call. Local/iCal
-> calendars return empty.
+> — "availability unknown" — rather than failing the call. A busy provider
+> is the exception: it fails the call with `provider-busy`, because empty
+> slots read as everyone free. Local/iCal calendars return empty.
 
 > **RSVP** rides three pieces: read-side population of `Event.organizer` +
 > `attendee_responses` (per provider — CalDAV `ATTENDEE;PARTSTAT`, EWS
@@ -264,6 +265,44 @@ It also carries the honorific `name_prefix` ("Prof. Dr.") and `name_suffix`
 surfaces both only inside the read-only `CompleteName` wrapper**, so the EWS
 adapter neither reads nor writes them — they stay null there rather than
 being written somewhere they could not round-trip.
+
+## When a provider is busy, or a save lands in part
+
+The surfaces translate a few error shapes into sentences; an adapter produces
+them through `cal_core` and never writes the token text itself.
+
+- **A busy provider** is `cal_core::Error::provider_busy(BusyDetail)`: a
+  `forbidden` whose message starts with `provider-busy:`. Use it only for a
+  request that did nothing — HTTP 429, a provider's own throttling answer
+  (Google's `rateLimitExceeded`, Exchange's `ErrorServerBusy`), or a 503 with
+  `Retry-After` on a request that writes nothing. A write answered 503 may
+  have been carried out, and a replayed write's answer may be about its first
+  attempt: both stay unsure (a network error). A quota used up for hours is no
+  throttle. The wait the provider names goes to the log, never into the
+  message: one line at `info` per busy answer, with the `Retry-After` (or the
+  provider's own back-off) where it sends one.
+- **A status the server turned a write down with** is read through
+  `WriteRefusal::turned_down_by_status`: `ProviderBusy` for 429,
+  `ServerRefused` for 400, 413, 415, 422 and 507, `None` otherwise. Check it
+  before mapping a status to a refusal, so a throttled write never reads as
+  the server refusing the change.
+- **A save of several requests** whose later request fails after an earlier
+  one landed goes through `Error::after_landed(step)`: a busy answer becomes
+  the leftover `partly-saved:`, a network error that may have landed stays,
+  anything else becomes a network error with the step in front. Never return
+  a refusal there: the surfaces read it as "nothing was changed" and invite
+  the user to save again, creating a second item. Send a follow-up request
+  only where it changes something. Name the step after the request that was
+  turned away; a task's status change sent as a request of its own is
+  `cal_core::STATUS_STEP`, and so is any request before it that fails while
+  that change is still due, since the status was not sent either. The hosts
+  read any other step as a status that went out with the fields (a completed
+  recurring task still gets its next turn).
+- **A walk or a fallback** stops at a busy answer: asking the next calendar,
+  or falling back to a full read, meets the same throttle, and a read that
+  gives up on part of the data must not be cached as the whole.
+- **A sign-in phase in a plugin** reports its failure through
+  `plugin_sdk::auth_error(phase, &error)`, which keeps a token first.
 
 ## The adapters
 

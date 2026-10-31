@@ -62,6 +62,8 @@ const STORE = {
   selectedTaskListIds: new Set(['list-shared', 'list-other', 'list-local']),
   colorLabels: [],
   sectionsByList: {},
+  sectionsWritten: {},
+  sectionsReadFailure: {},
   loadSections: () => Promise.resolve(),
 };
 const VIEW_STATE = { showHiddenTaskListTargets: false, timeStepMinutes: 15 };

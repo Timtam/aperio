@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createsInSteps, writeWithoutWaiting } from '@aperio/shared';
+import { createRunsInSteps, createsInSteps, writeWithoutWaiting } from '@aperio/shared';
 
 /**
  * Where a series is created in steps (decisions 227, 265): the target
@@ -28,6 +28,29 @@ describe('createsInSteps', () => {
     expect(createsInSteps(exchange, { rrule: 'FREQ=WEEKLY' })).toBe(false);
     expect(createsInSteps(exchange, { rrule: null, exceptions: ['x'] })).toBe(false);
     expect(createsInSteps(exchange, null)).toBe(false);
+  });
+
+  it('never for a create that keeps someone else’s meeting as theirs', () => {
+    // Review round 21 of #128: Exchange and Google take it with its
+    // deletions; nothing is removed one occurrence at a time.
+    const own = 'me@example.org';
+    expect(createRunsInSteps(exchange, { recurrence: withDeletions }, own)).toBe(true);
+    expect(
+      createRunsInSteps(exchange, { recurrence: withDeletions, keeps_invitation: false }, own),
+    ).toBe(true);
+    expect(
+      createRunsInSteps(exchange, { recurrence: withDeletions, keeps_invitation: true }, own),
+    ).toBe(false);
+    expect(createRunsInSteps(caldav, { recurrence: withDeletions }, own)).toBe(false);
+  });
+
+  it('waits for an invitation where the account’s address was not known', () => {
+    // Review round 22 of #128: read as someone else's for want of the
+    // address, it may be the account's own, which the adapter writes in steps.
+    const invitation = { recurrence: withDeletions, keeps_invitation: true };
+    expect(createRunsInSteps(exchange, invitation, null)).toBe(true);
+    expect(createRunsInSteps(exchange, invitation, undefined)).toBe(true);
+    expect(createRunsInSteps(exchange, invitation, ' ')).toBe(true);
   });
 
   it('a surface without a dialog just writes', async () => {

@@ -64,7 +64,8 @@ Aktionen an der Zeile selbst.
 Ein Kontakt kann auch eine **Verteilerliste** sein: Setze den Haken bei *Dies
 ist eine Verteilerliste (Gruppe)*, und die Personenfelder weichen einem
 Mitglieder-Editor – ein Mitglied pro Zeile, entweder
-`Name <adresse@example.com>` oder eine nackte E-Mail-Adresse.
+`Name <adresse@example.com>` oder eine nackte E-Mail-Adresse. Ein Foto hat
+eine Verteilerliste nicht.
 
 ## Bezeichnungen: welche Nummer ist welche
 

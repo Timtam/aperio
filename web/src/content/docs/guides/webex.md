@@ -235,5 +235,9 @@ browser.
 changed — this happens when you move between an official build and one of your
 own. Connect the account again.
 
+**"The provider is busy right now."** Webex takes no more requests for a
+while. Nothing about the meeting was changed; try again later. How long Webex
+asks to wait is only in the log.
+
 Aperio's log (**Settings → Troubleshooting**) records the failing request path
 and status without ever recording your tokens.

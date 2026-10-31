@@ -25,56 +25,58 @@ import {
   importIntoSentence,
   importOwner,
   allDayFormEndDate,
-  applySignature,
-  madeNoReminderChoice,
-  attendeeNotice,
-  notifierSentence,
-  silentSentence,
-  type AttendeeNotice,
-  sendsInvitations as sendsInvitationsFor,
-  organizerOf,
-  signatureIn,
-  eventPrefillFrom,
-  findOffer,
-  offerOptions,
-  offerUsable,
-  prefillTarget,
   allDayWireEnd,
-  describeRecurrence,
-  deletionsNotRestoredSentence,
-  eventWriteErrorMessage,
-  eventWriteFailureReason,
-  exceptionsLossOf,
-  exceptionsLossQuestion,
-  invitationLocked,
-  lastOccurrenceDayKey,
-  pickerMisreadsRule,
-  recurrenceSummaryText,
-  seriesDayKey,
   applyDateTimeChange,
+  applySignature,
+  asNewSeries,
+  attendeeNotice,
+  type AttendeeNotice,
+  cutoffDay,
   dateInput,
   defaultNewEventTimes,
-  isBirthdayEventId,
-  planSeriesSplit,
-  asNewSeries,
-  newSeriesRecurrence,
-  recurrenceStartDate,
-  selectableEventCalendars,
-  writeSeriesSplit,
-  timeInput,
-  toIso,
+  deletionsNotRestoredSentence,
+  describeRecurrence,
   editedRecurrence,
+  eventPrefillFrom,
+  eventWriteErrorMessage,
+  eventWriteFailureReason,
   exceptionsAtSeriesTime,
+  exceptionsLossOf,
+  exceptionsLossQuestion,
+  findOffer,
+  invitationLocked,
+  isBirthdayEventId,
+  lastOccurrenceDayKey,
+  madeNoReminderChoice,
+  movedTailRule,
+  newSeriesRecurrence,
+  notifierSentence,
+  offerOptions,
+  offerUsable,
+  organizerOf,
+  originalKeptSentence,
+  pickerMisreadsRule,
+  planSeriesSplit,
+  prefillTarget,
+  readErrorMessage,
   readSeriesRows,
+  recurrenceStartDate,
+  recurrenceSummaryText,
+  selectableEventCalendars,
+  sendsInvitations as sendsInvitationsFor,
+  seriesDayKey,
   seriesFromCut,
   seriesMaybeShownTwice,
-  cutoffDay,
   seriesTimesFromOccurrenceEdit,
-  tailRecurrenceFor,
-  movedTailRule,
-  TailShiftRefusedError,
   type ShiftRefusal,
+  signatureIn,
+  silentSentence,
+  tailRecurrenceFor,
+  TailShiftRefusedError,
+  timeInput,
+  toIso,
   type WholeSeriesPlan,
+  writeSeriesSplit,
 } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
@@ -142,10 +144,14 @@ import {
   worthCarrying,
   type CarryableFields,
   type CarryScope,
+  createRunsInSteps,
   createsInSteps,
   eventWriteLeftover,
+  writeNeverLanded,
   seriesTailMayStand,
   seriesTailRemoved,
+  removeOriginalAfterCopy,
+  carvedOccurrenceKeptSentence,
 } from '@aperio/shared';
 import { eventGroupsForEvents } from '../api/eventGroups';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -787,7 +793,8 @@ function EventEditorScreen({
           if (initialTitle) setTitle(initialTitle);
         }
       } catch (err) {
-        const message = eventWriteErrorMessage(err, t);
+        // A load: a busy provider says so, never that nothing was changed.
+        const message = readErrorMessage(err, t);
         setError(message);
         AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
       } finally {
@@ -1455,15 +1462,34 @@ function EventEditorScreen({
           // standalone copy (decision 72a).
           ...organizerOf(original),
         });
-        await addEventExdate(
-          occurrenceWriteKind.seriesId,
-          occurrenceWriteKind.occurrence,
-          original.calendar_id,
+        // The standalone event stands: a busy provider that kept the
+        // occurrence in its series is said, and the editor only closes; any
+        // other failure never reads as "nothing was changed" (277). Mirrors
+        // the desktop.
+        const removed = await removeOriginalAfterCopy('skip', () =>
+          addEventExdate(
+            occurrenceWriteKind.seriesId,
+            occurrenceWriteKind.occurrence,
+            original.calendar_id,
+          ),
         );
-        // The series lives on without this slot: it keeps its key.
+        // The series lives on without this slot, or with it while the
+        // provider is busy: it keeps its key, and the event that stands gets
+        // what Aperio keeps for it either way.
         await savePrivate(created, { oldKeyLivesOn: true });
         if (!isLocalCal) {
           await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
+        }
+        if (!removed) {
+          throw new CloseOnlyNotice(
+            carvedOccurrenceKeptSentence(
+              created.title,
+              original.calendar_id,
+              created.calendar_id,
+              (id) => calendars.find((c) => c.id === id)?.name,
+              t,
+            ),
+          );
         }
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
@@ -1932,13 +1958,22 @@ function EventEditorScreen({
           i18n.language,
           t,
         );
-        if (back != null) {
+        // A move to another calendar whose original the provider was too busy
+        // to delete (277): the move stands, and so does the original, which
+        // is said the same way. Mirrors the desktop.
+        const kept = originalKeptSentence(
+          [updated],
+          (id) => calendars.find((c) => c.id === id)?.name,
+          t,
+        );
+        const left = [back, kept].filter((part) => part != null).join(' ');
+        if (left !== '') {
           if (!shown.current) {
-            AccessibilityInfo.announceForAccessibility(back);
+            AccessibilityInfo.announceForAccessibility(left);
             return;
           }
           setSplitNotice({
-            sentence: back,
+            sentence: left,
             proceed: async () => {
               if (!(await carry())) navigation.goBack();
             },
@@ -1960,35 +1995,42 @@ function EventEditorScreen({
         // Someone else's meeting the calendar keeps goes in as theirs, as the
         // file has it; anything else carries what the form holds.
         const people = importEditorPeople(imported, importAs, attendees);
-        const created = await createEvent(
-          {
-            calendar_id: calId,
-            title: trimmedTitle,
-            description: description.trim() || null,
-            location: location.trim() || null,
-            start,
-            end,
-            all_day: allDay,
-            recurrence: recurrenceToSend,
-            color_label: colorToSend,
-            reminders: remindersForWire,
-            sound: null,
-            ...people,
-            send_invitations: sendInvitations,
-            // An untouched editor made no reminder choice: the calendar's
-            // "attach" mode may then write its defaults into the new event.
-            use_calendar_defaults: madeNoReminderChoice(
-              remindersTouchedRef.current,
-              remindersForWire,
-            ),
-            // An imported appointment keeps its file's UID, so importing it
-            // again finds it (I4); one the calendar holds already is a copy,
-            // with a UID of its own.
-            uid_to_keep: importIsHeld ? null : (imported?.uid ?? null),
-          },
-          // An imported series keeps the file's zone, or none, as a copy does
-          // (decision 262).
-          { preserveRecurrenceZone: imported != null },
+        const request = {
+          calendar_id: calId,
+          title: trimmedTitle,
+          description: description.trim() || null,
+          location: location.trim() || null,
+          start,
+          end,
+          all_day: allDay,
+          recurrence: recurrenceToSend,
+          color_label: colorToSend,
+          reminders: remindersForWire,
+          sound: null,
+          ...people,
+          send_invitations: sendInvitations,
+          // An untouched editor made no reminder choice: the calendar's
+          // "attach" mode may then write its defaults into the new event.
+          use_calendar_defaults: madeNoReminderChoice(
+            remindersTouchedRef.current,
+            remindersForWire,
+          ),
+          // An imported appointment keeps its file's UID, so importing it
+          // again finds it (I4); one the calendar holds already is a copy,
+          // with a UID of its own.
+          uid_to_keep: importIsHeld ? null : (imported?.uid ?? null),
+        };
+        // An imported series keeps the file's zone, or none, as a copy does
+        // (decision 262). One whose calendar writes its deletions one by one is
+        // created in steps (decisions 227, 265), unless it goes in as someone
+        // else's meeting (I6).
+        const created = await stepWriteWait(
+          createRunsInSteps(
+            calendars.find((c) => c.id === calId),
+            request,
+            importOwn,
+          ),
+          () => createEvent(request, { preserveRecurrenceZone: imported != null }),
         );
         await savePrivate(created);
         if (!isLocalCal) {
@@ -2008,6 +2050,17 @@ function EventEditorScreen({
       }
       navigation.goBack();
     } catch (err) {
+      // An appointment from a file that may stand is not offered again by
+      // its list (review round 16 of #128). Mirrors the desktop.
+      if (
+        !editing &&
+        imported &&
+        importToken != null &&
+        importIndex != null &&
+        !writeNeverLanded(err)
+      ) {
+        markImportedFromEditor(importToken, importIndex, true);
+      }
       // A new series that may stand, beside the old one or in the other
       // calendar (decisions 203, 210): said on screen and only closed —
       // saving again would create another. Mirrors the desktop.

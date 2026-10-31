@@ -605,10 +605,37 @@ for (const { text } of declaredSurface.unreadable) {
       `native modules to it: "${text.length > 80 ? `${text.slice(0, 77)}...` : text}"`,
   );
 }
-for (const [platform, file] of [
-  ['android', KOTLIN],
-  ['ios', SWIFT],
+/**
+ * The registrations that call the host without `hostCoded` or one of the
+ * coders built on it, `groupCoded` and `importCoded` (decision 273): an error of the Rust host would reach JavaScript in its raw
+ * native shape, without the desktop's code, and the token at the start of its
+ * message would go unread. Read with comments and strings blanked.
+ */
+function unwrappedHostCalls(source, language) {
+  const code = codeOnly(source);
+  const host = language === 'kotlin' ? /(?<![\w.])host\./ : /\bself\.host\./;
+  const out = [];
+  for (const m of code.matchAll(/\bAsyncFunction\s*\(\s*"[^"\n]*"\s*\)\s*\{/g)) {
+    const body = braced(code, m.index + m[0].length - 1);
+    if (body === null) continue;
+    if (host.test(body) && !/\b(?:hostCoded|groupCoded|importCoded)\b/.test(body)) {
+      const name = /"(\w+)"/.exec(source.slice(m.index, m.index + m[0].length));
+      out.push(name ? `${name[1]}()` : `the registration on line ${lineAt(code, m.index)}`);
+    }
+  }
+  return out;
+}
+
+for (const [platform, file, language] of [
+  ['android', KOTLIN, 'kotlin'],
+  ['ios', SWIFT, 'swift'],
 ]) {
+  for (const name of unwrappedHostCalls(readFileSync(file, 'utf8'), language)) {
+    surface.push(
+      `the ${MODULE[platform]} module's ${name} calls the host without hostCoded, so ` +
+        'its errors reach JavaScript without their code (decision 273)',
+    );
+  }
   for (const line of unreadableRegistrations(readFileSync(file, 'utf8'))) {
     surface.push(
       `the ${MODULE[platform]} module registers a function on line ${line} that this ` +

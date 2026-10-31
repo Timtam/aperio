@@ -69,6 +69,9 @@ export function useTasks() {
   const [loading, setLoading] = useState<boolean>(
     () => cacheGet(idsKey) === undefined,
   );
+  // The `dataVersion` whose fetch last landed here: the rows served from the
+  // cache before it are older, whatever array holds them.
+  const [fetchedVersion, setFetchedVersion] = useState(-1);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +92,7 @@ export function useTasks() {
     if (ids.length === 0) {
       setTasks([]);
       setLoading(false);
+      setFetchedVersion(dataVersion);
       cacheSet(idsKey, dataVersion, []);
       return;
     }
@@ -124,6 +128,7 @@ export function useTasks() {
       cacheSet(idsKey, dataVersion, flat);
       setTasks(flat);
       setLoading(false);
+      setFetchedVersion(dataVersion);
     });
 
     return () => {
@@ -140,7 +145,7 @@ export function useTasks() {
     return map;
   }, [taskLists]);
 
-  return { tasks, loading, taskListById };
+  return { tasks, loading, taskListById, fetchedVersion };
 }
 
 function taskOrder(a: Task, b: Task): number {

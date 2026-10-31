@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { differenceInCalendarDays } from 'date-fns';
 
 import {
+  afterLanded,
   invitationLocked,
   moveSeriesInstant,
   movedSeriesUntil,
@@ -19,6 +20,7 @@ import {
   type NoticeCalendar,
   type ShiftRefusal,
   createsInSteps,
+  removeOriginalAfterCopy,
   writeWithoutWaiting,
   type StepWriteOptions,
 } from '@aperio/shared';
@@ -115,6 +117,10 @@ export async function moveTaskToSection(
  * create-on-target + delete-from-source, which changes the parent id), and
  * re-thread each child onto the returned parent id so the family stays
  * connected.
+ *
+ * Returns the rows as the host returned them, the task first, then each
+ * child: one whose original could not be deleted carries `original_left_in`
+ * (decision 277), for the surface to say.
  */
 export async function moveTaskToList(
   task: Task,
@@ -130,24 +136,32 @@ export async function moveTaskToList(
    * asks the user and passes what they chose.
    */
   sectionId: string | null,
-): Promise<Task> {
+): Promise<Task[]> {
   const movedParent = await invoke<Task>('update_task', {
     task: { ...task, list_id: targetListId, section_id: sectionId },
     previousListId: task.list_id,
   });
-  for (const child of children) {
-    await invoke<Task>('update_task', {
-      task: {
-        ...child,
-        list_id: targetListId,
-        parent_id: movedParent.id,
-        // A family in two sections is the same surprise as one in two lists.
-        section_id: sectionId,
-      },
-      previousListId: child.list_id,
-    });
+  const moved = [movedParent];
+  try {
+    for (const child of children) {
+      const movedChild = await invoke<Task>('update_task', {
+        task: {
+          ...child,
+          list_id: targetListId,
+          parent_id: movedParent.id,
+          // A family in two sections is the same surprise as one in two lists.
+          section_id: sectionId,
+        },
+        previousListId: child.list_id,
+      });
+      moved.push(movedChild);
+    }
+  } catch (err) {
+    // The task itself moved: a subtask's failure never reads as "nothing
+    // was changed" (decision 277).
+    throw afterLanded(err, 'subtasks');
   }
-  return movedParent;
+  return moved;
 }
 
 /**
@@ -265,16 +279,19 @@ export async function moveTaskToBacklog(task: Task): Promise<Task> {
  * Written as the series it moved the series start to that occurrence, and could
  * drop the rule, so the master is loaded and moved as it is, with its real
  * deletions only (`newSeriesRowOf`).
+ *
+ * Returns the moved row: where its original could not be deleted, it carries
+ * `original_left_in` (decision 277), for the surface to say.
  */
 export async function moveEventToCalendar(
   event: CalendarEvent,
   targetCalendarId: string,
   steps: StepWriteOptions = {},
-): Promise<void> {
+): Promise<CalendarEvent> {
   const series = await newSeriesRowOf(event);
   // The other calendar creates the series anew: in steps where it writes its
   // deletions so (decisions 227, 265).
-  await (steps.wait ?? writeWithoutWaiting)(
+  return (steps.wait ?? writeWithoutWaiting)(
     createsInSteps(steps.target, series.recurrence),
     () => apiUpdateEvent({ ...series, calendar_id: targetCalendarId }, series.calendar_id),
   );
@@ -332,6 +349,9 @@ export type MoveCopyScope = 'occurrence' | 'series';
  * plain master row falls back to whole-series behaviour. The whole series is
  * moved or copied as the series: from a row of a series the master is loaded
  * (see `moveEventToCalendar`), so a copy starts where the series starts.
+ *
+ * Returns the moved row of a whole-series move, the one write that deletes an
+ * original (see `moveEventToCalendar`); `null` for everything else.
  */
 export async function moveOrCopyEvent(
   event: CalendarEvent,
@@ -339,19 +359,18 @@ export async function moveOrCopyEvent(
   mode: MoveCopyMode,
   scope: MoveCopyScope = 'series',
   steps: StepWriteOptions = {},
-): Promise<void> {
+): Promise<CalendarEvent | null> {
   const asOccurrence = scope === 'occurrence' && isSeriesOccurrence(event);
 
   // Whole-series move is the only path that updates the existing row in place
   // (and lets external adapters reroute via the move hint). Everything else
   // creates a row on the target.
   if (mode === 'move' && !asOccurrence) {
-    await moveEventToCalendar(event, targetCalendarId, steps);
-    return;
+    return moveEventToCalendar(event, targetCalendarId, steps);
   }
 
   const source = asOccurrence ? event : await newSeriesRowOf(event);
-  await (steps.wait ?? writeWithoutWaiting)(
+  const created = await (steps.wait ?? writeWithoutWaiting)(
     !asOccurrence && createsInSteps(steps.target, source.recurrence),
     () =>
       apiCreateEvent(
@@ -380,9 +399,16 @@ export async function moveOrCopyEvent(
   if (mode === 'move' && asOccurrence) {
     const occIso = occurrenceIsoOf(event);
     if (occIso) {
-      await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
+      // The copy stands: a busy provider that kept the original is said as a
+      // move whose original stayed, naming its calendar; any other failure
+      // never reads as "nothing was changed" (decision 277).
+      const removed = await removeOriginalAfterCopy('source-delete', () =>
+        addEventExdate(seriesIdOf(event), occIso, event.calendar_id),
+      );
+      if (!removed) return { ...created, original_left_in: event.calendar_id };
     }
   }
+  return null;
 }
 
 /**
@@ -525,7 +551,7 @@ export async function moveEventToSlot(
   }
 
   if (write.kind === 'carve-out') {
-    await apiCreateEvent({
+    const created = await apiCreateEvent({
       calendar_id: event.calendar_id,
       title: event.title,
       description: event.description,
@@ -540,7 +566,14 @@ export async function moveEventToSlot(
       attendees: event.attendees,
       ...organizerOf(event),
     });
-    await addEventExdate(write.seriesId, write.occurrence, event.calendar_id);
+    // The standalone copy stands: a busy provider that kept the occurrence
+    // in its series is said as a move whose original stayed — dragging again
+    // would make a second copy; any other failure of the skip is a later
+    // step's, never "nothing was changed" (277).
+    const removed = await removeOriginalAfterCopy('skip', () =>
+      addEventExdate(write.seriesId, write.occurrence, event.calendar_id),
+    );
+    if (!removed) throw new OriginalKeptError(created.title, event.calendar_id);
     return true;
   }
 
@@ -560,6 +593,23 @@ export type { ShiftRefusal };
 
 /** Moving someone else's meeting to another day or time was refused (77a):
  *  only the organizer may. The surface says so, naming the meeting. */
+/**
+ * A drag whose copy landed while a busy provider kept the occurrence it left
+ * in its series (decision 277): the view says it as a move whose original
+ * stayed (`originalKeptSentence`), naming the calendar, and reads again.
+ */
+export class OriginalKeptError extends Error {
+  readonly title: string;
+  readonly calendarId: string;
+
+  constructor(title: string, calendarId: string) {
+    super(`"${title}" was moved; its original in ${calendarId} stayed`);
+    this.name = 'OriginalKeptError';
+    this.title = title;
+    this.calendarId = calendarId;
+  }
+}
+
 export class InvitationLockedError extends Error {
   readonly title: string;
 

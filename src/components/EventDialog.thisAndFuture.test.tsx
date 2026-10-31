@@ -578,7 +578,7 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     expect(said.textContent).toMatch(/Teamrunde/);
     // The reason, and not the refusal's own "nothing was changed": something
     // was.
-    expect(said.textContent).toMatch(/auf dem Server geändert|changed on the server/);
+    expect(said.textContent).toMatch(/Stand auf dem Server hat sich inzwischen geändert|changed on the server in the meantime/);
     expect(said.textContent).not.toMatch(/nichts geändert|Nothing was changed/);
     // On screen, focused, and only closed: saving again would write the new
     // series once more (210).

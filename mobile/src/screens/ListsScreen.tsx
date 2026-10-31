@@ -1,6 +1,7 @@
 import { useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { writeErrorMessage } from '@aperio/shared';
 import {
   AccessibilityInfo,
   findNodeHandle,
@@ -110,7 +111,7 @@ export default function ListsScreen() {
       pendingFocusId.current = created.id;
       announce(t('mobile.listAdded', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     }
@@ -251,10 +252,6 @@ export default function ListsScreen() {
       )}
     </View>
   );
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 const makeStyles = (c: ThemeColors) =>

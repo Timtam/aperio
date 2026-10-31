@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -19,20 +26,25 @@ import type {
 } from '@aperio/shared';
 import {
   effortSuffix,
-  errorMessage,
   isImportantPriority,
   normalPriority,
   prioritySuffix,
+  readErrorMessage,
   statusI18nKey,
   statusMarker,
+  eventWriteLeftover,
+  writeAfterLanded,
   writeErrorMessage,
 } from '@aperio/shared';
 
 import { createTask, deleteTask, getTasks, updateTask } from '../api/client';
 import { useListFocusManager } from '../a11y/useListFocusManager';
+import { useCacheReload } from '../state/cacheObserver';
+import { FAILED_FOCUS_WATCH_MS } from '../state/reviewFocus';
 import { canStoreInProgress } from '../state/taskBehaviour';
 import {
   applyTaskToggle,
+  checkOffErrorMessage,
   recomputeAncestors,
   setTaskStatusTo,
   statusAnnounce,
@@ -72,6 +84,7 @@ export function SubtaskSection({
   priorityScale,
   onChanged,
   onParentSync,
+  endWatchRef,
 }: {
   /** The task whose children this section manages (the loaded editor task). */
   parentTask: Task;
@@ -85,6 +98,10 @@ export function SubtaskSection({
   /** Report the parent's fresh state after a mutation so the editor adopts a
    *  cascade-derived status (and doesn't revert it on Save). */
   onParentSync?: (parent: Task) => void;
+  /** Filled with what ends the watch after a failed delete: the editor calls
+   *  it on every act of the person's outside this section, as the task list
+   *  ends its own. */
+  endWatchRef?: RefObject<(() => void) | null>;
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -107,27 +124,72 @@ export function SubtaskSection({
 
   const announce = (message: string) => AccessibilityInfo.announceForAccessibility(message);
 
-  const reload = useCallback(async () => {
+  // A subtask whose delete failed: watched for a moment, as on the task list
+  // (`FAILED_FOCUS_WATCH_MS`) — the re-read is served from the host's cache
+  // first, and the refresh it starts may still show the delete landed.
+  const goneWatch = useRef<{ id: string; index: number; until: number } | null>(null);
+  // `onRemove` changes with the row count; read through a ref, so reading
+  // again does not depend on it.
+  const removed = useRef(onRemove);
+  useEffect(() => {
+    removed.current = onRemove;
+  }, [onRemove]);
+  useEffect(() => {
+    if (endWatchRef == null) return;
+    endWatchRef.current = () => {
+      goneWatch.current = null;
+    };
+    return () => {
+      endWatchRef.current = null;
+    };
+  }, [endWatchRef]);
+
+  /** Read the list's tasks again; the rows read, or `null` when the read
+   *  failed (said in the line). A subtask watched after its failed delete
+   *  that the rows no longer hold moves focus on, as a delete that worked
+   *  does. */
+  const reload = useCallback(async (): Promise<Task[] | null> => {
     try {
       const snap = await getTasks(parentTask.list_id);
       setAll(snap);
       const freshParent = snap.find((tk) => tk.id === parentTask.id);
       if (freshParent) onParentSync?.(freshParent);
+      const watch = goneWatch.current;
+      if (watch != null) {
+        if (Date.now() >= watch.until) {
+          goneWatch.current = null;
+        } else if (!snap.some((tk) => tk.id === watch.id)) {
+          goneWatch.current = null;
+          removed.current(watch.index);
+        }
+      }
+      return snap;
     } catch (err) {
-      // A read: nothing here was refused.
-      setError(errorMessage(err));
+      // A read: a busy provider says so, never that nothing was changed.
+      setError(readErrorMessage(err, t));
+      return null;
     }
-  }, [parentTask.list_id, parentTask.id, onParentSync]);
+  }, [parentTask.list_id, parentTask.id, onParentSync, t]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
+  // The host's background refresh of the list reaches the editor too: a write
+  // that failed but landed shows once the provider says so, as on the desktop.
+  const reloadFromCache = useCallback(() => {
+    void reload();
+  }, [reload]);
+  useCacheReload('tasks', reloadFromCache);
+
   const add = useCallback(async () => {
     const title = newTitle.trim();
     if (!title || busy) return;
+    // Every action ends the watch after a failed delete, as on the task list.
+    goneWatch.current = null;
     setBusy(true);
     setError(null);
+    let made = false;
     try {
       await createTask({
         list_id: parentTask.list_id,
@@ -151,15 +213,26 @@ export function SubtaskSection({
         assignees: [],
         sound: null,
       });
+      made = true;
       // A new open child can re-derive the parent (e.g. completed → in_progress)
       // — recompute ancestors against the post-create snapshot (coupling knob).
-      await recomputeAncestors(parentTask.id, await getTasks(parentTask.list_id));
+      // The subtask stands by then: a failure there is a later step (277).
+      await writeAfterLanded('cascade', async () =>
+        recomputeAncestors(parentTask.id, await getTasks(parentTask.list_id)),
+      );
       setNewTitle('');
       onAdd();
       await reload();
       onChanged();
       announce(t('dialogs.task.subtasks.added', { title }));
     } catch (err) {
+      // A subtask that stands leaves the field, so adding again does not make
+      // it twice, and the list reads again (decision 277) — also one whose
+      // own create stands in part (a leftover), as the editor's drafts count
+      // it. Mirrors the desktop.
+      if (made || eventWriteLeftover(err)) setNewTitle('');
+      void reload();
+      onChanged();
       setError(writeErrorMessage(err, t));
       announce(writeErrorMessage(err, t));
     } finally {
@@ -169,13 +242,18 @@ export function SubtaskSection({
 
   const toggle = useCallback(
     async (sub: Task) => {
+      goneWatch.current = null;
       try {
         const next = await applyTaskToggle(sub, list, all);
         await reload();
         onChanged();
         if (next) announce(statusAnnounce(t, next, sub.title));
       } catch (err) {
-        announce(writeErrorMessage(err, t));
+        // A check-off that landed in part — the subtask, not its parent — is
+        // real: the list reads again, as on the desktop (decision 277).
+        void reload();
+        onChanged();
+        announce(checkOffErrorMessage(err, t));
       }
     },
     [all, list, reload, onChanged, t],
@@ -183,6 +261,7 @@ export function SubtaskSection({
 
   const setStatus = useCallback(
     async (sub: Task, status: TaskStatus) => {
+      goneWatch.current = null;
       try {
         await setTaskStatusTo(sub, status, list, all);
         await reload();
@@ -194,7 +273,10 @@ export function SubtaskSection({
           }),
         );
       } catch (err) {
-        announce(writeErrorMessage(err, t));
+        // As a check-off: what landed shows (decision 277).
+        void reload();
+        onChanged();
+        announce(checkOffErrorMessage(err, t));
       }
     },
     [all, list, reload, onChanged, t],
@@ -205,6 +287,7 @@ export function SubtaskSection({
   // lands on `medium`, because what the task was before is not recorded.
   const cyclePriority = useCallback(
     async (sub: Task) => {
+      goneWatch.current = null;
       const twoLevel = priorityScale === 'two';
       const next = twoLevel
         ? isImportantPriority(sub.priority)
@@ -228,6 +311,9 @@ export function SubtaskSection({
               }),
         );
       } catch (err) {
+        // A save whose answer was lost may have landed: the subtasks read
+        // again, as on the desktop (277).
+        void reload();
         announce(writeErrorMessage(err, t));
       }
     },
@@ -236,16 +322,29 @@ export function SubtaskSection({
 
   const remove = useCallback(
     async (sub: Task, index: number) => {
+      goneWatch.current = null;
+      let deleted = false;
       try {
         await deleteTask(sub.id, sub.list_id);
+        deleted = true;
         // Removing the last open child can mark the parent completed — recompute
-        // ancestors against the post-deletion snapshot.
-        await recomputeAncestors(parentTask.id, await getTasks(parentTask.list_id));
+        // ancestors against the post-deletion snapshot. The subtask is gone by
+        // then: a failure there is a later step (277).
+        await writeAfterLanded('cascade', async () =>
+          recomputeAncestors(parentTask.id, await getTasks(parentTask.list_id)),
+        );
         onRemove(index);
         await reload();
         onChanged();
         announce(t('dialogs.task.deleted', { title: sub.title }));
       } catch (err) {
+        // What landed shows (decision 277); a subtask that is gone moves
+        // focus on as a delete that worked does — also one whose delete
+        // failed but which a read in the next moments no longer holds.
+        if (deleted) onRemove(index);
+        else goneWatch.current = { id: sub.id, index, until: Date.now() + FAILED_FOCUS_WATCH_MS };
+        await reload();
+        onChanged();
         announce(writeErrorMessage(err, t));
       }
     },
@@ -348,7 +447,11 @@ export function SubtaskSection({
         <TextInput
           style={styles.input}
           value={newTitle}
-          onChangeText={setNewTitle}
+          onChangeText={(text) => {
+            // Typing is an act too: a row that goes now takes no focus.
+            goneWatch.current = null;
+            setNewTitle(text);
+          }}
           placeholder={t('dialogs.task.subtasks.placeholder')}
           accessibilityLabel={t('dialogs.task.subtasks.newAria')}
           editable={!busy}

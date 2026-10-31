@@ -76,19 +76,30 @@ pub enum WriteRefusal {
     /// the surfaces ask with it and send the write again with the consent.
     ExceptionsWouldBeLost,
     /// A new series was written, its deleted occurrences could not all be
-    /// deleted from it again one by one, and it was deleted itself, so nothing
+    /// removed from it again one by one, and it was deleted itself, so nothing
     /// stands and the old series is as it was (decisions 202, 203). Unlike the
-    /// other refusals something was written for a moment: the series sits in
-    /// the provider's deleted items, and where the detail says
-    /// [`crate::step_write::INVITED`] its invitees were invited and got its
-    /// cancellation too (212). The detail is
-    /// [`crate::step_write::step_detail`]: a machine token for the log, marked
-    /// when the invitees may have heard of it — `no-occurrence` (no occurrence
-    /// found where the provider's rule makes one), `foreign-deletion`,
-    /// `unreadable`, `control` and `after-control` (the series read before and
-    /// after), `time`, `invitation`, `network`, `http-<status>` or
-    /// `ews-<code>` (the provider's own).
+    /// other refusals something was written for a moment: the provider deleted
+    /// the series like any other, and where the detail says
+    /// [`crate::step_write::INVITED`] its invitees may have heard of it and got
+    /// its cancellation too (212). The detail is
+    /// [`crate::step_write::step_detail`]: a machine token, marked when the
+    /// invitees may have heard of it — `no-occurrence` (no occurrence found
+    /// where the provider's rule makes one), `foreign-deletion`, `unreadable`,
+    /// `control` and `after-control` (the series read before and after),
+    /// [`crate::step_write::OUT_OF_TIME`], [`crate::step_write::PROVIDER_BUSY`]
+    /// (the provider kept asking it to wait, decision 276), `invitation`,
+    /// `network`, `http-<status>` or a code of the provider's own,
+    /// `<provider>-<code>`. `time` and `busy` choose what the surfaces say (too
+    /// slow; busy, try again later); the others are for the log.
     DeletionsNotKept,
+    /// The provider turned the request away because it is throttling, and the
+    /// request wrote nothing (decision 270): try again later. Reads carry it
+    /// too, as for [`Self::AccessNotGranted`]. The detail is a
+    /// [`BusyDetail`] word for the log: never a status or a word an older
+    /// host's text heuristic takes for a sign-in failure. A throttle after a
+    /// request of the same save had landed is no refusal but
+    /// [`crate::WriteLeftover::PartlySaved`] (277).
+    ProviderBusy,
     /// The calendar already holds an appointment with the iCalendar UID the
     /// create asked to keep ([`crate::NewEvent`]'s `uid_to_keep`, a file
     /// import), so nothing was written: it is the same appointment. The
@@ -96,6 +107,45 @@ pub enum WriteRefusal {
     /// the server saying so where they could not see it. The detail is the
     /// UID, or what the server named.
     UidTaken,
+}
+
+/// What a provider answered when it turned a request away for throttling, as
+/// the detail of [`WriteRefusal::ProviderBusy`]: a closed set of neutral
+/// words, so that none of them, on any host, reads as a sign-in failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BusyDetail {
+    /// HTTP 429, too many requests.
+    TooManyRequests,
+    /// HTTP 503 with a wait to keep: a provider that throttles that way.
+    Unavailable,
+    /// The provider's own answer that a rate limit was reached.
+    RateLimit,
+    /// The provider's own answer that this user's rate limit was reached.
+    UserRateLimit,
+    /// The provider's own answer that its server is busy.
+    ServerBusy,
+}
+
+impl BusyDetail {
+    /// Every detail, for the tests that keep them neutral.
+    pub const ALL: [Self; 5] = [
+        Self::TooManyRequests,
+        Self::Unavailable,
+        Self::RateLimit,
+        Self::UserRateLimit,
+        Self::ServerBusy,
+    ];
+
+    /// The word the detail is written as.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::TooManyRequests => "http-429",
+            Self::Unavailable => "http-503",
+            Self::RateLimit => "rate-limit",
+            Self::UserRateLimit => "user-rate-limit",
+            Self::ServerBusy => "server-busy",
+        }
+    }
 }
 
 /// What an update writes again that makes a provider drop a series' changed
@@ -166,6 +216,7 @@ impl WriteRefusal {
             Self::CopyUnreadable => "copy-unreadable",
             Self::ExceptionsWouldBeLost => "exceptions-would-be-lost",
             Self::DeletionsNotKept => "deletions-not-kept",
+            Self::ProviderBusy => "provider-busy",
             Self::UidTaken => "uid-taken",
         }
     }
@@ -177,13 +228,26 @@ impl WriteRefusal {
     /// 412 — carry their own error; a 5xx may come after a part was written
     /// and says nothing either way.
     ///
-    /// Where a write is refused this way, an adapter reports
-    /// [`Self::ServerRefused`] rather than a protocol error, so that a caller
-    /// deciding whether the write may have landed (splitting a series undoes
-    /// its new part only when the cut certainly did not, decision 144) is told
-    /// the truth.
+    /// Where a write is refused this way, an adapter reports the refusal
+    /// [`Self::turned_down_by_status`] names — a busy provider for 429,
+    /// [`Self::ServerRefused`] for the rest — rather than a protocol error, so
+    /// that a caller deciding whether the write may have landed (splitting a
+    /// series undoes its new part only when the cut certainly did not,
+    /// decision 144) is told the truth.
     pub const fn refused_status(status: u16) -> bool {
-        matches!(status, 400 | 413 | 415 | 422 | 429 | 507)
+        Self::turned_down_by_status(status).is_some()
+    }
+
+    /// The refusal a write turned down whole with this HTTP status names: a
+    /// busy provider for 429 (decision 270), the server's own refusal for the
+    /// other statuses [`Self::refused_status`] knows, `None` otherwise. The one
+    /// place that says which comes first, for every adapter.
+    pub const fn turned_down_by_status(status: u16) -> Option<Self> {
+        match status {
+            429 => Some(Self::ProviderBusy),
+            400 | 413 | 415 | 422 | 507 => Some(Self::ServerRefused),
+            _ => None,
+        }
     }
 
     /// The message: the token, and the detail behind a colon when there is one.
@@ -213,6 +277,7 @@ impl WriteRefusal {
             Self::CopyUnreadable,
             Self::ExceptionsWouldBeLost,
             Self::DeletionsNotKept,
+            Self::ProviderBusy,
             Self::UidTaken,
         ] {
             let token = refusal.token();
@@ -234,6 +299,61 @@ impl WriteRefusal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_busy_refusal_comes_back_from_its_message() {
+        let msg = WriteRefusal::ProviderBusy.message(BusyDetail::RateLimit.word());
+        assert_eq!(msg, "provider-busy: rate-limit");
+        assert_eq!(
+            WriteRefusal::parse(&msg),
+            Some((WriteRefusal::ProviderBusy, "rate-limit"))
+        );
+        assert_eq!(
+            WriteRefusal::parse("provider-busy"),
+            Some((WriteRefusal::ProviderBusy, ""))
+        );
+        assert_eq!(WriteRefusal::parse("provider-busy-elsewhere: x"), None);
+        assert_eq!(
+            serde_json::to_value(WriteRefusal::ProviderBusy).unwrap(),
+            serde_json::json!("provider-busy")
+        );
+    }
+
+    #[test]
+    fn a_status_turned_down_whole_names_busy_first() {
+        assert_eq!(
+            WriteRefusal::turned_down_by_status(429),
+            Some(WriteRefusal::ProviderBusy)
+        );
+        for status in [400, 413, 415, 422, 507] {
+            assert_eq!(
+                WriteRefusal::turned_down_by_status(status),
+                Some(WriteRefusal::ServerRefused),
+                "{status}"
+            );
+        }
+        for status in [200, 401, 403, 404, 409, 412, 500, 502, 503] {
+            assert_eq!(
+                WriteRefusal::turned_down_by_status(status),
+                None,
+                "{status}"
+            );
+        }
+        // The statuses turned down whole, exactly.
+        let refused: Vec<u16> = (0..1000u16)
+            .filter(|&status| WriteRefusal::refused_status(status))
+            .collect();
+        assert_eq!(refused, [400, 413, 415, 422, 429, 507]);
+    }
+
+    #[test]
+    fn a_busy_detail_never_looks_like_a_sign_in_failure() {
+        // The heuristic the refresh surfaces read a login problem by.
+        for detail in BusyDetail::ALL {
+            let msg = WriteRefusal::ProviderBusy.message(detail.word());
+            assert!(!crate::is_auth_shaped(&msg), "{msg}");
+        }
+    }
 
     #[test]
     fn the_access_refusal_comes_back_from_its_message() {

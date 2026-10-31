@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { listen } from '@tauri-apps/api/event';
+import { readFailureSentence } from '@aperio/shared';
+
+import { useAnnouncer } from '../a11y/announcerContext';
 
 import {
   getContactsSyncStatus,
@@ -31,6 +35,8 @@ import { useDialogState } from './dialogStateContext';
  * isn't visible — no contacts pages, no listener attached.
  */
 export function useContactSync() {
+  const { t } = useTranslation();
+  const announce = useAnnouncer();
   const { invalidateData } = useDialogState();
   const [status, setStatus] = useState<ContactsSyncStatus | null>(null);
   const [triggering, setTriggering] = useState(false);
@@ -121,8 +127,8 @@ export function useContactSync() {
       // On success the `contacts-synced` listener will fire and
       // overwrite the status — nothing further to do here.
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('sync_contacts_now failed', err);
+      // The person asked for it: said, never only logged (decision 273).
+      announce(readFailureSentence('views.contacts.syncFailed', err, t));
       // Roll the in_flight flag back so the user can retry.
       setStatus((prev) =>
         prev ? { ...prev, in_flight: false } : prev,
@@ -130,7 +136,7 @@ export function useContactSync() {
     } finally {
       setTriggering(false);
     }
-  }, []);
+  }, [announce, t]);
 
   return {
     /** Latest sync status snapshot, or `null` while the initial

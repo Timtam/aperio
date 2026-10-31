@@ -787,9 +787,10 @@ export function asNewSeries<P extends SeriesSplitPlan>(plan: P): P {
  * row of it stands in for, every cancelled row's slot. An occurrence changed
  * elsewhere is no deletion and comes back at its usual time. Past ones too
  * (259): a provider that takes them with the series — CalDAV, the local store —
- * keeps every one, and one that deletes them one by one after creating it
- * (Exchange) writes those from today on (`cal_core::deletions_from_today`,
- * 263). Google (until PR 7) and Microsoft 365 still show them again.
+ * keeps every one, and one that removes them one by one after creating it
+ * (Exchange, Google) writes those from today on
+ * (`cal_core::deletions_from_today`, 263). Microsoft 365 still shows them
+ * again.
  *
  * Nothing moves, so each deletion stays where it is, as spelled: placed anew
  * through the split's expansion, a deletion of a first occurrence off the rule,

@@ -32,6 +32,7 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   type MoveCopyScope,
+  OriginalKeptError,
   SeriesNotLoadedError,
   SeriesShiftRefusedError,
   type ShiftRefusal,
@@ -93,27 +94,29 @@ import type {
   TaskList,
 } from '../../api/types';
 import {
-  invitationLocked,
+  collapseEventGroups,
+  compactDaySummary,
+  type DayLog,
+  deletionsNotRestoredSentence,
   dropMinuteInWindow,
   eventBlockFactor,
-  eventSpanForDay,
-  layoutDayColumn,
-  collapseEventGroups,
-  groupBadge,
   eventInstanceKey,
+  eventSpanForDay,
+  eventWriteErrorMessage,
+  exceptionsLossOf,
+  groupBadge,
+  invitationLocked,
+  layoutDayColumn,
   MINUTES_PER_DAY,
   minutesFromMidnight,
   type PositionedSpan,
   type PriorityScale,
-  type TimedSpan,
-  compactDaySummary,
-  spokenDaySummary,
-  type DayLog,
-  eventWriteErrorMessage,
   shownInNotice,
-  exceptionsLossOf,
-  deletionsNotRestoredSentence,
+  spokenDaySummary,
+  type TimedSpan,
   withDeletionsNotRestored,
+  writeErrorMessage,
+  originalKeptSentence,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event row gets at `eventBlockFactor === 1`
@@ -848,6 +851,19 @@ export function DayView() {
         announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
         return;
       }
+      if (err instanceof OriginalKeptError) {
+        // The copy stands at the new slot; the occurrence it left could
+        // not be skipped while the provider is busy (277).
+        invalidateData();
+        announce(
+          originalKeptSentence(
+            [{ title: err.title, original_left_in: err.calendarId }],
+            (id) => calendars.find((c) => c.id === id)?.name,
+            t,
+          ) ?? eventWriteErrorMessage(err, t),
+        );
+        return;
+      }
       // A move that would drop occurrences of the series asks, after the
       // scope question, in a dialog of its own (decision 250); yes moves it
       // again with the consent, on that write only. A view the user has
@@ -862,6 +878,9 @@ export function DayView() {
       ) {
         return;
       }
+      // A move that failed may have landed in part — a carved-out copy
+      // stands — so the grid reads again (decision 277).
+      invalidateData();
       // In words, a provider's refusal included (decisions 243-253: a move
       // that would drop occurrences of the series says what and how many).
       announce(eventWriteErrorMessage(err, t));
@@ -956,8 +975,9 @@ export function DayView() {
         );
         invalidateData();
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('drop scheduleTaskAtTime failed', err);
+        // The person dropped it: said, never only logged (decision 273).
+        invalidateData();
+        announce(writeErrorMessage(err, t));
       }
     })();
   };
@@ -1016,6 +1036,9 @@ export function DayView() {
         // useEvents re-reads after the mutation lands on the server.
         invalidateData();
       } catch (err) {
+        // A delete that failed may have landed in part — a series cut short
+        // — so the grid reads again (decision 277).
+        invalidateData();
         // In words, as the editors say it: a provider's refusal included, such
         // as a cut on a clock Aperio cannot read (decision 256).
         announce(eventWriteErrorMessage(err, t));

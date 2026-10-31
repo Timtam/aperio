@@ -829,7 +829,15 @@ pub async fn create_task(
         {
             new.series_id = Some(uuid::Uuid::new_v4().to_string());
         }
-        ext.create_task(&request.list_id, new).await?
+        let created = ext.create_task(&request.list_id, new).await;
+        if created.is_err() {
+            // A create that failed may still have written: a task that stands
+            // without one of its follow-up steps (decision 273). The next read
+            // must show what the provider holds.
+            let _ = cache.invalidate(&account, SyncScope::Tasks, &request.list_id);
+            scheduler.invalidate();
+        }
+        created?
     };
     if is_local {
         if let Ok(fields) = serde_json::to_value(&task) {
@@ -947,7 +955,7 @@ pub async fn update_task(
             sound: task.sound.clone(),
         };
 
-        let created = if target_account == LOCAL_ID {
+        let mut created = if target_account == LOCAL_ID {
             adapter.create_task(&task.list_id, new_payload).await?
         } else {
             let Some(ext) = registry.task_adapter(&target_account) else {
@@ -956,7 +964,14 @@ pub async fn update_task(
                     message: format!("target task list '{}' is not routable", task.list_id,),
                 });
             };
-            ext.create_task(&task.list_id, new_payload).await?
+            let created = ext.create_task(&task.list_id, new_payload).await;
+            if created.is_err() {
+                // The copy at the target may stand without one of its steps
+                // (decision 273): the next read shows what the provider holds.
+                let _ = cache.invalidate(&target_account, SyncScope::Tasks, &task.list_id);
+                scheduler.invalidate();
+            }
+            created?
         };
 
         // Delete from source. Warn-but-continue on failure: the
@@ -965,25 +980,25 @@ pub async fn update_task(
         // the duplicate. A leftover row in the source list is
         // the lesser evil.
         let delete_result = if source_account == LOCAL_ID {
-            adapter
-                .delete_task(&task.id)
-                .await
-                .map_err(CommandError::from)
+            adapter.delete_task(&task.id).await
         } else if let Some(ext) = registry.task_adapter(&source_account) {
-            ext.delete_task(&task.id).await.map_err(CommandError::from)
+            ext.delete_task(&task.id).await
         } else {
             Ok(())
         };
-        if let Err(err) = delete_result {
+        if let Err(err) = &delete_result {
             tracing::warn!(
                 task_id = %task.id,
                 source = %previous,
                 target = %task.list_id,
-                code = %err.code,
-                message = %err.message,
+                %err,
                 "delete from source task list failed after move; duplicate may exist",
             );
         }
+        // A busy provider kept the original: the move stands, and the
+        // surfaces say to delete it (decision 277). Said on the row returned
+        // below, never in the sync event.
+        let kept = host_core::moves::original_kept(&delete_result);
 
         // Sync-event emission: same shape as the event move —
         // each LOCAL side emits its own event, external sides
@@ -1010,10 +1025,19 @@ pub async fn update_task(
             let _ = cache.invalidate(&target_account, SyncScope::Tasks, &task.list_id);
         }
         if source_account != LOCAL_ID {
-            let _ = cache.write_through_task_removal(&source_account, &previous, &task.id);
+            if kept {
+                // The original still stands: read the list again, never
+                // remove a row the provider still has.
+                let _ = cache.invalidate(&source_account, SyncScope::Tasks, &previous);
+            } else {
+                let _ = cache.write_through_task_removal(&source_account, &previous, &task.id);
+            }
         }
 
         scheduler.invalidate();
+        if kept {
+            created.original_left_in = Some(previous.clone());
+        }
         return Ok(created);
     }
 
@@ -1052,7 +1076,27 @@ pub async fn update_task(
         // Capture the completion intent before the value is moved into the
         // provider write — the Aperio-side spawn needs it.
         let completed = task.clone();
-        let updated = ext.update_task(task).await?;
+        let list_id = task.list_id.clone();
+        let updated = match ext.update_task(task).await {
+            Ok(updated) => updated,
+            Err(err) => {
+                // A completion that went out with the fields still recurs
+                // (decision 277), against the snapshot from before the save.
+                host_core::tasks::after_failed_external_update(
+                    ext.as_ref(),
+                    &cache,
+                    &target_account,
+                    &completed,
+                    &err,
+                )
+                .await;
+                // A save that failed may have landed in part (decision 273):
+                // the next read shows what the provider holds.
+                let _ = cache.invalidate(&target_account, SyncScope::Tasks, &list_id);
+                scheduler.invalidate();
+                return Err(err.into());
+            }
+        };
         // DESIGN §9.12: reconcile the provider's recurrence with Aperio's model
         // — spawn the next instance for on-demand/backlog rules, or leave a
         // completion record for a native rule the provider only advances.
@@ -1097,7 +1141,15 @@ pub async fn delete_task(
                 message: format!("account '{account}' is not routable"),
             });
         };
-        ext.delete_task(&id).await?;
+        if let Err(err) = ext.delete_task(&id).await {
+            // A delete whose answer was lost may have landed (decision 277):
+            // the next read asks the provider what it holds.
+            if let Some(lid) = &list_id {
+                let _ = cache.invalidate(&account, SyncScope::Tasks, lid);
+            }
+            scheduler.invalidate();
+            return Err(err.into());
+        }
     }
     if is_local {
         event_log.append(SyncEvent::TaskDeleted(IdPayload { id: id.clone() }));

@@ -5,13 +5,14 @@
 // the appointment is created. A list that is gone has no listener left: the
 // word is dropped.
 
-type Listener = (index: number) => void;
+type Listener = (index: number, inPart?: boolean) => void;
 
 const listeners = new Map<string, Set<Listener>>();
 
-/** Tell the list behind `token` that its row `index` was created. */
-export function markImportedFromEditor(token: string, index: number): void {
-  for (const listener of listeners.get(token) ?? []) listener(index);
+/** Tell the list behind `token` that its row `index` was created —
+ *  `inPart`: it may stand only in part, and is not offered again either. */
+export function markImportedFromEditor(token: string, index: number, inPart = false): void {
+  for (const listener of listeners.get(token) ?? []) listener(index, inPart);
 }
 
 /** Hear which rows of the list behind `token` the editor created, until the

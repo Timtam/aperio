@@ -52,7 +52,7 @@ use tokio::sync::Mutex as _Mutex;
 use crate::api::{delete_absolute, get_absolute, patch_absolute, post_absolute, ApiState};
 use crate::error::GoogleResult;
 
-const TASKS_API_BASE: &str = "https://tasks.googleapis.com/tasks/v1";
+pub(crate) const TASKS_API_BASE: &str = "https://tasks.googleapis.com/tasks/v1";
 
 // ── Public surface routed into TasksFeature ────────────────────────────
 
@@ -62,7 +62,7 @@ pub async fn list_task_lists(state: &ApiState) -> GoogleResult<Vec<TaskList>> {
     let mut out = Vec::new();
     let mut page_token: Option<String> = None;
     loop {
-        let mut url = format!("{TASKS_API_BASE}/users/@me/lists?maxResults=100");
+        let mut url = format!("{}/users/@me/lists?maxResults=100", state.tasks_base);
         if let Some(t) = &page_token {
             url.push_str("&pageToken=");
             url.push_str(&urlencoding(t));
@@ -93,8 +93,9 @@ pub async fn get_tasks(state: &ApiState, list_id: &str) -> GoogleResult<Vec<Task
         // Aperio still sees them — the dialog already filters by
         // status.
         let mut url = format!(
-            "{TASKS_API_BASE}/lists/{list_enc}/tasks\
+            "{}/lists/{list_enc}/tasks\
              ?maxResults=100&showCompleted=true&showHidden=true",
+            state.tasks_base,
         );
         if let Some(t) = &page_token {
             url.push_str("&pageToken=");
@@ -118,7 +119,7 @@ pub async fn get_tasks(state: &ApiState, list_id: &str) -> GoogleResult<Vec<Task
 /// payload, saving a follow-up GET.
 pub async fn create_task(state: &ApiState, list_id: &str, task: NewTask) -> GoogleResult<Task> {
     let list_enc = urlencoding(list_id);
-    let mut url = format!("{TASKS_API_BASE}/lists/{list_enc}/tasks");
+    let mut url = format!("{}/lists/{list_enc}/tasks", state.tasks_base);
     // Google's `parent` query param sets the parent at insert time
     // — the API rejects `parent` in the JSON body. Match the
     // documented behaviour.
@@ -136,40 +137,50 @@ pub async fn create_task(state: &ApiState, list_id: &str, task: NewTask) -> Goog
 /// and the server stay in step without diffing.
 ///
 /// Re-parenting is NOT handled by PATCH — Google rejects a `parent`
-/// in the body. If the caller changed `parent_id` we issue a
-/// follow-up `/move` request after the field update lands.
+/// in the body. If the caller asked for a parent the task is not under,
+/// we issue a follow-up `/move` request after the field update lands.
 pub async fn update_task(state: &ApiState, task: &Task) -> GoogleResult<Task> {
     let list_enc = urlencoding(&task.list_id);
     let task_enc = urlencoding(&task.id);
-    let url = format!("{TASKS_API_BASE}/lists/{list_enc}/tasks/{task_enc}");
+    let url = format!("{}/lists/{list_enc}/tasks/{task_enc}", state.tasks_base);
     let body = task_to_body(task);
     let entry: TaskEntry = patch_absolute(state, &url, &body).await?;
-    // Issue the move if the caller asked for a new parent. The
-    // Tasks API takes parent + previous as query params; we don't
-    // care about position, so we omit `previous` and let Google
-    // append to the end.
-    if let Some(parent) = task.parent_id.as_deref().filter(|s| !s.is_empty()) {
-        let move_url = format!(
-            "{TASKS_API_BASE}/lists/{list_enc}/tasks/{task_enc}/move?parent={}",
-            urlencoding(parent),
-        );
-        let _: TaskEntry = post_absolute(state, &move_url, &serde_json::json!({})).await?;
-    }
-    Ok(map_task(entry, &task.list_id))
+    // Move only when the PATCH answer shows the task under another parent:
+    // an edit that keeps the parent is one write. The Tasks API takes
+    // parent + previous as query params; we don't care about position, so
+    // we omit `previous` and let Google append to the end.
+    let Some(parent) = task
+        .parent_id
+        .as_deref()
+        .filter(|p| !p.is_empty() && entry.parent.as_deref() != Some(*p))
+    else {
+        return Ok(map_task(entry, &task.list_id));
+    };
+    let move_url = format!(
+        "{}/lists/{list_enc}/tasks/{task_enc}/move?parent={}",
+        state.tasks_base,
+        urlencoding(parent),
+    );
+    // The fields have landed: a move that fails now leaves the change saved
+    // in part (decision 277), never "nothing changed".
+    let moved: TaskEntry = post_absolute(state, &move_url, &serde_json::json!({}))
+        .await
+        .map_err(|err| err.after_landed("move"))?;
+    Ok(map_task(moved, &task.list_id))
 }
 
 /// `DELETE /lists/{tasklistId}/tasks/{taskId}`.
 pub async fn delete_task(state: &ApiState, list_id: &str, task_id: &str) -> GoogleResult<()> {
     let list_enc = urlencoding(list_id);
     let task_enc = urlencoding(task_id);
-    let url = format!("{TASKS_API_BASE}/lists/{list_enc}/tasks/{task_enc}");
+    let url = format!("{}/lists/{list_enc}/tasks/{task_enc}", state.tasks_base);
     delete_absolute(state, &url).await
 }
 
 /// `PATCH /users/@me/lists/{tasklistId}` with `{ "title": "..." }`.
 pub async fn rename_task_list(state: &ApiState, list_id: &str, new_name: &str) -> GoogleResult<()> {
     let list_enc = urlencoding(list_id);
-    let url = format!("{TASKS_API_BASE}/users/@me/lists/{list_enc}");
+    let url = format!("{}/users/@me/lists/{list_enc}", state.tasks_base);
     let body = serde_json::json!({ "title": new_name });
     let _: serde_json::Value = patch_absolute(state, &url, &body).await?;
     Ok(())
@@ -182,7 +193,7 @@ pub async fn create_task_list(
     name: &str,
     _parent_id: Option<&str>,
 ) -> GoogleResult<TaskList> {
-    let url = format!("{TASKS_API_BASE}/users/@me/lists");
+    let url = format!("{}/users/@me/lists", state.tasks_base);
     let body = serde_json::json!({ "title": name });
     let entry: TaskListEntry = post_absolute(state, &url, &body).await?;
     Ok(map_task_list(entry))
@@ -191,7 +202,7 @@ pub async fn create_task_list(
 /// `DELETE /users/@me/lists/{tasklistId}`.
 pub async fn delete_task_list(state: &ApiState, list_id: &str) -> GoogleResult<()> {
     let list_enc = urlencoding(list_id);
-    let url = format!("{TASKS_API_BASE}/users/@me/lists/{list_enc}");
+    let url = format!("{}/users/@me/lists/{list_enc}", state.tasks_base);
     delete_absolute(state, &url).await
 }
 
@@ -303,6 +314,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     }
 
     Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id: entry.id,
         list_id: list_id.to_string(),
@@ -561,27 +573,10 @@ mod tests {
             http: reqwest::Client::new(),
             token_url: format!("{server_url}/token"),
             api_base: server_url.to_string(),
+            people_base: server_url.to_string(),
+            tasks_base: server_url.to_string(),
         }
     }
-
-    /// Override `TASKS_API_BASE` per test by monkey-patching the
-    /// fixture's URL. We can't reassign a `const` at runtime, so
-    /// every test routes through a mock that intercepts the exact
-    /// path Google would see. mockito matches on path regardless of
-    /// host — the tasks code embeds the host in the URL, but
-    /// reqwest will hit whatever URL mockito serves once we point
-    /// our fixture's `api_base` at it (the tasks module uses its
-    /// own base; we bypass that by … wait, we can't). The simpler
-    /// approach: spin a stand-alone mockito server and inject the
-    /// URL via a const override.
-    ///
-    /// Actually mockito's host is dynamic, so we need to ALSO
-    /// override the TASKS_API_BASE for tests. We do that via a
-    /// per-test wrapper that uses the absolute server URL directly,
-    /// calling the same logic the tasks functions invoke. The
-    /// envelope-shape and mapping tests don't need the network.
-    /// HTTP tests check only the helpers + a single end-to-end
-    /// path against a stubbed server URL.
 
     // ── Status mapping ─────────────────────────────────────────
 
@@ -791,14 +786,6 @@ mod tests {
 
     // ── End-to-end via mockito ────────────────────────────────
 
-    /// Override `TASKS_API_BASE` for HTTP tests. We can't mutate
-    /// the `const`, so each end-to-end test builds its own URL
-    /// manually and calls the lower-level helpers. The thin layer
-    /// loses the "list_task_lists actually constructs the right
-    /// URL" coverage, but the URL is one line of code right above
-    /// — adding bespoke test infrastructure to verify it would
-    /// outweigh the benefit.
-
     #[tokio::test]
     async fn delete_absolute_round_trips_against_204() {
         let mut server = Server::new_async().await;
@@ -850,5 +837,126 @@ mod tests {
         assert_eq!(resp.items.len(), 2);
         assert_eq!(resp.items[0].id, "t1");
         assert_eq!(resp.items[1].status.as_deref(), Some("completed"));
+    }
+
+    // ── Saves of more than one request (decisions 270, 277) ───────────
+
+    /// A task as the PATCH answer `{"id":"T","parent":<parent>}` maps it,
+    /// asking for `wanted` as its parent.
+    fn task_wanting(wanted: Option<&str>) -> Task {
+        let entry: TaskEntry = serde_json::from_value(serde_json::json!({"id": "T"})).unwrap();
+        let mut task = map_task(entry, "L");
+        task.parent_id = wanted.map(str::to_string);
+        task
+    }
+
+    async fn patch_answering(server: &mut Server, parent: Option<&str>) -> mockito::Mock {
+        server
+            .mock("PATCH", "/lists/L/tasks/T")
+            .with_status(200)
+            .with_body(serde_json::json!({"id": "T", "parent": parent}).to_string())
+            .create_async()
+            .await
+    }
+
+    /// An edit that keeps the task's parent is one write: no move is sent.
+    #[tokio::test]
+    async fn a_task_keeping_its_parent_is_one_write() {
+        for (wanted, has) in [(Some("P1"), Some("P1")), (None, Some("P1")), (None, None)] {
+            let mut server = Server::new_async().await;
+            let _patch = patch_answering(&mut server, has).await;
+            let moved = server
+                .mock(
+                    "POST",
+                    mockito::Matcher::Regex(r"^/lists/L/tasks/T/move".into()),
+                )
+                .expect(0)
+                .create_async()
+                .await;
+            let task = update_task(&fixture_state(&server.url()), &task_wanting(wanted))
+                .await
+                .unwrap();
+            assert_eq!(task.parent_id.as_deref(), has, "{wanted:?}");
+            moved.assert_async().await;
+        }
+    }
+
+    /// A task asked under another parent is moved, and comes back as the
+    /// move left it.
+    #[tokio::test]
+    async fn a_task_moved_comes_back_under_its_new_parent() {
+        let mut server = Server::new_async().await;
+        let _patch = patch_answering(&mut server, Some("P0")).await;
+        let moved = server
+            .mock(
+                "POST",
+                mockito::Matcher::Regex(r"^/lists/L/tasks/T/move\?parent=P1$".into()),
+            )
+            .with_status(200)
+            .with_body(r#"{"id":"T","parent":"P1"}"#)
+            .create_async()
+            .await;
+        let task = update_task(&fixture_state(&server.url()), &task_wanting(Some("P1")))
+            .await
+            .unwrap();
+        assert_eq!(task.parent_id.as_deref(), Some("P1"));
+        moved.assert_async().await;
+    }
+
+    /// The fields have landed when the move fails: the change is saved in
+    /// part, whatever turned the move away — never "nothing changed".
+    #[tokio::test]
+    async fn a_move_failing_after_the_fields_landed_is_saved_in_part() {
+        for status in [429, 400] {
+            let mut server = Server::new_async().await;
+            let _patch = patch_answering(&mut server, None).await;
+            let _move = server
+                .mock(
+                    "POST",
+                    mockito::Matcher::Regex(r"^/lists/L/tasks/T/move\?parent=P1$".into()),
+                )
+                .with_status(status)
+                .with_body(r#"{"error":{"code":0}}"#)
+                .create_async()
+                .await;
+            let err = update_task(&fixture_state(&server.url()), &task_wanting(Some("P1")))
+                .await
+                .unwrap_err();
+            match err {
+                GoogleError::PartlySaved {
+                    step: "move",
+                    cause,
+                } => match (status, *cause) {
+                    (429, GoogleError::Busy { .. })
+                    | (400, GoogleError::Http { status: 400, .. }) => {}
+                    (_, other) => panic!("{status}: {other:?}"),
+                },
+                other => panic!("{status}: {other:?}"),
+            }
+        }
+    }
+
+    /// A PATCH Google turns away for throttling changed nothing: no move.
+    #[tokio::test]
+    async fn a_busy_task_update_sends_no_move() {
+        let mut server = Server::new_async().await;
+        let _patch = server
+            .mock("PATCH", "/lists/L/tasks/T")
+            .with_status(429)
+            .create_async()
+            .await;
+        let moved = server
+            .mock(
+                "POST",
+                mockito::Matcher::Regex(r"^/lists/L/tasks/T/move".into()),
+            )
+            .expect(0)
+            .create_async()
+            .await;
+        let err = update_task(&fixture_state(&server.url()), &task_wanting(Some("P1")))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GoogleError::Busy { .. }), "{err:?}");
+        moved.assert_async().await;
     }
 }

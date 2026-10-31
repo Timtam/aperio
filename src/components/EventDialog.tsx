@@ -89,15 +89,21 @@ import {
   planCarry,
   recurrenceSummaryText,
   privateReminderWrites,
+  readFailureSentence,
   seriesDayKey,
   worthCarrying,
   type CarryableFields,
   type CarryScope,
   type ExceptionsLoss,
+  removeOriginalAfterCopy,
+  carvedOccurrenceKeptSentence,
 } from '@aperio/shared';
 import {
+  createRunsInSteps,
   createsInSteps,
   eventWriteLeftover,
+  originalKeptSentence,
+  writeNeverLanded,
   seriesTailMayStand,
   seriesTailRemoved,
 } from '@aperio/shared';
@@ -236,7 +242,7 @@ export interface EventDialogProps {
   /** What the import says beside it, as the dialog's first stop. */
   importNote?: string | null;
   /** Told once the imported appointment was created. */
-  onImported?: () => void;
+  onImported?: (inPart?: boolean) => void;
 }
 
 interface FormState {
@@ -1350,8 +1356,12 @@ export function EventDialog({
           : t('dialogs.event.availability.someBusy', { count: busyCount }),
       );
     } catch (err) {
+      // A check that failed says why, and the previous answer goes: "All
+      // attendees are free" must never stand beside it (decision 273).
+      setAvailability(null);
+      setAvailabilityWindow(null);
       setAvailabilityError(
-        eventWriteErrorMessage(err, t),
+        readFailureSentence('dialogs.event.availability.failed', err, t),
       );
     } finally {
       setCheckingAvailability(false);
@@ -1686,14 +1696,32 @@ export function EventDialog({
                 send_invitations: sendInvitations,
                 ...organizerOf(event ?? {}),
               });
-              await addEventExdate(seriesId, occIso, event.calendar_id);
-              // The series lives on without this slot: it keeps its key.
+              // The standalone event stands: a busy provider that kept the
+              // occurrence in its series is said, and the editor only closes;
+              // any other failure never reads as "nothing was changed" (277).
+              const removed = await removeOriginalAfterCopy('skip', () =>
+                addEventExdate(seriesId, occIso, event.calendar_id),
+              );
+              // The series lives on without this slot, or with it while the
+              // provider is busy: it keeps its key, and the event that stands
+              // gets what Aperio keeps for it either way.
               await savePrivate(created, { oldKeyLivesOn: true });
               if (!storesColorNatively) {
                 await setEventColor(
                   created.id,
                   created.calendar_id,
                   form.colorLabel,
+                );
+              }
+              if (!removed) {
+                throw new CloseOnlyNotice(
+                  carvedOccurrenceKeptSentence(
+                    created.title,
+                    event.calendar_id,
+                    created.calendar_id,
+                    (id) => calendars.find((c) => c.id === id)?.name,
+                    t,
+                  ),
                 );
               }
               announce(
@@ -2208,14 +2236,25 @@ export function EventDialog({
             i18n.language,
             t,
           );
-          if (back) {
+          // A move to another calendar whose original the provider was too
+          // busy to delete (277): the move stands, and so does the original,
+          // which is said the same way.
+          const kept = saved
+            ? originalKeptSentence(
+                [saved],
+                (id) => calendars.find((c) => c.id === id)?.name,
+                t,
+              )
+            : null;
+          const left = [back, kept].filter(Boolean).join(' ');
+          if (left) {
             if (!shownRef.current) {
-              announce(back);
+              announce(left);
               return;
             }
             leavingNotice.current = false;
             setSplitNotice({
-              sentence: back,
+              sentence: left,
               proceed: async () => {
                 if (!(await carry())) onClose();
               },
@@ -2246,7 +2285,7 @@ export function EventDialog({
           // Someone else's meeting the calendar keeps goes in as theirs, as the
           // file has it; anything else carries what the form holds.
           const people = importEditorPeople(imported, importAs, form.attendees);
-          const created = await apiCreateEvent({
+          const request = {
             calendar_id: form.calendarId,
             title: trimmedTitle,
             description: form.description.trim() || null,
@@ -2270,9 +2309,19 @@ export function EventDialog({
             // again finds it (I4); one the calendar holds already is a copy,
             // with a UID of its own.
             uid_to_keep: importIsHeld ? null : (imported?.uid ?? null),
-            // An imported series keeps the file's zone, or none, as a copy
-            // does (decision 262).
-          }, { preserveRecurrenceZone: imported != null });
+          };
+          // An imported series keeps the file's zone, or none, as a copy does
+          // (decision 262). One whose calendar writes its deletions one by one
+          // is created in steps (decisions 227, 265), unless it goes in as
+          // someone else's meeting (I6).
+          const created = await wait(
+            createRunsInSteps(
+              calendars.find((c) => c.id === form.calendarId),
+              request,
+              importOwn,
+            ),
+            () => apiCreateEvent(request, { preserveRecurrenceZone: imported != null }),
+          );
           await savePrivate(created);
           if (!storesColorNatively) {
             await setEventColor(
@@ -2291,6 +2340,9 @@ export function EventDialog({
         }
         if (!carriedToGroup) onClose();
       } catch (err) {
+        // An appointment from a file that may stand is not offered again by
+        // its list (review round 16 of #128).
+        if (!isEdit && imported && !writeNeverLanded(err)) onImported?.(true);
         // A new series that may stand, beside the old one or in the other
         // calendar (decisions 203, 210): said on screen and only closed —
         // saving again would create another.

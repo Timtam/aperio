@@ -154,6 +154,27 @@ describe('AgendaView → the Delete key on a meeting the provider always cancels
     );
     expect(announced.join(' ')).not.toMatch(/day-zone-unreadable|forbidden:/);
   });
+
+  it('reads the list again after a delete that failed, which may have landed in part', async () => {
+    invokeMock.mockImplementation((command: string) =>
+      command === 'delete_event'
+        ? Promise.reject({ code: 'network', message: 'connection reset' })
+        : Promise.resolve([] as unknown),
+    );
+    const { AgendaView } = await import('./AgendaView');
+    render(<AgendaView />);
+    const list = await screen.findByRole('listbox');
+    await screen.findByText(/Planung/);
+    const before = invalidations;
+    fireEvent.keyDown(list, { key: 'Delete' });
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /absagen & teilnehmer benachrichtigen|cancel & notify attendees/i,
+      }),
+    );
+    await waitFor(() => expect(announced.length).toBeGreaterThan(0));
+    expect(invalidations).toBeGreaterThan(before);
+  });
 });
 
 describe('AgendaView → Ctrl+D', () => {

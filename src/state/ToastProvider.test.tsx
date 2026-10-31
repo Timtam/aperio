@@ -16,6 +16,9 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+const announce = vi.hoisted(() => vi.fn());
+vi.mock('../a11y/announcerContext', () => ({ useAnnouncer: () => announce }));
+
 /** Helper that fires off a toast as a side-effect on mount. Lets us
  *  drive the provider without a separate clickable button — saves
  *  noise in tests that don't care about the trigger surface. */
@@ -65,8 +68,8 @@ describe('ToastProvider', () => {
   });
 
   it('keeps the toast visible when the undo action throws', async () => {
-    const undo = vi.fn().mockRejectedValue(new Error('network'));
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const undo = vi.fn().mockRejectedValue({ code: 'forbidden', message: 'provider-busy: http-429' });
+    announce.mockClear();
     render(
       <ToastProvider>
         <Trigger
@@ -88,7 +91,9 @@ describe('ToastProvider', () => {
     expect(screen.getByText('Moved')).toBeInTheDocument();
     // Button re-enabled — `aria-disabled` cleared after the rejection.
     expect(button).not.toHaveAttribute('aria-disabled', 'true');
-    warnSpy.mockRestore();
+    // And said: the person pressed Undo, and silence would read as done. A
+    // busy provider adds to try again later.
+    expect(announce).toHaveBeenCalledWith('toast.undoFailed. common.tryAgainLater');
   });
 
   it('auto-dismisses after the supplied duration', async () => {

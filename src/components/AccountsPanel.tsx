@@ -13,8 +13,10 @@ import { useAnnouncer } from '../a11y/announcerContext';
 import {
   collectValues,
   firstMissingField,
+  readErrorMessage,
   withheldPhrase,
   withheldSince,
+  refreshErrorRowText,
 } from '@aperio/shared';
 import type { AccountFormAction } from '@aperio/shared';
 
@@ -28,7 +30,6 @@ import {
   syncContactsNow,
   deleteAccount,
   getUserPref,
-  isCommandError,
   listAccounts,
   listAccountsMissingCredentials,
   renameAccount,
@@ -204,8 +205,7 @@ export function AccountsPanel() {
     listAccounts(i18n.language)
       .then(setAccounts)
       .catch((err) => {
-        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
-        else setError(String(err));
+        setError(readErrorMessage(err, t));
       })
       .finally(() => setLoading(false));
     // Re-probe the missing-credentials set in parallel. Failures
@@ -222,7 +222,7 @@ export function AccountsPanel() {
       });
     // The language is part of the request: each row carries its own
     // adapter's name, resolved by the backend in the language asked for.
-  }, [i18n.language]);
+  }, [i18n.language, t]);
 
   // The panel mounts when the user lands on its tab, so "on mount" is
   // the right moment to fetch — no need to gate on an `isOpen` flag any
@@ -451,8 +451,7 @@ export function AccountsPanel() {
         }
         void Promise.allSettled(refreshes);
       } catch (err) {
-        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
-        else setError(String(err));
+        setError(readErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
@@ -492,8 +491,7 @@ export function AccountsPanel() {
         setTestMessage(t('dialogs.accounts.testOk'));
         announce(t('dialogs.accounts.testOk'));
       } catch (err) {
-        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
-        else setError(String(err));
+        setError(readErrorMessage(err, t));
       } finally {
         setTesting(false);
       }
@@ -540,13 +538,12 @@ export function AccountsPanel() {
           announce(action.success);
         }
       } catch (err) {
-        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
-        else setError(String(err));
+        setError(readErrorMessage(err, t));
       } finally {
         setRunningAction(null);
       }
     },
-    [announce, formValues, kind],
+    [announce, formValues, kind, t],
   );
 
   // Armed when the user triggers a delete from the listbox. The
@@ -575,8 +572,7 @@ export function AccountsPanel() {
           refreshContactLists(),
         ]);
       } catch (err) {
-        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
-        else setError(String(err));
+        setError(readErrorMessage(err, t));
       }
     },
     [
@@ -606,8 +602,7 @@ export function AccountsPanel() {
         await resetAccountSync(acc.id);
         announce(t('dialogs.accounts.resyncStarted', { name: acc.display_name }));
       } catch (err) {
-        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
-        else setError(String(err));
+        setError(readErrorMessage(err, t));
       } finally {
         setResyncing(false);
       }
@@ -754,8 +749,7 @@ export function AccountsPanel() {
         refresh();
         refreshAccounts();
       } catch (err) {
-        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
-        else setError(String(err));
+        setError(readErrorMessage(err, t));
       }
     })();
   };
@@ -1068,6 +1062,14 @@ export function AccountsPanel() {
                     )}
                   </FocusableNote>
                 )}
+                {/* A busy provider: nothing to do, and Aperio tries again by
+                    itself (decision 272). No reconnect button. */}
+                {errorsByAccount.get(accounts[focusIndex].id)?.cause ===
+                  'busy' && (
+                  <FocusableNote className="accounts-refresh-errors__busy-hint">
+                    {t('dialogs.accounts.refreshErrors.busyHint')}
+                  </FocusableNote>
+                )}
                 {/* A withheld grant is one fact for the whole account, said
                     once; the account's other failures (if any) follow as
                     rows. No "allow access" to point at: the desktop has
@@ -1101,7 +1103,11 @@ export function AccountsPanel() {
                               `dialogs.accounts.refreshErrors.scope.${err.scope}`,
                               { defaultValue: err.scope },
                             ),
-                          error: clampErrorText(err.error),
+                          error: refreshErrorRowText(
+                            err,
+                            t('dialogs.accounts.refreshErrors.busyEntry'),
+                            clampErrorText,
+                          ),
                         },
                       )} ${lastSuccessWords(err.last_success_at)}`;
                       return (

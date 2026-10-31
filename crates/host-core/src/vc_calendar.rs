@@ -42,6 +42,25 @@ use cal_core::{
 use std::sync::Arc;
 use vc_core::{Meeting, VcAdapter};
 
+/// A meeting adapter's error as the calendar error of the same kind, its text
+/// kept: a refusal token stays first, so a busy provider reads as busy —
+/// paused, not counted, never "sign in again" (decisions 270, 271) — and a
+/// rejected sign-in as one. As one `Internal` text it read as an access
+/// problem by its words.
+fn meeting_error(err: vc_core::VcError) -> Error {
+    use vc_core::VcError;
+    match err {
+        VcError::Authentication(message) => Error::Authentication(message),
+        VcError::Forbidden(message) => Error::Forbidden(message),
+        VcError::NotFound(message) => Error::NotFound(message),
+        VcError::Network(message) => Error::Network(message),
+        VcError::Protocol(message) => Error::Protocol(message),
+        VcError::InvalidInput(message) => Error::InvalidInput(message),
+        VcError::Unsupported(message) => Error::Unsupported(message),
+        VcError::Internal(message) => Error::Internal(message),
+    }
+}
+
 /// Suffix that turns an account id into its meetings-calendar id.
 ///
 /// A calendar id has to be stable and has to be recognisable as belonging to
@@ -93,6 +112,7 @@ impl VcCalendar {
         // appointment.
         let (start, end) = (meeting.start_time?, meeting.end_time?);
         Some(Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -178,7 +198,7 @@ impl CalendarFeature for VcCalendar {
             .vc
             .list_meetings(range.start, range.end)
             .await
-            .map_err(|err| Error::Internal(err.to_string()))?;
+            .map_err(meeting_error)?;
         Ok(meetings
             .into_iter()
             .filter_map(|m| self.to_event(m))
@@ -228,6 +248,8 @@ mod tests {
     struct FakeVc {
         meetings: Vec<Meeting>,
         listed: Mutex<Vec<(chrono::DateTime<Utc>, chrono::DateTime<Utc>)>>,
+        /// What the next listing fails with, when a test says so.
+        fails: Mutex<Option<vc_core::VcError>>,
     }
 
     #[async_trait]
@@ -253,6 +275,9 @@ mod tests {
             end: chrono::DateTime<Utc>,
         ) -> vc_core::VcResult<Vec<Meeting>> {
             self.listed.lock().unwrap().push((start, end));
+            if let Some(err) = self.fails.lock().unwrap().take() {
+                return Err(err);
+            }
             Ok(self.meetings.clone())
         }
     }
@@ -277,6 +302,7 @@ mod tests {
             Arc::new(FakeVc {
                 meetings,
                 listed: Mutex::new(Vec::new()),
+                fails: Mutex::new(None),
             }),
         )
     }
@@ -285,6 +311,7 @@ mod tests {
     fn sample_event() -> Event {
         let start = Utc.with_ymd_and_hms(2026, 7, 29, 9, 0, 0).unwrap();
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -410,5 +437,41 @@ mod tests {
             "writes are refused, so say so up front"
         );
         assert_eq!(listed[0].name, "Webex (work)");
+    }
+
+    /// A busy provider's listing reads as busy, a rejected sign-in as one:
+    /// each error keeps its kind and its text (decisions 270, 271).
+    #[tokio::test]
+    async fn a_failed_listing_keeps_its_kind() {
+        let busy = VcCalendar::new(
+            "acc-1",
+            "Webex (work)",
+            Arc::new(FakeVc {
+                meetings: Vec::new(),
+                listed: Mutex::new(Vec::new()),
+                fails: Mutex::new(Some(vc_core::VcError::Forbidden(
+                    "provider-busy: http-429".into(),
+                ))),
+            }),
+        );
+        let err = busy
+            .get_events(&calendar_id_for("acc-1"), window())
+            .await
+            .unwrap_err();
+        assert!(err.is_provider_busy(), "{err:?}");
+        let signed_out = VcCalendar::new(
+            "acc-1",
+            "Webex (work)",
+            Arc::new(FakeVc {
+                meetings: Vec::new(),
+                listed: Mutex::new(Vec::new()),
+                fails: Mutex::new(Some(vc_core::VcError::Authentication("expired".into()))),
+            }),
+        );
+        let err = signed_out
+            .get_events(&calendar_id_for("acc-1"), window())
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "auth", "{err:?}");
     }
 }

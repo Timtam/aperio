@@ -1,6 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { writeErrorMessage } from '@aperio/shared';
 import {
   AccessibilityInfo,
   Pressable,
@@ -24,10 +25,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // edited, and the add form below. Every signature used to be a card of three
 // stops (name, text, delete), so N signatures cost 3N swipes. Plain text only —
 // see shared/signatures.ts for why an invitation cannot carry anything else.
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** The first non-empty line of the text, trimmed to a spoken length. */
 function summaryOf(body: string, empty: string): string {
@@ -120,7 +117,7 @@ export default function SignaturesScreen() {
       setNewBody('');
       announce(t('dialogs.settings.signatures.added', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -145,7 +142,7 @@ export default function SignaturesScreen() {
       setEditingId(null);
       announce(t('dialogs.settings.signatures.updated', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -166,7 +163,7 @@ export default function SignaturesScreen() {
         // up would be a bigger action than the one asked for.
         announce(t('dialogs.settings.signatures.deleted', { name: sig.name }));
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {

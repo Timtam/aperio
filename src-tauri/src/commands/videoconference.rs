@@ -219,6 +219,9 @@ pub async fn attach_meeting(
                     "could not roll back a meeting after the event failed to save; \
                      it has to be removed in the provider's own interface"
                 );
+                // The meeting stands without the event carrying it: never
+                // "nothing was changed" (decision 277).
+                return Err(err.after_landed("event"));
             }
             return Err(err);
         }
@@ -455,6 +458,8 @@ pub async fn detach_meeting(
     // is already gone and the binding with it, so the worst case is a stale
     // link the user can delete by hand, which beats refusing the whole
     // operation after the provider side already happened.
+    // The meeting is gone by then: what fails now is a later step, never
+    // "nothing was changed" (decision 277).
     let event = super::calendars::read_event_for_meeting(
         &adapter,
         &registry,
@@ -463,7 +468,8 @@ pub async fn detach_meeting(
         &request.event_id,
         &request.calendar_id,
     )
-    .await?;
+    .await
+    .map_err(|err| err.after_landed("event"))?;
     let Some(event) = event else {
         return Ok(None);
     };
@@ -483,7 +489,8 @@ pub async fn detach_meeting(
     let saved = super::calendars::update_event(
         adapter, registry, cache, scheduler, event_log, db, updated, None,
     )
-    .await?;
+    .await
+    .map_err(|err| err.after_landed("event"))?;
     Ok(Some(saved))
 }
 

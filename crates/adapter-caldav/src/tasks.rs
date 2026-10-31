@@ -166,14 +166,21 @@ pub async fn create_task_list(
 </C:mkcalendar>"#
     );
 
-    let response = client
+    let answer = client
         .request(method, collection_url.clone())
         .headers(headers)
         .body(body)
-        .send_retrying()
+        .send_write()
         .await?;
+    // A replay answered 405: the collection exists, made by the first attempt.
+    let made_before = answer.replayed && answer.response.status() == StatusCode::METHOD_NOT_ALLOWED;
+    let response = if made_before {
+        answer.response
+    } else {
+        answer.settled(collection_url.as_str()).await?
+    };
     let status = response.status();
-    if !status.is_success() {
+    if !status.is_success() && !made_before {
         let text = response.text().await.unwrap_or_default();
         return Err(CaldavError::Http {
             status: status.as_u16(),
@@ -205,11 +212,16 @@ pub async fn delete_task_list(
     credentials: &Credentials,
 ) -> CaldavResult<()> {
     let headers = auth_header(credentials)?;
-    let response = client
+    let answer = client
         .delete(list_url.clone())
         .headers(headers)
-        .send_retrying()
+        .send_write()
         .await?;
+    // A replay answered 404: the first attempt removed it.
+    if answer.replayed && answer.response.status() == StatusCode::NOT_FOUND {
+        return Ok(());
+    }
+    let response = answer.settled(list_url.as_str()).await?;
     let status = response.status();
     if !status.is_success() {
         let text = response.text().await.unwrap_or_default();
@@ -252,15 +264,7 @@ async fn vtodo_query(
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if body.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                body.chars().take(200).collect()
-            },
-        });
+        return Err(crate::http::read_failure(response).await);
     }
     let text = response.text().await?;
     parse_multistatus(&text)
@@ -376,15 +380,22 @@ pub async fn create_task(
         HeaderValue::from_static("text/calendar; charset=utf-8"),
     );
     headers.insert(IF_NONE_MATCH, HeaderValue::from_static("*"));
-    let response = client
+    let answer = client
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send_retrying()
+        .send_write()
         .await?;
-    let etag = expect_write(&response)?;
+    // A replay answered 412 under `If-None-Match: *`: the resource exists,
+    // made by the first attempt. Its ETag is unknown until the next read.
+    let etag = if answer.replayed && answer.response.status() == StatusCode::PRECONDITION_FAILED {
+        None
+    } else {
+        expect_write(&answer.settled(resource.as_str()).await?)?
+    };
     let now = Utc::now();
     Ok(Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id: uid,
         list_id: list_url.to_string(),
@@ -442,7 +453,9 @@ pub async fn update_task(
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send_retrying()
+        .send_write()
+        .await?
+        .settled(resource.as_str())
         .await?;
     let new_etag = expect_write(&response)?;
     Ok(Task {
@@ -474,15 +487,22 @@ pub async fn delete_task(
         let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
-    let response = client
+    let what = resource.to_string();
+    let answer = client
         .delete(resource)
         .headers(headers)
-        .send_retrying()
+        .send_write()
         .await?;
-    let status = response.status();
-    if status == StatusCode::NOT_FOUND {
-        return Ok(crate::events::DeleteOutcome::NotFound);
+    if answer.response.status() == StatusCode::NOT_FOUND {
+        // On a replay, the first DELETE may have removed it (`DeleteWalk`).
+        return Ok(if answer.replayed {
+            crate::events::DeleteOutcome::GoneOnReplay
+        } else {
+            crate::events::DeleteOutcome::NotFound
+        });
     }
+    let response = answer.settled(&what).await?;
+    let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         return Err(CaldavError::Http {
@@ -762,6 +782,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>, raw: Option<&str>) -
     }
 
     Some(Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id: uid,
         list_id: list_id.to_string(),
@@ -1098,15 +1119,7 @@ async fn propfind(
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(CaldavError::Http {
-            status: status.as_u16(),
-            message: if body.is_empty() {
-                status.canonical_reason().unwrap_or("").to_string()
-            } else {
-                body.chars().take(200).collect()
-            },
-        });
+        return Err(crate::http::read_failure(response).await);
     }
     let text = response.text().await?;
     parse_multistatus(&text)
@@ -2345,5 +2358,89 @@ END:VCALENDAR</c:calendar-data>
             .await
             .unwrap_err();
         assert!(matches!(err, CaldavError::Http { status: 403, .. }));
+    }
+
+    /// A replayed task PUT whose first attempt may have landed, answered
+    /// 429: the answer may be about the first attempt, so it is unsure —
+    /// never a busy provider, which would say nothing was changed (P24).
+    #[tokio::test]
+    async fn a_429_to_a_replayed_task_put_is_unsure() {
+        let base = crate::http::first_attempt_lost_then(
+            b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let task: Task = serde_json::from_value(serde_json::json!({
+            "id": "t1@aperio", "list_id": format!("{base}/calendars/alice/tasks/"),
+            "title": "Buy milk", "description": null, "status": "open",
+            "priority": "medium", "scheduled_date": null, "scheduled_time": null,
+            "scheduled_end_time": null, "deadline_date": null, "deadline_time": null,
+            "recurrence": null, "resurface_date": null, "series_id": null,
+            "parent_id": null, "section_id": null, "color_label": null,
+            "reminders": [], "sound": null, "deadline_reminder_days": null,
+            "created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z",
+            "completed_at": null, "etag": "\"etag-1\""
+        }))
+        .unwrap();
+        let err = update_task(&client(), task, &creds(&base))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
+    }
+
+    /// A replayed create answered 412 under `If-None-Match: *`: the first
+    /// attempt made the resource, so the create is done.
+    #[tokio::test]
+    async fn a_412_to_a_replayed_create_is_the_first_attempts_task() {
+        let base = crate::http::first_attempt_lost_then(
+            b"HTTP/1.1 412 Precondition Failed\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let url = Url::parse(&format!("{base}/calendars/alice/tasks/")).unwrap();
+        let created = create_task(&client(), &url, sample_new_task(), &creds(&base))
+            .await
+            .unwrap();
+        assert!(created.id.contains("@aperio"));
+        assert_eq!(created.etag, None);
+    }
+
+    /// A replayed MKCALENDAR answered 405: the collection exists, made by the
+    /// first attempt. Answered 429, it is unsure.
+    #[tokio::test]
+    async fn a_replayed_mkcalendar_reads_its_answer_as_the_first_attempts() {
+        let base = crate::http::first_attempt_lost_then(
+            b"HTTP/1.1 405 Method Not Allowed\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let home = Url::parse(&format!("{base}/calendars/alice/")).unwrap();
+        let made = create_task_list(&client(), &home, "Errands", &creds(&base))
+            .await
+            .unwrap();
+        assert_eq!(made.name, "Errands");
+
+        let base = crate::http::first_attempt_lost_then(
+            b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n",
+        )
+        .await;
+        let home = Url::parse(&format!("{base}/calendars/alice/")).unwrap();
+        let err = create_task_list(&client(), &home, "Errands", &creds(&base))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
+    }
+
+    /// A first attempt answered 429 did nothing: a busy provider.
+    #[tokio::test]
+    async fn a_429_to_a_create_is_a_busy_provider() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("PUT", mockito::Matcher::Any)
+            .with_status(429)
+            .create_async()
+            .await;
+        let url = Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let err = create_task(&client(), &url, sample_new_task(), &creds(&server.url()))
+            .await
+            .unwrap_err();
+        assert!(crate::busy_detail(&err).is_some(), "{err:?}");
     }
 }

@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  afterLanded,
   eventWriteErrorMessage,
   eventWriteFailureReason,
   eventWriteLeftover,
   eventWriteRefusal,
   exceptionsLossOf,
+  familyNotAllSentence,
+  removeOriginalAfterCopy,
   stepDetail,
+  writeAll,
   writeErrorMessage,
   writeNeverLanded,
+  writeStatusLanded,
 } from '@aperio/shared';
 import outcome from '../../crates/cal-core/tests/fixtures/writeOutcome.json';
 import i18n from '../i18n';
@@ -162,7 +167,7 @@ describe('eventWriteFailureReason', () => {
       expect(reason, err.message).not.toBe('');
     }
     expect(eventWriteFailureReason(command('conflict', 'etag mismatch'), t)).toMatch(
-      /auf dem Server geändert/,
+      /Stand auf dem Server hat sich inzwischen geändert/,
     );
     expect(eventWriteFailureReason(command('forbidden', 'read-only calendar'), t)).toMatch(
       /read-only calendar/,
@@ -287,7 +292,7 @@ describe('a write that needs the current copy, when it cannot be read', () => {
       expect(eventWriteErrorMessage(err, t)).not.toMatch(/503|network/);
     }
     expect(eventWriteFailureReason(desktop, t)).toBe(
-      'Aperio konnte ihren aktuellen Stand nicht vom Server lesen',
+      'Aperio konnte den aktuellen Stand nicht vom Server lesen',
     );
     expect(writeNeverLanded(desktop)).toBe(true);
   });
@@ -333,6 +338,51 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
     }
   });
 
+  it('decides what never landed as the core does, by code and message', () => {
+    expect(outcome.landed.length).toBeGreaterThanOrEqual(12);
+    for (const row of outcome.landed) {
+      expect(writeNeverLanded(command(row.code, row.message)), `${row.code}: ${row.message}`).toBe(
+        row.never_landed,
+      );
+    }
+  });
+
+  it('keeps a leftover that arrives without a code, as on the iPhone (277)', () => {
+    // Expo 56 rejects on iOS with the message only, behind its wrapper.
+    for (const err of [
+      new Error("Calling the 'updateTaskJson' function has failed\n→ Caused by: partly-saved: assignees"),
+      new Error('created-may-stand: time'),
+    ]) {
+      const after = afterLanded(err, 'cascade');
+      expect(eventWriteLeftover(after), String(err)).not.toBeNull();
+      expect(writeErrorMessage(after, t)).toBe(writeErrorMessage(err, t));
+    }
+  });
+
+  it('reads when a task save completed its status as the core does (277)', () => {
+    expect(outcome.status_landed.length).toBeGreaterThanOrEqual(7);
+    for (const row of outcome.status_landed) {
+      expect(writeStatusLanded(command(row.code, row.message)), `${row.code}: ${row.message}`).toBe(
+        row.status_landed,
+      );
+    }
+  });
+
+  it('reads what a later request of a landed save leaves as the core does (277)', () => {
+    expect(outcome.after_landed.length).toBeGreaterThanOrEqual(14);
+    for (const row of outcome.after_landed) {
+      const after = afterLanded(command(row.code, row.message), row.step);
+      expect(after, `${row.code}: ${row.message}`).toEqual(row.after);
+      // Never "nothing was changed": something of the save stands.
+      expect(writeNeverLanded(after), `${row.code}: ${row.message}`).toBe(false);
+    }
+    // Busy after a landed request reads as the partly-saved sentence.
+    expect(writeErrorMessage(afterLanded(command('forbidden', 'provider-busy: http-429'), 'subtasks'), t)).toBe(
+      'Die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist. ' +
+        'Prüfe sie und versuche den Rest später noch einmal.',
+    );
+  });
+
   it('says a series taken back in words, with the cancellation where invitees were invited', () => {
     expect(eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: no-occurrence'), t)).toBe(
       'Der Kalender hat die neue Serie nicht mit ihren gelöschten Terminen übernommen, deshalb hat ' +
@@ -353,12 +403,12 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
     expect(message).not.toMatch(/deletions|invited|time\b/);
     expect(writeNeverLanded(command('forbidden', 'deletions-not-kept: x'))).toBe(true);
     expect(eventWriteFailureReason(command('forbidden', 'deletions-not-kept: x'), t)).toBe(
-      'der Kalender hat ihre gelöschten Termine nicht übernommen',
+      'der Kalender hat die gelöschten Termine der neuen Serie nicht übernommen',
     );
     // Out of time, the reason alone says so too (Ctrl+D's sentence uses it).
     expect(
       eventWriteFailureReason(command('forbidden', 'deletions-not-kept: invited time'), t),
-    ).toBe('ihre gelöschten Termine einzeln wieder zu löschen, hat zu lange gedauert');
+    ).toBe('die gelöschten Termine der neuen Serie einzeln wieder zu löschen, hat zu lange gedauert');
   });
 
   it('says a series that may stand, behind the wrapper too, and never as nothing written', () => {
@@ -403,5 +453,195 @@ describe('a new series written in steps (decisions 202-213, 263-266)', () => {
       expect(i18n.exists(key, { lng: 'en' }), key).toBe(true);
       expect(de(key)).not.toBe(en(key));
     }
+  });
+});
+
+describe('a provider that is busy (decisions 270, 276, 277)', () => {
+  const de = i18n.getFixedT('de');
+  const en = i18n.getFixedT('en');
+  /** The ways a message reaches a surface: the desktop's command error under
+   *  two codes, and the phone's native error behind Expo's wrapper. */
+  const carriers = (message: string) => [
+    command('forbidden', message),
+    command('network', message),
+    new Error(`Calling the 'updateTaskJson' function has failed\n→ Caused by: ${message}`),
+  ];
+
+  it('says a busy provider in words, as nothing written, whatever carried it', () => {
+    for (const err of carriers('provider-busy: rate-limit')) {
+      expect(eventWriteErrorMessage(err, t)).toBe(
+        'Der Anbieter ist gerade ausgelastet. Es wurde nichts geändert. Versuche es später noch einmal.',
+      );
+      expect(writeErrorMessage(err, t)).toBe(eventWriteErrorMessage(err, t));
+      expect(writeNeverLanded(err)).toBe(true);
+      expect(eventWriteFailureReason(err, t)).toBe('der Anbieter ist gerade ausgelastet');
+    }
+    // No machine word reaches the reader, in either language.
+    const english = eventWriteErrorMessage(command('forbidden', 'provider-busy: http-429'), (k, v) =>
+      en(k, v as never) as unknown as string,
+    );
+    expect(english).toBe('The provider is busy right now. Nothing was changed. Try again later.');
+    expect(english).not.toMatch(/429|provider-busy|rate/);
+  });
+
+  it('says a save that stands only in part, never as nothing written', () => {
+    for (const err of carriers('partly-saved: members')) {
+      expect(eventWriteErrorMessage(err, t)).toBe(
+        'Die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist. ' +
+          'Prüfe sie und versuche den Rest später noch einmal.',
+      );
+      expect(writeNeverLanded(err)).toBe(false);
+      expect(eventWriteFailureReason(err, t)).toBe(
+        'die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist',
+      );
+    }
+  });
+
+  it('says a new series taken back while the provider was busy', () => {
+    expect(eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: invited busy'), t)).toBe(
+      'Der Anbieter war ausgelastet, deshalb konnte Aperio die neue Serie nicht rechtzeitig ' +
+        'fertigstellen und hat sie wieder entfernt. Es wurde nichts geändert. Versuche es später noch ' +
+        'einmal. Falls Einladungen verschickt wurden, haben die Eingeladenen auch die Absage bekommen.',
+    );
+    expect(eventWriteFailureReason(command('forbidden', 'deletions-not-kept: busy'), t)).toBe(
+      'der Anbieter war ausgelastet, deshalb ließ sich die neue Serie nicht rechtzeitig fertigstellen',
+    );
+    // "Took too long" stays for a slow provider.
+    expect(eventWriteErrorMessage(command('forbidden', 'deletions-not-kept: time'), t)).toMatch(
+      /hat zu lange gedauert/,
+    );
+  });
+
+  it('says a save made in part without "invited", and its clause fits any frame', () => {
+    const inPart = eventWriteLeftover(command('network', 'partly-saved: invited x'));
+    expect(inPart?.invited).toBe(false);
+    expect(eventWriteLeftover(command('network', 'created-may-stand: invited time'))?.invited).toBe(
+      true,
+    );
+    expect(eventWriteFailureReason(command('network', 'partly-saved: members'), t)).toBe(
+      'die Änderung ist nur zum Teil gespeichert, weil der Anbieter gerade ausgelastet ist',
+    );
+  });
+
+  it('has every sentence in both languages', () => {
+    for (const key of [
+      'dialogs.event.writeError.providerBusy',
+      'dialogs.event.writeError.deletionsNotKeptBusy',
+      'dialogs.event.writeError.partlySaved',
+      'dialogs.event.writeError.reason.providerBusy',
+      'dialogs.event.writeError.reason.deletionsNotKeptBusy',
+      'dialogs.event.writeError.reason.partlySaved',
+    ]) {
+      expect(i18n.exists(key, { lng: 'de' }), key).toBe(true);
+      expect(i18n.exists(key, { lng: 'en' }), key).toBe(true);
+      expect(de(key), key).not.toBe(en(key));
+    }
+  });
+});
+
+describe('the writes of one action (decision 277)', () => {
+  const busy = command('forbidden', 'provider-busy: http-429');
+  const lost = command('network', 'connection reset');
+  const run = (answers: unknown[], oneAtATime = false) =>
+    writeAll(
+      'cascade',
+      answers.map((_, i) => i),
+      (i) => (answers[i] === 'ok' ? Promise.resolve() : Promise.reject(answers[i])),
+      { oneAtATime },
+    );
+
+  it('says a busy refusal as nothing written when every write was turned away', async () => {
+    const { landed, failure } = await run([busy, busy]);
+    expect(landed).toEqual([]);
+    expect(failure).toBe(busy);
+    expect(writeNeverLanded(failure)).toBe(true);
+  });
+
+  it('never says nothing was changed while another write may have landed', async () => {
+    for (const oneAtATime of [false, true]) {
+      // The busy refusal comes first; the lost answer after it may stand.
+      const { landed, failure } = await run([busy, lost], oneAtATime);
+      expect(landed).toEqual([]);
+      expect(writeNeverLanded(failure)).toBe(false);
+      expect(eventWriteErrorMessage(failure, t)).not.toMatch(/Es wurde nichts geändert/);
+    }
+  });
+
+  it('says the rest as partly saved where another write landed', async () => {
+    const { landed, failure } = await run(['ok', busy]);
+    expect(landed).toEqual([0]);
+    expect(eventWriteLeftover(failure)?.leftover).toBe('partly-saved');
+  });
+});
+
+describe('removing the original after its copy landed (decision 277)', () => {
+  it('says whether the original went', async () => {
+    await expect(removeOriginalAfterCopy('skip', () => Promise.resolve())).resolves.toBe(true);
+    // A busy provider kept it: the caller says where it stayed.
+    await expect(
+      removeOriginalAfterCopy('skip', () =>
+        Promise.reject(command('forbidden', 'provider-busy: http-429')),
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it('reads any other failure as a later step, never as nothing written', async () => {
+    const refused = command('forbidden', 'server-refused: 403');
+    expect(eventWriteErrorMessage(refused, t)).toMatch(/nichts geändert/);
+    const failure = await removeOriginalAfterCopy('skip', () => Promise.reject(refused)).catch(
+      (err: unknown) => err,
+    );
+    expect(writeNeverLanded(failure)).toBe(false);
+    expect(eventWriteErrorMessage(failure, t)).not.toMatch(/nichts geändert/);
+  });
+});
+
+describe('the reasons a frame about anything embeds (decision 273)', () => {
+  // The frames that say a meeting, an undo, a duplicate or a draft could not
+  // be done take the reason of any write: none may point back at a noun the
+  // frame never named ("sie" for a series, "ihn" for an event).
+  const de = i18n.getFixedT('de');
+  const reasons = [
+    'deletionsNotKept',
+    'deletionsNotKeptTime',
+    'deletionsNotKeptBusy',
+    'changedOnServer',
+    'unsafeToWrite',
+    'copyUnreadable',
+    'forbidden',
+    'serverRefused',
+    'providerBusy',
+    'replyOnly',
+    'identityUnknown',
+    'accessNotGranted',
+  ];
+
+  it('names nothing the frame does not', () => {
+    for (const key of reasons) {
+      const reason = de(`dialogs.event.writeError.reason.${key}`, { detail: '403' }) as string;
+      expect(reason, key).not.toMatch(/(^| )(sie|ihn|ihm|ihr|ihre|ihren|ihrer)( |,|$)/i);
+      for (const frame of ['toast.undoFailed', 'conferencing.meetingFailed', 'actions.duplicateFailed']) {
+        const sentence = de(frame, { reason, message: reason, title: 'Standup' }) as string;
+        expect(sentence, `${frame} ${key}`).toContain(reason);
+      }
+    }
+  });
+});
+
+describe('familyNotAllSentence', () => {
+  const landedWithStatus = { code: 'network', message: 'partly-saved: assignees' };
+  const statusMissed = { code: 'network', message: 'partly-saved: status' };
+  const busy = { code: 'forbidden', message: 'provider-busy: http-429' };
+
+  it('says the first write that kept its old status, with its reason', () => {
+    expect(familyNotAllSentence([landedWithStatus, busy, statusMissed], t)).toBe(
+      'Nicht jede Aufgabe darüber oder darunter hat den neuen Status übernommen: der Anbieter ist gerade ausgelastet.',
+    );
+    expect(familyNotAllSentence([statusMissed], t)).toMatch(/^Nicht jede Aufgabe/);
+  });
+
+  it('says nothing where every write took the new status (review round 21 of #128)', () => {
+    expect(familyNotAllSentence([], t)).toBe('');
+    expect(familyNotAllSentence([landedWithStatus, landedWithStatus], t)).toBe('');
   });
 });

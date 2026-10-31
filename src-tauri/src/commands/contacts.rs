@@ -262,11 +262,11 @@ pub async fn create_contact(
             message: format!("contact list '{}' is not routable", request.list_id),
         });
     };
-    let created = ext
-        .create_contact(&request.list_id, request.contact)
-        .await?;
+    let created = ext.create_contact(&request.list_id, request.contact).await;
+    // After a failure too: a contact or group may stand without one of its
+    // steps (decision 273), and the next read shows what the provider holds.
     let _ = cache.invalidate(&account, SyncScope::Contacts, &request.list_id);
-    Ok(created)
+    Ok(created?)
 }
 
 #[tauri::command]
@@ -289,9 +289,10 @@ pub async fn update_contact(
         });
     };
     let list_id = contact.list_id.clone();
-    let updated = ext.update_contact(contact).await?;
+    let updated = ext.update_contact(contact).await;
+    // After a failure too: a save may have landed in part (decision 273).
     let _ = cache.invalidate(&account, SyncScope::Contacts, &list_id);
-    Ok(updated)
+    Ok(updated?)
 }
 
 /// Delete a contact by id.
@@ -323,10 +324,13 @@ pub async fn delete_contact(
                 message: format!("account '{account}' is not routable"),
             });
         };
-        ext.delete_contact(&id).await?;
+        let deleted = ext.delete_contact(&id).await;
         if let Some(lid) = &list_id {
+            // Failed or not: a delete whose answer was lost may have landed
+            // (decision 277), so the next read asks the provider.
             let _ = cache.invalidate(&account, SyncScope::Contacts, lid);
         }
+        deleted?;
     }
     Ok(())
 }
@@ -431,6 +435,7 @@ pub async fn get_contact_photo(
 pub async fn set_contact_photo(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     id: String,
     list_id: Option<String>,
     photo: ContactPhoto,
@@ -446,7 +451,14 @@ pub async fn set_contact_photo(
             message: format!("account '{account}' is not routable"),
         });
     };
-    ext.set_contact_photo(&id, photo).await?;
+    let set = ext.set_contact_photo(&id, photo).await;
+    // A photo change alters the cached contact (`has_photo`), and one that
+    // failed may stand in part — the old picture gone (decision 277): the next
+    // read asks the provider. Mirrors the phone.
+    if let Some(lid) = &list_id {
+        let _ = cache.invalidate(&account, SyncScope::Contacts, lid);
+    }
+    set?;
     Ok(())
 }
 
@@ -594,6 +606,7 @@ pub async fn set_contacts_include_read_only_on_sync(
 pub async fn delete_contact_photo(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     id: String,
     list_id: Option<String>,
 ) -> CommandResult<()> {
@@ -608,6 +621,12 @@ pub async fn delete_contact_photo(
             message: format!("account '{account}' is not routable"),
         });
     };
-    ext.delete_contact_photo(&id).await?;
+    let deleted = ext.delete_contact_photo(&id).await;
+    // As for setting it: the cached contact changes, and a removal that
+    // failed may stand in part (decision 277).
+    if let Some(lid) = &list_id {
+        let _ = cache.invalidate(&account, SyncScope::Contacts, lid);
+    }
+    deleted?;
     Ok(())
 }

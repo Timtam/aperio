@@ -804,17 +804,23 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
                 &redirect_uri,
             )
             .await
-            .map_err(|e| format!("Microsoft Graph exchange: {e}"))?;
+            .map_err(|e| auth_failure("Microsoft Graph exchange", e))?;
             serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
         }
         None | Some("full") => {
             let tokens = MicrosoftGraphAdapter::authenticate_interactive(client_id, authority)
                 .await
-                .map_err(|e| format!("Microsoft Graph OAuth: {e}"))?;
+                .map_err(|e| auth_failure("Microsoft Graph OAuth", e))?;
             serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
         }
         Some(other) => Err(format!("unknown interactive_auth phase: {other}")),
     }
+}
+
+/// A sign-in phase's failure, with the token first where the error carries
+/// one (a busy token endpoint, decision 270), as the Google plugin says it.
+fn auth_failure(phase: &str, err: adapter_microsoft_graph::GraphError) -> String {
+    plugin_sdk::auth_error(phase, &adapter_microsoft_graph::core_error(err))
 }
 
 plugin_sdk::declare_interactive_auth! {
@@ -823,6 +829,27 @@ plugin_sdk::declare_interactive_auth! {
 
 #[cfg(test)]
 mod tests {
+    /// A busy token endpoint keeps its token first in the auth failure the
+    /// host carries, so the surfaces say the provider is busy, not "sign in
+    /// again" (decision 270); any other failure is named by its phase.
+    #[test]
+    fn a_busy_sign_in_keeps_its_token_first() {
+        let busy = adapter_microsoft_graph::GraphError::Busy {
+            detail: plugin_sdk::cal_core::BusyDetail::TooManyRequests,
+            retry_after: None,
+        };
+        assert_eq!(
+            super::auth_failure("Microsoft Graph exchange", busy),
+            "provider-busy: http-429"
+        );
+        let other = adapter_microsoft_graph::GraphError::Http {
+            status: 400,
+            message: "invalid_grant".into(),
+        };
+        assert!(super::auth_failure("Microsoft Graph exchange", other)
+            .starts_with("Microsoft Graph exchange: "));
+    }
+
     use super::*;
 
     /// The manifest ships beside this crate and is the ONLY thing that tells

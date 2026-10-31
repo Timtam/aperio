@@ -36,6 +36,7 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
   type MoveCopyScope,
+  OriginalKeptError,
   SeriesNotLoadedError,
   SeriesShiftRefusedError,
   type ShiftRefusal,
@@ -88,24 +89,26 @@ import {
 } from '../../api/client';
 import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 import {
-  invitationLocked,
+  type CollapsedRow,
   collapseEventGroups,
-  groupBadge,
+  deletionsNotRestoredSentence,
   dropMinuteInWindow,
   eventBlockFactor,
-  eventSpanForDay,
   eventInstanceKey,
+  eventSpanForDay,
+  eventWriteErrorMessage,
+  exceptionsLossOf,
+  groupBadge,
+  invitationLocked,
   layoutDayColumn,
   MINUTES_PER_DAY,
   minutesFromMidnight,
-  type CollapsedRow,
   type PositionedSpan,
   type PriorityScale,
   type TimedSpan,
-  eventWriteErrorMessage,
-  exceptionsLossOf,
-  deletionsNotRestoredSentence,
   withDeletionsNotRestored,
+  writeErrorMessage,
+  originalKeptSentence,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
@@ -343,7 +346,7 @@ export function WeekView() {
     openForTask: openTaskMenu,
     openForTaskProjection: openTaskProjectionMenu,
   } = useChipContextMenu({ requestDelete: requestDeleteFromMenu });
-  const { colorLabels, sectionColorById, sectionsByList, loadSections, taskLists } =
+  const { calendars, colorLabels, sectionColorById, sectionsByList, loadSections, taskLists } =
     useCalendarStore();
 
   // Load sections for the lists with tasks here so a colored section
@@ -835,8 +838,9 @@ export function WeekView() {
         );
         invalidateData();
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('reschedule update_task failed', err);
+        // The person dropped it: said, never only logged (decision 273).
+        invalidateData();
+        announce(writeErrorMessage(err, t));
       }
     },
     [tasks, announce, t, fmt, invalidateData],
@@ -911,8 +915,9 @@ export function WeekView() {
           );
           invalidateData();
         } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn('drop scheduleTaskAtTime failed', err);
+          // The person dropped it: said, never only logged (decision 273).
+          invalidateData();
+          announce(writeErrorMessage(err, t));
         }
       })();
     },
@@ -1000,6 +1005,19 @@ export function WeekView() {
           announce(t('dialogs.moveScope.seriesLoadFailed', { title: ev.title }));
           return;
         }
+        if (err instanceof OriginalKeptError) {
+          // The copy stands at the new slot; the occurrence it left could
+          // not be skipped while the provider is busy (277).
+          invalidateData();
+          announce(
+            originalKeptSentence(
+              [{ title: err.title, original_left_in: err.calendarId }],
+              (id) => calendars.find((c) => c.id === id)?.name,
+              t,
+            ) ?? eventWriteErrorMessage(err, t),
+          );
+          return;
+        }
         // A move that would drop occurrences of the series asks, after the
         // scope question, in a dialog of its own (decision 250); yes moves it
         // again with the consent, on that write only. A view the user has
@@ -1014,12 +1032,15 @@ export function WeekView() {
         ) {
           return;
         }
+        // A move that failed may have landed in part — a carved-out copy
+        // stands — so the grid reads again (decision 277).
+        invalidateData();
         // In words, a provider's refusal included (decisions 243-253: a move
         // that would drop occurrences of the series says what and how many).
         announce(eventWriteErrorMessage(err, t));
       }
     },
-    [announce, t, i18n.language, fmt, invalidateData, clockAt, calendarById, askLoss],
+    [announce, t, i18n.language, fmt, invalidateData, clockAt, calendarById, calendars, askLoss],
   );
   /** Someone else's meeting does not move: said before a scope question
    *  nothing could answer (77a). */
@@ -1121,6 +1142,9 @@ export function WeekView() {
         // so the dataVersion bump has to be explicit here.
         invalidateData();
       } catch (err) {
+        // A delete that failed may have landed in part — a series cut short
+        // — so the grid reads again (decision 277).
+        invalidateData();
         // In words, as the editors say it: a provider's refusal included, such
         // as a cut on a clock Aperio cannot read (decision 256).
         announce(eventWriteErrorMessage(err, t));

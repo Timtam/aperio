@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { afterLanded, readErrorMessage, writeErrorMessage } from '@aperio/shared';
 import {
   AccessibilityInfo,
   Alert,
@@ -39,6 +40,7 @@ import {
 import { useSoundPref } from '../state/useSoundPref';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useTaskStore } from '../state/taskStoreContext';
+import type { SectionWrite } from '../state/taskStore';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 /** Tri-state mapping for a per-list boolean override: undefined = inherit the
@@ -74,10 +76,6 @@ const fromTri = (s: TriState): boolean | undefined =>
 // results announced.
 
 const TOP_LEVEL = '__top__';
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function ListEditorModal({
   route,
@@ -135,6 +133,9 @@ export default function ListEditorModal({
   // manager's count-keyed effect won't fire on its own).
   const renameIndex = useRef<number | null>(null);
   const pendingRenameFocus = useRef<number | null>(null);
+  // A sentence for after that focus move: said first, the row's read-out
+  // would cut it off on iOS, so it is queued behind it.
+  const pendingRenameSay = useRef<string | null>(null);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -143,8 +144,8 @@ export default function ListEditorModal({
 
   // Load (refresh) this list's sections into the shared store on open.
   useEffect(() => {
-    void loadSections(listId).catch((err) => setError(errorMessage(err)));
-  }, [listId, loadSections]);
+    void loadSections(listId).catch((err) => setError(readErrorMessage(err, t)));
+  }, [listId, loadSections, t]);
 
   // Load the per-list task-behaviour override map on open.
   useEffect(() => {
@@ -225,7 +226,7 @@ export default function ListEditorModal({
             : t('sidebar.menu.reparentedTopAnnouncement', { name }),
         );
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {
@@ -256,7 +257,7 @@ export default function ListEditorModal({
             : t('sidebar.menu.colorClearedAnnouncement', { name }),
         );
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {
@@ -279,7 +280,7 @@ export default function ListEditorModal({
       invalidateData();
       announce(t('mobile.listRenamed', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -298,7 +299,25 @@ export default function ListEditorModal({
     if (i == null) return;
     pendingRenameFocus.current = null;
     focus.focusRow(i);
+    const say = pendingRenameSay.current;
+    pendingRenameSay.current = null;
+    if (say != null) {
+      AccessibilityInfo.announceForAccessibilityWithOptions(say, { queue: true });
+    }
   }, [editingId, focus]);
+
+  // The read after a section write that landed is a read (decision 277): what
+  // was written shows until the list's refresh brings the provider's rows (the
+  // host serves the rows from before until then), its failure is never said
+  // as the write's, and a sentence the write left stays.
+  const reloadAfterWrite = useCallback(
+    (written: SectionWrite) =>
+      loadSections(listId, written).then(
+        () => undefined,
+        (err: unknown) => setError((prev) => prev ?? readErrorMessage(err, t)),
+      ),
+    [listId, loadSections, t],
+  );
 
   const addSection = useCallback(async () => {
     if (busy) return;
@@ -310,13 +329,13 @@ export default function ListEditorModal({
       // Append after the current last section.
       const position = sections.reduce((max, s) => Math.max(max, s.order + 1), 0);
       focus.onAdd();
-      await createSection({ list_id: listId, name, position });
+      const created = await createSection({ list_id: listId, name, position });
       setNewSectionName('');
-      await loadSections(listId);
       invalidateData();
       announce(t('dialogs.task.section.created', { name }));
+      await reloadAfterWrite({ upsert: created });
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -328,8 +347,8 @@ export default function ListEditorModal({
     focus,
     invalidateData,
     listId,
-    loadSections,
     newSectionName,
+    reloadAfterWrite,
     sections,
     t,
   ]);
@@ -347,14 +366,35 @@ export default function ListEditorModal({
       // colour via set_section_color, which routes local → row, external →
       // host-local override (update_section ignores colour for external).
       await updateSection({ ...section, name });
-      await setSectionColor(section.id, listId, editingColor || null);
+      // The rename landed, so the colour's failure is a later step's (277).
+      const colorFailure = await setSectionColor(section.id, listId, editingColor || null).then(
+        () => null,
+        (err: unknown) => afterLanded(err, 'section-color'),
+      );
       pendingRenameFocus.current = renameIndex.current;
       setEditingId(null);
-      await loadSections(listId);
       invalidateData();
-      announce(t('dialogs.task.section.renamed', { name }));
+      if (colorFailure) {
+        const message = writeErrorMessage(colorFailure, t);
+        setError(message);
+        // Focus goes back to the row first; the sentence waits behind it.
+        if (pendingRenameFocus.current != null) {
+          pendingRenameSay.current = t('mobile.error', { message });
+        } else {
+          announce(t('mobile.error', { message }));
+        }
+      } else {
+        announce(t('dialogs.task.section.renamed', { name }));
+      }
+      await reloadAfterWrite({
+        upsert: {
+          ...section,
+          name,
+          color_label: colorFailure ? section.color_label : editingColor || null,
+        },
+      });
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -368,7 +408,7 @@ export default function ListEditorModal({
     editingName,
     invalidateData,
     listId,
-    loadSections,
+    reloadAfterWrite,
     sections,
     t,
   ]);
@@ -388,18 +428,18 @@ export default function ListEditorModal({
         // ungrouped), so no confirmation — just a clear announcement.
         focus.onRemove(index);
         await deleteSection(sectionId, listId);
-        await loadSections(listId);
         invalidateData();
         announce(t('dialogs.task.section.deleted', { name: sectionName }));
+        await reloadAfterWrite({ remove: sectionId });
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {
         setBusy(false);
       }
     },
-    [announce, busy, focus, invalidateData, listId, loadSections, t],
+    [announce, busy, focus, invalidateData, listId, reloadAfterWrite, t],
   );
 
   const removeList = useCallback(() => {
@@ -423,7 +463,7 @@ export default function ListEditorModal({
                 announce(t('mobile.deleted', { title: list.name }));
                 navigation.goBack();
               } catch (err) {
-                const message = errorMessage(err);
+                const message = writeErrorMessage(err, t);
                 setError(message);
                 announce(t('mobile.error', { message }));
                 setBusy(false);

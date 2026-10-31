@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { readErrorMessage, writeErrorMessage, writeNeverLanded } from '@aperio/shared';
 import {
   AccessibilityInfo,
+  findNodeHandle,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -41,10 +43,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 
 const RIGHTS: MemberRight[] = ['read', 'write', 'admin'];
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 export default function TaskMembersScreen({
   route,
   navigation,
@@ -82,17 +80,36 @@ export default function TaskMembersScreen({
     navigation.setOptions({ title: t('dialogs.taskMembers.title', { list: name }) });
   }, [navigation, name, t]);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      setShares(await taskListShares(listId));
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [listId]);
+  // `quiet` reads without the loading line, so the rows and the focus stay.
+  // The rows read, or `null` where the read failed.
+  const reload = useCallback(
+    async (quiet = false): Promise<TaskListShare[] | null> => {
+      if (!quiet) setLoading(true);
+      try {
+        const rows = await taskListShares(listId);
+        setShares(rows);
+        setError(null);
+        return rows;
+      } catch (err) {
+        setError(readErrorMessage(err, t));
+        return null;
+      } finally {
+        if (!quiet) setLoading(false);
+      }
+    },
+    [listId, t],
+  );
+
+  // The add field is always there: where a write took the pressed control
+  // away, the screen reader's focus goes to it, as on the desktop.
+  const inputRef = useRef<TextInput>(null);
+  const focusAddField = useCallback(() => {
+    // After the render that took the control away.
+    requestAnimationFrame(() => {
+      const tag = findNodeHandle(inputRef.current);
+      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+    });
+  }, []);
 
   useEffect(() => {
     void reload();
@@ -120,7 +137,7 @@ export default function TaskMembersScreen({
         .catch((err) => {
           if (cancelled) return;
           setResults([]);
-          setSearchError(errorMessage(err));
+          setSearchError(readErrorMessage(err, t));
           setSearchState('error');
         });
     }, 250);
@@ -128,31 +145,43 @@ export default function TaskMembersScreen({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [listId, query, addByEmail]);
+  }, [listId, query, addByEmail, t]);
 
+  // `gone`: whether the rows read after a failed write took the pressed
+  // control away (a removal or an add that landed after all).
   const run = useCallback(
-    async (fn: () => Promise<void>) => {
+    async (fn: () => Promise<void>, gone?: (rows: TaskListShare[]) => boolean) => {
       setBusy(true);
       try {
         await fn();
         await reload();
       } catch (err) {
-        setError(errorMessage(err));
+        // One that may have landed reads the members again first, as they now
+        // stand, quietly, so the rows that stay keep the focus (review rounds
+        // 21 and 22 of #128); its sentence comes after, since a read clears
+        // the one before.
+        const rows = writeNeverLanded(err) ? null : await reload(true);
+        setError(writeErrorMessage(err, t));
+        if (rows && gone?.(rows)) focusAddField();
       } finally {
         setBusy(false);
       }
     },
-    [reload],
+    [reload, t, focusAddField],
   );
 
   const add = (user: TaskUser) =>
-    void run(async () => {
-      // Default new members to write; the permission picker can adjust it.
-      await taskAddMember(listId, user.id, 'write');
-      announce(t('dialogs.taskMembers.added', { name: user.name }));
-      setQuery('');
-      setResults([]);
-    });
+    void run(
+      async () => {
+        // Default new members to write; the permission picker can adjust it.
+        await taskAddMember(listId, user.id, 'write');
+        announce(t('dialogs.taskMembers.added', { name: user.name }));
+        setQuery('');
+        setResults([]);
+      },
+      // A member now: no longer among the results.
+      (rows) => rows.some((r) => r.user.id === user.id),
+    );
 
   // Email-invite path (Todoist): the typed text IS the member ref; there are no
   // roles, so `right` is null.
@@ -166,17 +195,22 @@ export default function TaskMembersScreen({
     });
 
   const remove = (share: TaskListShare) =>
-    void run(async () => {
-      await taskRemoveMember(listId, share.user.id);
-      announce(t('dialogs.taskMembers.removed', { name: share.user.name }));
-    });
+    void run(
+      async () => {
+        await taskRemoveMember(listId, share.user.id);
+        announce(t('dialogs.taskMembers.removed', { name: share.user.name }));
+      },
+      (rows) => !rows.some((r) => r.user.id === share.user.id),
+    );
 
   const changeRight = (share: TaskListShare, right: MemberRight) => {
     if (busy || share.right === right) return;
     const prev = share.right;
     // Optimistic in place: update just this row's right so the picker keeps its
-    // value + focus. Revert only on failure (no full reload, which would rebuild
-    // the rows and snap focus away — the desktop hit exactly this NVDA bug).
+    // value + focus. Revert only on a failure that surely never landed; any
+    // other reads the members again, quietly (no loading line, which would
+    // rebuild the rows and snap focus away — the desktop hit exactly this NVDA
+    // bug), as they now stand (review round 21 of #128).
     setShares((rows) =>
       rows.map((r) => (r.user.id === share.user.id ? { ...r, right } : r)),
     );
@@ -184,11 +218,15 @@ export default function TaskMembersScreen({
       .then(() =>
         announce(t('dialogs.taskMembers.rightChanged', { name: share.user.name })),
       )
-      .catch((err) => {
-        setShares((rows) =>
-          rows.map((r) => (r.user.id === share.user.id ? { ...r, right: prev } : r)),
-        );
-        setError(errorMessage(err));
+      .catch(async (err) => {
+        if (writeNeverLanded(err)) {
+          setShares((rows) =>
+            rows.map((r) => (r.user.id === share.user.id ? { ...r, right: prev } : r)),
+          );
+        } else {
+          await reload(true);
+        }
+        setError(writeErrorMessage(err, t));
       });
   };
 
@@ -279,6 +317,7 @@ export default function TaskMembersScreen({
         <Text style={styles.label}>{t('dialogs.taskMembers.addLabel')}</Text>
         <View style={styles.addRow}>
           <TextInput
+            ref={inputRef}
             style={styles.input}
             value={query}
             onChangeText={setQuery}

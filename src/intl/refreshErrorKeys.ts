@@ -1,7 +1,8 @@
 import type { RefreshCause } from '@aperio/shared';
 
 // Which words a desktop surface says for a failing account, by the cause the
-// core leads with (access, then auth, then anything else; decision 181). One
+// core leads with (access, then auth, then a busy provider, then anything
+// else; decisions 181, 272). One
 // table, so the sidebar row, its warning glyph's tooltip and the accounts list
 // cannot disagree — and kept out of `useRefreshErrors`, whose module a test
 // mocks whole.
@@ -13,6 +14,8 @@ export function refreshErrorRowKey(cause: RefreshCause): string {
       return 'sidebar.tree.refreshErrorAccess';
     case 'auth':
       return 'sidebar.tree.refreshErrorAuth';
+    case 'busy':
+      return 'sidebar.tree.refreshErrorBusy';
     case 'other':
       return 'sidebar.tree.refreshError';
   }
@@ -25,6 +28,8 @@ export function refreshErrorAnnounceKey(cause: RefreshCause): string {
       return 'dialogs.accounts.refreshErrors.announceAccess';
     case 'auth':
       return 'dialogs.accounts.refreshErrors.announceAuth';
+    case 'busy':
+      return 'dialogs.accounts.refreshErrors.announceBusy';
     case 'other':
       return 'dialogs.accounts.refreshErrors.announce';
   }

@@ -280,6 +280,7 @@ impl LocalAdapter {
             .map_err(map_sql_err)?;
 
         Ok(Task {
+            original_left_in: None,
             assignees: Vec::new(),
             id,
             list_id: list_id.to_string(),
@@ -974,6 +975,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
     };
 
     Ok(Task {
+        original_left_in: None,
         assignees: Vec::new(),
         id,
         list_id,

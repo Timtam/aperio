@@ -46,6 +46,7 @@ fn make_applier(db: &SharedConn, adapter: &Arc<LocalAdapter>, device: DeviceId) 
 
 fn fixture_event(id: &str, calendar_id: &str) -> Event {
     Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,

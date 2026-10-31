@@ -7,11 +7,11 @@ import {
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { readErrorMessage } from '@aperio/shared';
 
 import { useAutoFocus } from '../hooks/useAutoFocus';
 import {
   search as apiSearch,
-  isCommandError,
   type EventTypeFilter,
   type SearchKind,
 } from '../api/client';
@@ -262,11 +262,7 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
         })
         .catch((err) => {
           if (lastQueryRef.current !== trimmed) return;
-          if (isCommandError(err)) {
-            setError(`${err.code}: ${err.message}`);
-          } else {
-            setError(String(err));
-          }
+          setError(readErrorMessage(err, t));
         })
         .finally(() => {
           if (lastQueryRef.current === trimmed) setLoading(false);

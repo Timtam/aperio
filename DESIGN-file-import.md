@@ -461,8 +461,10 @@ Fünf Prüfer (Kern, Adapter, Desktop, Handy, Doku), je mit einem Gegenprüfer:
   benennt eine Kopie ohne Namen mit der Endung ihres MIME-Typs und sagt
   einen Kopierfehler; der Schließen-Knopf der Liste ist beim Schreiben
   nicht verfügbar; „Bearbeiten …“ ohne Kalender sagt es.
-- **CalDAV.** Ein 412 nach einer Wiederholung gilt nur bei einer selbst
-  vergebenen UID als gelandet; eine behaltene ist `uid-taken`.
+- **CalDAV.** Ein 412 nach einer Wiederholung gilt nur als gelandet, wo
+  Aperio die Ressource selbst benannt hat (eine selbst vergebene UID, oder die
+  frische `{uuid}.ics` einer behaltenen UID, die kein schlichter Name ist;
+  Prüfrunde 17); wo eine behaltene UID sie benennt, ist er `uid-taken`.
 - **iCal.** Die Absage eines einzelnen Termins ohne seine Serie in der Datei
   wird genannt.
 - **Doppelte ehrlich** (Toni, 2026-10-26): `Calendar::keeps_uid` sagt, ob

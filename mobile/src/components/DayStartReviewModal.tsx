@@ -21,20 +21,28 @@ import {
   daysUntilDeadline,
   filterCarriedOver,
   filterOverdue,
+  movedToToday,
   occurrenceMoveTarget,
   priorityMarker,
   prioritySuffix,
   reminderCount,
-  movedToToday,
   todayIsoKey,
+  writeAfterLanded,
+  writeAll,
 } from '@aperio/shared';
 import type { Task } from '@aperio/shared';
 
 import { deleteTask as apiDeleteTask, updateTask } from '../api/client';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
 import { navigateNested } from '../navigation/navigationRef';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
 import { confirmDeleteTask } from '../state/taskDeleteScope';
+import {
+  FAILED_FOCUS_WATCH_MS,
+  focusAfterFailedAction,
+  type FailedAction,
+} from '../state/reviewFocus';
 import {
   effectiveForList,
   priorityScaleFor,
@@ -42,7 +50,7 @@ import {
   taskBehaviourDefaults,
   type TaskBehaviour,
 } from '../state/taskBehaviour';
-import { setTaskStatusTo, statusAnnounce } from '../state/taskToggle';
+import { checkOffErrorMessage, setTaskStatusTo, statusAnnounce } from '../state/taskToggle';
 import { useCurrentUserByList } from '../state/currentUser';
 import { useTaskStore } from '../state/taskStoreContext';
 import { useTasks } from '../state/useTasks';
@@ -71,8 +79,8 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
-  const { tasks, loading, taskListById } = useTasks();
-  const { invalidateData } = useTaskStore();
+  const { tasks, loading, taskListById, fetchedVersion } = useTasks();
+  const { invalidateData, dataVersion } = useTaskStore();
 
   const tr = useCallback(
     (key: string, vars?: Record<string, unknown>): string => t(key, vars) as string,
@@ -247,6 +255,31 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const titleRef = useRef<Text>(null);
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
+  // After a failed write: what its focus waits on until the re-read comes
+  // (`focusAfterFailedAction`).
+  const focusIfGone = useRef<FailedAction | null>(null);
+  // The rows whose showing means the last action's button still shows.
+  const actedIds = useRef<string[]>([]);
+  // The last action's failure, said: where the rows run out after it, "All
+  // handled" would speak over it and the review close with it unseen. It
+  // then stays on screen with Close instead (Toni, 2026-10-24), as any save
+  // that landed in part does. Mirrors the desktop.
+  const lastFailure = useRef<{ sentence: string; until: number } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // The review stays mounted all session: a new opening starts with nothing
+  // said, watched or acted on, as the desktop's dialog does by mounting anew.
+  useEffect(() => {
+    if (!visible) return;
+    lastFailure.current = null;
+    focusIfGone.current = null;
+    actedIds.current = [];
+    setNotice(null);
+  }, [visible]);
+  // The data version last rendered: a failure's re-read reads at the next.
+  const versionShown = useRef(dataVersion);
+  useEffect(() => {
+    versionShown.current = dataVersion;
+  }, [dataVersion]);
 
   const focusTitle = useCallback(() => {
     const tag = findNodeHandle(titleRef.current);
@@ -261,21 +294,68 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
 
   // After a resolution remounts the rows, move focus to the queued next row.
   useEffect(() => {
+    const gone = focusIfGone.current;
+    if (gone != null) {
+      // As on the desktop, a still-shown button keeps focus.
+      const step = focusAfterFailedAction(gone, orderedIds, fetchedVersion, Date.now());
+      if (step.kind === 'wait') return;
+      focusIfGone.current = null;
+      if (step.kind === 'move') {
+        const tag = rowTags.current[step.id];
+        if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+      }
+      return;
+    }
     if (pendingFocusId.current == null) return;
     const id = pendingFocusId.current;
     pendingFocusId.current = null;
     const tag = rowTags.current[id];
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-  }, [orderedIds]);
+  }, [orderedIds, fetchedVersion]);
 
-  /** Queue focus on the row that should take over once `removedIds` leave. */
+  /** Queue focus on the row that should take over once `removedIds` leave.
+   *  `pressed` are the rows whose showing means the pressed button still
+   *  shows: the pressed row for a row button (its subtasks are written too,
+   *  but its buttons go with it), the whole batch for a bulk one. */
   const queueFocusAfter = useCallback(
-    (removedIds: string[]) => {
+    (removedIds: string[], pressed: string[] = removedIds) => {
       const removed = new Set(removedIds);
       const survivor = orderedIds.find((id) => !removed.has(id));
+      actedIds.current = pressed;
+      focusIfGone.current = null;
+      lastFailure.current = null;
       pendingFocusId.current = survivor ?? null;
     },
     [orderedIds],
+  );
+
+  /** A button's write that failed: said, never an unhandled rejection
+   *  (decision 273), and what may have landed reads again. Focus stays on the
+   *  pressed button while it shows, and goes to the row queued for after it
+   *  where a read in the next moments takes it away (`focusAfterFailedAction`). */
+  const failed = useCallback(
+    (err: unknown) => {
+      const acted = actedIds.current;
+      focusIfGone.current =
+        acted.length > 0
+          ? {
+              acted,
+              fallback: pendingFocusId.current,
+              version: versionShown.current + 1,
+              until: Date.now() + FAILED_FOCUS_WATCH_MS,
+            }
+          : null;
+      pendingFocusId.current = null;
+      invalidateData();
+      // A check-off's own sentences, the family's after a status saved in
+      // part (review round 20 of #128); any other failure as itself.
+      const message = checkOffErrorMessage(err, t);
+      // Kept only while its re-read and the refresh after it may still clear
+      // the rows: a later emptying, by another device say, is not its doing.
+      lastFailure.current = { sentence: message, until: Date.now() + FAILED_FOCUS_WATCH_MS };
+      announce(message);
+    },
+    [announce, invalidateData, t],
   );
 
   // Close + snooze when the user has cleared everything mid-session. The
@@ -291,6 +371,14 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     if (!visible || behaviour == null || loading) return;
     if (totalRemaining > 0) return;
     if (hasReminders) return;
+    // The action before failed — in part, as its re-read shows: its sentence
+    // stays on screen with Close.
+    const kept = lastFailure.current;
+    lastFailure.current = null;
+    if (kept != null && Date.now() < kept.until) {
+      setNotice(`${kept.sentence} ${t('dialogs.dayStartReview.allHandled')}`);
+      return;
+    }
     if (resolvedIds.size > 0) {
       announce(t('dialogs.dayStartReview.allHandled'));
       void snoozeDayStartReview(4);
@@ -323,10 +411,17 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       return;
     }
     if (remindersOnly && !wasRemindersOnly.current) {
+      // The action before failed in part: its sentence first, in the same
+      // announcement. The reminders keep the review up.
+      const kept = lastFailure.current;
+      lastFailure.current = null;
+      const failure = kept != null && Date.now() < kept.until ? kept.sentence : null;
       announce(
-        resolvedIds.size > 0
-          ? t('dialogs.dayStartReview.allHandled')
-          : t('dialogs.dayStartReview.hintRemindersOnly'),
+        failure != null
+          ? `${failure} ${t('dialogs.dayStartReview.allHandled')}`
+          : resolvedIds.size > 0
+            ? t('dialogs.dayStartReview.allHandled')
+            : t('dialogs.dayStartReview.hintRemindersOnly'),
       );
     }
     wasRemindersOnly.current = remindersOnly;
@@ -354,11 +449,13 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
           extra > 0 ? `${base} ${t('views.tasks.cascadeSuffix', { count: extra })}` : base,
         );
         invalidateData();
+      } catch (err) {
+        failed(err);
       } finally {
         setBusy(false);
       }
     },
-    [announce, invalidateData, queueFocusAfter, t, tasks, taskListById],
+    [announce, failed, invalidateData, queueFocusAfter, t, tasks, taskListById],
   );
 
   /**
@@ -398,11 +495,13 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
           ),
         );
         invalidateData();
+      } catch (err) {
+        failed(err);
       } finally {
         setBusy(false);
       }
     },
-    [announce, invalidateData, queueFocusAfter, t],
+    [announce, failed, invalidateData, queueFocusAfter, t],
   );
 
   const backToBacklog = useCallback(
@@ -423,11 +522,13 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
           t('dialogs.dayStartReview.deadlines.announceBackToBacklog', { title: task.title }),
         );
         invalidateData();
+      } catch (err) {
+        failed(err);
       } finally {
         setBusy(false);
       }
     },
-    [announce, invalidateData, queueFocusAfter, t],
+    [announce, failed, invalidateData, queueFocusAfter, t],
   );
 
   const completeAllOverdue = useCallback(async () => {
@@ -439,28 +540,36 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       const now = new Date().toISOString();
       // Bulk = a plain status flip (no cascade) — mirrors the desktop's
       // completeAllOverdue, which intentionally skips the per-row cascade here.
-      for (const task of remainingOverdue) {
-        await updateTask({
-          ...task,
-          status: 'completed',
-          completed_at: task.completed_at ?? now,
-        });
-      }
+      // Every write is attempted; what landed leaves the review.
+      const { landed, failure } = await writeAll(
+        'batch',
+        remainingOverdue,
+        (task) =>
+          updateTask({
+            ...task,
+            status: 'completed',
+            completed_at: task.completed_at ?? now,
+          }),
+        { oneAtATime: true },
+      );
       setResolvedIds((s) => {
         const next = new Set(s);
-        ids.forEach((id) => next.add(id));
+        landed.forEach((task) => next.add(task.id));
         return next;
       });
+      if (failure !== null) throw failure;
       announce(
         t('dialogs.dayStartReview.deadlines.announceAllCompleted', {
           count: remainingOverdue.length,
         }),
       );
       invalidateData();
+    } catch (err) {
+      failed(err);
     } finally {
       setBusy(false);
     }
-  }, [announce, invalidateData, queueFocusAfter, remainingOverdue, t]);
+  }, [announce, failed, invalidateData, queueFocusAfter, remainingOverdue, t]);
 
   // ── Carry-over section actions ──────────────────────────────────────────────
 
@@ -473,7 +582,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       const followers = cascadeFor(root.list_id) ? actionableDescendants(root.id, tasks) : [];
       const targets: Task[] = [root, ...followers];
       const ids = targets.map((task) => task.id);
-      queueFocusAfter(ids);
+      queueFocusAfter(ids, [root.id]);
       try {
         // Sequential so a first-row failure surfaces without a half-applied family.
         let advanced = false;
@@ -491,7 +600,10 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
               ?.reschedule_single_occurrence ?? true,
           );
           if (move.advanced) advanced = true;
-          await updateTask({ ...target, scheduled_date: move.date });
+          const write = () => updateTask({ ...target, scheduled_date: move.date });
+          // Once the row itself moved, a subtask's failure never reads as
+          // "nothing was changed" (decision 277). Mirrors the desktop.
+          await (target === root ? write() : writeAfterLanded('subtasks', write));
         }
         setResolvedIds((s) => {
           const next = new Set(s);
@@ -510,11 +622,13 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
             : base,
         );
         invalidateData();
+      } catch (err) {
+        failed(err);
       } finally {
         setBusy(false);
       }
     },
-    [announce, cascadeFor, invalidateData, queueFocusAfter, t, taskListById, tasks],
+    [announce, cascadeFor, failed, invalidateData, queueFocusAfter, t, taskListById, tasks],
   );
 
   const carryToToday = useCallback(
@@ -563,21 +677,35 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       const ids = targets.map((task) => task.id);
       queueFocusAfter(ids);
       try {
-        for (const task of targets) {
-          await updateTask({ ...task, scheduled_date: newDate });
-        }
+        const { landed, failure } = await writeAll(
+          'batch',
+          targets,
+          (task) => updateTask({ ...task, scheduled_date: newDate }),
+          { oneAtATime: true },
+        );
         setResolvedIds((s) => {
           const next = new Set(s);
-          ids.forEach((id) => next.add(id));
+          landed.forEach((task) => next.add(task.id));
           return next;
         });
+        if (failure !== null) throw failure;
         announce(t(announcementKey, { count: remainingSlipped.length }));
         invalidateData();
+      } catch (err) {
+        failed(err);
       } finally {
         setBusy(false);
       }
     },
-    [announce, collectBulkCarryTargets, invalidateData, queueFocusAfter, remainingSlipped, t],
+    [
+      announce,
+      collectBulkCarryTargets,
+      failed,
+      invalidateData,
+      queueFocusAfter,
+      remainingSlipped,
+      t,
+    ],
   );
 
   const allCarryToToday = useCallback(
@@ -618,6 +746,8 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
                       t('dialogs.dayStartReview.announceDeleted', { title: task.title }),
                     );
                     invalidateData();
+                  } catch (err) {
+                    failed(err);
                   } finally {
                     setBusy(false);
                   }
@@ -651,7 +781,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
         () => setBusy(true),
       );
     },
-    [announce, invalidateData, queueFocusAfter, t, taskListById],
+    [announce, failed, invalidateData, queueFocusAfter, t, taskListById],
   );
 
   // ── Snooze ───────────────────────────────────────────────────────────────────
@@ -759,6 +889,25 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       </View>
     );
   };
+
+  if (notice != null) {
+    const closeNotice = () => {
+      setNotice(null);
+      void snoozeDayStartReview(4);
+      refreshRemindersSoon();
+      onClose();
+    };
+    return (
+      <Modal visible={visible} animationType="slide" onRequestClose={closeNotice}>
+        <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
+          <Text accessibilityRole="header" style={styles.title}>
+            {t('dialogs.dayStartReview.title')}
+          </Text>
+          <CloseOnlyNotice sentence={notice} onClose={closeNotice} />
+        </View>
+      </Modal>
+    );
+  }
 
   return (
     <Modal

@@ -59,7 +59,8 @@ carries **Edit** and **Delete** as accessibility actions on the row itself.
 
 A contact can also be a **distribution list**: tick *This is a distribution
 list (group)* and the person fields give way to a member editor — one member
-per line, either `Name <email@example.com>` or a bare email address.
+per line, either `Name <email@example.com>` or a bare email address. A
+distribution list has no photo.
 
 ## Labels: which phone number is which
 

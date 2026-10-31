@@ -27,6 +27,7 @@ const savedEvent = vi.hoisted(() => ({ current: null as unknown }));
 const seriesMaster = vi.hoisted(() => ({ current: null as unknown }));
 /** Set to make `create_event` fail, as an offline account would. */
 const createFails = vi.hoisted(() => ({ current: false }));
+const exdateBusy = vi.hoisted(() => ({ current: false }));
 const invokeMock = vi.hoisted(() =>
   vi.fn((command: string, payload?: unknown) => {
     void payload;
@@ -42,6 +43,9 @@ const invokeMock = vi.hoisted(() =>
     }
     // A carve-out creates the standalone copy; the dialog keys its private
     // reminders by what came back.
+    if (command === 'add_event_exdate' && exdateBusy.current) {
+      return Promise.reject({ code: 'forbidden', message: 'provider-busy: http-429' });
+    }
     if (command === 'create_event') {
       if (createFails.current) return Promise.reject(new Error('offline'));
       const request = (payload as { request: { calendar_id: string } }).request;
@@ -144,6 +148,7 @@ afterEach(() => {
   savedEvent.current = null;
   seriesMaster.current = null;
   createFails.current = false;
+  exdateBusy.current = false;
   (CALENDARS[0] as { stores_occurrence_exceptions?: boolean }).stores_occurrence_exceptions =
     undefined;
 });
@@ -531,6 +536,33 @@ describe('EventDialog → reminders Aperio keeps for this event', () => {
     expect(privateWrites()).toEqual([
       expect.objectContaining({ calendar_id: 'cal-work', event_id: 'created-1', reminders: STORED }),
     ]);
+  });
+
+  it('says where the original of a carve-out stayed when its skip met a busy provider, and only closes', async () => {
+    // The standalone copy stands once it is created: "nothing was changed"
+    // would invite a second save and a second copy (decision 277); the
+    // sentence names the calendar the occurrence is still in.
+    exdateBusy.current = true;
+    privateRows.current = [storedRow('series-1')];
+    await openEditor([], { event: OCCURRENCE, initialScope: 'occurrence' });
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
+    // In its own calendar nothing moved: the sentence says it was saved as
+    // an event of its own, and not to save again.
+    expect(
+      await screen.findByText(/als eigener Termin gespeichert, aber der Termin der Serie in „Arbeit“/),
+    ).toBeTruthy();
+    // The copy that stands still got the reminders Aperio keeps for it.
+    expect(privateWrites()).toEqual([
+      expect.objectContaining({ calendar_id: 'cal-work', event_id: 'created-1', reminders: STORED }),
+    ]);
+    // The save has settled: no update lands after the test.
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /speichern|save/i })).toBeNull(),
+    );
+    expect(screen.queryByText(/nichts geändert/i)).toBeNull();
+    expect(invokeMock.mock.calls.filter((call) => call[0] === 'create_event')).toHaveLength(1);
   });
 
   it('carves an occurrence out of its series when the save moves it to another calendar', async () => {

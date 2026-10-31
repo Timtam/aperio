@@ -9,7 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import { createEvent as apiCreateEvent, isCommandError } from '../api/client';
+import { createEvent as apiCreateEvent } from '../api/client';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
 import { useViewState } from '../state/viewStateContext';
@@ -17,6 +17,8 @@ import { timeInputStep } from '../state/timeStep';
 import {
   dateInput,
   defaultNewEventTimes,
+  eventWriteErrorMessage,
+  eventWriteLeftover,
   findOffer,
   offerOptions,
   offerUsable,
@@ -25,6 +27,8 @@ import {
   timeInput,
   toIso,
 } from '@aperio/shared';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import { Modal } from './Modal';
 import { QuickDateButton } from './QuickDateButton';
 import { TitleSuggestBox } from './TitleSuggestBox';
@@ -56,7 +60,8 @@ export function QuickAddDialog({
   const announce = useAnnouncer();
   const { calendars, selectedCalendarIds } = useCalendarStore();
   const { anchor, showHiddenCalendarTargets, timeStepMinutes } = useViewState();
-  const { openEventDialog } = useDialogState();
+  const { openEventDialog, invalidateData } = useDialogState();
+  const { notice, showNotice } = useCloseOnlyNotice();
 
   // Writable calendars that can host a new event: the sidebar-visible ones, plus
   // hidden ones when the "show hidden as targets" pref is on.
@@ -208,16 +213,20 @@ export function QuickAddDialog({
         announce(t('dialogs.event.created', { title: trimmed }));
         onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          setError(String(err));
+        // Something stands that saving again would write twice: an item saved
+        // without one of its follow-up steps (273). Said in place of the
+        // form, which only closes, and the data reloads.
+        if (eventWriteLeftover(err)) {
+          invalidateData();
+          showNotice(eventWriteErrorMessage(err, t));
+          return;
         }
+        setError(eventWriteErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
     },
-    [title, calendarId, date, time, announce, onClose, t],
+    [title, calendarId, date, time, announce, onClose, t, invalidateData, showNotice],
   );
 
   const openFullDialog = useCallback(() => {
@@ -234,6 +243,17 @@ export function QuickAddDialog({
       replace: true,
     });
   }, [openEventDialog, calendarId, date, time, title]);
+
+  if (notice) {
+    return (
+      <CloseOnlyNotice
+        title={t('dialogs.quickAdd.title')}
+        sentence={notice}
+        onClose={onClose}
+        className="modal--form modal--narrow"
+      />
+    );
+  }
 
   return (
     <Modal

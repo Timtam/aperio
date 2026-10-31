@@ -1944,6 +1944,7 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     );
 
     Ok(Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
@@ -5244,6 +5245,7 @@ mod tests {
     /// A weekly master with `tzid`, for the update tests.
     fn zoned_master(tzid: Option<&str>) -> Event {
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -6112,6 +6114,7 @@ mod tests {
     #[test]
     fn event_to_update_field_xml_sets_start_time_zone_for_zoned_master() {
         let ev = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
@@ -6399,6 +6402,7 @@ mod tests {
     #[test]
     fn event_to_update_field_xml_deletes_empty_optional_fields() {
         let ev = Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

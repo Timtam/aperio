@@ -133,12 +133,13 @@ pub fn reconcile_cache_generation(
 
 pub use observer::{CacheObserver, CacheRefreshStatus, FailingAccount, PassOutcome};
 pub use refresh::{
-    CacheRefresher, PREF_CACHE_LAST_REFRESHED_AT, PREF_CACHE_REFRESH_INTERVAL_MINUTES,
+    CacheRefresher, Forcing, PREF_CACHE_LAST_REFRESHED_AT, PREF_CACHE_REFRESH_INTERVAL_MINUTES,
 };
 pub use series::{series_rows, SeriesReach, SeriesRows};
 pub use swr::{
-    event_self_warm_needed, has_snapshot, is_stale, refresh_contacts, refresh_events,
-    refresh_sections, refresh_tasks, spawn_item_refresh, spawn_refresh, SWR_TTL_SECS,
+    event_self_warm, has_snapshot, is_stale, refresh_contacts, refresh_events, refresh_sections,
+    refresh_tasks, spawn_item_refresh, spawn_read_refresh, spawn_refresh, ReadRefresh,
+    SWR_TTL_SECS,
 };
 
 /// The "unbounded" snapshot window recorded for folder-complete containers
@@ -186,7 +187,65 @@ pub struct CacheStore {
     /// with: after a restart nothing is proven until the first refresh.
     event_proofs:
         std::sync::Arc<std::sync::Mutex<std::collections::HashMap<(String, String), EventProof>>>,
+    /// Decision 271: per container, the refresh generation a refresh that
+    /// failed for a busy provider was CLAIMED at. While the container's row
+    /// still says busy and its generation has not moved, the per-read
+    /// refreshes pause ([`Self::busy_paused`]); Aperio's own write bumps the
+    /// generation and lets one read through. In-memory: after a restart an
+    /// unknown generation is 0, like the generations themselves, so the pause
+    /// a stored busy row means outlives the restart.
+    busy_generations: std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<(String, &'static str, String), u64>>,
+    >,
+    /// Per container, the busy pause's generation and the ranges its
+    /// snapshot did not reach that a read asked for during it and met the
+    /// busy provider again ([`Self::ask_uncovered`]): each is asked once per
+    /// pause. A new pause starts empty. In memory, like the pause.
+    uncovered_asks: std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<(String, &'static str, String), (u64, Vec<DateRange>)>,
+        >,
+    >,
+    /// When each container's last COUNTED automatic round failed: rounds
+    /// less than [`ROUND_SPAN`] apart count as one (Toni, 2026-10-23). In
+    /// memory; a restart starts afresh.
+    counted_rounds: std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<(String, &'static str, String), std::time::Instant>,
+        >,
+    >,
 }
+
+/// Where a refresh attempt came from, which decides how its failure counts
+/// toward the warning (decision 271), and the refresh generation it was
+/// claimed at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Attempt {
+    /// A read's own background refresh. A busy provider's failure does not
+    /// count, and pauses the container's further reads.
+    Read { generation: u64 },
+    /// An automatic round (a warm pass): it counts, but rounds less than
+    /// [`ROUND_SPAN`] apart count once.
+    Background { generation: u64 },
+    /// A round someone started: its failure shows at once.
+    Forced { generation: u64 },
+}
+
+impl Attempt {
+    fn generation(self) -> u64 {
+        match self {
+            Self::Read { generation }
+            | Self::Background { generation }
+            | Self::Forced { generation } => generation,
+        }
+    }
+}
+
+/// Automatic rounds less than this apart count as one round toward the
+/// warning (Toni, 2026-10-23): one opening of the phone starts two or three
+/// within seconds, and a minute is the shortest refresh interval the desktop
+/// allows.
+pub const ROUND_SPAN: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// See [`CacheStore::events_proven`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -302,19 +361,22 @@ pub struct AccountRefreshErrors {
 
 /// Why a refresh fails, in the order the surfaces lead with it: a withheld
 /// grant (only the system settings help), then a login problem (only the
-/// user's credentials help), then everything else, which may heal by
-/// itself. Declared from least to most severe, so `Ord` is the severity.
+/// user's credentials help), then a busy provider (nothing to do: it heals
+/// by itself, and the surfaces say when Aperio tries again, decision 272),
+/// then everything else. Declared from least to most severe, so `Ord` is the
+/// severity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum RefreshCause {
     Other,
+    Busy,
     Auth,
     Access,
 }
 
 impl RefreshCause {
-    /// The severity as a number for the wire: 0 (other) to 2 (access).
+    /// The severity as a number for the wire: 0 (other) to 3 (access).
     pub fn rank(self) -> u8 {
         self as u8
     }
@@ -322,8 +384,13 @@ impl RefreshCause {
 
 /// What a failed refresh was, as recorded in `cache_sync_state.failure_kind`.
 /// Decided from the error itself; the text heuristic ([`is_auth_shaped`])
-/// remains only for errors that arrive as text (plugins, older rows).
+/// remains only for errors that arrive as text (plugins, older rows). A busy
+/// provider's token wins over the kind of error that carries it (decision
+/// 270): its text may hold "403" and must never read as a login problem.
 pub fn failure_kind(err: &cal_core::Error) -> Option<&'static str> {
+    if err.is_provider_busy() {
+        return Some(FAILURE_BUSY);
+    }
     match err {
         cal_core::Error::AccessNotGranted(_) => Some(FAILURE_ACCESS),
         cal_core::Error::Authentication(_) => Some(FAILURE_AUTH),
@@ -333,6 +400,12 @@ pub fn failure_kind(err: &cal_core::Error) -> Option<&'static str> {
 
 const FAILURE_ACCESS: &str = "access";
 const FAILURE_AUTH: &str = "auth";
+/// The provider was busy (decision 270): it heals by itself.
+const FAILURE_BUSY: &str = "busy";
+
+/// How many asked ranges [`CacheStore::ask_uncovered`] keeps per container
+/// and generation: one forgotten is asked once more, nothing worse.
+const UNCOVERED_ASKS_KEPT: usize = 32;
 
 /// The listing a container scope belongs to: an access failure blocks the
 /// whole family, and the family's listing row is where that is recorded.
@@ -352,35 +425,8 @@ fn listing_of(scope: SyncScope) -> SyncScope {
 /// manual refresh's result shows at once.
 const CONFIRM_THRESHOLD: i64 = 2;
 
-/// Heuristic: does a provider error text look like an AUTH failure (as
-/// opposed to a network blip)? Substring match over the usual suspects —
-/// conservative on purpose: a false "auth" only makes the UI suggest
-/// re-checking the password. The OAuth needles matter because a revoked
-/// grant's text carries the TOKEN endpoint's body
-/// (`{"error":"invalid_grant",...}`): Google and Graph now report such a
-/// refused refresh as an authentication error ("token refresh refused (HTTP
-/// 400): …"), but the builtin-oauth adapters (Drive, Dropbox, Webex), plugin
-/// messages passed through verbatim and older plugin builds still carry it
-/// as "protocol error: … HTTP 400: …" — exactly the case where
-/// re-authenticating is the fix.
-pub fn is_auth_shaped(error: &str) -> bool {
-    let lower = error.to_lowercase();
-    [
-        "401",
-        "403",
-        "unauthorized",
-        "unauthorised",
-        "forbidden",
-        "authentication",
-        "invalid credentials",
-        "password",
-        "invalid_grant",
-        "invalid_client",
-        "expired or revoked",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
-}
+/// The login-failure heuristic, in the core with its tests (`cal_core::is_auth_shaped`).
+pub use cal_core::is_auth_shaped;
 
 /// Outcome of an incremental sync the host hands to [`CacheStore`].
 #[derive(Debug, Clone, Default)]
@@ -464,6 +510,15 @@ impl CacheStore {
                 std::collections::HashMap::new(),
             )),
             event_proofs: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            busy_generations: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            uncovered_asks: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            counted_rounds: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
         }
@@ -815,6 +870,8 @@ impl CacheStore {
                 RefreshCause::Access
             } else if row_auth {
                 RefreshCause::Auth
+            } else if row.kind.as_deref() == Some(FAILURE_BUSY) {
+                RefreshCause::Busy
             } else {
                 RefreshCause::Other
             };
@@ -1760,7 +1817,9 @@ impl CacheStore {
         forced: bool,
     ) -> DbResult<()> {
         self.db
-            .with_conn(|c| record_failure(c, account, scope, container, message, None, forced))
+            .with_conn(|c| {
+                record_failure(c, account, scope, container, message, None, forced, true)
+            })
             .map(|_| ())
     }
 
@@ -1774,17 +1833,76 @@ impl CacheStore {
     /// for the whole family ([`Self::access_withheld`]) until a warm pass
     /// lists it again. It is confirmed at once, like a forced failure: it
     /// never heals by retrying.
+    ///
+    /// How the failure counts toward the warning depends on where the
+    /// attempt came from (decision 271): a read's busy failure does not
+    /// count, and pauses the container's reads ([`Self::busy_paused`]);
+    /// automatic rounds less than [`ROUND_SPAN`] apart count once; a forced
+    /// round shows at once.
     pub fn mark_failure(
         &self,
         account: &str,
         scope: SyncScope,
         container: &str,
         err: &cal_core::Error,
-        forced: bool,
+        attempt: Attempt,
     ) -> DbResult<bool> {
         let message = err.to_string();
         let kind = failure_kind(err);
         let access = kind == Some(FAILURE_ACCESS);
+        let busy = kind == Some(FAILURE_BUSY);
+        let key = (account.to_string(), scope.as_str(), container.to_string());
+        // Whether this failure starts a pause, or meets the one already on.
+        let pausing_again = busy && self.busy_paused(account, scope, container);
+        let counts = match attempt {
+            Attempt::Read { .. } => !busy,
+            Attempt::Forced { .. } => true,
+            Attempt::Background { .. } => {
+                let mut rounds = self.counted_rounds.lock().expect("counted rounds poisoned");
+                let now = std::time::Instant::now();
+                let fresh = rounds
+                    .get(&key)
+                    .is_none_or(|last| now.saturating_duration_since(*last) >= ROUND_SPAN);
+                if fresh {
+                    rounds.insert(key.clone(), now);
+                }
+                fresh
+            }
+        };
+        {
+            let mut generations = self
+                .busy_generations
+                .lock()
+                .expect("busy generations poisoned");
+            let mut asks = self.uncovered_asks.lock().expect("uncovered asks poisoned");
+            if busy {
+                // An older attempt's busy answer never moves a newer pause
+                // back: two reads of a container can be in flight across one
+                // of Aperio's writes, and their answers come in either order.
+                // The pause, and what it noted, stay at the newest generation
+                // an attempt was claimed at (decision 271).
+                let newer = generations
+                    .get(&key)
+                    .is_some_and(|stored| *stored > attempt.generation());
+                if !newer {
+                    generations.insert(key.clone(), attempt.generation());
+                    // A new pause starts with nothing asked. So does one this
+                    // process has no note of: a pause stored before a restart
+                    // outlives it, and its never-loaded ranges are asked once
+                    // too.
+                    let noted = asks
+                        .get(&key)
+                        .is_some_and(|(at, _)| *at == attempt.generation());
+                    if !pausing_again || !noted {
+                        asks.insert(key, (attempt.generation(), Vec::new()));
+                    }
+                }
+            } else {
+                generations.remove(&key);
+                asks.remove(&key);
+            }
+        }
+        let forced = matches!(attempt, Attempt::Forced { .. });
         self.db.with_tx(|tx| {
             let news = record_failure(
                 tx,
@@ -1794,13 +1912,117 @@ impl CacheStore {
                 &message,
                 kind,
                 forced || access,
+                counts,
             )?;
             let listing = listing_of(scope);
             if access && (listing != scope || !container.is_empty()) {
-                record_failure(tx, account, listing, "", &message, kind, true)?;
+                record_failure(tx, account, listing, "", &message, kind, true, true)?;
             }
             Ok(news)
         })
+    }
+
+    /// Whether a busy provider pauses the per-read refreshes of this
+    /// container (decision 271): its last attempt failed busy, and nothing of
+    /// Aperio's has changed it since (its generation is the one that attempt
+    /// was claimed at). Any success, any other failure, or Aperio's own write
+    /// lifts it; the warm pass is never paused.
+    pub fn busy_paused(&self, account: &str, scope: SyncScope, container: &str) -> bool {
+        let busy_now = self
+            .db
+            .with_read_conn(|c| {
+                c.query_row(
+                    "SELECT 1 FROM cache_sync_state
+                     WHERE account_id = ?1 AND scope = ?2 AND container_id = ?3
+                       AND last_error IS NOT NULL AND failure_kind = 'busy'",
+                    params![account, scope.as_str(), container],
+                    |_| Ok(()),
+                )
+                .optional()
+            })
+            .ok()
+            .flatten()
+            .is_some();
+        if !busy_now {
+            return false;
+        }
+        let claimed = self
+            .busy_generations
+            .lock()
+            .expect("busy generations poisoned")
+            .get(&(account.to_string(), scope.as_str(), container.to_string()))
+            .copied()
+            .unwrap_or(0);
+        claimed == self.refresh_generation(account, scope, container)
+    }
+
+    /// Whether a read of a range the container's snapshot does not reach may
+    /// ask the provider (decision 271). Outside a busy pause it always may.
+    /// During one, each range is asked once (Toni, 2026-10-23): a failed ask
+    /// writes no window, so without [`Self::note_uncovered_busy`] every read
+    /// of that week asked the busy provider again — also after Aperio's own
+    /// write, which clears the window and lets one read through.
+    pub fn ask_uncovered(
+        &self,
+        account: &str,
+        scope: SyncScope,
+        container: &str,
+        range: DateRange,
+    ) -> bool {
+        if !self.busy_paused(account, scope, container) {
+            return true;
+        }
+        let generation = self.refresh_generation(account, scope, container);
+        let asks = self.uncovered_asks.lock().expect("uncovered asks poisoned");
+        !asks
+            .get(&(account.to_string(), scope.as_str(), container.to_string()))
+            .is_some_and(|(at, ranges)| {
+                *at == generation
+                    && ranges
+                        .iter()
+                        .any(|asked| asked.start <= range.start && asked.end >= range.end)
+            })
+    }
+
+    /// Note that a read of `range`, claimed at `generation`, met the busy
+    /// provider: during that pause it is not asked again
+    /// ([`Self::ask_uncovered`]). Called after [`Self::mark_failure`], which
+    /// starts the pause.
+    pub fn note_uncovered_busy(
+        &self,
+        account: &str,
+        scope: SyncScope,
+        container: &str,
+        generation: u64,
+        range: DateRange,
+    ) {
+        let mut asks = self.uncovered_asks.lock().expect("uncovered asks poisoned");
+        let Some((at, ranges)) =
+            asks.get_mut(&(account.to_string(), scope.as_str(), container.to_string()))
+        else {
+            return;
+        };
+        if *at != generation {
+            return;
+        }
+        if ranges.len() >= UNCOVERED_ASKS_KEPT {
+            ranges.remove(0);
+        }
+        ranges.push(range);
+    }
+
+    /// Lets the tests age a container's last counted round past
+    /// [`ROUND_SPAN`] without waiting a minute.
+    #[cfg(test)]
+    pub(crate) fn age_counted_round(&self, account: &str, scope: SyncScope, container: &str) {
+        let mut rounds = self.counted_rounds.lock().expect("counted rounds poisoned");
+        if let Some(last) =
+            rounds.get_mut(&(account.to_string(), scope.as_str(), container.to_string()))
+        {
+            *last = last
+                .checked_sub(ROUND_SPAN + std::time::Duration::from_secs(1))
+                .unwrap_or(*last);
+        }
     }
 
     /// Whether the operating system has withheld this scope's family from
@@ -2302,6 +2524,9 @@ fn listing_of_str(scope: &str) -> &'static str {
 
 /// Record one failed attempt; see [`CacheStore::mark_error`]. Returns whether
 /// the row's error or kind changed (it was not failing, or failed otherwise).
+/// An attempt that does not `count` (decision 271) writes its error and kind
+/// and leaves the counter as it was.
+#[allow(clippy::too_many_arguments)]
 fn record_failure(
     c: &Connection,
     account: &str,
@@ -2310,11 +2535,13 @@ fn record_failure(
     message: &str,
     kind: Option<&str>,
     forced: bool,
+    counts: bool,
 ) -> DbResult<bool> {
     // Floor the counter for a forced failure so it crosses the confirm
     // threshold on the first try; automatic failures just increment.
     let floor: i64 = if forced { CONFIRM_THRESHOLD } else { 0 };
-    let initial: i64 = floor.max(1);
+    let step: i64 = i64::from(counts);
+    let initial: i64 = floor.max(step);
     let before: Option<(Option<String>, Option<String>)> = c
         .query_row(
             "SELECT last_error, failure_kind FROM cache_sync_state
@@ -2330,7 +2557,7 @@ fn record_failure(
          ON CONFLICT(account_id, scope, container_id) DO UPDATE SET
            last_error = excluded.last_error,
            failure_kind = excluded.failure_kind,
-           consecutive_failures = max(consecutive_failures + 1, ?6)",
+           consecutive_failures = max(consecutive_failures + ?8, ?6)",
         params![
             account,
             scope.as_str(),
@@ -2338,7 +2565,8 @@ fn record_failure(
             message,
             initial,
             floor,
-            kind
+            kind,
+            step
         ],
     )?;
     Ok(match before {

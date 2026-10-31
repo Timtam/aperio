@@ -10,13 +10,15 @@ import {
 } from 'react-native';
 
 import {
+  type EventGroup,
   eventGroupMemberKey,
   expandAll,
   memberFromEvent,
+  readErrorMessage,
   seriesIdOf,
   suggestGroupMate,
   withoutDuplicateMeetings,
-  type EventGroup,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 import { getEvents, listCalendars, type Calendar, type CalendarEvent } from '../api/calendar';
@@ -44,10 +46,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 //
 // Nothing here reaches a provider: grouping two events changes neither of
 // them, and ungrouping leaves both exactly as they were.
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** The day the anchor event starts, as a local midnight-to-midnight range. */
 function dayRangeOf(event: CalendarEvent): { start: string; end: string } {
@@ -206,13 +204,13 @@ export default function EventGroupModal({
           );
         }
       } catch (err) {
-        if (!cancelled) setError(errorMessage(err));
+        if (!cancelled) setError(readErrorMessage(err, t));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [event, loadGroup]);
+  }, [event, loadGroup, t]);
 
   /**
    * The events that can be named as "the same appointment".
@@ -300,7 +298,7 @@ export default function EventGroupModal({
       const message =
         (err as { code?: string })?.code === 'event_group_conflict'
           ? t('dialogs.eventGroup.conflict')
-          : errorMessage(err);
+          : writeErrorMessage(err, t);
       setError(message);
       // The live region below is ANDROID ONLY — `accessibilityLiveRegion` maps
       // to the Android platform attribute and does nothing on iOS. Removing
