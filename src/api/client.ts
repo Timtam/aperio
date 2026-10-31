@@ -1785,7 +1785,6 @@ export const forgetSyncDevice = (deviceId: string) =>
 export interface OnboardingReport {
   fetched_logs: number;
   applied: number;
-  skipped_own: number;
   skipped_already_applied: number;
   skipped_unsupported: number;
   apply_failures: number;

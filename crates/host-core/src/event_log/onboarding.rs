@@ -150,7 +150,6 @@ pub struct DeviceSummary {
 pub struct OnboardingReport {
     pub fetched_logs: usize,
     pub applied: usize,
-    pub skipped_own: usize,
     pub skipped_already_applied: usize,
     pub skipped_unsupported: usize,
     pub apply_failures: usize,
@@ -171,7 +170,6 @@ pub struct OnboardingReport {
 impl OnboardingReport {
     fn merge_apply(&mut self, report: ApplyReport) {
         self.applied += report.applied;
-        self.skipped_own += report.skipped_own;
         self.skipped_already_applied += report.skipped_already_applied;
         self.skipped_unsupported += report.skipped_unsupported;
         self.apply_failures += report.failed;
