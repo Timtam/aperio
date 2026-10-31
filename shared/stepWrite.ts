@@ -51,15 +51,21 @@ export interface StepWriteCreate {
 
 /**
  * Whether this CREATE runs in steps in that calendar (`createsInSteps`) —
- * never one that keeps someone else's meeting from a file as theirs (I6):
- * Exchange and Google take it in one request, its deletions with it, before
- * they would create a series in steps.
+ * never one that keeps someone else's meeting from a file as theirs (I6): its
+ * deletions go in with the request that creates it (Exchange then sends the
+ * reply, moves it and reads it back; Google imports it in one call), and
+ * nothing is removed one occurrence at a time. Only where the surface knew
+ * the account's address (`own`): without it a meeting read as someone else's
+ * may be the account's own, which the adapter, asking for itself, then writes
+ * in steps (review round 22 of #128).
  */
 export function createRunsInSteps(
   target: StepWriteTarget | null | undefined,
   create: StepWriteCreate,
+  own: string | null | undefined,
 ): boolean {
-  return !create.keeps_invitation && createsInSteps(target, create.recurrence);
+  const theirs = create.keeps_invitation === true && Boolean(own?.trim());
+  return !theirs && createsInSteps(target, create.recurrence);
 }
 
 /**

@@ -31,16 +31,26 @@ describe('createsInSteps', () => {
   });
 
   it('never for a create that keeps someone else’s meeting as theirs', () => {
-    // Review round 21 of #128: Exchange and Google take it in one request,
-    // its deletions with it.
-    expect(createRunsInSteps(exchange, { recurrence: withDeletions })).toBe(true);
+    // Review round 21 of #128: Exchange and Google take it with its
+    // deletions; nothing is removed one occurrence at a time.
+    const own = 'me@example.org';
+    expect(createRunsInSteps(exchange, { recurrence: withDeletions }, own)).toBe(true);
     expect(
-      createRunsInSteps(exchange, { recurrence: withDeletions, keeps_invitation: false }),
+      createRunsInSteps(exchange, { recurrence: withDeletions, keeps_invitation: false }, own),
     ).toBe(true);
     expect(
-      createRunsInSteps(exchange, { recurrence: withDeletions, keeps_invitation: true }),
+      createRunsInSteps(exchange, { recurrence: withDeletions, keeps_invitation: true }, own),
     ).toBe(false);
-    expect(createRunsInSteps(caldav, { recurrence: withDeletions })).toBe(false);
+    expect(createRunsInSteps(caldav, { recurrence: withDeletions }, own)).toBe(false);
+  });
+
+  it('waits for an invitation where the account’s address was not known', () => {
+    // Review round 22 of #128: read as someone else's for want of the
+    // address, it may be the account's own, which the adapter writes in steps.
+    const invitation = { recurrence: withDeletions, keeps_invitation: true };
+    expect(createRunsInSteps(exchange, invitation, null)).toBe(true);
+    expect(createRunsInSteps(exchange, invitation, undefined)).toBe(true);
+    expect(createRunsInSteps(exchange, invitation, ' ')).toBe(true);
   });
 
   it('a surface without a dialog just writes', async () => {

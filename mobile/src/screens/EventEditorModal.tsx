@@ -2028,6 +2028,7 @@ function EventEditorScreen({
           createRunsInSteps(
             calendars.find((c) => c.id === calId),
             request,
+            importOwn,
           ),
           () => createEvent(request, { preserveRecurrenceZone: imported != null }),
         );

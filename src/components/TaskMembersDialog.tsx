@@ -131,9 +131,10 @@ export function TaskMembersDialog({
       } catch (err) {
         // Only the write can land here: `reload` says its own failure. One
         // that may have landed reads the members again first, as they now
-        // stand (review round 21 of #128); its sentence comes after, since a
-        // read clears the one before.
-        if (!writeNeverLanded(err)) await reload();
+        // stand, quietly, so the rows that stay keep the focus (review rounds
+        // 21 and 22 of #128); its sentence comes after, since a read clears
+        // the one before.
+        if (!writeNeverLanded(err)) await reload(true);
         setError(writeErrorMessage(err, t));
       } finally {
         setBusy(false);

@@ -369,7 +369,7 @@ function ImportList({
         // in steps: the "please wait" dialog says so (decisions 227, 265).
         // Someone else's meeting kept as theirs goes in at once.
         const create = importedCreate(entry, intoOf(entry), calendarId, isHeld(index));
-        await wait(createRunsInSteps(calendar, create), () =>
+        await wait(createRunsInSteps(calendar, create, own), () =>
           apiCreateEvent(create, { preserveRecurrenceZone: true }),
         );
         done += 1;

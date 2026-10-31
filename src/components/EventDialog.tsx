@@ -2318,6 +2318,7 @@ export function EventDialog({
             createRunsInSteps(
               calendars.find((c) => c.id === form.calendarId),
               request,
+              importOwn,
             ),
             () => apiCreateEvent(request, { preserveRecurrenceZone: imported != null }),
           );

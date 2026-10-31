@@ -1434,9 +1434,13 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     schreibt, sagt sein Manifest (`recurrence.deletions_in_steps`); es wird
     beim Lesen der Kalenderliste gestempelt und braucht keinen neuen
     `CACHE_GENERATION`. Eine fremde Einladung aus einer Datei, die der
-    Kalender als ihre behält, geht bei Exchange und Google in einer Anfrage
-    hinein, ihre Löschungen mit ihr (I6): Für sie zeigt keine Oberfläche den
-    Wartedialog (`createRunsInSteps`, Prüfrunde 21 von #128).
+    Kalender als ihre behält, geht mit ihren Löschungen hinein: bei Exchange
+    als Anfrage (danach Antwort, Ordner, Zurücklesen; scheitert davon etwas,
+    steht sie zum Teil, 277), bei Google in einem Import. Kein Schritt
+    entfernt Termine einzeln, darum zeigt keine Oberfläche für sie den
+    Wartedialog (`createRunsInSteps`, Prüfrunde 21 von #128) — außer die
+    Oberfläche kannte die Adresse des Kontos nicht: Dann kann es dessen eigene
+    sein, die der Adapter in Schritten schreibt (Prüfrunde 22).
   - **Ein ausgelasteter Anbieter (270-278, PR 7).** Weist ein Anbieter eine
     Anfrage ab, weil in kurzer Zeit zu viele kamen (429, Googles
     `rateLimitExceeded`, Exchanges `ErrorServerBusy`, ein 503 mit

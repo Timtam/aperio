@@ -82,12 +82,15 @@ pub enum WriteRefusal {
     /// the series like any other, and where the detail says
     /// [`crate::step_write::INVITED`] its invitees may have heard of it and got
     /// its cancellation too (212). The detail is
-    /// [`crate::step_write::step_detail`]: a machine token for the log, marked
-    /// when the invitees may have heard of it — `no-occurrence` (no occurrence
-    /// found where the provider's rule makes one), `foreign-deletion`,
-    /// `unreadable`, `control` and `after-control` (the series read before and
-    /// after), `time`, `invitation`, `network`, `http-<status>` or a code of the
-    /// provider's own, `<provider>-<code>`.
+    /// [`crate::step_write::step_detail`]: a machine token, marked when the
+    /// invitees may have heard of it — `no-occurrence` (no occurrence found
+    /// where the provider's rule makes one), `foreign-deletion`, `unreadable`,
+    /// `control` and `after-control` (the series read before and after),
+    /// [`crate::step_write::OUT_OF_TIME`], [`crate::step_write::PROVIDER_BUSY`]
+    /// (the provider kept asking it to wait, decision 276), `invitation`,
+    /// `network`, `http-<status>` or a code of the provider's own,
+    /// `<provider>-<code>`. `time` and `busy` choose what the surfaces say (too
+    /// slow; busy, try again later); the others are for the log.
     DeletionsNotKept,
     /// The provider turned the request away because it is throttling, and the
     /// request wrote nothing (decision 270): try again later. Reads carry it
