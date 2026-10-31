@@ -34,7 +34,12 @@ use crate::device::DeviceId;
 /// variants — are forward-compatible because we don't use
 /// `#[serde(deny_unknown_fields)]` anywhere; older clients
 /// silently ignore the additions.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// 2 (2026-10-31, PR #130): row clocks, the catch-up and the GC that waits
+/// for every exact device. A build that weighs changes by file name would
+/// delete files a device still needs; the first compaction on this format
+/// raises `min_app_version`, locking such builds out (Toni's decision).
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// One row in the per-device registry.
 ///

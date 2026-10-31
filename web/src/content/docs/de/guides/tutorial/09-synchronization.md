@@ -100,7 +100,9 @@ entfernt.
 
 Aperio bewahrt die Änderungsprotokolle mindestens zwei Wochen auf und löscht
 keines, solange ein Gerät darüber noch nachholen muss. Wenn du von Hand
-kompaktierst, nennt es die Geräte, auf die es wartet.
+kompaktierst, nennt es die Geräte, auf die es wartet. Sobald ein Gerät mit
+dieser Version kompaktiert hat, werden Geräte mit einer älteren Version um ein
+Update gebeten, bevor sie wieder synchronisieren.
 
 Dieselbe Regel gilt jeden Tag: Eine Änderung, die spät ankommt, etwa offline
 geschrieben, gewinnt nicht gegen eine neuere. Das Löschen eines Eintrags

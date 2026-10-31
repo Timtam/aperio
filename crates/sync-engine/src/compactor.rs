@@ -1163,6 +1163,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_first_compaction_locks_out_the_builds_before_the_catch_up() {
+        // Toni, 2026-10-31: builds before PR #130 weigh changes by file name
+        // and would delete files a device still needs. They report 0.1.0 on
+        // a dataset of format 1; the first compaction on this format raises
+        // the minimum past them.
+        assert!(
+            sync_core::version_less("0.1.0", env!("CARGO_PKG_VERSION")),
+            "this build must report a version above the ones it locks out"
+        );
+        let (_store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        let mut before = sync_core::MetaJson::fresh("0.1.0");
+        before.schema_version = 1;
+        before.min_app_version = "0.1.0".into();
+        *adapter.meta.lock().unwrap() = Some(before);
+
+        compactor.compact_now(&adapter).await.unwrap();
+
+        let meta = adapter.meta.lock().unwrap().clone().unwrap();
+        assert!(matches!(
+            sync_core::ensure_compatible(&meta, "0.1.0"),
+            Err(sync_core::SyncError::SchemaTooOld { .. })
+        ));
+    }
+
+    #[tokio::test]
     async fn compact_preserves_min_app_version_when_schema_already_current() {
         // No schema upgrade → the existing min_app_version must NOT be raised.
         let (_store, compactor) = build_compactor();

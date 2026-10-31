@@ -96,7 +96,8 @@ exists only on this device is removed.
 
 Aperio keeps the change logs for at least two weeks, and deletes none while a
 device still has to catch up over them. If you compact by hand, it names the
-devices it is waiting for.
+devices it is waiting for. Once a device on this version has compacted,
+devices on an older version are asked to update before they sync again.
 
 The same rule holds every day: a change that arrives late — written offline,
 say — does not win over a newer one. Deleting an entry wins over an edit made

@@ -372,7 +372,10 @@ gegengeprüft, ein Kritiker. Einzelheiten: scratchpad `coverage/review_r3.json`.
 
 ## Entscheidungen nach Prüfrunde 3 (Toni, 2026-10-31)
 
-- **Alte Builds aussperren:** Die Sync-Formatversion steigt. Die erste
-  Verdichtung eines neuen Builds hebt `min_app_version` an; alte Builds
-  synchronisieren dann nicht mehr und zeigen „Update nötig“.
+- **Alte Builds aussperren:** Die Sync-Formatversion steigt auf 2, die
+  App-Version auf 0.2.0 (Toni: 0.2.0; Desktop und Handy melden für den Sync
+  die Workspace-Version, und die alten Builds melden 0.1.0). Die erste
+  Verdichtung eines neuen Builds hebt `min_app_version` auf 0.2.0; alte Builds
+  synchronisieren dann nicht mehr und zeigen „Update nötig“. Bis dahin können
+  sie noch nach Namen löschen: nach dem Update einmal „Jetzt kompaktieren“.
 - Danach eine Prüfrunde wie Runde 3.
