@@ -29,14 +29,16 @@
 //! from `user_prefs` by the host (a DB concern) and handed in.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use chrono::{DateTime, Utc};
-use sync_core::{DeviceId, EventEnvelope, LogFileName, SyncEvent};
+use sync_core::{DeviceId, EventEnvelope, LogFile, LogFileName, SyncEvent};
 use tokio::fs::{File, OpenOptions};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, Notify};
 use tracing::{debug, warn};
+
+use crate::SyncStore;
 
 /// A message on the drain queue. Either an event to append or a request to
 /// roll over to a new session file. Routing the rotation through the same
@@ -56,7 +58,7 @@ enum DrainMsg {
 }
 
 /// Handle to the per-process event-log writer.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct EventLogWriter {
     device_id: DeviceId,
     /// Sender half of the drain queue. `send` is allocation-only — appending a
@@ -70,6 +72,25 @@ pub struct EventLogWriter {
     /// inside a debounce window, the second ping is absorbed and the same
     /// round flushes both edits (the coalescing DESIGN.md §19.8 asks for).
     kick: Option<Arc<Notify>>,
+    /// Where this device's own changes advance their row's clock
+    /// (`sync_row_clock`, DESIGN-sync-snapshot-coverage.md), so an older
+    /// change from another device, arriving late, does not win over them.
+    /// Set once the store exists ([`Self::set_row_clock`]); shared by every
+    /// clone of the handle.
+    row_clock: Arc<OnceLock<Arc<dyn SyncStore>>>,
+    /// The time the file the writer appends to is named by: this launch's
+    /// boot, then each rotation's. Shared by every clone of the handle.
+    session_at: Arc<std::sync::Mutex<DateTime<Utc>>>,
+}
+
+impl std::fmt::Debug for EventLogWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventLogWriter")
+            .field("device_id", &self.device_id)
+            .field("kick", &self.kick.is_some())
+            .field("row_clock", &self.row_clock.get().is_some())
+            .finish()
+    }
 }
 
 impl EventLogWriter {
@@ -110,10 +131,18 @@ impl EventLogWriter {
             device_id: device_id.clone(),
             sender,
             kick,
+            row_clock: Arc::new(OnceLock::new()),
+            session_at: Arc::new(std::sync::Mutex::new(session_at)),
         });
         let pending_dir = data_dir.join("sync").join("log").join("pending");
         tokio::spawn(drain_loop(pending_dir, device_id, session_at, receiver));
         writer
+    }
+
+    /// The time the file the writer appends to is named by. A pending file
+    /// named before it is finished: nothing appends to it any more.
+    pub fn session_at(&self) -> DateTime<Utc> {
+        *self.session_at.lock().expect("session_at mutex poison")
     }
 
     /// Borrow the device id this writer is tagging events with.
@@ -121,12 +150,36 @@ impl EventLogWriter {
         &self.device_id
     }
 
+    /// Hand the writer the store whose row clocks this device's own changes
+    /// advance. Once; a second call is ignored.
+    pub fn set_row_clock(&self, store: Arc<dyn SyncStore>) {
+        let _ = self.row_clock.set(store);
+    }
+
     /// Queue one [`SyncEvent`] for writing. Returns immediately — the actual
     /// disk write happens in the drain task. A `send` error (only possible if
     /// the drain task has exited, which it doesn't in production) logs a
     /// warning; the mutation itself already succeeded against the store.
     pub fn append(&self, event: SyncEvent) {
-        let envelope = EventEnvelope::new(self.device_id.clone(), event);
+        let mut envelope = EventEnvelope::new(self.device_id.clone(), event);
+        // This change is the newest its row has seen: an older one from
+        // another device, arriving later, must not win over it.
+        if let (Some(store), Some(key)) = (self.row_clock.get(), envelope.event.row_key()) {
+            // Newer than anything the row has seen, even where this device's
+            // clock lags the one that wrote it: stamped older, every other
+            // device would skip it for good (review round 2 of #130).
+            match store.row_clock(&key) {
+                Ok(Some(clock)) if clock.changed >= envelope.timestamp => {
+                    envelope.timestamp = clock.changed + chrono::Duration::microseconds(1);
+                }
+                Ok(_) => {}
+                Err(err) => warn!(?err, kind = key.kind, "couldn't read the row's clock"),
+            }
+            let write = crate::RowWrite::of(&envelope.event);
+            if let Err(err) = store.advance_row_clock(&key, envelope.timestamp, write) {
+                warn!(?err, kind = key.kind, "couldn't advance the row's clock");
+            }
+        }
         if let Err(err) = self.sender.send(DrainMsg::Event(Box::new(envelope))) {
             warn!(?err, "event-log writer channel closed; event lost");
         }
@@ -163,7 +216,12 @@ impl EventLogWriter {
         }
         // `Err` here means the drain task dropped the ack without replying (it
         // exited mid-rotation) — treat as "no rotation".
-        rx.await.ok().flatten()
+        let closed = rx.await.ok().flatten();
+        if closed.is_some() {
+            // Only after the swap: until then the old file is the live one.
+            *self.session_at.lock().expect("session_at mutex poison") = new_session_at;
+        }
+        closed
     }
 }
 
@@ -192,18 +250,22 @@ async fn drain_loop(
     let Some(mut file) = open_append(&path).await else {
         return;
     };
+    // An append that failed may have left part of its line in the file.
+    let mut cut_short = false;
 
     while let Some(msg) = receiver.recv().await {
         match msg {
-            DrainMsg::Event(envelope) => {
-                if let Err(err) = write_one(&mut file, &envelope).await {
+            DrainMsg::Event(envelope) => match write_one(&mut file, &envelope, cut_short).await {
+                Ok(()) => cut_short = false,
+                Err(err) => {
+                    cut_short = true;
                     warn!(
                         event_id = %envelope.id,
                         ?err,
                         "failed to write event to log; dropping it",
                     );
                 }
-            }
+            },
             DrainMsg::Rotate {
                 new_session_at,
                 ack,
@@ -218,6 +280,7 @@ async fn drain_loop(
                     Some(new_file) => {
                         let old_path = std::mem::replace(&mut path, new_path);
                         file = new_file;
+                        cut_short = false;
                         debug!(
                             old = %old_path.display(),
                             new = %path.display(),
@@ -278,13 +341,48 @@ async fn open_append(path: &Path) -> Option<File> {
 /// Serialise one envelope and append it as a JSONL line. Flushes after every
 /// write — mutations happen at user speed (one at a time, not bursts), so the
 /// per-event flush cost is invisible and gives durability across crashes.
-async fn write_one(file: &mut File, envelope: &EventEnvelope) -> Result<(), std::io::Error> {
-    let line = serde_json::to_vec(envelope)
+/// `after_failure`: the last append failed and may have left part of its
+/// line; this one starts on a line of its own, so it is not glued to that
+/// half (review round 14 of #130).
+async fn write_one(
+    file: &mut (impl AsyncWrite + Unpin),
+    envelope: &EventEnvelope,
+    after_failure: bool,
+) -> Result<(), std::io::Error> {
+    let mut line = Vec::new();
+    if after_failure {
+        line.push(b'\n');
+    }
+    serde_json::to_writer(&mut line, envelope)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+    line.push(b'\n');
     file.write_all(&line).await?;
-    file.write_all(b"\n").await?;
     file.flush().await?;
     Ok(())
+}
+
+/// What this device's writer put into a pending file: every line that
+/// parses, and whether any did not (review round 14 of #130). Such a line is
+/// damage — a crash or a full disk left it half written, at the end or, before
+/// this build, with the next line glued to it —, and the lines around it
+/// stand. `None` where a line is whole JSON this build cannot read: a newer
+/// build's, no damage, and not this build's to drop.
+pub fn written_lines(log: &LogFile) -> Option<(Vec<EventEnvelope>, bool)> {
+    let text = String::from_utf8_lossy(&log.bytes);
+    let mut lines = Vec::new();
+    let mut damaged = false;
+    for raw in text.lines() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<EventEnvelope>(trimmed) {
+            Ok(envelope) => lines.push(envelope),
+            Err(_) if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() => return None,
+            Err(_) => damaged = true,
+        }
+    }
+    Some((lines, damaged))
 }
 
 #[cfg(test)]
@@ -413,6 +511,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn own_changes_advance_their_rows_clock_as_they_are_written() {
+        // DESIGN-sync-snapshot-coverage.md: this device's own change is the
+        // newest its row has seen, so an older one from another device,
+        // arriving later, does not win over it.
+        let tmp = TempDir::new().unwrap();
+        let writer =
+            EventLogWriter::spawn(tmp.path().to_path_buf(), DeviceId::from_string("me".into()));
+        let store = Arc::new(crate::test_support::FakeStore::default());
+        writer.set_row_clock(store.clone());
+        let before = Utc::now();
+        writer.append(SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+            key: "appearance.darkMode".into(),
+            value: serde_json::json!(true),
+        }));
+        let key = sync_core::RowKey {
+            kind: "setting",
+            id: "appearance.darkMode".into(),
+        };
+        let clock = store.row_clocks.lock().unwrap().get(&key).copied();
+        // A setting is written whole: both times move.
+        assert!(
+            clock.is_some_and(
+                |clock| clock.changed >= before && clock.written == Some(clock.changed)
+            ),
+            "{clock:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn an_own_change_is_newer_than_its_row_even_when_this_clock_lags() {
+        // The row's newest change came from a device whose clock runs ahead:
+        // stamped with this device's time, this later change would count as
+        // older everywhere else.
+        let tmp = TempDir::new().unwrap();
+        let writer =
+            EventLogWriter::spawn(tmp.path().to_path_buf(), DeviceId::from_string("me".into()));
+        let store = Arc::new(crate::test_support::FakeStore::default());
+        writer.set_row_clock(store.clone());
+        let key = sync_core::RowKey {
+            kind: "setting",
+            id: "appearance.darkMode".into(),
+        };
+        let ahead = Utc::now() + chrono::Duration::minutes(5);
+        store
+            .advance_row_clock(&key, ahead, crate::RowWrite::Whole)
+            .unwrap();
+        writer.append(SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+            key: "appearance.darkMode".into(),
+            value: serde_json::json!(false),
+        }));
+        let stamped = ahead + chrono::Duration::microseconds(1);
+        let clock = store.row_clocks.lock().unwrap().get(&key).copied().unwrap();
+        assert_eq!(clock.changed, stamped);
+        // And that is the time the peers read in the file.
+        let pending = tmp.path().join("sync").join("log").join("pending");
+        let mut written = Vec::new();
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if let Some(file) = std::fs::read_dir(&pending)
+                .ok()
+                .and_then(|mut entries| entries.next())
+                .and_then(|entry| entry.ok())
+            {
+                written = std::fs::read(file.path()).unwrap_or_default();
+                if !written.is_empty() {
+                    break;
+                }
+            }
+        }
+        let line = String::from_utf8(written).unwrap();
+        let envelope: EventEnvelope = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(envelope.timestamp, stamped);
+    }
+
+    #[tokio::test]
     async fn session_file_is_named_with_the_injected_boot_instant() {
         use chrono::{TimeZone, Utc};
         let boot = Utc.with_ymd_and_hms(2026, 5, 31, 7, 0, 0).unwrap();
@@ -440,5 +613,108 @@ mod tests {
             }
         }
         panic!("no log file created");
+    }
+
+    /// Takes `room` more bytes, then fails as a full disk does.
+    struct FullDisk {
+        written: Vec<u8>,
+        room: usize,
+    }
+
+    impl AsyncWrite for FullDisk {
+        fn poll_write(
+            mut self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            if self.room == 0 {
+                return std::task::Poll::Ready(Err(std::io::Error::other("no space left")));
+            }
+            let taken = buf.len().min(self.room);
+            self.written.extend_from_slice(&buf[..taken]);
+            self.room -= taken;
+            std::task::Poll::Ready(Ok(taken))
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    fn deleted(id: &str) -> EventEnvelope {
+        EventEnvelope::new(
+            DeviceId::from_string("dev-test".into()),
+            SyncEvent::EventDeleted(IdPayload { id: id.into() }),
+        )
+    }
+
+    fn pending(bytes: Vec<u8>) -> LogFile {
+        LogFile {
+            name: LogFileName::new(chrono::Utc::now(), DeviceId::from_string("dev-test".into())),
+            bytes,
+        }
+    }
+
+    fn ids(lines: &[EventEnvelope]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|envelope| match &envelope.event {
+                SyncEvent::EventDeleted(payload) => payload.id.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn an_append_after_a_failed_one_starts_on_a_line_of_its_own() {
+        // Review round 14 of #130: glued to the half line a full disk left,
+        // the next change was lost with it.
+        let mut disk = FullDisk {
+            written: Vec::new(),
+            room: 10,
+        };
+        assert!(write_one(&mut disk, &deleted("a"), false).await.is_err());
+        disk.room = usize::MAX;
+        write_one(&mut disk, &deleted("b"), true).await.unwrap();
+        write_one(&mut disk, &deleted("c"), false).await.unwrap();
+
+        let (lines, damaged) = written_lines(&pending(disk.written)).unwrap();
+        assert_eq!(ids(&lines), ["b", "c"]);
+        assert!(damaged);
+    }
+
+    #[test]
+    fn the_whole_lines_of_a_damaged_file_stand() {
+        // Review round 14 of #130: a half line in the middle, and a tail a
+        // crash filled with zeros.
+        let mut bytes = Vec::new();
+        for (id, tail) in [("a", "\n{\"id\":\"half\n"), ("b", "\n\0\0\0")] {
+            bytes.extend(serde_json::to_vec(&deleted(id)).unwrap());
+            bytes.extend(tail.as_bytes());
+        }
+        let (lines, damaged) = written_lines(&pending(bytes)).unwrap();
+        assert_eq!(ids(&lines), ["a", "b"]);
+        assert!(damaged);
+        let whole = serde_json::to_vec(&deleted("a")).unwrap();
+        let (lines, damaged) = written_lines(&pending(whole)).unwrap();
+        assert_eq!(ids(&lines), ["a"]);
+        assert!(!damaged);
+    }
+
+    #[test]
+    fn a_line_of_a_newer_build_is_no_damage() {
+        let mut bytes = serde_json::to_vec(&deleted("a")).unwrap();
+        bytes.extend(b"\n{\"id\":\"x\",\"type\":\"from.a.newer.build\"}\n");
+        assert!(written_lines(&pending(bytes)).is_none());
     }
 }

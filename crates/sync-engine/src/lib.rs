@@ -35,24 +35,32 @@ mod compactor;
 // shared local-FS remote) — test-only, so a plain `mod tests` inside a
 // single component file can't host them.
 #[cfg(test)]
+mod coverage_round_tests;
+#[cfg(test)]
 mod growth_refetch_tests;
 mod orchestrator;
+pub mod pushed;
 mod snapshot;
 mod writer;
-pub use applier::{conflict_still_genuine, ApplyReport, EventLogApplier};
+pub use applier::{conflict_still_genuine, ApplyReport, EventLogApplier, PassContext};
 pub use compactor::{
     CompactionReport, Compactor, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LOGS,
     PREF_BYTES_SINCE_SNAPSHOT, PREF_LOGS_SINCE_SNAPSHOT, PREF_MAX_AGE_DAYS, PREF_MAX_BYTES,
     PREF_MAX_LOGS,
 };
 pub use orchestrator::{
-    merge_applied_log_lengths, SyncOrchestrator, SyncRoundHooks, SYNC_APPLIED_LOG_LENGTHS_PREF_KEY,
-    SYNC_CURSOR_PREF_KEY, SYNC_LAST_ROUND_PREF_KEY, SYNC_OWN_NEWEST_LOG_PREF_KEY,
+    merge_applied_log_lengths, LeftoversCutoff, RoundHold, SyncOrchestrator, SyncRoundHooks,
+    UnreadableLogs, CATCH_UP_RETRY, HOLD_ROUNDS_WAIT, SYNC_APPLIED_LOG_LENGTHS_PREF_KEY,
+    SYNC_CATCH_UP_TRIED_AT_PREF_KEY, SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, SYNC_CURSOR_PREF_KEY,
+    SYNC_LAST_ROUND_PREF_KEY, SYNC_LEFTOVERS_CUTOFF_PREF_KEY, SYNC_LEFTOVERS_SETTLED_PREF_KEY,
+    SYNC_LEFTOVERS_TRIED_AT_PREF_KEY, SYNC_LEFTOVER_TAILS_PREF_KEY, SYNC_OWN_NEWEST_LOG_PREF_KEY,
+    SYNC_TORN_SEEN_PREF_KEY, SYNC_UNREADABLE_LOGS_PREF_KEY,
 };
 pub use snapshot::{
     AperioSnapshotBody, SnapshotAccount, SnapshotApplyOutcome, SnapshotBuilder, SnapshotCredential,
+    SnapshotRowClock,
 };
-pub use writer::EventLogWriter;
+pub use writer::{written_lines, EventLogWriter};
 
 pub mod whitelist;
 
@@ -91,6 +99,8 @@ pub struct SyncRoundReport {
     pub skipped_own: usize,
     pub skipped_already_applied: usize,
     pub skipped_unsupported: usize,
+    /// Envelopes older than their row's clock: a newer change already won.
+    pub skipped_older: usize,
     /// Per-envelope apply failures (non-fatal; the round still succeeds).
     pub apply_failures: usize,
     /// Push failures logged but tolerated (one bad file shouldn't sink a round).
@@ -369,6 +379,41 @@ pub trait SyncStore: Send + Sync {
     /// Record that the event with this id has been integrated, so a later
     /// pass skips it. Idempotent (INSERT OR IGNORE).
     fn mark_event_applied(&self, event_id: &str) -> Result<(), StoreError>;
+    /// Record a batch of event ids as integrated at once — the events a
+    /// snapshot names as held (DESIGN-sync-snapshot-coverage.md), hundreds
+    /// per snapshot. All or none: a half-recorded batch would let a later
+    /// pass re-apply events the snapshot's rows already hold.
+    fn mark_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError>;
+    /// The row's clock (`sync_row_clock`, DESIGN-sync-snapshot-coverage.md),
+    /// or `None` before any change stamped it.
+    fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<RowClock>, StoreError>;
+    /// Move the row's clock forward to `at` — its whole-row time too when
+    /// the change wrote the whole row, and whether that was a delete; never
+    /// back.
+    fn advance_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: DateTime<Utc>,
+        write: RowWrite,
+    ) -> Result<(), StoreError>;
+    /// As [`Self::advance_row_clock`] for a row of unknown time that holds a
+    /// change this device had applied: the clock is marked
+    /// [`RowClock::seeded`]. A clock already known stays known.
+    fn seed_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: DateTime<Utc>,
+        write: RowWrite,
+    ) -> Result<(), StoreError>;
+    /// Every row's clock, for the snapshot. A kind this version does not
+    /// know is left out.
+    fn row_clocks(&self) -> Result<Vec<(sync_core::RowKey, RowClock)>, StoreError>;
+    /// Move many rows' clocks forward at once — a snapshot's, all or none;
+    /// each time never back.
+    fn advance_row_clocks(
+        &self,
+        clocks: &[(sync_core::RowKey, RowClock)],
+    ) -> Result<(), StoreError>;
     /// Persist a field-level conflict the applier couldn't auto-merge,
     /// superseding any prior unresolved conflict on the same
     /// (kind, row, field) (DESIGN.md §19.3).
@@ -488,6 +533,52 @@ impl ConflictKind {
             "calendar" => Some(ConflictKind::Calendar),
             "color_label" => Some(ConflictKind::ColorLabel),
             _ => None,
+        }
+    }
+}
+
+/// A synced row's clock (`sync_row_clock`, DESIGN-sync-snapshot-coverage.md):
+/// an older change does not win over a newer one, even when it arrives later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowClock {
+    /// The newest change the row has seen, of any kind.
+    pub changed: DateTime<Utc>,
+    /// The newest change that wrote the whole row — a create, a whole-row
+    /// update or a delete. `None` while only field merges touched it.
+    pub written: Option<DateTime<Utc>>,
+    /// That newest whole-row write was a delete. A row gone without one —
+    /// its list, calendar or parent task was deleted and took it along — is
+    /// not deleted itself, and an edit moving it elsewhere still applies
+    /// (review rounds 3 and 5 of #130).
+    pub deleted: bool,
+    /// Only seeded: a change this device had applied set it, on a row of
+    /// unknown time ([`SyncStore::seed_row_clock`]). The row holds that
+    /// change or a newer one, so the next catch-up holds an applied change
+    /// here too; the first newer change taken on the row makes its time
+    /// known (review round 5 of #130).
+    pub seeded: bool,
+}
+
+/// How a change writes its row, for the row's clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowWrite {
+    /// A field merge: the change time only.
+    Fields,
+    /// The whole row: a create or a whole-row update.
+    Whole,
+    /// A delete.
+    Delete,
+}
+
+impl RowWrite {
+    /// How `event` writes its row.
+    pub fn of(event: &sync_core::SyncEvent) -> Self {
+        if event.is_delete() {
+            RowWrite::Delete
+        } else if event.merges_fields() {
+            RowWrite::Fields
+        } else {
+            RowWrite::Whole
         }
     }
 }

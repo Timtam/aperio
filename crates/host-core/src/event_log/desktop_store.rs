@@ -20,7 +20,7 @@ use adapter_local::{LocalAdapter, SnapshotApplyReport, SnapshotDump};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use sync_engine::whitelist::{is_synced_key, SYNC_WHITELIST};
-use sync_engine::{NewConflict, SnapshotAccount, StoreError, SyncStore};
+use sync_engine::{NewConflict, RowClock, RowWrite, SnapshotAccount, StoreError, SyncStore};
 
 use crate::conflicts::ConflictsRepo;
 use crate::db::SharedConn;
@@ -254,6 +254,181 @@ impl SyncStore for DesktopSyncStore {
         )
         .map_err(|err| StoreError::Backend(format!("mark_event_applied: {err}")))?;
         Ok(())
+    }
+
+    fn mark_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError> {
+        let mut conn = self.db.lock().expect("db mutex poisoned");
+        let now = Utc::now().to_rfc3339();
+        let backend =
+            |err: rusqlite::Error| StoreError::Backend(format!("mark_events_applied: {err}"));
+        let tx = conn.transaction().map_err(backend)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR IGNORE INTO sync_applied_events
+                        (event_id, applied_at) VALUES (?, ?)",
+                )
+                .map_err(backend)?;
+            for event_id in event_ids {
+                stmt.execute(params![event_id, now]).map_err(backend)?;
+            }
+        }
+        tx.commit().map_err(backend)
+    }
+
+    fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<RowClock>, StoreError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let stored: Option<(i64, Option<i64>, bool, bool)> = conn
+            .query_row(
+                "SELECT changed_us, written_us, deleted, seeded FROM sync_row_clock
+                 WHERE kind = ? AND id = ?",
+                params![key.kind, key.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()
+            .map_err(|err| StoreError::Backend(format!("row_clock: {err}")))?;
+        let from_us = chrono::DateTime::<Utc>::from_timestamp_micros;
+        Ok(
+            stored.and_then(|(changed_us, written_us, deleted, seeded)| {
+                Some(RowClock {
+                    changed: from_us(changed_us)?,
+                    written: written_us.and_then(from_us),
+                    deleted,
+                    seeded,
+                })
+            }),
+        )
+    }
+
+    fn advance_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: chrono::DateTime<Utc>,
+        write: RowWrite,
+    ) -> Result<(), StoreError> {
+        self.advance_row_clocks(&[(
+            key.clone(),
+            RowClock {
+                changed: at,
+                written: (write != RowWrite::Fields).then_some(at),
+                deleted: write == RowWrite::Delete,
+                seeded: false,
+            },
+        )])
+    }
+
+    fn seed_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: chrono::DateTime<Utc>,
+        write: RowWrite,
+    ) -> Result<(), StoreError> {
+        self.advance_row_clocks(&[(
+            key.clone(),
+            RowClock {
+                changed: at,
+                written: (write != RowWrite::Fields).then_some(at),
+                deleted: write == RowWrite::Delete,
+                seeded: true,
+            },
+        )])
+    }
+
+    fn row_clocks(&self) -> Result<Vec<(sync_core::RowKey, RowClock)>, StoreError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let backend = |err: rusqlite::Error| StoreError::Backend(format!("row_clocks: {err}"));
+        let mut stmt = conn
+            .prepare("SELECT kind, id, changed_us, written_us, deleted, seeded FROM sync_row_clock")
+            .map_err(backend)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, bool>(4)?,
+                    row.get::<_, bool>(5)?,
+                ))
+            })
+            .map_err(backend)?;
+        let from_us = chrono::DateTime::<Utc>::from_timestamp_micros;
+        let mut clocks = Vec::new();
+        for row in rows {
+            let (kind, id, changed_us, written_us, deleted, seeded) = row.map_err(backend)?;
+            let (Some(key), Some(changed)) =
+                (sync_core::RowKey::named(&kind, id), from_us(changed_us))
+            else {
+                continue;
+            };
+            clocks.push((
+                key,
+                RowClock {
+                    changed,
+                    written: written_us.and_then(from_us),
+                    deleted,
+                    seeded,
+                },
+            ));
+        }
+        Ok(clocks)
+    }
+
+    fn advance_row_clocks(
+        &self,
+        clocks: &[(sync_core::RowKey, RowClock)],
+    ) -> Result<(), StoreError> {
+        let mut conn = self.db.lock().expect("db mutex poisoned");
+        let backend =
+            |err: rusqlite::Error| StoreError::Backend(format!("advance_row_clocks: {err}"));
+        let tx = conn.transaction().map_err(backend)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    // SQLite's MAX() is NULL when either side is: a missing
+                    // whole-row time takes the other side's. The delete flag
+                    // follows the newest whole-row write, the seeded flag the
+                    // newest change: an older change taken left the row as it
+                    // was. At the same time a seed takes over neither from a
+                    // real write, nor the delete flag from one seeded before:
+                    // a change held again keeps the first decision. Every
+                    // right-hand side reads the row as it was.
+                    "INSERT INTO sync_row_clock (kind, id, changed_us, written_us, deleted, seeded)
+                     VALUES (?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(kind, id) DO UPDATE SET
+                         changed_us = MAX(changed_us, excluded.changed_us),
+                         seeded = CASE
+                             WHEN excluded.changed_us > changed_us THEN excluded.seeded
+                             WHEN excluded.changed_us = changed_us
+                             THEN MIN(seeded, excluded.seeded)
+                             ELSE seeded
+                         END,
+                         deleted = CASE
+                             WHEN excluded.written_us IS NOT NULL
+                                  AND (written_us IS NULL
+                                       OR excluded.written_us > written_us
+                                       OR (excluded.written_us = written_us
+                                           AND NOT excluded.seeded))
+                             THEN excluded.deleted
+                             ELSE deleted
+                         END,
+                         written_us = MAX(COALESCE(written_us, excluded.written_us),
+                                          COALESCE(excluded.written_us, written_us))",
+                )
+                .map_err(backend)?;
+            for (key, clock) in clocks {
+                stmt.execute(params![
+                    key.kind,
+                    key.id,
+                    clock.changed.timestamp_micros(),
+                    clock.written.map(|at| at.timestamp_micros()),
+                    clock.deleted,
+                    clock.seeded,
+                ])
+                .map_err(backend)?;
+            }
+        }
+        tx.commit().map_err(backend)
     }
 
     fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError> {
@@ -627,7 +802,8 @@ mod tests {
         );
         let outcome = builder(&db, adapter).apply(&snap).unwrap();
         assert_eq!(outcome.settings_applied, 1);
-        assert_eq!(outcome.settings_failed, 1);
+        assert_eq!(outcome.settings_dropped, 1);
+        assert_eq!(outcome.settings_failed, 0);
         // Confirm the protected key didn't land.
         let shared = db.shared();
         let prefs = UserPrefsRepo::new(&shared);

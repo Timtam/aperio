@@ -34,7 +34,13 @@ use crate::device::DeviceId;
 /// variants — are forward-compatible because we don't use
 /// `#[serde(deny_unknown_fields)]` anywhere; older clients
 /// silently ignore the additions.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// 2 (2026-10-31, PR #130): row clocks, the catch-up and the GC that waits
+/// for every exact device. A build that weighs changes by file name would
+/// delete files a device still needs; the first `meta.json` write of a build
+/// on this format raises `min_app_version`, locking such builds out (Toni's
+/// decision; at the first write since review round 6 of #130).
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// One row in the per-device registry.
 ///
@@ -93,6 +99,26 @@ pub struct DeviceRecord {
     /// case.
     #[serde(default, skip_serializing_if = "is_false")]
     pub stale: bool,
+    /// The device's applied record is exact (DESIGN-sync-snapshot-coverage.md):
+    /// it joined, resumed or caught up over every log file still present.
+    /// The compactor deletes no log file while an active device is not —
+    /// the files it still needs for that catch-up. `false` for a build that
+    /// predates the field, which drops it again on its next write: while it
+    /// takes part, nothing is deleted.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub exact: bool,
+    /// The log files this device's build could not read
+    /// (DESIGN-sync-snapshot-coverage.md, review round 5 of #130). No
+    /// compactor deletes them while an active device names them: an update
+    /// of that device reads them again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unreadable: Vec<String>,
+    /// The log files in this device's `pending/` — what it may push again
+    /// (DESIGN-sync-snapshot-coverage.md, review round 6 of #130). No
+    /// compactor deletes a file any device names here: pushing it once more
+    /// is then never pushing a deleted file back.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<String>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -255,6 +281,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         let bytes = meta.to_bytes().unwrap();
@@ -279,6 +308,9 @@ mod tests {
                     last_seen: None,
                     app_version: "1.0.0".into(),
                     stale: false,
+                    exact: false,
+                    unreadable: Vec::new(),
+                    pending: Vec::new(),
                 },
             )]),
         };
@@ -326,6 +358,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         let json = String::from_utf8(meta.to_bytes().unwrap()).unwrap();
@@ -340,6 +375,9 @@ mod tests {
                 last_seen: Some(Utc::now()),
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         let json = String::from_utf8(meta.to_bytes().unwrap()).unwrap();
@@ -363,6 +401,9 @@ mod tests {
                     last_seen: None,
                     app_version: "1.0.0".into(),
                     stale: false,
+                    exact: false,
+                    unreadable: Vec::new(),
+                    pending: Vec::new(),
                 },
             );
         }

@@ -373,6 +373,7 @@ async fn encrypting_adapter_translates_known_lengths_by_exactly_the_wire_overhea
             name: "f.jsonl".into(),
             len: 1_000,
         }],
+        fetch_unknown: true,
         ..DeviceCursor::epoch()
     };
     encrypting.fetch_new_logs(&cursor).await.expect("fetch");
@@ -382,6 +383,9 @@ async fn encrypting_adapter_translates_known_lengths_by_exactly_the_wire_overhea
         .expect("seen mutex")
         .clone()
         .expect("inner adapter saw a cursor");
+    // Fetching unknown files (DESIGN-sync-snapshot-coverage.md) is a name
+    // rule and passes through untranslated.
+    assert!(seen.fetch_unknown);
     assert_eq!(seen.known_lengths.len(), 1);
     assert_eq!(seen.known_lengths[0].name, "f.jsonl");
     assert_eq!(

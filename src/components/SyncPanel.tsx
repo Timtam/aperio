@@ -183,10 +183,14 @@ export function SyncPanel() {
     try {
       const report = await compactNow();
       announce(
-        t('dialogs.settings.sync.compactDone', {
-          deleted: report.deleted_logs,
-          stale: report.stale_devices,
-        }),
+        report.gc_waiting_for.length > 0
+          ? t('dialogs.settings.sync.compactWaiting', {
+              devices: report.gc_waiting_for.join(', '),
+            })
+          : t('dialogs.settings.sync.compactDone', {
+              deleted: report.deleted_logs,
+              stale: report.stale_devices,
+            }),
       );
     } catch (err) {
       // eslint-disable-next-line no-console

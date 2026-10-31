@@ -4893,7 +4893,7 @@ impl Host {
         // queued just before the flag-clear goes up ciphertext (then gets
         // rewritten plaintext below) rather than plaintext after the swap.
         self.runtime
-            .block_on(async { self.orchestrator.push_now().await })
+            .block_on(async { self.orchestrator.flush_before_e2e_downgrade().await })
             .map_err(sync_err)?;
         // Rebuild the now-genuinely-plain adapter (pref cleared above).
         let plain = restore_adapter_from_prefs(
@@ -5010,9 +5010,14 @@ impl Host {
                 .ok_or_else(|| StoreError::Unsupported {
                     detail: "no sync adapter configured".to_string(),
                 })?;
+        // No round beside it: a round's changes would be reverted by this
+        // resume's later snapshot apply (review round 14 of #130).
         let report = self
             .runtime
-            .block_on(async { self.onboarding.resume_from_stale(adapter.as_ref()).await })
+            .block_on(async {
+                let _hold = self.orchestrator.hold_rounds().await?;
+                self.onboarding.resume_from_stale(adapter.as_ref()).await
+            })
             .map_err(sync_err)?;
         self.orchestrator.clear_stale_device();
         // A stale-resume re-onboards from the target, so it can materialise

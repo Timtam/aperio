@@ -44,20 +44,25 @@
 //! - **Account re-connect prompt.** §19.11 Step 8. UI in Phase Si.
 //! - **Plugin gap detection.** §19.11 Step 9. Plugins land in §20.
 
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sync_core::{
-    DeviceCursor, DeviceId, DeviceRecord, LogFile, LogFileName, MetaJson, SyncAdapter, SyncError,
-    SyncResult,
+    DeviceCursor, DeviceId, DeviceRecord, EventEnvelope, LogFile, LogFileName, MetaJson,
+    SyncAdapter, SyncError, SyncResult,
 };
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
-use crate::event_log::{ApplyReport, EventLogApplier, SnapshotBuilder, SYNC_CURSOR_PREF_KEY};
+use crate::event_log::{
+    ApplyReport, EventLogApplier, SnapshotBuilder, SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
+    SYNC_CURSOR_PREF_KEY,
+};
 use crate::user_prefs::UserPrefsRepo;
+use sync_engine::SYNC_UNREADABLE_LOGS_PREF_KEY;
 
 /// `user_prefs` key holding the user-chosen device name. Surfaces in
 /// other devices' "known devices" lists via `meta.json`. Optional —
@@ -146,7 +151,6 @@ pub struct DeviceSummary {
 pub struct OnboardingReport {
     pub fetched_logs: usize,
     pub applied: usize,
-    pub skipped_own: usize,
     pub skipped_already_applied: usize,
     pub skipped_unsupported: usize,
     pub apply_failures: usize,
@@ -157,16 +161,28 @@ pub struct OnboardingReport {
     /// Number of devices in `meta.json` AFTER this device's entry
     /// was upserted. Includes us.
     pub device_count: usize,
+    /// What the pass over every log applied, whole — for a sync round that
+    /// resumed or caught up, so the platform re-reads settings and reloads
+    /// views from its report.
+    #[serde(skip)]
+    pub detail: ApplyReport,
 }
 
 impl OnboardingReport {
     fn merge_apply(&mut self, report: ApplyReport) {
         self.applied += report.applied;
-        self.skipped_own += report.skipped_own;
         self.skipped_already_applied += report.skipped_already_applied;
         self.skipped_unsupported += report.skipped_unsupported;
         self.apply_failures += report.failed;
     }
+}
+
+/// What [`OnboardingService::apply_every_log`] found.
+struct Pass {
+    /// The newest foreign file's name time, if any.
+    newest_foreign: Option<DateTime<Utc>>,
+    /// Every file read: the device is exact.
+    complete: bool,
 }
 
 /// Onboarding helper. The Tauri commands hold one of these in State
@@ -382,9 +398,10 @@ impl OnboardingService {
             .collect()
     }
 
-    /// "Datensatz übernehmen" path. Pulls every log from the remote,
-    /// hands them to the applier, registers this device in meta.json,
-    /// advances the local sync cursor.
+    /// "Datensatz übernehmen" path. Applies the snapshot and every log
+    /// on top ([`Self::apply_every_log`]), registers this device in
+    /// meta.json, advances the local sync cursor; the device's applied
+    /// record is exact from here on.
     ///
     /// `device_name` is optional; when `None`, the device record
     /// goes in without a friendly name and other devices show the
@@ -402,7 +419,7 @@ impl OnboardingService {
         device_name: Option<&str>,
     ) -> SyncResult<OnboardingReport> {
         adapter.test_connection().await?;
-        let mut meta = adapter.fetch_meta().await?.ok_or_else(|| {
+        let meta = adapter.fetch_meta().await?.ok_or_else(|| {
             SyncError::not_found("remote has no meta.json — use adopt_local for a fresh dataset")
         })?;
 
@@ -412,26 +429,46 @@ impl OnboardingService {
         // a generic error.
         sync_core::ensure_compatible(&meta, &self.app_version)?;
 
-        // Phase Sg: consume snapshot first if one exists. Apply
-        // its body to local SQLite + advance the cursor to the
-        // snapshot timestamp; the log pull below then only fetches
-        // the small backlog that came after compaction.
-        //
-        // We start the cursor at MIN_UTC (so a missing snapshot
-        // means "fetch everything"). A successful snapshot apply
-        // bumps it to the snapshot's own timestamp.
+        // Phase Sg: consume the snapshot first if one exists, then every log
+        // file on top. A snapshot that names the events it holds records them
+        // as applied (DESIGN-sync-snapshot-coverage.md).
         let mut starting_cursor: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
         let mut snapshot_applied = false;
-        match adapter.fetch_snapshot().await? {
+        let mut holds = None;
+        // A dataset this device was never part of had nothing of what an older
+        // build left pending: nothing of it counts as pushed there, and it is
+        // settled against this dataset anew (review round 9 of #130). A
+        // credential change goes up only where the dataset has E2E, as the
+        // join leaves it, whatever this device had before (review round 12).
+        let new_dataset = meta.device(&self.local_device_id).is_none();
+        let own = self
+            .own_pending(true, new_dataset, meta.e2e_enabled)
+            .await?;
+        // Everything is fetched first: a join that fails on the way leaves
+        // this device as it was, still syncing with what it had (review
+        // round 3 of #130).
+        let snapshot = adapter.fetch_snapshot().await?;
+        let logs = self.fetch_every_log(adapter).await?;
+        // Whatever this device knew of another dataset says nothing here; the
+        // pass over every file below makes the record exact again. Nor do its
+        // row clocks: they would let that dataset's times keep this one's
+        // changes out (review round 2 of #130). The snapshot brings its own.
+        self.clear_coverage_exact()?;
+        self.clear_row_clocks()?;
+        match snapshot {
             Some(snapshot) => {
                 info!(
                     snapshot_ts = %snapshot.metadata.snapshot_timestamp,
                     "consuming remote snapshot during onboarding",
                 );
                 match self.snapshot_builder.apply(&snapshot) {
-                    Ok(_outcome) => {
+                    Ok(outcome) => {
                         starting_cursor = snapshot.metadata.snapshot_timestamp;
                         snapshot_applied = true;
+                        holds = Some(SnapshotHolds::of(&snapshot, &outcome));
+                        if let Some(count) = outcome.covered_events {
+                            info!(count, "the snapshot names the events it holds");
+                        }
                     }
                     Err(err) => {
                         // Refuse to silently fall back to log-only
@@ -443,100 +480,51 @@ impl OnboardingService {
                 }
             }
             None => {
-                debug!("no remote snapshot present; falling back to full log replay",);
+                debug!("no remote snapshot present; applying every log");
             }
         }
 
-        // Pull logs newer than the snapshot timestamp (or epoch if
-        // there was no snapshot). The applier's idempotency table
-        // guarantees re-applying old logs is a no-op anyway, but
-        // skipping them saves the disk + serde cost.
         // Joining a (possibly different) dataset invalidates every
         // remote-missing sound verdict from the previous backend.
         crate::sound_assets::reset_missing_cache();
-        let logs = adapter
-            .fetch_new_logs(&DeviceCursor {
-                last_seen_log: starting_cursor,
-                // Own files are discarded by the filter below anyway —
-                // let the adapter skip fetching their bytes.
-                exclude_device: Some(self.local_device_id.clone()),
-                // Onboarding/resume fetch from scratch — no applied
-                // lengths recorded yet, growth-refetch not relevant.
-                known_lengths: Vec::new(),
-            })
-            .await?;
-        let mut foreign: Vec<_> = logs
-            .into_iter()
-            .filter(|log| log.name.device_id != self.local_device_id)
-            .collect();
-        // Apply chronologically regardless of adapter return order (the
-        // WebDAV adapter's concurrent GETs yield in completion order) —
-        // same rationale as the sync round: a rotated-away CREATE applied
-        // after its later DELETE would resurrect the item, and the
-        // applier's idempotency table would make that permanent.
-        sort_logs_chronologically(&mut foreign);
-        let fetched_logs = foreign.len();
-        info!(
-            count = fetched_logs,
-            snapshot_applied = snapshot_applied,
-            "accept_remote pulled remote logs",
-        );
-
-        // Track the newest timestamp so we can set the cursor
-        // correctly afterwards. Default to whatever the snapshot
-        // gave us (epoch when there was none) so an empty remote
-        // still lands a sensible cursor.
-        let mut newest: DateTime<Utc> = starting_cursor;
-
         let mut report = OnboardingReport {
             remote_was_empty: false,
             ..Default::default()
         };
-        report.fetched_logs = fetched_logs;
+        // Every log file, not only those named after the snapshot: a session
+        // named before it may have grown after it (Toni's laptop,
+        // 2026-10-27).
+        let pass = self.apply_every_log(logs, &mut report, holds, own).await?;
+        info!(
+            count = report.fetched_logs,
+            snapshot_applied = snapshot_applied,
+            "accept_remote applied every log",
+        );
 
-        let mut applied_lengths: Vec<(String, u64)> = Vec::new();
-        for log in &foreign {
-            if log.name.timestamp > newest {
-                newest = log.name.timestamp;
-            }
-            match self.applier.apply_log_file(log) {
-                Ok(apply_report) => {
-                    report.merge_apply(apply_report);
-                    applied_lengths.push((log.name.to_filename(), log.bytes.len() as u64));
-                }
-                Err(err) => {
-                    warn!(
-                        log = %log.name.to_filename(),
-                        ?err,
-                        "applier failed during onboarding",
-                    );
-                    report.apply_failures += 1;
-                    // Length 0 → any listed size counts as grown, so the
-                    // next round retries the file (matches the round's
-                    // failed-apply policy).
-                    applied_lengths.push((log.name.to_filename(), 0));
-                }
-            }
+        // Persist the cursor so the next scheduler round doesn't re-pull the
+        // same backlog: the snapshot's time, or the newest foreign file's. If
+        // neither moved it past MIN_UTC (no snapshot AND no logs), don't
+        // touch the existing cursor.
+        let cursor = starting_cursor.max(pass.newest_foreign.unwrap_or(DateTime::<Utc>::MIN_UTC));
+        if cursor > DateTime::<Utc>::MIN_UTC {
+            self.save_cursor(cursor)?;
         }
-        // Seed the growth-refetch records for what we just applied —
-        // typically including the peers' LIVE session files, whose later
-        // appends would otherwise stay invisible until those peers rotate
-        // (the cursor lands exactly on their timestamps).
-        self.record_applied_lengths(&applied_lengths);
-
-        // Persist the cursor so the next scheduler round doesn't
-        // re-pull the same backlog. The snapshot path bumps
-        // `newest` even when no logs followed it; if we never
-        // bumped `newest` past MIN_UTC (no snapshot AND no logs),
-        // don't touch the existing cursor.
-        if newest > DateTime::<Utc>::MIN_UTC {
-            self.save_cursor(newest)?;
+        if pass.complete {
+            self.save_coverage_exact_since(Utc::now())?;
         }
 
-        // Persist + push the device registration.
-        self.register_self_in_meta(&mut meta, device_name);
+        // Persist + push the device registration — into a fresh copy: the
+        // pass above took a while, and a compaction meanwhile may have raised
+        // the GC horizon or locked older builds out (review round 4 of #130).
+        let mut meta = adapter.fetch_meta().await?.unwrap_or(meta);
+        self.register_self_in_meta(&mut meta, device_name).await;
         adapter.push_meta(&meta).await?;
         report.device_count = meta.devices.len();
+        // Only once the join stands: one that fails leaves the device with
+        // the dataset it had, and its cutoff (review round 10 of #130).
+        if new_dataset {
+            self.forget_leftovers_cutoff()?;
+        }
 
         // Save the chosen device name + the "we've onboarded" flag.
         if let Some(name) = device_name {
@@ -569,24 +557,21 @@ impl OnboardingService {
     /// §19.10 stale-device resume.
     ///
     /// Called when the user clicks Fortfahren in the §19.10 "this
-    /// device was offline for a while" dialog. Sequence:
+    /// device was offline for a while" dialog, and by the round's
+    /// auto-resume. Sequence:
     ///
     /// 1. Re-pull the current `snapshot.json` + apply via
     ///    `SnapshotBuilder` (upserts rows from the snapshot
     ///    body; local-only rows untouched).
-    /// 2. Pull + apply any foreign logs newer than the snapshot.
-    /// 3. Replay our own pending logs through the applier's
-    ///    force-own path. The applier's field-level merge
-    ///    handles the snapshot-vs-offline-edit ordering: if our
-    ///    pending event's timestamp is newer than the snapshot's
-    ///    `updated_at` for that row, our value wins; otherwise
-    ///    the snapshot value stays. This step is what brings
-    ///    back any local edits the user made while offline that
-    ///    the snapshot apply would otherwise have clobbered.
-    /// 4. Save the cursor + clear the device's `stale` flag in
-    ///    meta + push the updated meta.
+    /// 2. Every log file still present and our own pending ones, as one
+    ///    pass ([`Self::apply_every_log`]): a change wins only where it is
+    ///    newer than its row. That brings back what the snapshot apply
+    ///    reverted — our offline edits, and changes this device applied
+    ///    before — wherever the change is newer than the snapshot's row.
+    /// 3. Save the cursor, mark the record exact, clear the device's
+    ///    `stale` flag in a freshly fetched meta + push it.
     ///
-    /// Pending logs stay on disk after the replay; the next
+    /// Pending logs stay on disk after the pass; the next
     /// scheduled sync round picks them up and pushes to the
     /// remote so other devices receive them too.
     pub async fn resume_from_stale(
@@ -594,7 +579,7 @@ impl OnboardingService {
         adapter: &dyn SyncAdapter,
     ) -> SyncResult<OnboardingReport> {
         adapter.test_connection().await?;
-        let mut meta = adapter.fetch_meta().await?.ok_or_else(|| {
+        let meta = adapter.fetch_meta().await?.ok_or_else(|| {
             SyncError::not_found("remote meta.json disappeared between stale detection and resume")
         })?;
 
@@ -610,15 +595,25 @@ impl OnboardingService {
         // wedge). The alternative — erroring here — left the device
         // permanently stuck, since the inline compaction that mints a
         // snapshot sits behind the bailing round.
-        let mut starting_cursor = match adapter.fetch_snapshot().await? {
+        let own = self
+            .own_pending(true, false, crate::credential_sync::e2e_enabled(&self.db))
+            .await?;
+        let snapshot = adapter.fetch_snapshot().await?;
+        let logs = self.fetch_every_log(adapter).await?;
+        // Exact again only once this pass read every file (review round 3
+        // of #130): an earlier mark says nothing after the snapshot apply.
+        self.clear_coverage_exact()?;
+        let mut holds = None;
+        let base = match snapshot {
             Some(snapshot) => {
                 info!(
                     snapshot_ts = %snapshot.metadata.snapshot_timestamp,
                     "applying snapshot during stale-device resume",
                 );
-                self.snapshot_builder.apply(&snapshot).map_err(|err| {
+                let outcome = self.snapshot_builder.apply(&snapshot).map_err(|err| {
                     SyncError::internal(format!("stale resume snapshot apply: {err}"))
                 })?;
+                holds = Some(SnapshotHolds::of(&snapshot, &outcome));
                 snapshot.metadata.snapshot_timestamp
             }
             None => {
@@ -630,95 +625,38 @@ impl OnboardingService {
             }
         };
 
-        // Pull + apply any logs that landed after the snapshot.
-        let logs = adapter
-            .fetch_new_logs(&DeviceCursor {
-                last_seen_log: starting_cursor,
-                // Own files are discarded by the filter below anyway —
-                // let the adapter skip fetching their bytes.
-                exclude_device: Some(self.local_device_id.clone()),
-                // Onboarding/resume fetch from scratch — no applied
-                // lengths recorded yet, growth-refetch not relevant.
-                known_lengths: Vec::new(),
-            })
-            .await?;
-        let mut foreign: Vec<_> = logs
-            .into_iter()
-            .filter(|log| log.name.device_id != self.local_device_id)
-            .collect();
-        // Chronological apply order — see accept_remote.
-        sort_logs_chronologically(&mut foreign);
-        let fetched_logs = foreign.len();
-        info!(
-            count = fetched_logs,
-            "stale resume pulled post-snapshot logs",
-        );
-
         let mut report = OnboardingReport {
             remote_was_empty: false,
             ..Default::default()
         };
-        report.fetched_logs = fetched_logs;
-
-        let mut applied_lengths: Vec<(String, u64)> = Vec::new();
-        for log in &foreign {
-            if log.name.timestamp > starting_cursor {
-                starting_cursor = log.name.timestamp;
-            }
-            match self.applier.apply_log_file(log) {
-                Ok(apply_report) => {
-                    report.merge_apply(apply_report);
-                    applied_lengths.push((log.name.to_filename(), log.bytes.len() as u64));
-                }
-                Err(err) => {
-                    warn!(
-                        log = %log.name.to_filename(),
-                        ?err,
-                        "applier failed during stale resume",
-                    );
-                    report.apply_failures += 1;
-                    applied_lengths.push((log.name.to_filename(), 0));
-                }
-            }
-        }
-        // Seed growth-refetch records (see accept_remote): the peers'
-        // live session files just applied would otherwise never be
-        // re-fetched when they grow.
-        self.record_applied_lengths(&applied_lengths);
-
-        // §19.10 v1.1: replay our own pending logs through the
-        // applier's force-own path. The snapshot apply above
-        // upserts every row from the snapshot dump — including
-        // shared rows the user edited locally during the offline
-        // window — so without this pass those local edits would
-        // disappear locally until another device relayed them
-        // back. The replay walks `pending/`, parses each .jsonl
-        // session file, and feeds the envelopes through
-        // `apply_envelopes_force_own`. The applier's field-level
-        // merge handles the ordering: edits newer than the
-        // snapshot row's `updated_at` win, edits older than the
-        // snapshot stay overwritten (matches the convergent
-        // semantics other devices would compute against the
-        // remote logs).
-        //
-        // Failures are non-fatal — the file stays on disk and
-        // the next sync round will push it; on the FOLLOWING
-        // resume (unlikely but possible) we'd re-try the replay.
-        self.replay_pending_logs(&mut report).await;
+        let pass = self.apply_every_log(logs, &mut report, holds, own).await?;
+        info!(
+            count = report.fetched_logs,
+            "stale resume applied every log",
+        );
 
         // Persist the cursor before mutating meta. If we crash
         // between cursor + meta push the next sync round just
         // re-pulls the post-snapshot logs (idempotent applier).
-        self.save_cursor(starting_cursor)?;
+        let cursor = base.max(pass.newest_foreign.unwrap_or(DateTime::<Utc>::MIN_UTC));
+        self.save_cursor(cursor)?;
+        if pass.complete {
+            self.save_coverage_exact_since(Utc::now())?;
+        }
 
         // Clear our device's `stale` flag in meta.json + bump
         // `last_seen_log` so other devices see us as current.
         // This is the bit that lets a future compactor round
-        // include our cursor in its retention math.
+        // include our cursor in its retention math. On a fresh copy:
+        // the pass above took a while, and a peer may have pushed since.
+        let mut meta = adapter.fetch_meta().await?.unwrap_or(meta);
         if let Some(entry) = meta.devices.get_mut(self.local_device_id.as_str()) {
             entry.stale = false;
-            entry.last_seen_log = starting_cursor;
+            entry.last_seen_log = cursor;
+            entry.exact = pass.complete;
         }
+        // A write of this build, as every other (review round 7 of #130).
+        lock_out_older_builds(&mut meta, &self.app_version);
         adapter.push_meta(&meta).await?;
         report.device_count = meta.devices.len();
 
@@ -743,36 +681,391 @@ impl OnboardingService {
         Ok(report)
     }
 
-    /// Walk `pending_dir` and re-apply every JSONL session file
-    /// through `apply_envelopes_force_own`. Used by stale resume
-    /// to restore offline edits over a freshly-applied snapshot.
+    /// The round's one-time catch-up for a device whose applied record is
+    /// not exact (DESIGN-sync-snapshot-coverage.md; Toni, 2026-10-30): it
+    /// joined or resumed from a snapshot before this existed, so a file it
+    /// skipped by name may hold events it never applied. One pass over every
+    /// log file ([`Self::apply_every_log`]); afterwards the record is exact.
+    pub async fn catch_up(&self, adapter: &dyn SyncAdapter) -> SyncResult<OnboardingReport> {
+        let mut report = OnboardingReport {
+            remote_was_empty: false,
+            ..Default::default()
+        };
+        // No snapshot here: the rows hold every own change, or a newer one.
+        let own = self
+            .own_pending(false, false, crate::credential_sync::e2e_enabled(&self.db))
+            .await?;
+        let logs = self.fetch_every_log(adapter).await?;
+        let pass = self.apply_every_log(logs, &mut report, None, own).await?;
+        if let Some(newest) = pass.newest_foreign {
+            self.save_cursor(self.read_cursor().max(newest))?;
+        }
+        if pass.complete {
+            self.save_coverage_exact_since(Utc::now())?;
+        }
+        info!(
+            fetched = report.fetched_logs,
+            applied = report.applied,
+            "catch-up over every log file complete",
+        );
+        Ok(report)
+    }
+
+    /// Every log file still present — this device's own included — and its
+    /// own changes not uploaded yet, applied as ONE pass in time order
+    /// (DESIGN-sync-snapshot-coverage.md; Toni, 2026-10-30). Not file by
+    /// file: sessions of different devices overlap in time, and a file's
+    /// late change must not win over another file's newer one. A change wins
+    /// only where it is newer than its row, without a conflict; what this
+    /// device applied before is weighed again, so a row a snapshot apply
+    /// reverted gets its newer change back
+    /// (`EventLogApplier::catch_up_envelopes`). Joining, resuming and the
+    /// round's catch-up all end here.
     ///
-    /// Per-file failures degrade gracefully: a parse error or
-    /// read error gets logged + skipped, the rest of the
-    /// directory is still processed, and the apply counts go
-    /// into the report. The files themselves stay on disk so
-    /// the next sync round can still push them to the remote.
-    async fn replay_pending_logs(&self, report: &mut OnboardingReport) {
+    /// Everything is fetched before anything changes, so a failed fetch
+    /// leaves the device as it was. Records the foreign files' lengths for
+    /// the growth refetch and returns the newest foreign file's name time,
+    /// and whether every file read: only then is the device exact.
+    ///
+    /// `holds` is what a snapshot the same pass applied holds (a join, a
+    /// resume): an own change not on the remote yet is weighed, as the peers
+    /// will weigh it once it is, and so is any own or applied change the
+    /// snapshot does not hold (review rounds 5 and 6 of #130). `None` where
+    /// no snapshot came first (the round's catch-up): the rows hold every own
+    /// change, or a newer one, so each is held.
+    async fn apply_every_log(
+        &self,
+        logs: Vec<LogFile>,
+        report: &mut OnboardingReport,
+        holds: Option<SnapshotHolds>,
+        own: OwnPending,
+    ) -> SyncResult<Pass> {
+        let unreadable_before = self.read_unreadable_logs();
+        let mut unreadable: HashMap<String, u64> = HashMap::new();
+        let mut envelopes = Vec::new();
+        let mut on_remote: HashSet<String> = HashSet::new();
+        // This device's own remote files that read.
+        let mut own_read: HashSet<String> = HashSet::new();
+        let mut lengths: Vec<(String, u64)> = Vec::new();
+        let mut newest_foreign: Option<DateTime<Utc>> = None;
+        let mut complete = true;
+        for log in &logs {
+            let foreign = log.name.device_id != self.local_device_id;
+            if foreign {
+                report.fetched_logs += 1;
+                newest_foreign = newest_foreign.max(Some(log.name.timestamp));
+            }
+            match log.into_envelopes() {
+                Ok(mut parsed) => {
+                    if !foreign {
+                        on_remote.extend(parsed.iter().map(|envelope| envelope.id.clone()));
+                        own_read.insert(log.name.to_filename());
+                    }
+                    envelopes.append(&mut parsed);
+                    if foreign {
+                        lengths.push((log.name.to_filename(), log.bytes.len() as u64));
+                    }
+                }
+                Err(err) => {
+                    // A torn read of a file being written: not recorded, and
+                    // the pass is not complete — the device is not exact, and
+                    // the next catch-up takes the file again, under its rules
+                    // rather than a round's (review round 2 of #130). Torn
+                    // again at the same size, it is no read in progress
+                    // (review round 3). A line this build does not know is
+                    // no torn read either, at any size: nothing here can
+                    // apply it, and it keeps no device from being exact; its
+                    // length is recorded, and an update that changed the
+                    // parser reads it again (review round 5).
+                    let filename = log.name.to_filename();
+                    let len = log.bytes.len() as u64;
+                    report.apply_failures += 1;
+                    if !log.is_torn() || unreadable_before.get(&filename) == Some(&len) {
+                        warn!(
+                            log = %filename,
+                            ?err,
+                            "log file this build cannot read; nothing to apply from it",
+                        );
+                        if foreign {
+                            lengths.push((filename.clone(), len));
+                        }
+                    } else {
+                        warn!(
+                            log = %filename,
+                            ?err,
+                            "unreadable log file; the device catches up again later",
+                        );
+                        complete = false;
+                    }
+                    // Own files too, for the rule above (review round 7);
+                    // only another device's are named in meta.json.
+                    unreadable.insert(filename, len);
+                }
+            }
+        }
+        // Our own changes not on the remote yet are weighed, not held. What
+        // an older build left pending up to the leftovers' cutoff counts as on
+        // the remote: it went up then and the peers applied it, whether a GC
+        // deleted the file since or a later push tore it (review round 8 of
+        // #130).
+        // Up to the older build's last round itself: a line it wrote just
+        // before went up with that round (review round 9). One a snapshot
+        // naming nothing is younger than is weighed all the same: it cannot
+        // hold it. Where the file's own remote copy reads, it shows what went
+        // up — but a later push of that build may have cut it short, so up to
+        // ten minutes before its last round a line went up with that round all
+        // the same (review rounds 10 and 11). Read before the fetch and again
+        // here, after the snapshot apply: a change made meanwhile is weighed
+        // too, and a file a round pushed and removed since keeps its lines
+        // (review rounds 11 and 12) — as does one a settle emptied, or the
+        // second read met mid-write: a later read adds, it never takes a line
+        // away (review round 13). A credential change that does not go up
+        // is weighed by no peer, and the keychain holds this device's own
+        // newest secret: it is left out (review round 12).
+        let (fresh, _) = self.pending_files().await;
+        let files = merged_pending(own.files, fresh);
+        let credentials_stay = !own.credentials_go_up;
+        let mut pending = Vec::new();
+        let mut unpushed: HashSet<String> = HashSet::new();
+        for (name, mut lines) in files {
+            if credentials_stay {
+                lines.retain(|envelope| !is_credential(envelope));
+            }
+            if let Some(holds) = &holds {
+                let until = if own_read.contains(&name) {
+                    own.pushed_until
+                        .map(|at| at - chrono::Duration::minutes(10))
+                } else {
+                    own.pushed_until
+                };
+                unpushed.extend(
+                    lines
+                        .iter()
+                        .filter(|envelope| {
+                            !on_remote.contains(&envelope.id)
+                                && (until.is_none_or(|until| envelope.timestamp > until)
+                                    || holds.provably_lacks(envelope))
+                        })
+                        .map(|envelope| envelope.id.clone()),
+                );
+            }
+            pending.extend(lines);
+        }
+        if let Some(holds) = &holds {
+            unpushed.extend(
+                envelopes
+                    .iter()
+                    .filter(|envelope| !holds.holds(envelope))
+                    .map(|envelope| envelope.id.clone()),
+            );
+        }
+        envelopes.extend(pending);
+        // A pending file may already be uploaded: each change once.
+        let mut seen = HashSet::new();
+        envelopes.retain(|envelope| seen.insert(envelope.id.clone()));
+        let applied = self
+            .applier
+            .catch_up_envelopes(envelopes, &sync_engine::PassContext { unpushed })?;
+        report.detail = applied.clone();
+        report.merge_apply(applied);
+        // Named first: a file this build cannot read whose name did not keep
+        // gets no length, and the pass is not complete, so the next one
+        // reads and names it again (review round 10 of #130).
+        if !self.save_unreadable_logs(&unreadable) {
+            lengths.retain(|(name, _)| !unreadable.contains_key(name));
+            complete = false;
+        }
+        self.record_applied_lengths(&lengths);
+        Ok(Pass {
+            newest_foreign,
+            complete,
+        })
+    }
+
+    /// Every log file on the remote, this device's own included.
+    async fn fetch_every_log(&self, adapter: &dyn SyncAdapter) -> SyncResult<Vec<LogFile>> {
+        adapter
+            .fetch_new_logs(&DeviceCursor {
+                last_seen_log: DateTime::<Utc>::MIN_UTC,
+                exclude_device: None,
+                known_lengths: Vec::new(),
+                fetch_unknown: false,
+            })
+            .await
+    }
+
+    /// The log files the last pass over every log could not read, with
+    /// their sizes ([`SYNC_UNREADABLE_LOGS_PREF_KEY`]) — only if this build's
+    /// parser tried: another one may read what that one could not. A record
+    /// that does not read is empty. Either way every unreadable file then
+    /// counts as a first sighting.
+    fn read_unreadable_logs(&self) -> HashMap<String, u64> {
+        let raw = UserPrefsRepo::new(&self.db)
+            .get(SYNC_UNREADABLE_LOGS_PREF_KEY)
+            .ok()
+            .flatten();
+        sync_engine::UnreadableLogs::of_this_parser(raw.as_deref())
+            .map(|record| record.files)
+            .unwrap_or_default()
+    }
+
+    /// What of this device's own pending files went up, for a pass over every
+    /// log ([`OwnPending`]), checked before anything changes; the pass reads
+    /// the files themselves after a snapshot apply (review round 10 of #130).
+    /// `strict` where a snapshot comes first (a join, a resume): a pending
+    /// file that does not read, or a cutoff that does not, fails the pass —
+    /// weighed without them, the snapshot's values would win over changes it
+    /// does not hold, or old ones over its own (review round 9). `new_dataset`:
+    /// nothing went up to it. `credentials_go_up`: the dataset has E2E, so a
+    /// credential change goes up.
+    async fn own_pending(
+        &self,
+        strict: bool,
+        new_dataset: bool,
+        credentials_go_up: bool,
+    ) -> SyncResult<OwnPending> {
+        let (files, all_read) = self.pending_files().await;
+        if strict && !all_read {
+            return Err(SyncError::io(
+                "a pending log file does not read; trying again later".to_string(),
+            ));
+        }
+        let pushed_until = if new_dataset {
+            None
+        } else {
+            match self.leftovers_pushed_until() {
+                Ok(until) => until,
+                Err(err) if strict => return Err(err),
+                Err(_) => None,
+            }
+        };
+        Ok(OwnPending {
+            files,
+            pushed_until,
+            credentials_go_up,
+        })
+    }
+
+    /// Up to when what an older build left pending went up: its last
+    /// successful round, as the round froze it
+    /// (`sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY`) — or, not frozen yet,
+    /// as that build left `sync.lastSuccessfulRound`: no round of this build
+    /// records itself before freezing it. `None` where none is known.
+    fn leftovers_pushed_until(&self) -> SyncResult<Option<DateTime<Utc>>> {
+        let prefs = UserPrefsRepo::new(&self.db);
+        let read = |key: &str| {
+            prefs
+                .get(key)
+                .map_err(|err| SyncError::internal(format!("read {key}: {err}")))
+        };
+        let settled = read(sync_engine::SYNC_LEFTOVERS_SETTLED_PREF_KEY)?.is_some();
+        if let Some(raw) = read(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)? {
+            return match sync_engine::LeftoversCutoff::parse(&raw) {
+                Some(cutoff) => Ok(cutoff.last_round),
+                // Settled, nothing an older build left is pending any more
+                // (review round 11 of #130); not settled, the next round
+                // freezes it anew.
+                None if settled => Ok(None),
+                None => Err(SyncError::internal("the leftovers' cutoff does not read")),
+            };
+        }
+        if settled {
+            return Ok(None);
+        }
+        Ok(read(sync_engine::SYNC_LAST_ROUND_PREF_KEY)?
+            .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
+            .map(|at| at.with_timezone(&Utc)))
+    }
+
+    /// Joined to a dataset it was never part of, this device's older
+    /// leftovers count as pushed nowhere, and are settled against it anew.
+    fn forget_leftovers_cutoff(&self) -> SyncResult<()> {
+        let prefs = UserPrefsRepo::new(&self.db);
+        let failed = |err| SyncError::internal(format!("reset the leftovers' cutoff: {err}"));
+        let before = prefs
+            .get(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)
+            .map_err(failed)?
+            .and_then(|raw| sync_engine::LeftoversCutoff::parse(&raw))
+            .map_or_else(Utc::now, |cutoff| cutoff.before);
+        let raw = serde_json::to_string(&sync_engine::LeftoversCutoff {
+            last_round: None,
+            before,
+        })
+        .map_err(|err| SyncError::internal(format!("encode the leftovers' cutoff: {err}")))?;
+        prefs
+            .set(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY, &raw)
+            .map_err(failed)?;
+        prefs
+            .delete(sync_engine::SYNC_LEFTOVERS_SETTLED_PREF_KEY)
+            .map_err(failed)?;
+        prefs
+            .delete(sync_engine::SYNC_LEFTOVERS_TRIED_AT_PREF_KEY)
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    /// The files this device names as unreadable in `meta.json`.
+    fn unreadable_names(&self) -> Vec<String> {
+        let raw = UserPrefsRepo::new(&self.db)
+            .get(SYNC_UNREADABLE_LOGS_PREF_KEY)
+            .ok()
+            .flatten();
+        sync_engine::UnreadableLogs::names(raw.as_deref(), &self.local_device_id)
+    }
+
+    /// Whether the record was saved.
+    fn save_unreadable_logs(&self, unreadable: &HashMap<String, u64>) -> bool {
+        let prefs = UserPrefsRepo::new(&self.db);
+        let saved = if unreadable.is_empty() {
+            prefs.delete(SYNC_UNREADABLE_LOGS_PREF_KEY)
+        } else {
+            let record = sync_engine::UnreadableLogs {
+                parser: sync_core::PARSER_FINGERPRINT,
+                files: unreadable.clone(),
+            };
+            match serde_json::to_string(&record) {
+                Ok(raw) => prefs.set(SYNC_UNREADABLE_LOGS_PREF_KEY, &raw),
+                Err(err) => {
+                    warn!(?err, "couldn't encode the unreadable log files");
+                    return false;
+                }
+            }
+        };
+        if let Err(err) = saved {
+            warn!(?err, "couldn't record the unreadable log files");
+            return false;
+        }
+        true
+    }
+
+    /// This device's own changes in `pending_dir` — written, maybe not
+    /// uploaded yet. Per-file failures degrade gracefully: a parse error or
+    /// read error gets logged + skipped, the rest of the directory is still
+    /// read. The files themselves stay on disk so the next sync round can
+    /// still push them to the remote.
+    async fn pending_files(&self) -> (Vec<LogFile>, bool) {
+        let mut logs = Vec::new();
+        let mut all_read = true;
         let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
             Ok(rd) => rd,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                // No writer has flushed anything this install —
-                // nothing to replay.
-                debug!("pending dir empty during stale resume; skipping replay");
-                return;
+                // No writer has flushed anything this install.
+                debug!("no pending dir; nothing of our own to add");
+                return (logs, true);
             }
             Err(err) => {
-                warn!(?err, "couldn't open pending dir during stale resume");
-                return;
+                warn!(?err, "couldn't open the pending dir");
+                return (logs, false);
             }
         };
-        let mut replayed_files = 0usize;
+        let mut files = 0usize;
         loop {
             let entry = match entries.next_entry().await {
                 Ok(Some(e)) => e,
                 Ok(None) => break,
                 Err(err) => {
-                    warn!(?err, "read_dir entry error during replay");
+                    warn!(?err, "read_dir entry error in the pending dir");
+                    all_read = false;
                     break;
                 }
             };
@@ -780,78 +1073,52 @@ impl OnboardingService {
             let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
                 continue;
             };
+            // Only files: nothing the writer makes is anything else (review
+            // round 10 of #130).
+            if !entry.file_type().await.is_ok_and(|kind| kind.is_file()) {
+                debug!(name = name, "skipping pending entry: not a file");
+                continue;
+            }
             let parsed = match LogFileName::from_filename(name) {
                 Ok(p) => p,
                 Err(_) => {
-                    debug!(
-                        name = name,
-                        "skipping pending entry during replay: not a log file"
-                    );
+                    debug!(name = name, "skipping pending entry: not a log file");
                     continue;
                 }
             };
-            // Only OUR own-device logs make sense to replay —
-            // anything else in the pending dir is suspicious
-            // (the writer only emits our own session files) but
-            // bypassing skip_own on a foreign log would
-            // double-apply via the field-level merge. Guard
-            // explicitly.
+            // Only OUR own-device logs belong here — anything else in the
+            // pending dir is suspicious (the writer only emits our own
+            // session files). Guard explicitly.
             if parsed.device_id != self.local_device_id {
-                debug!(
-                    name = name,
-                    "skipping pending entry during replay: foreign device",
-                );
+                debug!(name = name, "skipping pending entry: foreign device");
                 continue;
             }
             let bytes = match tokio::fs::read(&path).await {
                 Ok(b) => b,
                 Err(err) => {
                     warn!(name = name, ?err, "couldn't read pending log");
+                    all_read = false;
                     continue;
                 }
             };
-            let log = LogFile {
+            files += 1;
+            logs.push(LogFile {
                 name: parsed,
                 bytes,
-            };
-            let envelopes = match log.into_envelopes() {
-                Ok(e) => e,
-                Err(err) => {
-                    warn!(
-                        name = name,
-                        ?err,
-                        "couldn't parse pending log during replay",
-                    );
-                    continue;
-                }
-            };
-            match self.applier.apply_envelopes_force_own(envelopes) {
-                Ok(apply_report) => {
-                    replayed_files += 1;
-                    report.merge_apply(apply_report);
-                }
-                Err(err) => {
-                    warn!(
-                        name = name,
-                        ?err,
-                        "force-own apply failed during stale resume",
-                    );
-                    report.apply_failures += 1;
-                }
-            }
+            });
         }
-        info!(files = replayed_files, "stale resume replayed pending logs",);
+        debug!(files, "read our own pending logs");
+        (logs, all_read)
     }
 
-    /// "Neu beginnen" path. Builds a fresh meta.json with only this
-    /// device, pushes it to the remote, then leaves the rest to the
-    /// scheduler's next round (which will push whatever was already
-    /// queued in `pending/`).
+    /// "Neu beginnen" path. Deletes the old dataset's log files, pushes a
+    /// snapshot of this device's state and a fresh meta.json with only this
+    /// device, then leaves the rest to the scheduler's next round (which
+    /// will push whatever was already queued in `pending/`).
     ///
     /// Caller is responsible for warning the user that any existing
-    /// remote data is now orphaned — the meta we write overwrites
-    /// the prior file, and the prior logs become unreachable on
-    /// next compaction.
+    /// remote data is overwritten — its log files are deleted and its
+    /// snapshot replaced.
     pub async fn adopt_local(
         &self,
         adapter: &dyn SyncAdapter,
@@ -875,7 +1142,36 @@ impl OnboardingService {
             );
         }
 
+        // "Neu beginnen" overwrites the dataset (Toni, 2026-10-30): the old
+        // one's log files go, so neither this device's rounds nor a device
+        // joining later take them in, and its snapshot gives way to this
+        // device's state. Names only: the old files may be under another key.
+        // A delete that fails stops here, before the new meta, and the user
+        // can start over again.
+        let old_logs = adapter.list_log_names().await?;
+        for name in &old_logs {
+            adapter.delete_log(name).await?;
+        }
+        if !old_logs.is_empty() {
+            info!(
+                count = old_logs.len(),
+                "adopt_local deleted the old dataset's log files"
+            );
+        }
+        let snapshot_ts = Utc::now();
+        let mut snapshot = self.snapshot_builder.build_at(snapshot_ts, None)?;
+        // A dataset started without a passphrase is plaintext: no secret in
+        // its snapshot, whatever E2E mark this device kept from an earlier
+        // one (review round 3 of #130).
+        if e2e_params.is_none() {
+            crate::credential_sync::strip_credentials_from_snapshot(&mut snapshot);
+        }
+        adapter.push_snapshot(&snapshot).await?;
+        // Its own state is the dataset now: nothing to catch up over.
+        self.save_coverage_exact_since(snapshot_ts)?;
+
         let mut meta = MetaJson::fresh(&self.app_version);
+        meta.snapshot_timestamp = snapshot_ts;
         // Phase Sk: bake the E2E flag + params into the fresh
         // meta so devices joining later can derive the same key
         // from the user's passphrase. The key itself is NEVER
@@ -884,7 +1180,7 @@ impl OnboardingService {
             meta.e2e_enabled = true;
             meta.e2e_params = Some(params);
         }
-        self.register_self_in_meta(&mut meta, device_name);
+        self.register_self_in_meta(&mut meta, device_name).await;
         adapter.push_meta(&meta).await?;
 
         if let Some(name) = device_name {
@@ -932,6 +1228,9 @@ impl OnboardingService {
             .get(PREF_DEVICE_NAME)
             .ok()
             .flatten();
+        let exact = self.coverage_exact();
+        let unreadable = self.unreadable_names();
+        let pending = self.pending_names().await;
         let now = Utc::now();
         let is_current = |meta: &MetaJson| {
             meta.devices
@@ -940,7 +1239,9 @@ impl OnboardingService {
                     d.last_seen_log == last_seen_log
                         && d.name == name
                         && d.app_version == self.app_version
-                        && !d.stale
+                        && d.exact == exact
+                        && d.unreadable == unreadable
+                        && pending.as_ref().is_none_or(|names| d.pending == *names)
                         // Deliberately COARSE. Every other term here is an
                         // equality, and treating the wall clock the same way
                         // would make the skip below unreachable — the stamp
@@ -963,7 +1264,11 @@ impl OnboardingService {
                             .is_some_and(|seen| now - seen < LAST_SEEN_REFRESH)
                 })
         };
-        if round_meta.is_some_and(is_current) {
+        // A dataset still on an older format is locked out for older builds
+        // at this build's first write (review round 6 of #130): from then on
+        // no compactor deletes by name, ignoring what devices name pending.
+        let locked_out = |meta: &MetaJson| meta.schema_version >= sync_core::SCHEMA_VERSION;
+        if round_meta.is_some_and(|meta| locked_out(meta) && is_current(meta)) {
             debug!("heartbeat_meta: device record already current; skipping push");
             return Ok(());
         }
@@ -980,9 +1285,24 @@ impl OnboardingService {
         // The fresh copy can already carry the update (a fast concurrent
         // round of our own, or the round-start copy was merely stale) —
         // re-check before writing.
-        if is_current(&meta) {
+        if locked_out(&meta) && is_current(&meta) {
             return Ok(());
         }
+        lock_out_older_builds(&mut meta, &self.app_version);
+        // A flag a peer set stands: only a resume clears it, once it took the
+        // snapshot (review round 7 of #130). A push between rounds names its
+        // files here too.
+        let stale = meta
+            .device(&self.local_device_id)
+            .is_some_and(|record| record.stale);
+        let pending = match pending {
+            Some(names) => names,
+            // pending/ did not read: what the record named stands.
+            None => meta
+                .device(&self.local_device_id)
+                .map(|record| record.pending.clone())
+                .unwrap_or_default(),
+        };
         meta.upsert_device(
             &self.local_device_id,
             DeviceRecord {
@@ -990,14 +1310,19 @@ impl OnboardingService {
                 last_seen_log,
                 last_seen: Some(now),
                 app_version: self.app_version.clone(),
-                stale: false,
+                stale,
+                exact,
+                unreadable,
+                pending,
             },
         );
         adapter.push_meta(&meta).await?;
         Ok(())
     }
 
-    fn register_self_in_meta(&self, meta: &mut MetaJson, device_name: Option<&str>) {
+    async fn register_self_in_meta(&self, meta: &mut MetaJson, device_name: Option<&str>) {
+        lock_out_older_builds(meta, &self.app_version);
+        let pending = self.pending_names().await.unwrap_or_default();
         let name = device_name.map(str::to_string).or_else(|| {
             UserPrefsRepo::new(&self.db)
                 .get(PREF_DEVICE_NAME)
@@ -1013,8 +1338,50 @@ impl OnboardingService {
                 last_seen: Some(now),
                 app_version: self.app_version.clone(),
                 stale: false,
+                exact: self.coverage_exact(),
+                unreadable: self.unreadable_names(),
+                pending,
             },
         );
+    }
+
+    /// The log files in `pending/` that hold anything, for this device's
+    /// record; `None` when the directory does not read.
+    async fn pending_names(&self) -> Option<Vec<String>> {
+        let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
+            Ok(rd) => rd,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Some(Vec::new()),
+            Err(err) => {
+                warn!(?err, "couldn't open the pending dir to name its files");
+                return None;
+            }
+        };
+        let mut names = Vec::new();
+        loop {
+            match entries.next_entry().await {
+                Ok(Some(entry)) => {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    // An empty file never goes up (review round 7 of #130),
+                    // nor what is no file (review round 14).
+                    let no_file = entry.file_type().await.is_ok_and(|kind| !kind.is_file());
+                    let holds_any = !no_file
+                        && entry
+                            .metadata()
+                            .await
+                            .is_ok_and(|metadata| metadata.len() > 0);
+                    if holds_any && LogFileName::from_filename(&name).is_ok() {
+                        names.push(name);
+                    }
+                }
+                Ok(None) => break,
+                Err(err) => {
+                    warn!(?err, "read_dir entry error naming the pending files");
+                    return None;
+                }
+            }
+        }
+        names.sort_unstable();
+        Some(names)
     }
 
     fn save_device_name(&self, name: &str) -> SyncResult<()> {
@@ -1032,6 +1399,43 @@ impl OnboardingService {
         UserPrefsRepo::new(&self.db)
             .set(SYNC_CURSOR_PREF_KEY, &ts.to_rfc3339())
             .map_err(|err| SyncError::internal(format!("save cursor: {err}")))?;
+        Ok(())
+    }
+
+    /// Record that this device's applied record is exact from `ts` on
+    /// (`sync_engine::SYNC_COVERAGE_EXACT_SINCE_PREF_KEY`).
+    fn save_coverage_exact_since(&self, ts: DateTime<Utc>) -> SyncResult<()> {
+        UserPrefsRepo::new(&self.db)
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &ts.to_rfc3339())
+            .map_err(|err| SyncError::internal(format!("save coverage mark: {err}")))?;
+        Ok(())
+    }
+
+    /// Forget every row's clock (`sync_row_clock`): this device joins a
+    /// dataset, maybe another one.
+    fn clear_row_clocks(&self) -> SyncResult<()> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute("DELETE FROM sync_row_clock", [])
+            .map_err(|err| SyncError::internal(format!("clear row clocks: {err}")))?;
+        Ok(())
+    }
+
+    /// Whether this device's applied record is exact, for its entry in
+    /// meta.json. A mark that does not read is not: the compactors then wait.
+    fn coverage_exact(&self) -> bool {
+        matches!(
+            UserPrefsRepo::new(&self.db).get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY),
+            Ok(Some(_))
+        )
+    }
+
+    /// This device's record is no longer known to be exact: it joins a
+    /// dataset, maybe another one, and is exact again once it applied every
+    /// log file there.
+    fn clear_coverage_exact(&self) -> SyncResult<()> {
+        UserPrefsRepo::new(&self.db)
+            .delete(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+            .map_err(|err| SyncError::internal(format!("clear coverage mark: {err}")))?;
         Ok(())
     }
 
@@ -1064,8 +1468,8 @@ impl OnboardingService {
 
     /// Read the persisted fetch cursor, or the `MIN_UTC` "fetch
     /// everything" floor when none has been written yet. Used by the
-    /// tolerant stale-resume path to catch up via logs when there's no
-    /// snapshot to anchor on.
+    /// tolerant stale-resume path when there's no snapshot to anchor on,
+    /// and by the catch-up, which never moves it back.
     fn read_cursor(&self) -> DateTime<Utc> {
         UserPrefsRepo::new(&self.db)
             .get(SYNC_CURSOR_PREF_KEY)
@@ -1099,24 +1503,112 @@ fn snapshot_ts_if_real(meta: &MetaJson) -> Option<String> {
     }
 }
 
-/// Order fetched log files chronologically (session-start timestamp,
-/// device-id tiebreak — together the unique filename), matching the sync
-/// round's pre-apply sort. File-level ordering is an approximation:
-/// DIFFERENT devices' live sessions overlap, so an envelope written late
-/// into an earlier-started session can still apply before a
-/// later-started session's earlier envelope — the same residual exposure
-/// the round (and main's listing-order apply) always had. Session files
-/// of ONE device never overlap, which is the case that matters for
-/// rotated-away create/delete pairs.
-fn sort_logs_chronologically(logs: &mut [LogFile]) {
-    logs.sort_by(|a, b| {
-        a.name
-            .timestamp
-            .cmp(&b.name.timestamp)
-            .then_with(|| a.name.device_id.as_str().cmp(b.name.device_id.as_str()))
-    });
+/// Lock builds before this format out of `meta` (review round 6 of #130):
+/// they delete by name and ignore what devices name pending.
+fn lock_out_older_builds(meta: &mut MetaJson, app_version: &str) {
+    if meta.schema_version < sync_core::SCHEMA_VERSION {
+        meta.schema_version = sync_core::SCHEMA_VERSION;
+        meta.min_app_version = app_version.to_string();
+    }
 }
 
+/// What a snapshot the same pass applied holds (review round 6 of #130): the
+/// events it names, or, naming none, every change up to its time. The rows
+/// hold its values now, so an own or earlier applied change it does not hold
+/// is weighed against them, never held.
+enum SnapshotHolds {
+    Named(HashSet<String>),
+    Until(DateTime<Utc>),
+}
+
+impl SnapshotHolds {
+    fn of(snapshot: &sync_core::Snapshot, outcome: &sync_engine::SnapshotApplyOutcome) -> Self {
+        let named: Option<HashSet<String>> = outcome.covered_events.and_then(|_| {
+            snapshot
+                .body
+                .get("covered_event_ids")
+                .and_then(|ids| serde_json::from_value::<Vec<String>>(ids.clone()).ok())
+                .map(|ids| ids.into_iter().collect())
+        });
+        match named {
+            Some(named) => SnapshotHolds::Named(named),
+            None => SnapshotHolds::Until(snapshot.metadata.snapshot_timestamp),
+        }
+    }
+
+    fn holds(&self, envelope: &EventEnvelope) -> bool {
+        match self {
+            SnapshotHolds::Named(named) => named.contains(&envelope.id),
+            SnapshotHolds::Until(at) => envelope.timestamp <= *at,
+        }
+    }
+
+    /// Whether it cannot hold `envelope`: a snapshot naming nothing that is
+    /// older. Not naming a change says nothing — a snapshot names only what
+    /// is in a file still present (review round 9 of #130).
+    fn provably_lacks(&self, envelope: &EventEnvelope) -> bool {
+        matches!(self, SnapshotHolds::Until(at) if envelope.timestamp > *at)
+    }
+}
+
+/// This device's own pending files as read before anything changed, and up
+/// to when what an older build left among them went up, for a pass over every
+/// log ([`OnboardingService::own_pending`]).
+struct OwnPending {
+    files: Vec<LogFile>,
+    pushed_until: Option<DateTime<Utc>>,
+    /// The dataset has E2E: a credential change goes up and is weighed.
+    credentials_go_up: bool,
+}
+
+/// This device's pending changes as read `before` the fetch and `after` the
+/// snapshot apply, file by file: what either read of a file holds, each
+/// change once. A later read adds what was written meanwhile and never takes
+/// a change away — a file gone, emptied or met mid-write keeps what the
+/// earlier read had (review rounds 11 to 13 of #130).
+fn merged_pending(
+    before: Vec<LogFile>,
+    after: Vec<LogFile>,
+) -> std::collections::BTreeMap<String, Vec<EventEnvelope>> {
+    let mut merged: std::collections::BTreeMap<String, (Vec<EventEnvelope>, HashSet<String>)> =
+        std::collections::BTreeMap::new();
+    for file in before.iter().chain(&after) {
+        let (lines, seen) = merged.entry(file.name.to_filename()).or_default();
+        for envelope in whole_lines_of(file) {
+            if seen.insert(envelope.id.clone()) {
+                lines.push(envelope);
+            }
+        }
+    }
+    merged
+        .into_iter()
+        .map(|(name, (lines, _))| (name, lines))
+        .collect()
+}
+
+/// What a pending file holds: every whole line (`sync_engine::written_lines`)
+/// — a read that met a line being written keeps the lines before it (review
+/// round 13 of #130), a line a crash or a full disk left half written the
+/// lines around it, as they go up (review round 14).
+fn whole_lines_of(file: &LogFile) -> Vec<EventEnvelope> {
+    match sync_engine::written_lines(file) {
+        Some((lines, _)) => lines,
+        None => {
+            warn!(name = %file.name.to_filename(), "couldn't parse pending log");
+            Vec::new()
+        }
+    }
+}
+
+/// Whether `envelope` changes an account's secret.
+fn is_credential(envelope: &EventEnvelope) -> bool {
+    matches!(
+        envelope.event,
+        sync_core::SyncEvent::CredentialSet(_) | sync_core::SyncEvent::CredentialCleared(_)
+    )
+}
+
+/// The envelopes of `files`; one that does not parse is left out.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1133,25 +1625,39 @@ mod tests {
     struct FakeAdapter {
         meta: Mutex<Option<MetaJson>>,
         logs: Mutex<Vec<LogFile>>,
+        snapshot: Mutex<Option<Snapshot>>,
+        /// Fetching the logs fails, as offline.
+        fail_fetch: Mutex<bool>,
+        /// The meta.json a compaction elsewhere writes while the logs are
+        /// fetched.
+        meta_while_fetching: Mutex<Option<MetaJson>>,
+        /// What happens on this device while the logs are fetched (a round
+        /// pushing a pending file, a change written).
+        while_fetching: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     }
 
     impl FakeAdapter {
         fn new() -> Self {
-            Self {
-                meta: Mutex::new(None),
-                logs: Mutex::new(Vec::new()),
-            }
+            Self::with_logs(Vec::new())
         }
 
         fn with_logs(logs: Vec<LogFile>) -> Self {
             Self {
                 meta: Mutex::new(None),
                 logs: Mutex::new(logs),
+                snapshot: Mutex::new(None),
+                fail_fetch: Mutex::new(false),
+                meta_while_fetching: Mutex::new(None),
+                while_fetching: Mutex::new(None),
             }
         }
 
         fn install_meta(&self, meta: MetaJson) {
             *self.meta.lock().unwrap() = Some(meta);
+        }
+
+        fn install_snapshot(&self, snapshot: Snapshot) {
+            *self.snapshot.lock().unwrap() = Some(snapshot);
         }
     }
 
@@ -1168,12 +1674,25 @@ mod tests {
             Ok(())
         }
         async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
+            if *self.fail_fetch.lock().unwrap() {
+                return Err(SyncError::internal("offline"));
+            }
+            if let Some(meta) = self.meta_while_fetching.lock().unwrap().take() {
+                *self.meta.lock().unwrap() = Some(meta);
+            }
+            let act = self.while_fetching.lock().unwrap().take();
+            if let Some(act) = act {
+                act();
+            }
             Ok(self
                 .logs
                 .lock()
                 .unwrap()
                 .iter()
-                .filter(|l| l.name.timestamp > since.last_seen_log)
+                // The filter every real adapter applies, exclusion included.
+                .filter(|l| {
+                    since.wants_sized(&l.name, &l.name.to_filename(), Some(l.bytes.len() as u64))
+                })
                 .cloned()
                 .collect())
         }
@@ -1182,12 +1701,14 @@ mod tests {
             Ok(())
         }
         async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
-            Ok(None)
+            Ok(self.snapshot.lock().unwrap().clone())
         }
-        async fn push_snapshot(&self, _snapshot: &Snapshot) -> SyncResult<()> {
+        async fn push_snapshot(&self, snapshot: &Snapshot) -> SyncResult<()> {
+            *self.snapshot.lock().unwrap() = Some(snapshot.clone());
             Ok(())
         }
-        async fn delete_log(&self, _name: &LogFileName) -> SyncResult<()> {
+        async fn delete_log(&self, name: &LogFileName) -> SyncResult<()> {
+            self.logs.lock().unwrap().retain(|log| log.name != *name);
             Ok(())
         }
         async fn push_sound_asset(
@@ -1223,6 +1744,18 @@ mod tests {
     }
 
     fn build_service_with_pending(db: SharedConn, pending_dir: PathBuf) -> OnboardingService {
+        build_service_with(
+            db,
+            pending_dir,
+            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+        )
+    }
+
+    fn build_service_with(
+        db: SharedConn,
+        pending_dir: PathBuf,
+        secrets: Arc<sync_engine::test_support::FakeSecrets>,
+    ) -> OnboardingService {
         let device_id = DeviceId::from_string("dev-this".into());
         let adapter = Arc::new(LocalAdapter::new(db.clone()));
         let store: Arc<dyn sync_engine::SyncStore> = Arc::new(
@@ -1230,13 +1763,13 @@ mod tests {
         );
         let applier = Arc::new(EventLogApplier::new(
             Arc::clone(&store),
-            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+            secrets.clone(),
             Arc::clone(&adapter),
             device_id.clone(),
         ));
         let snapshot_builder = Arc::new(SnapshotBuilder::new(
             Arc::clone(&store),
-            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+            secrets,
             "1.0.0-test",
         ));
         OnboardingService::new(
@@ -1277,6 +1810,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -1308,6 +1844,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -1363,6 +1902,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         meta.upsert_device(
@@ -1373,6 +1915,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -1390,6 +1935,108 @@ mod tests {
         assert!(updated
             .device(&DeviceId::from_string("dev-a".into()))
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn starting_over_deletes_the_old_dataset_and_puts_this_devices_state_in_its_place() {
+        // Toni, 2026-10-30: "Neu beginnen" overwrites the dataset. Its old log
+        // files would otherwise come in through the catch-up, here or on a
+        // device joining later, and its snapshot through the join.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        UserPrefsRepo::new(&db.shared())
+            .set("sync.intervalMinutes", "15")
+            .unwrap();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = envelope("ev-old", "dev-old", at, set_interval("45"));
+        let adapter = FakeAdapter::with_logs(vec![file_of("dev-old", at, &[&old])]);
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+        adapter.install_snapshot(snapshot_at(at, None));
+
+        svc.adopt_local(&adapter, None, None).await.unwrap();
+
+        assert!(adapter.logs.lock().unwrap().is_empty());
+        let snapshot = adapter.fetch_snapshot().await.unwrap().unwrap();
+        let body: sync_engine::AperioSnapshotBody = serde_json::from_value(snapshot.body).unwrap();
+        assert_eq!(
+            body.settings
+                .get("sync.intervalMinutes")
+                .map(String::as_str),
+            Some("15"),
+            "this device's state",
+        );
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(
+            meta.snapshot_timestamp,
+            snapshot.metadata.snapshot_timestamp
+        );
+        assert!(after_self(&adapter).await.exact, "nothing to catch up over");
+    }
+
+    #[tokio::test]
+    async fn starting_over_without_a_passphrase_puts_no_secret_in_the_snapshot() {
+        // Review round 3 of #130: an E2E mark kept from an earlier dataset
+        // made the snapshot carry the account secrets, pushed in plaintext.
+        use sync_engine::{SecretSlot, SecretStore};
+        let (_tmp, db) = fresh_db();
+        db.shared()
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'caldav', 'Fastmail', '{}', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set(crate::credential_sync::PREF_E2E_ENABLED, "true")
+            .unwrap();
+        let secrets = Arc::new(sync_engine::test_support::FakeSecrets::default());
+        secrets
+            .store("acc-1", SecretSlot::Password, "hunter2")
+            .unwrap();
+        let svc = build_service_with(db.shared(), PathBuf::from("/non/existent/pending"), secrets);
+        let adapter = FakeAdapter::new();
+
+        svc.adopt_local(&adapter, None, None).await.unwrap();
+
+        let snapshot = adapter.fetch_snapshot().await.unwrap().unwrap();
+        assert!(!snapshot.body.to_string().contains("hunter2"));
+    }
+
+    #[tokio::test]
+    async fn the_heartbeat_reports_once_the_record_is_exact() {
+        // The compactors delete no log file while an active device has not
+        // caught up (Toni, 2026-10-30); each device says so in meta.json, and
+        // a record that only changed there is pushed.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let now = Utc::now();
+        svc.heartbeat_meta(&adapter, now, None).await.unwrap();
+        assert!(!after_self(&adapter).await.exact);
+        let cached = adapter.fetch_meta().await.unwrap().unwrap();
+
+        UserPrefsRepo::new(&db.shared())
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &now.to_rfc3339())
+            .unwrap();
+        svc.heartbeat_meta(&adapter, now, Some(&cached))
+            .await
+            .unwrap();
+
+        assert!(after_self(&adapter).await.exact);
+    }
+
+    #[tokio::test]
+    async fn a_joined_device_reports_its_record_exact() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::with_logs(Vec::new());
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert!(after_self(&adapter).await.exact);
     }
 
     #[tokio::test]
@@ -1427,6 +2074,9 @@ mod tests {
                 last_seen: Some(now - chrono::Duration::hours(1)),
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         // The REMOTE meanwhile gained a marker device (a concurrent peer's
@@ -1441,6 +2091,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(remote);
@@ -1480,6 +2133,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         // Remote meanwhile: the peer's write landed.
@@ -1492,6 +2148,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(remote);
@@ -1514,6 +2173,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_heartbeat_keeps_the_stale_flag_a_peer_set() {
+        // Review round 7 of #130: a push between rounds names its files through
+        // the heartbeat; clearing the flag there, it kept a device that never
+        // took the snapshot from ever resuming.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0-test");
+        meta.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now() - chrono::Duration::days(30),
+                last_seen: None,
+                app_version: "1.0.0-test".into(),
+                stale: true,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        adapter.install_meta(meta);
+        let now = Utc::now();
+
+        svc.heartbeat_meta(&adapter, now, None).await.unwrap();
+
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        let rec = after
+            .device(&DeviceId::from_string("dev-this".into()))
+            .expect("self entry");
+        assert_eq!(rec.last_seen_log, now, "the record was written");
+        assert!(rec.stale, "only a resume clears the flag");
+    }
+
+    #[tokio::test]
     async fn heartbeat_pushes_when_the_horizon_moved() {
         let (_tmp, db) = fresh_db();
         let svc = build_service(db.shared());
@@ -1529,6 +2223,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(cached.clone());
@@ -1566,6 +2263,9 @@ mod tests {
                 last_seen: Some(now - chrono::Duration::days(2)),
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(cached.clone());
@@ -1603,6 +2303,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(cached.clone());
@@ -1625,6 +2328,9 @@ mod tests {
             last_seen,
             app_version: "1.0.0-test".into(),
             stale: false,
+            exact: false,
+            unreadable: Vec::new(),
+            pending: Vec::new(),
         }
     }
 
@@ -1764,6 +2470,9 @@ mod tests {
                 last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: true,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -1782,27 +2491,1882 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_resume_locks_older_builds_out() {
+        // Review round 7 of #130: a write of this build, the only one of a
+        // round that resumes before anything else.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.schema_version = 1;
+        meta.min_app_version = "0.1.0".into();
+        meta.upsert_device(
+            svc.device_id(),
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now() - chrono::Duration::days(2),
+                last_seen: None,
+                app_version: "1.0.0".into(),
+                stale: true,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        adapter.install_meta(meta);
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(after.schema_version, sync_core::SCHEMA_VERSION);
+        assert_ne!(after.min_app_version, "0.1.0");
+    }
+
+    /// The laptop's case (Toni, 2026-10-27): a peer session file named at
+    /// `start`, before the snapshot at `start + 1h`, holding a change the
+    /// snapshot folded in (`held`, interval 30) and one the peer appended
+    /// after it (`appended`, interval 45). Returns the file, the snapshot's
+    /// time and the held event's id.
+    fn grown_session(start: DateTime<Utc>) -> (LogFile, DateTime<Utc>, String) {
+        let peer = DeviceId::from_string("dev-other".into());
+        let change = |minutes: i64, value: &str| sync_core::EventEnvelope {
+            id: format!("ev-{minutes}"),
+            device_id: peer.clone(),
+            timestamp: start + chrono::Duration::minutes(minutes),
+            event: sync_core::SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+                key: "sync.intervalMinutes".into(),
+                value: serde_json::json!(value),
+            }),
+        };
+        let held = change(10, "30");
+        let appended = change(120, "45");
+        let bytes = [&held, &appended]
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes();
+        let log = LogFile {
+            name: LogFileName::new(start, peer),
+            bytes,
+        };
+        (log, start + chrono::Duration::hours(1), held.id)
+    }
+
+    /// The snapshot at `at`, holding interval 30, naming `covered` (or
+    /// nothing).
+    fn snapshot_at(at: DateTime<Utc>, covered: Option<Vec<String>>) -> Snapshot {
+        let body = sync_engine::AperioSnapshotBody {
+            settings: std::collections::BTreeMap::from([(
+                "sync.intervalMinutes".to_string(),
+                "30".to_string(),
+            )]),
+            covered_event_ids: covered,
+            ..Default::default()
+        };
+        Snapshot::new(at, "1.0.0", serde_json::to_value(body).unwrap())
+    }
+
+    fn interval(db: &DbHandle) -> Option<String> {
+        UserPrefsRepo::new(&db.shared())
+            .get("sync.intervalMinutes")
+            .unwrap()
+    }
+
+    fn exact_since(db: &DbHandle) -> Option<DateTime<Utc>> {
+        UserPrefsRepo::new(&db.shared())
+            .get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+            .unwrap()
+            .and_then(|raw| DateTime::parse_from_rfc3339(&raw).ok())
+            .map(|ts| ts.with_timezone(&Utc))
+    }
+
+    #[tokio::test]
+    async fn accept_remote_applies_what_a_naming_snapshot_does_not_hold() {
+        // DESIGN-sync-snapshot-coverage.md: a joining device fetches every
+        // file, a session file named before the snapshot included, and the
+        // change the snapshot names is not applied again.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let start: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (log, snapshot_ts, held) = grown_session(start);
+        let adapter = FakeAdapter::with_logs(vec![log]);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = snapshot_ts;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(snapshot_ts, Some(vec![held])));
+
+        let report = svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(
+            interval(&db).as_deref(),
+            Some("45"),
+            "the appended change arrives"
+        );
+        assert_eq!(report.applied, 1, "the held change is not applied again");
+        assert!(exact_since(&db).is_some(), "its record is exact");
+    }
+
+    #[tokio::test]
+    async fn accept_remote_from_a_snapshot_naming_nothing_applies_every_file_too() {
+        // A snapshot written before the fix names nothing: the join applies
+        // every change in time order on top, and the newest wins.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        // Exact in the dataset it left: says nothing about this one.
+        let before: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &before.to_rfc3339())
+            .unwrap();
+        let start: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (log, snapshot_ts, _held) = grown_session(start);
+        let adapter = FakeAdapter::with_logs(vec![log]);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = snapshot_ts;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(snapshot_ts, None));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
+        assert!(
+            exact_since(&db).is_some_and(|at| at > before),
+            "exact again, here"
+        );
+    }
+
+    fn envelope(
+        id: &str,
+        device: &str,
+        at: DateTime<Utc>,
+        event: sync_core::SyncEvent,
+    ) -> sync_core::EventEnvelope {
+        sync_core::EventEnvelope {
+            id: id.into(),
+            device_id: DeviceId::from_string(device.into()),
+            timestamp: at,
+            event,
+        }
+    }
+
+    fn file_of(
+        device: &str,
+        named: DateTime<Utc>,
+        envelopes: &[&sync_core::EventEnvelope],
+    ) -> LogFile {
+        LogFile {
+            name: LogFileName::new(named, DeviceId::from_string(device.into())),
+            bytes: envelopes
+                .iter()
+                .map(|e| serde_json::to_string(e).unwrap())
+                .collect::<Vec<_>>()
+                .join("\n")
+                .into_bytes(),
+        }
+    }
+
+    fn set_interval(value: &str) -> sync_core::SyncEvent {
+        sync_core::SyncEvent::SettingsUpdated(sync_core::SettingsPayload {
+            key: "sync.intervalMinutes".into(),
+            value: serde_json::json!(value),
+        })
+    }
+
+    fn label_count(db: &DbHandle, id: &str) -> i64 {
+        let shared = db.shared();
+        let conn = shared.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM color_labels WHERE id = ?",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    /// The laptop before the catch-up (Toni, 2026-10-27): it took a snapshot
+    /// that named nothing, holding label `lbl-1` and interval 30, and skipped
+    /// the peer's session file by name. On the remote now: that file, which
+    /// also set 45 and deleted the label, and a snapshot at `+4h` that holds
+    /// all of it, naming its events or not (`covered`). Returns the service,
+    /// the adapter and the snapshot's time.
+    async fn laptop_before_catch_up(
+        db: &DbHandle,
+        pending: PathBuf,
+        covered: bool,
+    ) -> (OnboardingService, FakeAdapter, DateTime<Utc>) {
+        let svc = build_service_with_pending(db.shared(), pending);
+        let start: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let minutes = |m: i64| start + chrono::Duration::minutes(m);
+        let label = envelope(
+            "ev-label",
+            "dev-other",
+            minutes(5),
+            sync_core::SyncEvent::ColorLabelCreated(sync_core::EventPayload {
+                id: "lbl-1".into(),
+                fields: serde_json::json!({ "id": "lbl-1", "name": "Rot", "hex": "#e53935" }),
+            }),
+        );
+        let thirty = envelope("ev-30", "dev-other", minutes(10), set_interval("30"));
+        let forty_five = envelope("ev-45", "dev-other", minutes(120), set_interval("45"));
+        let deleted = envelope(
+            "ev-del",
+            "dev-other",
+            minutes(180),
+            sync_core::SyncEvent::ColorLabelDeleted(sync_core::IdPayload { id: "lbl-1".into() }),
+        );
+        svc.applier
+            .apply_envelopes(vec![label.clone(), thirty.clone()])
+            .unwrap();
+        assert_eq!(label_count(db, "lbl-1"), 1);
+
+        let snapshot_ts = minutes(240);
+        let adapter = FakeAdapter::with_logs(vec![file_of(
+            "dev-other",
+            start,
+            &[&label, &thirty, &forty_five, &deleted],
+        )]);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = snapshot_ts;
+        adapter.install_meta(meta);
+        let body = sync_engine::AperioSnapshotBody {
+            settings: std::collections::BTreeMap::from([(
+                "sync.intervalMinutes".to_string(),
+                "45".to_string(),
+            )]),
+            covered_event_ids: covered.then(|| {
+                vec![
+                    "ev-label".into(),
+                    "ev-30".into(),
+                    "ev-45".into(),
+                    "ev-del".into(),
+                ]
+            }),
+            ..Default::default()
+        };
+        adapter.install_snapshot(Snapshot::new(
+            snapshot_ts,
+            "1.0.0",
+            serde_json::to_value(body).unwrap(),
+        ));
+        (svc, adapter, snapshot_ts)
+    }
+
+    fn no_pending() -> PathBuf {
+        PathBuf::from("/non/existent/pending")
+    }
+
+    fn unresolved_conflicts(db: &DbHandle) -> usize {
+        crate::conflicts::ConflictsRepo::new(&db.shared())
+            .unresolved_count()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_catch_up_heals_a_device_that_joined_by_name() {
+        // DESIGN-sync-snapshot-coverage.md (Toni, 2026-10-30): the change it
+        // skipped arrives, the label the peer deleted goes, nothing asks —
+        // and its record is exact from here on.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, _) = laptop_before_catch_up(&db, no_pending(), false).await;
+
+        let report = svc.catch_up(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
+        assert_eq!(label_count(&db, "lbl-1"), 0, "the deleted label goes");
+        assert_eq!(unresolved_conflicts(&db), 0);
+        assert!(exact_since(&db).is_some());
+        // For the round's report: the platform re-reads this setting.
+        assert!(report
+            .detail
+            .settings_keys
+            .contains(&"sync.intervalMinutes".to_string()));
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_meeting_an_unreadable_file_is_not_exact_and_leaves_it_unrecorded() {
+        // Review round 2 of #130: a torn read of a peer's live file still
+        // marked the device exact, and recorded the file, so a round applied
+        // it later outside the catch-up's rules. The next catch-up takes it.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let torn = LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"{\"id\":".to_vec(),
+        };
+        let torn_name = torn.name.to_filename();
+        adapter.logs.lock().unwrap().push(torn);
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert_eq!(
+            interval(&db).as_deref(),
+            Some("45"),
+            "the rest still arrives"
+        );
+        assert!(exact_since(&db).is_none());
+        let lengths = UserPrefsRepo::new(&db.shared())
+            .get(sync_engine::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(!lengths.contains(&torn_name));
+    }
+
+    #[tokio::test]
+    async fn a_joining_device_keeps_its_own_change_not_pushed_yet() {
+        // Review round 3 of #130: a setting made in the first-launch wizard,
+        // pending, before the join. The snapshot holds the peer's value with
+        // no clock; the peers take this device's change once it is pushed,
+        // so it has to win here too, or the devices part.
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at = Utc::now() - chrono::Duration::minutes(5);
+        let own = envelope("ev-own", "dev-this", at, set_interval("70"));
+        let own_file = file_of("dev-this", at, &[&own]);
+        std::fs::write(
+            pending.path().join(own_file.name.to_filename()),
+            &own_file.bytes,
+        )
+        .unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set("sync.intervalMinutes", "70")
+            .unwrap();
+        stamp_clock(&db, "setting", "sync.intervalMinutes", at);
+        let adapter = FakeAdapter::with_logs(Vec::new());
+        let snapshot_ts = at - chrono::Duration::hours(1);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = snapshot_ts;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(snapshot_ts, None));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_join_that_cannot_fetch_leaves_the_device_as_it_was() {
+        // Review round 3 of #130: the join cleared the row clocks and the
+        // exact mark before it fetched anything, so a failed join damaged
+        // the dataset this device was still syncing with.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &at.to_rfc3339())
+            .unwrap();
+        stamp_clock(&db, "setting", "sync.intervalMinutes", at);
+        let adapter = FakeAdapter::new();
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+        *adapter.fail_fetch.lock().unwrap() = true;
+
+        assert!(svc.accept_remote(&adapter, None).await.is_err());
+
+        assert!(exact_since(&db).is_some());
+        let clocks: i64 = db
+            .shared()
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM sync_row_clock", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(clocks, 1);
+    }
+
+    #[tokio::test]
+    async fn a_file_unreadable_twice_at_the_same_size_no_longer_keeps_the_device_inexact() {
+        // Review round 3 of #130: one file no version of this build can read
+        // kept every device from being exact, so the GC waited forever and
+        // the catch-up ran every hour.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let broken = LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"not json".to_vec(),
+        };
+        let broken_name = broken.name.to_filename();
+        adapter.logs.lock().unwrap().push(broken);
+
+        svc.catch_up(&adapter).await.unwrap();
+        assert!(exact_since(&db).is_none(), "maybe a torn read: once more");
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert!(exact_since(&db).is_some());
+        let lengths = UserPrefsRepo::new(&db.shared())
+            .get(sync_engine::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(
+            lengths.contains(&broken_name),
+            "not fetched again unless it grows"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_incomplete_stale_resume_leaves_the_device_not_exact() {
+        // Review round 3 of #130: an earlier mark stayed, the heartbeat
+        // reported exact, and the GC stopped waiting for this device.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), true).await;
+        UserPrefsRepo::new(&db.shared())
+            .set(
+                SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
+                &snapshot_ts.to_rfc3339(),
+            )
+            .unwrap();
+        adapter.logs.lock().unwrap().push(LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"{\"id\":".to_vec(),
+        });
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        assert!(exact_since(&db).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_file_another_parser_could_not_read_is_a_first_sighting() {
+        // Review rounds 4 and 5 of #130: what an earlier parser recorded as
+        // unreadable says nothing about this one, which may read it.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let broken = LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"not json".to_vec(),
+        };
+        let record = sync_engine::UnreadableLogs {
+            parser: 0,
+            files: HashMap::from([(broken.name.to_filename(), broken.bytes.len() as u64)]),
+        };
+        UserPrefsRepo::new(&db.shared())
+            .set(
+                SYNC_UNREADABLE_LOGS_PREF_KEY,
+                &serde_json::to_string(&record).unwrap(),
+            )
+            .unwrap();
+        adapter.logs.lock().unwrap().push(broken);
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert!(exact_since(&db).is_none(), "once more, under this build");
+    }
+
+    #[tokio::test]
+    async fn a_join_registers_itself_in_the_meta_a_compaction_wrote_meanwhile() {
+        // Review round 4 of #130: the join pushed back the meta.json it read
+        // before its long pass, undoing a lock-out and a raised GC horizon.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        adapter.install_meta(MetaJson::fresh("0.2.0"));
+        let mut compacted = MetaJson::fresh("0.2.0");
+        compacted.min_app_version = "0.2.0".into();
+        compacted.gc_horizon = Some("2026-10-05T16:07:24Z".parse().unwrap());
+        *adapter.meta_while_fetching.lock().unwrap() = Some(compacted.clone());
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(meta.gc_horizon, compacted.gc_horizon);
+        assert_eq!(meta.min_app_version, "0.2.0");
+        assert!(meta.device(svc.device_id()).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_line_this_build_does_not_know_keeps_the_device_exact_and_is_named() {
+        // Review round 5 of #130: a newer build's live session, holding a
+        // line this one cannot read, grew between catch-ups and kept the
+        // device from ever being exact. It is no torn read; the device is
+        // exact, and names the file in meta.json, so no compactor deletes it.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let newer = LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"{\"from\":\"a newer build\"}\n".to_vec(),
+        };
+        let filename = newer.name.to_filename();
+        adapter.logs.lock().unwrap().push(newer);
+
+        svc.catch_up(&adapter).await.unwrap();
+        assert!(exact_since(&db).is_some());
+        svc.heartbeat_meta(&adapter, snapshot_ts, None)
+            .await
+            .unwrap();
+
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(
+            meta.device(svc.device_id())
+                .map(|record| record.unreadable.clone()),
+            Some(vec![filename]),
+        );
+
+        // Read at last: the next heartbeat names it no more, though nothing
+        // else about the record changed.
+        UserPrefsRepo::new(&db.shared())
+            .delete(SYNC_UNREADABLE_LOGS_PREF_KEY)
+            .unwrap();
+        let round_meta = adapter.fetch_meta().await.unwrap();
+        svc.heartbeat_meta(&adapter, snapshot_ts, round_meta.as_ref())
+            .await
+            .unwrap();
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(
+            meta.device(svc.device_id())
+                .map(|record| record.unreadable.clone()),
+            Some(Vec::new()),
+        );
+    }
+
+    #[tokio::test]
+    async fn the_catch_up_holds_an_own_change_its_peers_took_before_a_gc() {
+        // Review round 5 of #130: an old session, pushed and deleted by a
+        // peer's GC, still pending here (a 0.1.0 leftover), counted as not
+        // on the remote and was weighed: on a row of unknown time its
+        // months-old value won here, and the peers kept theirs.
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at: DateTime<Utc> = "2026-09-01T08:00:00Z".parse().unwrap();
+        let own = envelope("ev-own-old", "dev-this", at, set_interval("30"));
+        let own_file = file_of("dev-this", at, &[&own]);
+        std::fs::write(
+            pending.path().join(own_file.name.to_filename()),
+            &own_file.bytes,
+        )
+        .unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set("sync.intervalMinutes", "90")
+            .unwrap();
+        let adapter = FakeAdapter::with_logs(Vec::new());
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("90"));
+    }
+
+    #[tokio::test]
+    async fn an_own_file_torn_again_at_the_same_size_leaves_the_device_exact() {
+        // Review round 7 of #130: recorded no more, an own file torn for good
+        // kept its device from ever being exact.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        adapter.logs.lock().unwrap().push(LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-this".into()),
+            ),
+            bytes: b"{\"id\":\"ev".to_vec(),
+        });
+
+        svc.catch_up(&adapter).await.unwrap();
+        assert!(exact_since(&db).is_none(), "maybe a torn read: once more");
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert!(exact_since(&db).is_some());
+        assert!(svc.unreadable_names().is_empty(), "and not named");
+    }
+
+    #[tokio::test]
+    async fn an_own_file_that_does_not_read_is_not_named() {
+        // Review round 6 of #130: this device holds its own events whatever
+        // their remote copy looks like; named, the file held the GC back
+        // for good, as no ordinary round reads an own file.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        adapter.logs.lock().unwrap().push(LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-this".into()),
+            ),
+            bytes: b"{\"from\":\"a newer build\"}\n".to_vec(),
+        });
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert!(svc.unreadable_names().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_join_weighs_an_own_change_the_snapshot_does_not_hold() {
+        // Review round 6 of #130: a join clears every row clock, and a row the
+        // snapshot brings no clock for is of unknown time. This device's own
+        // change, made after the snapshot, was held there as applied, and the
+        // snapshot's older value stayed on this device alone.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let later = at + chrono::Duration::hours(2);
+        let own = envelope("ev-own", "dev-this", later, set_interval("70"));
+        let body = sync_engine::AperioSnapshotBody {
+            settings: std::collections::BTreeMap::from([(
+                "sync.intervalMinutes".to_string(),
+                "45".to_string(),
+            )]),
+            ..Default::default()
+        };
+        let adapter = FakeAdapter::with_logs(vec![file_of("dev-this", later, &[&own])]);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = at;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(Snapshot::new(
+            at,
+            "1.0.0",
+            serde_json::to_value(body).unwrap(),
+        ));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("70"));
+    }
+
+    /// What [`join_with`] sets up besides the leftover.
+    #[derive(Default)]
+    struct JoinCase<'a> {
+        /// The older build's last round as the round froze it.
+        cutoff: Option<&'a str>,
+        /// As that build left it, not frozen yet.
+        last_round: Option<DateTime<Utc>>,
+        /// The dataset knows this device.
+        member: bool,
+        /// A second pending file that does not read.
+        unreadable_pending: bool,
+        /// A directory in pending/, named as a log file.
+        dir_in_pending: bool,
+        /// The leftover's own remote copy, readable, without its change.
+        own_remote: bool,
+        /// The leftover's own remote copy, empty: a push cut it to nothing.
+        own_remote_empty: bool,
+        /// A snapshot that does not apply.
+        broken_snapshot: bool,
+        /// A round pushes and removes the leftover while the logs are
+        /// fetched.
+        removed_while_fetching: bool,
+        /// A change setting 80 is written into the leftover while the logs
+        /// are fetched.
+        grown_while_fetching: bool,
+        /// As `grown_while_fetching`, and a third line is being written: the
+        /// second read meets it mid-write.
+        torn_while_fetching: bool,
+        /// A settle empties the leftover while the logs are fetched.
+        emptied_while_fetching: bool,
+        /// A stale resume instead of a join.
+        resume: bool,
+        /// A half line before the leftover's change: a full disk cut an
+        /// earlier append short.
+        damaged_before: bool,
+    }
+
+    /// A join, the snapshot at `at` holding interval 45 and naming nothing,
+    /// of a device whose pending leftover sets 70 at `change_at`, its record
+    /// exact before. Returns the join's result and the interval after it.
+    async fn join_with(
+        change_at: DateTime<Utc>,
+        case: JoinCase<'_>,
+    ) -> (
+        SyncResult<OnboardingReport>,
+        Option<String>,
+        DbHandle,
+        (TempDir, TempDir),
+    ) {
+        let (tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let own = envelope("ev-own", "dev-this", change_at, set_interval("70"));
+        let leftover = file_of("dev-this", change_at, &[&own]);
+        let mut written = Vec::new();
+        if case.damaged_before {
+            written.extend_from_slice(b"{\"id\":\"ev-half\n");
+        }
+        written.extend_from_slice(&leftover.bytes);
+        std::fs::write(pending.path().join(leftover.name.to_filename()), &written).unwrap();
+        let other = LogFileName::new(
+            change_at + chrono::Duration::seconds(1),
+            DeviceId::from_string("dev-this".into()),
+        );
+        let other_path = pending.path().join(other.to_filename());
+        if case.unreadable_pending {
+            std::fs::write(&other_path, b"{}\n").unwrap();
+        }
+        if case.dir_in_pending {
+            std::fs::create_dir(&other_path).unwrap();
+        }
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        if let Some(raw) = case.cutoff {
+            prefs
+                .set(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY, raw)
+                .unwrap();
+        }
+        if let Some(at) = case.last_round {
+            prefs
+                .set(sync_engine::SYNC_LAST_ROUND_PREF_KEY, &at.to_rfc3339())
+                .unwrap();
+        }
+        prefs
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let body = if case.broken_snapshot {
+            serde_json::json!({ "settings": "not a map" })
+        } else {
+            serde_json::to_value(sync_engine::AperioSnapshotBody {
+                settings: std::collections::BTreeMap::from([(
+                    "sync.intervalMinutes".to_string(),
+                    "45".to_string(),
+                )]),
+                ..Default::default()
+            })
+            .unwrap()
+        };
+        let adapter = if case.own_remote {
+            let earlier = envelope(
+                "ev-earlier",
+                "dev-this",
+                change_at - chrono::Duration::minutes(1),
+                set_interval("60"),
+            );
+            FakeAdapter::with_logs(vec![file_of("dev-this", change_at, &[&earlier])])
+        } else if case.own_remote_empty {
+            FakeAdapter::with_logs(vec![LogFile {
+                name: LogFileName::new(change_at, DeviceId::from_string("dev-this".into())),
+                bytes: Vec::new(),
+            }])
+        } else {
+            FakeAdapter::new()
+        };
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = at;
+        if case.member {
+            meta.upsert_device(
+                &DeviceId::from_string("dev-this".into()),
+                DeviceRecord {
+                    name: None,
+                    last_seen_log: at,
+                    last_seen: None,
+                    app_version: "1.0.0".into(),
+                    stale: false,
+                    exact: false,
+                    unreadable: Vec::new(),
+                    pending: Vec::new(),
+                },
+            );
+        }
+        adapter.install_meta(meta);
+        adapter.install_snapshot(Snapshot::new(at, "1.0.0", body));
+        let leftover_path = pending.path().join(leftover.name.to_filename());
+        if case.removed_while_fetching {
+            *adapter.while_fetching.lock().unwrap() = Some(Box::new(move || {
+                std::fs::remove_file(&leftover_path).unwrap();
+            }));
+        } else if case.grown_while_fetching || case.torn_while_fetching {
+            let newer = envelope(
+                "ev-newer",
+                "dev-this",
+                change_at + chrono::Duration::minutes(1),
+                set_interval("80"),
+            );
+            let mut grown = file_of("dev-this", change_at, &[&own, &newer]).bytes;
+            if case.torn_while_fetching {
+                // `file_of` ends without the newline the writer adds.
+                grown.extend_from_slice(b"\n{\"id\":\"ev-half");
+            }
+            *adapter.while_fetching.lock().unwrap() = Some(Box::new(move || {
+                std::fs::write(&leftover_path, &grown).unwrap();
+            }));
+        } else if case.emptied_while_fetching {
+            *adapter.while_fetching.lock().unwrap() = Some(Box::new(move || {
+                std::fs::write(&leftover_path, b"").unwrap();
+            }));
+        }
+
+        let held = case
+            .unreadable_pending
+            .then(|| UnreadableFile::hold(other_path.clone()));
+        let result = if case.resume {
+            svc.resume_from_stale(&adapter).await
+        } else {
+            svc.accept_remote(&adapter, None).await
+        };
+        drop(held);
+        let after = interval(&db);
+        (result, after, db, (tmp, pending))
+    }
+
+    /// [`join_with`] in the common shape.
+    async fn join_with_a_leftover(
+        change_at: DateTime<Utc>,
+        cutoff: Option<&str>,
+        last_round: Option<DateTime<Utc>>,
+        member: bool,
+        unreadable_pending: bool,
+    ) -> (
+        SyncResult<OnboardingReport>,
+        Option<String>,
+        DbHandle,
+        (TempDir, TempDir),
+    ) {
+        join_with(
+            change_at,
+            JoinCase {
+                cutoff,
+                last_round,
+                member,
+                unreadable_pending,
+                ..JoinCase::default()
+            },
+        )
+        .await
+    }
+
+    /// Holds `path` so that it does not read (Windows: shared with nobody;
+    /// elsewhere: no permission) until dropped.
+    struct UnreadableFile {
+        #[cfg(windows)]
+        _file: std::fs::File,
+        #[cfg(not(windows))]
+        path: std::path::PathBuf,
+    }
+
+    impl UnreadableFile {
+        fn hold(path: std::path::PathBuf) -> Self {
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                let file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(&path)
+                    .unwrap();
+                Self { _file: file }
+            }
+            #[cfg(not(windows))]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+                Self { path }
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    impl Drop for UnreadableFile {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o644));
+        }
+    }
+
+    /// The cutoff the round freezes, as JSON.
+    fn frozen(last_round: Option<DateTime<Utc>>) -> String {
+        serde_json::to_string(&sync_engine::LeftoversCutoff {
+            last_round,
+            before: "2026-10-31T00:00:00Z".parse().unwrap(),
+        })
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_join_holds_what_an_older_build_left_pending_up_to_its_cutoff() {
+        // Review round 8 of #130: a leftover not settled yet, or left whole
+        // for its torn remote copy, was weighed whole; what it held up to the
+        // older build's last round went up then, and peers took newer values
+        // since.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(old + chrono::Duration::days(1)));
+        let (result, interval, _db, _dirs) =
+            join_with_a_leftover(old, Some(&cutoff), None, true, false).await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn a_join_holds_a_leftover_line_the_older_builds_last_round_pushed() {
+        // Review round 9 of #130: the pass took settle's cutoff, ten minutes
+        // before that round, and weighed what the round itself pushed.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let round = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(round));
+        let (result, interval, _db, _dirs) = join_with_a_leftover(
+            round - chrono::Duration::minutes(3),
+            Some(&cutoff),
+            None,
+            true,
+            false,
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn a_join_weighs_a_leftover_line_a_snapshot_naming_nothing_is_older_than() {
+        // Review round 9 of #130: it cannot hold the line, which the peers
+        // applied after it.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let cutoff = frozen(Some(at + chrono::Duration::hours(2)));
+        let (result, interval, _db, _dirs) = join_with_a_leftover(
+            at + chrono::Duration::hours(1),
+            Some(&cutoff),
+            None,
+            true,
+            false,
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_join_before_any_round_froze_the_cutoff_reads_the_older_builds_round() {
+        // Review round 9 of #130: no cutoff, and the leftover was weighed
+        // whole; no round of this build records itself before freezing it.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = at - chrono::Duration::days(30);
+        let (result, interval, _db, _dirs) = join_with_a_leftover(
+            old,
+            None,
+            Some(old + chrono::Duration::days(1)),
+            true,
+            false,
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn a_join_fails_and_changes_nothing_when_the_cutoff_does_not_read() {
+        // Review round 9 of #130: read as no cutoff, the leftover was weighed
+        // whole over the snapshot.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with_a_leftover(
+            at - chrono::Duration::days(30),
+            Some("not a cutoff"),
+            None,
+            true,
+            false,
+        )
+        .await;
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(interval, None, "nothing applied");
+        assert!(exact_since(&_db).is_some(), "the record as it was");
+    }
+
+    #[tokio::test]
+    async fn a_join_fails_and_changes_nothing_when_a_pending_file_does_not_read() {
+        // Review round 9 of #130: left out, its changes were never weighed,
+        // and the snapshot's older values stayed on this device alone.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) =
+            join_with_a_leftover(at + chrono::Duration::hours(1), None, None, true, true).await;
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(interval, None, "nothing applied");
+        assert!(exact_since(&_db).is_some(), "the record as it was");
+    }
+
+    #[tokio::test]
+    async fn a_directory_in_pending_keeps_no_join_back() {
+        // Review round 10 of #130: read as a file that does not read, it
+        // failed every join and resume for good.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                dir_in_pending: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_join_weighs_a_leftover_line_its_readable_remote_copy_lacks() {
+        // Review round 10 of #130: written after the older build's last push,
+        // within its last round, it was held as pushed, though the remote copy
+        // shows it never went up; the peers took it, this device kept the
+        // snapshot's value.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let round = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(round));
+        let (result, interval, _db, _dirs) = join_with(
+            round - chrono::Duration::seconds(20),
+            JoinCase {
+                cutoff: Some(&cutoff),
+                member: true,
+                own_remote: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn an_empty_own_remote_copy_shows_no_line_of_the_older_builds_rounds_missing() {
+        // Review round 11 of #130: cut to nothing by a later push, it counted
+        // as proof that nothing of the leftover ever went up, and its old
+        // lines won over the snapshot.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let round = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(round));
+        let (result, interval, _db, _dirs) = join_with(
+            round - chrono::Duration::hours(3),
+            JoinCase {
+                cutoff: Some(&cutoff),
+                member: true,
+                own_remote_empty: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn a_join_keeps_the_lines_of_a_leftover_a_round_pushed_while_it_fetched() {
+        // Review round 12 of #130: read only after the fetch, the file was
+        // gone, and the snapshot's older value stayed.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                removed_while_fetching: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_resume_keeps_the_lines_of_a_leftover_a_round_pushed_while_it_fetched() {
+        // Review round 13 of #130: the manual resume runs beside a round, which
+        // may push and remove a finished file meanwhile.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                resume: true,
+                removed_while_fetching: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_resume_keeps_the_lines_of_a_leftover_a_settle_emptied_while_it_fetched() {
+        // Review round 13 of #130: the later, empty read took the earlier
+        // read's lines away.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                resume: true,
+                emptied_while_fetching: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_resume_weighs_the_whole_lines_of_a_file_met_mid_write() {
+        // Review round 13 of #130: a read that met a line being written
+        // dropped the whole file.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                resume: true,
+                torn_while_fetching: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("80"));
+    }
+
+    #[tokio::test]
+    async fn a_resume_weighs_the_whole_lines_of_a_file_a_full_disk_damaged() {
+        // Review round 14 of #130: a half line before them dropped every
+        // line of the file, and the snapshot's older value stayed.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                resume: true,
+                damaged_before: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_join_weighs_a_change_written_while_it_fetched() {
+        // Review rounds 11 and 12 of #130: the pending files are read again
+        // after the snapshot apply.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                grown_while_fetching: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("80"));
+    }
+
+    /// A pending file of `dev-this` holding `event` for acc-1's password at
+    /// `at`, the keychain holding `held`, the row's clock at `at`; with the
+    /// service, its secrets and the pending dir.
+    fn an_own_credential_line(
+        db: &DbHandle,
+        at: DateTime<Utc>,
+        event: sync_core::SyncEvent,
+        held: &str,
+    ) -> (
+        OnboardingService,
+        Arc<sync_engine::test_support::FakeSecrets>,
+        TempDir,
+    ) {
+        use sync_engine::{SecretSlot, SecretStore};
+        db.shared()
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'caldav', 'Fastmail', '{}', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        let secrets = Arc::new(sync_engine::test_support::FakeSecrets::default());
+        secrets.store("acc-1", SecretSlot::Password, held).unwrap();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with(db.shared(), pending.path().to_path_buf(), secrets.clone());
+        let own = envelope("ev-secret", "dev-this", at, event);
+        let file = file_of("dev-this", at, &[&own]);
+        std::fs::write(pending.path().join(file.name.to_filename()), &file.bytes).unwrap();
+        stamp_clock(db, "credential", "acc-1/password", at);
+        (svc, secrets, pending)
+    }
+
+    fn password(secret: &str) -> sync_core::SyncEvent {
+        sync_core::SyncEvent::CredentialSet(sync_core::CredentialPayload {
+            account_id: "acc-1".into(),
+            slot: "password".into(),
+            secret: secret.into(),
+        })
+    }
+
+    fn older_password() -> sync_core::SyncEvent {
+        password("older")
+    }
+
+    /// The keychain's acc-1 password after `run`.
+    fn held_password(secrets: &sync_engine::test_support::FakeSecrets) -> String {
+        use sync_engine::{SecretSlot, SecretStore};
+        secrets.retrieve("acc-1", SecretSlot::Password).unwrap()
+    }
+
+    /// A dataset with E2E as `e2e`, this device a member, its snapshot at
+    /// `at` naming nothing and holding no secret.
+    fn a_dataset_with(at: DateTime<Utc>, e2e: bool) -> FakeAdapter {
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = at;
+        meta.e2e_enabled = e2e;
+        meta.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: at,
+                last_seen: None,
+                app_version: "1.0.0".into(),
+                stale: true,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(at, None));
+        adapter
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_with_e2e_on_weighs_an_own_credential_line() {
+        // Review round 13 of #130: going up, it is weighed as any change.
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (svc, secrets, _pending) = an_own_credential_line(&db, at, password("newer"), "older");
+        UserPrefsRepo::new(&db.shared())
+            .set(crate::credential_sync::PREF_E2E_ENABLED, "true")
+            .unwrap();
+
+        svc.catch_up(&FakeAdapter::new()).await.unwrap();
+
+        assert_eq!(held_password(&secrets), "newer");
+    }
+
+    #[tokio::test]
+    async fn a_resume_with_e2e_on_brings_back_an_own_secret_the_snapshot_reverted() {
+        // Review round 13 of #130: the snapshot's secret is older than this
+        // device's own change, which went up nowhere yet.
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let change_at = at + chrono::Duration::hours(1);
+        let (svc, secrets, _pending) =
+            an_own_credential_line(&db, change_at, password("newer"), "older");
+        UserPrefsRepo::new(&db.shared())
+            .set(crate::credential_sync::PREF_E2E_ENABLED, "true")
+            .unwrap();
+
+        svc.resume_from_stale(&a_dataset_with(at, true))
+            .await
+            .unwrap();
+
+        assert_eq!(held_password(&secrets), "newer");
+    }
+
+    #[tokio::test]
+    async fn a_resume_with_e2e_off_here_weighs_no_own_credential_line() {
+        // Review round 14 of #130: this device's own flag decides the
+        // resume, as it decides the next push, whatever meta.json says.
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let change_at = at + chrono::Duration::hours(1);
+        let (svc, secrets, _pending) =
+            an_own_credential_line(&db, change_at, older_password(), "newer");
+
+        svc.resume_from_stale(&a_dataset_with(at, true))
+            .await
+            .unwrap();
+
+        assert_eq!(held_password(&secrets), "newer");
+    }
+
+    #[tokio::test]
+    async fn a_join_of_a_dataset_with_e2e_weighs_an_own_credential_line() {
+        // Review round 13 of #130: the joined dataset says it goes up, whatever
+        // this device's own flag said before.
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let change_at = at + chrono::Duration::hours(1);
+        let (svc, secrets, _pending) =
+            an_own_credential_line(&db, change_at, password("newer"), "older");
+
+        svc.accept_remote(&a_dataset_with(at, true), None)
+            .await
+            .unwrap();
+
+        assert_eq!(held_password(&secrets), "newer");
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_with_e2e_off_leaves_the_keychain_as_it_is() {
+        // Review round 12 of #130: an own credential line on its row's clock
+        // is no older than the row, and wrote an old password back.
+        use sync_engine::{SecretSlot, SecretStore};
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (svc, secrets, _pending) = an_own_credential_line(&db, at, older_password(), "newer");
+
+        svc.catch_up(&FakeAdapter::new()).await.unwrap();
+
+        assert_eq!(
+            secrets.retrieve("acc-1", SecretSlot::Password).unwrap(),
+            "newer"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_with_e2e_off_clears_no_secret_of_its_own() {
+        // Review round 12 of #130: the same for a cleared secret.
+        use sync_engine::{SecretSlot, SecretStore};
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let cleared = sync_core::SyncEvent::CredentialCleared(sync_core::CredentialSlotPayload {
+            account_id: "acc-1".into(),
+            slot: "password".into(),
+        });
+        let (svc, secrets, _pending) = an_own_credential_line(&db, at, cleared, "newer");
+
+        svc.catch_up(&FakeAdapter::new()).await.unwrap();
+
+        assert_eq!(
+            secrets.retrieve("acc-1", SecretSlot::Password).unwrap(),
+            "newer"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_join_of_a_dataset_without_e2e_weighs_no_credential_line_though_the_flag_is_on() {
+        // Review round 12 of #130: the flag of the dataset this device was in
+        // is cleared only once the join stands; read from it, an old password
+        // was weighed, and went back into the keychain.
+        use sync_engine::{SecretSlot, SecretStore};
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let change_at = at + chrono::Duration::hours(1);
+        let (svc, secrets, _pending) =
+            an_own_credential_line(&db, change_at, older_password(), "newer");
+        UserPrefsRepo::new(&db.shared())
+            .set(crate::credential_sync::PREF_E2E_ENABLED, "true")
+            .unwrap();
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = at;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(at, None));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(
+            secrets.retrieve("acc-1", SecretSlot::Password).unwrap(),
+            "newer"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_join_with_e2e_off_weighs_no_credential_change_of_its_own() {
+        // Review round 11 of #130: it never goes up while E2E is off, so no
+        // peer weighs it; weighed here, an old password went back into the
+        // keychain.
+        use sync_engine::{SecretSlot, SecretStore};
+        let (_tmp, db) = fresh_db();
+        db.shared()
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'caldav', 'Fastmail', '{}', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        let secrets = Arc::new(sync_engine::test_support::FakeSecrets::default());
+        secrets
+            .store("acc-1", SecretSlot::Password, "newer")
+            .unwrap();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with(db.shared(), pending.path().to_path_buf(), secrets.clone());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let round = at - chrono::Duration::days(30);
+        let change_at = round - chrono::Duration::minutes(2);
+        let own = envelope(
+            "ev-secret",
+            "dev-this",
+            change_at,
+            sync_core::SyncEvent::CredentialSet(sync_core::CredentialPayload {
+                account_id: "acc-1".into(),
+                slot: "password".into(),
+                secret: "older".into(),
+            }),
+        );
+        let leftover = file_of("dev-this", change_at, &[&own]);
+        std::fs::write(
+            pending.path().join(leftover.name.to_filename()),
+            &leftover.bytes,
+        )
+        .unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set(
+                sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY,
+                &frozen(Some(round)),
+            )
+            .unwrap();
+        let adapter = FakeAdapter::with_logs(vec![LogFile {
+            name: leftover.name.clone(),
+            bytes: Vec::new(),
+        }]);
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = at;
+        meta.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: at,
+                last_seen: None,
+                app_version: "1.0.0".into(),
+                stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(at, None));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(
+            secrets.retrieve("acc-1", SecretSlot::Password).unwrap(),
+            "newer"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_settled_device_joins_though_its_leftovers_cutoff_does_not_read() {
+        // Review round 11 of #130: settled, it is never frozen anew, and every
+        // join and resume failed on it for good.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let prefs_conn = db.shared();
+        let prefs = UserPrefsRepo::new(&prefs_conn);
+        prefs
+            .set(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY, "not a cutoff")
+            .unwrap();
+        prefs
+            .set(sync_engine::SYNC_LEFTOVERS_SETTLED_PREF_KEY, "1")
+            .unwrap();
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = at;
+        // A dataset it is part of: the cutoff is read.
+        meta.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: at,
+                last_seen: None,
+                app_version: "1.0.0".into(),
+                stale: false,
+                exact: false,
+                unreadable: Vec::new(),
+                pending: Vec::new(),
+            },
+        );
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(at, None));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+        drop((tmp, pending));
+    }
+
+    #[tokio::test]
+    async fn a_failed_join_of_another_dataset_keeps_the_leftovers_cutoff() {
+        // Review round 10 of #130: forgotten before the join stood, the old
+        // dataset's next round counted nothing as pushed.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(old + chrono::Duration::days(1)));
+        let (result, _interval, db, _dirs) = join_with(
+            old,
+            JoinCase {
+                cutoff: Some(&cutoff),
+                broken_snapshot: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        assert!(result.is_err(), "{result:?}");
+        let shared = db.shared();
+        assert_eq!(
+            UserPrefsRepo::new(&shared)
+                .get(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)
+                .unwrap()
+                .as_deref(),
+            Some(cutoff.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pass_whose_record_does_not_save_records_no_length_and_is_not_complete() {
+        // Review round 10 of #130: its length kept, the file was never read
+        // or named again, and the device was exact without it.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let newer = LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"{\"from\":\"a newer build\"}\n".to_vec(),
+        };
+        let name = newer.name.to_filename();
+        adapter.logs.lock().unwrap().push(newer);
+        db.shared()
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER refuse_unreadable_insert BEFORE INSERT ON user_prefs
+                 WHEN NEW.key = 'sync.cursor.unreadableLogs'
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+            )
+            .unwrap();
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert!(exact_since(&db).is_none(), "not complete");
+        let lengths = UserPrefsRepo::new(&db.shared())
+            .get(sync_engine::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(!lengths.contains(&name), "{lengths}");
+    }
+
+    #[tokio::test]
+    async fn a_join_of_a_dataset_this_device_never_was_part_of_weighs_its_leftovers() {
+        // Review round 9 of #130: the cutoff of another dataset held them,
+        // though nothing of them ever went up here.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(old + chrono::Duration::days(1)));
+        let (result, interval, db, _dirs) =
+            join_with_a_leftover(old, Some(&cutoff), None, false, false).await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        let raw = prefs
+            .get(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            sync_engine::LeftoversCutoff::parse(&raw)
+                .unwrap()
+                .last_round,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn the_first_write_of_this_build_locks_older_builds_out() {
+        // Review round 6 of #130: until the first compaction older builds
+        // went on deleting by name, ignoring what devices name pending.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("0.1.0");
+        meta.schema_version = 1;
+        meta.min_app_version = "0.1.0".into();
+        adapter.install_meta(meta);
+
+        svc.heartbeat_meta(&adapter, Utc::now(), None)
+            .await
+            .unwrap();
+
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(meta.schema_version, sync_core::SCHEMA_VERSION);
+        assert_eq!(meta.min_app_version, svc.app_version);
+    }
+
+    #[tokio::test]
+    async fn the_heartbeat_names_every_pending_file_that_holds_anything() {
+        // An empty one never goes up (review round 7 of #130).
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let own = file_of(
+            "dev-this",
+            at,
+            &[&envelope("ev-own", "dev-this", at, set_interval("15"))],
+        );
+        std::fs::write(pending.path().join(own.name.to_filename()), &own.bytes).unwrap();
+        let stub = LogFileName::new(
+            at + chrono::Duration::hours(1),
+            DeviceId::from_string("dev-this".into()),
+        );
+        std::fs::write(pending.path().join(stub.to_filename()), b"").unwrap();
+        let adapter = FakeAdapter::new();
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+
+        svc.heartbeat_meta(&adapter, at, None).await.unwrap();
+
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(
+            meta.device(svc.device_id())
+                .map(|record| record.pending.clone()),
+            Some(vec![own.name.to_filename()]),
+        );
+    }
+
+    #[tokio::test]
+    async fn the_catch_up_brings_back_this_devices_own_changes() {
+        // Its own change, pushed and no longer pending: not skipped as own
+        // here, and newer than the row, so it wins.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let own = envelope(
+            "ev-own",
+            "dev-this",
+            snapshot_ts + chrono::Duration::minutes(30),
+            set_interval("70"),
+        );
+        adapter.logs.lock().unwrap().push(file_of(
+            "dev-this",
+            snapshot_ts + chrono::Duration::minutes(25),
+            &[&own],
+        ));
+
+        let report = svc.catch_up(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("70"));
+        assert_eq!(
+            report.fetched_logs, 1,
+            "the peer's file; its own is not counted"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_catch_up_takes_an_own_change_once_when_pending_and_pushed() {
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let own = envelope("ev-own", "dev-this", at, set_interval("70"));
+        let own_file = file_of("dev-this", at, &[&own]);
+        std::fs::write(
+            pending.path().join(own_file.name.to_filename()),
+            &own_file.bytes,
+        )
+        .unwrap();
+        let adapter = FakeAdapter::with_logs(vec![own_file]);
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+        // The writer stamped the row when the change was made; a snapshot
+        // apply then put an older value back.
+        stamp_clock(&db, "setting", "sync.intervalMinutes", at);
+        UserPrefsRepo::new(&db.shared())
+            .set("sync.intervalMinutes", "30")
+            .unwrap();
+
+        let report = svc.catch_up(&adapter).await.unwrap();
+
+        assert_eq!(report.applied, 1);
+        assert_eq!(interval(&db).as_deref(), Some("70"));
+    }
+
+    /// Stamp a row's clock, whole, as this device's writer does.
+    fn stamp_clock(db: &DbHandle, kind: &str, id: &str, at: DateTime<Utc>) {
+        let shared = db.shared();
+        let conn = shared.lock().unwrap();
+        conn.execute(
+            "INSERT INTO sync_row_clock (kind, id, changed_us, written_us) VALUES (?, ?, ?, ?)",
+            rusqlite::params![kind, id, at.timestamp_micros(), at.timestamp_micros()],
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_stale_resume_does_not_let_an_older_change_win_over_the_snapshot() {
+        // Review round 2 of #130: the snapshot wrote its rows but not their
+        // times, so this device's own older change, still pending, won over
+        // the snapshot's newer value — and every peer skipped it as older.
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let own = envelope("ev-own", "dev-this", at, set_interval("15"));
+        let own_file = file_of("dev-this", at, &[&own]);
+        std::fs::write(
+            pending.path().join(own_file.name.to_filename()),
+            &own_file.bytes,
+        )
+        .unwrap();
+        stamp_clock(&db, "setting", "sync.intervalMinutes", at);
+        UserPrefsRepo::new(&db.shared())
+            .set("sync.intervalMinutes", "15")
+            .unwrap();
+        // A peer set 45 two hours later; its file is gone, the snapshot
+        // holds it.
+        let later = at + chrono::Duration::hours(2);
+        let body = sync_engine::AperioSnapshotBody {
+            settings: std::collections::BTreeMap::from([(
+                "sync.intervalMinutes".to_string(),
+                "45".to_string(),
+            )]),
+            row_clocks: vec![sync_engine::SnapshotRowClock {
+                kind: "setting".into(),
+                id: "sync.intervalMinutes".into(),
+                changed: later,
+                written: Some(later),
+                deleted: false,
+            }],
+            ..Default::default()
+        };
+        let adapter = FakeAdapter::with_logs(Vec::new());
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = later;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(Snapshot::new(
+            later,
+            "1.0.0",
+            serde_json::to_value(body).unwrap(),
+        ));
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn joining_forgets_the_row_clocks_of_the_dataset_it_left() {
+        // A clock from the dataset this device left would keep this one's
+        // changes out as older.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let far: DateTime<Utc> = "2030-01-01T00:00:00Z".parse().unwrap();
+        stamp_clock(&db, "setting", "sync.intervalMinutes", far);
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let change = envelope("ev-45", "dev-other", at, set_interval("45"));
+        let adapter = FakeAdapter::with_logs(vec![file_of("dev-other", at, &[&change])]);
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn the_catch_up_never_moves_the_cursor_back() {
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let ahead = snapshot_ts + chrono::Duration::hours(10);
+        UserPrefsRepo::new(&db.shared())
+            .set(SYNC_CURSOR_PREF_KEY, &ahead.to_rfc3339())
+            .unwrap();
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert_eq!(svc.read_cursor(), ahead);
+    }
+
+    #[tokio::test]
+    async fn the_catch_up_takes_an_own_change_not_uploaded_yet() {
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let (svc, adapter, snapshot_ts) =
+            laptop_before_catch_up(&db, pending.path().to_path_buf(), false).await;
+        let own = envelope(
+            "ev-pending",
+            "dev-this",
+            snapshot_ts + chrono::Duration::minutes(40),
+            set_interval("80"),
+        );
+        let own_file = file_of(
+            "dev-this",
+            snapshot_ts + chrono::Duration::minutes(35),
+            &[&own],
+        );
+        std::fs::write(
+            pending.path().join(own_file.name.to_filename()),
+            &own_file.bytes,
+        )
+        .unwrap();
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("80"));
+    }
+
+    /// A stale resume over the laptop, the snapshot naming its events or
+    /// not: it heals like the catch-up.
+    async fn resume_heals(covered: bool) {
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, _) = laptop_before_catch_up(&db, no_pending(), covered).await;
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("45"));
+        assert_eq!(label_count(&db, "lbl-1"), 0, "the deleted label goes");
+        assert!(exact_since(&db).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_stale_resume_heals_like_the_catch_up() {
+        resume_heals(true).await;
+    }
+
+    #[tokio::test]
+    async fn a_stale_resume_heals_from_a_snapshot_naming_nothing_too() {
+        resume_heals(false).await;
+    }
+
+    #[tokio::test]
+    async fn a_stale_resume_keeps_a_newer_change_the_snapshot_would_revert() {
+        // The snapshot can come from a device that was behind this one: a
+        // change this device applied after it, still in a file, wins over
+        // the snapshot's older value again — quietly, it was the newer one.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), true).await;
+        let sixty = envelope(
+            "ev-60",
+            "dev-other",
+            snapshot_ts + chrono::Duration::minutes(30),
+            set_interval("60"),
+        );
+        svc.applier.apply_envelopes(vec![sixty.clone()]).unwrap();
+        adapter.logs.lock().unwrap().push(file_of(
+            "dev-other",
+            snapshot_ts + chrono::Duration::minutes(20),
+            &[&sixty],
+        ));
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        assert_eq!(interval(&db).as_deref(), Some("60"));
+        assert_eq!(unresolved_conflicts(&db), 0);
+    }
+
+    #[tokio::test]
     async fn accept_remote_advances_local_cursor_past_newest_log() {
         let (_tmp, db) = fresh_db();
         let svc = build_service(db.shared());
 
         // Pre-seed: one log from another device with a known
-        // timestamp. The applier will reject any unsupported event
-        // types as "skipped", which is fine — the test asserts on
-        // cursor advance, not on row counts.
+        // timestamp. The test asserts on cursor advance, not on row
+        // counts; the delete of a missing row changes nothing.
         let ts: DateTime<Utc> = "2026-05-01T12:34:56Z".parse().unwrap();
-        // Hard-code an envelope id rather than minting one — the
-        // applier doesn't validate id shape, and `mint_event_id` is
-        // crate-private.
-        let envelope_json = format!(
-            r#"{{"id":"ev-test-001","device_id":"dev-other","timestamp":"{}","type":"event.deleted","id_payload":{{"id":"nonexistent"}}}}"#,
-            ts.to_rfc3339(),
+        let deleted = envelope(
+            "ev-test-001",
+            "dev-other",
+            ts,
+            sync_core::SyncEvent::EventDeleted(sync_core::IdPayload {
+                id: "nonexistent".into(),
+            }),
         );
-        let log = LogFile {
-            name: LogFileName::new(ts, DeviceId::from_string("dev-other".into())),
-            bytes: envelope_json.into_bytes(),
-        };
-        let adapter = FakeAdapter::with_logs(vec![log]);
+        let adapter = FakeAdapter::with_logs(vec![file_of("dev-other", ts, &[&deleted])]);
         adapter.install_meta(MetaJson::fresh("1.0.0"));
 
         svc.accept_remote(&adapter, None).await.unwrap();
@@ -1813,5 +4377,11 @@ mod tests {
             .expect("cursor should be persisted");
         let parsed: DateTime<Utc> = cursor.parse().unwrap();
         assert_eq!(parsed, ts);
+        // No snapshot: every file from the start, nothing GC'd — what this
+        // device holds is exactly what it applied (DESIGN-sync-snapshot-coverage.md).
+        assert!(UserPrefsRepo::new(&db.shared())
+            .get(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY)
+            .unwrap()
+            .is_some());
     }
 }

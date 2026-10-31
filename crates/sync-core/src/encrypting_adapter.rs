@@ -205,6 +205,12 @@ impl SyncAdapter for EncryptingAdapter {
         self.inner.delete_log(name).await
     }
 
+    /// Names only, so nothing is decrypted: a file under another key is
+    /// named too.
+    async fn list_log_names(&self) -> SyncResult<Vec<LogFileName>> {
+        self.inner.list_log_names().await
+    }
+
     async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         let ciphertext = encrypt(&self.key, bytes)?;
         self.inner
@@ -332,6 +338,24 @@ mod tests {
             .unwrap();
         assert_eq!(fetched.len(), 1);
         assert_eq!(fetched[0].bytes, plaintext);
+    }
+
+    #[tokio::test]
+    async fn a_file_under_another_key_is_still_named() {
+        // "Neu beginnen" deletes the old dataset's files whatever key they
+        // are under (DESIGN-sync-snapshot-coverage.md): reading them fails,
+        // naming them must not.
+        let inner: Arc<dyn SyncAdapter> = Arc::new(FakeAdapter::new());
+        let old = EncryptingAdapter::new(Arc::clone(&inner), [1u8; KEY_LEN]);
+        let log = LogFile {
+            name: fixture_logname(),
+            bytes: br#"{"id":"evt-1"}"#.to_vec(),
+        };
+        old.push_log(&log).await.unwrap();
+        let new = EncryptingAdapter::new(Arc::clone(&inner), [2u8; KEY_LEN]);
+
+        assert!(new.fetch_new_logs(&DeviceCursor::epoch()).await.is_err());
+        assert_eq!(new.list_log_names().await.unwrap(), vec![log.name]);
     }
 
     #[tokio::test]

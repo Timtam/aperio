@@ -843,6 +843,7 @@ mod tests {
                 name: filename.clone(),
                 len: 100,
             }],
+            fetch_unknown: false,
         };
         // Grown past the applied length → selected, with the listed
         // id carried through for the direct download.
@@ -863,6 +864,7 @@ mod tests {
             last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
             exclude_device: Some(DeviceId::from_string("me".into())),
             known_lengths: Vec::new(),
+            fetch_unknown: false,
         };
         let newer = log_name(2_000, "peer");
         let entries = vec![

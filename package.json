@@ -1,7 +1,7 @@
 {
   "name": "aperio",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "build:wasm": "wasm-pack build crates/cal-core-wasm --target web --out-dir pkg",

@@ -40,11 +40,13 @@ use std::sync::Arc;
 use adapter_local::SnapshotDump;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sync_core::{Snapshot, SyncError, SyncResult};
+use sync_core::{RowKey, Snapshot, SyncError, SyncResult};
 use tracing::warn;
 
 use crate::whitelist::is_synced_key;
-use crate::{SecretSlot, SecretStore, SyncStore};
+#[cfg(test)]
+use crate::RowWrite;
+use crate::{RowClock, SecretSlot, SecretStore, SyncStore};
 
 /// The body of an Aperio snapshot. Lives between
 /// `serde_json::Value` (what `sync_core::Snapshot.body` carries) and
@@ -80,6 +82,31 @@ pub struct AperioSnapshotBody {
     /// strips it before any plaintext re-upload.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub credentials: Vec<SnapshotCredential>,
+    /// The ids of the events still in log files that this snapshot already
+    /// reflects (DESIGN-sync-snapshot-coverage.md). A device that takes the
+    /// snapshot records them as applied and can then fetch every log file
+    /// and apply only the rest: a session file named before the snapshot
+    /// may have grown after it. `None` when the compactor could not vouch
+    /// for its applied record — a snapshot as before, by timestamp only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub covered_event_ids: Option<Vec<String>>,
+    /// The author's row clocks (`sync_row_clock`, review round 2 of #130).
+    /// The snapshot writes rows; without their times, a device taking it
+    /// would let an older change win over its newer content.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub row_clocks: Vec<SnapshotRowClock>,
+}
+
+/// One row's clock in [`AperioSnapshotBody::row_clocks`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SnapshotRowClock {
+    pub kind: String,
+    pub id: String,
+    pub changed: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deleted: bool,
 }
 
 /// One account secret carried in [`AperioSnapshotBody::credentials`].
@@ -118,8 +145,16 @@ pub struct SnapshotApplyOutcome {
     pub rows_failed: usize,
     pub settings_applied: usize,
     pub settings_failed: usize,
+    /// Settings this build does not sync (not on its whitelist), left out
+    /// on purpose — a newer build's key, say. No failure: the snapshot's
+    /// event ids and clocks still count (review round 3 of #130).
+    pub settings_dropped: usize,
     pub accounts_applied: usize,
     pub accounts_failed: usize,
+    /// How many events the snapshot named as held and were recorded as
+    /// applied — `None` for a snapshot that names nothing
+    /// (DESIGN-sync-snapshot-coverage.md).
+    pub covered_events: Option<usize>,
 }
 
 impl SnapshotApplyOutcome {
@@ -162,7 +197,7 @@ impl SnapshotBuilder {
     /// responsible for atomically updating `meta.json.snapshot_timestamp`
     /// to match after a successful `push_snapshot`.
     pub fn build(&self) -> SyncResult<Snapshot> {
-        self.build_at(Utc::now())
+        self.build_at(Utc::now(), None)
     }
 
     /// Like [`build`](Self::build) but stamps the snapshot with a
@@ -173,8 +208,14 @@ impl SnapshotBuilder {
     /// land in a file whose timestamp is strictly newer than the
     /// snapshot — so a device that consumes the snapshot (and advances
     /// its cursor to `snapshot_at`) still fetches them instead of
-    /// skipping them as "older than the snapshot".
-    pub fn build_at(&self, snapshot_at: DateTime<Utc>) -> SyncResult<Snapshot> {
+    /// skipping them as "older than the snapshot". `covered_event_ids` is
+    /// what the compactor can vouch the snapshot holds
+    /// ([`AperioSnapshotBody::covered_event_ids`]).
+    pub fn build_at(
+        &self,
+        snapshot_at: DateTime<Utc>,
+        covered_event_ids: Option<Vec<String>>,
+    ) -> SyncResult<Snapshot> {
         let dump = self
             .store
             .dump_for_snapshot()
@@ -188,11 +229,26 @@ impl SnapshotBuilder {
             .dump_accounts()
             .map_err(|err| SyncError::internal(format!("dump accounts: {err}")))?;
         let credentials = self.dump_credentials(&accounts)?;
+        let row_clocks = self
+            .store
+            .row_clocks()
+            .map_err(|err| SyncError::internal(format!("dump row clocks: {err}")))?
+            .into_iter()
+            .map(|(key, clock)| SnapshotRowClock {
+                kind: key.kind.to_string(),
+                id: key.id,
+                changed: clock.changed,
+                written: clock.written,
+                deleted: clock.deleted,
+            })
+            .collect();
         let body = AperioSnapshotBody {
             dump,
             settings,
             accounts,
             credentials,
+            covered_event_ids,
+            row_clocks,
         };
         let body_value = serde_json::to_value(&body)?;
         Ok(Snapshot::new(
@@ -229,7 +285,7 @@ impl SnapshotBuilder {
                     key = %key,
                     "snapshot settings key not on whitelist; dropping",
                 );
-                outcome.settings_failed += 1;
+                outcome.settings_dropped += 1;
                 continue;
             }
             match self.store.set_pref(key, value) {
@@ -294,6 +350,63 @@ impl SnapshotBuilder {
                 count = body.credentials.len(),
                 "snapshot carried credentials but E2E is off locally; ignoring them",
             );
+        }
+
+        // What the rows above stand for — only when every one of them was
+        // written: a row that failed would otherwise count as holding events
+        // it does not, and its clock would keep older changes from repairing
+        // it (review round 2 of #130).
+        if outcome.rows_failed > 0 || outcome.settings_failed > 0 || outcome.accounts_failed > 0 {
+            warn!(
+                rows = outcome.rows_failed,
+                settings = outcome.settings_failed,
+                accounts = outcome.accounts_failed,
+                "snapshot apply left rows out; not recording its events or clocks",
+            );
+            return Ok(outcome);
+        }
+
+        // The author's row clocks, each time never back: a change older than
+        // the snapshot's row does not win over it.
+        let clocks: Vec<_> = body
+            .row_clocks
+            .iter()
+            .filter_map(|clock| {
+                let key = RowKey::named(&clock.kind, clock.id.clone());
+                if key.is_none() {
+                    warn!(kind = %clock.kind, "snapshot row clock of an unknown kind; dropped");
+                }
+                Some((
+                    key?,
+                    RowClock {
+                        changed: clock.changed,
+                        written: clock.written,
+                        deleted: clock.deleted,
+                        // A known time here, whatever it was for the author:
+                        // the taker's rows hold the snapshot's values now, so
+                        // its own newer changes must be weighed against it,
+                        // not held (review round 6 of #130). The author's
+                        // changes on a seeded row are at or before the seed.
+                        seeded: false,
+                    },
+                ))
+            })
+            .collect();
+        self.store
+            .advance_row_clocks(&clocks)
+            .map_err(|err| SyncError::internal(format!("record row clocks: {err}")))?;
+
+        // The events this snapshot holds that are still in log files
+        // (DESIGN-sync-snapshot-coverage.md), recorded as applied: their
+        // effect is in the rows above now, so a device taking the snapshot
+        // can fetch every log file and apply only the rest. A failure fails
+        // the apply — without the record, that fetch would re-apply what the
+        // rows hold and report false conflicts.
+        if let Some(ids) = &body.covered_event_ids {
+            self.store
+                .mark_events_applied(ids)
+                .map_err(|err| SyncError::internal(format!("record covered events: {err}")))?;
+            outcome.covered_events = Some(ids.len());
         }
         Ok(outcome)
     }
@@ -364,7 +477,8 @@ mod tests {
         );
         let outcome = builder(Arc::clone(&store), secrets).apply(&snap).unwrap();
         assert_eq!(outcome.settings_applied, 1);
-        assert_eq!(outcome.settings_failed, 1);
+        assert_eq!(outcome.settings_dropped, 1);
+        assert_eq!(outcome.settings_failed, 0);
         // Confirm the protected key didn't land and the legit one did.
         let prefs = store.prefs.lock().unwrap();
         assert!(!prefs.contains_key("sync.deviceId"));
@@ -372,6 +486,189 @@ mod tests {
             prefs.get("appearance.darkMode").map(String::as_str),
             Some("true")
         );
+    }
+
+    #[test]
+    fn apply_records_the_events_the_snapshot_names_as_applied() {
+        // DESIGN-sync-snapshot-coverage.md: the named events' effect is in
+        // the applied rows, so they are recorded as applied with them — a
+        // device taking the snapshot then fetches every file and applies
+        // only the rest. A snapshot that names nothing records nothing.
+        let store = Arc::new(FakeStore::default());
+        let secrets = Arc::new(FakeSecrets::default());
+        let body = AperioSnapshotBody {
+            covered_event_ids: Some(vec!["ev-1".into(), "ev-2".into()]),
+            ..Default::default()
+        };
+        let snap = Snapshot::new(
+            Utc::now(),
+            "1.0.0-test",
+            serde_json::to_value(&body).unwrap(),
+        );
+        let outcome = builder(Arc::clone(&store), Arc::clone(&secrets))
+            .apply(&snap)
+            .unwrap();
+        assert_eq!(outcome.covered_events, Some(2));
+        let applied = store.applied.lock().unwrap().clone();
+        assert!(applied.contains("ev-1") && applied.contains("ev-2"));
+
+        let plain = Arc::new(FakeStore::default());
+        let snap = Snapshot::new(
+            Utc::now(),
+            "1.0.0-test",
+            serde_json::to_value(AperioSnapshotBody::default()).unwrap(),
+        );
+        let outcome = builder(Arc::clone(&plain), secrets).apply(&snap).unwrap();
+        assert_eq!(outcome.covered_events, None);
+        assert!(plain.applied.lock().unwrap().is_empty());
+    }
+
+    fn setting_key() -> RowKey {
+        RowKey {
+            kind: "setting",
+            id: "appearance.darkMode".into(),
+        }
+    }
+
+    #[test]
+    fn a_snapshot_carries_its_authors_row_clocks_and_its_taker_keeps_the_newer() {
+        // Review round 2 of #130: the snapshot writes rows; without their
+        // times a device taking it let an older change win over them.
+        use chrono::TimeZone;
+        let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+        let author = Arc::new(FakeStore::default());
+        let secrets = Arc::new(FakeSecrets::default());
+        author
+            .advance_row_clock(&setting_key(), at(6000), RowWrite::Whole)
+            .unwrap();
+        let label = RowKey {
+            kind: "color_label",
+            id: "lbl-1".into(),
+        };
+        author
+            .advance_row_clock(&label, at(3000), RowWrite::Whole)
+            .unwrap();
+        let snap = builder(Arc::clone(&author), Arc::clone(&secrets))
+            .build_at(Utc::now(), None)
+            .unwrap();
+
+        let taker = Arc::new(FakeStore::default());
+        taker
+            .advance_row_clock(&label, at(9000), RowWrite::Fields)
+            .unwrap();
+        builder(Arc::clone(&taker), secrets).apply(&snap).unwrap();
+
+        let clocks = taker.row_clocks.lock().unwrap();
+        assert_eq!(
+            clocks.get(&setting_key()),
+            Some(&RowClock {
+                changed: at(6000),
+                written: Some(at(6000)),
+                deleted: false,
+                seeded: false,
+            }),
+        );
+        assert_eq!(
+            clocks.get(&label),
+            Some(&RowClock {
+                changed: at(9000),
+                written: Some(at(3000)),
+                deleted: false,
+                seeded: false,
+            }),
+            "its own newer change stays; the whole-row time comes",
+        );
+    }
+
+    #[test]
+    fn a_seeded_clock_is_a_known_time_on_the_taker() {
+        // Review round 6 of #130: carried as seeded, it made a re-joining
+        // device hold its own changes newer than the snapshot, and the
+        // snapshot's older value stayed there alone.
+        use chrono::TimeZone;
+        let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+        let author = Arc::new(FakeStore::default());
+        let secrets = Arc::new(FakeSecrets::default());
+        author
+            .seed_row_clock(&setting_key(), at(6000), RowWrite::Whole)
+            .unwrap();
+        let snap = builder(Arc::clone(&author), Arc::clone(&secrets))
+            .build_at(Utc::now(), None)
+            .unwrap();
+
+        let taker = Arc::new(FakeStore::default());
+        builder(Arc::clone(&taker), secrets).apply(&snap).unwrap();
+
+        let clock = taker.row_clocks.lock().unwrap()[&setting_key()];
+        assert_eq!(clock.changed, at(6000));
+        assert!(!clock.seeded);
+    }
+
+    #[test]
+    fn a_snapshot_that_left_rows_out_records_neither_its_events_nor_its_clocks() {
+        // A row that failed to write must not count as holding events, and
+        // its clock must not keep older changes from repairing it.
+        let store = Arc::new(FakeStore::default());
+        store
+            .failing_pref_writes
+            .lock()
+            .unwrap()
+            .insert("appearance.darkMode".into());
+        let body = AperioSnapshotBody {
+            settings: BTreeMap::from([("appearance.darkMode".to_string(), "true".to_string())]),
+            covered_event_ids: Some(vec!["ev-1".into()]),
+            row_clocks: vec![SnapshotRowClock {
+                kind: "setting".into(),
+                id: "appearance.darkMode".into(),
+                changed: Utc::now(),
+                written: None,
+                deleted: false,
+            }],
+            ..Default::default()
+        };
+        let snap = Snapshot::new(
+            Utc::now(),
+            "1.0.0-test",
+            serde_json::to_value(&body).unwrap(),
+        );
+        let outcome = builder(Arc::clone(&store), Arc::new(FakeSecrets::default()))
+            .apply(&snap)
+            .unwrap();
+        assert_eq!(outcome.settings_failed, 1);
+        assert_eq!(outcome.covered_events, None);
+        assert!(store.applied.lock().unwrap().is_empty());
+        assert!(store.row_clocks.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_setting_this_build_does_not_sync_is_no_failure() {
+        // A newer build's snapshot carries a key this one does not know: it
+        // is left out, and the snapshot still counts.
+        let store = Arc::new(FakeStore::default());
+        let body = AperioSnapshotBody {
+            settings: BTreeMap::from([("some.newer.key".to_string(), "x".to_string())]),
+            covered_event_ids: Some(vec!["ev-1".into()]),
+            row_clocks: vec![SnapshotRowClock {
+                kind: "setting".into(),
+                id: "appearance.darkMode".into(),
+                changed: Utc::now(),
+                written: None,
+                deleted: false,
+            }],
+            ..Default::default()
+        };
+        let snap = Snapshot::new(
+            Utc::now(),
+            "1.0.0-test",
+            serde_json::to_value(&body).unwrap(),
+        );
+        let outcome = builder(Arc::clone(&store), Arc::new(FakeSecrets::default()))
+            .apply(&snap)
+            .unwrap();
+        assert_eq!(outcome.settings_dropped, 1);
+        assert_eq!(outcome.settings_failed, 0);
+        assert_eq!(outcome.covered_events, Some(1));
+        assert_eq!(store.row_clocks.lock().unwrap().len(), 1);
     }
 
     #[test]

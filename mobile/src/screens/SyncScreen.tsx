@@ -145,7 +145,11 @@ export default function SyncScreen() {
     try {
       const report = await compactNow();
       announce(
-        t('dialogs.settings.sync.compactDone', { deleted: report.deleted_logs }),
+        report.gc_waiting_for.length > 0
+          ? t('dialogs.settings.sync.compactWaiting', {
+              devices: report.gc_waiting_for.join(', '),
+            })
+          : t('dialogs.settings.sync.compactDone', { deleted: report.deleted_logs }),
       );
       setSyncLog(await listSyncLog(100).catch(() => []));
     } catch (err) {

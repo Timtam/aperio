@@ -1677,6 +1677,8 @@ export interface SyncRoundReport {
   skipped_own: number;
   skipped_already_applied: number;
   skipped_unsupported: number;
+  /** Older than their row's clock: a newer change already won. */
+  skipped_older: number;
   apply_failures: number;
   push_failures: number;
   fetch_failures: number;
@@ -1705,6 +1707,11 @@ export interface CompactionReport {
   stale_devices: number;
   snapshot_rows: number;
   snapshot_settings: number;
+  /** Whether the snapshot names the events it holds. */
+  snapshot_coverage: boolean;
+  /** Devices (names, else ids) that have not caught up yet: no log file was
+   *  deleted while they still need them. */
+  gc_waiting_for: string[];
 }
 
 /** Onboarding preview result — what the §19.11 dialog needs to
@@ -1784,7 +1791,6 @@ export const forgetSyncDevice = (deviceId: string) =>
 export interface OnboardingReport {
   fetched_logs: number;
   applied: number;
-  skipped_own: number;
   skipped_already_applied: number;
   skipped_unsupported: number;
   apply_failures: number;

@@ -8,6 +8,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
 
+use chrono::{DateTime, Utc};
+
 use adapter_local::{SnapshotApplyReport, SnapshotDump};
 
 use crate::whitelist::is_synced_key;
@@ -32,6 +34,10 @@ pub struct FakeStore {
     /// exercise the difference between "this pref is unset" and "the store
     /// could not be read" — the two used to be the same thing to callers.
     pub failing_pref_reads: Mutex<HashSet<String>>,
+    /// Keys whose `set_pref` returns `Err`: a write the store refuses.
+    pub failing_pref_writes: Mutex<HashSet<String>>,
+    /// `sync_row_clock`: each row's clock.
+    pub row_clocks: Mutex<std::collections::HashMap<sync_core::RowKey, crate::RowClock>>,
 }
 
 impl SyncStore for FakeStore {
@@ -64,6 +70,9 @@ impl SyncStore for FakeStore {
     }
 
     fn set_pref(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        if self.failing_pref_writes.lock().unwrap().contains(key) {
+            return Err(StoreError::Backend(format!("cannot write {key}")));
+        }
         self.prefs
             .lock()
             .unwrap()
@@ -92,6 +101,86 @@ impl SyncStore for FakeStore {
 
     fn mark_event_applied(&self, event_id: &str) -> Result<(), StoreError> {
         self.applied.lock().unwrap().insert(event_id.to_string());
+        Ok(())
+    }
+
+    fn mark_events_applied(&self, event_ids: &[String]) -> Result<(), StoreError> {
+        self.applied
+            .lock()
+            .unwrap()
+            .extend(event_ids.iter().cloned());
+        Ok(())
+    }
+
+    fn row_clock(&self, key: &sync_core::RowKey) -> Result<Option<crate::RowClock>, StoreError> {
+        Ok(self.row_clocks.lock().unwrap().get(key).copied())
+    }
+
+    fn advance_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: DateTime<Utc>,
+        write: crate::RowWrite,
+    ) -> Result<(), StoreError> {
+        let theirs = crate::RowClock {
+            changed: at,
+            written: (write != crate::RowWrite::Fields).then_some(at),
+            deleted: write == crate::RowWrite::Delete,
+            seeded: false,
+        };
+        self.advance_row_clocks(&[(key.clone(), theirs)])
+    }
+
+    fn seed_row_clock(
+        &self,
+        key: &sync_core::RowKey,
+        at: DateTime<Utc>,
+        write: crate::RowWrite,
+    ) -> Result<(), StoreError> {
+        let theirs = crate::RowClock {
+            changed: at,
+            written: (write != crate::RowWrite::Fields).then_some(at),
+            deleted: write == crate::RowWrite::Delete,
+            seeded: true,
+        };
+        self.advance_row_clocks(&[(key.clone(), theirs)])
+    }
+
+    fn row_clocks(&self) -> Result<Vec<(sync_core::RowKey, crate::RowClock)>, StoreError> {
+        Ok(self
+            .row_clocks
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(key, clock)| (key.clone(), *clock))
+            .collect())
+    }
+
+    fn advance_row_clocks(
+        &self,
+        clocks: &[(sync_core::RowKey, crate::RowClock)],
+    ) -> Result<(), StoreError> {
+        let mut table = self.row_clocks.lock().unwrap();
+        for (key, theirs) in clocks {
+            let clock = table.entry(key.clone()).or_insert(*theirs);
+            // As the desktop store: the delete flag follows the newest
+            // whole-row write and the seeded flag the newest change; at the
+            // same time a seed takes over neither.
+            if let Some(at) = theirs.written {
+                let newer = clock.written.is_none_or(|ours| at > ours);
+                let same = clock.written == Some(at);
+                if newer || (same && !theirs.seeded) {
+                    clock.deleted = theirs.deleted;
+                }
+            }
+            if theirs.changed > clock.changed {
+                clock.seeded = theirs.seeded;
+            } else if theirs.changed == clock.changed {
+                clock.seeded = clock.seeded && theirs.seeded;
+            }
+            clock.changed = clock.changed.max(theirs.changed);
+            clock.written = clock.written.max(theirs.written);
+        }
         Ok(())
     }
 

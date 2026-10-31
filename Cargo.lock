@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "adapter-caldav"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-caldav-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-caldav-plugin",
  "plugin-sdk",
@@ -35,7 +35,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-caldav-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-caldav",
  "chrono",
@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-device-calendar"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cal-core",
@@ -57,7 +57,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-dropbox"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-dropbox-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-dropbox-plugin",
  "plugin-sdk",
@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-dropbox-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-dropbox",
  "base64 0.22.1",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-ews"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-ews-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-ews-plugin",
  "plugin-sdk",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-ews-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-ews",
  "chrono",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-ftp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -158,7 +158,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-ftp-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-ftp-plugin",
  "plugin-sdk",
@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-ftp-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-ftp",
  "base64 0.22.1",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-google"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-google-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-google-plugin",
  "plugin-sdk",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-google-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-google",
  "base64 0.22.1",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-ical"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-ical-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-ical-plugin",
  "plugin-sdk",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-ical-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-ical",
  "base64 0.22.1",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-local"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aperio-db",
  "async-trait",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-microsoft-graph"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-microsoft-graph-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-microsoft-graph-plugin",
  "plugin-sdk",
@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-microsoft-graph-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-microsoft-graph",
  "chrono",
@@ -322,7 +322,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-sftp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-sftp-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-sftp-plugin",
  "plugin-sdk",
@@ -345,7 +345,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-sftp-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-sftp",
  "base64 0.22.1",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-todoist"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cal-core",
@@ -374,7 +374,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-todoist-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-todoist-plugin",
  "plugin-sdk",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-todoist-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-todoist",
  "plugin-sdk",
@@ -392,7 +392,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-vikunja"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cal-core",
@@ -409,7 +409,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-vikunja-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-vikunja-plugin",
  "plugin-sdk",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-vikunja-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-vikunja",
  "plugin-sdk",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-webdav"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-webdav-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-webdav-plugin",
  "plugin-sdk",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-webdav-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-webdav",
  "base64 0.22.1",
@@ -465,7 +465,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-webex"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-webex-cdylib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-webex-plugin",
  "plugin-sdk",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "adapter-webex-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-webex",
  "chrono",
@@ -629,7 +629,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "aperio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-local",
  "anyhow",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "aperio-db"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rusqlite",
  "thiserror 1.0.69",
@@ -1188,7 +1188,7 @@ dependencies = [
 
 [[package]]
 name = "builtin-oauth"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hex",
  "serde",
@@ -1255,7 +1255,7 @@ dependencies = [
 
 [[package]]
 name = "cal-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1273,7 +1273,7 @@ dependencies = [
 
 [[package]]
 name = "cal-core-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cal-core",
  "wasm-bindgen",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "cal-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-device-calendar",
  "adapter-local",
@@ -3054,7 +3054,7 @@ dependencies = [
 
 [[package]]
 name = "host-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-caldav-plugin",
  "adapter-device-calendar",
@@ -3097,7 +3097,7 @@ dependencies = [
 
 [[package]]
 name = "host-plugins"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-caldav-plugin",
  "adapter-dropbox-plugin",
@@ -3271,7 +3271,7 @@ dependencies = [
 
 [[package]]
 name = "ical-mapping"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cal-core",
  "chrono",
@@ -4946,7 +4946,7 @@ dependencies = [
 
 [[package]]
 name = "plugin-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4969,7 +4969,7 @@ dependencies = [
 
 [[package]]
 name = "plugin-sdk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "cal-core",
@@ -6656,7 +6656,7 @@ dependencies = [
 
 [[package]]
 name = "sync-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -6673,7 +6673,7 @@ dependencies = [
 
 [[package]]
 name = "sync-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adapter-local",
  "async-trait",
@@ -7865,7 +7865,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vc-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -9023,7 +9023,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cal-core",
  "chrono",

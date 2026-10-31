@@ -80,6 +80,40 @@ selben Netz auf denselben Datensatz zugreifen.
   Desktop-Fenster sie beim nächsten Abgleich, ohne Neustart. Steht die
   Einstellungsseite gerade offen, wird die Änderung angesagt.
 
+## Ein neues Gerät, und Nachholen
+
+Von Zeit zu Zeit fasst ein Gerät das Änderungsprotokoll zu einem
+**Schnappschuss** zusammen, damit ein neues Gerät nicht Monate an Änderungen
+nachspielen muss. Ein neues Gerät übernimmt diesen Schnappschuss und danach
+jede Änderung seitdem — auch solche, die ein anderes Gerät in einer Sitzung
+geschrieben hat, die schon vor dem Schnappschuss begann. Eine Änderung, die ein
+Gerät offline gemacht und erst später hochgeladen hat, kommt ebenfalls bei den
+anderen an.
+
+Nach dem Update, das dies mitbringt, **holt jedes Gerät einmal nach**: Es geht
+alle noch aufbewahrten Änderungen durch, seine eigenen eingeschlossen.
+Verpasste Änderungen kommen an, und anderswo Gelöschtes verschwindet meist. Eine
+Änderung zählt nur, wo sie neuer ist als das, was das Gerät schon hat, und es
+wird kein Konflikt gemeldet. Nur wo das Gerät nicht weiß, wann ein Eintrag
+zuletzt geändert wurde — eine Einstellung, eine Liste, ein Kalender oder eine
+Farbe, seit einer älteren Version unverändert, oder eine inzwischen gelöschte
+Aufgabe oder ein gelöschter Termin —, kann einmal eine ältere Änderung
+gewinnen: Etwas wirkt dann zurückgesetzt, oder Gelöschtes kommt wieder. Stelle
+es neu ein, oder lösche es noch einmal.
+Diese eine Runde kann etwas länger dauern. Was es nur auf diesem Gerät gibt,
+wird nicht entfernt.
+
+Aperio bewahrt die Änderungsprotokolle mindestens zwei Wochen auf und löscht
+keines, solange ein Gerät darüber noch nachholen muss. Wenn du von Hand
+kompaktierst, nennt es die Geräte, auf die es wartet. Sobald ein Gerät mit
+dieser Version synchronisiert hat, werden Geräte mit einer älteren Version um ein
+Update gebeten, bevor sie wieder synchronisieren.
+
+Dieselbe Regel gilt jeden Tag: Eine Änderung, die spät ankommt, etwa offline
+geschrieben, gewinnt nicht gegen eine neuere. Das Löschen eines Eintrags
+gewinnt gegen eine gleichzeitige Bearbeitung auf einem anderen Gerät, damit
+beide Geräte gleich bleiben.
+
 ## Deine Geräte
 
 Jedes Gerät, das sich mit deinem Datensatz verbindet, trägt sich dort ein. Unter
