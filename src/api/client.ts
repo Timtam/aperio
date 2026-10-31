@@ -1210,6 +1210,13 @@ export const autostartIsEnabled = () =>
 export const autostartSet = (enabled: boolean) =>
   invoke<void>('autostart_set', { enabled });
 
+// ── OS notifications ───────────────────────────────────────────────────
+
+/** Show an OS notification with the system sound (the day-start review,
+ *  sync conflicts; reminders are sent by the backend itself). */
+export const notifySystem = (title: string, body: string) =>
+  invoke<void>('notify_system', { title, body });
+
 // ── System tray (close/minimize to tray) ──────────────────────────────
 
 /** Whether the platform/desktop exposes a system tray. The General

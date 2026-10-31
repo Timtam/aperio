@@ -11,6 +11,7 @@ pub mod commands;
 pub mod contact_sync;
 pub mod event_log;
 pub mod logging;
+pub mod os_notification;
 mod platform;
 pub mod reminders;
 pub mod secrets;
@@ -52,10 +53,11 @@ pub fn run() {
     // writes the crash file synchronously).
     logging::install_panic_hook(log_state.logs_dir.clone());
 
-    // Register the AUMID and pin it to this process before tauri starts
-    // — toast notifications inherit it at process scope. On non-Windows
-    // platforms this is a no-op.
-    platform::setup();
+    // The Tauri context, built once here: its identifier is the id the
+    // notification plugin sends toasts under, and the platform setup below
+    // needs it before the first window (the process pin; see `platform`).
+    let context = tauri::generate_context!();
+    platform::setup(&context.config().identifier);
 
     info!(
         kind = ?data_dir.kind,
@@ -959,6 +961,8 @@ pub fn run() {
             tray::request_window_close,
             tray::request_window_minimize,
             tray::set_tray_labels,
+            // The OS notifications the frontend sends, with the system sound.
+            os_notification::notify_system,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime
@@ -1093,7 +1097,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("failed to build the Tauri app");
 
     // Phase Se: app-exit hook. DESIGN.md §19.8 mandates pushing
