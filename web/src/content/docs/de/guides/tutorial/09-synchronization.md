@@ -92,19 +92,21 @@ anderen an.
 
 Nach dem Update, das dies mitbringt, **holt jedes Gerät einmal nach**: Es geht
 alle noch aufbewahrten Änderungen durch, seine eigenen eingeschlossen.
-Verpasste Änderungen kommen an, und anderswo Gelöschtes verschwindet. Eine
+Verpasste Änderungen kommen an, und anderswo Gelöschtes verschwindet meist. Eine
 Änderung zählt nur, wo sie neuer ist als das, was das Gerät schon hat, und es
 wird kein Konflikt gemeldet. Nur wo das Gerät nicht weiß, wann ein Eintrag
-zuletzt geändert wurde (eine Einstellung, eine Liste, ein Kalender oder eine
-Farbe, seit einer älteren Version unverändert), kann einmal eine ältere
-Änderung gewinnen; sieht danach etwas zurückgesetzt aus, stelle es neu ein.
+zuletzt geändert wurde — eine Einstellung, eine Liste, ein Kalender oder eine
+Farbe, seit einer älteren Version unverändert, oder eine inzwischen gelöschte
+Aufgabe oder ein gelöschter Termin —, kann einmal eine ältere Änderung
+gewinnen: Etwas wirkt dann zurückgesetzt, oder Gelöschtes kommt wieder. Stelle
+es neu ein, oder lösche es noch einmal.
 Diese eine Runde kann etwas länger dauern. Was es nur auf diesem Gerät gibt,
 wird nicht entfernt.
 
 Aperio bewahrt die Änderungsprotokolle mindestens zwei Wochen auf und löscht
 keines, solange ein Gerät darüber noch nachholen muss. Wenn du von Hand
 kompaktierst, nennt es die Geräte, auf die es wartet. Sobald ein Gerät mit
-dieser Version kompaktiert hat, werden Geräte mit einer älteren Version um ein
+dieser Version synchronisiert hat, werden Geräte mit einer älteren Version um ein
 Update gebeten, bevor sie wieder synchronisieren.
 
 Dieselbe Regel gilt jeden Tag: Eine Änderung, die spät ankommt, etwa offline

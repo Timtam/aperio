@@ -107,10 +107,6 @@ pub struct SnapshotRowClock {
     pub written: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub deleted: bool,
-    /// The author's row was of unknown time ([`RowClock::seeded`]): the
-    /// taker holds the author's applied changes there too.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub seeded: bool,
 }
 
 /// One account secret carried in [`AperioSnapshotBody::credentials`].
@@ -244,7 +240,6 @@ impl SnapshotBuilder {
                 changed: clock.changed,
                 written: clock.written,
                 deleted: clock.deleted,
-                seeded: clock.seeded,
             })
             .collect();
         let body = AperioSnapshotBody {
@@ -387,7 +382,12 @@ impl SnapshotBuilder {
                         changed: clock.changed,
                         written: clock.written,
                         deleted: clock.deleted,
-                        seeded: clock.seeded,
+                        // A known time here, whatever it was for the author:
+                        // the taker's rows hold the snapshot's values now, so
+                        // its own newer changes must be weighed against it,
+                        // not held (review round 6 of #130). The author's
+                        // changes on a seeded row are at or before the seed.
+                        seeded: false,
                     },
                 ))
             })
@@ -581,9 +581,10 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_carries_a_seeded_clock_as_seeded() {
-        // Review round 5 of #130: the author's row was of unknown time; the
-        // taker holds the author's applied changes there as the author does.
+    fn a_seeded_clock_is_a_known_time_on_the_taker() {
+        // Review round 6 of #130: carried as seeded, it made a re-joining
+        // device hold its own changes newer than the snapshot, and the
+        // snapshot's older value stayed there alone.
         use chrono::TimeZone;
         let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
         let author = Arc::new(FakeStore::default());
@@ -598,7 +599,9 @@ mod tests {
         let taker = Arc::new(FakeStore::default());
         builder(Arc::clone(&taker), secrets).apply(&snap).unwrap();
 
-        assert!(taker.row_clocks.lock().unwrap()[&setting_key()].seeded);
+        let clock = taker.row_clocks.lock().unwrap()[&setting_key()];
+        assert_eq!(clock.changed, at(6000));
+        assert!(!clock.seeded);
     }
 
     #[test]
@@ -620,7 +623,6 @@ mod tests {
                 changed: Utc::now(),
                 written: None,
                 deleted: false,
-                seeded: false,
             }],
             ..Default::default()
         };
@@ -652,7 +654,6 @@ mod tests {
                 changed: Utc::now(),
                 written: None,
                 deleted: false,
-                seeded: false,
             }],
             ..Default::default()
         };

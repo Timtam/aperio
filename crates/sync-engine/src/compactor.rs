@@ -528,6 +528,10 @@ impl Compactor {
         }
         meta.snapshot_timestamp = snapshot_ts;
         let device_name = self.store.get_pref(PREF_DEVICE_NAME).ok().flatten();
+        let own_pending = meta
+            .device(&self.local_device_id)
+            .map(|record| record.pending.clone())
+            .unwrap_or_default();
         meta.upsert_device(
             &self.local_device_id,
             DeviceRecord {
@@ -549,6 +553,9 @@ impl Compactor {
                         .flatten()
                         .as_deref(),
                 ),
+                // `upsert_device` replaces the whole record: what it named
+                // pending stands until its heartbeat names it anew.
+                pending: own_pending,
             },
         );
 
@@ -683,12 +690,18 @@ impl Compactor {
             .checked_sub_signed(ChronoDuration::days(i64::from(retention_days)))
             .unwrap_or(DateTime::<Utc>::MIN_UTC);
         // A file an active device could not read stays: an update of that
-        // device reads it again (review round 5 of #130).
+        // device reads it again (review round 5 of #130). So does a file any
+        // device names as pending: it may push it again (review round 6).
         let unread: HashSet<String> = meta
             .devices
             .values()
             .filter(|record| !record.stale && record.last_seen_log >= retention_floor)
             .flat_map(|record| record.unreadable.iter().cloned())
+            .chain(
+                meta.devices
+                    .values()
+                    .flat_map(|record| record.pending.iter().cloned()),
+            )
             .collect();
         for log in current {
             let filename = log.name.to_filename();
@@ -1287,6 +1300,7 @@ mod tests {
                 stale: false,
                 exact: true,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         *adapter.meta.lock().unwrap() = Some(meta);
@@ -1337,6 +1351,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         *adapter.meta.lock().unwrap() = Some(meta);
@@ -1389,6 +1404,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         *adapter.meta.lock().unwrap() = Some(meta);
@@ -1504,6 +1520,7 @@ mod tests {
                 stale: false,
                 exact: true,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         meta
@@ -1827,6 +1844,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         *adapter.meta.lock().unwrap() = Some(meta);
@@ -2024,6 +2042,54 @@ mod tests {
         let report = compactor.compact_now(&adapter).await.unwrap();
 
         assert_eq!(report.deleted_logs, 0);
+    }
+
+    #[tokio::test]
+    async fn a_file_a_device_names_as_pending_stays() {
+        // Review round 6 of #130: a device may push it again; deleted, it
+        // came back whole, with events every device had let go.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        let mut meta = meta_with_caught_up_peer();
+        let old: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
+        let log = held_log(&store, old);
+        let filename = log.name.to_filename();
+        for record in meta.devices.values_mut() {
+            record.pending = vec![filename.clone()];
+        }
+        *adapter.meta.lock().unwrap() = Some(meta);
+        adapter.logs.lock().unwrap().push(log);
+        seen_long_ago(&store, &adapter);
+
+        let report = compactor.compact_now(&adapter).await.unwrap();
+
+        assert_eq!(report.deleted_logs, 0);
+    }
+
+    #[tokio::test]
+    async fn a_compaction_names_what_an_older_parser_could_not_read() {
+        // Review round 6 of #130: a compaction before the round that reads
+        // them again published no names, and the GC's guard on them lifted.
+        let (store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        *adapter.meta.lock().unwrap() = Some(meta_with_caught_up_peer());
+        let record = serde_json::to_string(&crate::UnreadableLogs {
+            parser: 0,
+            files: HashMap::from([("x.jsonl".to_string(), 1)]),
+        })
+        .unwrap();
+        store
+            .set_pref(crate::SYNC_UNREADABLE_LOGS_PREF_KEY, &record)
+            .unwrap();
+
+        compactor.compact_now(&adapter).await.unwrap();
+
+        let meta = adapter.meta.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            meta.device(&compactor.local_device_id)
+                .map(|record| record.unreadable.clone()),
+            Some(vec!["x.jsonl".to_string()]),
+        );
     }
 
     #[tokio::test]

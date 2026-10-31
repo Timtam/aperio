@@ -630,6 +630,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.push_meta(&meta).await.unwrap();

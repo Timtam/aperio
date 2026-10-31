@@ -112,6 +112,12 @@ pub struct DeviceRecord {
     /// of that device reads them again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unreadable: Vec<String>,
+    /// The log files in this device's `pending/` — what it may push again
+    /// (DESIGN-sync-snapshot-coverage.md, review round 6 of #130). No
+    /// compactor deletes a file any device names here: pushing it once more
+    /// is then never pushing a deleted file back.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<String>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -276,6 +282,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         let bytes = meta.to_bytes().unwrap();
@@ -302,6 +309,7 @@ mod tests {
                     stale: false,
                     exact: false,
                     unreadable: Vec::new(),
+                    pending: Vec::new(),
                 },
             )]),
         };
@@ -351,6 +359,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         let json = String::from_utf8(meta.to_bytes().unwrap()).unwrap();
@@ -367,6 +376,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         let json = String::from_utf8(meta.to_bytes().unwrap()).unwrap();
@@ -392,6 +402,7 @@ mod tests {
                     stale: false,
                     exact: false,
                     unreadable: Vec::new(),
+                    pending: Vec::new(),
                 },
             );
         }

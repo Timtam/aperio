@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use adapter_local::LocalFsSyncAdapter;
 use chrono::TimeZone;
-use chrono::{DateTime, Timelike, Utc};
+use chrono::{DateTime, Utc};
 use sync_core::{
     DeviceId, EventEnvelope, IdPayload, LogFile, LogFileName, MetaJson, SyncAdapter, SyncError,
     SyncEvent, SyncResult,
@@ -29,9 +29,8 @@ struct RecordingHooks {
     store: Arc<FakeStore>,
     catch_ups: Mutex<usize>,
     fail: bool,
-    /// A compaction elsewhere raises the GC horizon to this while the
-    /// catch-up runs.
-    horizon_meanwhile: Mutex<Option<DateTime<Utc>>>,
+    /// How many log files the remote held at each heartbeat.
+    heartbeats: Mutex<Vec<usize>>,
 }
 
 #[async_trait::async_trait]
@@ -42,21 +41,20 @@ impl SyncRoundHooks for RecordingHooks {
 
     async fn heartbeat(
         &self,
-        _adapter: &dyn SyncAdapter,
+        adapter: &dyn SyncAdapter,
         _last_seen_log: DateTime<Utc>,
         _round_meta: Option<&MetaJson>,
     ) -> SyncResult<()> {
+        let held = adapter
+            .fetch_new_logs(&sync_core::DeviceCursor::epoch())
+            .await?
+            .len();
+        self.heartbeats.lock().unwrap().push(held);
         Ok(())
     }
 
-    async fn catch_up(&self, adapter: &dyn SyncAdapter) -> SyncResult<ApplyReport> {
+    async fn catch_up(&self, _adapter: &dyn SyncAdapter) -> SyncResult<ApplyReport> {
         *self.catch_ups.lock().unwrap() += 1;
-        let meanwhile = *self.horizon_meanwhile.lock().unwrap();
-        if let Some(horizon) = meanwhile {
-            let mut meta = adapter.fetch_meta().await?.unwrap_or_else(fresh_meta);
-            meta.gc_horizon = Some(horizon);
-            adapter.push_meta(&meta).await?;
-        }
         if self.fail {
             return Err(SyncError::internal("offline"));
         }
@@ -123,7 +121,7 @@ async fn device(
         store: fake,
         catch_ups: Mutex::new(0),
         fail,
-        horizon_meanwhile: Mutex::new(None),
+        heartbeats: Mutex::new(Vec::new()),
     });
     let orchestrator = SyncOrchestrator::new(
         store,
@@ -431,11 +429,45 @@ async fn a_file_an_earlier_parser_could_not_read_is_fetched_again() {
         .store
         .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &unreadable_by(0))
         .unwrap();
+    hooks
+        .store
+        .set_pref(crate::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY, r#"{"x.jsonl":1}"#)
+        .unwrap();
 
     orchestrator.sync_now().await.expect("round");
 
     assert_eq!(*hooks.catch_ups.lock().unwrap(), 0);
-    assert_eq!(applied_length(&hooks.store, "x.jsonl"), Some(0));
+    // Taken as unknown, also from an adapter that lists no sizes.
+    assert_eq!(applied_length(&hooks.store, "x.jsonl"), None);
+    // Still named until a round reads it (review round 6): a fetch failing
+    // meanwhile must not lift the GC's guard on it.
+    let raw = hooks.store.get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY).unwrap();
+    assert_eq!(
+        crate::UnreadableLogs::names(raw.as_deref()),
+        vec!["x.jsonl"]
+    );
+}
+
+#[tokio::test]
+async fn a_named_file_a_round_reads_is_named_no_more() {
+    // Review round 6 of #130: named once, it held the GC back for as long as
+    // the parser stayed the same, though this device had read it since.
+    let (_tmp, orchestrator, hooks, adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    let whole = session("dev-desktop", 1_000, 1);
+    let name = peer_file(&adapter, &whole.bytes).await;
+    let record = serde_json::to_string(&crate::UnreadableLogs {
+        parser: sync_core::PARSER_FINGERPRINT,
+        files: std::collections::HashMap::from([(name.clone(), 3)]),
+    })
+    .unwrap();
+    hooks
+        .store
+        .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &record)
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
     assert!(hooks
         .store
         .get_pref(SYNC_UNREADABLE_LOGS_PREF_KEY)
@@ -497,6 +529,30 @@ async fn peer_file(adapter: &Arc<dyn SyncAdapter>, bytes: &[u8]) -> String {
 }
 
 #[tokio::test]
+async fn a_named_file_torn_again_at_its_size_is_not_fetched_every_round() {
+    // Review round 6 of #130: named for being torn twice at the same size,
+    // it was fetched again in every ordinary round.
+    let (_tmp, orchestrator, hooks, adapter) = device(fresh_meta(), false).await;
+    mark_exact(&hooks.store);
+    let whole = String::from_utf8(session("dev-desktop", 1_000, 1).bytes).unwrap();
+    let torn = format!("{whole}\n{{\"id\":\"ev");
+    let name = peer_file(&adapter, torn.as_bytes()).await;
+    let record = serde_json::to_string(&crate::UnreadableLogs {
+        parser: sync_core::PARSER_FINGERPRINT,
+        files: std::collections::HashMap::from([(name.clone(), torn.len() as u64)]),
+    })
+    .unwrap();
+    hooks
+        .store
+        .set_pref(SYNC_UNREADABLE_LOGS_PREF_KEY, &record)
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    assert_eq!(applied_length(&hooks.store, &name), Some(torn.len() as u64));
+}
+
+#[tokio::test]
 async fn a_line_this_build_does_not_know_is_named_and_not_fetched_again_and_again() {
     // Review round 5 of #130: recorded as length 0, it was fetched again in
     // every round, for as long as it was there.
@@ -532,7 +588,7 @@ async fn a_torn_read_is_fetched_again_and_not_named() {
         .is_none());
 }
 
-// ---- Review round 5 of #130: a file pushed once does not go up again --------
+// ---- Review rounds 5 and 6 of #130: what goes up, once ----------------------
 
 /// An own pending file of envelopes at `secs`, named at the first, each line
 /// ending with its newline.
@@ -565,19 +621,6 @@ fn stage(tmp: &TempDir, log: &LogFile) {
         &log.bytes,
     )
     .unwrap();
-}
-
-fn pushed_record(store: &FakeStore, record: &[(&LogFile, usize)]) {
-    let map: std::collections::HashMap<String, u64> = record
-        .iter()
-        .map(|(log, len)| (log.name.to_filename(), *len as u64))
-        .collect();
-    store
-        .set_pref(
-            crate::SYNC_PUSHED_LENGTHS_PREF_KEY,
-            &crate::pushed::encode(&map),
-        )
-        .unwrap();
 }
 
 /// The remote's log files, by name, and what they hold.
@@ -631,98 +674,109 @@ async fn gc_passed(
 }
 
 #[tokio::test]
-async fn a_finished_session_pushed_whole_before_is_only_removed() {
-    // Every app start pushed it once more, whole — after a GC, back to the
-    // remote for a device that joined since to take as unknown. Here the GC
-    // has not passed it: whether its copy is there or not, what was pushed
-    // does not go again.
+async fn the_pending_files_are_named_before_any_goes_up() {
+    // Review round 6 of #130: no compactor deletes a file a device names as
+    // pending, so the names must be in meta.json before the file is on the
+    // remote.
     let (tmp, orchestrator, hooks, adapter) = gc_passed(500).await;
-    let log = own_file(&[1_000, 1_001]);
-    stage(&tmp, &log);
-    pushed_record(&hooks.store, &[(&log, log.bytes.len())]);
+    stage(&tmp, &own_file(&[1_000]));
 
     orchestrator.sync_now().await.expect("round");
 
-    assert!(remote_logs(&adapter).await.is_empty());
-    assert!(pending_names(&tmp).is_empty());
+    assert_eq!(hooks.heartbeats.lock().unwrap().first(), Some(&0));
+    assert_eq!(remote_logs(&adapter).await.len(), 1);
 }
 
 #[tokio::test]
-async fn of_a_file_whose_remote_copy_may_be_gone_only_what_never_went_up_goes() {
+async fn an_older_builds_leftover_sends_only_what_came_after_its_last_round() {
+    // Review rounds 5 and 6 of #130: a 0.1.0 build kept every pushed file in
+    // pending/, and its compactors deleted by name; pushed whole once more,
+    // a leftover brought months-old changes back for devices that never
+    // applied them.
     let (tmp, orchestrator, hooks, adapter) = gc_passed(5_000).await;
-    let log = own_file(&[1_000, 2_000]);
+    let log = own_file(&[1_000, 4_000]);
     stage(&tmp, &log);
-    let first_line = log.bytes.iter().position(|byte| *byte == b'\n').unwrap() + 1;
-    pushed_record(&hooks.store, &[(&log, first_line)]);
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LAST_ROUND_PREF_KEY,
+            &Utc.timestamp_opt(2_000 + 600, 0).unwrap().to_rfc3339(),
+        )
+        .unwrap();
 
     orchestrator.sync_now().await.expect("round");
 
     let remote = remote_logs(&adapter).await;
     assert_eq!(remote.len(), 1, "{remote:?}");
     assert_ne!(remote[0].0, log.name.to_filename());
-    assert!(remote[0].1.contains("ev-own-2000"));
+    assert!(remote[0].1.contains("ev-own-4000"));
     assert!(!remote[0].1.contains("ev-own-1000"));
-    assert!(pending_names(&tmp).is_empty());
+    assert!(pending_names(&tmp)
+        .iter()
+        .all(|name| *name != log.name.to_filename()));
+    assert!(hooks
+        .store
+        .get_pref(crate::SYNC_LEFTOVERS_SETTLED_PREF_KEY)
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]
-async fn the_first_push_of_this_build_goes_by_what_its_own_record_says_was_pushed() {
-    // A 0.1.0 leftover: no record of what went up. This device's own entry
-    // in meta.json says when its last round was; what came before it went.
-    let mut meta = fresh_meta();
-    meta.gc_horizon = Some(Utc.timestamp_opt(6_000, 0).unwrap());
-    meta.upsert_device(
-        &DeviceId::from_string("dev-laptop".into()),
-        sync_core::DeviceRecord {
-            name: None,
-            last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
-            last_seen: Some(Utc.timestamp_opt(2_000 + 600, 0).unwrap()),
-            app_version: "0.1.0".into(),
-            stale: false,
-            exact: false,
-            unreadable: Vec::new(),
-        },
-    );
-    let (tmp, orchestrator, hooks, adapter) = device(meta, false).await;
-    mark_exact(&hooks.store);
-    hooks
-        .store
-        .set_pref(
-            crate::SYNC_CURSOR_PREF_KEY,
-            &Utc.timestamp_opt(60_000, 0).unwrap().to_rfc3339(),
-        )
-        .unwrap();
-    let log = own_file(&[1_000, 5_000]);
+async fn a_leftover_with_no_round_known_goes_up_whole() {
+    let (tmp, orchestrator, _hooks, adapter) = gc_passed(5_000).await;
+    let log = own_file(&[1_000, 4_000]);
     stage(&tmp, &log);
 
     orchestrator.sync_now().await.expect("round");
 
     let remote = remote_logs(&adapter).await;
     assert_eq!(remote.len(), 1, "{remote:?}");
-    assert!(remote[0].1.contains("ev-own-5000"));
-    assert!(!remote[0].1.contains("ev-own-1000"));
-    assert!(hooks
-        .store
-        .get_pref(crate::SYNC_PUSHED_LENGTHS_PREF_KEY)
-        .unwrap()
-        .is_some());
+    assert_eq!(remote[0].0, log.name.to_filename());
 }
 
 #[tokio::test]
-async fn push_now_goes_by_the_datasets_gc_horizon_too() {
-    // The phone pushes through push_now after each edit; without the meta it
-    // took every finished file for one whose remote copy is there.
+async fn the_leftovers_are_settled_once() {
+    // A file of this build, finished and still pending (its push failed),
+    // named below the horizon later, is this build's work: whole.
     let (tmp, orchestrator, hooks, adapter) = gc_passed(5_000).await;
-    let log = own_file(&[1_000, 2_000]);
+    hooks
+        .store
+        .set_pref(crate::SYNC_LEFTOVERS_SETTLED_PREF_KEY, "1")
+        .unwrap();
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LAST_ROUND_PREF_KEY,
+            &Utc.timestamp_opt(2_000 + 600, 0).unwrap().to_rfc3339(),
+        )
+        .unwrap();
+    let log = own_file(&[1_000, 4_000]);
     stage(&tmp, &log);
-    let first_line = log.bytes.iter().position(|byte| *byte == b'\n').unwrap() + 1;
-    pushed_record(&hooks.store, &[(&log, first_line)]);
 
-    orchestrator.push_now().await.expect("push");
+    orchestrator.sync_now().await.expect("round");
 
     let remote = remote_logs(&adapter).await;
     assert_eq!(remote.len(), 1, "{remote:?}");
-    assert!(!remote[0].1.contains("ev-own-1000"));
+    assert_eq!(remote[0].0, log.name.to_filename());
+}
+
+#[tokio::test]
+async fn another_remote_gets_every_pending_file_once_more() {
+    // Review round 6 of #130: an adapter swap, an E2E switch, a join — the
+    // per-session lengths say nothing about the new remote.
+    let (tmp, orchestrator, _hooks, _adapter) = device(fresh_meta(), false).await;
+    let live = own_file(&[Utc::now().timestamp() + 3_600]);
+    stage(&tmp, &live);
+    orchestrator.push_now().await.expect("first push");
+    let other_dir = tmp.path().join("other");
+    std::fs::create_dir_all(&other_dir).unwrap();
+    let other: Arc<dyn SyncAdapter> = Arc::new(LocalFsSyncAdapter::new(&other_dir));
+    other.push_meta(&fresh_meta()).await.unwrap();
+
+    orchestrator.configure(Arc::clone(&other));
+    orchestrator.push_now().await.expect("push to the other");
+
+    assert_eq!(remote_logs(&other).await.len(), 1);
 }
 
 #[tokio::test]
@@ -739,126 +793,4 @@ async fn push_now_pushes_nothing_from_a_plaintext_device_into_an_encrypted_datas
         "{result:?}"
     );
     assert!(remote_logs(&adapter).await.is_empty());
-}
-
-#[tokio::test]
-async fn the_writer_leaves_a_live_file_the_gc_horizon_passed() {
-    // A desktop runs for weeks; a peer's compaction deletes its live file,
-    // unchanged long enough. Its next edit pushed the whole file again.
-    let tmp = TempDir::new().expect("tempdir");
-    let remote = tmp.path().join("remote");
-    std::fs::create_dir_all(&remote).unwrap();
-    let adapter: Arc<dyn SyncAdapter> = Arc::new(LocalFsSyncAdapter::new(&remote));
-    adapter.push_meta(&fresh_meta()).await.unwrap();
-    let device_id = DeviceId::from_string("dev-laptop".into());
-    let boot = Utc::now().with_nanosecond(0).unwrap() - chrono::Duration::hours(1);
-    let writer = crate::EventLogWriter::spawn_with_kick(
-        tmp.path().to_path_buf(),
-        device_id.clone(),
-        None,
-        boot,
-    );
-    let pending = tmp.path().join("sync").join("log").join("pending");
-    let fake = Arc::new(FakeStore::default());
-    let store: Arc<dyn SyncStore> = fake.clone();
-    let applier = Arc::new(EventLogApplier::new(
-        Arc::clone(&store),
-        Arc::new(FakeSecrets::default()),
-        Arc::new(adapter_local::LocalAdapter::new(
-            adapter_local::test_support::open_test_db(),
-        )),
-        device_id.clone(),
-    ));
-    let builder = Arc::new(SnapshotBuilder::new(
-        Arc::clone(&store),
-        Arc::new(FakeSecrets::default()),
-        "1.0.0-test",
-    ));
-    let compactor = Arc::new(Compactor::new(
-        Arc::clone(&store),
-        builder,
-        device_id.clone(),
-        "1.0.0-test",
-        Some(Arc::clone(&writer)),
-        None,
-    ));
-    let hooks = Arc::new(RecordingHooks {
-        store: fake.clone(),
-        catch_ups: Mutex::new(0),
-        fail: false,
-        horizon_meanwhile: Mutex::new(None),
-    });
-    let orchestrator = SyncOrchestrator::new(
-        store,
-        pending.clone(),
-        device_id,
-        applier,
-        hooks.clone(),
-        compactor,
-        boot,
-    );
-    orchestrator.configure(Arc::clone(&adapter));
-    mark_exact(&fake);
-    let live = pending
-        .join(LogFileName::new(boot, DeviceId::from_string("dev-laptop".into())).to_filename());
-    let written = |n: usize| {
-        let live = live.clone();
-        async move {
-            for _ in 0..200 {
-                let lines = std::fs::read_to_string(&live).map_or(0, |text| text.lines().count());
-                if lines >= n {
-                    return;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-            panic!("the writer did not write {n} line(s)");
-        }
-    };
-    writer.append(SyncEvent::EventDeleted(IdPayload { id: "row-1".into() }));
-    written(1).await;
-    orchestrator.push_now().await.expect("first push");
-    let first = remote_logs(&adapter).await;
-    assert_eq!(first.len(), 1);
-
-    let mut meta = adapter.fetch_meta().await.unwrap().unwrap();
-    meta.gc_horizon = Some(boot + chrono::Duration::minutes(30));
-    adapter.push_meta(&meta).await.unwrap();
-    writer.append(SyncEvent::EventDeleted(IdPayload { id: "row-2".into() }));
-    written(2).await;
-    orchestrator.push_now().await.expect("second push");
-
-    assert!(writer.session_at() > boot, "rotated away");
-    let remote = remote_logs(&adapter).await;
-    assert_eq!(remote.len(), 2, "{remote:?}");
-    let old = remote.iter().find(|(name, _)| *name == first[0].0).unwrap();
-    assert_eq!(old.1, first[0].1, "the old file did not go up again");
-    let tail = remote.iter().find(|(name, _)| *name != first[0].0).unwrap();
-    assert!(tail.1.contains("row-2") && !tail.1.contains("row-1"));
-}
-
-#[tokio::test]
-async fn the_push_goes_by_a_gc_horizon_raised_while_the_device_caught_up() {
-    // The catch-up fetches every file and can take minutes; a compaction
-    // elsewhere raised the horizon meanwhile, and the push judged by the
-    // copy read before.
-    let (tmp, orchestrator, hooks, adapter) = device(fresh_meta(), false).await;
-    hooks
-        .store
-        .set_pref(
-            crate::SYNC_CURSOR_PREF_KEY,
-            &Utc.timestamp_opt(50_000, 0).unwrap().to_rfc3339(),
-        )
-        .unwrap();
-    *hooks.horizon_meanwhile.lock().unwrap() = Some(Utc.timestamp_opt(5_000, 0).unwrap());
-    let log = own_file(&[1_000, 2_000]);
-    stage(&tmp, &log);
-    let first_line = log.bytes.iter().position(|byte| *byte == b'\n').unwrap() + 1;
-    pushed_record(&hooks.store, &[(&log, first_line)]);
-
-    orchestrator.sync_now().await.expect("round");
-
-    assert_eq!(*hooks.catch_ups.lock().unwrap(), 1);
-    let remote = remote_logs(&adapter).await;
-    assert_eq!(remote.len(), 1, "{remote:?}");
-    assert!(!remote[0].1.contains("ev-own-1000"));
 }

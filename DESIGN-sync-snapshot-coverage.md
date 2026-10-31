@@ -119,25 +119,30 @@ still, und nur Neueres gewinnt.
   hochgeladene Sitzung, oder eine nach dem Aufräumen erneut hochgeladene mit
   Namen unter `gc_horizon`. Ein nicht genaues Gerät behält die alte Regel, bis
   es nachgeholt hat.
-- **Was oben war, geht nicht wieder hoch** (Prüfrunde 5). Der Push merkt
-  sich je ausstehender Datei, wie viel davon hochgeladen ist
-  (`sync.push.pushedLengths`), über App-Starts hinweg; Beitritt und „Neu
-  beginnen“ setzen das leer. Fertig ist eine Datei, die vor der Datei
-  benannt ist, an die der Writer anhängt. Eine fertige, ganz hochgeladene
-  wird nur entfernt. Bisher ging jede nach jedem Start wieder hoch, und eine,
-  die der Compactor gelöscht hatte, kam zurück; ein genaues Gerät nahm sie
-  dann als unbekannt herein und übernahm monatealte Änderungen. Hat
-  `gc_horizon` den Namen einer Datei überholt, kann ein Compactor ihre
-  entfernte Kopie gelöscht haben: Von einer fertigen geht dann nur, was nie
-  oben war, in einer eigenen Datei; von einer laufenden rotiert der Writer
-  vorher weg. 0.1.0 führte kein Protokoll: Beim ersten Push dieses Builds
-  gilt als hochgeladen, was vor der letzten Runde lag, die der eigene Eintrag
-  in `meta.json` nennt (abzüglich zehn Minuten), danach führt das Protokoll.
+- **Was ein Gerät noch hochladen kann, löscht niemand** (Prüfrunden 5 und
+  6). Jedes Gerät nennt in seinem Eintrag in `meta.json` die Dateien in
+  seinem `pending/` (`pending`), bevor eine davon hochgeht; kein Compactor
+  löscht eine Datei, die ein Gerät so nennt. Der Push lädt dann jede
+  ausstehende Datei einmal je App-Start ganz hoch: Eine gelöschte kommt so
+  nie zurück, und eine entfernte Kopie, die ein abgebrochener Push halb
+  geschrieben hat, ist wieder ganz. Fertig ist eine Datei, die vor der Datei
+  benannt ist, an die der Writer anhängt; eine fertige wird entfernt, sobald
+  sie ganz oben ist. Ein anderer Sync-Speicher (`configure`, ein Beitritt, das
+  Umschalten der Verschlüsselung) bekommt jede ausstehende Datei noch einmal.
+  Runde 5 hatte statt dessen geraten, ob die entfernte Kopie noch da ist
+  (ein Protokoll des Hochgeladenen, nur der Rest unter `gc_horizon`, Rotation
+  des Writers); Runde 6 fand, dass das halb geschriebene Kopien nie heilte.
+- **Was 0.1.0 hinterließ, einmal.** Diese Builds entfernten nichts aus
+  `pending/`, nannten nichts, und ihre Compactors löschten nach Namen. Bevor
+  dieser Build zum ersten Mal pusht, nachholt oder wiederaufnimmt, gilt von
+  jeder fertigen Datei unter `gc_horizon` als oben, was vor der letzten
+  erfolgreichen Runde dieses Geräts lag (`sync.lastSuccessfulRound`, abzüglich
+  zehn Minuten: eine Runde pusht vor ihrem Ende, und eine Änderung während der
+  Runde kann ihren Push verpasst haben); der Rest geht als eigene Datei, kurz
+  vor der laufenden benannt, und die alte Datei geht (`sync.push.leftoversSettled`,
+  danach nie wieder). Ist keine solche Runde bekannt, gilt nichts als oben.
   Auch `push_now`, der Push nach jeder Änderung und auf dem Handy der übliche,
-  holt dafür `meta.json` und prüft Mindestversion und Verschlüsselung wie die
-  Runde. Nach einem Nachholen oder einer Wiederaufnahme holt die Runde
-  `meta.json` vor dem Push neu: Ein Compactor kann den Horizont inzwischen
-  angehoben haben.
+  holt `meta.json` und prüft Mindestversion und Verschlüsselung wie die Runde.
 - **Gemerkte Längen.** Die 256 neuesten (nach Namen), nicht nach `gc_horizon`
   beschnitten: Eine noch laufende Sitzung mit altem Namen muss ihr Wachstum
   weiter zeigen. Grenze: Liegen mehr als 256 Dateien vor, ist die älteste jede
@@ -208,12 +213,16 @@ dass sie nur gesetzt ist (`seeded`): Auch ein späteres Nachholen hält dort
 eine angewendete Änderung. Das Merkmal folgt der neuesten Änderung: Erst eine
 neuere übernommene macht die Zeit bekannt; bei gleicher Zeit übernimmt ein
 Setzen weder ein echtes Schreiben noch die Lösch-Entscheidung eines früheren
-Setzens. Ein Schnappschuss trägt es weiter. Eigene Änderungen gelten als
+Setzens. Ein Schnappschuss trägt es nicht weiter: Beim Übernehmenden halten
+die Zeilen dessen Werte, seine Uhren sind dort bekannte Zeiten (Prüfrunde 6).
+Eigene Änderungen gelten als
 angewendet, denn die Zeilen des Geräts halten sie. Nur wo derselbe Durchgang
 einen Schnappschuss angewendet hat (Beitritt, Wiederaufnahme), wird eine
 eigene gewogen, die noch nicht hochgeladen ist (laut Push-Protokoll, C): Der
 Schnappschuss kann einen älteren Wert zurückgesetzt haben, und die anderen
-Geräte übernehmen sie, sobald sie oben ist. Das gewöhnliche Nachholen hat
+Geräte übernehmen sie, sobald sie oben ist. Ebenso jede eigene oder schon
+angewendete Änderung, die der Schnappschuss nicht hält: nicht unter seinen
+Kennungen, oder, nennt er keine, jünger als er (Prüfrunde 6). Das gewöhnliche Nachholen hat
 keinen Schnappschuss und hält jede eigene (Prüfrunde 5). Ein Löschen eines
 Termins oder einer Aufgabe wiegt das `updated_at` der Zeile mit, wenn ein
 Schnappschuss sie zurückgebracht hat.
@@ -251,7 +260,11 @@ Verschiebung legt sie dann wieder an.
   Eine spät hochgeladene Sitzung mit alten Einträgen bleibt, bis jedes Gerät
   sie holen konnte.
 - **Unlesbares.** Eine Datei, die ein aktives Gerät als unlesbar nennt
-  (B.5), bleibt: Ein Update dort liest sie wieder (Prüfrunde 5).
+  (B.5), bleibt: Ein Update dort liest sie wieder (Prüfrunde 5). Genannt
+  bleibt sie, bis eine Runde sie liest, welcher Parser sie auch aufschrieb;
+  nur fremde Dateien werden genannt (Prüfrunde 6).
+- **Ausstehendes.** Eine Datei, die irgendein Gerät als ausstehend nennt (C),
+  bleibt: Es lädt sie vielleicht noch einmal hoch (Prüfrunde 6).
 - **Ausstehende Dateien.** Der Compactor lädt nichts hoch. Er räumt eine
   ausstehende Datei nur weg, wenn ihre entfernte Kopie mindestens so lang
   ist; sonst bleibt sie für den Push der Runde, und ihre entfernte Kopie
@@ -427,7 +440,8 @@ gegengeprüft, ein Kritiker. Einzelheiten: scratchpad `coverage/review_r3.json`.
 - **Alte Builds aussperren:** Die Sync-Formatversion steigt auf 2, die
   App-Version auf 0.2.0 (Toni: 0.2.0; Desktop und Handy melden für den Sync
   die Workspace-Version, und die alten Builds melden 0.1.0). Die erste
-  Verdichtung eines neuen Builds hebt `min_app_version` auf 0.2.0; alte Builds
+  Verdichtung eines neuen Builds hebt `min_app_version` auf 0.2.0 (seit
+  Prüfrunde 6 schon sein erster Eintrag in `meta.json`); alte Builds
   synchronisieren dann nicht mehr und zeigen „Update nötig“. Bis dahin können
   sie noch nach Namen löschen: nach dem Update einmal „Jetzt kompaktieren“.
 - Danach eine Prüfrunde wie Runde 3.
@@ -498,3 +512,32 @@ Einzelheiten: scratchpad `coverage/review_r5.json`, `coverage/r5_plan.md`.
   Meldung in beiden Oberflächen. Ebenso das „Neu beginnen“ eines anderen
   Geräts: Wer weiterläuft, lädt seine laufende Datei mit den alten
   Ereignissen in den neuen Datensatz.
+
+## Prüfrunde 6 (PR #130, 2026-10-31)
+
+Vier Prüfer auf die Commits nach Runde 5, 8 gegengeprüft (alle bestätigt),
+ein Kritiker; vor dem Umbau prüften 3 Kritiker den Plan. Einzelheiten:
+scratchpad `coverage/review_r6.json`, `coverage/r6_plan.md`.
+
+- **Kursänderung beim Push.** Das Protokoll aus Runde 5 riet, ob eine
+  entfernte Kopie noch da ist; ein abgebrochener Push blieb so für immer halb
+  geschrieben, Einträge gingen verloren, und es hing nicht am Sync-Speicher.
+  Jetzt nennt jedes Gerät seine ausstehenden Dateien in `meta.json`, und kein
+  Compactor löscht sie (C, F).
+- **0.1.0-Reste** gehen nach der letzten erfolgreichen Runde dieses Geräts,
+  nicht nach `last_seen` in `meta.json`: Den schrieb 0.1.0 auch nach einem
+  gescheiterten Push, nur alle zwölf Stunden, und ein Verdichten vorher
+  überschrieb ihn.
+- **Aussperren beim ersten Schreiben.** Schon der erste Eintrag dieses Builds
+  in `meta.json` (Herzschlag, Beitritt) hebt Format und `min_app_version`:
+  Danach löscht kein Build mehr nach Namen und übersieht, was Geräte als
+  ausstehend nennen.
+- **Schnappschüsse** tragen das Merkmal „nur gesetzt“ nicht weiter, und nach
+  einem Schnappschuss wird gewogen, was er nicht hält (E).
+- **Unlesbares** bleibt genannt, bis es gelesen ist; eigene Dateien werden
+  nicht genannt; eine nach einem Parser-Wechsel neu zu lesende Datei verliert
+  ihre gemerkte Länge, auch bei einem Speicher ohne Größenangaben.
+- Von mir entschieden (Toni sagen): das Aussperren schon beim ersten
+  Schreiben statt bei der ersten Verdichtung; ein vergessenes Gerät, das
+  zurückkommt, und ein Gerät, das als erste 0.2.0-Tat neu beitritt, laden ihre
+  alten Dateien noch ganz hoch (TODO B3).

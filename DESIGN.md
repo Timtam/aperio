@@ -3573,7 +3573,7 @@ sync/
 }
 ```
 
-Nach jedem erfolgreichen Sync-Durchlauf aktualisiert ein Gerät seinen eigenen `last_seen_log`- und `app_version`-Eintrag. `last_seen_log` ist der **„held horizon"** des Geräts — `max(Fetch-Cursor, eigenes neuestes Log)`, also der Zeitpunkt, bis zu dem es jedes Ereignis hält (angewendete fremde + selbst geschriebene). `stale: true` wird gesetzt, wenn der `last_seen_log` eines Geräts unter den `gc_horizon` fällt — die Logs, die es zum inkrementellen Aufholen bräuchte, sind bereits gelöscht (Schritt 6 des Kompaktierungs-Algorithmus). `gc_horizon` ist die (monoton steigende) **GC-Obergrenze**: jede Log-Datei mit `timestamp < gc_horizon` wurde gelöscht und kann nicht mehr inkrementell nachgeladen werden — abwesend (`null`) bedeutet, dass noch nie ein Log gelöscht wurde (frischer ODER Alt-Datensatz), sodass die Stale-Prüfung niemandem auslöst. `min_app_version` wird bei einem Schema-Upgrade auf die aktuelle App-Version gesetzt (Abschnitt 19.13).
+Nach jedem erfolgreichen Sync-Durchlauf aktualisiert ein Gerät seinen eigenen `last_seen_log`- und `app_version`-Eintrag, dazu ob es genau ist (`exact`), welche Dateien es nicht lesen kann (`unreadable`) und welche in seinem `pending/` liegen (`pending`; DESIGN-sync-snapshot-coverage.md). `last_seen_log` ist der **„held horizon"** des Geräts — `max(Fetch-Cursor, eigenes neuestes Log)`, also der Zeitpunkt, bis zu dem es jedes Ereignis hält (angewendete fremde + selbst geschriebene). `stale: true` wird gesetzt, wenn der `last_seen_log` eines Geräts unter den `gc_horizon` fällt — die Logs, die es zum inkrementellen Aufholen bräuchte, sind bereits gelöscht (Schritt 6 des Kompaktierungs-Algorithmus). `gc_horizon` ist die (monoton steigende) **GC-Obergrenze**: jede Log-Datei mit `timestamp < gc_horizon` wurde gelöscht und kann nicht mehr inkrementell nachgeladen werden — abwesend (`null`) bedeutet, dass noch nie ein Log gelöscht wurde (frischer ODER Alt-Datensatz), sodass die Stale-Prüfung niemandem auslöst. `min_app_version` wird bei einem Schema-Upgrade auf die aktuelle App-Version gesetzt (Abschnitt 19.13).
 
 #### `last_seen` — die Wanduhr neben dem Horizont
 
@@ -3666,12 +3666,11 @@ mindestens so lang ist. Eine längere bleibt für den Push der nächsten
 Runde, und ihre entfernte Kopie wird in Schritt 8 nicht gelöscht: Die
 anderen Geräte lesen Logs, nicht den Snapshot.
 
-Der Push lädt nichts zweimal hoch: Er merkt sich je ausstehender Datei,
-wie viel davon oben ist (`sync.push.pushedLengths`, über App-Starts
-hinweg; Beitritt und „Neu beginnen“ setzen es leer). Hat `gc_horizon` den
-Namen einer Datei überholt, kann ihre entfernte Kopie gelöscht sein: Dann
-geht nur, was nie oben war, in einer eigenen Datei, und von der laufenden
-rotiert der Writer vorher weg (DESIGN-sync-snapshot-coverage.md, C).
+Jedes Gerät nennt in meta.json die Dateien in seinem pending/
+(`pending`), bevor eine davon hochgeht, und Schritt 8 löscht keine Datei,
+die ein Gerät so nennt: Es lädt sie vielleicht noch einmal ganz hoch, und
+eine gelöschte käme so zurück. Was ein Build vor 0.2.0 dort hinterließ, wird
+einmal geordnet (DESIGN-sync-snapshot-coverage.md, C).
 ```
 
 #### Umgang mit veralteten Geräten ("stale")

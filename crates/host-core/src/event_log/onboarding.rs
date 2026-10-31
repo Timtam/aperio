@@ -62,7 +62,7 @@ use crate::event_log::{
     SYNC_CURSOR_PREF_KEY,
 };
 use crate::user_prefs::UserPrefsRepo;
-use sync_engine::{SYNC_PUSHED_LENGTHS_PREF_KEY, SYNC_UNREADABLE_LOGS_PREF_KEY};
+use sync_engine::SYNC_UNREADABLE_LOGS_PREF_KEY;
 
 /// `user_prefs` key holding the user-chosen device name. Surfaces in
 /// other devices' "known devices" lists via `meta.json`. Optional —
@@ -434,6 +434,7 @@ impl OnboardingService {
         // as applied (DESIGN-sync-snapshot-coverage.md).
         let mut starting_cursor: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
         let mut snapshot_applied = false;
+        let mut holds = None;
         // Everything is fetched first: a join that fails on the way leaves
         // this device as it was, still syncing with what it had (review
         // round 3 of #130).
@@ -455,6 +456,7 @@ impl OnboardingService {
                     Ok(outcome) => {
                         starting_cursor = snapshot.metadata.snapshot_timestamp;
                         snapshot_applied = true;
+                        holds = Some(SnapshotHolds::of(&snapshot, &outcome));
                         if let Some(count) = outcome.covered_events {
                             info!(count, "the snapshot names the events it holds");
                         }
@@ -483,12 +485,7 @@ impl OnboardingService {
         // Every log file, not only those named after the snapshot: a session
         // named before it may have grown after it (Toni's laptop,
         // 2026-10-27).
-        // Nothing is pushed to this dataset yet: every pending file goes up
-        // whole, and an own change in it is weighed (review round 5 of #130).
-        self.reset_pushed()?;
-        let pass = self
-            .apply_every_log(logs, &mut report, Some(HashMap::new()))
-            .await?;
+        let pass = self.apply_every_log(logs, &mut report, holds).await?;
         info!(
             count = report.fetched_logs,
             snapshot_applied = snapshot_applied,
@@ -511,7 +508,7 @@ impl OnboardingService {
         // pass above took a while, and a compaction meanwhile may have raised
         // the GC horizon or locked older builds out (review round 4 of #130).
         let mut meta = adapter.fetch_meta().await?.unwrap_or(meta);
-        self.register_self_in_meta(&mut meta, device_name);
+        self.register_self_in_meta(&mut meta, device_name).await;
         adapter.push_meta(&meta).await?;
         report.device_count = meta.devices.len();
 
@@ -589,15 +586,17 @@ impl OnboardingService {
         // Exact again only once this pass read every file (review round 3
         // of #130): an earlier mark says nothing after the snapshot apply.
         self.clear_coverage_exact()?;
+        let mut holds = None;
         let base = match snapshot {
             Some(snapshot) => {
                 info!(
                     snapshot_ts = %snapshot.metadata.snapshot_timestamp,
                     "applying snapshot during stale-device resume",
                 );
-                self.snapshot_builder.apply(&snapshot).map_err(|err| {
+                let outcome = self.snapshot_builder.apply(&snapshot).map_err(|err| {
                     SyncError::internal(format!("stale resume snapshot apply: {err}"))
                 })?;
+                holds = Some(SnapshotHolds::of(&snapshot, &outcome));
                 snapshot.metadata.snapshot_timestamp
             }
             None => {
@@ -613,12 +612,7 @@ impl OnboardingService {
             remote_was_empty: false,
             ..Default::default()
         };
-        // What this device pushed counts as on the remote, a 0.1.0 leftover
-        // as its record in meta.json tells it (review round 5 of #130).
-        let pushed = self.pushed_record(meta.device(&self.local_device_id)).await;
-        let pass = self
-            .apply_every_log(logs, &mut report, Some(pushed))
-            .await?;
+        let pass = self.apply_every_log(logs, &mut report, holds).await?;
         info!(
             count = report.fetched_logs,
             "stale resume applied every log",
@@ -711,17 +705,17 @@ impl OnboardingService {
     /// the growth refetch and returns the newest foreign file's name time,
     /// and whether every file read: only then is the device exact.
     ///
-    /// `pushed` is what this device pushed of its pending files, where the
-    /// pass applied a snapshot (a join, a resume): an own change not on the
-    /// remote yet is weighed, as the peers will weigh it once it is. `None`
-    /// where no snapshot came first (the round's catch-up): the rows hold
-    /// every own change, or a newer one, so each is held (review round 5 of
-    /// #130).
+    /// `holds` is what a snapshot the same pass applied holds (a join, a
+    /// resume): an own change not on the remote yet is weighed, as the peers
+    /// will weigh it once it is, and so is any own or applied change the
+    /// snapshot does not hold (review rounds 5 and 6 of #130). `None` where
+    /// no snapshot came first (the round's catch-up): the rows hold every own
+    /// change, or a newer one, so each is held.
     async fn apply_every_log(
         &self,
         logs: Vec<LogFile>,
         report: &mut OnboardingReport,
-        pushed: Option<HashMap<String, u64>>,
+        holds: Option<SnapshotHolds>,
     ) -> SyncResult<Pass> {
         let unreadable_before = self.read_unreadable_logs();
         let mut unreadable: HashMap<String, u64> = HashMap::new();
@@ -777,24 +771,24 @@ impl OnboardingService {
                         );
                         complete = false;
                     }
-                    unreadable.insert(filename, len);
+                    // Only another device's: this one holds its own events
+                    // whatever its remote copy looks like (review round 6).
+                    if foreign {
+                        unreadable.insert(filename, len);
+                    }
                 }
             }
         }
         // Our own changes not on the remote yet are weighed, not held.
         let pending_files = self.pending_files().await;
         let pending = envelopes_of(&pending_files);
-        let unpushed = match &pushed {
-            Some(record) => {
-                for file in &pending_files {
-                    on_remote.extend(sync_engine::pushed::pushed_ids(file, record));
-                }
-                pending
-                    .iter()
-                    .filter(|envelope| !on_remote.contains(&envelope.id))
-                    .map(|envelope| envelope.id.clone())
-                    .collect()
-            }
+        let unpushed: HashSet<String> = match &holds {
+            Some(holds) => pending
+                .iter()
+                .filter(|envelope| !on_remote.contains(&envelope.id))
+                .chain(envelopes.iter().filter(|envelope| !holds.holds(envelope)))
+                .map(|envelope| envelope.id.clone())
+                .collect(),
             None => HashSet::new(),
         };
         envelopes.extend(pending);
@@ -936,27 +930,6 @@ impl OnboardingService {
         logs
     }
 
-    /// What this device pushed of its pending files
-    /// (`sync_engine::pushed`): the record, or — none yet — what a build
-    /// before this one pushed, as `own` tells it.
-    async fn pushed_record(&self, own: Option<&DeviceRecord>) -> HashMap<String, u64> {
-        let raw = UserPrefsRepo::new(&self.db)
-            .get(SYNC_PUSHED_LENGTHS_PREF_KEY)
-            .ok()
-            .flatten();
-        match sync_engine::pushed::parse(raw.as_deref()) {
-            Some(record) => record,
-            None => sync_engine::pushed::legacy(&self.pending_files().await, own),
-        }
-    }
-
-    /// Nothing is pushed to the dataset this device is onto now.
-    fn reset_pushed(&self) -> SyncResult<()> {
-        UserPrefsRepo::new(&self.db)
-            .set(SYNC_PUSHED_LENGTHS_PREF_KEY, "{}")
-            .map_err(|err| SyncError::internal(format!("reset the push record: {err}")))
-    }
-
     /// "Neu beginnen" path. Deletes the old dataset's log files, pushes a
     /// snapshot of this device's state and a fresh meta.json with only this
     /// device, then leaves the rest to the scheduler's next round (which
@@ -1013,10 +986,8 @@ impl OnboardingService {
             crate::credential_sync::strip_credentials_from_snapshot(&mut snapshot);
         }
         adapter.push_snapshot(&snapshot).await?;
-        // Its own state is the dataset now: nothing to catch up over, and
-        // nothing pushed to it yet (review round 5 of #130).
+        // Its own state is the dataset now: nothing to catch up over.
         self.save_coverage_exact_since(snapshot_ts)?;
-        self.reset_pushed()?;
 
         let mut meta = MetaJson::fresh(&self.app_version);
         meta.snapshot_timestamp = snapshot_ts;
@@ -1028,7 +999,7 @@ impl OnboardingService {
             meta.e2e_enabled = true;
             meta.e2e_params = Some(params);
         }
-        self.register_self_in_meta(&mut meta, device_name);
+        self.register_self_in_meta(&mut meta, device_name).await;
         adapter.push_meta(&meta).await?;
 
         if let Some(name) = device_name {
@@ -1078,6 +1049,7 @@ impl OnboardingService {
             .flatten();
         let exact = self.coverage_exact();
         let unreadable = self.unreadable_names();
+        let pending = self.pending_names().await;
         let now = Utc::now();
         let is_current = |meta: &MetaJson| {
             meta.devices
@@ -1089,6 +1061,7 @@ impl OnboardingService {
                         && !d.stale
                         && d.exact == exact
                         && d.unreadable == unreadable
+                        && pending.as_ref().is_none_or(|names| d.pending == *names)
                         // Deliberately COARSE. Every other term here is an
                         // equality, and treating the wall clock the same way
                         // would make the skip below unreachable — the stamp
@@ -1111,7 +1084,11 @@ impl OnboardingService {
                             .is_some_and(|seen| now - seen < LAST_SEEN_REFRESH)
                 })
         };
-        if round_meta.is_some_and(is_current) {
+        // A dataset still on an older format is locked out for older builds
+        // at this build's first write (review round 6 of #130): from then on
+        // no compactor deletes by name, ignoring what devices name pending.
+        let locked_out = |meta: &MetaJson| meta.schema_version >= sync_core::SCHEMA_VERSION;
+        if round_meta.is_some_and(|meta| locked_out(meta) && is_current(meta)) {
             debug!("heartbeat_meta: device record already current; skipping push");
             return Ok(());
         }
@@ -1128,9 +1105,18 @@ impl OnboardingService {
         // The fresh copy can already carry the update (a fast concurrent
         // round of our own, or the round-start copy was merely stale) —
         // re-check before writing.
-        if is_current(&meta) {
+        if locked_out(&meta) && is_current(&meta) {
             return Ok(());
         }
+        lock_out_older_builds(&mut meta, &self.app_version);
+        let pending = match pending {
+            Some(names) => names,
+            // pending/ did not read: what the record named stands.
+            None => meta
+                .device(&self.local_device_id)
+                .map(|record| record.pending.clone())
+                .unwrap_or_default(),
+        };
         meta.upsert_device(
             &self.local_device_id,
             DeviceRecord {
@@ -1141,13 +1127,16 @@ impl OnboardingService {
                 stale: false,
                 exact,
                 unreadable,
+                pending,
             },
         );
         adapter.push_meta(&meta).await?;
         Ok(())
     }
 
-    fn register_self_in_meta(&self, meta: &mut MetaJson, device_name: Option<&str>) {
+    async fn register_self_in_meta(&self, meta: &mut MetaJson, device_name: Option<&str>) {
+        lock_out_older_builds(meta, &self.app_version);
+        let pending = self.pending_names().await.unwrap_or_default();
         let name = device_name.map(str::to_string).or_else(|| {
             UserPrefsRepo::new(&self.db)
                 .get(PREF_DEVICE_NAME)
@@ -1165,8 +1154,40 @@ impl OnboardingService {
                 stale: false,
                 exact: self.coverage_exact(),
                 unreadable: self.unreadable_names(),
+                pending,
             },
         );
+    }
+
+    /// The log files in `pending/`, every one, for this device's record;
+    /// `None` when the directory does not read.
+    async fn pending_names(&self) -> Option<Vec<String>> {
+        let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
+            Ok(rd) => rd,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Some(Vec::new()),
+            Err(err) => {
+                warn!(?err, "couldn't open the pending dir to name its files");
+                return None;
+            }
+        };
+        let mut names = Vec::new();
+        loop {
+            match entries.next_entry().await {
+                Ok(Some(entry)) => {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if LogFileName::from_filename(&name).is_ok() {
+                        names.push(name);
+                    }
+                }
+                Ok(None) => break,
+                Err(err) => {
+                    warn!(?err, "read_dir entry error naming the pending files");
+                    return None;
+                }
+            }
+        }
+        names.sort_unstable();
+        Some(names)
     }
 
     fn save_device_name(&self, name: &str) -> SyncResult<()> {
@@ -1285,6 +1306,47 @@ fn snapshot_ts_if_real(meta: &MetaJson) -> Option<String> {
         Some(meta.snapshot_timestamp.to_rfc3339())
     } else {
         None
+    }
+}
+
+/// Lock builds before this format out of `meta` (review round 6 of #130):
+/// they delete by name and ignore what devices name pending.
+fn lock_out_older_builds(meta: &mut MetaJson, app_version: &str) {
+    if meta.schema_version < sync_core::SCHEMA_VERSION {
+        meta.schema_version = sync_core::SCHEMA_VERSION;
+        meta.min_app_version = app_version.to_string();
+    }
+}
+
+/// What a snapshot the same pass applied holds (review round 6 of #130): the
+/// events it names, or, naming none, every change up to its time. The rows
+/// hold its values now, so an own or earlier applied change it does not hold
+/// is weighed against them, never held.
+enum SnapshotHolds {
+    Named(HashSet<String>),
+    Until(DateTime<Utc>),
+}
+
+impl SnapshotHolds {
+    fn of(snapshot: &sync_core::Snapshot, outcome: &sync_engine::SnapshotApplyOutcome) -> Self {
+        let named: Option<HashSet<String>> = outcome.covered_events.and_then(|_| {
+            snapshot
+                .body
+                .get("covered_event_ids")
+                .and_then(|ids| serde_json::from_value::<Vec<String>>(ids.clone()).ok())
+                .map(|ids| ids.into_iter().collect())
+        });
+        match named {
+            Some(named) => SnapshotHolds::Named(named),
+            None => SnapshotHolds::Until(snapshot.metadata.snapshot_timestamp),
+        }
+    }
+
+    fn holds(&self, envelope: &EventEnvelope) -> bool {
+        match self {
+            SnapshotHolds::Named(named) => named.contains(&envelope.id),
+            SnapshotHolds::Until(at) => envelope.timestamp <= *at,
+        }
     }
 }
 
@@ -1495,6 +1557,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -1528,6 +1591,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -1585,6 +1649,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         meta.upsert_device(
@@ -1597,6 +1662,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -1755,6 +1821,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         // The REMOTE meanwhile gained a marker device (a concurrent peer's
@@ -1771,6 +1838,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(remote);
@@ -1812,6 +1880,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         // Remote meanwhile: the peer's write landed.
@@ -1826,6 +1895,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(remote);
@@ -1865,6 +1935,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(cached.clone());
@@ -1904,6 +1975,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(cached.clone());
@@ -1943,6 +2015,7 @@ mod tests {
                 stale: false,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(cached.clone());
@@ -1967,6 +2040,7 @@ mod tests {
             stale: false,
             exact: false,
             unreadable: Vec::new(),
+            pending: Vec::new(),
         }
     }
 
@@ -2108,6 +2182,7 @@ mod tests {
                 stale: true,
                 exact: false,
                 unreadable: Vec::new(),
+                pending: Vec::new(),
             },
         );
         adapter.install_meta(meta);
@@ -2663,28 +2738,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_resume_holds_an_own_change_it_pushed_before() {
-        // The record says the change went up: the snapshot's value, of
-        // unknown time, stays.
+    async fn an_own_file_that_does_not_read_is_not_named() {
+        // Review round 6 of #130: this device holds its own events whatever
+        // their remote copy looks like; named, the file held the GC back
+        // for good, as no ordinary round reads an own file.
         let (_tmp, db) = fresh_db();
-        let pending = TempDir::new().unwrap();
-        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        adapter.logs.lock().unwrap().push(LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-this".into()),
+            ),
+            bytes: b"{\"from\":\"a newer build\"}\n".to_vec(),
+        });
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert!(svc.unreadable_names().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_join_weighs_an_own_change_the_snapshot_does_not_hold() {
+        // Review round 6 of #130: a join clears every row clock, and a row the
+        // snapshot brings no clock for is of unknown time. This device's own
+        // change, made after the snapshot, was held there as applied, and the
+        // snapshot's older value stayed on this device alone.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
         let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
-        let own = envelope("ev-own", "dev-this", at, set_interval("15"));
-        let own_file = file_of("dev-this", at, &[&own]);
-        std::fs::write(
-            pending.path().join(own_file.name.to_filename()),
-            &own_file.bytes,
-        )
-        .unwrap();
-        let record = HashMap::from([(own_file.name.to_filename(), own_file.bytes.len() as u64)]);
-        UserPrefsRepo::new(&db.shared())
-            .set(
-                SYNC_PUSHED_LENGTHS_PREF_KEY,
-                &sync_engine::pushed::encode(&record),
-            )
-            .unwrap();
         let later = at + chrono::Duration::hours(2);
+        let own = envelope("ev-own", "dev-this", later, set_interval("70"));
         let body = sync_engine::AperioSnapshotBody {
             settings: std::collections::BTreeMap::from([(
                 "sync.intervalMinutes".to_string(),
@@ -2692,57 +2775,64 @@ mod tests {
             )]),
             ..Default::default()
         };
-        let adapter = FakeAdapter::with_logs(Vec::new());
+        let adapter = FakeAdapter::with_logs(vec![file_of("dev-this", later, &[&own])]);
         let mut meta = MetaJson::fresh("1.0.0");
-        meta.snapshot_timestamp = later;
+        meta.snapshot_timestamp = at;
         adapter.install_meta(meta);
         adapter.install_snapshot(Snapshot::new(
-            later,
+            at,
             "1.0.0",
             serde_json::to_value(body).unwrap(),
         ));
 
-        svc.resume_from_stale(&adapter).await.unwrap();
+        svc.accept_remote(&adapter, None).await.unwrap();
 
-        assert_eq!(interval(&db).as_deref(), Some("45"));
+        assert_eq!(interval(&db).as_deref(), Some("70"));
     }
 
     #[tokio::test]
-    async fn joining_and_starting_over_push_every_pending_file_again() {
-        // A record from the dataset this device left says nothing about the
-        // one it is onto now.
+    async fn the_first_write_of_this_build_locks_older_builds_out() {
+        // Review round 6 of #130: until the first compaction older builds
+        // went on deleting by name, ignoring what devices name pending.
         let (_tmp, db) = fresh_db();
         let svc = build_service(db.shared());
-        let old = HashMap::from([("old.jsonl".to_string(), 12u64)]);
-        let shared = db.shared();
-        let prefs = UserPrefsRepo::new(&shared);
-        prefs
-            .set(
-                SYNC_PUSHED_LENGTHS_PREF_KEY,
-                &sync_engine::pushed::encode(&old),
-            )
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("0.1.0");
+        meta.schema_version = 1;
+        meta.min_app_version = "0.1.0".into();
+        adapter.install_meta(meta);
+
+        svc.heartbeat_meta(&adapter, Utc::now(), None)
+            .await
             .unwrap();
+
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(meta.schema_version, sync_core::SCHEMA_VERSION);
+        assert_eq!(meta.min_app_version, svc.app_version);
+    }
+
+    #[tokio::test]
+    async fn the_heartbeat_names_every_pending_file() {
+        let (_tmp, db) = fresh_db();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with_pending(db.shared(), pending.path().to_path_buf());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let own = file_of(
+            "dev-this",
+            at,
+            &[&envelope("ev-own", "dev-this", at, set_interval("15"))],
+        );
+        std::fs::write(pending.path().join(own.name.to_filename()), &own.bytes).unwrap();
         let adapter = FakeAdapter::new();
         adapter.install_meta(MetaJson::fresh("1.0.0"));
 
-        svc.accept_remote(&adapter, None).await.unwrap();
-        assert_eq!(
-            prefs.get(SYNC_PUSHED_LENGTHS_PREF_KEY).unwrap().as_deref(),
-            Some("{}"),
-        );
+        svc.heartbeat_meta(&adapter, at, None).await.unwrap();
 
-        prefs
-            .set(
-                SYNC_PUSHED_LENGTHS_PREF_KEY,
-                &sync_engine::pushed::encode(&old),
-            )
-            .unwrap();
-        svc.adopt_local(&FakeAdapter::new(), None, None)
-            .await
-            .unwrap();
+        let meta = adapter.fetch_meta().await.unwrap().unwrap();
         assert_eq!(
-            prefs.get(SYNC_PUSHED_LENGTHS_PREF_KEY).unwrap().as_deref(),
-            Some("{}"),
+            meta.device(svc.device_id())
+                .map(|record| record.pending.clone()),
+            Some(vec![own.name.to_filename()]),
         );
     }
 
@@ -2846,7 +2936,6 @@ mod tests {
                 changed: later,
                 written: Some(later),
                 deleted: false,
-                seeded: false,
             }],
             ..Default::default()
         };
