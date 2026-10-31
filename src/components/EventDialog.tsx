@@ -102,6 +102,7 @@ import {
   createsInSteps,
   eventWriteLeftover,
   originalKeptSentence,
+  writeNeverLanded,
   seriesTailMayStand,
   seriesTailRemoved,
 } from '@aperio/shared';
@@ -240,7 +241,7 @@ export interface EventDialogProps {
   /** What the import says beside it, as the dialog's first stop. */
   importNote?: string | null;
   /** Told once the imported appointment was created. */
-  onImported?: () => void;
+  onImported?: (inPart?: boolean) => void;
 }
 
 interface FormState {
@@ -2336,6 +2337,9 @@ export function EventDialog({
         }
         if (!carriedToGroup) onClose();
       } catch (err) {
+        // An appointment from a file that may stand is not offered again by
+        // its list (review round 16 of #128).
+        if (!isEdit && imported && !writeNeverLanded(err)) onImported?.(true);
         // A new series that may stand, beside the old one or in the other
         // calendar (decisions 203, 210): said on screen and only closed —
         // saving again would create another.

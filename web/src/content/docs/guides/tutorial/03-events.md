@@ -439,10 +439,12 @@ checkbox; **Edit …** is one of its actions (on iOS in the rotor).
   they stay, and are invited.
 - **When not every one arrives**, the list says how many did, and names each
   one that did not with its reason; a busy provider's ends with “try again
-  later”, and those stay checked. One that arrived only in part — a series
-  whose skipped occurrences could not all be removed, or an invitation Exchange
-  kept but did not finish — is marked “imported only in part” and not offered
-  again: importing it once more would make it twice. Check it in the calendar.
+  later”, and those stay checked. One that may not have arrived whole — a
+  series whose skipped occurrences could not all be removed, an invitation
+  Exchange kept but did not finish, or one whose answer was lost — is marked
+  “maybe not imported whole” and not offered again, from the list or from its
+  editor: importing it once more could make it twice. Check it in the
+  calendar.
   A series a calendar writes in steps shows the “please wait” dialog meanwhile.
 
 Times keep their zone, including the Windows zone names Outlook writes. A

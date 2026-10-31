@@ -6578,9 +6578,11 @@ impl Host {
             "device calendar access requested: before {before}, after {}",
             Self::device_access_words(provider.as_ref())
         );
-        // Spawns nothing: the caller refreshes (`refresh_external_cache`),
-        // as adding the account does. A command unit tests call must not
-        // leave a task running into the runtime's teardown.
+        // Spawns nothing: the caller refreshes. Adding an account refreshes
+        // that one (`refresh_account_cache`, decision 271); the device-access
+        // gate still forces every account (`refresh_external_cache`, TODO
+        // B14). A command unit tests call must not leave a task running into
+        // the runtime's teardown.
         granted
     }
 
@@ -9058,8 +9060,9 @@ impl Host {
                 detail: e.to_string(),
             })?;
             // No warm kick here: like the create path, the JS layer follows a
-            // successful connect/edit with its own refreshExternalCache() —
-            // the one owner of that trigger on mobile.
+            // successful connect/edit with its own refreshAccountCache(id),
+            // forced for that account only (decision 271) — the one owner of
+            // that trigger on mobile.
             return to_json(&updated);
         }
 

@@ -12,7 +12,6 @@ import {
 
 import {
   createsInSteps,
-  eventWriteLeftover,
   heldSentence,
   heldStatusSentence,
   importedCreate,
@@ -25,6 +24,7 @@ import {
   rechosenForHeld,
   selectableEventCalendars,
   skippedSentence,
+  writeNeverLanded,
   type ImportedEvent,
   type ImportInto,
 } from '@aperio/shared';
@@ -42,7 +42,8 @@ import { onImportedFromEditor } from '../state/importProgress';
 import { readLastUsedCalendar, writeLastUsedCalendar } from '../state/lastUsedCalendar';
 import { useCalendarOwnAddress } from '../state/useCalendarOwnAddress';
 import { useHeldOnImport } from '../state/useHeldOnImport';
-import { stepWriteWait } from '../state/stepWriteWait';
+import { holdStepWriteWait, stepWriteWait } from '../state/stepWriteWait';
+import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 const announce = (message: string) => AccessibilityInfo.announceForAccessibility(message);
@@ -57,7 +58,21 @@ const announce = (message: string) => AccessibilityInfo.announceForAccessibility
  * action, the sighted-only twin of the visible Edit button, as the calendar
  * list's rows carry Manage.
  */
-export default function FileImportScreen({
+/**
+ * The list, with its own "please wait" host beside it (decisions 227, 265):
+ * on iOS a dialog presents from the screen it is rendered in, and one in a
+ * screen under this sheet could not present over it.
+ */
+export default function FileImportScreen(props: RootStackScreenProps<'FileImport'>) {
+  return (
+    <>
+      <FileImportList {...props} />
+      <StepWriteWaitHost />
+    </>
+  );
+}
+
+function FileImportList({
   route,
   navigation,
 }: RootStackScreenProps<'FileImport'>) {
@@ -277,7 +292,9 @@ export default function FileImportScreen({
     const standing: { title: string; err: unknown }[] = [];
     let done = 0;
     // One after the other: a provider asked many times at once may turn the
-    // rest away as busy.
+    // rest away as busy. The "please wait" dialog opens at the first series
+    // that needs it and stays until the last is written.
+    const releaseWait = holdStepWriteWait();
     for (const { event: entry, index } of toImport) {
       try {
         // A series whose calendar writes its deletions one by one is created
@@ -290,14 +307,17 @@ export default function FileImportScreen({
         done += 1;
         markImported(index);
       } catch (err) {
-        if (eventWriteLeftover(err)) {
+        // Only one that surely never landed is offered again; any other may
+        // stand (decision 277, review round 16 of #128).
+        if (writeNeverLanded(err)) {
+          failed.push({ title: entry.title, err });
+        } else {
           standing.push({ title: entry.title, err });
           markImported(index, true);
-        } else {
-          failed.push({ title: entry.title, err });
         }
       }
     }
+    await releaseWait();
     setBusy(false);
     if (done > 0 || standing.length > 0) void writeLastUsedCalendar(calendarId);
     if (failed.length === 0 && standing.length === 0) {

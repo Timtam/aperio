@@ -16,6 +16,8 @@ const t = (key: string, values?: Record<string, unknown>) => i18n.t(key, values)
 const failTitles = vi.hoisted(() => ({ current: new Set<string>() }));
 /** Creates that land and then fail at a later step: they stand in part. */
 const inPartTitles = vi.hoisted(() => ({ current: new Set<string>() }));
+/** Creates whose answer was lost: they may stand. */
+const lostTitles = vi.hoisted(() => ({ current: new Set<string>() }));
 /** Creates held open until the test lets them go: a list that is writing. */
 const heldCreates = vi.hoisted(() => ({ on: false, release: [] as Array<() => void> }));
 /** What each calendar holds when asked (`get_events`): rows, a failure, or an
@@ -43,6 +45,9 @@ const invokeMock = vi.hoisted(() =>
       }
       if (inPartTitles.current.has(request.title)) {
         return Promise.reject({ code: 'network', message: 'partly-saved: reply' });
+      }
+      if (lostTitles.current.has(request.title)) {
+        return Promise.reject({ code: 'network', message: 'connection reset' });
       }
       if (heldCreates.on) {
         return new Promise((resolve) =>
@@ -94,6 +99,7 @@ afterEach(() => {
   announce.mockClear();
   failTitles.current = new Set();
   inPartTitles.current = new Set();
+  lostTitles.current = new Set();
   heldCreates.on = false;
   heldCreates.release = [];
   STORE.selectedCalendarIds = new Set(['cal-home', 'cal-work']);
@@ -101,6 +107,7 @@ afterEach(() => {
   ownAddress.current = {};
   for (const calendar of CALENDARS) {
     delete (calendar as { invitation_import?: string }).invitation_import;
+    delete (calendar as { recurrence_capabilities?: unknown }).recurrence_capabilities;
     (calendar as { keeps_uid?: boolean }).keeps_uid = true;
   }
   localStorage.clear();
@@ -236,12 +243,23 @@ describe('ImportDialog → several appointments', () => {
     fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
     expect(
       await screen.findByText(
-        /^1 von 2 Terminen ganz in „Privat“ importiert\. Nur zum Teil angekommen, prüfe sie im Kalender: „Projektbesprechung“/,
+        /^1 von 2 Terminen ganz in „Privat“ importiert\. Vielleicht nicht ganz angekommen, prüfe ihn im Kalender: „Projektbesprechung“/,
       ),
     ).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
-    expect(screen.getByText(/Projektbesprechung, .*, nur zum Teil importiert/)).toBeTruthy();
+    expect(screen.getByText(/Projektbesprechung, .*, vielleicht nicht ganz importiert/)).toBeTruthy();
+  });
+
+  it('does not offer again one whose answer was lost', async () => {
+    // Review round 16 of #128: a create that may have landed read as not
+    // imported and stayed checked.
+    lostTitles.current = new Set(['Projektbesprechung']);
+    await open({ read: READ });
+    await screen.findByText(/In „Privat“ lassen sich Organisator und Teilnehmer/);
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    expect(await screen.findByText(/Vielleicht nicht ganz angekommen/)).toBeTruthy();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 
   it('opens one in the editor, as it stands, and marks it once created', async () => {
@@ -291,6 +309,39 @@ describe('ImportDialog → several appointments', () => {
     act(() => options.onImported());
     const done = screen.getByText(/Projektbesprechung, .*, importiert/);
     expect(done.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('holds the "please wait" dialog over every series it writes in steps', async () => {
+    // Review round 16 of #128: it opened and closed again for each series,
+    // and focus went back to the button between them.
+    (CALENDARS[0] as { recurrence_capabilities?: unknown }).recurrence_capabilities = {
+      deletions_in_steps: true,
+    };
+    heldCreates.on = true;
+    const series = (title: string) =>
+      event(title, {
+        recurrence: {
+          rrule: 'FREQ=WEEKLY',
+          exceptions: ['2026-11-25T13:00:00Z'],
+        } as ImportedEvent['recurrence'],
+      });
+    await open({ read: { events: [series('Jour fixe'), series('Chor')], skipped: [] } });
+    fireEvent.click(screen.getByRole('button', { name: '2 Termine importieren' }));
+    const waiting = () => screen.queryByRole('dialog', { name: /Vorgang läuft/ });
+    await waitFor(() => expect(waiting()).toBeTruthy());
+    const opened = waiting();
+    await act(async () => {
+      heldCreates.release.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(createRequests()).toHaveLength(2));
+    // The same dialog, never closed between the two.
+    expect(waiting()).toBe(opened);
+    await act(async () => {
+      heldCreates.release.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(waiting()).toBeNull());
   });
 
   it('holds the calendar and the rows while it writes', async () => {

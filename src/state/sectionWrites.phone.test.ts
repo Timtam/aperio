@@ -40,6 +40,19 @@ describe('section writes over a list\'s reads', () => {
     expect(landed.rows.map((s) => s.name)).toEqual(['A', 'Q4']);
   });
 
+  it('ends a write once the host serves anything else than before it', async () => {
+    // Review round 16 of #128: a section another device deleted or renamed
+    // before Aperio read its own write stayed in every picker.
+    const { overRead, withWrite } = await load();
+    const before = [section('sec-a', 'A')];
+    const written = withWrite([], { upsert: section('sec-a', 'Neu'), before });
+    expect(overRead(before, written).rows.map((s) => s.name)).toEqual(['Neu']);
+    // The refresh landed: another device had renamed it once more.
+    const moved = overRead([section('sec-a', 'Später')], written);
+    expect(moved.open).toEqual([]);
+    expect(moved.rows.map((s) => s.name)).toEqual(['Später']);
+  });
+
   it('keeps a deleted section out, and a later write of it takes its place', async () => {
     const { overRead, withWrite } = await load();
     const renamed = withWrite([], { upsert: section('sec-a', 'Neu') });

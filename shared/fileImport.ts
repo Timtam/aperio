@@ -381,8 +381,9 @@ export function importRowLabel(
  * What an import list says when some of the chosen appointments did not
  * arrive whole: how many did, of how many, each one that did not by its title,
  * with its own reason — never a sentence that says nothing was created after
- * some were —, and each one that stands only in part (`standing`: a create
- * that landed and failed later, decision 277), not offered again. A busy
+ * some were —, and each one that may stand (`standing`: a create that landed
+ * and failed later, or whose answer was lost; decision 277), not offered
+ * again. A busy
  * provider's ends with "try again later" (decision 272), as every frame that
  * embeds a busy reason does.
  */
@@ -410,7 +411,9 @@ export function partlyImportedSentence(
       : t('fileImport.list.whole', { done, count, calendar });
   const sentence = [
     head,
-    standing.length > 0 ? t('fileImport.list.standing', { titles: titled(standing) }) : null,
+    standing.length > 0
+      ? t('fileImport.list.standing', { count: standing.length, titles: titled(standing) })
+      : null,
   ]
     .filter(Boolean)
     .join(' ');

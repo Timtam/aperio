@@ -528,9 +528,16 @@ mod tests {
 
     const BUSY_FAULT: &str = r#"<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultcode xmlns:a="http://schemas.microsoft.com/exchange/services/2006/types">a:ErrorServerBusy</faultcode><faultstring>busy</faultstring></s:Fault></s:Body></s:Envelope>"#;
 
+    /// The step a create stood at, as the adapter says it — and what the
+    /// shells receive of it says the import may stand, never that nothing
+    /// was made.
     fn partly_saved_at(result: EwsResult<Event>) -> Option<&'static str> {
         match result {
-            Err(EwsError::PartlySaved { step, .. }) => Some(step),
+            Err(EwsError::PartlySaved { step, cause }) => {
+                let core = crate::to_core_error_for_tests(EwsError::PartlySaved { step, cause });
+                assert!(!core.never_landed(), "{core:?}");
+                Some(step)
+            }
             _ => None,
         }
     }

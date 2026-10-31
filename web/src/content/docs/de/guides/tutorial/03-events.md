@@ -478,11 +478,12 @@ Ankreuzfeld; **Bearbeiten …** ist eine ihrer Aktionen (unter iOS im Rotor).
 - **Wenn nicht alle ankommen,** sagt die Liste, wie viele es sind, und nennt
   jeden, der nicht ankam, mit seinem Grund; bei einem ausgelasteten Anbieter
   endet der Satz mit „Versuche es später noch einmal“, und diese bleiben
-  angehakt. Einer, der nur zum Teil ankam — eine Serie, deren ausgelassene
-  Termine sich nicht alle entfernen ließen, oder eine Einladung, die Exchange
-  aufnahm, aber nicht fertigstellte —, heißt „nur zum Teil importiert“ und
-  wird nicht noch einmal angeboten: Ein zweites Importieren legte ihn doppelt
-  an. Prüfe ihn im Kalender. Eine Serie, die ein Kalender schrittweise
+  angehakt. Einer, der vielleicht nicht ganz ankam — eine Serie, deren
+  ausgelassene Termine sich nicht alle entfernen ließen, eine Einladung, die
+  Exchange aufnahm, aber nicht fertigstellte, oder einer, dessen Antwort
+  verloren ging —, heißt „vielleicht nicht ganz importiert“ und wird nicht noch
+  einmal angeboten, weder in der Liste noch aus seinem Editor: Ein zweites
+  Importieren könnte ihn doppelt anlegen. Prüfe ihn im Kalender. Eine Serie, die ein Kalender schrittweise
   schreibt, zeigt solange den Dialog „Vorgang läuft, bitte warten“.
 
 Zeiten behalten ihre Zone, auch die Windows-Zonennamen, die Outlook schreibt.

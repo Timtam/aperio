@@ -114,11 +114,16 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
   // not only the first (review round 15 of #128); a later write of the same
   // section takes the earlier one's place.
   const writtenRef = useRef<Record<string, SectionWrite[]>>({});
+  // What the host served each list last, before any write is laid over it.
+  const servedRef = useRef<Record<string, Section[]>>({});
   const loadSections = useCallback(async (listId: string, afterWrite?: SectionWrite) => {
     if (afterWrite) {
       writtenRef.current = {
         ...writtenRef.current,
-        [listId]: withWrite(writtenRef.current[listId] ?? [], afterWrite),
+        [listId]: withWrite(writtenRef.current[listId] ?? [], {
+          ...afterWrite,
+          before: servedRef.current[listId],
+        }),
       };
     }
     // Sorted HERE, once — every screen that renders sections reads this cache
@@ -127,6 +132,7 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
     let read: Section[];
     try {
       read = await getSections(listId);
+      servedRef.current = { ...servedRef.current, [listId]: read };
     } catch (err) {
       if (!afterWrite) throw err;
       read = sectionsRef.current[listId] ?? [];

@@ -257,9 +257,16 @@ describe('partlyImportedSentence', () => {
       { title: 'Jour fixe', err: inPart },
     ]);
     expect(sentence).toBe(
-      `1 von 2 Terminen ganz in „Arbeit“ importiert. Nur zum Teil angekommen, prüfe sie im ` +
-        `Kalender: „Jour fixe“ (${t('dialogs.event.writeError.reason.partlySaved')}).`,
+      `1 von 2 Terminen ganz in „Arbeit“ importiert. Vielleicht nicht ganz angekommen, prüfe ` +
+        `ihn im Kalender: „Jour fixe“ (${t('dialogs.event.writeError.reason.partlySaved')}).`,
     );
+    // Two: the plural (review round 16 of #128).
+    expect(
+      partlyImportedSentence([], 0, 2, 'Arbeit', t, [
+        { title: 'Jour fixe', err: inPart },
+        { title: 'Budget', err: inPart },
+      ]),
+    ).toMatch(/Vielleicht nicht ganz angekommen, prüfe sie im Kalender: „Jour fixe“/);
     expect(sentence).not.toMatch(/Nicht importiert/);
   });
 });

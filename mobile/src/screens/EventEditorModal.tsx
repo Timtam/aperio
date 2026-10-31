@@ -146,6 +146,7 @@ import {
   type CarryScope,
   createsInSteps,
   eventWriteLeftover,
+  writeNeverLanded,
   seriesTailMayStand,
   seriesTailRemoved,
   removeOriginalAfterCopy,
@@ -2046,6 +2047,17 @@ function EventEditorScreen({
       }
       navigation.goBack();
     } catch (err) {
+      // An appointment from a file that may stand is not offered again by
+      // its list (review round 16 of #128). Mirrors the desktop.
+      if (
+        !editing &&
+        imported &&
+        importToken != null &&
+        importIndex != null &&
+        !writeNeverLanded(err)
+      ) {
+        markImportedFromEditor(importToken, importIndex, true);
+      }
       // A new series that may stand, beside the old one or in the other
       // calendar (decisions 203, 210): said on screen and only closed —
       // saving again would create another. Mirrors the desktop.

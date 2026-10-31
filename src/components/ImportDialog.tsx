@@ -2,7 +2,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import {
   createsInSteps,
-  eventWriteLeftover,
   heldSentence,
   heldStatusSentence,
   importedCreate,
@@ -16,6 +15,7 @@ import {
   rechosenForHeld,
   selectableEventCalendars,
   skippedSentence,
+  writeNeverLanded,
 } from '@aperio/shared';
 
 import { FocusableNote } from '../a11y/FocusableNote';
@@ -210,7 +210,7 @@ function ImportList({
     () => new Set(progress.imported),
   );
   const [inPart, setInPart] = useState<ReadonlySet<number>>(() => new Set(progress.inPart));
-  const { waitDialog, wait } = useStepWriteWait();
+  const { waitDialog, wait, hold } = useStepWriteWait();
   const [busy, setBusy] = useState(false);
   // Each notice is a value of its own: the same sentence for a second press
   // is focused and said again.
@@ -330,7 +330,7 @@ function ImportList({
       calendarId,
       importFrom: event,
       importNote: null,
-      onImported: () => markImported(index),
+      onImported: (inPart) => markImported(index, inPart),
     });
   };
 
@@ -360,7 +360,9 @@ function ImportList({
     const standing: { title: string; err: unknown }[] = [];
     let done = 0;
     // One after the other: a provider asked many times at once may turn the
-    // rest away as busy.
+    // rest away as busy. The "please wait" dialog opens at the first series
+    // that needs it and stays until the last is written.
+    const releaseWait = hold();
     for (const { event: entry, index } of toImport) {
       try {
         // A series whose calendar writes its deletions one by one is created
@@ -373,14 +375,17 @@ function ImportList({
         done += 1;
         markImported(index);
       } catch (err) {
-        if (eventWriteLeftover(err)) {
+        // Only one that surely never landed is offered again; any other may
+        // stand (decision 277, review round 16 of #128).
+        if (writeNeverLanded(err)) {
+          failed.push({ title: entry.title, err });
+        } else {
           standing.push({ title: entry.title, err });
           markImported(index, true);
-        } else {
-          failed.push({ title: entry.title, err });
         }
       }
     }
+    await releaseWait();
     setBusy(false);
     if (done > 0 || standing.length > 0) {
       writeLastUsedCalendar(calendarId);

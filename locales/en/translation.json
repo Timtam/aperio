@@ -2727,8 +2727,9 @@
       "partly_other": "{{done}} of {{count}} appointments imported into “{{calendar}}”. Not imported: {{titles}}.",
       "whole_one": "{{done}} of {{count}} appointment imported whole into “{{calendar}}”.",
       "whole_other": "{{done}} of {{count}} appointments imported whole into “{{calendar}}”.",
-      "standing": "Arrived only in part, check them in the calendar: {{titles}}.",
-      "importedInPart": "imported only in part",
+      "standing_one": "Maybe not arrived whole, check it in the calendar: {{titles}}.",
+      "standing_other": "Maybe not arrived whole, check them in the calendar: {{titles}}.",
+      "importedInPart": "maybe not imported whole",
       "failedTitle": "“{{title}}” ({{reason}})",
       "quoted": "“{{title}}”"
     },
