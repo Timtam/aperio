@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { calendarPlace, tracePrefill } from './prefillTrace';
 
 describe('the prefill trace', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it('names a calendar by its place in the catalog, never by its id', () => {
     const catalog = [{ id: 'anna@example.org' }, { id: 'cal-work' }];
