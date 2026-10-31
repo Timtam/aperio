@@ -21,11 +21,18 @@
 > ihre Beschreibung stimmt ja noch.
 >
 > **Geordnet am 2026-10-16** (Toni): oben steht alles Offene — auch Teilweises
-> `[~]`, Punkte im Test ↻ und 🚩 —, unten unter „✔ Erledigt“ alles vollständig
+> `[~]` und 🚩 —, unten unter „✔ Erledigt“ alles vollständig
 > Erledigte, in derselben Ordnung. Ein langer Punkt mit offenen und erledigten
 > Teilen steht oben mit seinen offenen Teilen; sein erledigter Verlauf steht
 > unten unter demselben Titel. Neue Punkte kommen oben in ihren Abschnitt, und
 > wer einen Punkt erledigt, verschiebt ihn nach unten.
+>
+> **Nachgeführt am 2026-10-31** (Toni): Testaufgaben gibt es hier nicht mehr.
+> Was gebaut, geprüft und gemergt ist, gilt als erledigt und steht unten; läuft
+> etwas nicht, sagt Toni es. „↻ im Test“ ist darum aufgelöst, ebenso „am Handy
+> prüfen“, „ungeprüft“ und „Live prüfen“. Oben stehen nur noch echte Arbeit,
+> Entscheidungen und Recherche (🚩). PR 7 (#128), #130, #131 und #132 sind
+> gemergt.
 
 ---
 
@@ -157,64 +164,12 @@ Reihenfolge nach RISIKO, nicht nach Interesse: jeder Schritt kostet einen
 EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
 Übrige trägt.
 
-- [x] **Schritt 2b/2c** — Widget 1 mit echten Daten, über eine SNAPSHOT-Datei  
-      NACHTRAG (Gerätebefund): ein laufender Termin verdeckte alles, was IN ihm
-      lag. Ein Blocktermin „Arbeitszeit 10–16" gewann ab 10:00 gegen jede
-      Besprechung darin, und je länger er lief, desto sicherer — die Sortierung
-      nahm den START. Jetzt ordnet ein LAUFENDER Termin nach seinem ENDE, womit
-      der innerste zuerst kommt; dieselbe Begründung wie bei ganztägigen, nur
-      eine Stufe früher.
-      Das musste an DREI Stellen: der Schlüssel hängt jetzt an der Uhr, und die
-      App friert ihre Antwort Stunden vor dem Zeichnen ein. Also sortieren
-      `Snapshot.swift` und `WidgetStore.kt` zur RENDERZEIT neu — beide Zeitachsen
-      legen ohnehin je einen Eintrag auf jeden Start und jedes Ende, also genau
-      auf die Momente, an denen sich die Reihenfolge ändern kann.
-      `widgetSnapshotWire.test.ts` bewacht, dass beide es weiter tun.
-      ⚠️ Noch ungeprüft auf dem Gerät. Offen bleibt außerdem: die Galerie-Namen
-      („Als Nächstes" / „Up Next") können nicht aus dem Snapshot kommen — sie
-      werden gelesen, bevor Daten existieren — und hängen deshalb an
-      `Locale.preferredLanguages` statt an der App-Sprache.
-- [~] **Schritt 4** — Abhaken aus dem Widget (`targets/widget/Actions.swift`,
-      `mobile/src/state/widgetActions.ts`). Die Extension schreibt NICHT die
-      Antwort, sondern die FRAGE: eine Datei pro Tipp in die App Group, die die
-      App über `setTaskStatusTo` abarbeitet — denselben Aufruf, den die
-      Tagesstart-Übersicht nutzt. Abschließen kaskadiert auf Eltern und Kinder,
-      weist auf geteilten Listen zu, schaltet Wiederholungen weiter und stellt
-      einen Sync-Push ein; nichts davon ist aus einem Extension-Prozess
-      erreichbar, und es hier nachzubauen wäre der Weg, auf dem Widget und App
-      auseinanderlaufen.
-      EINE Datei pro Aktion, nie eine gemeinsame: zwei Prozesse schreiben da
-      hinein, und ein read-modify-write verliert den Tipp, der das Rennen
-      verliert.
-      Das Widget blendet bereits eingereihte Zeilen aus, sonst wirkt der Knopf
-      tot. Eine Aktion wird nach dem VERSUCH gelöscht, nicht erst nach Erfolg —
-      sonst bliebe eine unausführbare Aktion für immer stehen und mit ihr die
-      unsichtbare Zeile.
-      A11y: die Aufgabenzeile IST das Kontrollkästchen — `Toggle(isOn:intent:)`
-      mit der ganzen Zeile als Label, nicht Text plus Knopf daneben. Ein Element
-      statt zwei, und VoiceOver liefert Inhalt, Rolle und Zustand in einem Wisch.
-      `Toggle(isOn:intent:)` nimmt einen NORMALEN `AppIntent` — `SetValueIntent`
-      braucht nur `ControlWidgetToggle` (Kontrollzentrum). Der gewünschte
-      Zielzustand steckt in den Intent-Parametern, nicht im Toggle.
-      Eigener `ToggleStyle` (Kreis statt Schalter): die Interaktion hängt am
-      `Toggle`, nicht am Style, also ändert ein Style, der nur zeichnet, nichts
-      am Verhalten.
-      `isOn` ist IMMER false — eine erledigte Aufgabe steht nicht im Snapshot,
-      eine gerade abgehakte blendet das Overlay aus. Es gibt hier keinen Zustand,
-      der mit der App auseinanderlaufen könnte.
-      Der Tipp läuft über `applyTaskToggle`, NICHT über `setTaskStatusTo(…,
-      'completed')`. Der Abhak-MODUS ist eine gesynct Einstellung: unter „cycle"
-      geht ein Tipp offen → in Arbeit → erledigt. Hart auf erledigt zu schreiben
-      hätte das Widget zur einzigen Oberfläche gemacht, die die Einstellung des
-      Nutzers ignoriert. Die eingereihte Aktion heißt darum `toggle`, nicht
-      `complete` — das Widget bittet um dasselbe wie ein Tipp in der App, und die
-      App entscheidet, was das heißt.
-      Der Zustand steht an der Zeile: leerer Kreis = offen, halb gefüllt = in
-      Arbeit, plus das Wort in der Ansage. Eine schreibgeschützte Projektion
-      bekommt das Wiederholungs-Symbol statt eines Kreises — ein Kreis, den man
-      nicht anhaken kann, ist ein lügendes Bedienelement.
-      Offen: der Intent-Titel („Check off task") ist unübersetzt, er taucht nur
-      in der Kurzbefehle-App auf.
+- [ ] **Widget-Galerie-Namen** („Als Nächstes“ / „Up Next“) können nicht aus dem
+  Snapshot kommen — sie werden gelesen, bevor Daten existieren — und hängen
+  deshalb an `Locale.preferredLanguages` statt an der App-Sprache.
+- [ ] **Widget-Abhaken:** der Intent-Titel („Check off task“) ist unübersetzt, er
+  taucht nur in der Kurzbefehle-App auf.
+
 ### A8 · Sprachbefehle (Siri / Kurzbefehle, iOS zuerst) `[x]` — code-vollstaendig
 Termine und Aufgaben per Sprache anlegen, mit Kalender- bzw. Listenwahl.
 
@@ -230,43 +185,6 @@ stehen. „Termin morgen um 11 in Aperio" in einem Satz geht nicht; Siri fragt d
 Parameter nach. Für einen Screenreader-Nutzer ist der geführte Dialog eher ein
 Vorteil.
 
-- [x] **Schritt 4** — tatsächlich anlegen, jetzt auch Aufgaben.  
-  ↳ Code-vollständig inkl. der zwei feinen Regeln (Tag ohne Uhrzeit; nie den Rust-Kern im Intent-Prozess öffnen). 🚩 `CreateTaskIntent` ist der einzige Intent ohne Gerätebericht.
-      `CreateTaskIntent`: Titel + Liste werden gefragt, der Tag NICHT — optionale
-      Parameter fragt Siri nicht ab, und das ist richtig so: die meisten
-      gesprochenen Aufgaben sind „merk dir das" und gehören ins Backlog, nicht
-      auf einen Tag. Über die Kurzbefehle-App ist der Tag trotzdem setzbar.
-      Gespeichert wird nur das DATUM, nie die Uhrzeit: ein iOS-Datumsparameter
-      trägt immer eine mit, und eine per Tagesauswahl gebaute Aktion liefert
-      Mitternacht — das würde „irgendwann am Dienstag" zu „fällig um 0:00".
-      `openAppWhenRun` bleibt bei beiden: beim Haken ist Verzögerung unsichtbar,
-      beim ANLEGEN nicht — man sagt etwas und findet minutenlang nichts.
-      ⚠️ Ungeprüft.
-      Den Rust-Kern direkt aus dem Intent zu öffnen ist bewusst KEINE Option:
-      zweiter schreibender Prozess auf einer Datenbank, plus ein teurer
-      Host-Start pro Sprachbefehl.
-
-- [x] **Android** — „Als Nächstes" über **Glance**  
-  ↳ Erledigt und im Baum nachprüfbar (Glance für die TalkBack-lesbare CheckBox, `filesDir/widget` statt App Group, Receiver mit exported=true). 🚩 Ohne Android-Hardware ungeprüft.
-      (`modules/cal-ffi/android/.../AperioWidget.kt`). Liest denselben Snapshot;
-      kein App Group nötig, ein Android-Widget läuft im Prozess der App unter
-      derselben uid, also reicht `filesDir/widget/`.
-      GLANCE statt RemoteViews wegen EINER Sache: `CheckBox` trägt Rolle UND
-      Zustand zu TalkBack. RemoteViews kann einen Kreis zeichnen und eine
-      Beschreibung setzen, aber nicht sagen „das ist ein Kontrollkästchen, und
-      es ist nicht angehakt".
-      Der Compose-Compiler war KEINE neue Abhängigkeit: `expo-modules-core` legt
-      `org.jetbrains.kotlin.plugin.compose` bereits in den buildscript-Klassenpfad
-      und `expo-dev-launcher` zieht Compose ohnehin in den Baum. Angewendet im
-      selben Muster wie expo-modules-core (`apply plugin:` nach einem
-      buildscript-Block, nicht die `plugins {}`-DSL).
-      Der Receiver steht im MODUL-Manifest, das der Build ins App-Manifest
-      mergt — kein Config-Plugin nötig. `exported="true"`, sonst bindet der
-      Launcher ihn nie.
-      Sperrbildschirm-Widgets gibt es unter Android nicht (nach Android 11
-      entfernt), das Countdown-Widget hat also kein Gegenstück.
-      ⚠️ Ungeprüft — Toni hat kein Android-Gerät; ein Bau prüft nur, dass es
-      übersetzt.
 - Offen: Live Activities brauchen einen Start aus dem Vordergrund oder per Push;
   Aperio hat keinen Server und entfernt das Push-Entitlement bewusst. Ein
   Countdown „ohne Zutun" ist unter iOS damit nicht erreichbar, unter Android
@@ -314,105 +232,10 @@ Siehe DESIGN §4.2.
   anstempelt. Beide Aufrufer (Desktop-Sidebar, mobiler Listeneditor) verwerfen
   die Antwort, es ist also latent; der Typ heißt jetzt `TaskListCore` und sagt
   die Wahrheit. Sauber wäre, die Zeile auch dort anzustempeln.
-- [~] **Schritt 2 vermessen (2026-09-09), und die Fragestellung war falsch.**
-  Acht Module wurden einzeln durchgemessen (Reinheit, jede Aufrufstelle,
-  Rust-Gegenstück, Kosten). Befund: **es gibt keine Einheit in Modulgröße, die
-  umziehen könnte** — jedes der acht zerfällt in eine Domänen-Hälfte, die in den
-  Kern gehört, und eine Ansichts-Hälfte, die nicht weg kann. Und der Blocker ist
-  bei sechs von acht **nicht** die IPC-Runde, sondern das Fehlen einer
-  **synchronen** Kern-Bindung; kein Umbau eines Befehls behebt das.
-  Sieben von acht „large"-Schätzungen sind derselbe eine Befund.
-  ↳ Nur EINE echte Doppelung existierte: `is_mine_or_unassigned`, in
-  `host-core/src/reminders.rs` **privat** und in `shared/taskAssignment.ts`.
-  Erledigt — siehe den Eintrag oben.
-  ↳ Echte Divergenz, unabhängig vom Umzug: `shared/recurrence.ts` und
-  `host-core`s `expand_occurrences` dokumentieren **verschiedenes**
-  DST-Randverhalten, und Rust deckelt bei `RRULESET_LIMIT=500`, JS gar nicht.
-  Braucht eine sprachübergreifende Fixture, bevor irgendetwas
-  Wiederholungs-Förmiges umzieht — und die läuft mangels Test-Runner nicht auf
-  Mobile.
-  ↳ Gemessen 2026-09-14: `eventOccurrences.json`, siehe den Eintrag
-  „Termin-Wiederholung zieht in den Kern".
-  ↳ Messlücke, ehrlich benannt: `collapseEventGroups` (202), `dayGridLayout`
-  (269), `taskRecurrence` (178) und `taskAssignment` (87) liegen INNERHALB der
-  vermessenen Abhängigkeiten und wurden nicht vermessen.
-- [x] **Die Textordnung liegt im Kern** (Toni: „zieh icu in den kern, das wiegt
-  nicht so schwer", 2026-09-09). `cal_core::collation` bietet genau zwei
-  Regeln — `compare_names` (Namen von Dingen: Konten, Behälter, Kontakte,
-  Tagesmarkierungen; Groß-/Kleinschreibung und Akzente trennen nicht) und
-  `compare_titles` (selbstgeschriebener Text; Ziffernläufe nach Wert, Fälle
-  trennen). Beide Oberflächen gehen durch ihre eigene Tür: der Desktop über
-  WebAssembly, Mobile über eine synchrone Expo-`Function`. In `shared/` ist
-  kein `localeCompare` mehr. Siehe DESIGN §4.4.
-  ↳ Offen bleibt: honoriert Hermes `{ numeric: true }`? Die Frage ist für die
-  Zukunft entschärft (der Kern sortiert jetzt), aber falls Hermes es nicht tat,
-  ändert sich mit dem nächsten Mobile-Build eine bestehende Reihenfolge sichtbar
-  — das ist die Reparatur, nicht der Regress.
-- [~] **Die Aufgaben-Gruppierung zieht in den Kern** (Tonis Wahl 2026-09-10),
-  in denselben zwei Schritten wie der Übertrag.
-- [~] **Die Kalendertag-Regeln ziehen in den Kern** (`taskDay`), in denselben
-  zwei Schritten.
-- [~] **Der Aufgaben-Zustand zieht in den Kern** (`taskStatus`), in denselben
-  zwei Schritten — mit dem Schnitt vom 2026-09-09: Zustand rein, Zeichen vorn.
-- [~] **Die Status-Kopplung zieht in den Kern** (`taskCascade`), in denselben
-  zwei Schritten. Vier Antworten: was ein Elternteil aus seinen Kindern ist
-  (`deriveStatusFromChildren`), welche Schreibvorgänge ein Statuswechsel
-  plant — Wurzel, Nachkommen, Vorfahren, IN DIESER REIHENFOLGE
-  (`planStatusCascade`), dieselben nach Anlegen/Löschen einer Unteraufgabe
-  (`planAncestorRecompute`), und das Begleitdatum „gestartet → heute"
-  (`autoDateOnStart`). Der Kern liest keine Uhr: `todayKey` reist als
-  Parameter; ob er überhaupt mitreist (Einstellung, Anbieter kann
-  `in_progress` halten, Listen-Regel) entscheidet die Oberfläche, genauso das
-  Anwenden und Ansagen der Schreibvorgänge.
-- [~] **Die Wiederholungs-Projektion zieht in den Kern**
-  (`expandTaskOccurrences`), das letzte Aufgaben-Modul des Bogens, in denselben
-  zwei Schritten. Drei Antworten: welche Vorkommen eine wiederkehrende
-  eingeplante Aufgabe in einem Fenster zeigt — die echte Aufgabe an ihrem
-  eigenen Tag, schreibgeschützte Projektionen an jedem anderen, alles andere
-  unverändert durchgereicht (`expandScheduledRecurringTasks`); ein Schritt
-  desselben Laufs (`nextTaskOccurrence`); was „auf diesen Tag verschieben" auf
-  einer Quelle sein kann, der das Datum gehört (`occurrenceMoveTarget`). Der
-  Kern antwortet mit POSITIONEN und TAGEN (welche Eingabe-Aufgabe, welcher Tag,
-  echt oder projiziert); die Kopie und ihre Id (`<id> occ <tag>`) baut die
-  Hülle, wie sie sie auch zurückliest.
-- [~] **Die kleinen Doppelungen ziehen in den Kern** — der Bogen nach den
-  Aufgaben-Regeln (entschieden 2026-09-13): `taskAssignment`, dann
-  `eventGroups`, `signatures`, `birthdays`, `planTaskDates`,
-  `syncConflictGroups`; ein PR-Paar pro Modul, vermessen, dann Port.
-- [~] **Die Signaturen ziehen in den Kern** (`signatures`), das zweite Modul
-  des Bogens der kleinen Doppelungen. Dazwischen geprüft und gestrichen:
-  `eventGroups` (drei Helfer sind JavaScript-Kleber um erzeugte Typen —
-  Map-Schlüssel als JSON, Map-Index, Wire-Objekt aus dem Termin; dieselbe
-  Begründung wie `eventKey.ts`), `planTaskDates` (liest die Uhr, formatiert)
-  und `syncConflictGroups` (Listen-Gruppierung; wenn, dann im Host).
-  `birthdays` braucht einen Entwurf: der Host liefert den Namen eines
-  Geburtstagskalenders als Schlüssel plus Listenname statt „Birthdays – "
-  (DESIGN §4.5 a), dann fallen die Schere und die Präfix-Zwillinge.
-- [~] **Der Tagesstart zieht in den Kern** (`dayStart`), ein neuer Bogen nach
-  den kleinen Doppelungen (gewählt 2026-09-13). `shared/dayStart.ts` hat außer
-  `is_mine_or_unassigned` keinen Rust-Zwilling; Desktop-Prüfer und -Dialog,
-  die mobilen Prüfungen, das Modal und der Vorplaner der OS-Benachrichtigungen
-  laufen die Regeln jeden Morgen. Drei davon lesen die Uhr selbst
-  (`movedToToday`, `filterDeadlinePinTargets`, und `shouldFireToday` über
-  `now`); der Kern bekommt Tag und Uhrzeit hinein.
-- [~] **Die Tagesstart-Zusammensetzung zieht in den Kern** — der zweite Teil des
-  Tagesstart-Bogens, nach den Regeln (#60/#61). Entschieden 2026-09-13: EINE
-  Planungs-Frage an den Kern; das Einlesen der Aufgaben-Einstellungen folgt als
-  eigener Schritt ebenfalls in den Kern. Die Zusammensetzung steht dreimal
-  inline — Desktop-`DayStartReviewChecker`, mobile `useDayStartChecks`, mobiler
-  `dayStartSchedule` (für künftige Morgen, nur die Zahl): Überfällige,
-  verschleppte Zeilen nach dem Übertrags-Standard der Liste in Fragen / Heute /
-  Backlog geteilt, die Ziele der stillen Stapel (Wurzel plus, wo ihre Liste
-  koppelt, die handlungsfähigen Nachfahren), die Erinnerungsgruppen und die
-  Zahl, die den Rückblick öffnet.
-- [~] **Die Aufgaben-Einstellungen ziehen in den Kern** — der dritte Teil des
-  Tagesstart-Bogens, nach Regeln (#60/#61) und Zusammensetzung (#62/#63).
-  Entschieden 2026-09-13. Beide Oberflächen lesen dieselben sechzehn
-  gespeicherten Werte mit je eigener Kopie jeder Regel: die Aufgaben-Schalter,
-  das Countdown-Fenster, das Tagesfenster des Kalenders, Ansicht, Abhaken,
-  Übertrags-Standard, Auslöser und die Überschreibungen je Liste — Desktop im
-  `TaskCascadeProvider` (private Helfer), Mobile in `taskBehaviour.ts`. Dazu die
-  wirksamen Werte je Liste und was beim Schreiben geklemmt wird.
+- [ ] **`birthdays` in den Kern** braucht einen Entwurf: der Host liefert
+  den Namen eines Geburtstagskalenders als Schlüssel plus Listenname statt
+  „Birthdays – “ (DESIGN §4.5 a), dann fallen die Schere und die
+  Präfix-Zwillinge (vom Bogen der kleinen Doppelungen übrig).
 - [~] **Termin-Wiederholung zieht in den Kern** — neuer Bogen (Toni,
   2026-09-14), mit Entwurfsrunde. Vermessen: ZWEI Ausroller —
   `shared/recurrence.ts` (`expandAll`, rrule.js) für alle Ansichten und das
@@ -427,98 +250,21 @@ Siehe DESIGN §4.2.
     chrono-tz, das nur die exakte Schreibweise kennt. Eine Serie mit
     „europe/berlin“ schreiben sie als UTC-Zeit. Das bestand schon vorher.
 
-  ↻ **Mit dem nächsten Handy-Build prüfen.** Keine CI sieht, ob `mobile/index.ts`
-  die Tür installiert.
-  - Die App startet ohne „series clock rules used before
-    installSeriesClockRules()“.
-  - Eine Serie mit `Etc/UTC` zeigt dieselben Zeiten wie vorher.
-  - Mit dem Gerät auf UTC wird eine neue Serie ohne Zone gespeichert.
-  - In einem Dev-Build `resolvedOptions().timeZone` für UTC, Indien und die
-    Ukraine auf iOS und Android notieren (DESIGN-series-time-zone.md,
-    „Ungeprüft“).
-  ↻ **Mit dem nächsten Handy-Build:** die `.so` frisch erzeugen (vier neue
-  Funktionen), dazu die Liste und die Suche einmal auf dem Gerät aufrufen.
   🚩 **Aktualität der Zeitzonendaten** (32a): Marokko ab 20.09.2026, Vancouver,
   Edmonton und Inuvik ab 01.11.2026, Chisinau stellt eine Stunde später um.
   Eigene Aufgabe.
-  ↻ **Eine Ausnahme in Exchange zu ändern scheiterte**, behoben in PR #77.
-  Aperio schickte beim Ändern eines einzeln geänderten Termins
-  `DeleteItemField calendar:Recurrence`. Exchange lehnt das an einer Ausnahme
-  mit `ErrorInvalidPropertyDelete` ab, und die ganze Änderung scheiterte.
-  Jetzt bleibt das Löschen bei einer Ausnahme weg. Die zurückgegebene Ausnahme
-  behält ihre Override-Id. Auf dem Handy wirkt das mit dem nächsten Build.
   - 🚩 Die Gästelisten-Regel (71a, `keep_attendees`) hat dieselbe Falle wie
     oben: Gast entfernt, gespeichert, vor der Aktualisierung wieder
     hinzugefügt — das Hinzufügen wird nicht geschrieben. Gegen den Grund von
     71a abzuwägen (die eigene Zeile des Organisators). Entscheidung offen.
   Eine Liste, die du selbst leerst, behält ihre Kennung: Sie muss dem Termin
-  auf dem anderen Gerät folgen. Offen: das Handy hat keinen Testläufer; die
-  Tests laufen am Desktop-Editor.
+  auf dem anderen Gerät folgen.
 
   🚩 **Folgen aus den Reviews von #92:**
-  - ✅ **Gelöschte Serie klingelte weiter** (Review von #93; 118, behoben).
-    „Dieses und alle folgenden löschen“ ab dem ERSTEN Vorkommen kürzte die
-    Serie auf ein Ende eine Sekunde vor ihrem Beginn. Die Ansichten zeigten
-    nichts mehr, aber die Weckerberechnung verwirft so eine Regel und nahm
-    ersatzweise den Serienbeginn: alle Erinnerungen klingelten weiter,
-    überall. Ebenso beim Ändern und beim Mitziehen an Kopien. Jetzt
-    entscheidet `planSeriesSplit` einmal, ob vor dem Schnitt etwas zu sehen
-    ist (`kind: 'cut'` oder `'whole'`); auch ein Beginn neben dem Muster und
-    lauter gelöschte frühere Vorkommen zählen als „nichts davor“. Dazu
-    liest es die Zeilen, die der Anbieter für einzelne Vorkommen führt
-    (125, `readSeriesRows`): ein in Outlook geändertes Vorkommen steht bei
-    Exchange unter den Ausnahmen, ist aber da; ein bei Google gelöschtes ist
-    eine abgesagte Zeile ohne Ausnahme. Gezählt wird nach dem Platz in der
-    Serie, nicht nach dem verschobenen Beginn. Schlägt das Lesen fehl, wird
-    nichts geschrieben. Dann:
-    Löschen löscht die Serie (und leert damit ihre privaten Erinnerungen
-    überall, #93), Ändern schreibt die ganze Serie an Ort und Stelle
-    (dieselbe Id, also bleiben private Erinnerungen, Gruppe, Farbe,
-    Besprechung), eine Kopie ohne Kopf wird als Ganzes geändert, und die
-    Ansage sagt warum (123). `writeSeriesSplit` nimmt nur noch Pläne mit
-    Kopf, per Typ und zur Laufzeit. Mit dabei: Beim Teilen gilt eine im
-    Formular geänderte Wiederholungsregel für die neue Serie (121) — ihr
-    COUNT zählt wie im Feld ab Beginn der Serie, die neue Serie bekommt den
-    Rest —, und ihre Ausnahmen folgen einer neuen Uhrzeit, auch beim
-    Mitziehen an Kopien; eine Ausnahme genau auf dem Schnitt (bei Exchange ein
-    geändertes Vorkommen) versteckt nicht mehr das erste Vorkommen der neuen
-    Serie. Ein Teilen, das sich nicht planen lässt, wird am Desktop
-    abgelehnt statt zur ganzen Serie zu werden (wie am Handy); wiederholt
-    sich die Serie inzwischen nicht mehr, sagt er das. Vom Anbieter
-    gespeicherte Einzeländerungen bleiben (122). „Diesen und alle folgenden“
-    auf einer solchen Einzeländerung öffnet der Desktop jetzt wie das Handy
-    als Serie an ihrer Stelle (126): Das Wiederholungsfeld zeigte „wiederholt
-    sich nicht“, und ihr Titel landete auf der ganzen Serie.
-    Offen: Handy ohne Testläufer — ↻ im Test.
   - 🚩 **Folge-PR „Ausnahmen beim Teilen“** (zweite Prüfung von #94, 132; alle
     älter als #94):
-    - ↻ **Eine neue Google-Serie behält ihre gelöschten Termine** (PR 7,
-      Entscheidungen 202-213, 263-270): Ob Google eine Löschzeile mit einer
-      neuen Serie beachtet, ist ungemessen (137), und Google selbst löscht
-      einen Termin, indem es ihn absagt. Der Adapter legt die Serie ohne
-      Löschzeile an, unter einer eigenen Kennung (268), mit dem
-      Benachrichtigen-Schalter (204, 267: die Einladung kommt mit der Serie).
-      Dann listet er Googles Termine im Fenster der Löschungen und sagt jede
-      Löschung ab heute einzeln ab (263), per PATCH auf die Kennung, die
-      Google listet; ein Termin zählt, wenn er dort beginnt oder höchstens
-      eine Stunde daneben (veraltete Zeitzonendaten) und nie über die halbe
-      Lücke zu den Nachbarn. Fehlt einer, liest er einmal nach; dann wird
-      die Stelle übersprungen und geloggt (207, 266, 269). Die Antwort jeder
-      Absage ist der Beweis (208), eine zweite Liste prüft, dass sonst alles
-      steht. Eine verlorene Antwort aufs Anlegen wird über die Kennung
-      nachgelesen, nie neu angelegt (268). Drosselung wird nach Retry-After
-      oder 1-2-4 s ausgewartet, ein aufgebrauchtes Kontingent nicht. Scheitert
-      ein Schritt, löscht er die Serie wieder (203), mit Absage, wo die
-      Eingeladenen von ihr gehört haben (212). Das Manifest schaltet den
-      Warte-Dialog an. Ohne Live-Test (Toni nutzt kein Google): Ein
-      nachgebautes Google mit Fehlern je Anfrage und eine Fehlermatrix sichern
-      ab, wie Aperio Googles Dokumentation liest — ↻ im Test.
-      - [ ] **Ungemessen bei Google**, für einen späteren Test mit einem
-        Google-Konto: welche Felder die Antwort einer Absage trägt (Aperio
-        verlangt nur Kennung und Status), ob die Liste direkt nach dem
-        Schreiben schon stimmt (Aperio liest einmal nach), ob Google Aperios
-        Kennung mit 400 ablehnt, ob Google die Regel anders schreibt, wo eine
-        gelöschte Serie landet.
+    - **Eine neue Google-Serie behält ihre gelöschten Termine** (PR 7) — gebaut,
+      siehe „Erledigt“; offen daran:
       - [ ] **Eigene Kennung auch für einfache Google-Anlagen**: Eine
         verlorene Antwort aufs Anlegen eines einzelnen Termins ist dort
         heute ein Fehler, obwohl der Termin stehen kann.
@@ -527,67 +273,6 @@ Siehe DESIGN §4.2.
         und löscht am Ursprung.
       - [ ] **Gemeinsamer getakteter Sender**, sobald Microsoft 365 (140)
         dasselbe braucht: EWS und Google haben je ihre eigene Sende-Schleife.
-      - [ ] **Anlegen mit Folgeschritt, ehrlich abgeschlossen** (in PR 7,
-        Toni 2026-10-23): Steht ein Anlegen, aber ein Folgeschritt scheitert,
-        bietet kein Editor das Anlegen erneut an. Google-Gruppe ohne
-        Mitglieder: Hinweis, der sich nur schließen lässt, Daten laden neu.
-        Google-Foto: weiter verschluckt, der Editor sagt „ohne Foto
-        gespeichert“. Unteraufgaben-Entwürfe: der Editor bearbeitet danach
-        die angelegte Aufgabe, Speichern schreibt ihre Felder und legt die
-        übrigen Entwürfe an (Toni, 2026-10-24). Vikunja (Zuständige),
-        Todoist (Abschließen), Graph (Erweiterung) und Exchange
-        (Herauslösen, Kontaktfoto ersetzen) laufen über
-        `Error::after_landed` denselben Weg; das Foto eines neuen Kontakts
-        bleibt bei Graph und Exchange wie bei Google verschluckt. Der volle Wunsch („Editor
-        bleibt auf dem Angelegten“ überall) kommt mit O1 des Bogens unten.
-        ↻ Die Oberflächen beider Seiten sind gebaut: Aufgaben-Editor,
-        Schnell-Anlegen, Einplanen, Verschieben/Kopieren und Kontakt-Editor
-        zeigen den Hinweis, der sich nur schließen lässt (Desktop
-        `CloseOnlyNotice`, Handy dasselbe); der Editor bearbeitet nach
-        gescheiterten Entwürfen die angelegte Aufgabe; „ohne Foto angelegt“ über `has_photo`; ein beim
-        Verschieben stehengebliebenes Original wird mit seiner Liste oder
-        seinem Kalender benannt (277). Exchange, Graph, Vikunja und Todoist
-        sind gebaut. Am Handy ohne Testläufer zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
-        prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
-        ist (VoiceOver sagt den Satz an); eine zum Teil gespeicherte Aufgabe
-        schließt den Editor; im Tagesstart behält ein Sammelknopf den Fokus,
-        solange nach dem Neu-Lesen eine Zeile seines Stapels bleibt (auch
-        wenn der Aufgaben-Reiter offen ist und seine Zeilen zuerst noch einmal
-        aus dem Zwischenspeicher kommen), und ein
-        Zeilenknopf, dessen Unteraufgabe scheiterte, gibt ihn an die nächste
-        Zeile, wenn seine Zeile geht; ein Löschen in der Aufgabenliste, dessen
-        Antwort verloren ging, das aber angekommen ist, gibt den Fokus an die
-        nächste Zeile, sobald die Aktualisierung die Zeile nimmt (15 s
-        Beobachtung; die nächste Aktion beendet sie, Einklappen zählt nicht
-        als Löschen; dasselbe für eine Unteraufgabe im Editor; ein
-        gescheitertes Abhaken oder Duplizieren spricht die Zeile nicht über
-        den Fehlersatz); räumt im
-        Tagesstart die letzte Aktion die letzten Zeilen ab und stand nur zum
-        Teil, bleibt der Satz mit „Alle Einträge bearbeitet“ und Schließen
-        stehen; die Fehlerzeile eines
-        gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
-        neu geladen wird, und geht, sobald etwas anderes gelingt oder du aus
-        dem Editor zurückkommst; Erinnerungen und Suche sagen einen Ladefehler
-        an; ein gescheitertes Löschen in den Kontakten lässt die Liste stehen
-        (kein „Lädt…“, der Fokus bleibt auf dem Kontakt); Gruppieren, Listen,
-        Suche oder ein anderer Reiter beenden die Beobachtung nach einem
-        gescheiterten Löschen, im Editor auch jedes Feld und das Tippen einer
-        neuen Unteraufgabe; ein unter Verschieben/Kopieren neu angelegter
-        Abschnitt steht in der Auswahl und ist gewählt, sein Fehler steht am
-        Feld und geht beim nächsten Versuch; scheitert beim Umbenennen eines
-        Abschnitts nur die Farbe, sagt VoiceOver den Fehler ganz, nachdem der
-        Fokus auf die Zeile zurückging; ein in der Listenbearbeitung einer
-        Todoist- oder Vikunja-Liste angelegter, umbenannter oder gelöschter
-        Abschnitt zeigt sich sofort und bleibt so, wenn die Aktualisierung
-        kommt.
-      - ↻ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
-        274): CalDAV liest 429 und beim Lesen 503 mit `Retry-After` als
-        ausgelasteten Anbieter, Todoist und Vikunja 429. Ob iCloud so
-        antwortet oder anders (etwa 403 oder 503 ohne Wartezeit), ob Todoist
-        auch innerhalb von `sync_status` drosselt und wie Vikunja es tut, ist
-        ungemessen; je eine Live-Runde mit vielen schnellen Anfragen klärt es.
-        Ebenso ungemessen: ob Googles Token-Endpunkt mit 429 drosselt und ob
-        ein Anmeldecode einen gedrosselten Austausch übersteht.
       - [ ] **CardDAV: Kontakt löschen trifft nur das erste Adressbuch**
         (gefunden in PR 7): `contacts::delete_contact` liest 404 als Erfolg,
         und der Lauf über alle Adressbücher in `lib.rs::delete_contact` endet
@@ -621,34 +306,6 @@ Siehe DESIGN §4.2.
       PRs (Bogen O1-O13), Grenzen und 28 Korrekturen aus der Kritik in
       `DESIGN-write-operations.md`. Toni 2026-10-23: als eigener Bogen nach
       PR 7, 9 und 10. Zu Beginn die 15 offenen Fragen aus §8 stellen.
-    - ↻ **Eine neue Exchange-Serie behält ihre gelöschten Termine** (PR 8,
-      Entscheidungen 202-213, 223-230, 263-266): Exchange nimmt eine Serie
-      ohne ihre Löschungen an (140). Der Adapter legt sie still an, löscht
-      jede Löschung ab dem heutigen Tag des Geräts einzeln wieder (263),
-      gefunden über ihren Platz und nicht über die geschätzte Nummer; eine
-      Stelle, an der Exchanges Regel keinen Termin erzeugt (vor Beginn, nach
-      Ende, neben dem Muster), wird übersprungen (207, 266). Danach liest er
-      die Serie nach: Ihre Löschungen müssen genau die gemachten sein (208,
-      230). Mit Eingeladenen schickt er dann EINE Einladung (225; nur die
-      Teilnehmer neu gesetzt) und liest noch einmal nach. 15 s ab dem
-      bestätigten Anlegen, 15 s fürs Zurücknehmen (213, 226); „beschäftigt“
-      wird ausgewartet. Scheitert ein Schritt, löscht er die Serie wieder
-      (203), mit Absage, wo eine Einladung raus sein kann (212, 264):
-      `deletions-not-kept`, „nichts geändert“. Gelingt auch das nicht:
-      `created-may-stand`, ein Hinweis, der sich nur schließen lässt (210),
-      mit dem Satz zu den Eingeladenen (228). Alle Wege, die eine Serie mit
-      Löschungen anlegen (Teilen, Übertragen, Verschieben, Kopieren, Strg+D,
-      Seitenleiste, Kalenderwechsel im Editor), zeigen solange „Vorgang
-      läuft, bitte warten …“ (227, 265), gesteuert vom Manifest
-      (`deletions_in_steps`), Desktop und Handy. Auch der bestehende Fall
-      „weder gekürzt noch gelöscht“ lässt sich nur noch schließen (210). Ein
-      gescheitertes Anlegen liest neu ein (beide Hosts), iOS gibt dem
-      Schreiben Hintergrundzeit (229). Ein Anlegen, das Exchange ganz
-      ablehnt, heißt jetzt auch bei einfachen Terminen „Server lehnt ab“.
-      Live-Runde 11 bestanden (2026-10-18, zwei Läufe): T1 bis T6 wie
-      gemeint; die Einladung trägt beide Löschungen als EXDATE, und GMX
-      bekam genau eine Einladung und beim Aufräumen eine Absage (225 hält);
-      60 Löschungen in 10,7 s. Handy offen — ↻ im Test.
     - [ ] **Warten auch beim Ändern an Ort und Stelle** (aus 265): Ändert ein
       Speichern Beginn, Zone oder Muster einer ganzen Exchange-Serie, löscht
       `restore_deletions` (253) danach jede Löschung einzeln, ohne Uhr und ohne
@@ -663,181 +320,10 @@ Siehe DESIGN §4.2.
       oder von iOS angehalten, bevor die Löschungen fertig sind, steht die
       halb fertige neue Serie neben der ungekürzten alten, und keine
       Oberfläche weiß davon. Braucht ein Schreib-Journal.
-    - ↻ **Verschieben, Kopieren und Duplizieren geben nur echte Löschungen
-      weiter** (PR 8b, Entscheidungen 224, 259-262): Eine ganze Serie, in einen
-      anderen Kalender verschoben, kopiert, mit Strg+D dupliziert oder im
-      Editor in einen anderen Kalender gespeichert, bekommt genau ihre echten
-      Löschungen mit (`newSeriesRecurrence`, dieselbe Regel wie beim Teilen).
-      Ein einzeln geänderter Termin, etwa in Outlook, kommt zu seiner üblichen
-      Zeit zurück, statt in der neuen Serie gelöscht zu sein. Jede Löschung
-      bleibt an ihrem Platz, wie sie geschrieben war, weil sich Beginn und
-      Regel nicht ändern; nur wenn der Editor zugleich Beginn, Ganztägig oder
-      Regel ändert, gehen sie den Weg von 198. Auch vergangene Löschungen
-      (259): Die Grenze „ab heute“ kommt mit PR 8, wo Exchange Löschungen
-      einzeln schreibt. Strg+D auf einem Termin einer Serie dupliziert die
-      ganze Serie ab ihrem Beginn und sagt das mit dem Titel der Serie an
-      (260); die Ansicht liest danach neu ein, und ein Scheitern wird gesagt
-      (261). Kopieren und Duplizieren behalten die Zone der Quelle (262).
-      Microsoft 365 nimmt beim Anlegen noch keine Löschungen (140): Dort
-      erscheinen gelöschte Termine in der neuen Serie vorerst wieder; Exchange
-      löscht sie seit PR 8 ab heute einzeln wieder, Google sagt sie seit PR 7
-      ab heute einzeln ab. Aus einem Google-Kalender
-      kennt Aperio gelöschte Termine etwa
-      drei Monate zurück und ein Jahr voraus (150). Das Handy hat keinen
-      Testläufer; ein Paritätstest am Desktop rechnet sein Modul mit — ↻ im
-      Test.
-    - ✅ Die neue Serie bekam nur die Ausnahmen des Masters. Bei Google ist ein
-      gelöschtes Vorkommen aber eine abgesagte Zeile ohne Ausnahme, bei CalDAV
-      ein abgesagtes RECURRENCE-ID: beim Teilen kam es in der neuen Serie
-      zurück, mit Einladung. Und Exchange mischt gelöschte und geänderte
-      Vorkommen in den Ausnahmen: ein anderer Kalender schrieb alle, dann
-      fehlte ein geändertes Vorkommen in beiden Hälften. Jetzt bekommt die
-      neue Serie genau die Plätze, für die der Kalender nichts zeigt
-      (`deletedSlots`): eine Ausnahme ohne lebende Zeile, jede abgesagte
-      Zeile; ein geändertes Vorkommen ist keine Löschung. Plätze gleichen wie
-      in den Ansichten (`sameSlot`: genau bei Uhrzeit, nach Tag bei
-      ganztägig). Offen: Google kennt die Zeilen nur so weit, wie der
-      Zwischenspeicher reicht (etwa ein Jahr voraus); weiter vorn gelöschte
-      Vorkommen kommen zurück (150: benennen, später gezielt bei Google
-      nachlesen, eigener PR). EWS löscht sie seit PR 8 nach dem Anlegen einzeln
-      wieder, ab heute (202, 263); Google sagt sie seit PR 7 nach dem Anlegen
-      einzeln ab, ab heute (202, 263, 267). Aperios eigene Absagen weiter als
-      das Fenster voraus sieht es nach einem neuen Einlesen nicht mehr, eine
-      spätere Kopie der Serie zeigt sie wieder (150). CalDAV schreibt sie
-      seit PR 5 als Datum.
-    - ✅ **Die Regel wandert mit dem Datum** (PR 3c, 189, 192-197): Verschiebt
-      „dieser und alle folgenden“ das Datum, wandert eine Regel, die ihre Tage
-      nennt, wie beim Ziehen einer ganzen Serie (jeden Montag → jeden Dienstag,
-      jeden 10. → jeden 11.), und ihre Löschungen nach ihrem Platz; eine Regel,
-      die ihre Tage aus dem Beginn nimmt, nimmt sie aus dem neuen. UNTIL rückt so,
-      dass die neue Serie auf dem Vorkommen am Platz des alten letzten endet, auch
-      bei neuer Uhrzeit, bei einer Monatsregel auf neuem Monatstag und beim Wechsel
-      von ganztägig zu Uhrzeit (`keepingLength`); früher bewegte `ruleFromCut`
-      UNTIL nicht, und das letzte Vorkommen fiel weg.
-      Nur ein in dieser Bearbeitung geändertes Datum verschiebt die Tage (192).
-      Eine Regel, die nicht um ganze Tage wandern kann, wird abgelehnt, bevor
-      etwas geschrieben wird (193). Das Feld zeigt die verschobene Regel sofort
-      (197). Eine selbst eingestellte Regel, die genau die verschobene ist, auch
-      anders geschrieben, trägt die Löschungen wie das Verschieben (196). Kern:
-      `series_shift::begin_series_anew` (Fragefeld `begins_anew`) und
-      `tail_exceptions` erkennt die verschobene Regel selbst; Shell
-      `movedTailRule`; beide Editoren, beide Mitzieh-Dialoge. ↻ im Test.
     - 🚩 Wechsel ganztägig/Uhrzeit bei einer Serie, deren Zone einen anderen Tag
       zeigt als das Gerät (New York 20 Uhr = Berlin 2 Uhr): Die Regel wird auf
       der alten Uhr gelesen, der ganztägige Beginn auf den Tagen des Geräts; die
       neue Serie kann neben ihrer Regel beginnen. Selten, nicht behandelt.
-    - ✅ **Abgesagte und verschobene Einzeltermine klingeln richtig** (PR 7a,
-      209, 214): Die Erinnerungen klappten jede Serie für sich aus und wandten
-      ihre Einzeländerungen nicht an. Ein abgesagtes Vorkommen klingelte
-      weiter (bei Google ist jede Löschung so eine Zeile; mit PR 7 hätte das
-      jeden gelöschten Termin eines neuen Serienteils getroffen), ein
-      verschobenes zweimal: am alten Platz und zur neuen Zeit, bei CalDAV und
-      Google (Exchange trug den alten Platz schon in den Ausnahmen der Serie).
-      Jetzt nimmt jede Zeile `{Serie}::rid::{Platz}` ihren
-      Platz aus der Serie (`override_slots`), wie die Ansichten
-      (`expandAll`): genau bei Uhrzeit, nach dem Tag bei ganztägig; ein
-      Platz, der sich nicht lesen lässt, bleibt. Fünf Vertragszeilen in
-      `eventOccurrences.json` sind jetzt einig; die ganze abgesagte Serie
-      bleibt still (gewollt). Desktop und Handy gleich (host-core). Dazu 215:
-      Exchange nannte den Platz einer ganztägigen Einzeländerung als
-      Mitternacht in der Zone des Postfachs; lag das Gerät mehr als zwölf
-      Stunden davon, lasen Ansichten (schon vorher) und nun auch Erinnerungen
-      den Nachbartag. Der Adapter verankert den Platz jetzt wie die Ausnahme
-      der Serie (`override_slot`, lokale Mitternacht des Tages), Schreiben
-      findet beide Schreibweisen (`names_override`), Cache-Generation 7 lädt
-      einmal neu. Die Folgen (216): Weil diese Plätze von der Zone des Geräts
-      abhängen, liest Exchange nach einem Zonenwechsel alles einmal neu (das
-      Token nennt die Zone); eine Farbe oder ein Meeting an einer
-      Einzeländerung wandert bei einer neuen Kennung zu ihr, nie auf die ganze
-      Serie (`plan_repairs`, hilft auch CalDAV und Google); ohne eigenen Ton
-      klingelt eine Einzeländerung mit dem der Serie. Und 217: Exchange liest
-      die Zeitpunkte einer ganztägigen Serie 13:45 in den Tag hinein in der
-      Zone, die Exchange nennt (Startzone wie die Zone der Serie, UTC für eine
-      ohne Zone, `all_day_zone`), statt 12 Stunden in UTC, was eine
-      Mitternacht östlich von UTC+12 (Neuseelands Sommer) als den Vortag las;
-      das fängt auch ein Etikett ab, das Exchange nach Aperios eigenem
-      Schreiben auf UTC umstellt, während die Zeitpunkte Mitternacht der alten
-      Zone bleiben (Live-Runde 3), für jede alte Zone in (−10:15, +13:45]
-      (Niue, Pago Pago, Kiritimati liegen außerhalb). Ohne lesbare Zone wird
-      in UTC gelesen, mit demselben Fenster. Fällt die Mitternacht des Geräts
-      an einer Umstellung aus, gilt die erste Stunde danach, wie in den
-      Ansichten. Offen: einen eigenen Ton für einen einzelnen Termin speichert
-      nur das Handy, unter der Kennung des Termins (`sound.item.{id}`); eine
-      neu geprägte Kennung (Exchange bei jeder ChangeKey-Änderung, seit 215/216
-      ein ganztägiger Platz in anderer Zone) verliert ihn, die Reparatur kennt
-      Töne nicht, und der Desktop speichert Töne nur je Serie. Die Kopie einer Ausnahme, mit der ein Bearbeiten vergleicht, wird
-      in der Zone ihrer Serie gelesen wie ihre Zeile. Einen Tag einer
-      ganztägigen Serie zu löschen vergleicht den Platz des Servers so
-      gelesen; vorher scheiterte das über sechs Stunden Abstand zum Postfach,
-      und mit der UTC-Lesart hätte es in Neuseelands Sommer den Folgetag
-      gelöscht. Ohne Zone werden die rohen Zeitpunkte verglichen und im
-      Zweifel abgebrochen. `plan_repairs` liest den Tag eines ganztägigen
-      Termins 13:45 in den Zeitpunkt hinein und findet so eine Zeile auch aus
-      einer anderen Zone (siehe oben). ↻ im Test.
-    - ✅ **Google liest jede Schreibweise einer Löschung** (PR 6, 205): Andere
-      Apps schreiben gelöschte Vorkommen als `EXDATE`-Zeilen in eine
-      Google-Serie, meist als Wanduhr in der Zone (`EXDATE;TZID=…`), wie auch
-      Googles eigener Export. Aperio las nur UTC und Datum, zeigte die anderen
-      Vorkommen wieder, und jedes Speichern der Serie, auch ein neuer Titel,
-      schrieb die Zeilen ohne sie neu: dann waren sie überall wieder da. Jetzt
-      liest der Adapter Wanduhr mit und ohne Zone, UTC, Datum (ganztägig als
-      lokale Mitternacht, wie ein Datums-Beginn), mehrere Werte je Zeile, jede
-      Reihenfolge und Schreibweise der Namen und eine Regel mit Parametern;
-      eine Wanduhr an einer Zeitumstellung landet dort, wo die Ansichten das
-      Vorkommen hinsetzen. Was er nicht liest (`RDATE`, `EXRULE`, eine
-      unbekannte Zone), nennt das Log einmal je Lauf. Er schreibt Löschungen
-      wie Googles Export (Wanduhr mit `TZID`, ganztägig `VALUE=DATE`, sonst
-      UTC). Fasst eine Änderung Beginn, Ende, „ganztägig“ und Wiederholung
-      nicht an (`keep_fields`), bleiben alle vier aus dem PATCH, gemeinsam:
-      Googles Zeilen hängen am Beginn, und ein behaltener Beginn kann die
-      neuere Änderung eines anderen Geräts sein (106). Eine unbekannte Zone
-      (per `TZID` oder als Zone der Serie) kostet nur eine Wanduhr; UTC und
-      Datum braucht sie nicht. UTC-Mitternacht ist bei ganztägig ihr Datum
-      (so schrieb Aperio Datums-Löschungen bisher). Bekannt: Aperios
-      Zeitzonendaten (2025b, neuestes chrono-tz) kennen die neueren Regeln für
-      Marokko/Westsahara (ab 20.9.2026), British Columbia/Alberta/Inuvik (ab
-      1.11.2026) und Chișinău nicht; dort kann eine geschriebene Löschung mit
-      Uhrzeit, die nicht als Wanduhr in der Zone der Serie gelesen wurde
-      (etwa die UTC-Löschung einer anderen App oder eine Wanduhr in einer
-      anderen Zone), eine Stunde neben Googles Vorkommen liegen, ebenso eine
-      Wanduhr in einer Lücke, die nur 2025b kennt (02:30 geht als 03:30
-      zurück); eine in der Zone der Serie gelesene Wanduhr außerhalb einer
-      Lücke behält ihre Ziffern (eigene Aufgabe: Zeitzonendaten aktuell
-      halten). Offen: das
-      `UNTIL` einer ganztägigen Serie schreibt Google noch als Zeitpunkt (bei
-      CalDAV seit PR 5 ein Datum); ungemessen. ↻ im Test.
-    - ✅ **Ganztägige Serien: Löschungen und Ende als Datum** (PR 5, 200, 201):
-      CalDAV schreibt die Ausnahmen einer ganztägigen Serie als
-      `EXDATE;VALUE=DATE` (der Tag der nächsten lokalen Mitternacht, wie 95
-      Tage liest) und ein UTC-Ende als Datum seiner Ziffern, beim Anlegen und
-      Bearbeiten (`apply_common`, `all_day_date`, `all_day_rule`); vorher
-      schlossen die UTC-Zeitpunkte bei iPhone und anderen Programmen nichts aus.
-      Bestehende Serien heilen beim nächsten Speichern. Und überall liest eine
-      Serie von Tagen ihr UNTIL nach seinen Ziffern auf der Tagesuhr, ein Datum
-      als ganzen Tag (201): „bis 31.12.“ aus dem Feld (`…T235959Z`) zeigte in
-      Berlin auch den 1.1., die Erinnerungen ebenso; ein Datums- oder
-      schwebendes UNTIL wies die rrule-Kiste ab, und die Erinnerungen blieben
-      beim ersten Termin. Ansichten (`untilOnClock`, auch `occurrenceCount`)
-      und Erinnerungen (`until_on_day_clock`) lesen gleich, auch wenn eine
-      Zeitumstellung die Grenze überspringt; vier Vertragszeilen in
-      `eventOccurrences.json` sind jetzt einig. Mit ihnen der Satz „letzter
-      Termin am …“ (`lastOccurrenceDayKey` liest die Regel der Ansichten) und
-      das Ziehen der ganzen Serie (`movedSeriesUntil` verschiebt die Ziffern um
-      ihre Tage; als Zeitpunkt verschoben, gewann sie über eine Zeitumstellung
-      einen Tag). ↻ im Test.
-    - ✅ **Ganze Serie, Wechsel ganztägig/Uhrzeit (191), und ihr Datum (195):**
-      Der Editor liest eine Bearbeitung der ganzen Serie, deren Beginn wandert
-      oder die zwischen ganztägig und Uhrzeit wechselt, wie „dieser und alle
-      folgenden“ ab ihrem eigenen Beginn (198): Regel wandert mit, gelöschte
-      Termine nach Platz oder Tag (die Ausnahme um 18 Uhr bleibt auf ihrem Tag),
-      das Ende hält die Länge, die Zone folgt der Art (ganztägig keine, aus
-      ganztägig die Gerätezone). Das Feld zeigt die verschobene Regel sofort
-      (199). Eine Serie, die neben ihrer Regel beginnt, behält ihren Beginn und
-      zählt ihre Plätze ab dem ersten Vorkommen (`old_start`); ihr gelöschtes
-      erstes Vorkommen bleibt gelöscht. Unberührt bleibt die Wiederholung
-      byte-genau. Feld und Speichern lesen denselben geschriebenen Beginn
-      (`ruleFrame`). Die Mitzieh-Dialoge schreiben Kopien, die Serien sind,
-      ebenso. Das Ziehen bleibt Ziehen. Beide Editoren. ↻ im Test.
     - 🚩 Ganztägige Serien bei Google und CalDAV: das Kürzen räumt die
       geänderten Vorkommen nach dem Schnitt nicht weg (die Adapter überspringen
       das für Tage), ein geänderter Tag steht dann doppelt — die Zeile des
@@ -845,59 +331,6 @@ Siehe DESIGN §4.2.
       EXDATE und RECURRENCE-ID zugleich, den die neue Serie früher ausließ. Zu
       beheben beim Kürzen, nicht in der Tail-Regel (Exchange bräuchte sonst
       wieder beide Hälften ohne sein geändertes Vorkommen).
-    - ✅ `readSeriesRows` las über einen Datumsbereich bis einen Monat nach dem
-      Schnitt und stieß bei langen Google-Serien ein volles Nachladen an. Jetzt
-      liest es nach der Serie (135): jede Zeile `{Serie}::rid::…` aus dem
-      Zwischenspeicher, gleich welches Datum, abgesagte mit, ohne Nachladen
-      und ohne Reparaturen (Desktop `get_series_rows`, Handy `get_events_json`
-      mit `series_id`, beide über `host_core::cache::series_rows`). Der Host
-      meldet dazu, wie weit sein Zwischenspeicher reicht (139): ganz (Exchange,
-      CalDAV, lokal), ein Fenster (Google, etwa ein Jahr voraus) oder
-      unbekannt (nach einem Schreiben bis zum nächsten Abgleich). Das Fenster
-      bürgt für Zeilen nach ihrer JETZIGEN Zeit: eine abgesagte Zeile steht an
-      ihrem Platz, fehlt also nur, wenn der Platz draußen liegt; ein aus dem
-      Fenster verschobenes Vorkommen fehlt, wo immer sein Platz liegt. Die
-      Nachfrage vor dem Teilen kommt mit der gemeinsamen Regel für die
-      Ausnahmen der neuen Serie, erst dann zählen die Zeilen dafür, und sie
-      muss das berücksichtigen. Ein älteres Handy-.so ignoriert das Feld und
-      liest wie bisher; dann gilt die Reichweite als unbekannt. Handy: braucht
-      ein frisch erzeugtes `.so`, ohne Testläufer — ↻ im Test.
-    - ✅ **Teilen kürzte zuerst** (136, 144). Scheiterte danach das Anlegen,
-      stellte das Wiederherstellen nur die Regel zurück: die geänderten und
-      gelöschten Vorkommen, die das Kürzen beim Anbieter verworfen hatte
-      (Google löscht sie, CalDAV schreibt sie nicht mehr), waren still weg.
-      Jetzt legt `writeSeriesSplit` erst die neue Serie an und kürzt dann; die
-      Editoren und beide Mitzieh-Dialoge folgen. Scheitert das Kürzen sicher
-      (`writeNeverLanded`: Ablehnungs-Token oder Code `conflict`, `forbidden`,
-      `invalid_input`, `not_found`, `auth`, `unsupported`), wird die neue Serie
-      mit derselben Benachrichtigung wieder gelöscht. Sonst (Netz, Protokoll,
-      ohne Code) bleiben beide stehen (144), und das Teilen gilt als
-      geschrieben (145, `headCut: 'unsure'`): Die neue Serie bekommt private
-      Erinnerungen, Farbe und Gruppe, die Ansage sagt, ab welchem Tag die Serie
-      möglicherweise doppelt steht, und nichts bietet an, sie noch einmal zu
-      schreiben (der Mitzieh-Dialog bleibt mit dem Hinweis offen, ohne „erneut
-      versuchen“). Scheitert nach einer Ablehnung auch das Löschen der neuen
-      Serie, ist es ein Fehler mit demselben Hinweis (`seriesMaybeShownTwice`);
-      der Editor bittet, vor dem erneuten Speichern zu prüfen. Beim unklaren
-      Kürzen bleibt der Editor mit dem Hinweis offen, fokussiert, nur mit
-      „Schließen“; erst danach geht es zum Mitziehen oder zu (146). Ein Anlegen
-      behält den Nachweis aus 106 (`invalidate_after_create`), sonst schrieb das
-      Kürzen danach auf Exchange alle Felder zurück. CalDAV liest die Antwort
-      einer Wiederholung als das, was sie ist: 412 nach dem erneuten Senden
-      eines bewachten PUT ist „unklar“; 404 nach dem erneuten DELETE ist
-      „weg oder nie hier“, die Suche über die Kalender geht weiter und zählt
-      es nur als gelöscht, wenn kein anderer Kalender den Termin hat
-      (`DeleteWalk`). Nach einem gescheiterten Verbindungsaufbau gilt nichts
-      davon: da ging nichts hinaus. Am Android-Handy kommen seit PR 7 alle
-      Fehler mit dem Code des Desktops an (B9), am iPhone nur der Text (siehe
-      „iPhone: verliert Expo den Fehlercode?“); eine Ablehnung mit Marke
-      (`server-refused`, `unsafe-to-write`) wird an der Marke erkannt, auf
-      beiden. Handy ohne
-      Testläufer — ↻ im Test.
-    - ✅ CalDAV `create_task_list`: MKCALENDAR läuft seit PR 7 (7950e08b)
-      über `send_write`. Eine Wiederholung, die 405 bekommt, ist die Liste des
-      ersten Versuchs, jede andere Ablehnung einer Wiederholung unsicher
-      (`a_replayed_mkcalendar_reads_its_answer_as_the_first_attempts`).
   - 🚩 **Weckerberechnung bei einem Ende vor dem Beginn** (124: jetzt nicht).
     `expand_on` nimmt bei einer Regel, die vor ihrem Beginn endet, weiter den
     Serienbeginn. Aperio schreibt solche Regeln nicht mehr, aber ein Enddatum,
@@ -946,123 +379,19 @@ Siehe DESIGN §4.2.
     Termine dieselbe Kennung tragen, keine speichern. Trifft auch Gruppen,
     Farben und Besprechungen.
 
-  ↻ **A: Das Handy ändert eine Exchange-Ausnahme nicht direkt**, behoben in
-  PR #78. Für „nur dieses Vorkommen“ öffnete es den Serienkopf. Dann löschte es
-  die Ausnahme und legte einen neuen Einzeltermin an, oder das Speichern
-  scheiterte. Jetzt öffnet es die Ausnahme selbst und ändert sie direkt, wie der
-  Desktop (`isProviderOverride` in `shared/recurrence.ts`). Zu- und Absagen gehen
-  wie auf dem Desktop an die Serie. Bei CalDAV und Google braucht das PR #80.
-  Wirkt mit dem nächsten Handy-Build.
   🚩 **Klang eines geänderten Vorkommens: Desktop und Handy uneins.** Die
   Erinnerungen einer Ausnahme suchen ihren Klang unter der Id der Ausnahme
   (`host-core/src/reminders.rs`). Das Handy speichert ihn dort, der Desktop
   unter der Serie (`EventDialog.tsx`, `seriesIdOf`). Ein am Desktop gewählter
   Klang erreicht die Ausnahme also nicht. Eine Regel festlegen, am besten im
   Kern (`sound.rs`: erst die Ausnahme, dann die Serie).
-  ↻ **B: Verschieben „nur dieses Vorkommen“ hinterlässt ein Duplikat**, behoben
-  in PR #79. Auf dem Desktop legte Verschieben oder Ziehen einer geänderten
-  Ausnahme einen neuen Einzeltermin an und nahm den Platz aus der Serie heraus;
-  die Ausnahme selbst änderte es nie (`moveActions.ts`). Die Suche nach dem
-  Vorkommen in Exchange verglich dabei `Start` statt `OriginalStart`, sodass
-  eine um mehr als sechs Stunden verschobene Ausnahme doppelt stehen blieb.
-  Jetzt verschiebt Ziehen „nur dieses Vorkommen“ die Ausnahme selbst, wie der
-  Dialog sie speichert, und die Exchange-Suche vergleicht `OriginalStart`. Das
-  gilt auch für das Löschen einer weit verschobenen Ausnahme und für den Umzug
-  in einen anderen Kalender, auf Desktop und Handy. Bei CalDAV und Google
-  braucht das Ziehen PR #80; bei Exchange löst #80 eine Ausnahme, die nicht
-  über ein Nachbar-Vorkommen darf, aus der Serie (64a).
-  ↻ **Eine geänderte Ausnahme traf bei CalDAV und Google die ganze Serie**
-  (Prüfung von #78; 62b, 63a), behoben in PR #80. Die Override-Id
-  `{Serie}::rid::{Platz}` konnte nur Exchange adressieren. Bei CalDAV/iCloud
-  überschrieb „nur dieses Vorkommen“ speichern die ganze Serie mit einem
-  einzelnen Termin, und ein Kalenderwechsel löschte die Serie. Bei Google
-  scheiterte das Speichern, und ein Kalenderwechsel ließ ein Duplikat zurück.
-  Der Desktop hatte das seit 4179edfe. Jetzt:
-  - CalDAV schreibt nur den Block der Ausnahme und legt den Rest der Ressource
-    byte-genau zurück. Ein einzelnes Vorkommen löschen behält die übrigen
-    Ausnahmen und ihre Zeitzonen und nimmt die Ausnahme im Platz mit.
-  - Google sucht die Instanz über ihren Platz (`originalStart`). Dadurch findet
-    das Löschen auch eine weit verschobene Ausnahme, und es trifft in einer
-    täglichen Serie nie mehr das Nachbar-Vorkommen.
-  - Löschen über eine Override-Id nimmt bei allen dreien nur dieses Vorkommen
-    heraus.
-  - Exchange löst eine Ausnahme, die es nicht über ein Nachbar-Vorkommen
-    schieben will, selbst aus der Serie (64a).
   🚩 **CalDAV: Ändern des Serienkopfs schreibt nur den Kopf.** `put_master_only`
   verlässt sich darauf, dass der Server die übrigen Ausnahmen der Ressource
   wieder anhängt (Kommentar in `events.rs` seit 27f9fcd1). Das ist nicht
   belegt; ein Server, der sich an RFC 4791 hält, verwirft sie. Live messen
   (iCloud, Nextcloud) und bei Bedarf auf das Zusammenführen umstellen, das
   #80 für Ausnahmen gebaut hat.
-  **Live-Test Runde 4** (65, 66b), gelaufen am 19.09.2026 auf dem Desktop mit
-  iCloud und Exchange. Das Handy war nicht dabei, Toni hat Aperio dort noch nie
-  benutzt (69).
-  - ↻ Der Build startete nicht: Die CSP des Produktionsbuilds verbot das
-    WebAssembly der Kernregeln. Behoben in PR #81.
-  - D3: Das Folge-Vorkommen einer ganztägigen iCloud-Serie stand am 26. statt
-    am 27.10. Das ist der Lesefehler aus 48a.
-  - ↻ D6, D7 und H2: Ändern eines Outlook-Termins scheiterte mit
-    `ErrorInvalidRecipients`. Aperio las den Organisator als Gast und wollte
-    ihn benachrichtigen. Behoben in PR #83.
-  - ↻ D8: Das gelöste Vorkommen öffnet Outlook als „Besprechung“. Vermutlich,
-    weil es den Organisator als Gast mitnahm. PR #83 nimmt ihn heraus. In der
-    nächsten Runde nachsehen.
-  - D9: Toni hat den Einzeltermin in Outlook gelöscht, und Aperio hat ihn
-    richtig entfernt. Das Löschen aus Aperio heraus ist noch ungeprüft.
-  - ↻ H1: „Anwenden auf“ stand da, aber nicht in der Tab-Reihenfolge. Behoben
-    in PR #82 (68): Der Titel nennt den Umfang, und ein schreibgeschütztes Feld
-    liegt in der Tab-Reihenfolge, auch für die ganze Serie.
-
-  ↻ **Der Organisator galt als Gast** (67a, 70a bis 72a), behoben in PR #83.
-  Die Regel steht einmal im Kern (`cal_core::attendee`, DESIGN §7.3):
-  - Beim Lesen nimmt jeder Adapter die Zeile des Organisators aus den Gästen.
-  - Benachrichtigen darf nur, wer den Termin organisiert. Das sagt ein
-    ausdrückliches Merkmal des Anbieters, sonst gilt der Termin als fremd
-    organisiert.
-  - Beide Hosts schreiben die Gästeliste nur, wenn sie sich gegenüber dem
-    Cache geändert hat (Exchange, Google, Microsoft 365).
-  - Abgeleitete Termine tragen den Organisator ihrer Quelle mit.
-  - `CACHE_GENERATION` 2: Der erste Start liest jedes externe Konto einmal neu
-    ein, Exchange vollständig.
-  ↻ **Ein iCloud-Termin verliert seine Gäste** (E1), behoben in PR #84.
-  Aperio baute den VEVENT neu und schrieb `ORGANIZER` und `ATTENDEE` nur beim
-  Benachrichtigen; ohne `ORGANIZER` sagt ein RFC-6638-Server die Besprechung
-  allen ab. Zudem erkannte Aperio Toni nicht als Organisator, weil iCloud ihn
-  per Principal-Pfad nennt (Messung M1), also fehlte der Schalter. Jetzt:
-  - Aperio erkennt das Konto an allen Einträgen seiner
-    `calendar-user-address-set` und am `EMAIL` einer Zeile.
-  - Jedes Speichern liest zuerst die Kopie des Servers und trägt die Zeilen
-    der Besprechung wörtlich weiter; nur eine geänderte Gästeliste ändert
-    Zeilen. Eine Serie behält ihre Ausnahmen Byte für Byte, „nur diesen
-    Termin löschen“ fügt eine einzige `EXDATE`-Zeile ein, und ein Speichern
-    ohne Änderung schickt nichts.
-  - Bei iCloud und Microsoft 365 zeigen Editor und Löschdialoge statt einer
-    Wahl den Satz, wer die Teilnehmer informiert (76a, 80a, 82b), auf Desktop
-    und Handy, auch nach der Entfernen-Taste in Woche, Tag, Monat und Agenda
-    (ein gemeinsamer `DeleteEventConfirm`). Die Löschdialoge fragen
-    „organisiert das Konto?“ jetzt über `organized_elsewhere` statt über einen
-    Adressvergleich. Der Satz beim ersten Gast kommt zusammen mit „X
-    hinzugefügt“ in einer Ansage.
-  - `CACHE_GENERATION` 3.
-  ↻ **Fremde Einladungen sind schreibgeschützt** (77a, 83b, 84a), gestapelt
-  auf #84 und zusammen mit #83 zu mergen. Kalender auf einem Server mit
-  Terminplanung tragen `invitations_reply_only`; beide Editoren zeigen so
-  eine Besprechung schreibgeschützt (Antwort, eigene Erinnerungen, Klang,
-  Farbe, Beitreten, Verfügbarkeit, Löschen bleiben), CalDAV schreibt in so
-  einem Termin nur die VALARMs und lässt jede andere Zeile Byte für Byte
-  stehen, der Löschdialog sagt „Der Organisator bekommt eine Absage“, die
-  Wiederholung steht als Satz da (Kern-Regel mit Prüf-Datei, EN/DE), und
-  jede Ablehnung des Servers wird in beiden Oberflächen zu einem Satz.
-  `CACHE_GENERATION` 4. Offen bleibt „nur diesen Termin“ einer iCloud-Serie
-  als echte Ausnahme (79b, PR 3).
-  🚩 **Nach dem Live-Test zu klären (PR 2):**
-  - Nimmt iCloud es an, wenn ein Gast `X-APPLE-DEFAULT-ALARM` entfernt, und
-    setzt es den Standard-Hinweis danach wieder? Darauf ruht das Ersetzen der
-    Wecker.
-  - Schickt iCloud dem Organisator wirklich eine Absage, wenn ein Gast seine
-    Kopie oder ein einzelnes Vorkommen löscht? RFC 6638 führt `EXDATE` nicht
-    unter den erlaubten Änderungen eines Gastes; Apple macht es trotzdem
-    (86a: der Dialog sagt es schon jetzt).
+  🚩 **Offen aus PR 2:**
   - `EXDATE` einer Zeit-Serie wird weiter als UTC geschrieben, nicht mit
     `TZID`; nur die Ganztagsform ist jetzt richtig.
   - `respond_to_event` kennt nur die eine Adresse aus der Discovery, keine
@@ -1110,8 +439,6 @@ Siehe DESIGN §4.2.
   - Die Mitnahme in eine Gruppe (`groupCarry`) legt weiterhin für jede Kopie
     einen eigenständigen Termin an; eine Ausnahme im Takt einer ANDEREN Serie
     wäre geraten, nicht gelesen.
-  - Ungemessen: ob iCloud eine von Aperio geschriebene `RECURRENCE-ID`
-    annimmt, und was die Gäste dabei bekommen. Gehört in Live-Runde 7.
   🚩 **Offen nach #84:**
   - Verschieben einer iCloud-Besprechung in einen anderen Kalender bleibt
     Anlegen und Löschen: Die Gäste bekommen eine Absage, die Kopie hat keine
@@ -1134,29 +461,6 @@ Siehe DESIGN §4.2.
   „Organisiert von …“ im Editor, die Suche über `$.organizer` und der
   Organisator in der Verfügbarkeitsprüfung. Seit PR #83 fragt die Prüfung ihn
   nicht mehr ab, weil er kein Gast mehr ist.
-  ↻ **Enddatum einer Exchange-Serie** (gefunden bei der Planung von PR 8a,
-  2026-10-10): Exchange hängt an das Startdatum einer Serie eine Zone an.
-  Gemessen ist zweimal `2026-10-19Z`, beide Male bei einer ganztägigen Serie:
-  einer, die Aperio ohne Zone angelegt hat (Runde 2), und einer aus Outlook,
-  deren Startzone Aperios Änderung auf Greenwich gesetzt hatte (Runde 3).
-  Beide liegen bei Versatz 0; `Z` sagt dort nicht, ob es die UTC-Rechnung
-  der Anfrage oder die Zone der Serie meint. Der Live-Test 8a (2026-10-10)
-  hat für eine Serie in W. Europe ohne `TimeZoneContext` gemessen: Start- und
-  Enddatum kommen mit Versatz zurück, `2026-11-04+01:00`. `Z` kommt also
-  nicht bei jeder Serie; der Fehler traf Serien mit `Z` und mit einem Versatz
-  westlich von UTC. Der Leser schnitt nur `T` und `+` ab. Bei `Z` und bei einem Versatz
-  westlich von UTC wurde daraus eine Regel wie `UNTIL=20261105ZT235959Z`, die
-  beide Ausroller ablehnten: Die Serie erschien nur am Beginn ihres Masters,
-  dem ersten Termin der Regel, auch wenn dieses Vorkommen geändert oder
-  gelöscht war, und nur dafür kam eine Erinnerung. Geänderte
-  Vorkommen sind eigene Zeilen und erschienen weiter. Auch Aperios eigene
-  Suche nach der Nummer eines Vorkommens (`nominal_occurrence_index`) las
-  diese Regel; ein einzelnes Vorkommen einer solchen Serie auszulassen, wie
-  es das Mitziehen einer Gruppe tut, scheiterte mit „could not compute the
-  InstanceIndex“. Jetzt behält der Leser
-  nur das Datum, beim Lesen und beim Ausgeben aus dem Zwischenspeicher
-  (`range_date`). READ_RULE 3 gibt beim nächsten Abgleich alle gespeicherten
-  Termine neu aus. Handy: `.so` und XCFramework frisch bauen.
   🚩 Offen: Exchange-Aufgaben lesen ihre Wiederholung mit demselben Leser, aber
   ihre zwischengespeicherten Zeilen gibt READ_RULE nicht neu aus. Eine vor dem
   Fix gelesene Aufgabe kann deshalb „endlos“ bleiben, bis sich in ihrer Liste
@@ -1164,32 +468,6 @@ Siehe DESIGN §4.2.
   zurück. Das gilt nur, falls Exchange `task:Recurrence` beim Auflisten
   überhaupt liefert, und das ist ungeprüft (`tasks.rs`). Abhilfe wäre, jede
   Aufgabenliste einmal neu zu lesen, etwa über eine Version im Aufgaben-Token.
-  ↻ **Update-Regel für ganztägige Exchange-Termine** (47a) und
-  **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
-  UTC-Datum): gebaut in PR 8a (2026-10-10, Entscheidungen 231-239). Eine
-  Serie beginnt an ihrem ersten Tag auf der Uhr, auf der Exchange sie
-  wiederholt; ein ganztägiger Tag geht beim Ändern auf Mitternacht in der
-  gespeicherten Zone jeder Grenze; eigene Zonen-Definitionen werden gelesen;
-  eine unlesbare Zone lehnt den Tag mit eigenem Satz ab (237). Live-Test 8a
-  am 10.10.2026: Schritte 1 bis 5 und 7 bestanden. Schritt 6 (ein Termin vom
-  iPhone) war nicht machbar; ein Testprogramm hat stattdessen eigene Termine
-  per EWS angelegt, eine eigene Zone und „Europe/Berlin“, beide bestanden.
-  Ungemessen bleiben ein Termin mit eigener Zone vom iPhone oder aus einer
-  Einladung und die Ablehnung nach 237 am echten Server (Einzelheiten in
-  DESIGN, Stufe 4, „Gemessen“).
-  ↻ **Schnitttag doppelt** (235, Entscheidungen 254-258): Ein Schnitt „dieser
-  und alle folgenden“ an einer Exchange-Serie mit Uhrzeit zeigte meist den
-  Schnitttag in beiden Serien, und das Löschen ab einem Termin ließ ihn
-  stehen: Aperio schrieb das UTC-Datum des `UNTIL` als Enddatum, und Exchange
-  zählt es als ganzen Tag auf der Uhr der Serie (Live-Runde 10a). Richtig
-  war das nur östlich von UTC für eine Uhrzeit bis zum Abstand zu UTC (M1).
-  Jetzt endet die alte Serie am Tag vor dem Schnitttag, auf dieser Uhr; ein
-  selbst gewähltes Ende bleibt, wie es ist. Aperios eigene Anzeige liest das
-  zurückgelesene Enddatum weiter als Zeitpunkt und irrt in zwei Fenstern um
-  einen Tag (255, Stufe 8). Gebaut im Exchange-Adapter, also für Desktop und
-  Handy zugleich (#125); Live-Runde 10b bestanden (alle zehn Schritte, auch
-  ein Schnitt am Tag der Umstellung auf Sommerzeit). Ungemessen: ein Schnitt
-  am Tag der Umstellung auf Winterzeit.
   🚩 **Serien mit falschem Starttag** (231): Was Aperio vor 8a geschrieben hat,
   bleibt so. Einmal verschieben und Wochentag oder Tag in der Wiederholung
   neu wählen; eine wöchentliche Serie ohne gewählten Wochentag trägt in der
@@ -1200,42 +478,6 @@ Siehe DESIGN §4.2.
   liest `…T235959Z` zurück wie Exchange; `cal_core::last_day_through` (257)
   ist dafür da. Ob Graph das Enddatum inklusive und auf welcher Uhr zählt,
   ist ungemessen.
-  ↻ **Die Zone zuerst** (Zonen-PR, 2026-10-10, Entscheidungen 240-245): Eine
-  neue Zone behält die gespeicherte Uhrzeit (Runde 1, B2), also wanderte jedes
-  Ändern, das die Uhr eines Exchange-Termins wechselte, um den Versatz: ein
-  in Aperio angelegter Einzeltermin, der zur Serie wird (Live-Test 8a: aus
-  Montag 00:30 wurde Sonntag 23:30), eine ganztägige Serie, die Uhrzeiten
-  bekommt, und der Zonenwechsel an einer gespeicherten Serie, den erst die
-  Stufen 11 und 12 in den Editor bringen. Ein
-  Ändern schreibt die Zone jetzt zuerst; nennt sie eine andere Uhr, folgen
-  Beginn, Ende und Ganztägig mit den Werten des Servers (240), die Regel
-  zuletzt auf der neuen Uhr und nur, wenn sich ihre gebaute Form ändert (241).
-  Live-Test Zone (242, 2026-10-10): Einzeltermin zur Serie in Berlin und
-  Tokio richtig (L1, L1b), Gegenproben richtig (L4a bis L4e). Beginn und Ende
-  neu verwerfen die Ausnahmen einer Serie (L3a, L3b, M3, M6), Titel und
-  Anzahl allein nicht (M4, M5): Vor einem Zonenwechsel, der sie nur
-  deshalb schreibt, fragt Aperio, wenn dabei einzeln geänderte Vorkommen
-  verloren gingen (245, seit 247 eine Frage). Ganztägig bekommt
-  Uhrzeit: Beginn und Ende
-  vor und nach der Zone, die Regel immer (244, M7, M8). Aperios eigene
-  Anfrage danach, vierte Runde: ganztägig bekommt 10:00 und 00:30 richtig
-  (N1, N1b); der Zonenwechsel wird abgelehnt, nichts geht raus, die
-  Ausnahmen bleiben (N2); Wien statt Berlin schreibt nur die Zone und
-  behält sie (N3). Fünfte Runde: ganztägige Outlook-Serien in W. Europe
-  bekommen 10:00 richtig, täglich und samstags (O1, O2).
-  ↻ **Warnen und fragen** (243, PR A, Entscheidungen 246-253): Schreibt ein
-  Ändern Beginn und Ende, die Zone oder das Muster einer Exchange-Serie neu,
-  fragt der Editor vorher, was dabei verloren ginge — einzeln geänderte
-  Vorkommen und gelöschte, die Aperio nicht wieder zuordnen kann —, auf dem
-  Desktop und auf dem Handy, mit der Zahl vom Server; die übrigen gelöschten
-  löscht Aperio danach wieder, und was nicht klappt, nennt es mit dem Tag.
-  Eine Serie ohne lesbaren Stand wird nicht geschrieben (248). Live-Test
-  Runde 7 mit Aperios eigener Anfrage bestanden (Q1 bis Q6, 2026-10-11).
-  ↻ **Warnen und fragen, PR B** (250, 251): Ziehen fragt nach der Umfang-Wahl
-  in einem eigenen Bestätigen-Dialog und verschiebt bei Ja noch einmal, mit
-  der Zustimmung nur am Schreiben der Serie; Übertragen an Kopien fragt
-  einmal nach der Schleife, jede Kopie mit ihrem Kalender, und schickt nur die
-  betroffenen noch einmal, auf dem Desktop und auf dem Handy.
   🚩 **Zonen-Picker und dieselbe Uhrzeit** (Stufen 11 und 12): Paris statt
   Berlin heißt bei Exchange „Romance Standard Time“ statt „W. Europe Standard
   Time“ und zählt deshalb als andere Uhr: Aperio schreibt Beginn und Ende
@@ -1247,8 +489,6 @@ Siehe DESIGN §4.2.
   🚩 **Wenn der EWS-Adapter das Repository verlässt,** müssen `cldr/`, die
   erzeugte Tabelle und `cargo xtask windows-zones` mitgehen. Sonst fällt die
   Prüfung still weg.
-  ↻ **Mit dem nächsten Handy-Build:** die `.so` frisch erzeugen. Rust im
-  EWS-Adapter hat sich geändert, neue FFI-Funktionen gibt es nicht.
 - [ ] Schritt 3: Darstellung (`dayGridLayout`, `titleSuggestions`,
   `eventDateTime`, `taskRecurrence`, `quickDates`, `eventKey`) bleibt pro
   Oberfläche und darf auseinanderlaufen.
@@ -1260,9 +500,8 @@ Siehe DESIGN §4.2.
 
 ### B3 · Sync-Restpunkte (§19) `[~]` (Toggle-UI bewusst zurückgestellt)
 - [ ] Per-Einstellung-Sync-Umschalter-UI im `SyncPanel` (§19.2.1; Backend hat eine feste `SYNC_WHITELIST`) — **bewusst zurückgestellt** (auf Wunsch).
-- [~] Schnappschuss nennt seine Ereignisse, jedes Gerät holt einmal nach (DESIGN-sync-snapshot-coverage.md, Toni 2026-10-27/30, Laptop übersprang eine gewachsene Desktop-Sitzung). PR #130, Branch `fix/snapshot-coverage`: R1-R7 gebaut. Offen:
+- [~] Schnappschuss nennt seine Ereignisse, jedes Gerät holt einmal nach (DESIGN-sync-snapshot-coverage.md, Toni 2026-10-27/30, Laptop übersprang eine gewachsene Desktop-Sitzung). PR #130 gemergt (3e2db8cc, 2026-10-31, Version 0.2.0, Sync-Format 2), ohne Live-Test auf Tonis Wunsch. Offen:
   ↳ Sobald ein Gerät Tastenkürzel-Ereignisse schreibt (`shortcut.*`, noch ohne Anwender): Sie gelten als nicht gehalten, halten jede Datei mit ihnen fest und verhindern Kennungen im Schnappschuss. Dann Anwender bauen oder sie als gehalten zählen.
-  ↳ Live prüfen: Nach dem Update holt jedes Gerät einmal nach; auf dem Laptop stimmen die Aufgaben seit dem 19.10., gelöschte verschwinden, kein Konflikt.
   ↳ Grenzen: Eine Löschung, deren Datei schon aufgeräumt ist, lässt sich nicht nachholen. Eine Zeile ohne bekannte Zeit (Uhr erst ab diesem Update, kein `updated_at`) nimmt eine nie angewendete ältere Änderung noch an — auch aus einer Datei, die ein 0.1.0-Build nach dem Aufräumen erneut hochgeladen hat (Prüfrunde 4: die Regel „älter als `gc_horizon` gilt als gehalten“ verwarf gewöhnliche Änderungen und entfiel).
   ↳ Mehr als 256 Dateien im Sync-Ordner: Die ältesten fallen aus den gemerkten Längen und werden jede Runde neu geholt (richtig, aber Bandbreite). Bei Bedarf Längen nach Auflistung statt nach Anzahl kappen.
   ↳ Eine einzige unlesbare Datei (Lesefehler, oder unter E2E eine nicht entschlüsselbare) lässt den ganzen Abruf scheitern: Beitritt und Wiederaufnahme schlagen fehl, das Nachholen versucht es stündlich. Adapter sollten so eine Datei mit Warnung überspringen und benennen (Prüfrunde 2, U5).
@@ -1450,191 +689,18 @@ Vorschlag aus der Prüfung:
 Windows und Linux laufen über `npm run tauri -- build` und sind nicht
 betroffen.
 
-### B9 · Personen einer Liste: ein Fehler wird gesagt (130) `[~]`
-
-✅ Das Feld „Zugewiesen an“ verschwand bei Toni von jeder Vikunja-Aufgabe. Die
-Personen kommen auf v2 aus `GET /api/v2/projects/{id}/users/search`, einem Weg mit
-eigenem Token-Recht („users search“ unter Projects). Vikunja gibt einem
-bestehenden Token nie ein neues Recht; sein Token von vor 2.4 bekam 401, und der
-Adapter machte aus jedem Fehler eine leere Liste, die das Feld versteckte. Jetzt:
-`cal_core::ReadRefusal::TokenRefused` nennt das Recht, jeder andere Fehler bleibt
-einer (Vikunja und Todoist; bei Todoist heißt nur 403 „niemand“), beide Hosts
-melden eine nicht routbare Liste, und `assigneeField` zeigt das Feld immer, wo die
-Liste Zuweisungen kennt: lädt, Fehler mit Neu-Versuch, niemand, Auswahl. Das Handy
-liest die Meldung hinter Expos Vorspann („Call to function … Caused by:“; gilt
-auch für die Schreib-Ablehnungen) und lädt Personen und „ich“ getrennt. Der
-Fokus bleibt nach „Erneut versuchen“ im Feld (Desktop), am Handy geht er auf die
-Beschriftung und das Ergebnis wird angesagt. ↻ im Test (Handy ohne Testläufer).
-
-↻ **Erledigt in PR 7 (2026-10-23):** Jeder Aufruf des Rust-Hosts aus der
-Handy-Brücke läuft jetzt durch `hostCoded` (`CalFfiModule.swift`/`.kt`), das
-jede Variante mit dem Code des Desktops nach JS gibt (`auth`, `forbidden`,
-`not_found`, `conflict`, `network`, `protocol`, `invalid_input`,
-`unsupported`, `internal`, beim Abgleich dessen eigener Code);
-`check-ffi-bridges.mjs` lässt keine unumhüllte Registrierung durch. Kotlin
-lokal gebaut; Swift baut erst der iOS-Bau — ↻ im Test. Das gilt so nur für
-Android: Auf iOS kommt der Code nicht in JavaScript an (siehe „iPhone:
-verliert Expo den Fehlercode?“ unter B14), dort liest nur die Marke im
-Text.
-
-### B10 · iOS: VoiceOver tippte durch die Tab-Leiste (159) `[~]`
-
-✅ Doppeltippen auf „Protokolle“, den letzten Eintrag der Einstellungen, öffnete
-den Tab „Kalender“. Die Leiste liegt über der Szene; die Tab-Seiten polsterten nur
-ihren Scroll-INHALT, die Scroll-Ansicht selbst lief weiter unter die Leiste.
-VoiceOver hielt eine Zeile dort für sichtbar, scrollte sie nicht hoch und tippte
-ihre Mitte an, also die Leiste. Seit dem zwölften Eintrag (Signaturen) lag
-„Protokolle“ genau dort; latent galt es für jede Tab-Seite (Aufgaben mit der
-Gruppe „Erledigt“, Tag, Woche, Monat, Agenda, Jahr, Kontakte). Jetzt endet die
-Szene jeder Tab-Seite über der Leiste (`useStackScreenOptions` in `App.tsx`,
-nur iOS; Android legt die Leiste unter die Szene). Sehende sehen den Inhalt nicht
-mehr hinter der Glas-Leiste, und beim Öffnen und Schließen einer Unterseite
-zeigt die Tab-Seite während der Animation unten einen leeren Streifen ohne
-Leiste (die Leiste verschwindet beim Öffnen sofort und kommt beim Schließen erst
-danach). Bewusst so: das Polster an der Sichtbarkeit der Leiste festzumachen,
-hieße die Stapel bei jedem Wechsel neu zu rendern, und das setzt den
-VoiceOver-Cursor zurück. ↻ im Test (Handy ohne Testläufer).
+### B10 · iOS: VoiceOver tippte durch die Tab-Leiste (159) `[ ]`
 
 🚩 **Offen:** Auf dem iPad ab iPadOS 18 sitzt die Leiste in normaler Breite
 oben. Das untere Polster kostet dort jetzt auf jeder Tab-Seite einen festen
 leeren Streifen von 56 bis 76 pt; das alte war nur Leerraum am Listenende.
 Braucht die Lage der Leiste (oben oder unten), die die Bibliothek nicht meldet.
 
-### B11 · Titel-Vorschlag: der Kalender, den er nennt (160, 161) `[~]`
-
-✅ Im Schnell-Hinzufügen nannte der Vorschlag „Arbeit“, und der Editor landete
-auf dem obersten Kalender. Zwei Wege, beide nachgestellt: Das Übernehmen suchte
-nur nach der Kennung, und dieselbe Kennung kann in zwei Kalendern liegen
-(Google behält sie über Kalender hinweg, eine Kopie behält ihre UID) — jetzt
-per Behälter und Kennung (`offerKey`, `findOffer`), auch bei Aufgaben, wo zwei
-Server von derselben 1 zählen. Und seit ba58411e galt jede Pfeiltaste in der
-Kalenderauswahl als Wahl; jetzt zählt nur, was beim Übernehmen vom gezeigten
-Standard abweicht (`pickedOverOffer`, 160). Dazu (161): eine beschreibbare
-Kopie desselben Titels kommt vor einer neueren in einem nur lesbaren Kalender,
-ein nur lesbarer Vorschlag sagt „nur lesbar“, und nimmt der Editor einen
-anderen Kalender oder eine andere Liste, sagt er beide an — beim Übernehmen im
-Editor mit der Ansage der Übernahme, nach dem Schnell-Hinzufügen beim Öffnen.
-Die Vorschläge öffnen sich nur noch nach Tippen, nicht nach einer Übernahme.
-Desktop, Handy, Termine und Aufgaben. ↻ im Test (Handy ohne Testläufer).
-
-Auf eine noch leere Kalender- oder Listenauswahl warten beide Editoren jetzt,
-statt jeden Behälter als unbekannt abzulehnen; ein Testaufbau mit derselben
-Dauer wie die Grundform hatte das verdeckt.
+### B11 · Titel-Vorschlag: der Kalender, den er nennt (160, 161) `[ ]`
 
 🚩 **Offen:** Fehlt der Behälter des Vorschlags nur in einer noch
 unvollständigen Auswahl, bleibt die erste Ablehnung stehen (der Riegel
 `prefillApplied`). Bei Toni nicht der Fall.
-
-↻ **Release-Build (Toni, 2026-10-31):** Der Editor landete nach einem
-Vorschlag aus dem Schnell-Hinzufügen wieder auf dem ersten Kalender, obwohl
-jeder Test der Übergabe grün war. Eine Spur im Log (`[prefill …]`, wieder
-entfernt) zeigte die Ursache: Der Reset lief ein zweites Mal, bevor
-die Aktualisierung des Prefills gerendert war. Ein Store, der synchron pusht,
-rendert vor den Aktualisierungen der Effekte; das Formular sah darum noch
-unberührt aus, und die Grundform landete hinter dem Prefill. Der Prefill lief
-nicht wieder, weil sich keine seiner Abhängigkeiten änderte (in dev rettete
-StrictMode). Jetzt zählt jeder Reset (`baselineResets`), und der Prefill läuft
-danach noch einmal, im Termin- und im Aufgaben-Editor. Bestätigen im Build von
-main.
-
-### B12 · Gerätekonto nach dem Telefonwechsel (162-173) `[~]`
-
-✅ **PR-A:** Nach dem Umzug per Schnellstart auf ein neues iPhone kamen Aperios
-Daten mit, die iOS-Freigabe für Kalender und Erinnerungen nicht; Aperio fragte
-nur beim Anlegen des Kontos, prüfte den Status nie und hielt den leeren Katalog
-für „lädt noch“. Jetzt fragt Aperio beim Start, wenn es ein Gerätekonto gibt
-und iOS auf diesem Telefon noch nie gefragt hat (`cal_core::os_access`, 166),
-nach dem Entsperren und dem ersten Bild, auf einer eigenen Warteschlange. Nach
-der Freigabe frischt die Brücke ihren `EKEventStore` auf (seit PR-G mit `reset()`
-statt eines neuen Stores), das Konto lädt neu
-(`warm_all_queued`: am Handy ging eine Anfrage während eines Durchlaufs bisher
-verloren), und ein Satz sagt, was erteilt wurde. Das Protokoll nennt den
-Zugriff vorher und nachher sowie, wie sich die Kalenderliste änderte (geblieben,
-weggefallen, neu) oder dass sie nach einem Fehler unverändert wiederkam — daran
-sieht man, ob iOS die Kennungen behalten hat. Konten, die über den Abgleich
-ankommen, gehen einem laufenden Durchlauf ebenfalls nicht mehr verloren.
-↻ im Test (Handy ohne Testläufer).
-
-✅ **PR-B:** Ohne vollen Zugriff verweigert der Adapter jedes Lesen und
-Schreiben (`cal_core::Error::AccessNotGranted`, Marke `access-not-granted`,
-getragen als `forbidden`). Vorher meldete Löschen Erfolg, ohne etwas zu tun
-(und vergaß Gruppierung und private Erinnerungen auf allen Geräten), und „nur
-hinzufügen“ (171: zählt als kein Zugriff) hätte mit seinem einen virtuellen
-Kalender die echten aus dem Zwischenspeicher verdrängt. Am Handy sagt jedes
-Schreiben eine Ablehnung als Satz (`writeErrorMessage`), nicht nur der
-Termin-Editor. ↻ im Test (Handy ohne Testläufer).
-
-✅ **PR-C:** Der Cache merkt sich die Fehlerart (`failure_kind`: access, auth,
-sonst nichts; Migration 46) statt sie aus Wörtern zu raten. Fehlt der Zugriff,
-sperrt das die ganze Familie (Kalender oder Listen) für das Nachladen beim
-Lesen (`access_withheld`); der Warm-Durchlauf fragt weiter, eine Freigabe hebt
-die Sperre. Die Fehlerliste nennt eine gesperrte Familie einmal statt jede
-Kennung, sagt `no_access` und `cause`, und ein Fehler steht nur noch einmal
-im Protokoll, nicht bei jedem gleichen Versuch. „Neu synchronisieren“ behält
-die letzte erfolgreiche Aktualisierung (`last_success_at`). ↻ im Test.
-
-✅ **PR-D1:** Fehlt der Zugriff, trägt die Kontozeile ein Abzeichen, das den
-fehlenden Speicher nennt („Kein Zugriff“, „Kalender ohne Zugriff“,
-„Erinnerungen ohne Zugriff“), und die Aktion „Zugriff erlauben…“. Was sie tut, entscheidet der Kern
-(`cal_core::os_access::repair_for`): fragen, solange das System fragt (unter
-Android, bis es „nicht mehr fragen“ meldet), sonst ein Dialog, der sagt, was in
-den Einstellungen fehlt, und sie öffnet; bei einer Einschränkung nur die
-Erklärung. Kommt Aperio wieder nach vorn und der Zugriff ist da, während der
-Cache das Konto noch sperrt (`restorable`), oder ist seit dem letzten Blick ein
-Speicher lesbar geworden (beim Neustart der gemerkte Blick des letzten Laufs:
-iOS beendet Apps womöglich bei geänderten Rechten), lädt es sofort neu und
-sagt es an; nach einem Weg in die Einstellungen, der nichts änderte, sagt es,
-wofür der Zugriff noch fehlt. Unter Android meldet ein ohne Antwort
-geschlossener Dialog dasselbe wie „nicht mehr fragen“, und nichts trennt beides;
-der Dialog behauptet deshalb nichts darüber. ↻ im Test (Handy ohne Testläufer).
-
-✅ **PR-D2:** Der Satz am Ende eines Durchlaufs nennt, was nicht aktualisiert
-wurde („Externe Daten aktualisiert, außer: …“; nichts gelesen: „konnten nicht
-aktualisiert werden“, dann die Warnung mit Ursache; nichts gelesen und nichts
-bestätigt (erster Netzaussetzer) oder kein Ergebnis: „Aktualisierung externer
-Daten beendet“), aus dem Kern (`CacheRefreshStatus.outcome`, dieselbe
-Menge wie die Fehleranzeige); Genanntes wird nicht noch einmal angesagt, die
-Hinweise erscheinen mit dem Satz (180). Die Ursache ist ein Typ mit Rang im Kern
-(`RefreshCause`, Zugriff vor Anmeldung vor Sonstigem, 181); Banner und Ansagen
-lesen ihn ab, eine schwerere Ursache wird erneut angesagt (185). Fehlt einem
-Konto der Zugriff, steht im Synchronisieren-Bereich eine Zeile mit Knopf „Zu
-den Konten“ (184), am Desktop eine Zeile. „Neu verbinden“ nur bei Anmeldeproblem
-und Kontoart mit Zugangsdaten. Höchstens ein Konto einer Art per
-`single_instance` im Manifest, an allen Konto-Türen (183); „Dieses Gerät“ in der
-Auswahl führt dann zur Reparatur oder zur Zeile (182). Ein Klick in den ersten
-Sekunden am Desktop lässt den Start-Durchlauf erzwungen laufen; sein Satz nennt
-Fehler sofort. Die Typen dafür sind erzeugt
-statt von Hand gespiegelt. ↻ im Test (Handy ohne Testläufer).
-
-✅ **PR-E:** Android fragt beim Start einmal selbst (172). Weil Android nicht
-sagen kann, ob es je gefragt hat, merkt sich Aperio jede Anfrage auf dem Gerät
-(`noBackupFilesDir`, nicht im Backup, also auf einem neuen Telefon wieder
-leer); ohne Merker meldet die Brücke „noch nie gefragt“, und die Kernregel
-(`ask_on_start`) fragt wie unter iOS. Danach liest sie „unbestimmt“, und
-„Zugriff erlauben…“ fragt bzw. führt in die Einstellungen. ↻ im Test (Handy
-ohne Testläufer).
-
-✅ **PR-F entfällt:** Gemessen am 2026-10-03 auf Tonis iPhone: Nach der Freigabe
-kamen alle 8 Kalender und alle 5 Erinnerungslisten mit ihren alten Kennungen
-zurück (nichts weggefallen, nichts neu). Es gibt nichts zu übernehmen.
-
-✅ **PR-G (186, 187):** Im selben Feldtest meldete iOS für die Erinnerungen eine
-Sekunde nach der Zustimmung wieder „noch nie gefragt“ und blieb dabei, bis
-Aperio neu startete; jede weitere Anfrage beantwortete iOS sofort mit
-„erteilt“, ohne Dialog, und Aperio sagte trotzdem „nicht erteilt“ und schickte
-in die Einstellungen. Zwei Änderungen: Die Brücke hält einen einzigen
-`EKEventStore` für den ganzen Lauf und frischt ihn nach einer Zustimmung mit
-`reset()` auf (186), statt ihn zu ersetzen — der Wechsel hatte binnen einer
-Sekunde zwei neue Stores erzeugt (drei im Lauf) und gerade den mit der frischen
-Zustimmung verworfen. Solange eine Anfrage läuft, setzt nichts den Store zurück;
-kommt danach eine leere Liste, folgt einmal ein weiterer `reset()`. Und eine Zustimmung in diesem Lauf entscheidet ein späteres „noch
-nie gefragt“ (`cal_core::os_access::settled_by_grant`, 187); „verweigert“,
-„eingeschränkt“ und „nur hinzufügen“ gehen immer vor, nichts wird über den Lauf
-hinaus gemerkt. Die Brücke meldet die Zustimmung als `granted_this_run`
-(Vertrag: `shared/contracts/deviceAccessStatus.json`, den Rusts Test liest und
-an dem `check-ffi-bridges.mjs` die Schlüssel beider Brücken prüft), das Protokoll
-nennt, wann sie den Status entschieden hat. ✓ im Einsatz (Build vom 2026-10-04,
-von Toni getestet).
 
 ### B13 · Abhaken am Handy wartet auf den Erinnerungs-Durchlauf (218-220) `[ ]`
 
@@ -1900,7 +966,7 @@ Vorschläge sind nicht aufgenommen.
       ein eigenes Schreiben sie freigibt, und die Runden fragen im üblichen
       Takt neu. Sie könnten bis zur genannten Zeit warten. Aus der Planung
       von PR 7 (2026-10-23).
-- [ ] ↻ **iPhone: verliert Expo den Fehlercode?** Expo 56 scheint auf iOS bei
+- [ ] **iPhone: Expo verliert den Fehlercode.** Expo 56 lässt auf iOS bei
       jeder abgewiesenen `AsyncFunction` `error.code` fallen zu lassen. Dann
       sind die Zweige, die nach dem Code fragen, auf dem iPhone tot:
       `useSyncErrorMessage`, `EventGroupModal`, `client_secret_required` im
@@ -1913,8 +979,7 @@ Vorschläge sind nicht aufgenommen.
       56.0.10): `AsyncFunctionDefinition` gibt den Fehler an
       `JavaScriptPromise.reject`, und das baut `JavaScriptError` nur mit der
       Meldung; den Code hängt nur der Weg für synchrone Würfe an. Android
-      gibt ihn mit. Am iPhone prüfen (etwa ein Speichern mit Konflikt); wenn
-      ja, entweder expo-modules-jsi per patch-package den Code mitgeben lassen
+      gibt ihn mit. Abhilfe: entweder expo-modules-jsi per patch-package den Code mitgeben lassen
       oder den Code in den Text legen, ohne dass die Marke ihren ersten Platz
       verliert. Aus der Planung von PR 7 (2026-10-23).
 - [ ] **Plugins: Abgleich liest „verboten“ als Anmeldung.** Der Abgleich
@@ -2377,7 +1442,19 @@ nur eine Klasse für vom Nutzer angestoßene Vordergrundarbeit.
       die Existenz einer Datei — entscheidet weiterhin, welche Kopie lebt.
       ⚠️ Weiterhin einseitig: eine App-Version VOR dem Umzug sucht in
       Application Support, findet dort aber jetzt wieder alles.
-- **Schritt 2b/2c** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Schritt 2b/2c** — Widget 1 mit echten Daten, über eine SNAPSHOT-Datei  
+      NACHTRAG (Gerätebefund): ein laufender Termin verdeckte alles, was IN ihm
+      lag. Ein Blocktermin „Arbeitszeit 10–16" gewann ab 10:00 gegen jede
+      Besprechung darin, und je länger er lief, desto sicherer — die Sortierung
+      nahm den START. Jetzt ordnet ein LAUFENDER Termin nach seinem ENDE, womit
+      der innerste zuerst kommt; dieselbe Begründung wie bei ganztägigen, nur
+      eine Stufe früher.
+      Das musste an DREI Stellen: der Schlüssel hängt jetzt an der Uhr, und die
+      App friert ihre Antwort Stunden vor dem Zeichnen ein. Also sortieren
+      `Snapshot.swift` und `WidgetStore.kt` zur RENDERZEIT neu — beide Zeitachsen
+      legen ohnehin je einen Eintrag auf jeden Start und jedes Ende, also genau
+      auf die Momente, an denen sich die Reihenfolge ändern kann.
+      `widgetSnapshotWire.test.ts` bewacht, dass beide es weiter tun.
   ↳ Erledigt inkl. der dreisprachigen Neusortierung zur Renderzeit. Was bleibt, sind benannte Randfälle, keine fehlende Implementierung.
       statt über den mitgelinkten Rust-Kern. Beim Ausarbeiten von 2b fiel die
       Annahme, auf der der Linking-Plan stand:
@@ -2453,6 +1530,46 @@ nur eine Klasse für vom Nutzer angestoßene Vordergrundarbeit.
       Terminierte Einträge sortieren weiterhin nach Start, auch laufende: ein
       Termin, in dem man gerade sitzt, ist das Unmittelbarste, was es gibt.
       ⚠️ Ungeprüft auf dem Gerät.
+
+- [x] **Schritt 4** — Abhaken aus dem Widget (`targets/widget/Actions.swift`,
+      `mobile/src/state/widgetActions.ts`). Die Extension schreibt NICHT die
+      Antwort, sondern die FRAGE: eine Datei pro Tipp in die App Group, die die
+      App über `setTaskStatusTo` abarbeitet — denselben Aufruf, den die
+      Tagesstart-Übersicht nutzt. Abschließen kaskadiert auf Eltern und Kinder,
+      weist auf geteilten Listen zu, schaltet Wiederholungen weiter und stellt
+      einen Sync-Push ein; nichts davon ist aus einem Extension-Prozess
+      erreichbar, und es hier nachzubauen wäre der Weg, auf dem Widget und App
+      auseinanderlaufen.
+      EINE Datei pro Aktion, nie eine gemeinsame: zwei Prozesse schreiben da
+      hinein, und ein read-modify-write verliert den Tipp, der das Rennen
+      verliert.
+      Das Widget blendet bereits eingereihte Zeilen aus, sonst wirkt der Knopf
+      tot. Eine Aktion wird nach dem VERSUCH gelöscht, nicht erst nach Erfolg —
+      sonst bliebe eine unausführbare Aktion für immer stehen und mit ihr die
+      unsichtbare Zeile.
+      A11y: die Aufgabenzeile IST das Kontrollkästchen — `Toggle(isOn:intent:)`
+      mit der ganzen Zeile als Label, nicht Text plus Knopf daneben. Ein Element
+      statt zwei, und VoiceOver liefert Inhalt, Rolle und Zustand in einem Wisch.
+      `Toggle(isOn:intent:)` nimmt einen NORMALEN `AppIntent` — `SetValueIntent`
+      braucht nur `ControlWidgetToggle` (Kontrollzentrum). Der gewünschte
+      Zielzustand steckt in den Intent-Parametern, nicht im Toggle.
+      Eigener `ToggleStyle` (Kreis statt Schalter): die Interaktion hängt am
+      `Toggle`, nicht am Style, also ändert ein Style, der nur zeichnet, nichts
+      am Verhalten.
+      `isOn` ist IMMER false — eine erledigte Aufgabe steht nicht im Snapshot,
+      eine gerade abgehakte blendet das Overlay aus. Es gibt hier keinen Zustand,
+      der mit der App auseinanderlaufen könnte.
+      Der Tipp läuft über `applyTaskToggle`, NICHT über `setTaskStatusTo(…,
+      'completed')`. Der Abhak-MODUS ist eine gesynct Einstellung: unter „cycle"
+      geht ein Tipp offen → in Arbeit → erledigt. Hart auf erledigt zu schreiben
+      hätte das Widget zur einzigen Oberfläche gemacht, die die Einstellung des
+      Nutzers ignoriert. Die eingereihte Aktion heißt darum `toggle`, nicht
+      `complete` — das Widget bittet um dasselbe wie ein Tipp in der App, und die
+      App entscheidet, was das heißt.
+      Der Zustand steht an der Zeile: leerer Kreis = offen, halb gefüllt = in
+      Arbeit, plus das Wort in der Ansage. Eine schreibgeschützte Projektion
+      bekommt das Wiederholungs-Symbol statt eines Kreises — ein Kreis, den man
+      nicht anhaken kann, ist ein lügendes Bedienelement.
 
 #### A9 · Termingruppen `[x]` — Stufen 0 bis 3 stehen
 Derselbe Termin liegt heute mehrfach in Aperio (Outlook für die Kollegen, Kopie
@@ -2594,6 +1711,41 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
       Nur beschreibbare und nicht ausgeblendete Kalender; bei Aufgabenlisten
       dagegen ALLE, weil die Listenauswahl in der Aufgabenansicht ein Fokus-
       Werkzeug ist und keine Aussage darüber, was existiert.
+- [x] **Schritt 4** — tatsächlich anlegen, jetzt auch Aufgaben.  
+  ↳ Code-vollständig inkl. der zwei feinen Regeln (Tag ohne Uhrzeit; nie den Rust-Kern im Intent-Prozess öffnen).
+      `CreateTaskIntent`: Titel + Liste werden gefragt, der Tag NICHT — optionale
+      Parameter fragt Siri nicht ab, und das ist richtig so: die meisten
+      gesprochenen Aufgaben sind „merk dir das" und gehören ins Backlog, nicht
+      auf einen Tag. Über die Kurzbefehle-App ist der Tag trotzdem setzbar.
+      Gespeichert wird nur das DATUM, nie die Uhrzeit: ein iOS-Datumsparameter
+      trägt immer eine mit, und eine per Tagesauswahl gebaute Aktion liefert
+      Mitternacht — das würde „irgendwann am Dienstag" zu „fällig um 0:00".
+      `openAppWhenRun` bleibt bei beiden: beim Haken ist Verzögerung unsichtbar,
+      beim ANLEGEN nicht — man sagt etwas und findet minutenlang nichts.
+      Den Rust-Kern direkt aus dem Intent zu öffnen ist bewusst KEINE Option:
+      zweiter schreibender Prozess auf einer Datenbank, plus ein teurer
+      Host-Start pro Sprachbefehl.
+
+- [x] **Android** — „Als Nächstes" über **Glance**  
+  ↳ Erledigt und im Baum nachprüfbar (Glance für die TalkBack-lesbare CheckBox, `filesDir/widget` statt App Group, Receiver mit exported=true).
+      (`modules/cal-ffi/android/.../AperioWidget.kt`). Liest denselben Snapshot;
+      kein App Group nötig, ein Android-Widget läuft im Prozess der App unter
+      derselben uid, also reicht `filesDir/widget/`.
+      GLANCE statt RemoteViews wegen EINER Sache: `CheckBox` trägt Rolle UND
+      Zustand zu TalkBack. RemoteViews kann einen Kreis zeichnen und eine
+      Beschreibung setzen, aber nicht sagen „das ist ein Kontrollkästchen, und
+      es ist nicht angehakt".
+      Der Compose-Compiler war KEINE neue Abhängigkeit: `expo-modules-core` legt
+      `org.jetbrains.kotlin.plugin.compose` bereits in den buildscript-Klassenpfad
+      und `expo-dev-launcher` zieht Compose ohnehin in den Baum. Angewendet im
+      selben Muster wie expo-modules-core (`apply plugin:` nach einem
+      buildscript-Block, nicht die `plugins {}`-DSL).
+      Der Receiver steht im MODUL-Manifest, das der Build ins App-Manifest
+      mergt — kein Config-Plugin nötig. `exported="true"`, sonst bindet der
+      Launcher ihn nie.
+      Sperrbildschirm-Widgets gibt es unter Android nicht (nach Android 11
+      entfernt), das Countdown-Widget hat also kein Gegenstück.
+
 #### A10 · Adapter in eigene Repositories herauslösen (§20) `[~]` — erledigte Punkte
 
 - [x] **Paket 1 — Manifeste gehören ihrer Kiste.** Jede der 14 Kisten mit
@@ -2901,7 +2053,14 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   (`undefined - undefined` = NaN, `NaN || …` fällt durch); Rust wirft. Kein
   Produktionspfad kann das erzeugen — `priority` ist auf `Task` Pflicht —, aber
   ein Test-Fixture konnte es, und der lautere Fehler hat es gefunden.
-- **Die Textordnung liegt im Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Die Textordnung liegt im Kern** (Toni: „zieh icu in den kern, das wiegt
+  nicht so schwer", 2026-09-09). `cal_core::collation` bietet genau zwei
+  Regeln — `compare_names` (Namen von Dingen: Konten, Behälter, Kontakte,
+  Tagesmarkierungen; Groß-/Kleinschreibung und Akzente trennen nicht) und
+  `compare_titles` (selbstgeschriebener Text; Ziffernläufe nach Wert, Fälle
+  trennen). Beide Oberflächen gehen durch ihre eigene Tür: der Desktop über
+  WebAssembly, Mobile über eine synchrone Expo-`Function`. In `shared/` ist
+  kein `localeCompare` mehr. Siehe DESIGN §4.4.
   ↳ **Drei stille Fehler nebenbei behoben:** die Regel lag nur in JavaScript
   (reMarkable hätte eine dritte Ordnung gebraucht); jeder Aufruf übergab
   `undefined` als Locale und folgte damit dem BETRIEBSSYSTEM statt der in
@@ -3289,7 +2448,8 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Android-Muster, denn eas-cli liest nie den Index, sondern den Arbeitsbaum
   durch `.gitignore`. Das rrule-Paar (PR #40): exportiert, deklariert, von
   keiner Brücke gerufen; der Wächter duldet das mit Absicht.
-- **Die Aufgaben-Gruppierung zieht in den Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Die Aufgaben-Gruppierung zieht in den Kern** (Tonis Wahl 2026-09-10),
+  in denselben zwei Schritten wie der Übertrag.
   ↳ **Schritt 1 (PR #41): die Tabelle.** `buildEntries` (611 Zeilen, auf
   BEIDEN Oberflächen aus `useMemo` gerufen — die Modul-Suche zeigte nur den
   Desktop, weil Mobile über das Barrel importiert) hatte 41 Desktop-Tests und
@@ -3345,7 +2505,8 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Nebenbefund für danach: `useTasks.ts` hat auf Desktop
   UND Mobile je eine identische lokale `taskOrder` (Datums-Eimer → Datum →
   Erstellzeit, eine ANDERE Ordnung als die geteilte) — ein zweiter Zwilling.
-- **Die Kalendertag-Regeln ziehen in den Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Die Kalendertag-Regeln ziehen in den Kern** (`taskDay`), in denselben
+  zwei Schritten.
   ↳ **Schritt 1 (PR #44): die Tabelle.** `filterTasksOnDay` & Co. (362
   Zeilen, auf beiden Oberflächen aus `useMemo` gerufen) hatten 28 + 9 Tests
   und keine Fixture. Jetzt steht `crates/cal-core/tests/fixtures/taskDay.json`:
@@ -3401,7 +2562,8 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   davon fragten nach einem Tag, an dem die Aufgabe gar nicht liegt, und
   prüfen jetzt genau das: kein Eintrag. Kein Verhalten hat sich geändert.
 
-- **Der Aufgaben-Zustand zieht in den Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Der Aufgaben-Zustand zieht in den Kern** (`taskStatus`), in denselben
+  zwei Schritten — mit dem Schnitt vom 2026-09-09: Zustand rein, Zeichen vorn.
   ↳ **Schritt 1 (dieser PR): die Tabelle.** Von den 18 Exporten des Moduls
   sind drei schon Türen (`priorityRank`, `isImportantPriority`,
   `normalPriority`), zwei sind Glyphen (bleiben), fünf sind Wortwahl über `t`
@@ -3443,7 +2605,16 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   würde es den Prototyp setzen). Der dritte Gegenleser (Aufrufer, CI) fand
   nichts: jede Zeile fragt mit demselben Hook-Array, eine Überfahrt pro Liste.
 
-- **Die Status-Kopplung zieht in den Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Die Status-Kopplung zieht in den Kern** (`taskCascade`), in denselben
+  zwei Schritten. Vier Antworten: was ein Elternteil aus seinen Kindern ist
+  (`deriveStatusFromChildren`), welche Schreibvorgänge ein Statuswechsel
+  plant — Wurzel, Nachkommen, Vorfahren, IN DIESER REIHENFOLGE
+  (`planStatusCascade`), dieselben nach Anlegen/Löschen einer Unteraufgabe
+  (`planAncestorRecompute`), und das Begleitdatum „gestartet → heute"
+  (`autoDateOnStart`). Der Kern liest keine Uhr: `todayKey` reist als
+  Parameter; ob er überhaupt mitreist (Einstellung, Anbieter kann
+  `in_progress` halten, Listen-Regel) entscheidet die Oberfläche, genauso das
+  Anwenden und Ansagen der Schreibvorgänge.
   ↳ **Schritt 1 (dieser PR): die Tabelle.**
   `crates/cal-core/tests/fixtures/taskCascade.json`, gemessen am heutigen
   TypeScript: 8 Auto-Datum-Zeilen, 17 Ableitungen (JEDE Anwesenheitsmenge der
@@ -3476,7 +2647,17 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   5/5 beim ersten Lauf (70 Zeilen + Draht), rot bewiesen (Asymmetrie der
   Nachberechnung entfernt → eine Zeile fällt).
 
-- **Die Wiederholungs-Projektion zieht in den Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Die Wiederholungs-Projektion zieht in den Kern**
+  (`expandTaskOccurrences`), das letzte Aufgaben-Modul des Bogens, in denselben
+  zwei Schritten. Drei Antworten: welche Vorkommen eine wiederkehrende
+  eingeplante Aufgabe in einem Fenster zeigt — die echte Aufgabe an ihrem
+  eigenen Tag, schreibgeschützte Projektionen an jedem anderen, alles andere
+  unverändert durchgereicht (`expandScheduledRecurringTasks`); ein Schritt
+  desselben Laufs (`nextTaskOccurrence`); was „auf diesen Tag verschieben" auf
+  einer Quelle sein kann, der das Datum gehört (`occurrenceMoveTarget`). Der
+  Kern antwortet mit POSITIONEN und TAGEN (welche Eingabe-Aufgabe, welcher Tag,
+  echt oder projiziert); die Kopie und ihre Id (`<id> occ <tag>`) baut die
+  Hülle, wie sie sie auch zurückliest.
   ↳ **Schritt 1 (dieser PR): die Tabelle.**
   `crates/cal-core/tests/fixtures/taskOccurrences.json`, gemessen am heutigen
   TypeScript: 41 Projektionen, 14 Schritte, 7 Verschiebungen — die 34
@@ -3548,7 +2729,10 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   (Tag 32/Monat 13/Tag 0 verworfen, ungültig neben gültig ignoriert, 30.
   Februar klemmt, Backlog mit nur ungültigen Triggern nimmt sein Intervall,
   Monatstag 0 und 40 schreiten in ganzen Monaten, Monatstag 31 klemmt).
-- **Die kleinen Doppelungen ziehen in den Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Die kleinen Doppelungen ziehen in den Kern** — der Bogen nach den
+  Aufgaben-Regeln (entschieden 2026-09-13): `taskAssignment`, dann
+  `eventGroups`, `signatures`, `birthdays`, `planTaskDates`,
+  `syncConflictGroups`; ein PR-Paar pro Modul, vermessen, dann Port.
   ↳ **taskAssignment, Schritt 1 (dieser PR): die Tabelle.** Von den fünf
   Exporten ist `isMineOrUnassigned` längst der Kern (`is_mine_or_unassigned`,
   gepinnt durch `shared/contracts/taskOwnership.json`, das host-core liest);
@@ -3589,7 +2773,15 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   beim ersten Lauf, rot bewiesen (Zurücktreten behält mich statt der anderen
   → Zeilen-Test und Draht-Test fallen).
 
-- **Die Signaturen ziehen in den Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Die Signaturen ziehen in den Kern** (`signatures`), das zweite Modul
+  des Bogens der kleinen Doppelungen. Dazwischen geprüft und gestrichen:
+  `eventGroups` (drei Helfer sind JavaScript-Kleber um erzeugte Typen —
+  Map-Schlüssel als JSON, Map-Index, Wire-Objekt aus dem Termin; dieselbe
+  Begründung wie `eventKey.ts`), `planTaskDates` (liest die Uhr, formatiert)
+  und `syncConflictGroups` (Listen-Gruppierung; wenn, dann im Host).
+  `birthdays` braucht einen Entwurf: der Host liefert den Namen eines
+  Geburtstagskalenders als Schlüssel plus Listenname statt „Birthdays – "
+  (DESIGN §4.5 a), dann fallen die Schere und die Präfix-Zwillinge.
   ↳ **Schritt 1 (dieser PR): die Tabelle.** Die Signatur-Regel hat KEINEN
   Rust-Zwilling; beide Editoren laufen sie: die LETZTE Zeile, die genau `-- `
   ist (nachlaufender Leerraum egal), eröffnet den Block; Auslesen, Abschneiden
@@ -3655,7 +2847,13 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   jetzt durch `shared/contracts/birthdayIds.json` gegen die Ids gepinnt, die
   die Synthese tatsächlich erzeugt; die Termin-Präfix-Zeichenkette ist dafür
   eine Konstante `BIRTHDAY_EVENT_PREFIX` geworden.
-- **Der Tagesstart zieht in den Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Der Tagesstart zieht in den Kern** (`dayStart`), ein neuer Bogen nach
+  den kleinen Doppelungen (gewählt 2026-09-13). `shared/dayStart.ts` hat außer
+  `is_mine_or_unassigned` keinen Rust-Zwilling; Desktop-Prüfer und -Dialog,
+  die mobilen Prüfungen, das Modal und der Vorplaner der OS-Benachrichtigungen
+  laufen die Regeln jeden Morgen. Drei davon lesen die Uhr selbst
+  (`movedToToday`, `filterDeadlinePinTargets`, und `shouldFireToday` über
+  `now`); der Kern bekommt Tag und Uhrzeit hinein.
   ↳ **Schritt 1 (dieser PR): die Tabelle.**
   `crates/cal-core/tests/fixtures/dayStart.json`, gemessen am heutigen
   TypeScript in Europe/Berlin: 134 Zeilen über zwölf Regeln — überfällig,
@@ -3733,7 +2931,16 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Kalendertag übersprangen (der Kern zählt Kalendertage, wie die Funktion es
   immer versprach; betroffen wären nur historische Tage vor dem Heute).
 
-- **Die Tagesstart-Zusammensetzung zieht in den Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Die Tagesstart-Zusammensetzung zieht in den Kern** — der zweite Teil des
+  Tagesstart-Bogens, nach den Regeln (#60/#61). Entschieden 2026-09-13: EINE
+  Planungs-Frage an den Kern; das Einlesen der Aufgaben-Einstellungen folgt als
+  eigener Schritt ebenfalls in den Kern. Die Zusammensetzung steht dreimal
+  inline — Desktop-`DayStartReviewChecker`, mobile `useDayStartChecks`, mobiler
+  `dayStartSchedule` (für künftige Morgen, nur die Zahl): Überfällige,
+  verschleppte Zeilen nach dem Übertrags-Standard der Liste in Fragen / Heute /
+  Backlog geteilt, die Ziele der stillen Stapel (Wurzel plus, wo ihre Liste
+  koppelt, die handlungsfähigen Nachfahren), die Erinnerungsgruppen und die
+  Zahl, die den Rückblick öffnet.
   ↳ **Schritt 1 (dieser PR): die Tabelle.**
   `crates/cal-core/tests/fixtures/dayStartPlan.json`, gemessen am heutigen
   TypeScript: 19 Fälle. Gemessen wurde der Block des Desktop-Prüfers, wörtlich
@@ -3793,7 +3000,14 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   und in TypeScript), die Namens-Wächter nannten die neuen Zeilen nicht, und
   zwei Fixture-Texte beschrieben den Stand vor dem Umzug.
 
-- **Die Aufgaben-Einstellungen ziehen in den Kern** — der erledigte Teil; was daran offen ist, steht oben.
+- [x] **Die Aufgaben-Einstellungen ziehen in den Kern** — der dritte Teil des
+  Tagesstart-Bogens, nach Regeln (#60/#61) und Zusammensetzung (#62/#63).
+  Entschieden 2026-09-13. Beide Oberflächen lesen dieselben sechzehn
+  gespeicherten Werte mit je eigener Kopie jeder Regel: die Aufgaben-Schalter,
+  das Countdown-Fenster, das Tagesfenster des Kalenders, Ansicht, Abhaken,
+  Übertrags-Standard, Auslöser und die Überschreibungen je Liste — Desktop im
+  `TaskCascadeProvider` (private Helfer), Mobile in `taskBehaviour.ts`. Dazu die
+  wirksamen Werte je Liste und was beim Schreiben geklemmt wird.
   ↳ **Schritt 1 (dieser PR): die Tabelle.**
   `crates/cal-core/tests/fixtures/taskSettings.json`, gemessen am ECHTEN Code
   beider Oberflächen: der Desktop-Provider gerendert, seine Lesungen aus der
@@ -4377,6 +3591,600 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
     niemand erfährt (98). Ein stilles Speichern bleibt trotzdem unmöglich,
     solange Aperio kein iTIP selbst verschickt.
 
+- **Termin-Wiederholung zieht in den Kern** — weitere erledigte Teile, Stand 2026-10-31:
+    ✅ **Eine Ausnahme in Exchange zu ändern scheiterte**, behoben in PR #77.
+    Aperio schickte beim Ändern eines einzeln geänderten Termins
+    `DeleteItemField calendar:Recurrence`. Exchange lehnt das an einer Ausnahme
+    mit `ErrorInvalidPropertyDelete` ab, und die ganze Änderung scheiterte.
+    Jetzt bleibt das Löschen bei einer Ausnahme weg. Die zurückgegebene Ausnahme
+    behält ihre Override-Id.
+
+    - ✅ **Gelöschte Serie klingelte weiter** (Review von #93; 118, behoben).
+      „Dieses und alle folgenden löschen“ ab dem ERSTEN Vorkommen kürzte die
+      Serie auf ein Ende eine Sekunde vor ihrem Beginn. Die Ansichten zeigten
+      nichts mehr, aber die Weckerberechnung verwirft so eine Regel und nahm
+      ersatzweise den Serienbeginn: alle Erinnerungen klingelten weiter,
+      überall. Ebenso beim Ändern und beim Mitziehen an Kopien. Jetzt
+      entscheidet `planSeriesSplit` einmal, ob vor dem Schnitt etwas zu sehen
+      ist (`kind: 'cut'` oder `'whole'`); auch ein Beginn neben dem Muster und
+      lauter gelöschte frühere Vorkommen zählen als „nichts davor“. Dazu
+      liest es die Zeilen, die der Anbieter für einzelne Vorkommen führt
+      (125, `readSeriesRows`): ein in Outlook geändertes Vorkommen steht bei
+      Exchange unter den Ausnahmen, ist aber da; ein bei Google gelöschtes ist
+      eine abgesagte Zeile ohne Ausnahme. Gezählt wird nach dem Platz in der
+      Serie, nicht nach dem verschobenen Beginn. Schlägt das Lesen fehl, wird
+      nichts geschrieben. Dann:
+      Löschen löscht die Serie (und leert damit ihre privaten Erinnerungen
+      überall, #93), Ändern schreibt die ganze Serie an Ort und Stelle
+      (dieselbe Id, also bleiben private Erinnerungen, Gruppe, Farbe,
+      Besprechung), eine Kopie ohne Kopf wird als Ganzes geändert, und die
+      Ansage sagt warum (123). `writeSeriesSplit` nimmt nur noch Pläne mit
+      Kopf, per Typ und zur Laufzeit. Mit dabei: Beim Teilen gilt eine im
+      Formular geänderte Wiederholungsregel für die neue Serie (121) — ihr
+      COUNT zählt wie im Feld ab Beginn der Serie, die neue Serie bekommt den
+      Rest —, und ihre Ausnahmen folgen einer neuen Uhrzeit, auch beim
+      Mitziehen an Kopien; eine Ausnahme genau auf dem Schnitt (bei Exchange ein
+      geändertes Vorkommen) versteckt nicht mehr das erste Vorkommen der neuen
+      Serie. Ein Teilen, das sich nicht planen lässt, wird am Desktop
+      abgelehnt statt zur ganzen Serie zu werden (wie am Handy); wiederholt
+      sich die Serie inzwischen nicht mehr, sagt er das. Vom Anbieter
+      gespeicherte Einzeländerungen bleiben (122). „Diesen und alle folgenden“
+      auf einer solchen Einzeländerung öffnet der Desktop jetzt wie das Handy
+      als Serie an ihrer Stelle (126): Das Wiederholungsfeld zeigte „wiederholt
+      sich nicht“, und ihr Titel landete auf der ganzen Serie.
+
+    - ✅ **Eine neue Google-Serie behält ihre gelöschten Termine** (PR 7,
+      Entscheidungen 202-213, 263-270): Ob Google eine Löschzeile mit einer
+      neuen Serie beachtet, ist ungemessen (137), und Google selbst löscht
+      einen Termin, indem es ihn absagt. Der Adapter legt die Serie ohne
+      Löschzeile an, unter einer eigenen Kennung (268), mit dem
+      Benachrichtigen-Schalter (204, 267: die Einladung kommt mit der Serie).
+      Dann listet er Googles Termine im Fenster der Löschungen und sagt jede
+      Löschung ab heute einzeln ab (263), per PATCH auf die Kennung, die
+      Google listet; ein Termin zählt, wenn er dort beginnt oder höchstens
+      eine Stunde daneben (veraltete Zeitzonendaten) und nie über die halbe
+      Lücke zu den Nachbarn. Fehlt einer, liest er einmal nach; dann wird
+      die Stelle übersprungen und geloggt (207, 266, 269). Die Antwort jeder
+      Absage ist der Beweis (208), eine zweite Liste prüft, dass sonst alles
+      steht. Eine verlorene Antwort aufs Anlegen wird über die Kennung
+      nachgelesen, nie neu angelegt (268). Drosselung wird nach Retry-After
+      oder 1-2-4 s ausgewartet, ein aufgebrauchtes Kontingent nicht. Scheitert
+      ein Schritt, löscht er die Serie wieder (203), mit Absage, wo die
+      Eingeladenen von ihr gehört haben (212). Das Manifest schaltet den
+      Warte-Dialog an. Ohne Live-Test (Toni nutzt kein Google): Ein
+      nachgebautes Google mit Fehlern je Anfrage und eine Fehlermatrix sichern
+      ab, wie Aperio Googles Dokumentation liest.
+
+    - [ ] **Anlegen mit Folgeschritt, ehrlich abgeschlossen** (in PR 7,
+      Toni 2026-10-23): Steht ein Anlegen, aber ein Folgeschritt scheitert,
+      bietet kein Editor das Anlegen erneut an. Google-Gruppe ohne
+      Mitglieder: Hinweis, der sich nur schließen lässt, Daten laden neu.
+      Google-Foto: weiter verschluckt, der Editor sagt „ohne Foto
+      gespeichert“. Unteraufgaben-Entwürfe: der Editor bearbeitet danach
+      die angelegte Aufgabe, Speichern schreibt ihre Felder und legt die
+      übrigen Entwürfe an (Toni, 2026-10-24). Vikunja (Zuständige),
+      Todoist (Abschließen), Graph (Erweiterung) und Exchange
+      (Herauslösen, Kontaktfoto ersetzen) laufen über
+      `Error::after_landed` denselben Weg; das Foto eines neuen Kontakts
+      bleibt bei Graph und Exchange wie bei Google verschluckt. Der volle Wunsch („Editor
+      bleibt auf dem Angelegten“ überall) kommt mit O1 des Bogens unten.
+      ✅ Die Oberflächen beider Seiten sind gebaut: Aufgaben-Editor,
+      Schnell-Anlegen, Einplanen, Verschieben/Kopieren und Kontakt-Editor
+      zeigen den Hinweis, der sich nur schließen lässt (Desktop
+      `CloseOnlyNotice`, Handy dasselbe); der Editor bearbeitet nach
+      gescheiterten Entwürfen die angelegte Aufgabe; „ohne Foto angelegt“ über `has_photo`; ein beim
+      Verschieben stehengebliebenes Original wird mit seiner Liste oder
+      seinem Kalender benannt (277). Exchange, Graph, Vikunja und Todoist
+      sind gebaut. Am Handy ohne Testläufer zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
+      prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
+      ist (VoiceOver sagt den Satz an); eine zum Teil gespeicherte Aufgabe
+      schließt den Editor; im Tagesstart behält ein Sammelknopf den Fokus,
+      solange nach dem Neu-Lesen eine Zeile seines Stapels bleibt (auch
+      wenn der Aufgaben-Reiter offen ist und seine Zeilen zuerst noch einmal
+      aus dem Zwischenspeicher kommen), und ein
+      Zeilenknopf, dessen Unteraufgabe scheiterte, gibt ihn an die nächste
+      Zeile, wenn seine Zeile geht; ein Löschen in der Aufgabenliste, dessen
+      Antwort verloren ging, das aber angekommen ist, gibt den Fokus an die
+      nächste Zeile, sobald die Aktualisierung die Zeile nimmt (15 s
+      Beobachtung; die nächste Aktion beendet sie, Einklappen zählt nicht
+      als Löschen; dasselbe für eine Unteraufgabe im Editor; ein
+      gescheitertes Abhaken oder Duplizieren spricht die Zeile nicht über
+      den Fehlersatz); räumt im
+      Tagesstart die letzte Aktion die letzten Zeilen ab und stand nur zum
+      Teil, bleibt der Satz mit „Alle Einträge bearbeitet“ und Schließen
+      stehen; die Fehlerzeile eines
+      gescheiterten Löschens in Liste und Agenda bleibt stehen, wenn danach
+      neu geladen wird, und geht, sobald etwas anderes gelingt oder du aus
+      dem Editor zurückkommst; Erinnerungen und Suche sagen einen Ladefehler
+      an; ein gescheitertes Löschen in den Kontakten lässt die Liste stehen
+      (kein „Lädt…“, der Fokus bleibt auf dem Kontakt); Gruppieren, Listen,
+      Suche oder ein anderer Reiter beenden die Beobachtung nach einem
+      gescheiterten Löschen, im Editor auch jedes Feld und das Tippen einer
+      neuen Unteraufgabe; ein unter Verschieben/Kopieren neu angelegter
+      Abschnitt steht in der Auswahl und ist gewählt, sein Fehler steht am
+      Feld und geht beim nächsten Versuch; scheitert beim Umbenennen eines
+      Abschnitts nur die Farbe, sagt VoiceOver den Fehler ganz, nachdem der
+      Fokus auf die Zeile zurückging; ein in der Listenbearbeitung einer
+      Todoist- oder Vikunja-Liste angelegter, umbenannter oder gelöschter
+      Abschnitt zeigt sich sofort und bleibt so, wenn die Aktualisierung
+      kommt.
+    - ✅ **Wie drosseln iCloud, Todoist und Vikunja?** (PR 7, Entscheidung
+      274): CalDAV liest 429 und beim Lesen 503 mit `Retry-After` als
+      ausgelasteten Anbieter, Todoist und Vikunja 429. Ob iCloud so
+      antwortet oder anders (etwa 403 oder 503 ohne Wartezeit), ob Todoist
+      auch innerhalb von `sync_status` drosselt und wie Vikunja es tut, ist
+      ungemessen; je eine Live-Runde mit vielen schnellen Anfragen klärt es.
+      Ebenso ungemessen: ob Googles Token-Endpunkt mit 429 drosselt und ob
+      ein Anmeldecode einen gedrosselten Austausch übersteht.
+
+    - ✅ **Eine neue Exchange-Serie behält ihre gelöschten Termine** (PR 8,
+      Entscheidungen 202-213, 223-230, 263-266): Exchange nimmt eine Serie
+      ohne ihre Löschungen an (140). Der Adapter legt sie still an, löscht
+      jede Löschung ab dem heutigen Tag des Geräts einzeln wieder (263),
+      gefunden über ihren Platz und nicht über die geschätzte Nummer; eine
+      Stelle, an der Exchanges Regel keinen Termin erzeugt (vor Beginn, nach
+      Ende, neben dem Muster), wird übersprungen (207, 266). Danach liest er
+      die Serie nach: Ihre Löschungen müssen genau die gemachten sein (208,
+      230). Mit Eingeladenen schickt er dann EINE Einladung (225; nur die
+      Teilnehmer neu gesetzt) und liest noch einmal nach. 15 s ab dem
+      bestätigten Anlegen, 15 s fürs Zurücknehmen (213, 226); „beschäftigt“
+      wird ausgewartet. Scheitert ein Schritt, löscht er die Serie wieder
+      (203), mit Absage, wo eine Einladung raus sein kann (212, 264):
+      `deletions-not-kept`, „nichts geändert“. Gelingt auch das nicht:
+      `created-may-stand`, ein Hinweis, der sich nur schließen lässt (210),
+      mit dem Satz zu den Eingeladenen (228). Alle Wege, die eine Serie mit
+      Löschungen anlegen (Teilen, Übertragen, Verschieben, Kopieren, Strg+D,
+      Seitenleiste, Kalenderwechsel im Editor), zeigen solange „Vorgang
+      läuft, bitte warten …“ (227, 265), gesteuert vom Manifest
+      (`deletions_in_steps`), Desktop und Handy. Auch der bestehende Fall
+      „weder gekürzt noch gelöscht“ lässt sich nur noch schließen (210). Ein
+      gescheitertes Anlegen liest neu ein (beide Hosts), iOS gibt dem
+      Schreiben Hintergrundzeit (229). Ein Anlegen, das Exchange ganz
+      ablehnt, heißt jetzt auch bei einfachen Terminen „Server lehnt ab“.
+      Live-Runde 11 bestanden (2026-10-18, zwei Läufe): T1 bis T6 wie
+      gemeint; die Einladung trägt beide Löschungen als EXDATE, und GMX
+      bekam genau eine Einladung und beim Aufräumen eine Absage (225 hält);
+      60 Löschungen in 10,7 s. Handy offen.
+
+    - ✅ **Verschieben, Kopieren und Duplizieren geben nur echte Löschungen
+      weiter** (PR 8b, Entscheidungen 224, 259-262): Eine ganze Serie, in einen
+      anderen Kalender verschoben, kopiert, mit Strg+D dupliziert oder im
+      Editor in einen anderen Kalender gespeichert, bekommt genau ihre echten
+      Löschungen mit (`newSeriesRecurrence`, dieselbe Regel wie beim Teilen).
+      Ein einzeln geänderter Termin, etwa in Outlook, kommt zu seiner üblichen
+      Zeit zurück, statt in der neuen Serie gelöscht zu sein. Jede Löschung
+      bleibt an ihrem Platz, wie sie geschrieben war, weil sich Beginn und
+      Regel nicht ändern; nur wenn der Editor zugleich Beginn, Ganztägig oder
+      Regel ändert, gehen sie den Weg von 198. Auch vergangene Löschungen
+      (259): Die Grenze „ab heute“ kommt mit PR 8, wo Exchange Löschungen
+      einzeln schreibt. Strg+D auf einem Termin einer Serie dupliziert die
+      ganze Serie ab ihrem Beginn und sagt das mit dem Titel der Serie an
+      (260); die Ansicht liest danach neu ein, und ein Scheitern wird gesagt
+      (261). Kopieren und Duplizieren behalten die Zone der Quelle (262).
+      Microsoft 365 nimmt beim Anlegen noch keine Löschungen (140): Dort
+      erscheinen gelöschte Termine in der neuen Serie vorerst wieder; Exchange
+      löscht sie seit PR 8 ab heute einzeln wieder, Google sagt sie seit PR 7
+      ab heute einzeln ab. Aus einem Google-Kalender
+      kennt Aperio gelöschte Termine etwa
+      drei Monate zurück und ein Jahr voraus (150). Das Handy hat keinen
+      Testläufer; ein Paritätstest am Desktop rechnet sein Modul mit — ↻ im
+      Test.
+    - ✅ Die neue Serie bekam nur die Ausnahmen des Masters. Bei Google ist ein
+      gelöschtes Vorkommen aber eine abgesagte Zeile ohne Ausnahme, bei CalDAV
+      ein abgesagtes RECURRENCE-ID: beim Teilen kam es in der neuen Serie
+      zurück, mit Einladung. Und Exchange mischt gelöschte und geänderte
+      Vorkommen in den Ausnahmen: ein anderer Kalender schrieb alle, dann
+      fehlte ein geändertes Vorkommen in beiden Hälften. Jetzt bekommt die
+      neue Serie genau die Plätze, für die der Kalender nichts zeigt
+      (`deletedSlots`): eine Ausnahme ohne lebende Zeile, jede abgesagte
+      Zeile; ein geändertes Vorkommen ist keine Löschung. Plätze gleichen wie
+      in den Ansichten (`sameSlot`: genau bei Uhrzeit, nach Tag bei
+      ganztägig). Offen: Google kennt die Zeilen nur so weit, wie der
+      Zwischenspeicher reicht (etwa ein Jahr voraus); weiter vorn gelöschte
+      Vorkommen kommen zurück (150: benennen, später gezielt bei Google
+      nachlesen, eigener PR). EWS löscht sie seit PR 8 nach dem Anlegen einzeln
+      wieder, ab heute (202, 263); Google sagt sie seit PR 7 nach dem Anlegen
+      einzeln ab, ab heute (202, 263, 267). Aperios eigene Absagen weiter als
+      das Fenster voraus sieht es nach einem neuen Einlesen nicht mehr, eine
+      spätere Kopie der Serie zeigt sie wieder (150). CalDAV schreibt sie
+      seit PR 5 als Datum.
+    - ✅ **Die Regel wandert mit dem Datum** (PR 3c, 189, 192-197): Verschiebt
+      „dieser und alle folgenden“ das Datum, wandert eine Regel, die ihre Tage
+      nennt, wie beim Ziehen einer ganzen Serie (jeden Montag → jeden Dienstag,
+      jeden 10. → jeden 11.), und ihre Löschungen nach ihrem Platz; eine Regel,
+      die ihre Tage aus dem Beginn nimmt, nimmt sie aus dem neuen. UNTIL rückt so,
+      dass die neue Serie auf dem Vorkommen am Platz des alten letzten endet, auch
+      bei neuer Uhrzeit, bei einer Monatsregel auf neuem Monatstag und beim Wechsel
+      von ganztägig zu Uhrzeit (`keepingLength`); früher bewegte `ruleFromCut`
+      UNTIL nicht, und das letzte Vorkommen fiel weg.
+      Nur ein in dieser Bearbeitung geändertes Datum verschiebt die Tage (192).
+      Eine Regel, die nicht um ganze Tage wandern kann, wird abgelehnt, bevor
+      etwas geschrieben wird (193). Das Feld zeigt die verschobene Regel sofort
+      (197). Eine selbst eingestellte Regel, die genau die verschobene ist, auch
+      anders geschrieben, trägt die Löschungen wie das Verschieben (196). Kern:
+      `series_shift::begin_series_anew` (Fragefeld `begins_anew`) und
+      `tail_exceptions` erkennt die verschobene Regel selbst; Shell
+      `movedTailRule`; beide Editoren, beide Mitzieh-Dialoge.
+
+    - ✅ **Abgesagte und verschobene Einzeltermine klingeln richtig** (PR 7a,
+      209, 214): Die Erinnerungen klappten jede Serie für sich aus und wandten
+      ihre Einzeländerungen nicht an. Ein abgesagtes Vorkommen klingelte
+      weiter (bei Google ist jede Löschung so eine Zeile; mit PR 7 hätte das
+      jeden gelöschten Termin eines neuen Serienteils getroffen), ein
+      verschobenes zweimal: am alten Platz und zur neuen Zeit, bei CalDAV und
+      Google (Exchange trug den alten Platz schon in den Ausnahmen der Serie).
+      Jetzt nimmt jede Zeile `{Serie}::rid::{Platz}` ihren
+      Platz aus der Serie (`override_slots`), wie die Ansichten
+      (`expandAll`): genau bei Uhrzeit, nach dem Tag bei ganztägig; ein
+      Platz, der sich nicht lesen lässt, bleibt. Fünf Vertragszeilen in
+      `eventOccurrences.json` sind jetzt einig; die ganze abgesagte Serie
+      bleibt still (gewollt). Desktop und Handy gleich (host-core). Dazu 215:
+      Exchange nannte den Platz einer ganztägigen Einzeländerung als
+      Mitternacht in der Zone des Postfachs; lag das Gerät mehr als zwölf
+      Stunden davon, lasen Ansichten (schon vorher) und nun auch Erinnerungen
+      den Nachbartag. Der Adapter verankert den Platz jetzt wie die Ausnahme
+      der Serie (`override_slot`, lokale Mitternacht des Tages), Schreiben
+      findet beide Schreibweisen (`names_override`), Cache-Generation 7 lädt
+      einmal neu. Die Folgen (216): Weil diese Plätze von der Zone des Geräts
+      abhängen, liest Exchange nach einem Zonenwechsel alles einmal neu (das
+      Token nennt die Zone); eine Farbe oder ein Meeting an einer
+      Einzeländerung wandert bei einer neuen Kennung zu ihr, nie auf die ganze
+      Serie (`plan_repairs`, hilft auch CalDAV und Google); ohne eigenen Ton
+      klingelt eine Einzeländerung mit dem der Serie. Und 217: Exchange liest
+      die Zeitpunkte einer ganztägigen Serie 13:45 in den Tag hinein in der
+      Zone, die Exchange nennt (Startzone wie die Zone der Serie, UTC für eine
+      ohne Zone, `all_day_zone`), statt 12 Stunden in UTC, was eine
+      Mitternacht östlich von UTC+12 (Neuseelands Sommer) als den Vortag las;
+      das fängt auch ein Etikett ab, das Exchange nach Aperios eigenem
+      Schreiben auf UTC umstellt, während die Zeitpunkte Mitternacht der alten
+      Zone bleiben (Live-Runde 3), für jede alte Zone in (−10:15, +13:45]
+      (Niue, Pago Pago, Kiritimati liegen außerhalb). Ohne lesbare Zone wird
+      in UTC gelesen, mit demselben Fenster. Fällt die Mitternacht des Geräts
+      an einer Umstellung aus, gilt die erste Stunde danach, wie in den
+      Ansichten. Offen: einen eigenen Ton für einen einzelnen Termin speichert
+      nur das Handy, unter der Kennung des Termins (`sound.item.{id}`); eine
+      neu geprägte Kennung (Exchange bei jeder ChangeKey-Änderung, seit 215/216
+      ein ganztägiger Platz in anderer Zone) verliert ihn, die Reparatur kennt
+      Töne nicht, und der Desktop speichert Töne nur je Serie. Die Kopie einer Ausnahme, mit der ein Bearbeiten vergleicht, wird
+      in der Zone ihrer Serie gelesen wie ihre Zeile. Einen Tag einer
+      ganztägigen Serie zu löschen vergleicht den Platz des Servers so
+      gelesen; vorher scheiterte das über sechs Stunden Abstand zum Postfach,
+      und mit der UTC-Lesart hätte es in Neuseelands Sommer den Folgetag
+      gelöscht. Ohne Zone werden die rohen Zeitpunkte verglichen und im
+      Zweifel abgebrochen. `plan_repairs` liest den Tag eines ganztägigen
+      Termins 13:45 in den Zeitpunkt hinein und findet so eine Zeile auch aus
+      einer anderen Zone (siehe oben).
+    - ✅ **Google liest jede Schreibweise einer Löschung** (PR 6, 205): Andere
+      Apps schreiben gelöschte Vorkommen als `EXDATE`-Zeilen in eine
+      Google-Serie, meist als Wanduhr in der Zone (`EXDATE;TZID=…`), wie auch
+      Googles eigener Export. Aperio las nur UTC und Datum, zeigte die anderen
+      Vorkommen wieder, und jedes Speichern der Serie, auch ein neuer Titel,
+      schrieb die Zeilen ohne sie neu: dann waren sie überall wieder da. Jetzt
+      liest der Adapter Wanduhr mit und ohne Zone, UTC, Datum (ganztägig als
+      lokale Mitternacht, wie ein Datums-Beginn), mehrere Werte je Zeile, jede
+      Reihenfolge und Schreibweise der Namen und eine Regel mit Parametern;
+      eine Wanduhr an einer Zeitumstellung landet dort, wo die Ansichten das
+      Vorkommen hinsetzen. Was er nicht liest (`RDATE`, `EXRULE`, eine
+      unbekannte Zone), nennt das Log einmal je Lauf. Er schreibt Löschungen
+      wie Googles Export (Wanduhr mit `TZID`, ganztägig `VALUE=DATE`, sonst
+      UTC). Fasst eine Änderung Beginn, Ende, „ganztägig“ und Wiederholung
+      nicht an (`keep_fields`), bleiben alle vier aus dem PATCH, gemeinsam:
+      Googles Zeilen hängen am Beginn, und ein behaltener Beginn kann die
+      neuere Änderung eines anderen Geräts sein (106). Eine unbekannte Zone
+      (per `TZID` oder als Zone der Serie) kostet nur eine Wanduhr; UTC und
+      Datum braucht sie nicht. UTC-Mitternacht ist bei ganztägig ihr Datum
+      (so schrieb Aperio Datums-Löschungen bisher). Bekannt: Aperios
+      Zeitzonendaten (2025b, neuestes chrono-tz) kennen die neueren Regeln für
+      Marokko/Westsahara (ab 20.9.2026), British Columbia/Alberta/Inuvik (ab
+      1.11.2026) und Chișinău nicht; dort kann eine geschriebene Löschung mit
+      Uhrzeit, die nicht als Wanduhr in der Zone der Serie gelesen wurde
+      (etwa die UTC-Löschung einer anderen App oder eine Wanduhr in einer
+      anderen Zone), eine Stunde neben Googles Vorkommen liegen, ebenso eine
+      Wanduhr in einer Lücke, die nur 2025b kennt (02:30 geht als 03:30
+      zurück); eine in der Zone der Serie gelesene Wanduhr außerhalb einer
+      Lücke behält ihre Ziffern (eigene Aufgabe: Zeitzonendaten aktuell
+      halten). Offen: das
+      `UNTIL` einer ganztägigen Serie schreibt Google noch als Zeitpunkt (bei
+      CalDAV seit PR 5 ein Datum); ungemessen.
+    - ✅ **Ganztägige Serien: Löschungen und Ende als Datum** (PR 5, 200, 201):
+      CalDAV schreibt die Ausnahmen einer ganztägigen Serie als
+      `EXDATE;VALUE=DATE` (der Tag der nächsten lokalen Mitternacht, wie 95
+      Tage liest) und ein UTC-Ende als Datum seiner Ziffern, beim Anlegen und
+      Bearbeiten (`apply_common`, `all_day_date`, `all_day_rule`); vorher
+      schlossen die UTC-Zeitpunkte bei iPhone und anderen Programmen nichts aus.
+      Bestehende Serien heilen beim nächsten Speichern. Und überall liest eine
+      Serie von Tagen ihr UNTIL nach seinen Ziffern auf der Tagesuhr, ein Datum
+      als ganzen Tag (201): „bis 31.12.“ aus dem Feld (`…T235959Z`) zeigte in
+      Berlin auch den 1.1., die Erinnerungen ebenso; ein Datums- oder
+      schwebendes UNTIL wies die rrule-Kiste ab, und die Erinnerungen blieben
+      beim ersten Termin. Ansichten (`untilOnClock`, auch `occurrenceCount`)
+      und Erinnerungen (`until_on_day_clock`) lesen gleich, auch wenn eine
+      Zeitumstellung die Grenze überspringt; vier Vertragszeilen in
+      `eventOccurrences.json` sind jetzt einig. Mit ihnen der Satz „letzter
+      Termin am …“ (`lastOccurrenceDayKey` liest die Regel der Ansichten) und
+      das Ziehen der ganzen Serie (`movedSeriesUntil` verschiebt die Ziffern um
+      ihre Tage; als Zeitpunkt verschoben, gewann sie über eine Zeitumstellung
+      einen Tag).
+    - ✅ **Ganze Serie, Wechsel ganztägig/Uhrzeit (191), und ihr Datum (195):**
+      Der Editor liest eine Bearbeitung der ganzen Serie, deren Beginn wandert
+      oder die zwischen ganztägig und Uhrzeit wechselt, wie „dieser und alle
+      folgenden“ ab ihrem eigenen Beginn (198): Regel wandert mit, gelöschte
+      Termine nach Platz oder Tag (die Ausnahme um 18 Uhr bleibt auf ihrem Tag),
+      das Ende hält die Länge, die Zone folgt der Art (ganztägig keine, aus
+      ganztägig die Gerätezone). Das Feld zeigt die verschobene Regel sofort
+      (199). Eine Serie, die neben ihrer Regel beginnt, behält ihren Beginn und
+      zählt ihre Plätze ab dem ersten Vorkommen (`old_start`); ihr gelöschtes
+      erstes Vorkommen bleibt gelöscht. Unberührt bleibt die Wiederholung
+      byte-genau. Feld und Speichern lesen denselben geschriebenen Beginn
+      (`ruleFrame`). Die Mitzieh-Dialoge schreiben Kopien, die Serien sind,
+      ebenso. Das Ziehen bleibt Ziehen. Beide Editoren.
+
+    - ✅ `readSeriesRows` las über einen Datumsbereich bis einen Monat nach dem
+      Schnitt und stieß bei langen Google-Serien ein volles Nachladen an. Jetzt
+      liest es nach der Serie (135): jede Zeile `{Serie}::rid::…` aus dem
+      Zwischenspeicher, gleich welches Datum, abgesagte mit, ohne Nachladen
+      und ohne Reparaturen (Desktop `get_series_rows`, Handy `get_events_json`
+      mit `series_id`, beide über `host_core::cache::series_rows`). Der Host
+      meldet dazu, wie weit sein Zwischenspeicher reicht (139): ganz (Exchange,
+      CalDAV, lokal), ein Fenster (Google, etwa ein Jahr voraus) oder
+      unbekannt (nach einem Schreiben bis zum nächsten Abgleich). Das Fenster
+      bürgt für Zeilen nach ihrer JETZIGEN Zeit: eine abgesagte Zeile steht an
+      ihrem Platz, fehlt also nur, wenn der Platz draußen liegt; ein aus dem
+      Fenster verschobenes Vorkommen fehlt, wo immer sein Platz liegt. Die
+      Nachfrage vor dem Teilen kommt mit der gemeinsamen Regel für die
+      Ausnahmen der neuen Serie, erst dann zählen die Zeilen dafür, und sie
+      muss das berücksichtigen. Ein älteres Handy-.so ignoriert das Feld und
+      liest wie bisher; dann gilt die Reichweite als unbekannt. Handy: braucht
+      ein frisch erzeugtes `.so`, ohne Testläufer.
+    - ✅ **Teilen kürzte zuerst** (136, 144). Scheiterte danach das Anlegen,
+      stellte das Wiederherstellen nur die Regel zurück: die geänderten und
+      gelöschten Vorkommen, die das Kürzen beim Anbieter verworfen hatte
+      (Google löscht sie, CalDAV schreibt sie nicht mehr), waren still weg.
+      Jetzt legt `writeSeriesSplit` erst die neue Serie an und kürzt dann; die
+      Editoren und beide Mitzieh-Dialoge folgen. Scheitert das Kürzen sicher
+      (`writeNeverLanded`: Ablehnungs-Token oder Code `conflict`, `forbidden`,
+      `invalid_input`, `not_found`, `auth`, `unsupported`), wird die neue Serie
+      mit derselben Benachrichtigung wieder gelöscht. Sonst (Netz, Protokoll,
+      ohne Code) bleiben beide stehen (144), und das Teilen gilt als
+      geschrieben (145, `headCut: 'unsure'`): Die neue Serie bekommt private
+      Erinnerungen, Farbe und Gruppe, die Ansage sagt, ab welchem Tag die Serie
+      möglicherweise doppelt steht, und nichts bietet an, sie noch einmal zu
+      schreiben (der Mitzieh-Dialog bleibt mit dem Hinweis offen, ohne „erneut
+      versuchen“). Scheitert nach einer Ablehnung auch das Löschen der neuen
+      Serie, ist es ein Fehler mit demselben Hinweis (`seriesMaybeShownTwice`);
+      der Editor bittet, vor dem erneuten Speichern zu prüfen. Beim unklaren
+      Kürzen bleibt der Editor mit dem Hinweis offen, fokussiert, nur mit
+      „Schließen“; erst danach geht es zum Mitziehen oder zu (146). Ein Anlegen
+      behält den Nachweis aus 106 (`invalidate_after_create`), sonst schrieb das
+      Kürzen danach auf Exchange alle Felder zurück. CalDAV liest die Antwort
+      einer Wiederholung als das, was sie ist: 412 nach dem erneuten Senden
+      eines bewachten PUT ist „unklar“; 404 nach dem erneuten DELETE ist
+      „weg oder nie hier“, die Suche über die Kalender geht weiter und zählt
+      es nur als gelöscht, wenn kein anderer Kalender den Termin hat
+      (`DeleteWalk`). Nach einem gescheiterten Verbindungsaufbau gilt nichts
+      davon: da ging nichts hinaus. Am Android-Handy kommen seit PR 7 alle
+      Fehler mit dem Code des Desktops an (B9), am iPhone nur der Text (siehe
+      „iPhone: verliert Expo den Fehlercode?“); eine Ablehnung mit Marke
+      (`server-refused`, `unsafe-to-write`) wird an der Marke erkannt, auf
+      beiden.
+
+    ✅ **A: Das Handy ändert eine Exchange-Ausnahme nicht direkt**, behoben in
+    PR #78. Für „nur dieses Vorkommen“ öffnete es den Serienkopf. Dann löschte es
+    die Ausnahme und legte einen neuen Einzeltermin an, oder das Speichern
+    scheiterte. Jetzt öffnet es die Ausnahme selbst und ändert sie direkt, wie der
+    Desktop (`isProviderOverride` in `shared/recurrence.ts`). Zu- und Absagen gehen
+    wie auf dem Desktop an die Serie. Bei CalDAV und Google braucht das PR #80.
+    Wirkt mit dem nächsten Handy-Build.
+
+    ✅ **B: Verschieben „nur dieses Vorkommen“ hinterlässt ein Duplikat**, behoben
+    in PR #79. Auf dem Desktop legte Verschieben oder Ziehen einer geänderten
+    Ausnahme einen neuen Einzeltermin an und nahm den Platz aus der Serie heraus;
+    die Ausnahme selbst änderte es nie (`moveActions.ts`). Die Suche nach dem
+    Vorkommen in Exchange verglich dabei `Start` statt `OriginalStart`, sodass
+    eine um mehr als sechs Stunden verschobene Ausnahme doppelt stehen blieb.
+    Jetzt verschiebt Ziehen „nur dieses Vorkommen“ die Ausnahme selbst, wie der
+    Dialog sie speichert, und die Exchange-Suche vergleicht `OriginalStart`. Das
+    gilt auch für das Löschen einer weit verschobenen Ausnahme und für den Umzug
+    in einen anderen Kalender, auf Desktop und Handy. Bei CalDAV und Google
+    braucht das Ziehen PR #80; bei Exchange löst #80 eine Ausnahme, die nicht
+    über ein Nachbar-Vorkommen darf, aus der Serie (64a).
+    ✅ **Eine geänderte Ausnahme traf bei CalDAV und Google die ganze Serie**
+    (Prüfung von #78; 62b, 63a), behoben in PR #80. Die Override-Id
+    `{Serie}::rid::{Platz}` konnte nur Exchange adressieren. Bei CalDAV/iCloud
+    überschrieb „nur dieses Vorkommen“ speichern die ganze Serie mit einem
+    einzelnen Termin, und ein Kalenderwechsel löschte die Serie. Bei Google
+    scheiterte das Speichern, und ein Kalenderwechsel ließ ein Duplikat zurück.
+    Der Desktop hatte das seit 4179edfe. Jetzt:
+    - CalDAV schreibt nur den Block der Ausnahme und legt den Rest der Ressource
+      byte-genau zurück. Ein einzelnes Vorkommen löschen behält die übrigen
+      Ausnahmen und ihre Zeitzonen und nimmt die Ausnahme im Platz mit.
+    - Google sucht die Instanz über ihren Platz (`originalStart`). Dadurch findet
+      das Löschen auch eine weit verschobene Ausnahme, und es trifft in einer
+      täglichen Serie nie mehr das Nachbar-Vorkommen.
+    - Löschen über eine Override-Id nimmt bei allen dreien nur dieses Vorkommen
+      heraus.
+    - Exchange löst eine Ausnahme, die es nicht über ein Nachbar-Vorkommen
+      schieben will, selbst aus der Serie (64a).
+
+    **Live-Test Runde 4** (65, 66b), gelaufen am 19.09.2026 auf dem Desktop mit
+    iCloud und Exchange. Das Handy war nicht dabei, Toni hat Aperio dort noch nie
+    benutzt (69).
+    - ✅ Der Build startete nicht: Die CSP des Produktionsbuilds verbot das
+      WebAssembly der Kernregeln. Behoben in PR #81.
+    - D3: Das Folge-Vorkommen einer ganztägigen iCloud-Serie stand am 26. statt
+      am 27.10. Das ist der Lesefehler aus 48a.
+    - ✅ D6, D7 und H2: Ändern eines Outlook-Termins scheiterte mit
+      `ErrorInvalidRecipients`. Aperio las den Organisator als Gast und wollte
+      ihn benachrichtigen. Behoben in PR #83.
+    - ✅ D8: Das gelöste Vorkommen öffnet Outlook als „Besprechung“. Vermutlich,
+      weil es den Organisator als Gast mitnahm. PR #83 nimmt ihn heraus.
+    - D9: Toni hat den Einzeltermin in Outlook gelöscht, und Aperio hat ihn
+      richtig entfernt.
+    - ✅ H1: „Anwenden auf“ stand da, aber nicht in der Tab-Reihenfolge. Behoben
+      in PR #82 (68): Der Titel nennt den Umfang, und ein schreibgeschütztes Feld
+      liegt in der Tab-Reihenfolge, auch für die ganze Serie.
+
+    ✅ **Der Organisator galt als Gast** (67a, 70a bis 72a), behoben in PR #83.
+    Die Regel steht einmal im Kern (`cal_core::attendee`, DESIGN §7.3):
+    - Beim Lesen nimmt jeder Adapter die Zeile des Organisators aus den Gästen.
+    - Benachrichtigen darf nur, wer den Termin organisiert. Das sagt ein
+      ausdrückliches Merkmal des Anbieters, sonst gilt der Termin als fremd
+      organisiert.
+    - Beide Hosts schreiben die Gästeliste nur, wenn sie sich gegenüber dem
+      Cache geändert hat (Exchange, Google, Microsoft 365).
+    - Abgeleitete Termine tragen den Organisator ihrer Quelle mit.
+    - `CACHE_GENERATION` 2: Der erste Start liest jedes externe Konto einmal neu
+      ein, Exchange vollständig.
+    ✅ **Ein iCloud-Termin verliert seine Gäste** (E1), behoben in PR #84.
+    Aperio baute den VEVENT neu und schrieb `ORGANIZER` und `ATTENDEE` nur beim
+    Benachrichtigen; ohne `ORGANIZER` sagt ein RFC-6638-Server die Besprechung
+    allen ab. Zudem erkannte Aperio Toni nicht als Organisator, weil iCloud ihn
+    per Principal-Pfad nennt (Messung M1), also fehlte der Schalter. Jetzt:
+    - Aperio erkennt das Konto an allen Einträgen seiner
+      `calendar-user-address-set` und am `EMAIL` einer Zeile.
+    - Jedes Speichern liest zuerst die Kopie des Servers und trägt die Zeilen
+      der Besprechung wörtlich weiter; nur eine geänderte Gästeliste ändert
+      Zeilen. Eine Serie behält ihre Ausnahmen Byte für Byte, „nur diesen
+      Termin löschen“ fügt eine einzige `EXDATE`-Zeile ein, und ein Speichern
+      ohne Änderung schickt nichts.
+    - Bei iCloud und Microsoft 365 zeigen Editor und Löschdialoge statt einer
+      Wahl den Satz, wer die Teilnehmer informiert (76a, 80a, 82b), auf Desktop
+      und Handy, auch nach der Entfernen-Taste in Woche, Tag, Monat und Agenda
+      (ein gemeinsamer `DeleteEventConfirm`). Die Löschdialoge fragen
+      „organisiert das Konto?“ jetzt über `organized_elsewhere` statt über einen
+      Adressvergleich. Der Satz beim ersten Gast kommt zusammen mit „X
+      hinzugefügt“ in einer Ansage.
+    - `CACHE_GENERATION` 3.
+    ✅ **Fremde Einladungen sind schreibgeschützt** (77a, 83b, 84a), gestapelt
+    auf #84 und zusammen mit #83 zu mergen. Kalender auf einem Server mit
+    Terminplanung tragen `invitations_reply_only`; beide Editoren zeigen so
+    eine Besprechung schreibgeschützt (Antwort, eigene Erinnerungen, Klang,
+    Farbe, Beitreten, Verfügbarkeit, Löschen bleiben), CalDAV schreibt in so
+    einem Termin nur die VALARMs und lässt jede andere Zeile Byte für Byte
+    stehen, der Löschdialog sagt „Der Organisator bekommt eine Absage“, die
+    Wiederholung steht als Satz da (Kern-Regel mit Prüf-Datei, EN/DE), und
+    jede Ablehnung des Servers wird in beiden Oberflächen zu einem Satz.
+    `CACHE_GENERATION` 4. Offen bleibt „nur diesen Termin“ einer iCloud-Serie
+    als echte Ausnahme (79b, PR 3).
+
+    ✅ **Enddatum einer Exchange-Serie** (gefunden bei der Planung von PR 8a,
+    2026-10-10): Exchange hängt an das Startdatum einer Serie eine Zone an.
+    Gemessen ist zweimal `2026-10-19Z`, beide Male bei einer ganztägigen Serie:
+    einer, die Aperio ohne Zone angelegt hat (Runde 2), und einer aus Outlook,
+    deren Startzone Aperios Änderung auf Greenwich gesetzt hatte (Runde 3).
+    Beide liegen bei Versatz 0; `Z` sagt dort nicht, ob es die UTC-Rechnung
+    der Anfrage oder die Zone der Serie meint. Der Live-Test 8a (2026-10-10)
+    hat für eine Serie in W. Europe ohne `TimeZoneContext` gemessen: Start- und
+    Enddatum kommen mit Versatz zurück, `2026-11-04+01:00`. `Z` kommt also
+    nicht bei jeder Serie; der Fehler traf Serien mit `Z` und mit einem Versatz
+    westlich von UTC. Der Leser schnitt nur `T` und `+` ab. Bei `Z` und bei einem Versatz
+    westlich von UTC wurde daraus eine Regel wie `UNTIL=20261105ZT235959Z`, die
+    beide Ausroller ablehnten: Die Serie erschien nur am Beginn ihres Masters,
+    dem ersten Termin der Regel, auch wenn dieses Vorkommen geändert oder
+    gelöscht war, und nur dafür kam eine Erinnerung. Geänderte
+    Vorkommen sind eigene Zeilen und erschienen weiter. Auch Aperios eigene
+    Suche nach der Nummer eines Vorkommens (`nominal_occurrence_index`) las
+    diese Regel; ein einzelnes Vorkommen einer solchen Serie auszulassen, wie
+    es das Mitziehen einer Gruppe tut, scheiterte mit „could not compute the
+    InstanceIndex“. Jetzt behält der Leser
+    nur das Datum, beim Lesen und beim Ausgeben aus dem Zwischenspeicher
+    (`range_date`). READ_RULE 3 gibt beim nächsten Abgleich alle gespeicherten
+    Termine neu aus. Handy: `.so` und XCFramework frisch bauen.
+
+    ✅ **Update-Regel für ganztägige Exchange-Termine** (47a) und
+    **Datumsfehler** (Startdatum, Wochentag, Monatstag und Monat aus dem
+    UTC-Datum): gebaut in PR 8a (2026-10-10, Entscheidungen 231-239). Eine
+    Serie beginnt an ihrem ersten Tag auf der Uhr, auf der Exchange sie
+    wiederholt; ein ganztägiger Tag geht beim Ändern auf Mitternacht in der
+    gespeicherten Zone jeder Grenze; eigene Zonen-Definitionen werden gelesen;
+    eine unlesbare Zone lehnt den Tag mit eigenem Satz ab (237). Live-Test 8a
+    am 10.10.2026: Schritte 1 bis 5 und 7 bestanden. Schritt 6 (ein Termin vom
+    iPhone) war nicht machbar; ein Testprogramm hat stattdessen eigene Termine
+    per EWS angelegt, eine eigene Zone und „Europe/Berlin“, beide bestanden.
+    Ungemessen bleiben ein Termin mit eigener Zone vom iPhone oder aus einer
+    Einladung und die Ablehnung nach 237 am echten Server (Einzelheiten in
+    DESIGN, Stufe 4, „Gemessen“).
+    ✅ **Schnitttag doppelt** (235, Entscheidungen 254-258): Ein Schnitt „dieser
+    und alle folgenden“ an einer Exchange-Serie mit Uhrzeit zeigte meist den
+    Schnitttag in beiden Serien, und das Löschen ab einem Termin ließ ihn
+    stehen: Aperio schrieb das UTC-Datum des `UNTIL` als Enddatum, und Exchange
+    zählt es als ganzen Tag auf der Uhr der Serie (Live-Runde 10a). Richtig
+    war das nur östlich von UTC für eine Uhrzeit bis zum Abstand zu UTC (M1).
+    Jetzt endet die alte Serie am Tag vor dem Schnitttag, auf dieser Uhr; ein
+    selbst gewähltes Ende bleibt, wie es ist. Aperios eigene Anzeige liest das
+    zurückgelesene Enddatum weiter als Zeitpunkt und irrt in zwei Fenstern um
+    einen Tag (255, Stufe 8). Gebaut im Exchange-Adapter, also für Desktop und
+    Handy zugleich (#125); Live-Runde 10b bestanden (alle zehn Schritte, auch
+    ein Schnitt am Tag der Umstellung auf Sommerzeit). Ungemessen: ein Schnitt
+    am Tag der Umstellung auf Winterzeit.
+
+    ✅ **Die Zone zuerst** (Zonen-PR, 2026-10-10, Entscheidungen 240-245): Eine
+    neue Zone behält die gespeicherte Uhrzeit (Runde 1, B2), also wanderte jedes
+    Ändern, das die Uhr eines Exchange-Termins wechselte, um den Versatz: ein
+    in Aperio angelegter Einzeltermin, der zur Serie wird (Live-Test 8a: aus
+    Montag 00:30 wurde Sonntag 23:30), eine ganztägige Serie, die Uhrzeiten
+    bekommt, und der Zonenwechsel an einer gespeicherten Serie, den erst die
+    Stufen 11 und 12 in den Editor bringen. Ein
+    Ändern schreibt die Zone jetzt zuerst; nennt sie eine andere Uhr, folgen
+    Beginn, Ende und Ganztägig mit den Werten des Servers (240), die Regel
+    zuletzt auf der neuen Uhr und nur, wenn sich ihre gebaute Form ändert (241).
+    Live-Test Zone (242, 2026-10-10): Einzeltermin zur Serie in Berlin und
+    Tokio richtig (L1, L1b), Gegenproben richtig (L4a bis L4e). Beginn und Ende
+    neu verwerfen die Ausnahmen einer Serie (L3a, L3b, M3, M6), Titel und
+    Anzahl allein nicht (M4, M5): Vor einem Zonenwechsel, der sie nur
+    deshalb schreibt, fragt Aperio, wenn dabei einzeln geänderte Vorkommen
+    verloren gingen (245, seit 247 eine Frage). Ganztägig bekommt
+    Uhrzeit: Beginn und Ende
+    vor und nach der Zone, die Regel immer (244, M7, M8). Aperios eigene
+    Anfrage danach, vierte Runde: ganztägig bekommt 10:00 und 00:30 richtig
+    (N1, N1b); der Zonenwechsel wird abgelehnt, nichts geht raus, die
+    Ausnahmen bleiben (N2); Wien statt Berlin schreibt nur die Zone und
+    behält sie (N3). Fünfte Runde: ganztägige Outlook-Serien in W. Europe
+    bekommen 10:00 richtig, täglich und samstags (O1, O2).
+    ✅ **Warnen und fragen** (243, PR A, Entscheidungen 246-253): Schreibt ein
+    Ändern Beginn und Ende, die Zone oder das Muster einer Exchange-Serie neu,
+    fragt der Editor vorher, was dabei verloren ginge — einzeln geänderte
+    Vorkommen und gelöschte, die Aperio nicht wieder zuordnen kann —, auf dem
+    Desktop und auf dem Handy, mit der Zahl vom Server; die übrigen gelöschten
+    löscht Aperio danach wieder, und was nicht klappt, nennt es mit dem Tag.
+    Eine Serie ohne lesbaren Stand wird nicht geschrieben (248). Live-Test
+    Runde 7 mit Aperios eigener Anfrage bestanden (Q1 bis Q6, 2026-10-11).
+    ✅ **Warnen und fragen, PR B** (250, 251): Ziehen fragt nach der Umfang-Wahl
+    in einem eigenen Bestätigen-Dialog und verschiebt bei Ja noch einmal, mit
+    der Zustimmung nur am Schreiben der Serie; Übertragen an Kopien fragt
+    einmal nach der Schleife, jede Kopie mit ihrem Kalender, und schickt nur die
+    betroffenen noch einmal, auf dem Desktop und auf dem Handy.
+
+- [x] **Schritt 2 vermessen (2026-09-09), und die Fragestellung war falsch.**
+  Acht Module wurden einzeln durchgemessen (Reinheit, jede Aufrufstelle,
+  Rust-Gegenstück, Kosten). Befund: **es gibt keine Einheit in Modulgröße, die
+  umziehen könnte** — jedes der acht zerfällt in eine Domänen-Hälfte, die in den
+  Kern gehört, und eine Ansichts-Hälfte, die nicht weg kann. Und der Blocker ist
+  bei sechs von acht **nicht** die IPC-Runde, sondern das Fehlen einer
+  **synchronen** Kern-Bindung; kein Umbau eines Befehls behebt das.
+  Sieben von acht „large"-Schätzungen sind derselbe eine Befund.
+  ↳ Nur EINE echte Doppelung existierte: `is_mine_or_unassigned`, in
+  `host-core/src/reminders.rs` **privat** und in `shared/taskAssignment.ts`.
+  Erledigt — siehe den Eintrag oben.
+  ↳ Echte Divergenz, unabhängig vom Umzug: `shared/recurrence.ts` und
+  `host-core`s `expand_occurrences` dokumentieren **verschiedenes**
+  DST-Randverhalten, und Rust deckelt bei `RRULESET_LIMIT=500`, JS gar nicht.
+  Braucht eine sprachübergreifende Fixture, bevor irgendetwas
+  Wiederholungs-Förmiges umzieht — und die läuft mangels Test-Runner nicht auf
+  Mobile.
+  ↳ Gemessen 2026-09-14: `eventOccurrences.json`, siehe den Eintrag
+  „Termin-Wiederholung zieht in den Kern".
+  ↳ Messlücke, ehrlich benannt: `collapseEventGroups` (202), `dayGridLayout`
+  (269), `taskRecurrence` (178) und `taskAssignment` (87) liegen INNERHALB der
+  vermessenen Abhängigkeiten und wurden nicht vermessen.
+
+- **Folge-PR „Ausnahmen beim Teilen“** (unter „Termin-Wiederholung zieht in den
+  Kern“) — der erledigte Teil; was daran offen ist, steht oben.
+  - ✅ CalDAV `create_task_list`: MKCALENDAR läuft seit PR 7 (7950e08b)
+    über `send_write`. Eine Wiederholung, die 405 bekommt, ist die Liste des
+    ersten Versuchs, jede andere Ablehnung einer Wiederholung unsicher
+    (`a_replayed_mkcalendar_reads_its_answer_as_the_first_attempts`).
+
 ### 🟠 B. Teilweise umgesetzt / kleinere Lücken — erledigt
 
 #### B1 · Woche-Start konfigurierbar (§5.2) ✅ erledigt
@@ -4407,6 +4215,182 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 
 - [-] Per-Vorkommen-Sound-Override, ohne das Vorkommen aus der Serie herauslösen zu müssen.  
   ↳ HINFÄLLIG: §14.4 wurde am 2026-06-04 (27459041) umgeschrieben — der Item-Override ist per Design serien-gebunden. Eine Vorkommen-Ebene wäre ein NEUER Wunsch, keine Lücke.
+#### B9 · Personen einer Liste: ein Fehler wird gesagt (130) `[x]` — erledigt
+
+✅ Das Feld „Zugewiesen an“ verschwand bei Toni von jeder Vikunja-Aufgabe. Die
+Personen kommen auf v2 aus `GET /api/v2/projects/{id}/users/search`, einem Weg mit
+eigenem Token-Recht („users search“ unter Projects). Vikunja gibt einem
+bestehenden Token nie ein neues Recht; sein Token von vor 2.4 bekam 401, und der
+Adapter machte aus jedem Fehler eine leere Liste, die das Feld versteckte. Jetzt:
+`cal_core::ReadRefusal::TokenRefused` nennt das Recht, jeder andere Fehler bleibt
+einer (Vikunja und Todoist; bei Todoist heißt nur 403 „niemand“), beide Hosts
+melden eine nicht routbare Liste, und `assigneeField` zeigt das Feld immer, wo die
+Liste Zuweisungen kennt: lädt, Fehler mit Neu-Versuch, niemand, Auswahl. Das Handy
+liest die Meldung hinter Expos Vorspann („Call to function … Caused by:“; gilt
+auch für die Schreib-Ablehnungen) und lädt Personen und „ich“ getrennt. Der
+Fokus bleibt nach „Erneut versuchen“ im Feld (Desktop), am Handy geht er auf die
+Beschriftung und das Ergebnis wird angesagt.
+
+✅ **Erledigt in PR 7 (2026-10-23):** Jeder Aufruf des Rust-Hosts aus der
+Handy-Brücke läuft jetzt durch `hostCoded` (`CalFfiModule.swift`/`.kt`), das
+jede Variante mit dem Code des Desktops nach JS gibt (`auth`, `forbidden`,
+`not_found`, `conflict`, `network`, `protocol`, `invalid_input`,
+`unsupported`, `internal`, beim Abgleich dessen eigener Code);
+`check-ffi-bridges.mjs` lässt keine unumhüllte Registrierung durch. Kotlin
+lokal gebaut; Swift baut erst der iOS-Bau — Das gilt so nur für
+Android: Auf iOS kommt der Code nicht in JavaScript an (siehe „iPhone:
+verliert Expo den Fehlercode?“ unter B14), dort liest nur die Marke im
+Text.
+
+#### B10 · iOS: VoiceOver tippte durch die Tab-Leiste (159) `[~]` — erledigte Punkte
+
+✅ Doppeltippen auf „Protokolle“, den letzten Eintrag der Einstellungen, öffnete
+den Tab „Kalender“. Die Leiste liegt über der Szene; die Tab-Seiten polsterten nur
+ihren Scroll-INHALT, die Scroll-Ansicht selbst lief weiter unter die Leiste.
+VoiceOver hielt eine Zeile dort für sichtbar, scrollte sie nicht hoch und tippte
+ihre Mitte an, also die Leiste. Seit dem zwölften Eintrag (Signaturen) lag
+„Protokolle“ genau dort; latent galt es für jede Tab-Seite (Aufgaben mit der
+Gruppe „Erledigt“, Tag, Woche, Monat, Agenda, Jahr, Kontakte). Jetzt endet die
+Szene jeder Tab-Seite über der Leiste (`useStackScreenOptions` in `App.tsx`,
+nur iOS; Android legt die Leiste unter die Szene). Sehende sehen den Inhalt nicht
+mehr hinter der Glas-Leiste, und beim Öffnen und Schließen einer Unterseite
+zeigt die Tab-Seite während der Animation unten einen leeren Streifen ohne
+Leiste (die Leiste verschwindet beim Öffnen sofort und kommt beim Schließen erst
+danach). Bewusst so: das Polster an der Sichtbarkeit der Leiste festzumachen,
+hieße die Stapel bei jedem Wechsel neu zu rendern, und das setzt den
+VoiceOver-Cursor zurück.
+
+#### B11 · Titel-Vorschlag: der Kalender, den er nennt (160, 161) `[~]` — erledigte Punkte
+
+✅ Im Schnell-Hinzufügen nannte der Vorschlag „Arbeit“, und der Editor landete
+auf dem obersten Kalender. Zwei Wege, beide nachgestellt: Das Übernehmen suchte
+nur nach der Kennung, und dieselbe Kennung kann in zwei Kalendern liegen
+(Google behält sie über Kalender hinweg, eine Kopie behält ihre UID) — jetzt
+per Behälter und Kennung (`offerKey`, `findOffer`), auch bei Aufgaben, wo zwei
+Server von derselben 1 zählen. Und seit ba58411e galt jede Pfeiltaste in der
+Kalenderauswahl als Wahl; jetzt zählt nur, was beim Übernehmen vom gezeigten
+Standard abweicht (`pickedOverOffer`, 160). Dazu (161): eine beschreibbare
+Kopie desselben Titels kommt vor einer neueren in einem nur lesbaren Kalender,
+ein nur lesbarer Vorschlag sagt „nur lesbar“, und nimmt der Editor einen
+anderen Kalender oder eine andere Liste, sagt er beide an — beim Übernehmen im
+Editor mit der Ansage der Übernahme, nach dem Schnell-Hinzufügen beim Öffnen.
+Die Vorschläge öffnen sich nur noch nach Tippen, nicht nach einer Übernahme.
+Desktop, Handy, Termine und Aufgaben.
+
+Auf eine noch leere Kalender- oder Listenauswahl warten beide Editoren jetzt,
+statt jeden Behälter als unbekannt abzulehnen; ein Testaufbau mit derselben
+Dauer wie die Grundform hatte das verdeckt.
+
+✅ **Release-Build (Toni, 2026-10-31):** Der Editor landete nach einem
+Vorschlag aus dem Schnell-Hinzufügen wieder auf dem ersten Kalender, obwohl
+jeder Test der Übergabe grün war. Eine Spur im Log (`[prefill …]`, wieder
+entfernt) zeigte die Ursache: Der Reset lief ein zweites Mal, bevor
+die Aktualisierung des Prefills gerendert war. Ein Store, der synchron pusht,
+rendert vor den Aktualisierungen der Effekte; das Formular sah darum noch
+unberührt aus, und die Grundform landete hinter dem Prefill. Der Prefill lief
+nicht wieder, weil sich keine seiner Abhängigkeiten änderte (in dev rettete
+StrictMode). Jetzt zählt jeder Reset (`baselineResets`), und der Prefill läuft
+danach noch einmal, im Termin- und im Aufgaben-Editor (#131, 944412de).
+Bestätigen im Build von main.
+
+#### B12 · Gerätekonto nach dem Telefonwechsel (162-173) `[x]` — erledigt
+
+✅ **PR-A:** Nach dem Umzug per Schnellstart auf ein neues iPhone kamen Aperios
+Daten mit, die iOS-Freigabe für Kalender und Erinnerungen nicht; Aperio fragte
+nur beim Anlegen des Kontos, prüfte den Status nie und hielt den leeren Katalog
+für „lädt noch“. Jetzt fragt Aperio beim Start, wenn es ein Gerätekonto gibt
+und iOS auf diesem Telefon noch nie gefragt hat (`cal_core::os_access`, 166),
+nach dem Entsperren und dem ersten Bild, auf einer eigenen Warteschlange. Nach
+der Freigabe frischt die Brücke ihren `EKEventStore` auf (seit PR-G mit `reset()`
+statt eines neuen Stores), das Konto lädt neu
+(`warm_all_queued`: am Handy ging eine Anfrage während eines Durchlaufs bisher
+verloren), und ein Satz sagt, was erteilt wurde. Das Protokoll nennt den
+Zugriff vorher und nachher sowie, wie sich die Kalenderliste änderte (geblieben,
+weggefallen, neu) oder dass sie nach einem Fehler unverändert wiederkam — daran
+sieht man, ob iOS die Kennungen behalten hat. Konten, die über den Abgleich
+ankommen, gehen einem laufenden Durchlauf ebenfalls nicht mehr verloren.
+✓ im Einsatz (Feldtest am iPhone, 2026-10-03/04, Toni).
+
+✅ **PR-B:** Ohne vollen Zugriff verweigert der Adapter jedes Lesen und
+Schreiben (`cal_core::Error::AccessNotGranted`, Marke `access-not-granted`,
+getragen als `forbidden`). Vorher meldete Löschen Erfolg, ohne etwas zu tun
+(und vergaß Gruppierung und private Erinnerungen auf allen Geräten), und „nur
+hinzufügen“ (171: zählt als kein Zugriff) hätte mit seinem einen virtuellen
+Kalender die echten aus dem Zwischenspeicher verdrängt. Am Handy sagt jedes
+Schreiben eine Ablehnung als Satz (`writeErrorMessage`), nicht nur der
+Termin-Editor. ✓ im Einsatz (Feldtest am iPhone, 2026-10-03/04, Toni).
+
+✅ **PR-C:** Der Cache merkt sich die Fehlerart (`failure_kind`: access, auth,
+sonst nichts; Migration 46) statt sie aus Wörtern zu raten. Fehlt der Zugriff,
+sperrt das die ganze Familie (Kalender oder Listen) für das Nachladen beim
+Lesen (`access_withheld`); der Warm-Durchlauf fragt weiter, eine Freigabe hebt
+die Sperre. Die Fehlerliste nennt eine gesperrte Familie einmal statt jede
+Kennung, sagt `no_access` und `cause`, und ein Fehler steht nur noch einmal
+im Protokoll, nicht bei jedem gleichen Versuch. „Neu synchronisieren“ behält
+die letzte erfolgreiche Aktualisierung (`last_success_at`). ✓ im Einsatz (Feldtest am iPhone, 2026-10-03/04, Toni).
+
+✅ **PR-D1:** Fehlt der Zugriff, trägt die Kontozeile ein Abzeichen, das den
+fehlenden Speicher nennt („Kein Zugriff“, „Kalender ohne Zugriff“,
+„Erinnerungen ohne Zugriff“), und die Aktion „Zugriff erlauben…“. Was sie tut, entscheidet der Kern
+(`cal_core::os_access::repair_for`): fragen, solange das System fragt (unter
+Android, bis es „nicht mehr fragen“ meldet), sonst ein Dialog, der sagt, was in
+den Einstellungen fehlt, und sie öffnet; bei einer Einschränkung nur die
+Erklärung. Kommt Aperio wieder nach vorn und der Zugriff ist da, während der
+Cache das Konto noch sperrt (`restorable`), oder ist seit dem letzten Blick ein
+Speicher lesbar geworden (beim Neustart der gemerkte Blick des letzten Laufs:
+iOS beendet Apps womöglich bei geänderten Rechten), lädt es sofort neu und
+sagt es an; nach einem Weg in die Einstellungen, der nichts änderte, sagt es,
+wofür der Zugriff noch fehlt. Unter Android meldet ein ohne Antwort
+geschlossener Dialog dasselbe wie „nicht mehr fragen“, und nichts trennt beides;
+der Dialog behauptet deshalb nichts darüber. ✓ im Einsatz (Feldtest am iPhone, 2026-10-03/04, Toni).
+
+✅ **PR-D2:** Der Satz am Ende eines Durchlaufs nennt, was nicht aktualisiert
+wurde („Externe Daten aktualisiert, außer: …“; nichts gelesen: „konnten nicht
+aktualisiert werden“, dann die Warnung mit Ursache; nichts gelesen und nichts
+bestätigt (erster Netzaussetzer) oder kein Ergebnis: „Aktualisierung externer
+Daten beendet“), aus dem Kern (`CacheRefreshStatus.outcome`, dieselbe
+Menge wie die Fehleranzeige); Genanntes wird nicht noch einmal angesagt, die
+Hinweise erscheinen mit dem Satz (180). Die Ursache ist ein Typ mit Rang im Kern
+(`RefreshCause`, Zugriff vor Anmeldung vor Sonstigem, 181); Banner und Ansagen
+lesen ihn ab, eine schwerere Ursache wird erneut angesagt (185). Fehlt einem
+Konto der Zugriff, steht im Synchronisieren-Bereich eine Zeile mit Knopf „Zu
+den Konten“ (184), am Desktop eine Zeile. „Neu verbinden“ nur bei Anmeldeproblem
+und Kontoart mit Zugangsdaten. Höchstens ein Konto einer Art per
+`single_instance` im Manifest, an allen Konto-Türen (183); „Dieses Gerät“ in der
+Auswahl führt dann zur Reparatur oder zur Zeile (182). Ein Klick in den ersten
+Sekunden am Desktop lässt den Start-Durchlauf erzwungen laufen; sein Satz nennt
+Fehler sofort. Die Typen dafür sind erzeugt
+statt von Hand gespiegelt. ✓ im Einsatz (Feldtest am iPhone, 2026-10-03/04, Toni).
+
+✅ **PR-F entfällt:** Gemessen am 2026-10-03 auf Tonis iPhone: Nach der Freigabe
+kamen alle 8 Kalender und alle 5 Erinnerungslisten mit ihren alten Kennungen
+zurück (nichts weggefallen, nichts neu). Es gibt nichts zu übernehmen.
+
+✅ **PR-G (186, 187):** Im selben Feldtest meldete iOS für die Erinnerungen eine
+Sekunde nach der Zustimmung wieder „noch nie gefragt“ und blieb dabei, bis
+Aperio neu startete; jede weitere Anfrage beantwortete iOS sofort mit
+„erteilt“, ohne Dialog, und Aperio sagte trotzdem „nicht erteilt“ und schickte
+in die Einstellungen. Zwei Änderungen: Die Brücke hält einen einzigen
+`EKEventStore` für den ganzen Lauf und frischt ihn nach einer Zustimmung mit
+`reset()` auf (186), statt ihn zu ersetzen — der Wechsel hatte binnen einer
+Sekunde zwei neue Stores erzeugt (drei im Lauf) und gerade den mit der frischen
+Zustimmung verworfen. Solange eine Anfrage läuft, setzt nichts den Store zurück;
+kommt danach eine leere Liste, folgt einmal ein weiterer `reset()`. Und eine Zustimmung in diesem Lauf entscheidet ein späteres „noch
+nie gefragt“ (`cal_core::os_access::settled_by_grant`, 187); „verweigert“,
+„eingeschränkt“ und „nur hinzufügen“ gehen immer vor, nichts wird über den Lauf
+hinaus gemerkt. Die Brücke meldet die Zustimmung als `granted_this_run`
+(Vertrag: `shared/contracts/deviceAccessStatus.json`, den Rusts Test liest und
+an dem `check-ffi-bridges.mjs` die Schlüssel beider Brücken prüft), das Protokoll
+nennt, wann sie den Status entschieden hat. ✓ im Einsatz (Build vom 2026-10-04,
+von Toni getestet).
+
+✅ **PR-E:** Android fragt beim Start einmal selbst (172). Weil Android nicht
+sagen kann, ob es je gefragt hat, merkt sich Aperio jede Anfrage auf dem Gerät
+(`noBackupFilesDir`, nicht im Backup, also auf einem neuen Telefon wieder
+leer); ohne Merker meldet die Brücke „noch nie gefragt“, und die Kernregel
+(`ask_on_start`) fragt wie unter iOS. Danach liest sie „unbestimmt“, und
+„Zugriff erlauben…“ fragt bzw. führt in die Einstellungen.
+
 #### B13 · Abhaken am Handy wartet auf den Erinnerungs-Durchlauf (218-220) `[ ]` — erledigte Punkte
 
 - [-] **219 · Kein 5-Minuten-Speicher am Handy.** Entschieden: Der
