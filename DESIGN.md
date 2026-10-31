@@ -310,7 +310,7 @@ Alle Ansichten müssen vollständig per Tastatur navigierbar sein. Die vollstän
 | `Ctrl+←` / `Ctrl+→` | Vorherige / nächste Periode |
 | `Ctrl+1–6` | Ansicht wechseln (6 = Aufgaben-Ansicht) |
 | `Ctrl+T` | Zur heutigen Ansicht springen |
-| `F6` | Zwischen Haupt-Navigationsbereichen wechseln |
+| `F6` / `Ctrl+Tab` | Zwischen Haupt-Navigationsbereichen wechseln: Seitenleiste → aktive Ansicht in der Toolbar → Backlog → Ansicht (ihr Raster, ihre Liste, ihr Baum); mit Shift rückwärts (Toni, 2026-10-31) |
 | `Ctrl+H` / `Ctrl+/` (macOS) | Tastaturkürzel-Overlay öffnen |
 
 ### 3.5 Farbe & Kontrast
@@ -2875,7 +2875,7 @@ Alle Kürzel sind individuell umbelegbar (siehe Abschnitt 15.10), um Konflikte m
 | `Ctrl+4` | Jahresansicht |
 | `Ctrl+5` | Agenda-Ansicht |
 | `Ctrl+6` | Aufgaben-Ansicht |
-| `F6` | Zwischen Hauptbereichen wechseln (Sidebar ↔ Kalender ↔ Toolbar) |
+| `F6` / `Ctrl+Tab` | Zwischen Hauptbereichen wechseln (Sidebar → aktive Ansicht → Backlog → Ansicht), mit Shift rückwärts |
 
 #### Termine
 

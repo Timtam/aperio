@@ -1341,6 +1341,7 @@ export function DayView() {
         <ul
           ref={listRef}
           role="listbox"
+          data-region-target
           tabIndex={0}
           aria-label={t('views.day.eventList')}
           // Grid mode: the canvas height + gridline offset scale to the visible

@@ -61,8 +61,10 @@ The state is remembered across restarts.
 
 > **Keyboard & screen reader:** The button sits **before** the sidebar in the
 > tab order — after expanding, one more Tab reaches the sidebar; when collapsed,
-> Tab skips it. Press `F6` to jump between regions (sidebar, toolbar, view,
-> backlog).
+> Tab skips it. Press `F6` or `Ctrl+Tab` to jump between regions: the sidebar,
+> the active view's button in the toolbar, the backlog (week and month), and the
+> view itself — its grid, list or tree, not the button above it. `Shift+F6` and
+> `Ctrl+Shift+Tab` go the other way.
 
 ## The backlog (week & month planner)
 
@@ -86,10 +88,13 @@ of those chips shows its due date.
 Drag a chip onto a day cell to **schedule** it there, or drop a scheduled task
 back onto the backlog to **clear** its day and deadline.
 
-> **Keyboard & screen reader:** Each part is its own single-stop **listbox**:
-> Tab lands on it once, `Arrow`/`Home`/`End` move between tasks, `Enter` opens a
-> task, `Shift+D` opens the plan dialog (assign a day), and the context-menu key
-> (or `Shift+F10`) opens the task menu.
+> **Keyboard & screen reader:** The backlog is **one listbox**, with a group
+> for each part: Tab or `F6` lands on it once, and the arrow keys go through
+> every task, from one part into the next — a screen reader names the part as
+> you enter it. `Page Up`/`Page Down` jump to the part before or after,
+> `Home`/`End` to the first or last task. `Enter` opens a task, `Shift+D` opens
+> the plan dialog (assign a day), and the context-menu key (or `Shift+F10`)
+> opens the task menu.
 
 ### Which lists the backlog shows
 

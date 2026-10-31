@@ -63,6 +63,8 @@ export function Toolbar() {
             type="button"
             className="toolbar__view-btn"
             aria-pressed={view === v}
+            // F6 lands on the view that is on (useRegionFocus).
+            data-region-target={view === v || undefined}
             onClick={() => setView(v)}
             title={`${t(`toolbar.views.${v}`)} (Ctrl+${VIEW_SHORTCUT[v]})`}
           >

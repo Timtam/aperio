@@ -15,6 +15,7 @@ Tastaturkürzel**, wo du jedes Kürzel ändern kannst.
 | Suche öffnen | `Strg+F` |
 | Erinnerungs-Übersicht öffnen | `Strg+Umschalt+R` |
 | Zwischen Bereichen wechseln | `Tab` / `Umschalt+Tab` |
+| Zwischen den Hauptbereichen springen: Seitenleiste, Schaltfläche der aktiven Ansicht, Backlog, die Ansicht | `F6` / `Umschalt+F6`, `Strg+Tab` / `Strg+Umschalt+Tab` |
 | Auswählen / öffnen / bearbeiten | `Eingabe` |
 | Dialog oder Menü schließen | `Esc` |
 | Kontextmenü öffnen | `Anwendungstaste` / `Umschalt+F10` |

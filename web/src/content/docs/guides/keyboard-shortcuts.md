@@ -15,6 +15,7 @@ always authoritative.
 | Open search | `Ctrl+F` |
 | Open reminders overview | `Ctrl+Shift+R` |
 | Switch between areas | `Tab` / `Shift+Tab` |
+| Jump between regions: sidebar, the active view's button, backlog, the view | `F6` / `Shift+F6`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Select / open / edit | `Enter` |
 | Close dialog or menu | `Esc` |
 | Open context menu | `Application key` / `Shift+F10` |

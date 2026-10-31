@@ -852,6 +852,7 @@ export function MonthView() {
         <div
           ref={gridRef}
           role="grid"
+          data-region-target
           aria-label={t('views.month.gridLabel')}
           tabIndex={0}
           aria-activedescendant={

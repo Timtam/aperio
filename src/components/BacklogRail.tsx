@@ -74,15 +74,15 @@ function parseDayKey(key: string): Date {
  * onto a day still shows here (it also keeps its grid due-marker) and a started
  * task is included — the rail is the one place to see what's due soonest.
  *
- * All three lists are drag sources (drop a chip on a day cell to schedule it)
- * and the rail is a drop target (drop a scheduled task back here to clear its
- * plan). Each list is its own single-tab-stop `listbox` (Arrow/Home/End move the
- * active option via `aria-activedescendant`, Enter opens, Shift+D plans,
- * ContextMenu / Shift+F10 opens the task menu), so the rail stays fully
- * keyboard/SR usable.
+ * All three sections are drag sources (drop a chip on a day cell to schedule
+ * it) and the rail is a drop target (drop a scheduled task back here to clear
+ * its plan). The sections are the groups of ONE single-tab-stop `listbox`
+ * (`BacklogList`: Arrow/Home/End/Page Up/Page Down move the active option via
+ * `aria-activedescendant`, Enter opens, Shift+D plans, ContextMenu / Shift+F10
+ * opens the task menu), so the rail stays fully keyboard/SR usable.
  *
  * Rendered as a fixed-width resizable column left of the grid; it joins the F6
- * region cycle. Each chip carries its hierarchical color (task → section → list)
+ * region cycle, its list as the stop. Each chip carries its hierarchical color (task → section → list)
  * and a priority marker; deadline chips additionally show the due date.
  */
 export function BacklogRail() {
@@ -324,49 +324,36 @@ export function BacklogRail() {
         {total === 0 ? (
           <p className="backlog-rail__empty">{t('views.backlog.empty')}</p>
         ) : (
-          <>
-            {byWeek.thisWeek.length > 0 && (
-              <BacklogList
-                items={byWeek.thisWeek}
-                heading={t('views.backlog.thisWeekHeading', {
+          <BacklogList
+            labelledBy={headingId}
+            sections={[
+              {
+                key: 'this-week',
+                heading: t('views.backlog.thisWeekHeading', {
                   count: byWeek.thisWeek.length,
-                })}
-                listLabel={t('views.backlog.thisWeekListLabel')}
-                optionPrefix="backlog-this-week"
-                labelById={labelById}
-                todayKey={todayKey}
-                showDeadline
-              />
-            )}
-            {byWeek.nextWeek.length > 0 && (
-              <BacklogList
-                items={byWeek.nextWeek}
-                heading={t('views.backlog.nextWeekHeading', {
+                }),
+                items: byWeek.thisWeek,
+              },
+              {
+                key: 'next-week',
+                heading: t('views.backlog.nextWeekHeading', {
                   count: byWeek.nextWeek.length,
-                })}
-                listLabel={t('views.backlog.nextWeekListLabel')}
-                optionPrefix="backlog-next-week"
-                labelById={labelById}
-                todayKey={todayKey}
-                showDeadline
-              />
-            )}
-            {everythingElse.length > 0 && (
-              <BacklogList
-                items={everythingElse}
-                heading={t('views.backlog.restHeading', {
-                  count: everythingElse.length,
-                })}
-                listLabel={t('views.backlog.restListLabel')}
-                optionPrefix="backlog-rest"
-                labelById={labelById}
-                todayKey={todayKey}
+                }),
+                items: byWeek.nextWeek,
+              },
+              {
                 // The section mixes dated and undated rows; a chip without a
                 // deadline simply renders none.
-                showDeadline
-              />
-            )}
-          </>
+                key: 'rest',
+                heading: t('views.backlog.restHeading', {
+                  count: everythingElse.length,
+                }),
+                items: everythingElse,
+              },
+            ]}
+            labelById={labelById}
+            todayKey={todayKey}
+          />
         )}
       </div>
       {/* Drag (or arrow-key) the right edge to resize the column. */}
@@ -386,28 +373,33 @@ export function BacklogRail() {
   );
 }
 
-interface BacklogListProps {
-  items: Task[];
+interface BacklogSection {
+  key: string;
   heading: string;
-  listLabel: string;
-  /** Unique id prefix so each list's `aria-activedescendant` targets are
-   *  distinct across the listboxes in the rail. */
-  optionPrefix: string;
-  labelById: ReturnType<typeof labelsLookup>;
-  todayKey: string;
-  /** Render the due date on each chip; a chip without a deadline shows none. */
-  showDeadline?: boolean;
+  items: Task[];
 }
 
-/** One labelled `listbox` section of the rail. */
-function BacklogList({
-  items,
-  heading,
-  listLabel,
-  optionPrefix,
+interface BacklogListProps {
+  /** The rail's heading, which names the list. */
+  labelledBy: string;
+  /** This week, next week, the rest; an empty one is left out. */
+  sections: BacklogSection[];
+  labelById: ReturnType<typeof labelsLookup>;
+  todayKey: string;
+}
+
+/**
+ * The rail's tasks as ONE `listbox` with a `group` per section (WAI-ARIA
+ * "listbox with grouped options"; Toni, 2026-10-31). One tab stop, and one F6
+ * stop: the arrows go through every task, across the sections, and a screen
+ * reader names the section a move enters. Page Up / Page Down jump to the
+ * section before or after.
+ */
+export function BacklogList({
+  labelledBy,
+  sections,
   labelById,
   todayKey,
-  showDeadline = false,
 }: BacklogListProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -418,13 +410,25 @@ function BacklogList({
   const { openForTask } = useChipContextMenu();
   const { visualEffortSizing, priorityScale } = useTaskCascadeEnabled();
   const [activeIndex, setActiveIndex] = useState(0);
-  const headingId = useId();
+  const groupId = useId();
 
+  const shown = sections.filter((section) => section.items.length > 0);
+  const items = shown.flatMap((section) => section.items);
+  // Where each shown section begins in `items`.
+  const starts: number[] = [];
+  let count = 0;
+  for (const section of shown) {
+    starts.push(count);
+    count += section.items.length;
+  }
   // Clamp the active option to the current list (it shrinks as tasks are
   // scheduled away). Derived, so it never points past the end.
   const activeIdx =
     items.length === 0 ? -1 : Math.min(activeIndex, items.length - 1);
-  const optionId = (i: number) => `${optionPrefix}-opt-${i}`;
+  const optionId = (i: number) => `${groupId}-opt-${i}`;
+  // The section `index` lies in.
+  const sectionOf = (index: number) =>
+    starts.reduce((found, start, i) => (index >= start ? i : found), 0);
 
   const onListKeyDown = (e: React.KeyboardEvent) => {
     if (activeIdx < 0) return;
@@ -446,6 +450,22 @@ function BacklogList({
         e.preventDefault();
         setActiveIndex(items.length - 1);
         return;
+      case 'PageDown': {
+        // The first task of the next section; in the last, its last task.
+        e.preventDefault();
+        const next = sectionOf(activeIdx) + 1;
+        setActiveIndex(next < starts.length ? starts[next] : items.length - 1);
+        return;
+      }
+      case 'PageUp': {
+        // The first task of this section; from there, of the one before.
+        e.preventDefault();
+        const here = sectionOf(activeIdx);
+        setActiveIndex(
+          activeIdx > starts[here] ? starts[here] : starts[Math.max(here - 1, 0)],
+        );
+        return;
+      }
       case 'Enter':
       case ' ':
         e.preventDefault();
@@ -479,139 +499,148 @@ function BacklogList({
     }
   };
 
-  return (
-    <div className="backlog-rail__section">
-      <h3 id={headingId} className="backlog-rail__subheading">
-        {heading}
-      </h3>
-      <ul
-        className="backlog-rail__list"
-        role="listbox"
-        aria-labelledby={headingId}
-        aria-label={listLabel}
-        tabIndex={0}
-        aria-activedescendant={optionId(activeIdx)}
-        onKeyDown={onListKeyDown}
+  const chip = (task: Task, i: number) => {
+    const children = tasks.filter((c) => c.parent_id === task.id);
+    const listName = taskListById.get(task.list_id)?.name ?? task.list_id;
+    const color = resolveTaskColor(
+      task,
+      taskListById,
+      labelById,
+      sectionColorById,
+    );
+    const priorityGlyph = priorityMarker(task.priority, priorityScale);
+    const effortMod = visualEffortSizing
+      ? effortSizeModifier(task.effort)
+      : '';
+    const parentTitle = subtaskParentTitle(task, tasks);
+    const due = task.deadline_date
+      ? fmt.format(parseDayKey(task.deadline_date), 'P')
+      : null;
+    const overdue = !!task.deadline_date && task.deadline_date < todayKey;
+    const ariaLabel =
+      due
+        ? t('views.backlog.deadlineChipLabel', {
+            title: task.title,
+            list: listName,
+            deadline: due,
+            overdue: overdue ? t('views.backlog.overdueSuffix') : '',
+            priority: prioritySuffix(t, task.priority, priorityScale),
+            assignee: assigneeSuffix(t, task.assignees),
+          })
+        : t('views.backlog.chipLabel', {
+            title: task.title,
+            list: listName,
+            priority: prioritySuffix(t, task.priority, priorityScale),
+            assignee: assigneeSuffix(t, task.assignees),
+          });
+    return (
+      <li
+        key={task.id}
+        id={optionId(i)}
+        role="option"
+        aria-selected={i === activeIdx}
+        aria-label={
+          ariaLabel +
+          (parentTitle
+            ? t('views.tasks.subtaskParent', { parent: parentTitle })
+            : '') +
+          effortSuffix(t, task.effort)
+        }
+        className={
+          'backlog-rail__chip' +
+          (i === activeIdx ? ' backlog-rail__chip--active' : '') +
+          (overdue ? ' backlog-rail__chip--overdue' : '') +
+          (effortMod ? ` backlog-rail__chip--effort-${effortMod}` : '')
+        }
+        style={
+          color.hex
+            ? ({ '--event-color': color.hex } as React.CSSProperties)
+            : undefined
+        }
+        draggable
+        onDragStart={(e) => setTaskDrag(e.dataTransfer, task, children)}
+        onClick={() => setActiveIndex(i)}
+        onDoubleClick={() => {
+          setActiveIndex(i);
+          openTaskDialog(task);
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setActiveIndex(i);
+          void openForTask(task, { x: e.clientX, y: e.clientY });
+        }}
       >
-        {items.map((task, i) => {
-          const children = tasks.filter((c) => c.parent_id === task.id);
-          const listName = taskListById.get(task.list_id)?.name ?? task.list_id;
-          const color = resolveTaskColor(
-            task,
-            taskListById,
-            labelById,
-            sectionColorById,
-          );
-          const priorityGlyph = priorityMarker(task.priority, priorityScale);
-          const effortMod = visualEffortSizing
-            ? effortSizeModifier(task.effort)
-            : '';
-          const parentTitle = subtaskParentTitle(task, tasks);
-          const due =
-            showDeadline && task.deadline_date
-              ? fmt.format(parseDayKey(task.deadline_date), 'P')
-              : null;
-          const overdue =
-            showDeadline &&
-            !!task.deadline_date &&
-            task.deadline_date < todayKey;
-          const ariaLabel =
-            showDeadline && due
-              ? t('views.backlog.deadlineChipLabel', {
-                  title: task.title,
-                  list: listName,
-                  deadline: due,
-                  overdue: overdue ? t('views.backlog.overdueSuffix') : '',
-                  priority: prioritySuffix(t, task.priority, priorityScale),
-                  assignee: assigneeSuffix(t, task.assignees),
-                })
-              : t('views.backlog.chipLabel', {
-                  title: task.title,
-                  list: listName,
-                  priority: prioritySuffix(t, task.priority, priorityScale),
-                  assignee: assigneeSuffix(t, task.assignees),
-                });
-          return (
-            <li
-              key={task.id}
-              id={optionId(i)}
-              role="option"
-              aria-selected={i === activeIdx}
-              aria-label={
-                ariaLabel +
-                (parentTitle
-                  ? t('views.tasks.subtaskParent', { parent: parentTitle })
-                  : '') +
-                effortSuffix(t, task.effort)
-              }
-              className={
-                'backlog-rail__chip' +
-                (i === activeIdx ? ' backlog-rail__chip--active' : '') +
-                (overdue ? ' backlog-rail__chip--overdue' : '') +
-                (effortMod ? ` backlog-rail__chip--effort-${effortMod}` : '')
-              }
-              style={
-                color.hex
-                  ? ({ '--event-color': color.hex } as React.CSSProperties)
-                  : undefined
-              }
-              draggable
-              onDragStart={(e) => setTaskDrag(e.dataTransfer, task, children)}
-              onClick={() => setActiveIndex(i)}
-              onDoubleClick={() => {
-                setActiveIndex(i);
-                openTaskDialog(task);
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setActiveIndex(i);
-                void openForTask(task, { x: e.clientX, y: e.clientY });
-              }}
+        <span className="backlog-rail__chip-main">
+          <span className="backlog-rail__chip-title">{task.title}</span>
+          {priorityGlyph && (
+            <span
+              className="backlog-rail__chip-priority"
+              aria-hidden="true"
             >
-              <span className="backlog-rail__chip-main">
-                <span className="backlog-rail__chip-title">{task.title}</span>
-                {priorityGlyph && (
-                  <span
-                    className="backlog-rail__chip-priority"
-                    aria-hidden="true"
-                  >
-                    {priorityGlyph}
-                  </span>
-                )}
-              </span>
-              {parentTitle && (
-                <span className="backlog-rail__chip-parent" aria-hidden="true">
-                  ↳ {parentTitle}
-                </span>
-              )}
-              {/* The list is NOT drawn here: the colour carries the belonging
-                  for a sighted reader, in a form that costs no line, and a
-                  screen reader has no colour to read so the list stays in the
-                  aria-label above.
-                  Worth knowing what the stripe actually resolves to
-                  (`resolveTaskColor`): the task's OWN colour label first, then
-                  its section's, and the list only as the fallback — and an
-                  overdue chip paints the stripe red regardless. So a task the
-                  user has coloured personally shows ITS colour here, not its
-                  list's. That is the point of setting a label, but it does
-                  mean the list is not always readable off the rail. */}
-              {due && (
-                <span className="backlog-rail__chip-meta">
-                  <span
-                    className={
-                      'backlog-rail__chip-deadline' +
-                      (overdue ? ' backlog-rail__chip-deadline--overdue' : '')
-                    }
-                    aria-hidden="true"
-                  >
-                    {due}
-                  </span>
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+              {priorityGlyph}
+            </span>
+          )}
+        </span>
+        {parentTitle && (
+          <span className="backlog-rail__chip-parent" aria-hidden="true">
+            ↳ {parentTitle}
+          </span>
+        )}
+        {/* The list is NOT drawn here: the colour carries the belonging
+            for a sighted reader, in a form that costs no line, and a
+            screen reader has no colour to read so the list stays in the
+            aria-label above.
+            Worth knowing what the stripe actually resolves to
+            (`resolveTaskColor`): the task's OWN colour label first, then
+            its section's, and the list only as the fallback — and an
+            overdue chip paints the stripe red regardless. So a task the
+            user has coloured personally shows ITS colour here, not its
+            list's. That is the point of setting a label, but it does
+            mean the list is not always readable off the rail. */}
+        {due && (
+          <span className="backlog-rail__chip-meta">
+            <span
+              className={
+                'backlog-rail__chip-deadline' +
+                (overdue ? ' backlog-rail__chip-deadline--overdue' : '')
+              }
+              aria-hidden="true"
+            >
+              {due}
+            </span>
+          </span>
+        )}
+      </li>
+    );
+  };
+
+  return (
+    <div
+      className="backlog-rail__list"
+      role="listbox"
+      aria-labelledby={labelledBy}
+      tabIndex={0}
+      aria-activedescendant={activeIdx < 0 ? undefined : optionId(activeIdx)}
+      data-region-target
+      onKeyDown={onListKeyDown}
+    >
+      {shown.map((section, s) => (
+        <ul
+          key={section.key}
+          role="group"
+          aria-labelledby={`${groupId}-${section.key}`}
+          className="backlog-rail__section"
+        >
+          <li
+            role="presentation"
+            id={`${groupId}-${section.key}`}
+            className="backlog-rail__subheading"
+          >
+            {section.heading}
+          </li>
+          {section.items.map((task, j) => chip(task, starts[s] + j))}
+        </ul>
+      ))}
     </div>
   );
 }
