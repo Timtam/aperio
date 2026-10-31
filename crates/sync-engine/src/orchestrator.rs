@@ -169,6 +169,11 @@ pub const SYNC_LEFTOVERS_CUTOFF_PREF_KEY: &str = "sync.push.leftoversCutoff";
 /// again after [`CATCH_UP_RETRY`]. Device-local.
 pub const SYNC_LEFTOVERS_TRIED_AT_PREF_KEY: &str = "sync.push.leftoversTriedAt";
 
+/// The names of the tails settling an older build's leftovers wrote: named
+/// before the live file, they are no older build's files, and go up while
+/// another leftover waits (review round 10 of #130). Device-local.
+pub const SYNC_LEFTOVER_TAILS_PREF_KEY: &str = "sync.push.leftoverTails";
+
 /// The foreign log files an ordinary round read torn, with their sizes
 /// (review round 8 of #130): found torn again at the same size, a file is no
 /// read in progress and is not fetched every round. Apart from the record a
@@ -213,6 +218,12 @@ impl LeftoversCutoff {
     /// The frozen cutoff as `raw` holds it; `None` where it does not read.
     pub fn parse(raw: &str) -> Option<Self> {
         serde_json::from_str(raw).ok()
+    }
+
+    /// Before when a pending file is an older build's: [`Self::before`] to
+    /// the second, as log files are named (review round 10 of #130).
+    pub fn older_before(&self) -> DateTime<Utc> {
+        self.before.with_nanosecond(0).unwrap_or(self.before)
     }
 }
 
@@ -990,11 +1001,9 @@ impl SyncOrchestrator {
                 let unnamed: HashSet<String> =
                     unreadable.iter().map(|(name, _)| name.clone()).collect();
                 if !self.update_unreadable(unreadable, &read) {
-                    for (name, len) in &mut applied_lengths {
-                        if unnamed.contains(name) {
-                            *len = 0;
-                        }
-                    }
+                    // No length, not 0: a listing without sizes reads 0 as
+                    // known (review round 10).
+                    applied_lengths.retain(|(name, _)| !unnamed.contains(name));
                 }
                 self.record_applied_lengths(&applied_lengths);
                 self.update_torn_seen(torn, &read);
@@ -1180,9 +1189,14 @@ impl SyncOrchestrator {
         hold_below: Option<DateTime<Utc>>,
     ) -> SyncResult<usize> {
         let live_at = self.live_at();
+        // A tail settling wrote is named before the live file, and is no
+        // older build's file (review round 10 of #130).
+        let tails = self.leftover_tails();
         let held = |name: &sync_core::LogFileName| {
             hold_below.is_some_and(|below| {
-                is_stale_empty_stub(name.timestamp, live_at) && name.timestamp < below
+                is_stale_empty_stub(name.timestamp, live_at)
+                    && name.timestamp < below
+                    && !tails.contains(&name.to_filename())
             })
         };
         let files: Vec<PendingFile> = self
@@ -1380,7 +1394,7 @@ impl SyncOrchestrator {
             mark(self.store.as_ref());
             return LeftoverHold::SETTLED;
         };
-        let below = horizon.min(cutoff.before);
+        let below = horizon.min(cutoff.older_before());
         let hold = LeftoverHold {
             below: Some(below),
             cutoff_frozen: true,
@@ -1491,7 +1505,7 @@ impl SyncOrchestrator {
     /// session left goes up, and the round records no successful round.
     fn unfrozen_hold(&self) -> LeftoverHold {
         LeftoverHold {
-            below: Some(self.boot_at),
+            below: Some(self.boot_at.with_nanosecond(0).unwrap_or(self.boot_at)),
             cutoff_frozen: false,
         }
     }
@@ -1501,7 +1515,7 @@ impl SyncOrchestrator {
         match frozen {
             Ok(None) => LeftoverHold::SETTLED,
             Ok(Some(cutoff)) => LeftoverHold {
-                below: Some(cutoff.before),
+                below: Some(cutoff.older_before()),
                 cutoff_frozen: true,
             },
             Err(()) => self.unfrozen_hold(),
@@ -1547,9 +1561,12 @@ impl SyncOrchestrator {
         }
         match self.store.get_pref(SYNC_LEFTOVERS_CUTOFF_PREF_KEY) {
             Ok(Some(raw)) => {
-                return LeftoversCutoff::parse(&raw).map(Some).ok_or_else(|| {
-                    warn!("the leftovers' cutoff does not read");
-                });
+                // One that does not read is frozen anew: kept, it held every
+                // join and resume back for good (review round 10 of #130).
+                match LeftoversCutoff::parse(&raw) {
+                    Some(cutoff) => return Ok(Some(cutoff)),
+                    None => warn!("the leftovers' cutoff does not read; freezing it anew"),
+                }
             }
             Ok(None) => {}
             Err(err) => {
@@ -1701,12 +1718,46 @@ impl SyncOrchestrator {
             }
             at -= chrono::Duration::seconds(1);
         };
+        // Known as a tail before it exists: held as an older build's file
+        // otherwise, while another leftover waits.
+        if !self.remember_tail(&name.to_filename()) {
+            return None;
+        }
         let path = self.pending_dir.join(name.to_filename());
         if let Err(err) = tokio::fs::write(&path, &tail).await {
             warn!(name = %name.to_filename(), ?err, "couldn't write what never went up");
             return None;
         }
         Some(LogFile { name, bytes: tail })
+    }
+
+    /// The tails settling wrote ([`SYNC_LEFTOVER_TAILS_PREF_KEY`]); none
+    /// where they do not read.
+    fn leftover_tails(&self) -> HashSet<String> {
+        self.store
+            .get_pref(SYNC_LEFTOVER_TAILS_PREF_KEY)
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    /// Records `name` as a tail; whether it was recorded.
+    fn remember_tail(&self, name: &str) -> bool {
+        let mut tails = self.leftover_tails();
+        tails.insert(name.to_string());
+        let saved = serde_json::to_string(&tails)
+            .map_err(|err| err.to_string())
+            .and_then(|raw| {
+                self.store
+                    .set_pref(SYNC_LEFTOVER_TAILS_PREF_KEY, &raw)
+                    .map_err(|err| err.to_string())
+            });
+        if let Err(err) = saved {
+            warn!(%err, "couldn't record the tail of an older build's leftover");
+            return false;
+        }
+        true
     }
 
     /// Whether the catch-up is due ([`SYNC_CATCH_UP_TRIED_AT_PREF_KEY`]):

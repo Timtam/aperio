@@ -103,8 +103,9 @@ enden im selben Durchgang (`OnboardingService::apply_every_log`):
    Datei, und der nächste Abruf liest sie wieder; erst dann trägt der Merker
    den neuen Parser (Prüfrunde 7). Bis dahin ergänzt eine Runde ihn unter dem
    alten, statt ihn zu ersetzen (Prüfrunde 8). Eine unlesbare Datei, deren Name
-   sich nicht merken ließ, bekommt auch keine Länge: Die nächste Runde holt und
-   nennt sie wieder (Prüfrunde 9). Ein Merker, der sich nicht lesen
+   sich nicht merken ließ, bekommt auch keine Länge, und der Durchgang ist
+   nicht vollständig: Die nächste Runde holt und nennt sie wieder (Prüfrunden 9
+   und 10). Ein Merker, der sich nicht lesen
    lässt, lässt das Gerät einmal nachholen (Prüfrunde 5). Cursor = Maximum
    aus bisherigem Cursor (beim Beitritt und bei der Wiederaufnahme:
    Schnappschuss) und neuester fremder Datei, nie zurück.
@@ -163,8 +164,11 @@ still, und nur Neueres gewinnt.
   Start der App-Sitzung, die sie einfror) wird zu Beginn jeder Runde und jedes
   Pushs eingefroren, bevor etwas sie verschieben kann, auch ohne `meta.json`
   (Prüfrunde 9); lässt sie sich nicht halten, ordnet der Versuch nichts, und
-  die Runde zählt nicht als erfolgreich. Ein Rest ist eine Datei, die vor dem
-  ersten Lauf dieses Builds benannt ist und unter `gc_horizon` liegt. Bis alle
+  die Runde zählt nicht als erfolgreich; eine, die sich nicht lesen lässt,
+  wird neu eingefroren (Prüfrunde 10). Ein Rest ist eine Datei, die vor dem
+  ersten Lauf dieses Builds benannt ist (auf die Sekunde, wie Dateien heißen)
+  und unter `gc_horizon` liegt; ein Rest, den das Ordnen schrieb, ist keiner
+  (`sync.push.leftoverTails`). Bis alle
   geordnet sind, geht keiner hoch, auch keiner, der sich nicht lesen ließ
   (Prüfrunde 8); die späteren Dateien dieses Builds warten nicht (Prüfrunde 9).
   Das Auflisten holt bei den meisten Speichern einmal jede Datei; ein Versuch,
@@ -257,12 +261,17 @@ seiner letzten erfolgreichen Runde (C, ohne die zehn Minuten) hielt, gilt
 dabei als oben: Es ging damals hoch, und die anderen Geräte übernahmen es, ob
 ein Aufräumen die Datei seither löschte oder ein späterer Push sie halb
 schrieb (Prüfrunde 8) — außer ein Schnappschuss, der nichts nennt, ist älter
-als die Änderung: Der kann sie nicht halten (Prüfrunde 9). Ist die Grenze
+als die Änderung: Der kann sie nicht halten (Prüfrunde 9). Das gilt nur für
+eine Datei, deren eigene Fernkopie fehlt oder abgerissen ist: Eine lesbare
+zeigt, was hochging (Prüfrunde 10). Die ausstehenden Dateien liest der
+Durchgang nach dem Schnappschuss, damit eine Änderung währenddessen gewogen
+wird; geprüft, ob sie lesbar sind, wird vorher. Ist die Grenze
 noch nicht eingefroren, gilt `sync.lastSuccessfulRound`, wie der alte Build
 ihn hinterließ. Lässt sich die Grenze oder eine ausstehende Datei nicht
-lesen, scheitern Beitritt und Wiederaufnahme, bevor sie etwas ändern. Tritt
-das Gerät einem Datensatz bei, in dem es nie war, gilt nichts davon als oben,
-und seine Reste werden gegen diesen neu geordnet. Ebenso jede eigene oder schon
+lesen, scheitern Beitritt und Wiederaufnahme, bevor sie etwas ändern (was in
+`pending/` keine Datei ist, zählt nicht). Tritt das Gerät einem Datensatz bei,
+in dem es nie war, gilt nichts davon als oben, und seine Reste werden gegen
+diesen neu geordnet, sobald der Beitritt steht. Ebenso jede eigene oder schon
 angewendete Änderung, die der Schnappschuss nicht hält: nicht unter seinen
 Kennungen, oder, nennt er keine, jünger als er (Prüfrunde 6). Das gewöhnliche Nachholen hat
 keinen Schnappschuss und hält jede eigene (Prüfrunde 5). Ein Löschen eines
@@ -670,3 +679,26 @@ widerlegt), ein Kritiker. Einzelheiten: scratchpad `coverage/review_r9.json`.
   per Push hochschob (beim Beenden, auf dem Handy nach jeder Änderung), wiegt
   ein Beitritt oder eine Wiederaufnahme weiterhin über den Schnappschuss
   (TODO B3).
+
+## Prüfrunde 10 (PR #130, 2026-10-31)
+
+Vier Prüfer auf den Commit nach Runde 9, 8 gegengeprüft (5 bestätigt, 3
+widerlegt), ein Kritiker. Einzelheiten: scratchpad `coverage/review_r10.json`.
+
+- **Beitritt und Wiederaufnahme** (E): Eine lesbare eigene Fernkopie zeigt,
+  was von einer ausstehenden Datei hochging; die Grenze gilt nur, wo sie
+  fehlt oder abgerissen ist. Die Dateien selbst liest der Durchgang nach dem
+  Schnappschuss. Ein Beitritt setzt die Grenze erst zurück, wenn er steht.
+  Was in `pending/` keine Datei ist, hält nichts auf.
+- **Reste** (C): Die Grenze auf die Sekunde, wie Dateien heißen; geschriebene
+  Reste werden gemerkt und nicht als Dateien des alten Builds gehalten; eine
+  unlesbare Grenze wird neu eingefroren.
+- **Unlesbares** (B.5): Auch der Durchgang über alle Dateien merkt keine
+  Länge, wo der Name nicht hielt, und ist dann nicht vollständig; eine Runde
+  merkt dort gar keine Länge statt 0, die eine Auflistung ohne Größen als
+  bekannt läse.
+- Von mir entschieden (Toni sagen): Eine Änderung, die 0.1.0 in seiner
+  letzten Runde nach deren Push schrieb, gilt bei einer Datei, die der
+  Sync-Speicher nicht mehr hat, als oben (TODO B3). Eine ausstehende Datei,
+  die sich dauerhaft nicht lesen lässt, hält Beitritt und Wiederaufnahme auf,
+  bis sie lesbar ist oder entfernt wird (TODO B3).

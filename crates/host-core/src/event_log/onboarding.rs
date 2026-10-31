@@ -451,9 +451,6 @@ impl OnboardingService {
         // changes out (review round 2 of #130). The snapshot brings its own.
         self.clear_coverage_exact()?;
         self.clear_row_clocks()?;
-        if new_dataset {
-            self.forget_leftovers_cutoff()?;
-        }
         match snapshot {
             Some(snapshot) => {
                 info!(
@@ -519,6 +516,11 @@ impl OnboardingService {
         self.register_self_in_meta(&mut meta, device_name).await;
         adapter.push_meta(&meta).await?;
         report.device_count = meta.devices.len();
+        // Only once the join stands: one that fails leaves the device with
+        // the dataset it had, and its cutoff (review round 10 of #130).
+        if new_dataset {
+            self.forget_leftovers_cutoff()?;
+        }
 
         // Save the chosen device name + the "we've onboarded" flag.
         if let Some(name) = device_name {
@@ -734,6 +736,8 @@ impl OnboardingService {
         let mut unreadable: HashMap<String, u64> = HashMap::new();
         let mut envelopes = Vec::new();
         let mut on_remote: HashSet<String> = HashSet::new();
+        // This device's own remote files that read.
+        let mut own_read: HashSet<String> = HashSet::new();
         let mut lengths: Vec<(String, u64)> = Vec::new();
         let mut newest_foreign: Option<DateTime<Utc>> = None;
         let mut complete = true;
@@ -747,6 +751,7 @@ impl OnboardingService {
                 Ok(mut parsed) => {
                     if !foreign {
                         on_remote.extend(parsed.iter().map(|envelope| envelope.id.clone()));
+                        own_read.insert(log.name.to_filename());
                     }
                     envelopes.append(&mut parsed);
                     if foreign {
@@ -798,23 +803,40 @@ impl OnboardingService {
         // Up to the older build's last round itself: a line it wrote just
         // before went up with that round (review round 9). One a snapshot
         // naming nothing is younger than is weighed all the same: it cannot
-        // hold it.
-        let pending = envelopes_of(&own.files);
-        let unpushed: HashSet<String> = match &holds {
-            Some(holds) => pending
-                .iter()
-                .filter(|envelope| {
-                    !on_remote.contains(&envelope.id)
-                        && (own
-                            .pushed_until
-                            .is_none_or(|until| envelope.timestamp > until)
-                            || holds.provably_lacks(envelope))
-                })
-                .chain(envelopes.iter().filter(|envelope| !holds.holds(envelope)))
-                .map(|envelope| envelope.id.clone())
-                .collect(),
-            None => HashSet::new(),
-        };
+        // hold it. Only for a file whose remote copy is gone or torn: one
+        // that reads shows what went up (review round 10). Read now, after
+        // the snapshot apply: a change made meanwhile is weighed too.
+        let (pending_files, _) = self.pending_files().await;
+        let mut pending = Vec::new();
+        let mut unpushed: HashSet<String> = HashSet::new();
+        for file in &pending_files {
+            let lines = envelopes_of(std::slice::from_ref(file));
+            if let Some(holds) = &holds {
+                let shown = own_read.contains(&file.name.to_filename());
+                unpushed.extend(
+                    lines
+                        .iter()
+                        .filter(|envelope| {
+                            !on_remote.contains(&envelope.id)
+                                && (shown
+                                    || own
+                                        .pushed_until
+                                        .is_none_or(|until| envelope.timestamp > until)
+                                    || holds.provably_lacks(envelope))
+                        })
+                        .map(|envelope| envelope.id.clone()),
+                );
+            }
+            pending.extend(lines);
+        }
+        if let Some(holds) = &holds {
+            unpushed.extend(
+                envelopes
+                    .iter()
+                    .filter(|envelope| !holds.holds(envelope))
+                    .map(|envelope| envelope.id.clone()),
+            );
+        }
         envelopes.extend(pending);
         // A pending file may already be uploaded: each change once.
         let mut seen = HashSet::new();
@@ -824,8 +846,14 @@ impl OnboardingService {
             .catch_up_envelopes(envelopes, &sync_engine::PassContext { unpushed })?;
         report.detail = applied.clone();
         report.merge_apply(applied);
+        // Named first: a file this build cannot read whose name did not keep
+        // gets no length, and the pass is not complete, so the next one
+        // reads and names it again (review round 10 of #130).
+        if !self.save_unreadable_logs(&unreadable) {
+            lengths.retain(|(name, _)| !unreadable.contains_key(name));
+            complete = false;
+        }
         self.record_applied_lengths(&lengths);
-        self.save_unreadable_logs(&unreadable);
         Ok(Pass {
             newest_foreign,
             complete,
@@ -859,15 +887,16 @@ impl OnboardingService {
             .unwrap_or_default()
     }
 
-    /// This device's own pending files and what of them went up, for a pass
-    /// over every log ([`OwnPending`]), read before anything changes. `strict`
-    /// where a snapshot comes first (a join, a resume): a pending file that
-    /// does not read, or a cutoff that does not, fails the pass — weighed
-    /// without them, the snapshot's values would win over changes it does not
-    /// hold, or old ones over its own (review round 9 of #130). `new_dataset`:
+    /// What of this device's own pending files went up, for a pass over every
+    /// log ([`OwnPending`]), checked before anything changes; the pass reads
+    /// the files themselves after a snapshot apply (review round 10 of #130).
+    /// `strict` where a snapshot comes first (a join, a resume): a pending
+    /// file that does not read, or a cutoff that does not, fails the pass —
+    /// weighed without them, the snapshot's values would win over changes it
+    /// does not hold, or old ones over its own (review round 9). `new_dataset`:
     /// nothing went up to it.
     async fn own_pending(&self, strict: bool, new_dataset: bool) -> SyncResult<OwnPending> {
-        let (files, all_read) = self.pending_files().await;
+        let (_, all_read) = self.pending_files().await;
         if strict && !all_read {
             return Err(SyncError::io(
                 "a pending log file does not read; trying again later".to_string(),
@@ -882,10 +911,7 @@ impl OnboardingService {
                 Err(_) => None,
             }
         };
-        Ok(OwnPending {
-            files,
-            pushed_until,
-        })
+        Ok(OwnPending { pushed_until })
     }
 
     /// Up to when what an older build left pending went up: its last
@@ -949,7 +975,8 @@ impl OnboardingService {
         sync_engine::UnreadableLogs::names(raw.as_deref(), &self.local_device_id)
     }
 
-    fn save_unreadable_logs(&self, unreadable: &HashMap<String, u64>) {
+    /// Whether the record was saved.
+    fn save_unreadable_logs(&self, unreadable: &HashMap<String, u64>) -> bool {
         let prefs = UserPrefsRepo::new(&self.db);
         let saved = if unreadable.is_empty() {
             prefs.delete(SYNC_UNREADABLE_LOGS_PREF_KEY)
@@ -962,13 +989,15 @@ impl OnboardingService {
                 Ok(raw) => prefs.set(SYNC_UNREADABLE_LOGS_PREF_KEY, &raw),
                 Err(err) => {
                     warn!(?err, "couldn't encode the unreadable log files");
-                    return;
+                    return false;
                 }
             }
         };
         if let Err(err) = saved {
             warn!(?err, "couldn't record the unreadable log files");
+            return false;
         }
+        true
     }
 
     /// This device's own changes in `pending_dir` — written, maybe not
@@ -1006,6 +1035,12 @@ impl OnboardingService {
             let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
                 continue;
             };
+            // Only files: nothing the writer makes is anything else (review
+            // round 10 of #130).
+            if !entry.file_type().await.is_ok_and(|kind| kind.is_file()) {
+                debug!(name = name, "skipping pending entry: not a file");
+                continue;
+            }
             let parsed = match LogFileName::from_filename(name) {
                 Ok(p) => p,
                 Err(_) => {
@@ -1475,11 +1510,9 @@ impl SnapshotHolds {
     }
 }
 
-/// This device's own pending files for a pass over every log, and up to when
-/// what an older build left among them went up
-/// ([`OnboardingService::own_pending`]).
+/// Up to when what an older build left pending went up, for a pass over
+/// every log ([`OnboardingService::own_pending`]).
 struct OwnPending {
-    files: Vec<LogFile>,
     pushed_until: Option<DateTime<Utc>>,
 }
 
@@ -3012,17 +3045,31 @@ mod tests {
         assert_eq!(interval(&db).as_deref(), Some("70"));
     }
 
-    /// A join, the snapshot at `at` holding interval 45 and naming nothing,
-    /// of a device whose pending leftover sets 70 at `change_at`. `cutoff`:
-    /// the older build's last round as the round froze it; `last_round`: as
-    /// that build left it, not frozen yet. `member`: the dataset knows this
-    /// device. Returns the join's result and the interval after it.
-    async fn join_with_a_leftover(
-        change_at: DateTime<Utc>,
-        cutoff: Option<&str>,
+    /// What [`join_with`] sets up besides the leftover.
+    #[derive(Default)]
+    struct JoinCase<'a> {
+        /// The older build's last round as the round froze it.
+        cutoff: Option<&'a str>,
+        /// As that build left it, not frozen yet.
         last_round: Option<DateTime<Utc>>,
+        /// The dataset knows this device.
         member: bool,
+        /// A second pending file that does not read.
         unreadable_pending: bool,
+        /// A directory in pending/, named as a log file.
+        dir_in_pending: bool,
+        /// The leftover's own remote copy, readable, without its change.
+        own_remote: bool,
+        /// A snapshot that does not apply.
+        broken_snapshot: bool,
+    }
+
+    /// A join, the snapshot at `at` holding interval 45 and naming nothing,
+    /// of a device whose pending leftover sets 70 at `change_at`, its record
+    /// exact before. Returns the join's result and the interval after it.
+    async fn join_with(
+        change_at: DateTime<Utc>,
+        case: JoinCase<'_>,
     ) -> (
         SyncResult<OnboardingReport>,
         Option<String>,
@@ -3039,38 +3086,59 @@ mod tests {
             &leftover.bytes,
         )
         .unwrap();
-        if unreadable_pending {
-            // A directory named as a log file: it lists, and does not read.
-            let other = LogFileName::new(
-                change_at + chrono::Duration::seconds(1),
-                DeviceId::from_string("dev-this".into()),
-            );
-            std::fs::create_dir(pending.path().join(other.to_filename())).unwrap();
+        let other = LogFileName::new(
+            change_at + chrono::Duration::seconds(1),
+            DeviceId::from_string("dev-this".into()),
+        );
+        let other_path = pending.path().join(other.to_filename());
+        if case.unreadable_pending {
+            std::fs::write(&other_path, b"{}\n").unwrap();
+        }
+        if case.dir_in_pending {
+            std::fs::create_dir(&other_path).unwrap();
         }
         let shared = db.shared();
         let prefs = UserPrefsRepo::new(&shared);
-        if let Some(raw) = cutoff {
+        if let Some(raw) = case.cutoff {
             prefs
                 .set(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY, raw)
                 .unwrap();
         }
-        if let Some(at) = last_round {
+        if let Some(at) = case.last_round {
             prefs
                 .set(sync_engine::SYNC_LAST_ROUND_PREF_KEY, &at.to_rfc3339())
                 .unwrap();
         }
+        prefs
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &Utc::now().to_rfc3339())
+            .unwrap();
         let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
-        let body = sync_engine::AperioSnapshotBody {
-            settings: std::collections::BTreeMap::from([(
-                "sync.intervalMinutes".to_string(),
-                "45".to_string(),
-            )]),
-            ..Default::default()
+        let body = if case.broken_snapshot {
+            serde_json::json!({ "settings": "not a map" })
+        } else {
+            serde_json::to_value(sync_engine::AperioSnapshotBody {
+                settings: std::collections::BTreeMap::from([(
+                    "sync.intervalMinutes".to_string(),
+                    "45".to_string(),
+                )]),
+                ..Default::default()
+            })
+            .unwrap()
         };
-        let adapter = FakeAdapter::new();
+        let adapter = if case.own_remote {
+            let earlier = envelope(
+                "ev-earlier",
+                "dev-this",
+                change_at - chrono::Duration::minutes(1),
+                set_interval("60"),
+            );
+            FakeAdapter::with_logs(vec![file_of("dev-this", change_at, &[&earlier])])
+        } else {
+            FakeAdapter::new()
+        };
         let mut meta = MetaJson::fresh("1.0.0");
         meta.snapshot_timestamp = at;
-        if member {
+        if case.member {
             meta.upsert_device(
                 &DeviceId::from_string("dev-this".into()),
                 DeviceRecord {
@@ -3086,15 +3154,79 @@ mod tests {
             );
         }
         adapter.install_meta(meta);
-        adapter.install_snapshot(Snapshot::new(
-            at,
-            "1.0.0",
-            serde_json::to_value(body).unwrap(),
-        ));
+        adapter.install_snapshot(Snapshot::new(at, "1.0.0", body));
 
+        let held = case
+            .unreadable_pending
+            .then(|| UnreadableFile::hold(other_path.clone()));
         let result = svc.accept_remote(&adapter, None).await;
+        drop(held);
         let after = interval(&db);
         (result, after, db, (tmp, pending))
+    }
+
+    /// [`join_with`] in the common shape.
+    async fn join_with_a_leftover(
+        change_at: DateTime<Utc>,
+        cutoff: Option<&str>,
+        last_round: Option<DateTime<Utc>>,
+        member: bool,
+        unreadable_pending: bool,
+    ) -> (
+        SyncResult<OnboardingReport>,
+        Option<String>,
+        DbHandle,
+        (TempDir, TempDir),
+    ) {
+        join_with(
+            change_at,
+            JoinCase {
+                cutoff,
+                last_round,
+                member,
+                unreadable_pending,
+                ..JoinCase::default()
+            },
+        )
+        .await
+    }
+
+    /// Holds `path` so that it does not read (Windows: shared with nobody;
+    /// elsewhere: no permission) until dropped.
+    struct UnreadableFile {
+        #[cfg(windows)]
+        _file: std::fs::File,
+        #[cfg(not(windows))]
+        path: std::path::PathBuf,
+    }
+
+    impl UnreadableFile {
+        fn hold(path: std::path::PathBuf) -> Self {
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                let file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(&path)
+                    .unwrap();
+                Self { _file: file }
+            }
+            #[cfg(not(windows))]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+                Self { path }
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    impl Drop for UnreadableFile {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o644));
+        }
     }
 
     /// The cutoff the round freezes, as JSON.
@@ -3191,6 +3323,7 @@ mod tests {
         .await;
         assert!(result.is_err(), "{result:?}");
         assert_eq!(interval, None, "nothing applied");
+        assert!(exact_since(&_db).is_some(), "the record as it was");
     }
 
     #[tokio::test]
@@ -3202,6 +3335,110 @@ mod tests {
             join_with_a_leftover(at + chrono::Duration::hours(1), None, None, true, true).await;
         assert!(result.is_err(), "{result:?}");
         assert_eq!(interval, None, "nothing applied");
+        assert!(exact_since(&_db).is_some(), "the record as it was");
+    }
+
+    #[tokio::test]
+    async fn a_directory_in_pending_keeps_no_join_back() {
+        // Review round 10 of #130: read as a file that does not read, it
+        // failed every join and resume for good.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                dir_in_pending: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_join_weighs_a_leftover_line_its_readable_remote_copy_lacks() {
+        // Review round 10 of #130: written after the older build's last push,
+        // within its last round, it was held as pushed, though the remote copy
+        // shows it never went up; the peers took it, this device kept the
+        // snapshot's value.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let round = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(round));
+        let (result, interval, _db, _dirs) = join_with(
+            round - chrono::Duration::seconds(20),
+            JoinCase {
+                cutoff: Some(&cutoff),
+                member: true,
+                own_remote: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_join_of_another_dataset_keeps_the_leftovers_cutoff() {
+        // Review round 10 of #130: forgotten before the join stood, the old
+        // dataset's next round counted nothing as pushed.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let old = at - chrono::Duration::days(30);
+        let cutoff = frozen(Some(old + chrono::Duration::days(1)));
+        let (result, _interval, db, _dirs) = join_with(
+            old,
+            JoinCase {
+                cutoff: Some(&cutoff),
+                broken_snapshot: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        assert!(result.is_err(), "{result:?}");
+        let shared = db.shared();
+        assert_eq!(
+            UserPrefsRepo::new(&shared)
+                .get(sync_engine::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)
+                .unwrap()
+                .as_deref(),
+            Some(cutoff.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pass_whose_record_does_not_save_records_no_length_and_is_not_complete() {
+        // Review round 10 of #130: its length kept, the file was never read
+        // or named again, and the device was exact without it.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let newer = LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"{\"from\":\"a newer build\"}\n".to_vec(),
+        };
+        let name = newer.name.to_filename();
+        adapter.logs.lock().unwrap().push(newer);
+        db.shared()
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER refuse_unreadable_insert BEFORE INSERT ON user_prefs
+                 WHEN NEW.key = 'sync.cursor.unreadableLogs'
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+            )
+            .unwrap();
+
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert!(exact_since(&db).is_none(), "not complete");
+        let lengths = UserPrefsRepo::new(&db.shared())
+            .get(sync_engine::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(!lengths.contains(&name), "{lengths}");
     }
 
     #[tokio::test]

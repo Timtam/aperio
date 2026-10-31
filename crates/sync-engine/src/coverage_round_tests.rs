@@ -1305,7 +1305,9 @@ async fn a_file_this_build_cannot_read_and_could_not_name_is_fetched_again() {
         .insert(SYNC_UNREADABLE_LOGS_PREF_KEY.to_string());
 
     orchestrator.sync_now().await.expect("round 1");
-    assert_eq!(applied_length(&hooks.store, &name), Some(0));
+    // No length, not 0: a listing without sizes reads 0 as known (review
+    // round 10 of #130).
+    assert_eq!(applied_length(&hooks.store, &name), None);
 
     hooks.store.failing_pref_reads.lock().unwrap().clear();
     orchestrator.sync_now().await.expect("round 2");
@@ -1425,4 +1427,111 @@ async fn a_leftover_that_will_neither_go_nor_empty_sends_its_tail_once() {
         .filter(|(_, bytes)| bytes.contains("ev-own-4000"))
         .collect();
     assert_eq!(tails.len(), 1, "{tails:?}");
+}
+
+// ---- Review round 10 of #130 -----------------------------------------------
+
+#[tokio::test]
+async fn the_session_that_froze_the_cutoff_is_this_builds_own() {
+    // Its file is named to the second, the cutoff to the instant: it counted
+    // as an older build's and waited as long as settling did.
+    let first_boot = Utc
+        .timestamp_opt(Utc::now().timestamp() - 7_200, 734_000_000)
+        .unwrap();
+    let (tmp, orchestrator, hooks, adapter) =
+        gc_passed_booted(Utc::now().timestamp() + 3_600, Utc::now()).await;
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LEFTOVERS_CUTOFF_PREF_KEY,
+            &serde_json::to_string(&crate::LeftoversCutoff {
+                last_round: Some(Utc.timestamp_opt(2_600, 0).unwrap()),
+                before: first_boot,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    stage(&tmp, &own_file(&[1_000, 4_000]));
+    let first_session = own_file(&[first_boot.timestamp()]);
+    stage(&tmp, &first_session);
+    orchestrator.configure(Arc::new(ListlessAdapter {
+        inner: LocalFsSyncAdapter::new(tmp.path().join("remote")),
+        lists: Arc::new(Mutex::new(0)),
+    }));
+
+    orchestrator.sync_now().await.expect("round");
+
+    let remote = remote_logs(&adapter).await;
+    assert!(
+        remote
+            .iter()
+            .any(|(name, _)| *name == first_session.name.to_filename()),
+        "{remote:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_leftovers_cutoff_that_does_not_read_is_frozen_anew() {
+    // Kept, it held every join and resume back for good.
+    let (_tmp, orchestrator, hooks, _adapter, _log) = with_a_leftover(Utc::now()).await;
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LEFTOVERS_CUTOFF_PREF_KEY,
+            "2026-10-30T10:00:00Z",
+        )
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    let raw = hooks
+        .store
+        .get_pref(crate::SYNC_LEFTOVERS_CUTOFF_PREF_KEY)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        crate::LeftoversCutoff::parse(&raw).map(|cutoff| cutoff.last_round),
+        Some(Some(Utc.timestamp_opt(2_600, 0).unwrap()))
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn a_tail_goes_up_while_another_leftover_waits() {
+    // Named before the live file, it was held as an older build's file.
+    use std::os::windows::fs::OpenOptionsExt;
+    // The horizon past this session's start, so the hold reaches the tail.
+    let (tmp, orchestrator, hooks, adapter) =
+        gc_passed_booted(Utc::now().timestamp() + 3_600, Utc::now()).await;
+    let log = own_file(&[1_000, 4_000]);
+    stage(&tmp, &log);
+    hooks
+        .store
+        .set_pref(
+            crate::SYNC_LAST_ROUND_PREF_KEY,
+            &Utc.timestamp_opt(2_000 + 600, 0).unwrap().to_rfc3339(),
+        )
+        .unwrap();
+    let stuck = own_file(&[1_500, 4_500]);
+    stage(&tmp, &stuck);
+    let _held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x1)
+        .open(tmp.path().join("pending").join(stuck.name.to_filename()))
+        .unwrap();
+
+    orchestrator.sync_now().await.expect("round");
+
+    assert!(hooks
+        .store
+        .get_pref(crate::SYNC_LEFTOVERS_SETTLED_PREF_KEY)
+        .unwrap()
+        .is_none());
+    let remote = remote_logs(&adapter).await;
+    assert!(
+        remote
+            .iter()
+            .any(|(name, bytes)| *name != log.name.to_filename() && bytes.contains("ev-own-4000")),
+        "{remote:?}"
+    );
 }
