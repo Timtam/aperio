@@ -270,7 +270,10 @@ letzter Runde gilt eine fehlende Zeile darum trotzdem als oben (Prüfrunden 10
 und 11). Die ausstehenden Dateien liest der Durchgang vor dem Abholen und
 nach dem Schnappschuss noch einmal, damit eine Änderung währenddessen gewogen
 wird und eine Datei, die eine Runde inzwischen hochlud und entfernte, ihre
-Zeilen behält (Prüfrunden 11 und 12). Eine eigene Änderung eines Zugangs geht
+Zeilen behält (Prüfrunden 11 und 12). Die spätere Lesung fügt hinzu, nimmt
+aber nichts weg: Auch eine Datei, die das Ordnen inzwischen leerte, oder die
+sie mitten im Schreiben einer Zeile traf, behält, was die frühere hatte, und
+von einer halb geschriebenen gelten die ganzen Zeilen (Prüfrunde 13). Eine eigene Änderung eines Zugangs geht
 nur in einen Datensatz mit E2E hoch, ein Beitritt fragt den Datensatz, dem er
 beitritt; geht sie nicht hoch, lässt der Durchgang sie ganz weg: Der
 Schlüsselbund hält dann den neuesten eigenen Wert (Prüfrunde 12). Ist die
@@ -748,3 +751,17 @@ widerlegt), ein Kritiker; alle Befunde klein. Einzelheiten: scratchpad
   beim Beitritt gewogen wird, entscheidet das E2E des Datensatzes, dem das
   Gerät beitritt; bei der Wiederaufnahme und beim Nachholen das eigene
   Merkmal, das auch den nächsten Push bestimmt.
+
+## Prüfrunde 13 (PR #130, 2026-10-31)
+
+Vier Prüfer auf den Commit nach Runde 12, gegengeprüft (6 bestätigt), ein
+Kritiker; alle Befunde klein, vier davon Testlücken. Einzelheiten: scratchpad
+`coverage/review_r13.json`.
+
+- **Ausstehende Dateien** (E): Beide Lesungen werden je Datei nach Änderung
+  vereint, nicht mehr nach Dateiname ersetzt: Eine geleerte oder mitten im
+  Schreiben gelesene Datei nahm sonst ihre Zeilen aus dem Durchgang. Von einer
+  halb geschriebenen gelten die ganzen Zeilen.
+- **Tests**: Die Wiederaufnahme liest ihre Dateien vor dem Abholen, geprüft
+  wie der Beitritt (Prüfrunde 12 nannte nur ihn); Zugänge, die hochgehen,
+  werden bei Beitritt, Wiederaufnahme und Nachholen gewogen.
