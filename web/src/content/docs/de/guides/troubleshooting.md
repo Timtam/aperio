@@ -405,8 +405,10 @@ Aperio sagt das und bietet sie nicht noch einmal an; prüfe sie.
 Wurde eine Aufgabe nur zum Teil gespeichert, kam ihr neuer Status aber an
 (ein späterer Schritt wie ihre Zuständigen wurde abgewiesen), übernehmen die
 Aufgaben darüber und darunter ihn trotzdem, wie beim Abhaken; nimmt eine ihn
-nicht an, sagt die Meldung das danach. Kam der Status selbst nicht an,
-behalten sie ihren.
+nicht an, sagt die Meldung das danach. Kam der Status selbst nicht an, lässt
+der Editor sie, wie sie waren; beim Abhaken schreibt Aperio sie trotzdem, und
+manche können den neuen Status haben, während die Aufgabe ihren alten
+behielt.
 
 Was du tun kannst: Öffne das Element später noch einmal und ergänze, was
 fehlt.

@@ -250,7 +250,7 @@ pub async fn update_contact(
     // flag claims an avatar; photo-less contacts skip it.
     let preserved_photo = if contact.has_photo {
         match fetch_vcard_body(client, &resource, credentials).await {
-            Ok(body) => parse_vcard_photo(&body),
+            Ok((body, _)) => parse_vcard_photo(&body),
             // A busy server does nothing now, so nothing is sent: written
             // without the photo, the PUT would wipe the avatar for a
             // throttled read (decision 270).
@@ -297,15 +297,17 @@ pub async fn update_contact(
     })
 }
 
-/// GET a vCard resource and return its body as text. Shared by
-/// the photo-CRUD helpers, which all need the current vCard
-/// state (current PHOTO bytes, current etag) before re-PUTting
-/// a mutated version.
+/// GET a vCard resource and return its body as text, with its ETag.
+/// Shared by the photo-CRUD helpers, which all need the current vCard
+/// state (current PHOTO bytes, current etag) before re-PUTting a
+/// mutated version: both from this one GET, so a busy server is asked
+/// nothing more, and a PUT is never sent unguarded because a second read
+/// was throttled (decision 270, review round 23 of #128).
 async fn fetch_vcard_body(
     client: &Client,
     resource: &Url,
     credentials: &Credentials,
-) -> CaldavResult<String> {
+) -> CaldavResult<(String, Option<String>)> {
     let mut headers = auth_header(credentials)?;
     headers.insert(
         ACCEPT,
@@ -320,7 +322,12 @@ async fn fetch_vcard_body(
     if !status.is_success() {
         return Err(crate::http::read_failure(response).await);
     }
-    Ok(response.text().await?)
+    let etag = response
+        .headers()
+        .get(ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    Ok((response.text().await?, etag))
 }
 
 /// Fetch a contact's avatar by re-reading the vCard and pulling
@@ -333,7 +340,7 @@ pub async fn get_contact_photo(
     credentials: &Credentials,
 ) -> CaldavResult<Option<ContactPhoto>> {
     let resource = resource_url_for_contact(list_url, contact_id)?;
-    let body = fetch_vcard_body(client, &resource, credentials).await?;
+    let (body, _) = fetch_vcard_body(client, &resource, credentials).await?;
     Ok(parse_vcard_photo(&body))
 }
 
@@ -352,8 +359,7 @@ pub async fn set_contact_photo(
     credentials: &Credentials,
 ) -> CaldavResult<()> {
     let resource = resource_url_for_contact(list_url, contact_id)?;
-    let body = fetch_vcard_body(client, &resource, credentials).await?;
-    let etag_header_value = read_etag_from_get(client, &resource, credentials).await;
+    let (body, etag_header_value) = fetch_vcard_body(client, &resource, credentials).await?;
     let (_, uid) = decode_id(contact_id);
     // Re-parse the body so we can rebuild a faithful representation
     // of the existing contact (every property we model survives)
@@ -374,42 +380,12 @@ pub async fn delete_contact_photo(
     credentials: &Credentials,
 ) -> CaldavResult<()> {
     let resource = resource_url_for_contact(list_url, contact_id)?;
-    let body = fetch_vcard_body(client, &resource, credentials).await?;
-    let etag_header_value = read_etag_from_get(client, &resource, credentials).await;
+    let (body, etag_header_value) = fetch_vcard_body(client, &resource, credentials).await?;
     let (_, uid) = decode_id(contact_id);
     let mut existing = parse_vcard(&body, list_url.as_str(), contact_id.into(), None)?;
     existing.has_photo = false;
     let new_body = rebuild_vcard(uid, &existing, None);
     put_vcard(client, &resource, &new_body, etag_header_value, credentials).await
-}
-
-/// Read the ETag header that the most recent GET response would
-/// have carried. We can't peek at the GET we already did from
-/// inside `fetch_vcard_body` (it owns the response), so we issue
-/// a HEAD-shaped GET here just for the header. Failures collapse
-/// to `None` — without an etag the PUT skips `If-Match`, which
-/// trades safety against concurrent edits for the ability to
-/// still complete the write.
-async fn read_etag_from_get(
-    client: &Client,
-    resource: &Url,
-    credentials: &Credentials,
-) -> Option<String> {
-    let headers = match auth_header(credentials) {
-        Ok(h) => h,
-        Err(_) => return None,
-    };
-    let response = client
-        .request(Method::HEAD, resource.clone())
-        .headers(headers)
-        .send_retrying()
-        .await
-        .ok()?;
-    response
-        .headers()
-        .get(ETAG)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
 }
 
 /// Shared PUT helper for the photo-mutation paths. Adds
@@ -888,6 +864,57 @@ END:VCARD&#13;
         .await
         .unwrap_err();
         assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
+    }
+
+    /// A photo write guards its PUT with the ETag of the GET it read the
+    /// vCard with, and asks nothing more: a second read a busy server
+    /// turned away sent the PUT unguarded (review round 23 of #128).
+    #[tokio::test]
+    async fn a_photo_write_guards_its_put_with_the_etag_it_read() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/addressbooks/alice/c1.vcf")
+            .with_status(200)
+            .with_header("ETag", "\"e1\"")
+            .with_body("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:c1@aperio\r\nFN:Anna\r\nEND:VCARD\r\n")
+            .create_async()
+            .await;
+        let head = server
+            .mock("HEAD", mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
+        let put = server
+            .mock("PUT", "/addressbooks/alice/c1.vcf")
+            .match_header("If-Match", "\"e1\"")
+            .with_status(204)
+            .expect(2)
+            .create_async()
+            .await;
+        let list = Url::parse(&format!("{}/addressbooks/alice/", server.url())).unwrap();
+        let photo = ContactPhoto {
+            content_type: "image/png".into(),
+            data: vec![0x89, b'P', b'N', b'G'],
+        };
+        set_contact_photo(
+            &client(),
+            &list,
+            "/addressbooks/alice/c1.vcf|c1@aperio",
+            photo,
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        delete_contact_photo(
+            &client(),
+            &list,
+            "/addressbooks/alice/c1.vcf|c1@aperio",
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        head.assert_async().await;
+        put.assert_async().await;
     }
 
     /// The photo is read before a contact's PUT, which replaces the whole

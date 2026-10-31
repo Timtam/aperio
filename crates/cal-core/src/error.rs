@@ -101,8 +101,9 @@ impl Error {
     /// 277). Carried as a network error with the token
     /// [`crate::WriteLeftover::PartlySaved`] — a leftover, which every surface
     /// reads as "may have landed", never as a refusal. `step` names the
-    /// request that was turned away, a word for the log. Built through
-    /// [`Self::after_landed`].
+    /// request that was turned away: a task's status request is
+    /// [`STATUS_STEP`], which [`Self::status_landed`] reads; any other word
+    /// is for the log. Built through [`Self::after_landed`].
     pub fn partly_saved(step: &str) -> Self {
         Self::Network(crate::WriteLeftover::PartlySaved.message(step))
     }

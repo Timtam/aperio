@@ -1436,7 +1436,10 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     `CACHE_GENERATION`. Eine fremde Einladung aus einer Datei, die der
     Kalender als ihre behält, geht mit ihren Löschungen hinein: bei Exchange
     als Anfrage (danach Antwort, Ordner, Zurücklesen; scheitert davon etwas,
-    steht sie zum Teil, 277), bei Google in einem Import. Kein Schritt
+    steht sie zum Teil, 277 — außer ein Verschieben, dessen Aufräumen gelang:
+    Dann steht nichts, eine Ablehnung oder, bei ausgelastetem Exchange,
+    ausgelastet, und die Liste bietet sie wieder an, `EwsError::TakenBack`,
+    Prüfrunde 19), bei Google in einem Import. Kein Schritt
     entfernt Termine einzeln, darum zeigt keine Oberfläche für sie den
     Wartedialog (`createRunsInSteps`, Prüfrunde 21 von #128) — außer die
     Oberfläche kannte die Adresse des Kontos nicht: Dann kann es dessen eigene

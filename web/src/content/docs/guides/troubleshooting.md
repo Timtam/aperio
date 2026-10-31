@@ -376,7 +376,8 @@ When a task was saved only in part but its new status got through (a later
 step, such as its assignees, was turned away), the tasks above and below it
 still take the new status, as when you check it off; if one does not, the
 message says so after its own sentence. If the status itself did not get
-through, they keep theirs.
+through, the editor leaves them as they were; a check-off still writes each of
+them, so some may have taken the new status while the task kept its old one.
 
 What you can do: open the item again later and add what is missing.
 

@@ -33,7 +33,11 @@ pub enum WriteLeftover {
     /// earlier request of it had landed (decision 277): part of the change
     /// stands, the rest does not. It counts as landed — nothing is taken back
     /// or sent again —, and the surfaces say to check it and try the rest
-    /// later. The detail is a machine word for the log: the step turned away.
+    /// later. The detail names the step turned away, and it decides:
+    /// [`crate::STATUS_STEP`] when that was a task's status request (or one
+    /// before it while the status was still due), which
+    /// [`crate::Error::status_landed`] reads as a status that did not land;
+    /// any other step means the status went out with the fields.
     PartlySaved,
 }
 
