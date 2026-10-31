@@ -1525,6 +1525,14 @@ Dauer wie die Grundform hatte das verdeckt.
 unvollständigen Auswahl, bleibt die erste Ablehnung stehen (der Riegel
 `prefillApplied`). Bei Toni nicht der Fall.
 
+🚩 **Offen (Toni, 2026-10-31):** Im Release-Build landet der Editor nach einem
+Vorschlag aus dem Schnell-Hinzufügen wieder auf dem ersten Kalender, bei einem
+schlichten Einzeltermin, ohne Ansage zum Kalender. Jeder Test der Übergabe ist
+grün, mit und ohne StrictMode. Eine Spur (`src/state/prefillTrace.ts`,
+`[prefill …]` im Log, Kalender nur als Platz in der Liste) schreibt jeden
+Schritt, der den Kalender entscheidet oder ändert; entfernen, sobald die
+Ursache gemessen ist.
+
 ### B12 · Gerätekonto nach dem Telefonwechsel (162-173) `[~]`
 
 ✅ **PR-A:** Nach dem Umzug per Schnellstart auf ein neues iPhone kamen Aperios
