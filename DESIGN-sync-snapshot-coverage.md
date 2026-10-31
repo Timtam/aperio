@@ -166,7 +166,8 @@ still, und nur Neueres gewinnt.
   (Prüfrunde 9); lässt sie sich nicht halten, ordnet der Versuch nichts, und
   die Runde zählt nicht als erfolgreich; eine, die sich nicht lesen lässt,
   wird neu eingefroren, ohne bekannte Runde: Diesen Wert haben die Runden
-  dieses Builds inzwischen überschrieben (Prüfrunden 10 und 11). Ein Rest ist eine Datei, die vor dem
+  dieses Builds inzwischen überschrieben (Prüfrunden 10 und 11). Ein
+  geordnetes Gerät braucht sie nicht mehr und lässt sie, wie sie ist. Ein Rest ist eine Datei, die vor dem
   ersten Lauf dieses Builds benannt ist (auf die Sekunde, wie Dateien heißen)
   und unter `gc_horizon` liegt; ein Rest, den das Ordnen schrieb, ist keiner
   (`sync.push.leftoverTails`). Bis alle
@@ -266,14 +267,19 @@ als die Änderung: Der kann sie nicht halten (Prüfrunde 9). Wo die eigene
 Fernkopie einer Datei lesbar ist, zeigt sie, was hochging — doch ein späterer
 Push des alten Builds kann sie gekürzt haben: Bis zehn Minuten vor dessen
 letzter Runde gilt eine fehlende Zeile darum trotzdem als oben (Prüfrunden 10
-und 11). Die ausstehenden Dateien liest der Durchgang vorher und nach dem
-Schnappschuss noch einmal, damit eine Änderung währenddessen gewogen wird und
-eine inzwischen hochgeladene Datei ihre Zeilen behält. Eine Änderung eines
-Zugangs geht bei ausgeschaltetem E2E nie hoch und wird darum nicht gewogen. Ist die Grenze
-noch nicht eingefroren, gilt `sync.lastSuccessfulRound`, wie der alte Build
-ihn hinterließ. Lässt sich die Grenze oder eine ausstehende Datei nicht
-lesen, scheitern Beitritt und Wiederaufnahme, bevor sie etwas ändern (was in
-`pending/` keine Datei ist, zählt nicht). Tritt das Gerät einem Datensatz bei,
+und 11). Die ausstehenden Dateien liest der Durchgang vor dem Abholen und
+nach dem Schnappschuss noch einmal, damit eine Änderung währenddessen gewogen
+wird und eine Datei, die eine Runde inzwischen hochlud und entfernte, ihre
+Zeilen behält (Prüfrunden 11 und 12). Eine eigene Änderung eines Zugangs geht
+nur in einen Datensatz mit E2E hoch, ein Beitritt fragt den Datensatz, dem er
+beitritt; geht sie nicht hoch, lässt der Durchgang sie ganz weg: Der
+Schlüsselbund hält dann den neuesten eigenen Wert (Prüfrunde 12). Ist die
+Grenze noch nicht eingefroren, gilt `sync.lastSuccessfulRound`, wie der alte
+Build ihn hinterließ. Lässt sich eine ausstehende Datei nicht lesen, oder die
+Grenze eines Geräts, das noch nicht geordnet ist, scheitern Beitritt und
+Wiederaufnahme, bevor sie etwas ändern (was in `pending/` keine Datei ist,
+zählt nicht); einem geordneten gilt dann keine Runde des alten Builds als
+bekannt (Prüfrunde 11). Tritt das Gerät einem Datensatz bei,
 in dem es nie war, gilt nichts davon als oben, und seine Reste werden gegen
 diesen neu geordnet, sobald der Beitritt steht. Ebenso jede eigene oder schon
 angewendete Änderung, die der Schnappschuss nicht hält: nicht unter seinen
@@ -723,3 +729,22 @@ widerlegt), ein Kritiker; alle Befunde klein. Einzelheiten: scratchpad
 - Von mir entschieden (Toni sagen): Ist die eingefrorene Grenze beschädigt,
   gilt keine Runde des alten Builds als bekannt: Seine Reste gehen ganz hoch
   (TODO B3).
+
+## Prüfrunde 12 (PR #130, 2026-10-31)
+
+Vier Prüfer auf den Commit nach Runde 11, gegengeprüft (3 bestätigt, 4
+widerlegt), ein Kritiker; alle Befunde klein. Einzelheiten: scratchpad
+`coverage/review_r12.json`.
+
+- **Zugänge** (E): Eine eigene Änderung eines Zugangs, die nicht hochgeht,
+  bleibt ganz aus dem Durchgang, auch beim Nachholen; sie stand sonst auf der
+  Uhr ihrer Zeile und schrieb ein altes Kennwort zurück. Ob sie hochgeht, sagt
+  beim Beitritt der Datensatz, nicht das Merkmal des alten.
+- **Ausstehende Dateien** (E): zuerst gelesen, vor dem Abholen; Tests
+  ändern sie, während abgeholt wird.
+- **Grenze** (C, E): Für ein geordnetes Gerät stehen die Regeln jetzt auch in
+  C und E.
+- Von mir entschieden (Toni sagen): Ob eine eigene Änderung eines Zugangs
+  beim Beitritt gewogen wird, entscheidet das E2E des Datensatzes, dem das
+  Gerät beitritt; bei der Wiederaufnahme und beim Nachholen das eigene
+  Merkmal, das auch den nächsten Push bestimmt.

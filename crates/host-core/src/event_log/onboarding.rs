@@ -435,16 +435,20 @@ impl OnboardingService {
         let mut starting_cursor: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
         let mut snapshot_applied = false;
         let mut holds = None;
+        // A dataset this device was never part of had nothing of what an older
+        // build left pending: nothing of it counts as pushed there, and it is
+        // settled against this dataset anew (review round 9 of #130). A
+        // credential change goes up only where the dataset has E2E, as the
+        // join leaves it, whatever this device had before (review round 12).
+        let new_dataset = meta.device(&self.local_device_id).is_none();
+        let own = self
+            .own_pending(true, new_dataset, meta.e2e_enabled)
+            .await?;
         // Everything is fetched first: a join that fails on the way leaves
         // this device as it was, still syncing with what it had (review
         // round 3 of #130).
         let snapshot = adapter.fetch_snapshot().await?;
         let logs = self.fetch_every_log(adapter).await?;
-        // A dataset this device was never part of had nothing of what an older
-        // build left pending: nothing of it counts as pushed there, and it is
-        // settled against this dataset anew (review round 9 of #130).
-        let new_dataset = meta.device(&self.local_device_id).is_none();
-        let own = self.own_pending(true, new_dataset).await?;
         // Whatever this device knew of another dataset says nothing here; the
         // pass over every file below makes the record exact again. Nor do its
         // row clocks: they would let that dataset's times keep this one's
@@ -591,9 +595,11 @@ impl OnboardingService {
         // wedge). The alternative — erroring here — left the device
         // permanently stuck, since the inline compaction that mints a
         // snapshot sits behind the bailing round.
+        let own = self
+            .own_pending(true, false, crate::credential_sync::e2e_enabled(&self.db))
+            .await?;
         let snapshot = adapter.fetch_snapshot().await?;
         let logs = self.fetch_every_log(adapter).await?;
-        let own = self.own_pending(true, false).await?;
         // Exact again only once this pass read every file (review round 3
         // of #130): an earlier mark says nothing after the snapshot apply.
         self.clear_coverage_exact()?;
@@ -685,9 +691,11 @@ impl OnboardingService {
             remote_was_empty: false,
             ..Default::default()
         };
-        let logs = self.fetch_every_log(adapter).await?;
         // No snapshot here: the rows hold every own change, or a newer one.
-        let own = self.own_pending(false, false).await?;
+        let own = self
+            .own_pending(false, false, crate::credential_sync::e2e_enabled(&self.db))
+            .await?;
+        let logs = self.fetch_every_log(adapter).await?;
         let pass = self.apply_every_log(logs, &mut report, None, own).await?;
         if let Some(newest) = pass.newest_foreign {
             self.save_cursor(self.read_cursor().max(newest))?;
@@ -806,26 +814,22 @@ impl OnboardingService {
         // hold it. Where the file's own remote copy reads, it shows what went
         // up — but a later push of that build may have cut it short, so up to
         // ten minutes before its last round a line went up with that round all
-        // the same (review rounds 10 and 11). Read again after the snapshot
-        // apply: a change made meanwhile is weighed too, and a file gone since
-        // the first read keeps its lines. A credential change never goes up
-        // while E2E is off: it is weighed by no peer.
+        // the same (review rounds 10 and 11). Read before the fetch and again
+        // here, after the snapshot apply: a change made meanwhile is weighed
+        // too, and a file a round pushed and removed since keeps its lines
+        // (review rounds 11 and 12). A credential change that does not go up
+        // is weighed by no peer, and the keychain holds this device's own
+        // newest secret: it is left out (review round 12).
         let (fresh, _) = self.pending_files().await;
-        let mut files: std::collections::BTreeMap<String, LogFile> = own
-            .files
-            .into_iter()
-            .map(|file| (file.name.to_filename(), file))
-            .collect();
-        files.extend(
-            fresh
-                .into_iter()
-                .map(|file| (file.name.to_filename(), file)),
-        );
-        let credentials_stay = !crate::credential_sync::e2e_enabled(&self.db);
+        let files = merged_pending(own.files, fresh);
+        let credentials_stay = !own.credentials_go_up;
         let mut pending = Vec::new();
         let mut unpushed: HashSet<String> = HashSet::new();
         for (name, file) in &files {
-            let lines = envelopes_of(std::slice::from_ref(file));
+            let mut lines = envelopes_of(std::slice::from_ref(file));
+            if credentials_stay {
+                lines.retain(|envelope| !is_credential(envelope));
+            }
             if let Some(holds) = &holds {
                 let until = if own_read.contains(name) {
                     own.pushed_until
@@ -838,7 +842,6 @@ impl OnboardingService {
                         .iter()
                         .filter(|envelope| {
                             !on_remote.contains(&envelope.id)
-                                && !(credentials_stay && is_credential(envelope))
                                 && (until.is_none_or(|until| envelope.timestamp > until)
                                     || holds.provably_lacks(envelope))
                         })
@@ -912,8 +915,14 @@ impl OnboardingService {
     /// file that does not read, or a cutoff that does not, fails the pass —
     /// weighed without them, the snapshot's values would win over changes it
     /// does not hold, or old ones over its own (review round 9). `new_dataset`:
-    /// nothing went up to it.
-    async fn own_pending(&self, strict: bool, new_dataset: bool) -> SyncResult<OwnPending> {
+    /// nothing went up to it. `credentials_go_up`: the dataset has E2E, so a
+    /// credential change goes up.
+    async fn own_pending(
+        &self,
+        strict: bool,
+        new_dataset: bool,
+        credentials_go_up: bool,
+    ) -> SyncResult<OwnPending> {
         let (files, all_read) = self.pending_files().await;
         if strict && !all_read {
             return Err(SyncError::io(
@@ -932,6 +941,7 @@ impl OnboardingService {
         Ok(OwnPending {
             files,
             pushed_until,
+            credentials_go_up,
         })
     }
 
@@ -1543,6 +1553,22 @@ impl SnapshotHolds {
 struct OwnPending {
     files: Vec<LogFile>,
     pushed_until: Option<DateTime<Utc>>,
+    /// The dataset has E2E: a credential change goes up and is weighed.
+    credentials_go_up: bool,
+}
+
+/// This device's pending files as read `before` the fetch and `after` the
+/// snapshot apply, by name: a file only one read has is kept, and the later
+/// read wins where both have it.
+fn merged_pending(
+    before: Vec<LogFile>,
+    after: Vec<LogFile>,
+) -> std::collections::BTreeMap<String, LogFile> {
+    before
+        .into_iter()
+        .chain(after)
+        .map(|file| (file.name.to_filename(), file))
+        .collect()
 }
 
 /// Whether `envelope` changes an account's secret.
@@ -1587,6 +1613,9 @@ mod tests {
         /// The meta.json a compaction elsewhere writes while the logs are
         /// fetched.
         meta_while_fetching: Mutex<Option<MetaJson>>,
+        /// What happens on this device while the logs are fetched (a round
+        /// pushing a pending file, a change written).
+        while_fetching: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     }
 
     impl FakeAdapter {
@@ -1601,6 +1630,7 @@ mod tests {
                 snapshot: Mutex::new(None),
                 fail_fetch: Mutex::new(false),
                 meta_while_fetching: Mutex::new(None),
+                while_fetching: Mutex::new(None),
             }
         }
 
@@ -1631,6 +1661,10 @@ mod tests {
             }
             if let Some(meta) = self.meta_while_fetching.lock().unwrap().take() {
                 *self.meta.lock().unwrap() = Some(meta);
+            }
+            let act = self.while_fetching.lock().unwrap().take();
+            if let Some(act) = act {
+                act();
             }
             Ok(self
                 .logs
@@ -3101,6 +3135,12 @@ mod tests {
         own_remote_empty: bool,
         /// A snapshot that does not apply.
         broken_snapshot: bool,
+        /// A round pushes and removes the leftover while the logs are
+        /// fetched.
+        removed_while_fetching: bool,
+        /// A change setting 80 is written into the leftover while the logs
+        /// are fetched.
+        grown_while_fetching: bool,
     }
 
     /// A join, the snapshot at `at` holding interval 45 and naming nothing,
@@ -3199,6 +3239,23 @@ mod tests {
         }
         adapter.install_meta(meta);
         adapter.install_snapshot(Snapshot::new(at, "1.0.0", body));
+        let leftover_path = pending.path().join(leftover.name.to_filename());
+        if case.removed_while_fetching {
+            *adapter.while_fetching.lock().unwrap() = Some(Box::new(move || {
+                std::fs::remove_file(&leftover_path).unwrap();
+            }));
+        } else if case.grown_while_fetching {
+            let newer = envelope(
+                "ev-newer",
+                "dev-this",
+                change_at + chrono::Duration::minutes(1),
+                set_interval("80"),
+            );
+            let grown = file_of("dev-this", change_at, &[&own, &newer]);
+            *adapter.while_fetching.lock().unwrap() = Some(Box::new(move || {
+                std::fs::write(&leftover_path, &grown.bytes).unwrap();
+            }));
+        }
 
         let held = case
             .unreadable_pending
@@ -3443,6 +3500,149 @@ mod tests {
         .await;
         result.unwrap();
         assert_eq!(interval.as_deref(), Some("45"));
+    }
+
+    #[tokio::test]
+    async fn a_join_keeps_the_lines_of_a_leftover_a_round_pushed_while_it_fetched() {
+        // Review round 12 of #130: read only after the fetch, the file was
+        // gone, and the snapshot's older value stayed.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                removed_while_fetching: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_join_weighs_a_change_written_while_it_fetched() {
+        // Review rounds 11 and 12 of #130: the pending files are read again
+        // after the snapshot apply.
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (result, interval, _db, _dirs) = join_with(
+            at + chrono::Duration::hours(1),
+            JoinCase {
+                member: true,
+                grown_while_fetching: true,
+                ..JoinCase::default()
+            },
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(interval.as_deref(), Some("80"));
+    }
+
+    /// A pending file of `dev-this` holding `secret` for acc-1's password at
+    /// `at`, the keychain holding "newer", the row's clock at `at`; with the
+    /// service, its secrets and the pending dir.
+    fn an_own_credential_line(
+        db: &DbHandle,
+        at: DateTime<Utc>,
+        event: sync_core::SyncEvent,
+    ) -> (
+        OnboardingService,
+        Arc<sync_engine::test_support::FakeSecrets>,
+        TempDir,
+    ) {
+        use sync_engine::{SecretSlot, SecretStore};
+        db.shared()
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'caldav', 'Fastmail', '{}', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        let secrets = Arc::new(sync_engine::test_support::FakeSecrets::default());
+        secrets
+            .store("acc-1", SecretSlot::Password, "newer")
+            .unwrap();
+        let pending = TempDir::new().unwrap();
+        let svc = build_service_with(db.shared(), pending.path().to_path_buf(), secrets.clone());
+        let own = envelope("ev-secret", "dev-this", at, event);
+        let file = file_of("dev-this", at, &[&own]);
+        std::fs::write(pending.path().join(file.name.to_filename()), &file.bytes).unwrap();
+        stamp_clock(db, "credential", "acc-1/password", at);
+        (svc, secrets, pending)
+    }
+
+    fn older_password() -> sync_core::SyncEvent {
+        sync_core::SyncEvent::CredentialSet(sync_core::CredentialPayload {
+            account_id: "acc-1".into(),
+            slot: "password".into(),
+            secret: "older".into(),
+        })
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_with_e2e_off_leaves_the_keychain_as_it_is() {
+        // Review round 12 of #130: an own credential line on its row's clock
+        // is no older than the row, and wrote an old password back.
+        use sync_engine::{SecretSlot, SecretStore};
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let (svc, secrets, _pending) = an_own_credential_line(&db, at, older_password());
+
+        svc.catch_up(&FakeAdapter::new()).await.unwrap();
+
+        assert_eq!(
+            secrets.retrieve("acc-1", SecretSlot::Password).unwrap(),
+            "newer"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_with_e2e_off_clears_no_secret_of_its_own() {
+        // Review round 12 of #130: the same for a cleared secret.
+        use sync_engine::{SecretSlot, SecretStore};
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let cleared = sync_core::SyncEvent::CredentialCleared(sync_core::CredentialSlotPayload {
+            account_id: "acc-1".into(),
+            slot: "password".into(),
+        });
+        let (svc, secrets, _pending) = an_own_credential_line(&db, at, cleared);
+
+        svc.catch_up(&FakeAdapter::new()).await.unwrap();
+
+        assert_eq!(
+            secrets.retrieve("acc-1", SecretSlot::Password).unwrap(),
+            "newer"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_join_of_a_dataset_without_e2e_weighs_no_credential_line_though_the_flag_is_on() {
+        // Review round 12 of #130: the flag of the dataset this device was in
+        // is cleared only once the join stands; read from it, an old password
+        // was weighed, and went back into the keychain.
+        use sync_engine::{SecretSlot, SecretStore};
+        let (_tmp, db) = fresh_db();
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        let change_at = at + chrono::Duration::hours(1);
+        let (svc, secrets, _pending) = an_own_credential_line(&db, change_at, older_password());
+        UserPrefsRepo::new(&db.shared())
+            .set(crate::credential_sync::PREF_E2E_ENABLED, "true")
+            .unwrap();
+        let adapter = FakeAdapter::new();
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = at;
+        adapter.install_meta(meta);
+        adapter.install_snapshot(snapshot_at(at, None));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        assert_eq!(
+            secrets.retrieve("acc-1", SecretSlot::Password).unwrap(),
+            "newer"
+        );
     }
 
     #[tokio::test]
