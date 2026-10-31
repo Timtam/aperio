@@ -962,7 +962,13 @@ impl OnboardingService {
             );
         }
         let snapshot_ts = Utc::now();
-        let snapshot = self.snapshot_builder.build_at(snapshot_ts, None)?;
+        let mut snapshot = self.snapshot_builder.build_at(snapshot_ts, None)?;
+        // A dataset started without a passphrase is plaintext: no secret in
+        // its snapshot, whatever E2E mark this device kept from an earlier
+        // one (review round 3 of #130).
+        if e2e_params.is_none() {
+            crate::credential_sync::strip_credentials_from_snapshot(&mut snapshot);
+        }
         adapter.push_snapshot(&snapshot).await?;
         // Its own state is the dataset now: nothing to catch up over.
         self.save_coverage_exact_since(snapshot_ts)?;
@@ -1353,6 +1359,18 @@ mod tests {
     }
 
     fn build_service_with_pending(db: SharedConn, pending_dir: PathBuf) -> OnboardingService {
+        build_service_with(
+            db,
+            pending_dir,
+            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+        )
+    }
+
+    fn build_service_with(
+        db: SharedConn,
+        pending_dir: PathBuf,
+        secrets: Arc<sync_engine::test_support::FakeSecrets>,
+    ) -> OnboardingService {
         let device_id = DeviceId::from_string("dev-this".into());
         let adapter = Arc::new(LocalAdapter::new(db.clone()));
         let store: Arc<dyn sync_engine::SyncStore> = Arc::new(
@@ -1366,7 +1384,7 @@ mod tests {
         ));
         let snapshot_builder = Arc::new(SnapshotBuilder::new(
             Arc::clone(&store),
-            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+            secrets,
             "1.0.0-test",
         ));
         OnboardingService::new(
@@ -1560,6 +1578,37 @@ mod tests {
             snapshot.metadata.snapshot_timestamp
         );
         assert!(after_self(&adapter).await.exact, "nothing to catch up over");
+    }
+
+    #[tokio::test]
+    async fn starting_over_without_a_passphrase_puts_no_secret_in_the_snapshot() {
+        // Review round 3 of #130: an E2E mark kept from an earlier dataset
+        // made the snapshot carry the account secrets, pushed in plaintext.
+        use sync_engine::{SecretSlot, SecretStore};
+        let (_tmp, db) = fresh_db();
+        db.shared()
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'caldav', 'Fastmail', '{}', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set(crate::credential_sync::PREF_E2E_ENABLED, "true")
+            .unwrap();
+        let secrets = Arc::new(sync_engine::test_support::FakeSecrets::default());
+        secrets
+            .store("acc-1", SecretSlot::Password, "hunter2")
+            .unwrap();
+        let svc = build_service_with(db.shared(), PathBuf::from("/non/existent/pending"), secrets);
+        let adapter = FakeAdapter::new();
+
+        svc.adopt_local(&adapter, None, None).await.unwrap();
+
+        let snapshot = adapter.fetch_snapshot().await.unwrap().unwrap();
+        assert!(!snapshot.body.to_string().contains("hunter2"));
     }
 
     #[tokio::test]

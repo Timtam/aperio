@@ -858,6 +858,7 @@ impl Compactor {
             rows_failed: 0,
             settings_applied: body.settings.len(),
             settings_failed: 0,
+            settings_dropped: 0,
             accounts_applied: body.accounts.len(),
             accounts_failed: 0,
             covered_events: body.covered_event_ids.as_ref().map(Vec::len),

@@ -765,7 +765,8 @@ mod tests {
         );
         let outcome = builder(&db, adapter).apply(&snap).unwrap();
         assert_eq!(outcome.settings_applied, 1);
-        assert_eq!(outcome.settings_failed, 1);
+        assert_eq!(outcome.settings_dropped, 1);
+        assert_eq!(outcome.settings_failed, 0);
         // Confirm the protected key didn't land.
         let shared = db.shared();
         let prefs = UserPrefsRepo::new(&shared);

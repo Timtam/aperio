@@ -145,6 +145,10 @@ pub struct SnapshotApplyOutcome {
     pub rows_failed: usize,
     pub settings_applied: usize,
     pub settings_failed: usize,
+    /// Settings this build does not sync (not on its whitelist), left out
+    /// on purpose — a newer build's key, say. No failure: the snapshot's
+    /// event ids and clocks still count (review round 3 of #130).
+    pub settings_dropped: usize,
     pub accounts_applied: usize,
     pub accounts_failed: usize,
     /// How many events the snapshot named as held and were recorded as
@@ -281,7 +285,7 @@ impl SnapshotBuilder {
                     key = %key,
                     "snapshot settings key not on whitelist; dropping",
                 );
-                outcome.settings_failed += 1;
+                outcome.settings_dropped += 1;
                 continue;
             }
             match self.store.set_pref(key, value) {
@@ -467,7 +471,8 @@ mod tests {
         );
         let outcome = builder(Arc::clone(&store), secrets).apply(&snap).unwrap();
         assert_eq!(outcome.settings_applied, 1);
-        assert_eq!(outcome.settings_failed, 1);
+        assert_eq!(outcome.settings_dropped, 1);
+        assert_eq!(outcome.settings_failed, 0);
         // Confirm the protected key didn't land and the legit one did.
         let prefs = store.prefs.lock().unwrap();
         assert!(!prefs.contains_key("sync.deviceId"));
@@ -572,8 +577,13 @@ mod tests {
         // A row that failed to write must not count as holding events, and
         // its clock must not keep older changes from repairing it.
         let store = Arc::new(FakeStore::default());
+        store
+            .failing_pref_writes
+            .lock()
+            .unwrap()
+            .insert("appearance.darkMode".into());
         let body = AperioSnapshotBody {
-            settings: BTreeMap::from([("not.a.synced.key".to_string(), "x".to_string())]),
+            settings: BTreeMap::from([("appearance.darkMode".to_string(), "true".to_string())]),
             covered_event_ids: Some(vec!["ev-1".into()]),
             row_clocks: vec![SnapshotRowClock {
                 kind: "setting".into(),
@@ -596,6 +606,37 @@ mod tests {
         assert_eq!(outcome.covered_events, None);
         assert!(store.applied.lock().unwrap().is_empty());
         assert!(store.row_clocks.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_setting_this_build_does_not_sync_is_no_failure() {
+        // A newer build's snapshot carries a key this one does not know: it
+        // is left out, and the snapshot still counts.
+        let store = Arc::new(FakeStore::default());
+        let body = AperioSnapshotBody {
+            settings: BTreeMap::from([("some.newer.key".to_string(), "x".to_string())]),
+            covered_event_ids: Some(vec!["ev-1".into()]),
+            row_clocks: vec![SnapshotRowClock {
+                kind: "setting".into(),
+                id: "appearance.darkMode".into(),
+                changed: Utc::now(),
+                written: None,
+                deleted: false,
+            }],
+            ..Default::default()
+        };
+        let snap = Snapshot::new(
+            Utc::now(),
+            "1.0.0-test",
+            serde_json::to_value(&body).unwrap(),
+        );
+        let outcome = builder(Arc::clone(&store), Arc::new(FakeSecrets::default()))
+            .apply(&snap)
+            .unwrap();
+        assert_eq!(outcome.settings_dropped, 1);
+        assert_eq!(outcome.settings_failed, 0);
+        assert_eq!(outcome.covered_events, Some(1));
+        assert_eq!(store.row_clocks.lock().unwrap().len(), 1);
     }
 
     #[test]

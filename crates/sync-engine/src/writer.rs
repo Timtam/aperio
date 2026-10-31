@@ -506,8 +506,28 @@ mod tests {
             key: "appearance.darkMode".into(),
             value: serde_json::json!(false),
         }));
+        let stamped = ahead + chrono::Duration::microseconds(1);
         let clock = store.row_clocks.lock().unwrap().get(&key).copied().unwrap();
-        assert_eq!(clock.changed, ahead + chrono::Duration::microseconds(1));
+        assert_eq!(clock.changed, stamped);
+        // And that is the time the peers read in the file.
+        let pending = tmp.path().join("sync").join("log").join("pending");
+        let mut written = Vec::new();
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if let Some(file) = std::fs::read_dir(&pending)
+                .ok()
+                .and_then(|mut entries| entries.next())
+                .and_then(|entry| entry.ok())
+            {
+                written = std::fs::read(file.path()).unwrap_or_default();
+                if !written.is_empty() {
+                    break;
+                }
+            }
+        }
+        let line = String::from_utf8(written).unwrap();
+        let envelope: EventEnvelope = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(envelope.timestamp, stamped);
     }
 
     #[tokio::test]

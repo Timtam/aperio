@@ -144,7 +144,9 @@ sie mindestens ihr eigenes `updated_at`.
 
 Ein Schnappschuss trägt die Uhren seines Autors (`row_clocks`). Wer ihn
 übernimmt, stempelt sie, jede nie zurück, aber nur, wenn alle seine Zeilen
-geschrieben wurden; sonst trägt er auch keine Kennungen ein. Ein Beitritt
+geschrieben wurden; sonst trägt er auch keine Kennungen ein. Ein Schlüssel,
+den dieser Build nicht synchronisiert (etwa der eines neueren), wird mit
+Absicht weggelassen und zählt nicht als Fehler. Ein Beitritt
 beginnt mit leeren Uhren: Die eines früheren Datensatzes hielten die
 Änderungen des neuen als älter draußen.
 

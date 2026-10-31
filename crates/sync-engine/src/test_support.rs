@@ -34,6 +34,8 @@ pub struct FakeStore {
     /// exercise the difference between "this pref is unset" and "the store
     /// could not be read" — the two used to be the same thing to callers.
     pub failing_pref_reads: Mutex<HashSet<String>>,
+    /// Keys whose `set_pref` returns `Err`: a write the store refuses.
+    pub failing_pref_writes: Mutex<HashSet<String>>,
     /// `sync_row_clock`: each row's clock.
     pub row_clocks: Mutex<std::collections::HashMap<sync_core::RowKey, crate::RowClock>>,
 }
@@ -68,6 +70,9 @@ impl SyncStore for FakeStore {
     }
 
     fn set_pref(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        if self.failing_pref_writes.lock().unwrap().contains(key) {
+            return Err(StoreError::Backend(format!("cannot write {key}")));
+        }
         self.prefs
             .lock()
             .unwrap()
