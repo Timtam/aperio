@@ -10,6 +10,17 @@ import {
 } from '../api/client';
 import { useDialogState } from '../state/dialogStateContext';
 
+/** Whether the user is in the middle of something the dialog stack does not
+ *  know about: a view's own modal, or a text field in use. */
+function pageBusy(): boolean {
+  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return true;
+  const el = document.activeElement;
+  return (
+    el instanceof HTMLElement &&
+    el.matches('input, textarea, select, [contenteditable="true"]')
+  );
+}
+
 /**
  * Opens the one-time hint (`NotificationShortcutHintDialog`) when the
  * backend says a reminder came due while Windows would hide it. Mount once.
@@ -21,6 +32,9 @@ import { useDialogState } from '../state/dialogStateContext';
  *    in the focused window.
  *  - No other dialog is open: the stack shows only its top frame, and a
  *    dialog pushed onto an editor would unmount it and lose its edits.
+ *  - Nothing else holds the user: a view's own dialog (outside the stack) or
+ *    a text field in use, such as the sidebar's rename, which saves on blur.
+ *    Checked again whenever focus moves.
  *  - Setting up is still needed, read from disk again just before.
  *
  * Once per app start: the backend lets it be raised once, and this keeps
@@ -31,7 +45,16 @@ export function NotificationShortcutHintChecker() {
   const { mode, openNotificationShortcutHint } = useDialogState();
   const [pending, setPending] = useState(false);
   const [focused, setFocused] = useState(false);
+  // Bumped on every focus move, so a hint held back by `pageBusy` is tried
+  // again once the user is done (a rename ends, a view's dialog closes).
+  const [focusTick, setFocusTick] = useState(0);
   const shown = useRef(false);
+
+  useEffect(() => {
+    const bump = () => setFocusTick((n) => n + 1);
+    document.addEventListener('focusin', bump);
+    return () => document.removeEventListener('focusin', bump);
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -87,7 +110,7 @@ export function NotificationShortcutHintChecker() {
   }, []);
 
   useEffect(() => {
-    if (!pending || !focused || mode.kind !== 'none' || shown.current) return;
+    if (!pending || !focused || mode.kind !== 'none' || shown.current || pageBusy()) return;
     let cancelled = false;
     void (async () => {
       let needed: boolean;
@@ -98,7 +121,7 @@ export function NotificationShortcutHintChecker() {
       }
       // A dialog opened, or focus left, while the status was read: this
       // effect runs again once that is over.
-      if (cancelled || shown.current) return;
+      if (cancelled || shown.current || pageBusy()) return;
       if (!needed) {
         setPending(false);
         return;
@@ -111,7 +134,7 @@ export function NotificationShortcutHintChecker() {
     return () => {
       cancelled = true;
     };
-  }, [pending, focused, mode.kind, openNotificationShortcutHint]);
+  }, [pending, focused, mode.kind, focusTick, openNotificationShortcutHint]);
 
   return null;
 }

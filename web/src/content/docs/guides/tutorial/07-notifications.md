@@ -31,7 +31,7 @@ Aperio never creates the entry by itself. Three places offer it:
   would hide it, Aperio opens the dialog **Reminders are not showing**. **Set
   up notifications** creates the entry, and **Not now** closes the dialog.
   Aperio asks at most once per start. While its window does not have focus,
-  or another dialog is open, the hint waits. After the next start it can ask
+  another dialog is open, or you are typing in a field, the hint waits. After the next start it can ask
   again, also if you removed the entry or skipped the wizard step.
 - **The first-launch wizard.** On a fresh install it has a step **Reminders
   on Windows** after the language (see
@@ -211,7 +211,9 @@ overrides the one above it:
 Every level offers the same choices:
 
 - **System default** — your operating system's notification sound. On
-  Windows this is the Windows default notification sound.
+  Windows this is the Windows default notification sound. On macOS, Aperio
+  plays no sound for System default for now; pick a custom sound there if
+  you need one.
 - **Silent** — a visual-only notification, no sound.
 - **Custom sound** — import your own audio file (`.mp3`, `.ogg`, `.wav`,
   `.m4a`, `.aac`, `.flac`, up to 5 MB). Use **Test** to preview it and

@@ -66,7 +66,10 @@ mod tests {
 
     #[test]
     fn a_reminder_with_the_system_sound_asks_for_it() {
-        assert_eq!(reminder_sound_name(&SoundSource::System, false), SYSTEM_SOUND);
+        assert_eq!(
+            reminder_sound_name(&SoundSource::System, false),
+            SYSTEM_SOUND
+        );
     }
 
     #[test]

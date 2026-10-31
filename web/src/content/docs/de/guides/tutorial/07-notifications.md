@@ -31,8 +31,9 @@ Aperio legt den Eintrag nie von selbst an. Drei Stellen bieten ihn an:
   fällig und Windows würde sie verbergen, öffnet Aperio den Dialog
   **Erinnerungen werden nicht angezeigt**. **Benachrichtigungen einrichten**
   legt den Eintrag an, **Nicht jetzt** schließt den Dialog. Aperio fragt
-  höchstens einmal pro Start. Solange sein Fenster nicht den Fokus hat oder
-  ein anderer Dialog offen ist, wartet der Hinweis. Nach dem nächsten Start
+  höchstens einmal pro Start. Solange sein Fenster nicht den Fokus hat, ein
+  anderer Dialog offen ist oder du gerade in einem Feld schreibst, wartet der
+  Hinweis. Nach dem nächsten Start
   kann er wiederkommen, auch wenn du den Eintrag entfernt oder den Schritt im
   Assistenten übersprungen hast.
 - **Der Erststart-Assistent.** Bei einer frischen Installation hat er nach der
@@ -226,7 +227,9 @@ Ebenen, wobei jede die darüberliegende überschreibt:
 Jede Ebene bietet dieselben Optionen:
 
 - **Systemstandard** – der Benachrichtigungston deines Betriebssystems. Unter
-  Windows ist das der Standard-Benachrichtigungston von Windows.
+  Windows ist das der Standard-Benachrichtigungston von Windows. Unter macOS
+  spielt Aperio bei Systemstandard vorerst keinen Ton; wähle dort einen
+  eigenen Ton, wenn du einen brauchst.
 - **Kein Ton** – eine rein visuelle Benachrichtigung, ohne Ton.
 - **Eigener Ton** – importiere eine eigene Audiodatei (`.mp3`, `.ogg`,
   `.wav`, `.m4a`, `.aac`, `.flac`, bis 5 MB). Mit **Testen** hörst du sie

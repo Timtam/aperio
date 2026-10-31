@@ -124,6 +124,8 @@ it is one button:
 
 The line is read again when you open the screen and when you come back to
 the app, so a change made in the system settings shows on the way back.
+When you return from the system settings through this button, Aperio reads
+the line out.
 
 ## Home-screen widget (iOS)
 

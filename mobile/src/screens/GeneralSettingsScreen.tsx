@@ -1,8 +1,9 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  AppState,
   Linking,
   Platform,
   Pressable,
@@ -38,7 +39,7 @@ import {
 } from '../settings/showCancelledEvents';
 import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
 import { useAppBadgePref } from '../state/appBadge';
-import { useAppLockPref } from '../state/appLock';
+import { useAppLockPref, whenAppLockReleased, whileOsSheetOpen } from '../state/appLock';
 import { ensurePermission, rescheduleReminders } from '../reminders/scheduler';
 import {
   useNotificationPermission,
@@ -50,6 +51,10 @@ import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
 import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { useThemeModePref, type ThemeModeChoice } from '../theme/themeMode';
+
+/** How long a sentence waits after an unlock, so the closing prompt and
+ *  cover do not cut it off (the same pause as `AccountsScreen`'s). */
+const AFTER_UNLOCK_SPEECH_MS = 400;
 
 /** What the notification-permission row says in each state. */
 const PERMISSION_STATUS_KEY = {
@@ -100,19 +105,52 @@ export default function GeneralSettingsScreen() {
   // settings can change it; the row is read again on the way back.
   const { permission, refresh: refreshPermission } = useNotificationPermission();
   const [permissionBusy, setPermissionBusy] = useState(false);
+  // A result is said after the OS is done with the user, and never under the
+  // unlock prompt a slow answer can bring back.
+  const sayAfterUnlock = useCallback(async (sentence: string) => {
+    if (await whenAppLockReleased()) {
+      await new Promise((resolve) => setTimeout(resolve, AFTER_UNLOCK_SPEECH_MS));
+    }
+    AccessibilityInfo.announceForAccessibility(sentence);
+  }, []);
+  // A trip to the system settings: on the way back the line says where things
+  // stand, whichever way the user changed them (the button reads the same
+  // either way, so nothing else would say it).
+  const settingsTrip = useRef(false);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || !settingsTrip.current) return;
+      settingsTrip.current = false;
+      void refreshPermission().then((next) =>
+        sayAfterUnlock(
+          t(
+            next == null
+              ? 'mobile.notificationPermission.statusUnknown'
+              : PERMISSION_STATUS_KEY[next],
+          ),
+        ),
+      );
+    });
+    return () => sub.remove();
+  }, [refreshPermission, sayAfterUnlock, t]);
   const onPermissionAction = useCallback(() => {
     if (permissionBusy) return;
     if (permission !== 'askable') {
-      void Linking.openSettings().catch(() => {});
+      settingsTrip.current = true;
+      void Linking.openSettings().catch(() => {
+        settingsTrip.current = false;
+      });
       return;
     }
     setPermissionBusy(true);
     void (async () => {
       try {
-        const granted = await ensurePermission().catch(() => false);
+        // Through the OS-sheet gate, like the other permission prompts: the
+        // sheet flips the app inactive, and the lock must not cover it.
+        const granted = await whileOsSheetOpen(() => ensurePermission()).catch(() => false);
         await refreshPermission();
         if (granted) void rescheduleReminders();
-        AccessibilityInfo.announceForAccessibility(
+        await sayAfterUnlock(
           t(
             granted
               ? 'mobile.notificationPermission.allowedDone'
@@ -123,7 +161,7 @@ export default function GeneralSettingsScreen() {
         setPermissionBusy(false);
       }
     })();
-  }, [permission, permissionBusy, refreshPermission, t]);
+  }, [permission, permissionBusy, refreshPermission, sayAfterUnlock, t]);
   const permissionActionLabel = t(
     permission === 'askable'
       ? 'mobile.notificationPermission.allow'

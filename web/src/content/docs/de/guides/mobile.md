@@ -137,7 +137,8 @@ Knopf:
 
 Die Zeile wird neu gelesen, wenn du den Bildschirm öffnest und wenn du zur App
 zurückkehrst. Eine Änderung in den Systemeinstellungen siehst du also auf dem
-Rückweg.
+Rückweg. Kommst du über diesen Knopf aus den Systemeinstellungen zurück, sagt
+Aperio die Zeile an.
 
 ## Widget auf dem Startbildschirm (iOS)
 

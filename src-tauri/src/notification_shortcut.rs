@@ -19,6 +19,7 @@
 //!   Windows would hide it raises one event for the frontend. Kept in memory
 //!   only, so it can come again after a restart (Toni, 2026-10-31).
 
+#[cfg(any(windows, test))]
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -235,12 +236,17 @@ impl NotificationShortcutState {
         {
             let _io = self.io.lock().expect("shortcut io poisoned");
             let (link, exe) = self.paths(false)?;
-            win::status_at(&link, &exe, &self.identifier, crate::platform::is_dev_build())
-                .map_err(internal)
+            win::status_at(
+                &link,
+                &exe,
+                &self.identifier,
+                crate::platform::is_dev_build(),
+            )
+            .map_err(internal)
         }
         #[cfg(not(windows))]
         {
-            let _ = (&self.io, &self.product_name);
+            let _ = (&self.io, &self.identifier, &self.product_name);
             Ok(NotificationShortcut::Unsupported)
         }
     }
@@ -250,7 +256,12 @@ impl NotificationShortcutState {
         {
             let _io = self.io.lock().expect("shortcut io poisoned");
             let (link, exe) = self.paths(true)?;
-            win::create_at(&link, &exe, &self.identifier, crate::platform::is_dev_build())
+            win::create_at(
+                &link,
+                &exe,
+                &self.identifier,
+                crate::platform::is_dev_build(),
+            )
         }
         #[cfg(not(windows))]
         Err(unsupported())
@@ -261,7 +272,12 @@ impl NotificationShortcutState {
         {
             let _io = self.io.lock().expect("shortcut io poisoned");
             let (link, exe) = self.paths(false)?;
-            win::remove_at(&link, &exe, &self.identifier, crate::platform::is_dev_build())
+            win::remove_at(
+                &link,
+                &exe,
+                &self.identifier,
+                crate::platform::is_dev_build(),
+            )
         }
         #[cfg(not(windows))]
         Err(unsupported())
@@ -271,8 +287,13 @@ impl NotificationShortcutState {
     fn repair_at_startup(&self) -> CommandResult<NotificationShortcut> {
         let _io = self.io.lock().expect("shortcut io poisoned");
         let (link, exe) = self.paths(false)?;
-        win::refresh_at(&link, &exe, &self.identifier, crate::platform::is_dev_build())
-            .map_err(internal)
+        win::refresh_at(
+            &link,
+            &exe,
+            &self.identifier,
+            crate::platform::is_dev_build(),
+        )
+        .map_err(internal)
     }
 }
 
@@ -296,7 +317,10 @@ fn unsupported() -> CommandError {
 /// before the status was known. Elsewhere than Windows it only records that
 /// there is nothing to set up.
 pub fn spawn_startup_check(app: AppHandle) {
-    let state = app.state::<Arc<NotificationShortcutState>>().inner().clone();
+    let state = app
+        .state::<Arc<NotificationShortcutState>>()
+        .inner()
+        .clone();
     #[cfg(windows)]
     {
         let spawned = std::thread::Builder::new()
@@ -340,7 +364,10 @@ async fn blocking<T: Send + 'static>(
 /// reminder fired before the status was known.
 #[tauri::command]
 pub async fn notification_shortcut_status(app: AppHandle) -> CommandResult<ShortcutStatus> {
-    let state = app.state::<Arc<NotificationShortcutState>>().inner().clone();
+    let state = app
+        .state::<Arc<NotificationShortcutState>>()
+        .inner()
+        .clone();
     let status = blocking({
         let state = state.clone();
         move || state.status()
@@ -356,7 +383,10 @@ pub async fn notification_shortcut_status(app: AppHandle) -> CommandResult<Short
 /// exe). `unsupported` in a development build and off Windows.
 #[tauri::command]
 pub async fn notification_shortcut_create(app: AppHandle) -> CommandResult<ShortcutStatus> {
-    let state = app.state::<Arc<NotificationShortcutState>>().inner().clone();
+    let state = app
+        .state::<Arc<NotificationShortcutState>>()
+        .inner()
+        .clone();
     let status = blocking({
         let state = state.clone();
         move || state.create()
@@ -370,7 +400,10 @@ pub async fn notification_shortcut_create(app: AppHandle) -> CommandResult<Short
 /// Remove our shortcut. `conflict` for a foreign one, which stays.
 #[tauri::command]
 pub async fn notification_shortcut_remove(app: AppHandle) -> CommandResult<ShortcutStatus> {
-    let state = app.state::<Arc<NotificationShortcutState>>().inner().clone();
+    let state = app
+        .state::<Arc<NotificationShortcutState>>()
+        .inner()
+        .clone();
     let status = blocking({
         let state = state.clone();
         move || state.remove()
@@ -418,7 +451,10 @@ mod tests {
     #[test]
     fn a_development_build_is_one_whatever_is_on_disk() {
         let here = Path::new(r"C:\a\aperio.exe");
-        assert_eq!(classify(None, here, ID, true), NotificationShortcut::DevBuild);
+        assert_eq!(
+            classify(None, here, ID, true),
+            NotificationShortcut::DevBuild
+        );
         assert_eq!(
             classify(Some(&link(r"C:\a\aperio.exe", Some(ID))), here, ID, true),
             NotificationShortcut::DevBuild
@@ -428,13 +464,21 @@ mod tests {
     #[test]
     fn the_shortcut_is_classified_by_its_id_and_its_target() {
         let here = Path::new(r"C:\a\aperio.exe");
-        assert_eq!(classify(None, here, ID, false), NotificationShortcut::NotSetUp);
+        assert_eq!(
+            classify(None, here, ID, false),
+            NotificationShortcut::NotSetUp
+        );
         assert_eq!(
             classify(Some(&link(r"C:\a\aperio.exe", None)), here, ID, false),
             NotificationShortcut::Foreign
         );
         assert_eq!(
-            classify(Some(&link(r"C:\a\aperio.exe", Some("other.id"))), here, ID, false),
+            classify(
+                Some(&link(r"C:\a\aperio.exe", Some("other.id"))),
+                here,
+                ID,
+                false
+            ),
             NotificationShortcut::Foreign
         );
         assert_eq!(

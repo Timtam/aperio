@@ -127,6 +127,37 @@ describe('the notification shortcut hint', () => {
     expect(opened()).toBe(1);
   });
 
+  it('waits while a text field is in use, and opens once focus moves on', async () => {
+    const field = document.createElement('input');
+    const button = document.createElement('button');
+    document.body.append(field, button);
+    field.focus();
+    await mount();
+    await fire();
+    expect(opened()).toBe(0);
+    await act(async () => button.focus());
+    await settle();
+    expect(opened()).toBe(1);
+    field.remove();
+    button.remove();
+  });
+
+  it("waits while a view's own dialog is open", async () => {
+    const local = document.createElement('div');
+    local.setAttribute('role', 'dialog');
+    local.setAttribute('aria-modal', 'true');
+    const button = document.createElement('button');
+    document.body.append(local, button);
+    await mount();
+    await fire();
+    expect(opened()).toBe(0);
+    local.remove();
+    await act(async () => button.focus());
+    await settle();
+    expect(opened()).toBe(1);
+    button.remove();
+  });
+
   it('stays away when the shortcut was set up meanwhile', async () => {
     await mount();
     h.backend.status = { kind: 'set_up', needs_set_up: false };

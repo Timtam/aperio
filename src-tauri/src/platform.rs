@@ -115,12 +115,20 @@ mod tests {
 
     #[test]
     fn only_a_cargo_debug_or_release_folder_counts_as_a_development_build() {
-        assert!(toasts_use_powershell_id(&dir(&["C:", "src", "target", "debug"])));
-        assert!(toasts_use_powershell_id(&dir(&["C:", "src", "target", "release"])));
+        assert!(toasts_use_powershell_id(&dir(&[
+            "C:", "src", "target", "debug"
+        ])));
+        assert!(toasts_use_powershell_id(&dir(&[
+            "C:", "src", "target", "release"
+        ])));
         // A test binary: one level deeper.
-        assert!(!toasts_use_powershell_id(&dir(&["C:", "src", "target", "debug", "deps"])));
+        assert!(!toasts_use_powershell_id(&dir(&[
+            "C:", "src", "target", "debug", "deps"
+        ])));
         // Case-sensitive, like the plugin.
-        assert!(!toasts_use_powershell_id(&dir(&["C:", "src", "Target", "Debug"])));
+        assert!(!toasts_use_powershell_id(&dir(&[
+            "C:", "src", "Target", "Debug"
+        ])));
         // A cross-compiled build folder is a real copy to the plugin.
         assert!(!toasts_use_powershell_id(&dir(&[
             "C:",
@@ -130,6 +138,9 @@ mod tests {
             "release",
         ])));
         // The portable folder.
-        assert!(!toasts_use_powershell_id(&dir(&["D:", "aperio-windows-x86_64"])));
+        assert!(!toasts_use_powershell_id(&dir(&[
+            "D:",
+            "aperio-windows-x86_64"
+        ])));
     }
 }

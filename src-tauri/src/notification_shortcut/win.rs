@@ -90,9 +90,19 @@ pub fn read_link(link: &Path) -> Result<Option<LinkInfo>> {
     // the call that fills it.
     unsafe {
         let shell: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
-        shell
+        let loaded = shell
             .cast::<IPersistFile>()?
-            .Load(&HSTRING::from(link), STGM_READ)?;
+            .Load(&HSTRING::from(link), STGM_READ);
+        if loaded.is_err() {
+            // Not a shortcut the shell can read (cut off by an interrupted
+            // save, another file of that name): not ours, so foreign. Setting
+            // up replaces it; nothing else touches it. (An empty file the
+            // shell reads as an empty link, which is foreign too.)
+            return Ok(Some(LinkInfo {
+                target: PathBuf::new(),
+                aumid: None,
+            }));
+        }
         // Not MAX_PATH: a cut-off path would read as another exe and be
         // rewritten at every start.
         let mut buf = vec![0u16; 32_768];
@@ -108,18 +118,22 @@ pub fn read_link(link: &Path) -> Result<Option<LinkInfo>> {
 }
 
 /// Point the shortcut at `link` at `exe` and give it `aumid`. The one place
-/// a shortcut is written. An existing one is opened rather than replaced,
-/// so what the user set on it (a shortcut key, how it opens) stays.
-pub fn write_link(link: &Path, exe: &Path, aumid: &str) -> Result<()> {
+/// a shortcut is written. With `keep_existing` (a shortcut of ours) the
+/// existing one is opened rather than replaced, so what the user set on it
+/// (a shortcut key, how it opens) stays; one the shell cannot read is
+/// written afresh. Without it (a foreign shortcut being replaced) nothing
+/// of the old one carries over: not its arguments, not its icon.
+pub fn write_link(link: &Path, exe: &Path, aumid: &str, keep_existing: bool) -> Result<()> {
     let _com = Apartment::enter()?;
     let path = HSTRING::from(link);
     // SAFETY: COM calls on an initialised apartment; the strings and the
     // PROPVARIANT outlive the calls that read them.
     unsafe {
-        let shell: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
-        let file: IPersistFile = shell.cast()?;
-        if link.exists() {
-            file.Load(&path, STGM_READWRITE)?;
+        let mut shell: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+        let mut file: IPersistFile = shell.cast()?;
+        if keep_existing && link.exists() && file.Load(&path, STGM_READWRITE).is_err() {
+            shell = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+            file = shell.cast()?;
         }
         shell.SetPath(&HSTRING::from(exe))?;
         if let Some(dir) = exe.parent() {
@@ -175,7 +189,11 @@ pub fn create_at(
     if let Some(dir) = link.parent() {
         std::fs::create_dir_all(dir).map_err(internal)?;
     }
-    write_link(link, exe, aumid).map_err(internal)?;
+    let ours = matches!(
+        status_at(link, exe, aumid, dev).map_err(internal)?,
+        NotificationShortcut::SetUp | NotificationShortcut::PointsElsewhere { .. }
+    );
+    write_link(link, exe, aumid, ours).map_err(internal)?;
     let status = status_at(link, exe, aumid, dev).map_err(internal)?;
     if status != NotificationShortcut::SetUp {
         return Err(internal(format!(
@@ -218,7 +236,7 @@ pub fn refresh_at(link: &Path, exe: &Path, aumid: &str, dev: bool) -> Result<Not
     let NotificationShortcut::PointsElsewhere { target } = &status else {
         return Ok(status);
     };
-    match write_link(link, exe, aumid) {
+    match write_link(link, exe, aumid, true) {
         Ok(()) => {
             tracing::info!(
                 target: "aperio::notifications",
@@ -322,7 +340,7 @@ mod tests {
     #[test]
     fn a_written_shortcut_reads_back_with_its_target_and_app_id() {
         let f = fixture();
-        write_link(&f.link, &f.here, ID).unwrap();
+        write_link(&f.link, &f.here, ID, true).unwrap();
         let info = read_link(&f.link).unwrap().expect("a shortcut");
         assert!(super::super::same_exe(&info.target, &f.here), "{info:?}");
         assert_eq!(info.aumid.as_deref(), Some(ID));
@@ -335,7 +353,7 @@ mod tests {
             status_at(&f.link, &f.here, ID, false).unwrap(),
             NotificationShortcut::NotSetUp
         );
-        write_link(&f.link, &f.here, ID).unwrap();
+        write_link(&f.link, &f.here, ID, true).unwrap();
         assert_eq!(
             status_at(&f.link, &f.here, ID, false).unwrap(),
             NotificationShortcut::SetUp
@@ -354,7 +372,7 @@ mod tests {
     #[test]
     fn the_start_points_a_moved_shortcut_at_this_copy_and_keeps_its_shortcut_key() {
         let f = fixture();
-        write_link(&f.link, &f.other, ID).unwrap();
+        write_link(&f.link, &f.other, ID, true).unwrap();
         // Ctrl+Alt+A.
         set_hotkey(&f.link, 0x0641);
         assert_eq!(
@@ -389,7 +407,7 @@ mod tests {
     #[test]
     fn a_development_build_repairs_nothing_and_sets_up_nothing() {
         let f = fixture();
-        write_link(&f.link, &f.other, ID).unwrap();
+        write_link(&f.link, &f.other, ID, true).unwrap();
         let before = std::fs::read(&f.link).unwrap();
         assert_eq!(
             refresh_at(&f.link, &f.here, ID, true).unwrap(),
@@ -403,9 +421,32 @@ mod tests {
     }
 
     #[test]
-    fn setting_up_replaces_a_foreign_shortcut() {
+    fn setting_up_replaces_a_foreign_shortcut_with_nothing_of_it_left() {
         let f = fixture();
         write_plain_link(&f.link, &f.other);
+        set_hotkey(&f.link, 0x0641);
+        assert_eq!(
+            create_at(&f.link, &f.here, ID, false).unwrap(),
+            NotificationShortcut::SetUp
+        );
+        assert_eq!(hotkey(&f.link), 0);
+    }
+
+    #[test]
+    fn a_file_the_shell_cannot_read_is_foreign_and_setting_up_replaces_it() {
+        let f = fixture();
+        // Not a shell link at all (an empty file the shell reads as an
+        // empty link, so it would not test this).
+        std::fs::write(&f.link, b"this is not a shortcut").unwrap();
+        assert_eq!(
+            status_at(&f.link, &f.here, ID, false).unwrap(),
+            NotificationShortcut::Foreign
+        );
+        assert_eq!(
+            refresh_at(&f.link, &f.here, ID, false).unwrap(),
+            NotificationShortcut::Foreign
+        );
+        assert_eq!(std::fs::read(&f.link).unwrap(), b"this is not a shortcut");
         assert_eq!(
             create_at(&f.link, &f.here, ID, false).unwrap(),
             NotificationShortcut::SetUp
@@ -415,7 +456,7 @@ mod tests {
     #[test]
     fn removing_deletes_ours_keeps_a_foreign_one_and_is_fine_with_none() {
         let f = fixture();
-        write_link(&f.link, &f.here, ID).unwrap();
+        write_link(&f.link, &f.here, ID, true).unwrap();
         assert_eq!(
             remove_at(&f.link, &f.here, ID, false).unwrap(),
             NotificationShortcut::NotSetUp
