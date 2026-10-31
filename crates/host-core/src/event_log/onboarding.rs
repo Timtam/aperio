@@ -44,7 +44,7 @@
 //! - **Account re-connect prompt.** §19.11 Step 8. UI in Phase Si.
 //! - **Plugin gap detection.** §19.11 Step 9. Plugins land in §20.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -177,6 +177,12 @@ impl OnboardingReport {
         self.apply_failures += report.failed;
     }
 }
+
+/// The log files the last pass over every log could not read, with their
+/// sizes (JSON; review round 3 of #130). One unreadable again at the same
+/// size is no torn read and no longer keeps the device from being exact.
+/// Device-local, like every `sync.cursor.*` key.
+const PREF_UNREADABLE_LOGS: &str = "sync.cursor.unreadableLogs";
 
 /// What [`OnboardingService::apply_every_log`] found.
 struct Pass {
@@ -435,13 +441,18 @@ impl OnboardingService {
         // as applied (DESIGN-sync-snapshot-coverage.md).
         let mut starting_cursor: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
         let mut snapshot_applied = false;
+        // Everything is fetched first: a join that fails on the way leaves
+        // this device as it was, still syncing with what it had (review
+        // round 3 of #130).
+        let snapshot = adapter.fetch_snapshot().await?;
+        let logs = self.fetch_every_log(adapter).await?;
         // Whatever this device knew of another dataset says nothing here; the
         // pass over every file below makes the record exact again. Nor do its
         // row clocks: they would let that dataset's times keep this one's
         // changes out (review round 2 of #130). The snapshot brings its own.
         self.clear_coverage_exact()?;
         self.clear_row_clocks()?;
-        match adapter.fetch_snapshot().await? {
+        match snapshot {
             Some(snapshot) => {
                 info!(
                     snapshot_ts = %snapshot.metadata.snapshot_timestamp,
@@ -480,7 +491,7 @@ impl OnboardingService {
         // named before it may have grown after it (Toni's laptop,
         // 2026-10-27).
         let pass = self
-            .apply_every_log(adapter, meta.gc_horizon, &mut report)
+            .apply_every_log(logs, meta.gc_horizon, &mut report)
             .await?;
         info!(
             count = report.fetched_logs,
@@ -574,7 +585,12 @@ impl OnboardingService {
         // wedge). The alternative — erroring here — left the device
         // permanently stuck, since the inline compaction that mints a
         // snapshot sits behind the bailing round.
-        let base = match adapter.fetch_snapshot().await? {
+        let snapshot = adapter.fetch_snapshot().await?;
+        let logs = self.fetch_every_log(adapter).await?;
+        // Exact again only once this pass read every file (review round 3
+        // of #130): an earlier mark says nothing after the snapshot apply.
+        self.clear_coverage_exact()?;
+        let base = match snapshot {
             Some(snapshot) => {
                 info!(
                     snapshot_ts = %snapshot.metadata.snapshot_timestamp,
@@ -599,7 +615,7 @@ impl OnboardingService {
             ..Default::default()
         };
         let pass = self
-            .apply_every_log(adapter, meta.gc_horizon, &mut report)
+            .apply_every_log(logs, meta.gc_horizon, &mut report)
             .await?;
         info!(
             count = report.fetched_logs,
@@ -661,9 +677,8 @@ impl OnboardingService {
             ..Default::default()
         };
         let gc_horizon = adapter.fetch_meta().await?.and_then(|meta| meta.gc_horizon);
-        let pass = self
-            .apply_every_log(adapter, gc_horizon, &mut report)
-            .await?;
+        let logs = self.fetch_every_log(adapter).await?;
+        let pass = self.apply_every_log(logs, gc_horizon, &mut report).await?;
         if let Some(newest) = pass.newest_foreign {
             self.save_cursor(self.read_cursor().max(newest))?;
         }
@@ -699,18 +714,12 @@ impl OnboardingService {
     /// and whether every file read: only then is the device exact.
     async fn apply_every_log(
         &self,
-        adapter: &dyn SyncAdapter,
+        logs: Vec<LogFile>,
         gc_horizon: Option<DateTime<Utc>>,
         report: &mut OnboardingReport,
     ) -> SyncResult<Pass> {
-        let logs = adapter
-            .fetch_new_logs(&DeviceCursor {
-                last_seen_log: DateTime::<Utc>::MIN_UTC,
-                exclude_device: None,
-                known_lengths: Vec::new(),
-                fetch_unknown: false,
-            })
-            .await?;
+        let unreadable_before = self.read_unreadable_logs();
+        let mut unreadable: HashMap<String, u64> = HashMap::new();
         let mut envelopes = Vec::new();
         let mut pushed: HashSet<String> = HashSet::new();
         let mut lengths: Vec<(String, u64)> = Vec::new();
@@ -737,14 +746,31 @@ impl OnboardingService {
                     // cannot read. Not recorded, and the pass is not complete:
                     // the device is not exact, and the next catch-up takes the
                     // file again, under its rules rather than a round's
-                    // (review round 2 of #130).
-                    warn!(
-                        log = %log.name.to_filename(),
-                        ?err,
-                        "unreadable log file; the device catches up again later",
-                    );
+                    // (review round 2 of #130). Unreadable again at the same
+                    // size, it is no torn read: nothing here can apply it, and
+                    // it no longer keeps the device from being exact (review
+                    // round 3) — its length is recorded until it grows.
+                    let filename = log.name.to_filename();
+                    let len = log.bytes.len() as u64;
                     report.apply_failures += 1;
-                    complete = false;
+                    if unreadable_before.get(&filename) == Some(&len) {
+                        warn!(
+                            log = %filename,
+                            ?err,
+                            "log file still unreadable at the same size; nothing to apply from it",
+                        );
+                        if foreign {
+                            lengths.push((filename.clone(), len));
+                        }
+                    } else {
+                        warn!(
+                            log = %filename,
+                            ?err,
+                            "unreadable log file; the device catches up again later",
+                        );
+                        complete = false;
+                    }
+                    unreadable.insert(filename, len);
                 }
             }
         }
@@ -769,10 +795,53 @@ impl OnboardingService {
         report.detail = applied.clone();
         report.merge_apply(applied);
         self.record_applied_lengths(&lengths);
+        self.save_unreadable_logs(&unreadable);
         Ok(Pass {
             newest_foreign,
             complete,
         })
+    }
+
+    /// Every log file on the remote, this device's own included.
+    async fn fetch_every_log(&self, adapter: &dyn SyncAdapter) -> SyncResult<Vec<LogFile>> {
+        adapter
+            .fetch_new_logs(&DeviceCursor {
+                last_seen_log: DateTime::<Utc>::MIN_UTC,
+                exclude_device: None,
+                known_lengths: Vec::new(),
+                fetch_unknown: false,
+            })
+            .await
+    }
+
+    /// The log files the last pass over every log could not read, with
+    /// their sizes ([`PREF_UNREADABLE_LOGS`]). A record that does not read
+    /// is empty: every unreadable file then counts as a first sighting.
+    fn read_unreadable_logs(&self) -> HashMap<String, u64> {
+        UserPrefsRepo::new(&self.db)
+            .get(PREF_UNREADABLE_LOGS)
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_unreadable_logs(&self, unreadable: &HashMap<String, u64>) {
+        let prefs = UserPrefsRepo::new(&self.db);
+        let saved = if unreadable.is_empty() {
+            prefs.delete(PREF_UNREADABLE_LOGS)
+        } else {
+            match serde_json::to_string(unreadable) {
+                Ok(raw) => prefs.set(PREF_UNREADABLE_LOGS, &raw),
+                Err(err) => {
+                    warn!(?err, "couldn't encode the unreadable log files");
+                    return;
+                }
+            }
+        };
+        if let Err(err) = saved {
+            warn!(?err, "couldn't record the unreadable log files");
+        }
     }
 
     /// This device's own changes in `pending_dir` — written, maybe not
@@ -1181,6 +1250,8 @@ mod tests {
         meta: Mutex<Option<MetaJson>>,
         logs: Mutex<Vec<LogFile>>,
         snapshot: Mutex<Option<Snapshot>>,
+        /// Fetching the logs fails, as offline.
+        fail_fetch: Mutex<bool>,
     }
 
     impl FakeAdapter {
@@ -1193,6 +1264,7 @@ mod tests {
                 meta: Mutex::new(None),
                 logs: Mutex::new(logs),
                 snapshot: Mutex::new(None),
+                fail_fetch: Mutex::new(false),
             }
         }
 
@@ -1218,6 +1290,9 @@ mod tests {
             Ok(())
         }
         async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
+            if *self.fail_fetch.lock().unwrap() {
+                return Err(SyncError::internal("offline"));
+            }
             Ok(self
                 .logs
                 .lock()
@@ -2264,6 +2339,91 @@ mod tests {
         svc.accept_remote(&adapter, None).await.unwrap();
 
         assert_eq!(interval(&db).as_deref(), Some("70"));
+    }
+
+    #[tokio::test]
+    async fn a_join_that_cannot_fetch_leaves_the_device_as_it_was() {
+        // Review round 3 of #130: the join cleared the row clocks and the
+        // exact mark before it fetched anything, so a failed join damaged
+        // the dataset this device was still syncing with.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let at: DateTime<Utc> = "2026-10-19T07:58:29Z".parse().unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set(SYNC_COVERAGE_EXACT_SINCE_PREF_KEY, &at.to_rfc3339())
+            .unwrap();
+        stamp_clock(&db, "setting", "sync.intervalMinutes", at);
+        let adapter = FakeAdapter::new();
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+        *adapter.fail_fetch.lock().unwrap() = true;
+
+        assert!(svc.accept_remote(&adapter, None).await.is_err());
+
+        assert!(exact_since(&db).is_some());
+        let clocks: i64 = db
+            .shared()
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM sync_row_clock", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(clocks, 1);
+    }
+
+    #[tokio::test]
+    async fn a_file_unreadable_twice_at_the_same_size_no_longer_keeps_the_device_inexact() {
+        // Review round 3 of #130: one file no version of this build can read
+        // kept every device from being exact, so the GC waited forever and
+        // the catch-up ran every hour.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), false).await;
+        let broken = LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"not json".to_vec(),
+        };
+        let broken_name = broken.name.to_filename();
+        adapter.logs.lock().unwrap().push(broken);
+
+        svc.catch_up(&adapter).await.unwrap();
+        assert!(exact_since(&db).is_none(), "maybe a torn read: once more");
+        svc.catch_up(&adapter).await.unwrap();
+
+        assert!(exact_since(&db).is_some());
+        let lengths = UserPrefsRepo::new(&db.shared())
+            .get(sync_engine::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(
+            lengths.contains(&broken_name),
+            "not fetched again unless it grows"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_incomplete_stale_resume_leaves_the_device_not_exact() {
+        // Review round 3 of #130: an earlier mark stayed, the heartbeat
+        // reported exact, and the GC stopped waiting for this device.
+        let (_tmp, db) = fresh_db();
+        let (svc, adapter, snapshot_ts) = laptop_before_catch_up(&db, no_pending(), true).await;
+        UserPrefsRepo::new(&db.shared())
+            .set(
+                SYNC_COVERAGE_EXACT_SINCE_PREF_KEY,
+                &snapshot_ts.to_rfc3339(),
+            )
+            .unwrap();
+        adapter.logs.lock().unwrap().push(LogFile {
+            name: LogFileName::new(
+                snapshot_ts + chrono::Duration::minutes(10),
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: b"{\"id\":".to_vec(),
+        });
+
+        svc.resume_from_stale(&adapter).await.unwrap();
+
+        assert!(exact_since(&db).is_none());
     }
 
     #[tokio::test]

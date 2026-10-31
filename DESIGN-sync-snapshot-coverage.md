@@ -80,13 +80,17 @@ enden im selben Durchgang (`OnboardingService::apply_every_log`):
 5. Längen der fremden Dateien merken. Eine unlesbare (abgerissen gelesen, oder
    von einer neueren Version) nicht: Dann ist der Durchgang unvollständig, und
    das nächste Nachholen nimmt sie wieder, nach seinen Regeln statt denen einer
-   Runde. Cursor = Maximum aus bisherigem Cursor (beim Beitritt
+   Runde. Ist sie beim nächsten Mal in derselben Größe wieder unlesbar
+   (`sync.cursor.unreadableLogs`), ist es kein abgerissenes Lesen: Dann wird
+   ihre Länge gemerkt, und sie hält das Gerät nicht mehr vom Genau-Sein ab. Cursor = Maximum aus bisherigem Cursor (beim Beitritt
    und bei der Wiederaufnahme: Schnappschuss) und neuester fremder Datei, nie
    zurück.
 6. Danach ist das Gerät **genau** (`sync.cursor.coverageExactSince`), wenn jede
    Datei lesbar war.
 
-Erst holen, dann ändern: Ein abgebrochener Abruf lässt den Bestand unberührt.
+Erst holen, dann ändern: Ein abgebrochener Abruf lässt den Bestand unberührt,
+auch Uhren und das „genau“-Zeichen. Die Wiederaufnahme nimmt ein früheres
+„genau“ zurück und setzt es nur neu, wenn jede Datei lesbar war.
 Das löst auch, was „Ursache“ gegen das Wiederabspielen einwandte: Es geschieht
 still, und nur Neueres gewinnt.
 
