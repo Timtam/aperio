@@ -2616,9 +2616,42 @@ Erinnerungen werden als native Systembenachrichtigungen zugestellt – unabhäng
 
 | Plattform | Benachrichtigungs-API | Besonderheiten |
 |---|---|---|
-| **Windows** | Windows Toast Notifications (WinRT) | Erscheinen im Aktionscenter; bleiben bei Nichtbeachtung erhalten |
+| **Windows** | Windows Toast Notifications (WinRT) | Erscheinen nur, wenn eine Startmenü-Verknüpfung die App-Id `com.aperio.app` trägt (siehe unten); dann als Banner und im Benachrichtigungscenter, wo sie bei Nichtbeachtung erhalten bleiben. Keine Erlaubnis-Abfrage |
 | **macOS** | `UNUserNotificationCenter` | Erfordert Nutzer-Erlaubnis beim ersten Start |
 | **Linux** | `libnotify` / D-Bus | Verhalten abhängig vom Desktop-Environment (GNOME, KDE, etc.) |
+
+#### Windows: Absender-Identität und Startmenü-Eintrag
+
+Gemessen am 2026-10-31 mit Toni auf Windows 11 Insider 26220 (NVDA):
+
+- `tauri-plugin-notification` schickt jeden Toast unter dem Tauri-Identifier `com.aperio.app` (Plugin 2.3.3 übergibt ihn ausdrücklich an `CreateToastNotifierWithId`). Liegt die exe in einem Cargo-Ordner `target\debug` oder `target\release`, nimmt das Plugin stattdessen die Id von PowerShell: Entwicklungs-Builds erscheinen als „Windows PowerShell“.
+- Ohne Registrierung legt Windows jeden Toast ab und zeigt keinen: kein Banner, nichts im Benachrichtigungscenter. Ein Schlüssel `HKCU\Software\Classes\AppUserModelId\<id>` hilft auf diesem Build **nicht**.
+- Eine Verknüpfung `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Aperio.lnk` mit `System.AppUserModel.ID = com.aperio.app` ließ den nächsten Toast sofort erscheinen, ohne Neustart. Das ist dieselbe Verknüpfung, die Tauris NSIS-Installer schreibt; eine `ToastActivatorCLSID` trägt sie nicht. An dieser Stelle würden Klicks aus dem Benachrichtigungscenter andocken („Öffnen“, TODO A5).
+- Bis 2026-10 registrierte Aperio die Id `Aperio.Calendar` in HKCU und heftete sie an den Prozess (`platform.rs`), in der Annahme, Toasts erbten die Prozess-Id. Sie tun es nicht. Aperio löscht den alten Schlüssel `HKCU\Software\Classes\AppUserModelId\Aperio.Calendar` jetzt beim Start (sein `ShowInSettings` konnte in den Windows-Einstellungen ein zweites „Aperio“ zeigen) und heftet den Prozess an `com.aperio.app`, also an dieselbe Id wie der Toast. Das gruppiert nur das Fenster in der Taskleiste mit der Verknüpfung; über den Absender eines Toasts entscheidet es nicht. Entwicklungs-Builds heften nichts an.
+
+**Portabel zuerst** (Entscheidung Toni): Aperio legt die Verknüpfung **nie von selbst** an. Drei Wege führen hinein, alle drei nur unter Windows:
+
+1. **Einstellungen → Allgemein → Windows-Benachrichtigungen**, zwischen Darstellung und Systemstart (§17.5): Erklärung, Zustand, „Benachrichtigungen einrichten“ und „Startmenü-Eintrag entfernen“.
+2. **Ein einmaliger Hinweis** „Erinnerungen werden nicht angezeigt“ mit „Benachrichtigungen einrichten“ und „Nicht jetzt“ (Regeln unten).
+3. **Der Erststart-Assistent**: Auf einer frischen Instanz, auf der Einrichten nötig ist, steht nach der Sprache und vor dem ersten Konto der Schritt „Erinnerungen unter Windows“; die Schrittanzeige sagt dann „von 4“. Er bietet nur „Benachrichtigungen einrichten“ an, „Weiter“ geht ohne Einrichten weiter. Lässt sich der Zustand beim Start des Assistenten nicht lesen, fehlt der Schritt.
+
+„Einrichten nötig“ heißt: keine Verknüpfung, oder eine namens Aperio ohne unsere Id (fremd). Nur in diesen beiden Zuständen verbirgt Windows die Erinnerungen, und nur dort erscheinen Hinweis und Assistenten-Schritt.
+
+**Reparatur beim Start**: Zeigt unsere Verknüpfung auf eine andere exe (Ordner verschoben, oder zuletzt lief eine andere Kopie), richtet Aperio sie beim Start auf sich selbst, auf einem eigenen Thread (COM). Eine fehlende Verknüpfung legt der Start **nie** an, eine fremde fasst er nie an, Entwicklungs-Builds ändern nichts. Ein gescheitertes Umschreiben wird protokolliert, der Zustand bleibt. Zwei Pfade gelten als dieselbe exe, wenn das Dateisystem sie gleich auflöst; existiert einer nicht mehr, werden sie als Windows-Text verglichen (Trenner vereinheitlicht, ohne Groß- und Kleinschreibung).
+
+**Schreiben**: Eine vorhandene eigene Verknüpfung wird geöffnet statt ersetzt, sodass ein Tastenkürzel, das der Nutzer darauf gesetzt hat, erhalten bleibt. Eine fremde wird beim Einrichten ganz neu geschrieben, ohne ihre Argumente und ihr Symbol; eine Datei, die die Shell nicht als Verknüpfung lesen kann, gilt als fremd. Gesetzt werden Ziel, Arbeitsordner und `System.AppUserModel.ID` (als `VT_LPWSTR`); danach wird zurückgelesen, und alles außer „eingerichtet“ ist ein Fehler.
+
+**Der Hinweis**:
+
+- Die erste Erinnerung eines App-Starts, die feuert, während Einrichten nötig ist, löst ihn aus. Feuert sie, bevor der Zustand bekannt ist (eine Erinnerung gleich beim Start), zählt sie, sobald der Zustand da ist.
+- **Einmal pro App-Start**, nur im Speicher; gespeichert wird nichts. Nach einem Neustart kann er wiederkommen. Entfernen in den Einstellungen und Überspringen im Assistenten bringen ihn **nicht** zum Schweigen.
+- Er öffnet erst, wenn Aperios Fenster den Fokus hat (nach einem Autostart liegt Aperio verborgen im Infobereich, und NVDA liest einen Dialog nur im fokussierten Fenster), kein anderer Dialog offen ist (der Stapel zeigt nur seinen obersten Rahmen; ein Dialog über einem Editor würde dessen Eingaben verwerfen), auch kein eigener Dialog einer Ansicht und kein Eingabefeld in Benutzung (das Umbenennen in der Seitenleiste speichert beim Verlassen; geprüft bei jedem Fokuswechsel), und der Zustand, unmittelbar vorher neu von der Platte gelesen, das Einrichten noch verlangt. Sonst wartet er.
+- Wird eingerichtet, während er wartet, entfällt er. „Nicht jetzt“ schließt ihn. Während das Einrichten läuft, tun Escape und „Nicht jetzt“ nichts; Erfolg schließt ihn, ein Fehler lässt ihn mit der Meldung offen.
+- Ersatz für die verlorene Erinnerung selbst gibt es in der App **nicht**.
+
+**Code**: `src-tauri/src/notification_shortcut.rs` (Zustände, Befehle `notification_shortcut_*`, Reparatur beim Start, Regeln des Hinweises in `HintGate`), `src-tauri/src/notification_shortcut/win.rs` (die `.lnk` lesen und schreiben über `IShellLinkW`, `IPersistFile` und `IPropertyStore`), `src-tauri/src/platform.rs` (Prozess-Id, Löschen von `Aperio.Calendar`, die Regel für Entwicklungs-Builds `toasts_use_powershell_id`). Oberfläche: `NotificationShortcutSection.tsx`, `NotificationShortcutHintChecker.tsx`, `NotificationShortcutHintDialog.tsx`, `FirstLaunchWizardDialog.tsx`.
+
+**Handy**: Dort entscheidet die Berechtigung des Betriebssystems. `Einstellungen → Allgemein → Benachrichtigungstöne` zeigt, ob sie erteilt ist (erlaubt; noch nicht erlaubt; nicht erlaubt, nur die Systemeinstellungen können es erlauben; nicht prüfbar), mit „Benachrichtigungen erlauben“ (fragt das Betriebssystem; ein Ja plant die Erinnerungen sofort ein) oder sonst „Systemeinstellungen öffnen“. Neu gelesen, wenn der Bildschirm sichtbar wird und wenn die App in den Vordergrund zurückkehrt (`mobile/src/state/notificationPermission.ts`).
 
 #### Benachrichtigungsinhalt (Beispiel Termin)
 
@@ -2741,15 +2774,17 @@ reminder.sound
 
 #### Wiedergabe
 
-`tauri-plugin-notification` kann nur einen **benannten System-Ton** oder Stille auslösen, keine beliebige Datei. Daher:
+`tauri-plugin-notification` kann nur einen **benannten System-Ton** oder Stille auslösen, keine beliebige Datei. Den Namen reicht es an `notify-rust` weiter. Unter Windows schickt `notify-rust` ohne Namen `<audio silent="true"/>`: **Ohne Namen ist der Toast stumm.** Nur der exakte Name `"Default"` wird zu `Sound::Default` (`tauri-winrt-notification`), der das Audio-Element weglässt, sodass Windows seinen eigenen Benachrichtigungston spielt. Bis 2026-10 war deshalb jede Aperio-Benachrichtigung unter Windows stumm, „Systemsound“ eingeschlossen. Die Regel steht einmal in `src-tauri/src/os_notification.rs` (`reminder_sound_name`):
 
 | Quelle | Verhalten |
 |---|---|
-| Systemsound | OS-Standardton + visuell (`.show()`) |
-| Kein Sound | stille Benachrichtigung, nur visuell (`.silent()`) |
-| Benutzerdefiniert | stille Benachrichtigung **+** Datei wird selbst per `rodio` auf einem dauerhaften, dedizierten Audio-Thread abgespielt |
+| Systemsound | OS-Standardton + visuell; unter Windows mit `.sound("Default")` |
+| Kein Sound | stille Benachrichtigung, nur visuell (kein Ton-Name) |
+| Benutzerdefiniert | stille Benachrichtigung (kein Ton-Name) **+** Datei wird selbst per `rodio` auf einem dauerhaften, dedizierten Audio-Thread abgespielt |
 
-Fehlt eine referenzierte Custom-Datei lokal, fällt die Wiedergabe auf den Systemsound zurück (kein Absturz, keine stille Erinnerung). Custom-Dateien liegen unter `<data_dir>/assets/sounds/<hash>.<ext>` und werden über den Asset-Store (Abschnitt 19.2.2 / 19.11.7) zwischen Geräten synchronisiert; der Asset-Push erfasst dabei auch nur über `user_prefs` referenzierte Hashes.
+`.silent()` des Plugins wird nicht benutzt: Es wirkt nur unter iOS. Den Namen `"Default"` setzt Aperio nur unter Windows, denn macOS liest einen Namen als Ton-Datei (`mac-notification-sys`); dort ist das Verhalten unverändert. Nach dem Code ist „Systemsound“ auch unter macOS stumm, weil dort ohne Namen ein leerer Ton hinausgeht und nur der exakte Name `"NSUserNotificationDefaultSoundName"` den Standardton spielt (offen, TODO B7). Die Benachrichtigungen, die die Oberfläche selbst schickt (Tagesstart-Übersicht, Sync-Konflikte, `src/state/notify.ts`), laufen über den Backend-Befehl `notify_system` statt über den JavaScript-Aufruf des Plugins und bekommen so denselben Systemton. Die Kommentare in `src-tauri/src/os_notification.rs` und `src-tauri/src/platform.rs` nennen die Versionen, deren Code gelesen wurde (tauri-plugin-notification 2.3.3, notify-rust 4.17, tauri-winrt-notification 0.7.2); nach einem Update ist er neu zu lesen. Ein Test prüft den exakten Namen `"Default"` gegen den Parser von `tauri-winrt-notification`.
+
+Fehlt eine referenzierte Custom-Datei lokal, fällt die Wiedergabe auf den Systemsound zurück (kein Absturz, keine stille Erinnerung; unter Windows ebenfalls `"Default"`). Custom-Dateien liegen unter `<data_dir>/assets/sounds/<hash>.<ext>` und werden über den Asset-Store (Abschnitt 19.2.2 / 19.11.7) zwischen Geräten synchronisiert; der Asset-Push erfasst dabei auch nur über `user_prefs` referenzierte Hashes.
 
 #### Sonderfälle
 
@@ -2765,7 +2800,8 @@ Fehlt eine referenzierte Custom-Datei lokal, fällt die Wiedergabe auf den Syste
 
 ### 14.6 Barrierefreiheit
 
-- Alle Benachrichtigungen werden von Screen Readern plattformseitig vorgelesen
+- Alle Benachrichtigungen werden von Screen Readern plattformseitig vorgelesen, unter Windows aber erst, wenn Windows den Toast auch zeigt: Ohne Startmenü-Eintrag (§14.3) liest NVDA nichts, weil nichts erscheint
+- Der Hinweis „Erinnerungen werden nicht angezeigt“ (§14.3) öffnet mit dem Fokus auf seiner Erklärung, damit NVDA den Grund vor den Knöpfen liest; `Tab` führt zu „Benachrichtigungen einrichten“, dann zu „Nicht jetzt“. Er öffnet nur im fokussierten Fenster und auf leerem Dialog-Stapel. Erfolg und Entfernen in den Einstellungen werden einmal angesagt, ein Fehler steht als eine Alert-Zeile da
 - Die Snooze- und Öffnen-Aktionen sind per Tastatur erreichbar (plattformseitig)
 - In der App selbst gibt es eine **Erinnerungs-Übersicht** (zugänglich per `Ctrl+Shift+R`): eine chronologische Liste aller anstehenden und vergangenen Erinnerungen, vollständig tastaturnavigierbar
 
@@ -3169,7 +3205,6 @@ Beim ersten Start erscheint ein barrierefreier Einrichtungsdialog, der alle Syst
 │  [x] Als Standard-App für .ics-Dateien festlegen     │
 │  [x] Als Handler für webcal://-Links registrieren    │
 │  [x] Als Standard-App für .aperio-Dateien festlegen  │
-│  [ ] Desktop-Verknüpfung erstellen (optional)        │
 │                                                      │
 │  Diese Einstellungen können jederzeit unter          │
 │  Einstellungen → Systemintegration geändert werden.  │
@@ -3181,6 +3216,7 @@ Beim ersten Start erscheint ein barrierefreier Einrichtungsdialog, der alle Syst
 - Alle Checkboxen per Tastatur bedienbar (`Space` zum Umschalten)
 - Dialog ist vollständig mit Screen Readern nutzbar (`role="dialog"`, Fokus-Falle)
 - Einstellungen nachträglich unter `Einstellungen → Systemintegration` änderbar, inkl. Rückgängig-Machen aller Registrierungen
+- Eine Desktop-Verknüpfung bietet der Assistent nicht an. Die einzige Verknüpfung, die Aperio anlegt, ist der Startmenü-Eintrag für Benachrichtigungen unter Windows (§17.5); der gebaute Erststart-Assistent (Sprache, Konto, Synchronisierung) fragt danach in einem eigenen Schritt (§14.3)
 
 ### 17.4 Autostart (Start bei der Anmeldung)
 
@@ -3207,6 +3243,27 @@ Optional lässt sich Autostart auch im Erststart-Assistenten (17.3) als weitere 
 ```
 [ ] Aperio bei der Anmeldung automatisch starten
 ```
+
+### 17.5 Startmenü-Eintrag für Benachrichtigungen (Windows)
+
+Windows zeigt Aperios Erinnerungen nur, wenn eine Startmenü-Verknüpfung die App-Id `com.aperio.app` trägt (Befund und Regeln in §14.3). Aperio ist portabel und legt sie **nur auf Wunsch** an: eine Verknüpfung `Aperio.lnk` im Startmenü-Ordner `Programme` des Nutzers (`FOLDERID_Programs`), mit Ziel und Arbeitsordner der laufenden exe.
+
+Der Zustand auf der Platte ist die **alleinige Quelle der Wahrheit**, wie beim Autostart (§17.4): Es gibt keine gespeicherte Einstellung. Der Abschnitt liest den Zustand bei jedem Öffnen neu, denn die Verknüpfung kann außerhalb von Aperio gelöscht oder verändert werden; nach einem Fehler liest er ihn ebenfalls neu.
+
+- **Bedienung:** Abschnitt „Windows-Benachrichtigungen“ unter `Einstellungen → Allgemein`, zwischen Darstellung und Systemstart. Nur unter Windows; sonst erscheint er nicht. Er erklärt, wozu der Eintrag nötig ist, nennt den Zustand und hat zwei feste Knöpfe, „Benachrichtigungen einrichten“ und „Startmenü-Eintrag entfernen“. Zwei Knöpfe statt eines mit wechselnder Beschriftung: Ein zweites Enter gleich nach dem Einrichten darf den Eintrag nicht wieder entfernen. Ein Knopf, der nicht passt, ist `aria-disabled`, nie nativ `disabled`, damit der Fokus nicht von ihm fällt. Unter „Entfernen“ steht (per `aria-describedby`): vor dem Löschen des Ordners entfernen, sonst bleibt ein Eintrag, der ins Leere führt.
+- **Benutzerspezifisch:** gilt je Windows-Benutzer, kein Admin-Recht nötig. **Geräte-lokal**, wird nicht synchronisiert (§19.2.1).
+- **Nebenwirkung:** Mit dem Eintrag steht Aperio im Startmenü und lässt sich von dort starten.
+
+| Zustand | Bedeutung | Einrichten | Entfernen |
+|---|---|---|---|
+| Nicht eingerichtet | keine Verknüpfung | aktiv | inaktiv |
+| Fremd | eine Verknüpfung namens Aperio ohne unsere Id | aktiv (ersetzt sie) | inaktiv (die fremde bleibt; der Befehl antwortet `conflict`) |
+| Eingerichtet | unsere, zeigt auf diese exe | inaktiv | aktiv |
+| Zeigt woanders hin | unsere, zeigt auf eine andere Kopie (Pfad wird genannt) | aktiv (richtet sie auf diese Kopie) | aktiv |
+| Entwicklungs-Build | exe in `target\debug` oder `target\release`; Toasts erscheinen als „Windows PowerShell“ | keine Knöpfe | keine Knöpfe |
+| Nicht lesbar | Zustand konnte nicht gelesen werden (Fehler wird genannt) | keine Knöpfe | keine Knöpfe |
+
+Erfolg wird einmal angesagt (der Fokus bleibt auf dem Knopf, dessen Namen NVDA nicht noch einmal liest); ein Fehler steht als eine Alert-Zeile da. Die Reparatur beim Start (eine verschobene oder andere Kopie wird umgerichtet, nie etwas angelegt) und der einmalige Hinweis stehen in §14.3.
 
 ---
 
@@ -3438,6 +3495,7 @@ Nicht alle Einstellungen sind geräteübergreifend sinnvoll. Sie werden in drei 
 | **Nie synchronisiert (immer gerätespezifisch)** | | |
 | Fenstergröße & -position | ❌ Lokal | ❌ Nein |
 | Systemintegration (.ics, webcal://) | ❌ Lokal | ❌ Nein |
+| Startmenü-Eintrag für Benachrichtigungen (Windows, §17.5) – eine Datei je Rechner und Windows-Benutzer, keine Einstellung | ❌ Lokal | ❌ Nein |
 | Geräte-ID | ❌ Lokal | ❌ Nein |
 | Adapter-Zugangsdaten (Sync-, Daten-, Videokonferenz-Adapter) | Lokal (Keychain); **bei aktivem E2E** zusätzlich Ende-zu-Ende-verschlüsselt synchronisiert (§19.7) | ❌ Fest an E2E gekoppelt |
 | **Konfigurierbar durch Nutzer** | | |
@@ -5040,7 +5098,14 @@ fn resolve_data_dir() -> PathBuf {
 | Portabel (USB-Stick, beliebiges Verzeichnis) | `./data/` neben der Binary |
 | Schreibgeschütztes Binary-Verzeichnis | `%APPDATA%\Aperio\` (Windows) / `~/Library/Application Support/Aperio/` (macOS) / `~/.config/Aperio/` (Linux) |
 
-Keine Registry-Einträge außer den optionalen, benutzerspezifischen Systemintegrations-Einträgen (Abschnitt 17), die auf Wunsch des Nutzers gesetzt werden.
+Registry und Startmenü berührt Aperio nur benutzerspezifisch, ohne Admin-Recht (Abschnitt 17):
+
+- **Startmenü-Eintrag** für Benachrichtigungen unter Windows (§17.5): eine Datei `Aperio.lnk`, kein Registry-Eintrag, nur auf Anfrage angelegt. Beim Start richtet Aperio einen vorhandenen eigenen Eintrag auf sich selbst, legt aber keinen an. Vor dem Löschen des Ordners entfernt man ihn unter `Einstellungen → Allgemein → Windows-Benachrichtigungen`.
+- **Autostart** (§17.4): unter Windows ein Wert `Aperio` unter `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, solange der Schalter an ist. Gibt es `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run` (unter Windows 10 und 11 üblich), schreibt das Einschalten dort zusätzlich einen Binärwert `Aperio`; das Ausschalten löscht nur den Run-Wert, der Binärwert bleibt (`auto-launch` über `tauri-plugin-autostart`).
+- **Alter Schlüssel:** Beim Start löscht Aperio `HKCU\Software\Classes\AppUserModelId\Aperio.Calendar`, den Versionen bis 2026-10 geschrieben haben (§14.3). Neu geschrieben wird er nicht.
+- Die übrigen Systemintegrations-Einträge (§17.1, §17.2) kommen erst mit ihnen dazu, auf Wunsch des Nutzers.
+
+Außerhalb des Ordners liegen außerdem das WebView-Profil und die Zugangsdaten im Schlüsselbund des Betriebssystems.
 
 ### 22.3 Versionierung
 

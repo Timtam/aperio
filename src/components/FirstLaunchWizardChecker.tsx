@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react';
 
-import { getUserPref, isFreshInstance, setUserPref } from '../api/client';
+import {
+  getUserPref,
+  isFreshInstance,
+  notificationShortcutStatus,
+  setUserPref,
+} from '../api/client';
 import { useDialogState } from '../state/dialogStateContext';
 
 /** Marker that the first-launch check has already run, so an empty instance
@@ -26,6 +31,10 @@ const EVALUATED_KEY = 'onboarding.firstLaunchWizardEvaluated';
  * an empty local store (the backend `is_fresh_instance` check) — it opens the
  * wizard exactly once, paired with the marker above so an established (or
  * already-dismissed) install is never prompted. Renders nothing.
+ *
+ * Whether the wizard asks about Windows notifications is decided here, before
+ * it opens: only where the backend says setting up the Start menu shortcut is
+ * needed. A failed answer leaves the step out rather than the wizard.
  */
 export function FirstLaunchWizardChecker() {
   const { mode, openFirstLaunchWizard } = useDialogState();
@@ -45,6 +54,15 @@ export function FirstLaunchWizardChecker() {
         }
         const fresh = await isFreshInstance();
         if (cancelled) return;
+        let notificationStep = false;
+        if (fresh) {
+          try {
+            notificationStep = (await notificationShortcutStatus()).needs_set_up;
+          } catch {
+            // the wizard goes on without the step
+          }
+          if (cancelled) return;
+        }
         // Mark evaluated BEFORE opening so the mode change can't re-trigger us.
         evaluatedRef.current = true;
         // A failed write costs one redundant evaluation next launch, which is
@@ -55,7 +73,7 @@ export function FirstLaunchWizardChecker() {
         } catch {
           // re-evaluated next launch
         }
-        if (fresh) openFirstLaunchWizard();
+        if (fresh) openFirstLaunchWizard({ notificationStep });
       } catch (err) {
         // No answer was obtained — leave the marker unwritten so the next
         // launch asks again. Writing it here would retire onboarding for this

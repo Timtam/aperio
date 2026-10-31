@@ -37,6 +37,27 @@ npm run tauri dev
 The first build compiles the whole Rust workspace and can take a while;
 subsequent builds are incremental.
 
+## Notifications on Windows in a development build
+
+Windows shows a notification only when a Start menu shortcut carries the
+notification's app id; the portable app offers that shortcut under
+**Settings, General, Windows notifications** (DESIGN.md §14.3, §17.5).
+
+A development build needs none. When the exe lies in a cargo `target\debug`
+or `target\release` folder, tauri-plugin-notification sends its
+notifications under PowerShell's app id, so they appear as **Windows
+PowerShell** without any shortcut. Aperio follows the same rule
+(`platform::toasts_use_powershell_id`, a port of the plugin's, case-sensitive
+like it): the settings section says it is a development build and offers no
+buttons, the hint never opens, and the repair at start changes nothing.
+
+A build in any other `CARGO_TARGET_DIR`, or a cross-compiled
+`target\<triple>\release`, counts as a real copy to the plugin. Its
+notifications go out as `com.aperio.app` and need the shortcut, and at start
+it points your real Start menu entry at itself, because the entry then points
+at another copy. Start your everyday copy again, or set the entry up from it,
+to point it back.
+
 ## Commands you'll use daily
 
 Frontend (`package.json` scripts):

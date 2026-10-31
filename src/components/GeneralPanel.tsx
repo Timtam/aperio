@@ -11,6 +11,7 @@ import {
   trayAvailable,
 } from '../api/client';
 import { localeFor } from '../intl/dateFormat';
+import { NotificationShortcutSection } from './NotificationShortcutSection';
 import {
   readLanguagePref,
   setLanguagePref,
@@ -41,6 +42,9 @@ const AUTOSTART_MINIMIZED = 'window.autostartMinimized';
  *
  *  - **Language.** System / Deutsch / English. Persists to the synced
  *    `locale` pref and applies live via i18next.
+ *  - **Windows notifications.** Windows only: the Start menu shortcut
+ *    Windows needs before it shows Aperio's reminders, its status and the
+ *    buttons to set it up or remove it (`NotificationShortcutSection`).
  *  - **System tray.** Whether closing / minimizing tucks Aperio into the
  *    tray (where the reminder scheduler keeps running) instead of quitting /
  *    going to the taskbar. Both default off and persist to synced prefs;
@@ -340,6 +344,8 @@ export function GeneralPanel() {
           {t('dialogs.settings.general.themeHint')}
         </p>
       </section>
+
+      <NotificationShortcutSection variant="settings" />
 
       <section
         className="general-panel__section"

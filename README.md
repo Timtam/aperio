@@ -123,7 +123,9 @@ npm run lint
 
 Aperio runs **portable** by default: if a writable `data/` directory exists
 (or can be created) next to the binary, all data lives there; otherwise it
-falls back to the platform's user-profile directory.
+falls back to the platform's user-profile directory. For notifications on
+Windows, Aperio needs one entry outside its folder: a Start menu shortcut,
+created only when you ask.
 
 ## Project layout
 

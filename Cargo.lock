@@ -651,6 +651,7 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
+ "tauri-winrt-notification",
  "tempfile",
  "tokio",
  "tracing",

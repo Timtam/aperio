@@ -100,13 +100,21 @@ chrono.workspace = true
 uuid.workspace = true
 keyring.workspace = true
 [target.'cfg(windows)'.dependencies]
-# Setting the process AppUserModelID at startup + writing the AUMID
-# entry to HKCU is what lets Windows show "Aperio" instead of
-# "Windows PowerShell" as the toast source. Both are needed because
-# portable apps don't go through an installer.
+# Pinning the identifier to the process (taskbar grouping, see
+# platform.rs), and the Start menu shortcut that carries it
+# (notification_shortcut/win.rs: IShellLinkW, IPersistFile, IPropertyStore,
+# PKEY_AppUserModel_ID). Every feature the code uses is listed, not left to
+# another crate's feature set. winreg only deletes the old Aperio.Calendar
+# registration.
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_UI_Shell",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Variant",
+  "Win32_Storage_FileSystem",
+  "Win32_Storage_EnhancedStorage",
 ] }
 winreg = "0.55"
 
@@ -120,6 +128,12 @@ adapter-local = { workspace = true, features = ["test-support"] }
 # they run against the real DesktopSyncStore but must not touch the OS
 # keychain. test-support only activates for the test build.
 sync-engine = { workspace = true, features = ["test-support"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# Only for a test that the sound name `os_notification` sends is one the
+# toast crate reads as Windows' default sound (already in the tree through
+# tauri-plugin-notification, so nothing new is downloaded).
+tauri-winrt-notification = "0.7"
 
 [lints]
 workspace = true

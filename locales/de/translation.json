@@ -147,7 +147,17 @@
     "oauthNoCode": "Die Anmeldung hat keinen Autorisierungscode zurückgegeben. Bitte versuche es erneut.",
     "sftpFieldsRequired": "Bitte Host, Benutzername und Pfad eingeben.",
     "syncFieldsRequired": "Bitte zuerst die erforderlichen Felder ausfüllen.",
-    "syncPreviewStale": "Ziel geändert — prüfe den Datensatz erneut, bevor du beitrittst."
+    "syncPreviewStale": "Ziel geändert — prüfe den Datensatz erneut, bevor du beitrittst.",
+    "notificationPermission": {
+      "statusGranted": "Erlaubt. Das Telefon zeigt die Erinnerungen von Aperio an; wie, bestimmen seine Systemeinstellungen.",
+      "statusAskable": "Noch nicht erlaubt. Ohne Erlaubnis zeigt das Telefon keine Erinnerungen von Aperio an.",
+      "statusBlocked": "Nicht erlaubt. Das Telefon zeigt die Erinnerungen von Aperio nicht an, und erlauben lässt es sich nur in seinen Systemeinstellungen.",
+      "statusUnknown": "Aperio konnte nicht prüfen, ob es Benachrichtigungen zeigen darf.",
+      "allow": "Benachrichtigungen erlauben",
+      "openSettings": "Systemeinstellungen öffnen",
+      "allowedDone": "Benachrichtigungen erlaubt.",
+      "stillNotAllowed": "Benachrichtigungen sind weiterhin nicht erlaubt."
+    }
   },
   "common": {
     "colorComposer": {
@@ -489,7 +499,8 @@
       "accountAdd": "Konto hinzufügen",
       "next": "Weiter",
       "back": "Zurück",
-      "finish": "Fertig"
+      "finish": "Fertig",
+      "notificationsHeading": "Erinnerungen unter Windows"
     },
     "contact": {
       "emailValueFor": "E-Mail-Adresse {{index}}",
@@ -2283,7 +2294,26 @@
         "pacific": "Pazifik"
       }
     },
-    "readOnlyField": "{{label}}: {{value}}"
+    "readOnlyField": "{{label}}: {{value}}",
+    "notificationShortcut": {
+      "heading": "Windows-Benachrichtigungen",
+      "intro": "Windows zeigt Benachrichtigungen nur von Programmen, die einen Eintrag im Startmenü haben. Aperio läuft ohne Installation und legt diesen Eintrag deshalb nur an, wenn du es möchtest: eine Verknüpfung namens Aperio in deinem eigenen Startmenü-Ordner.",
+      "statusSetUp": "Eingerichtet. Windows kann die Erinnerungen von Aperio anzeigen; ob es das tut, bestimmen auch die Benachrichtigungseinstellungen von Windows.",
+      "statusNotSetUp": "Nicht eingerichtet. Windows zeigt die Erinnerungen von Aperio nicht an, weder als Banner noch im Benachrichtigungscenter.",
+      "statusForeign": "Nicht eingerichtet. Im Startmenü gibt es einen Eintrag namens Aperio, der nicht für Benachrichtigungen angelegt wurde, daher zeigt Windows die Erinnerungen von Aperio nicht an. Einrichten ersetzt diesen Eintrag.",
+      "statusPointsElsewhere": "Für eine andere Kopie von Aperio eingerichtet: {{target}}. Beim Start richtet Aperio den Eintrag auf sich selbst; richte ihn erneut ein, damit er jetzt auf diese Kopie zeigt.",
+      "statusDevBuild": "Das ist eine Entwicklungsversion aus einem Build-Ordner. Windows zeigt ihre Benachrichtigungen unter Windows PowerShell an, daher gibt es nichts einzurichten.",
+      "statusUnknown": "Aperio konnte den Startmenü-Eintrag nicht prüfen: {{error}}",
+      "setUp": "Benachrichtigungen einrichten",
+      "remove": "Startmenü-Eintrag entfernen",
+      "removeHint": "Bevor du den Ordner von Aperio löschst, entferne den Eintrag hier. Sonst bleibt im Startmenü ein Eintrag zurück, der ins Leere führt.",
+      "setUpDone": "Benachrichtigungen eingerichtet. Windows kann die Erinnerungen von Aperio jetzt anzeigen.",
+      "removeDone": "Startmenü-Eintrag entfernt. Windows zeigt die Erinnerungen von Aperio nicht mehr an.",
+      "failed": "Der Startmenü-Eintrag konnte nicht geändert werden: {{error}}",
+      "hintTitle": "Erinnerungen werden nicht angezeigt",
+      "hintBody": "Eine Erinnerung ist fällig geworden, aber Windows hat sie nicht angezeigt, weil Aperio noch keinen Startmenü-Eintrag für Benachrichtigungen hat. Aperio kann ihn jetzt anlegen. Das geht auch später unter Einstellungen, Allgemein, Windows-Benachrichtigungen. Bis zum nächsten Start fragt Aperio nicht noch einmal.",
+      "hintLater": "Nicht jetzt"
+    }
   },
   "sidebar": {
     "label": "Seitenleiste",

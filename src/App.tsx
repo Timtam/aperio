@@ -4,6 +4,7 @@ import { AnnouncerProvider } from './a11y/Announcer';
 import { DayStartReviewChecker } from './components/DayStartReviewChecker';
 import { DeadlinePinChecker } from './components/DeadlinePinChecker';
 import { FirstLaunchWizardChecker } from './components/FirstLaunchWizardChecker';
+import { NotificationShortcutHintChecker } from './components/NotificationShortcutHintChecker';
 import { DialogHost } from './components/DialogHost';
 import { FocusBar } from './components/FocusBar';
 import { Sidebar } from './components/Sidebar';
@@ -103,6 +104,7 @@ export function App() {
                       instance (no account / no sync / empty store) it opens the
                       wizard once; otherwise it's a no-op. Renders nothing. */}
                   <FirstLaunchWizardChecker />
+                  <NotificationShortcutHintChecker />
                   {/* Bridges backend `cache-updated` pushes to data
                       invalidation so external views refresh when a
                       background snapshot refresh lands. Renders nothing. */}

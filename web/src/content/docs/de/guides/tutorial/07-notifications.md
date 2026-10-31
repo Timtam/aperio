@@ -13,11 +13,66 @@ lernst, wie du auf sie reagierst.
 3. Du kannst mehrere Erinnerungen pro Eintrag hinzufügen.
 4. **Speichern**.
 
+## Benachrichtigungen unter Windows
+
+Windows zeigt Benachrichtigungen nur von Programmen, die einen Eintrag im
+Startmenü haben. Aperio läuft ohne Installation und hat diesen Eintrag
+deshalb erst, wenn du ihn anlegen lässt. Ohne ihn zeigt Windows keine
+Erinnerung von Aperio an: kein Banner und nichts im Benachrichtigungscenter.
+Aperio zeigt die Erinnerung auch nicht ersatzweise im eigenen Fenster.
+
+Aperio legt den Eintrag nie von selbst an. Drei Stellen bieten ihn an:
+
+- **Einstellungen, Allgemein, Windows-Benachrichtigungen.** Dieser Abschnitt
+  erklärt, wozu der Eintrag nötig ist, und sagt, wie es um ihn steht.
+  **Benachrichtigungen einrichten** legt ihn an, **Startmenü-Eintrag
+  entfernen** entfernt ihn wieder. Den Abschnitt gibt es nur unter Windows.
+- **Ein Hinweis nach einer verborgenen Erinnerung.** Wird eine Erinnerung
+  fällig und Windows würde sie verbergen, öffnet Aperio den Dialog
+  **Erinnerungen werden nicht angezeigt**. **Benachrichtigungen einrichten**
+  legt den Eintrag an, **Nicht jetzt** schließt den Dialog. Aperio fragt
+  höchstens einmal pro Start. Solange sein Fenster nicht den Fokus hat, ein
+  anderer Dialog offen ist oder du gerade in einem Feld schreibst, wartet der
+  Hinweis. Nach dem nächsten Start
+  kann er wiederkommen, auch wenn du den Eintrag entfernt oder den Schritt im
+  Assistenten übersprungen hast.
+- **Der Erststart-Assistent.** Bei einer frischen Installation hat er nach der
+  Sprache einen Schritt **Erinnerungen unter Windows** (siehe
+  [Kapitel 01](/de/guides/tutorial/01-installation/)). **Weiter** geht ohne
+  Einrichten weiter.
+
+Der Eintrag ist eine Verknüpfung namens Aperio in deinem eigenen
+Startmenü-Ordner. Er braucht keine Administratorrechte und gilt nur für
+deinen Windows-Benutzer. Sobald es ihn gibt, steht Aperio auch im Startmenü,
+und du kannst es von dort starten.
+
+Verschiebst du den Ordner von Aperio oder startest eine andere Kopie von
+Aperio, zeigt der Eintrag noch auf den alten Ort. Beim Start richtet Aperio
+seinen Eintrag wieder auf sich selbst. Einen fehlenden Eintrag legt es beim
+Start nie an, und einen Eintrag namens Aperio, den es nicht selbst angelegt
+hat, lässt es in Ruhe. Ein Tastenkürzel, das du auf dem Eintrag gesetzt hast,
+bleibt erhalten.
+
+Bevor du den Ordner von Aperio löschst, entferne den Eintrag unter
+**Einstellungen, Allgemein, Windows-Benachrichtigungen**. Sonst bleibt im
+Startmenü ein Eintrag zurück, der ins Leere führt.
+
+Eine Entwicklungsversion, die aus einem Build-Ordner (`target\debug` oder
+`target\release`) gestartet wird, zeigt ihre Benachrichtigungen als
+**Windows PowerShell** an. Sie braucht keinen Eintrag, und der Abschnitt
+bietet dort keine Knöpfe an.
+
+> **Screenreader-Hinweis:** Der Hinweis-Dialog öffnet mit dem Fokus auf
+> seiner Erklärung, du hörst also erst den Grund und dann die Knöpfe. `Tab`
+> führt zu **Benachrichtigungen einrichten**, dann zu **Nicht jetzt**. Nach
+> dem Einrichten sagt Aperio „Benachrichtigungen eingerichtet. Windows kann
+> die Erinnerungen von Aperio jetzt anzeigen.“, und der Dialog schließt sich.
+
 ## Wie Erinnerungen erscheinen
 
-Zur fälligen Zeit zeigt Aperio eine Benachrichtigung an – als
-System-Mitteilung und/oder als Hinweis in der App, je nach deinen
-Einstellungen. Optional wird ein **Ton** abgespielt.
+Zur fälligen Zeit zeigt Aperio eine Mitteilung deines Betriebssystems an.
+Unter Windows braucht das den oben beschriebenen Startmenü-Eintrag. Optional
+wird ein **Ton** abgespielt.
 
 In der Benachrichtigung kannst du:
 
@@ -171,7 +226,10 @@ Ebenen, wobei jede die darüberliegende überschreibt:
 
 Jede Ebene bietet dieselben Optionen:
 
-- **Systemstandard** – der Benachrichtigungston deines Betriebssystems.
+- **Systemstandard** – der Benachrichtigungston deines Betriebssystems. Unter
+  Windows ist das der Standard-Benachrichtigungston von Windows. Unter macOS
+  spielt Aperio bei Systemstandard vorerst keinen Ton; wähle dort einen
+  eigenen Ton, wenn du einen brauchst.
 - **Kein Ton** – eine rein visuelle Benachrichtigung, ohne Ton.
 - **Eigener Ton** – importiere eine eigene Audiodatei (`.mp3`, `.ogg`,
   `.wav`, `.m4a`, `.aac`, `.flac`, bis 5 MB). Mit **Testen** hörst du sie
@@ -188,17 +246,12 @@ reist mit der Einstellung), sodass eine Erinnerung überall gleich klingt.
 
 ## Einstellungen für Benachrichtigungen
 
-In den **Einstellungen** unter **Benachrichtigungen** legst du fest:
-
-- ob System-Benachrichtigungen verwendet werden,
-- ob und welcher **Ton** abgespielt wird (siehe *Benachrichtigungstöne*
-  oben),
-- Standard-Snooze-Dauer,
-- Standard-Vorlaufzeit für neue Termine.
-
-> **Hinweis:** Damit System-Benachrichtigungen erscheinen, muss Aperio die
-> entsprechende Berechtigung deines Betriebssystems haben. Beim ersten Mal
-> wirst du danach gefragt.
+Die Einstellungen am Desktop haben keine eigene Seite für Benachrichtigungen.
+Den Ton stellst du ein, wie oben unter *Benachrichtigungstöne* beschrieben.
+Windows fragt nach keiner Berechtigung: Ob es die Erinnerungen von Aperio
+anzeigt, hängt am Startmenü-Eintrag, siehe *Benachrichtigungen unter Windows*
+oben. Die Berechtigung am Handy beschreibt die
+[Mobile App](/de/guides/mobile/).
 
 > **Screenreader-Hinweis:** Erinnerungen werden über eine Live-Region
 > angesagt, sodass du sie auch ohne sichtbaren Fokuswechsel mitbekommst.

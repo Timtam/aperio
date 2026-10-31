@@ -25,13 +25,15 @@ use std::time::{Duration, Instant};
 use adapter_local::{LocalAdapter, SharedConn};
 use cal_core::SoundSource;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Notify;
 use tracing::{info, warn};
 
 use crate::audio::AudioPlayer;
 use crate::cache::CacheStore;
+use crate::notification_shortcut::{NotificationShortcutState, HINT_EVENT};
+use crate::os_notification::reminder_sound_name;
 use crate::registry::AdapterRegistry;
 // Trigger enumeration + the shared types it produces. Re-exported so existing
 // `crate::reminders::{Trigger, ItemKind, UpcomingReminder}` references (and the
@@ -445,33 +447,44 @@ impl ReminderScheduler {
             Some(body) => builder.body(body),
             None => builder,
         };
-        // §14.4 playback dispatch:
-        //   - System → let the OS play its default notification sound.
-        //   - Silent → suppress sound, visual only.
-        //   - Custom → play the file ourselves (the notification plugin can't),
-        //     so silence the toast to avoid a double sound. A missing file falls
-        //     back to the System sound rather than silently dropping the cue.
-        let builder = match &t.sound.source {
-            SoundSource::System => builder,
-            SoundSource::Silent => builder.silent(),
+        // §14.4 playback dispatch: a custom sound Aperio plays itself (the
+        // notification plugin can't), and the toast then asks for no sound,
+        // so nothing plays twice. What the toast asks for is
+        // `os_notification::reminder_sound_name`: the system sound for
+        // System and for a custom sound whose file is missing, none for
+        // Silent. The plugin's `.silent()` is not used: it only acts on iOS.
+        let custom_file_found = match &t.sound.source {
             SoundSource::Custom { sha256 } => {
                 match crate::sound_assets::local_sound_path(&self.sounds_dir, sha256) {
                     Some(path) => {
                         self.audio.play_file(path);
-                        builder.silent()
+                        true
                     }
                     None => {
                         warn!(
                             hash = %sha256,
                             "custom sound file missing; falling back to system sound",
                         );
-                        builder
+                        false
                     }
                 }
             }
+            SoundSource::System | SoundSource::Silent => false,
+        };
+        let builder = match reminder_sound_name(&t.sound.source, custom_file_found) {
+            Some(name) => builder.sound(name),
+            None => builder,
         };
         if let Err(err) = builder.show() {
             warn!(?err, "failed to dispatch notification");
+        }
+        // Windows stores this toast and shows nothing while Aperio has no
+        // Start menu shortcut for notifications: the first such reminder of
+        // an app start asks the page to offer one (`notification_shortcut`).
+        if let Some(shortcut) = app.try_state::<Arc<NotificationShortcutState>>() {
+            if shortcut.note_reminder_fired() {
+                let _ = app.emit(HINT_EVENT, ());
+            }
         }
         let mut fired = self.fired.lock().expect("fired set poisoned");
         fired.insert(FiredKey {

@@ -16,7 +16,9 @@ Aperio is distributed as an archive (ZIP):
 
 > **Portable:** If a `data/` folder sits next to the program, Aperio stores
 > its data there – handy for USB sticks. Otherwise the data is kept in your
-> system's standard data directory.
+> system's standard data directory. For notifications on Windows, Aperio
+> needs one entry outside its folder: a Start menu shortcut, created only
+> when you ask (see [Chapter 07](/guides/tutorial/07-notifications/)).
 
 ## The first-launch wizard
 
@@ -24,6 +26,11 @@ The first time you start Aperio – on a fresh install with no accounts, sync
 or data yet – a short, accessible wizard walks you through the essentials:
 
 - The interface **language** (default: your system language).
+- **Reminders on Windows** – on Windows, unless notifications are already set
+  up: the Start menu entry Windows needs before it shows Aperio's reminders
+  (see [Chapter 07](/guides/tutorial/07-notifications/)). **Set up
+  notifications** creates it; **Next** moves on without it. The step
+  indicator then counts four steps.
 - A **first account** (or skip it and add one later – see
   [Chapter 02](/guides/tutorial/02-connecting-accounts/)).
 - The **storage location** – restore your data from an existing one, set up

@@ -11,6 +11,8 @@ pub mod commands;
 pub mod contact_sync;
 pub mod event_log;
 pub mod logging;
+pub mod notification_shortcut;
+pub mod os_notification;
 mod platform;
 pub mod reminders;
 pub mod secrets;
@@ -52,10 +54,22 @@ pub fn run() {
     // writes the crash file synchronously).
     logging::install_panic_hook(log_state.logs_dir.clone());
 
-    // Register the AUMID and pin it to this process before tauri starts
-    // — toast notifications inherit it at process scope. On non-Windows
-    // platforms this is a no-op.
-    platform::setup();
+    // The Tauri context, built once here: its identifier is the id the
+    // notification plugin sends toasts under, and the platform setup below
+    // needs it before the first window (the process pin; see `platform`).
+    let context = tauri::generate_context!();
+    platform::setup(&context.config().identifier);
+    // The Start menu shortcut Windows needs before it shows a notification
+    // (`notification_shortcut`): named after the product, carrying the
+    // identifier as its app id.
+    let notification_shortcut = Arc::new(notification_shortcut::NotificationShortcutState::new(
+        context.config().identifier.clone(),
+        context
+            .config()
+            .product_name
+            .clone()
+            .unwrap_or_else(|| "Aperio".into()),
+    ));
 
     info!(
         kind = ?data_dir.kind,
@@ -610,6 +624,7 @@ pub fn run() {
             Some(vec!["--autostart"]),
         ))
         .manage(audio_player)
+        .manage(notification_shortcut)
         .manage(commands::SoundsDir(sounds_dir_for_commands))
         .manage(local_adapter)
         .manage(registry)
@@ -959,8 +974,19 @@ pub fn run() {
             tray::request_window_close,
             tray::request_window_minimize,
             tray::set_tray_labels,
+            // The OS notifications the frontend sends, with the system sound.
+            os_notification::notify_system,
+            // The Start menu shortcut Windows needs before it shows them.
+            notification_shortcut::notification_shortcut_status,
+            notification_shortcut::notification_shortcut_create,
+            notification_shortcut::notification_shortcut_remove,
+            notification_shortcut::notification_shortcut_hint_pending,
+            notification_shortcut::notification_shortcut_hint_shown,
         ])
         .setup(move |app| {
+            // The Start menu shortcut, off the main thread: repaired when ours
+            // points at another copy, and known before most reminders fire.
+            notification_shortcut::spawn_startup_check(app.handle().clone());
             // Spawn the reminder scheduler on the Tauri/tokio runtime
             // and register its handle so command modules can call
             // `invalidate()` after every mutation.
@@ -1093,7 +1119,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("failed to build the Tauri app");
 
     // Phase Se: app-exit hook. DESIGN.md §19.8 mandates pushing

@@ -1,9 +1,12 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  AppState,
+  Linking,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -36,13 +39,29 @@ import {
 } from '../settings/showCancelledEvents';
 import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
 import { useAppBadgePref } from '../state/appBadge';
-import { useAppLockPref } from '../state/appLock';
+import { useAppLockPref, whenAppLockReleased, whileOsSheetOpen } from '../state/appLock';
+import { ensurePermission, rescheduleReminders } from '../reminders/scheduler';
+import {
+  useNotificationPermission,
+  type NotificationPermission,
+} from '../state/notificationPermission';
 import { useBackgroundSyncPref } from '../state/backgroundSync';
 import { useHapticsPref } from '../state/haptics';
 import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
 import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { useThemeModePref, type ThemeModeChoice } from '../theme/themeMode';
+
+/** How long a sentence waits after an unlock, so the closing prompt and
+ *  cover do not cut it off (the same pause as `AccountsScreen`'s). */
+const AFTER_UNLOCK_SPEECH_MS = 400;
+
+/** What the notification-permission row says in each state. */
+const PERMISSION_STATUS_KEY = {
+  granted: 'mobile.notificationPermission.statusGranted',
+  askable: 'mobile.notificationPermission.statusAskable',
+  blocked: 'mobile.notificationPermission.statusBlocked',
+} as const satisfies Record<NotificationPermission, string>;
 
 // General settings — the mobile twin of the desktop Settings "General" tab,
 // pushed from the Settings hub so the hub stays a clean list of destinations
@@ -80,6 +99,74 @@ export default function GeneralSettingsScreen() {
   const globalSound = useSoundPref('sound.global');
   // Device-local light/dark/system theme mode (default: follow the OS).
   const [themeMode, setThemeMode] = useThemeModePref();
+  // Whether the phone lets Aperio show its reminders (the twin of the
+  // desktop's Windows-notifications section). Askable: one tap asks the OS,
+  // and a yes schedules the reminders at once. Otherwise only the system
+  // settings can change it; the row is read again on the way back.
+  const { permission, refresh: refreshPermission } = useNotificationPermission();
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  // A result is said after the OS is done with the user, and never under the
+  // unlock prompt a slow answer can bring back.
+  const sayAfterUnlock = useCallback(async (sentence: string) => {
+    if (await whenAppLockReleased()) {
+      await new Promise((resolve) => setTimeout(resolve, AFTER_UNLOCK_SPEECH_MS));
+    }
+    AccessibilityInfo.announceForAccessibility(sentence);
+  }, []);
+  // A trip to the system settings: on the way back the line says where things
+  // stand, whichever way the user changed them (the button reads the same
+  // either way, so nothing else would say it).
+  const settingsTrip = useRef(false);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || !settingsTrip.current) return;
+      settingsTrip.current = false;
+      void refreshPermission().then((next) =>
+        sayAfterUnlock(
+          t(
+            next == null
+              ? 'mobile.notificationPermission.statusUnknown'
+              : PERMISSION_STATUS_KEY[next],
+          ),
+        ),
+      );
+    });
+    return () => sub.remove();
+  }, [refreshPermission, sayAfterUnlock, t]);
+  const onPermissionAction = useCallback(() => {
+    if (permissionBusy) return;
+    if (permission !== 'askable') {
+      settingsTrip.current = true;
+      void Linking.openSettings().catch(() => {
+        settingsTrip.current = false;
+      });
+      return;
+    }
+    setPermissionBusy(true);
+    void (async () => {
+      try {
+        // Through the OS-sheet gate, like the other permission prompts: the
+        // sheet flips the app inactive, and the lock must not cover it.
+        const granted = await whileOsSheetOpen(() => ensurePermission()).catch(() => false);
+        await refreshPermission();
+        if (granted) void rescheduleReminders();
+        await sayAfterUnlock(
+          t(
+            granted
+              ? 'mobile.notificationPermission.allowedDone'
+              : 'mobile.notificationPermission.stillNotAllowed',
+          ),
+        );
+      } finally {
+        setPermissionBusy(false);
+      }
+    })();
+  }, [permission, permissionBusy, refreshPermission, sayAfterUnlock, t]);
+  const permissionActionLabel = t(
+    permission === 'askable'
+      ? 'mobile.notificationPermission.allow'
+      : 'mobile.notificationPermission.openSettings',
+  );
   // Device-local haptic feedback for the external-sync start/end cues (default on).
   const [haptics, setHaptics] = useHapticsPref();
   // Device-local app-icon badge (today's open tasks + upcoming events; default on).
@@ -289,6 +376,29 @@ export default function GeneralSettingsScreen() {
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.settings.notifications.hint')}
         </Text>
+        <Text style={styles.hint} accessibilityRole="text">
+          {t(
+            permission == null
+              ? 'mobile.notificationPermission.statusUnknown'
+              : PERMISSION_STATUS_KEY[permission],
+          )}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={permissionActionLabel}
+          accessibilityState={{ disabled: permissionBusy, busy: permissionBusy }}
+          disabled={permissionBusy}
+          onPress={onPermissionAction}
+          style={({ pressed }) => [
+            styles.button,
+            pressed && styles.pressed,
+            permissionBusy && styles.disabled,
+          ]}
+        >
+          <Text style={styles.buttonText} importantForAccessibility="no">
+            {permissionActionLabel}
+          </Text>
+        </Pressable>
         {!globalSound.loading && (
           <SoundSelect
             label={t('dialogs.settings.notifications.globalLabel')}
@@ -357,4 +467,14 @@ const makeStyles = (c: ThemeColors) =>
     section: { gap: 8 },
     heading: { fontSize: 17, fontWeight: '700', color: c.textLabel },
     hint: { fontSize: 14, color: c.textSecondary, lineHeight: 20 },
+    button: {
+      paddingVertical: 14,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    buttonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    pressed: { opacity: 0.7 },
+    disabled: { opacity: 0.5 },
   });

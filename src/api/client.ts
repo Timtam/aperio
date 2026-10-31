@@ -1210,6 +1210,46 @@ export const autostartIsEnabled = () =>
 export const autostartSet = (enabled: boolean) =>
   invoke<void>('autostart_set', { enabled });
 
+// ── OS notifications ───────────────────────────────────────────────────
+
+/** Show an OS notification with the system sound (the day-start review,
+ *  sync conflicts; reminders are sent by the backend itself). */
+export const notifySystem = (title: string, body: string) =>
+  invoke<void>('notify_system', { title, body });
+
+/** Where the Start menu shortcut stands that Windows needs before it shows
+ *  Aperio's notifications (backend `notification_shortcut`). `needs_set_up`
+ *  is the backend's rule: Windows hides the notifications now, and setting
+ *  up would bring them. */
+export type NotificationShortcutStatus =
+  | {
+      kind: 'unsupported' | 'dev_build' | 'not_set_up' | 'foreign' | 'set_up';
+      needs_set_up: boolean;
+    }
+  | { kind: 'points_elsewhere'; target: string; needs_set_up: boolean };
+
+export const notificationShortcutStatus = () =>
+  invoke<NotificationShortcutStatus>('notification_shortcut_status');
+
+/** Create the shortcut, or point it at this copy. */
+export const notificationShortcutCreate = () =>
+  invoke<NotificationShortcutStatus>('notification_shortcut_create');
+
+/** Remove Aperio's shortcut (`conflict` for one Aperio did not make). */
+export const notificationShortcutRemove = () =>
+  invoke<NotificationShortcutStatus>('notification_shortcut_remove');
+
+/** Raised by the backend when a reminder fired while Windows would hide it. */
+export const NOTIFICATION_SHORTCUT_HINT_EVENT = 'notification-shortcut-hint';
+
+/** Whether that hint waits (it may have been raised before the page listened). */
+export const notificationShortcutHintPending = () =>
+  invoke<boolean>('notification_shortcut_hint_pending');
+
+/** The hint is on screen: not again in this app start. */
+export const notificationShortcutHintShown = () =>
+  invoke<void>('notification_shortcut_hint_shown');
+
 // ── System tray (close/minimize to tray) ──────────────────────────────
 
 /** Whether the platform/desktop exposes a system tray. The General

@@ -192,7 +192,14 @@ export type DialogMode =
        *  present but rejected (refresh-error surface). */
       reason?: 'restore' | 'repair';
     }
-  | { kind: 'firstLaunchWizard' }
+  /** `notificationStep`: whether the wizard asks about the Start menu
+   *  shortcut Windows needs before it shows notifications (Windows, and only
+   *  while setting up is needed). Decided before it opens, so its step count
+   *  stays put. */
+  | { kind: 'firstLaunchWizard'; notificationStep: boolean }
+  /** A reminder came due while Windows would hide it: offer the Start menu
+   *  shortcut, once per app start (`NotificationShortcutHintChecker`). */
+  | { kind: 'notificationShortcutHint' }
   /** The "please wait" dialog of a surface that has none of its own — a drop
    *  in the sidebar, Ctrl+D (decisions 227, 265) —, and the notice it turns
    *  into when the write failed (210). `id` tells one wait's frame from any
@@ -386,9 +393,12 @@ export interface DialogStateValue {
     reason?: 'restore' | 'repair',
   ) => void;
   /** §19.11 first-launch wizard. Opened by `FirstLaunchWizardChecker` on a
-   *  fresh instance: language → sync (restore / create / skip) → first
-   *  account. */
-  openFirstLaunchWizard: () => void;
+   *  fresh instance: language → (Windows notifications) → first account →
+   *  sync (restore / create / skip). */
+  openFirstLaunchWizard: (options: { notificationStep: boolean }) => void;
+  /** Offer the Start menu shortcut Windows needs before it shows Aperio's
+   *  notifications. Opened by `NotificationShortcutHintChecker`. */
+  openNotificationShortcutHint: () => void;
   close: () => void;
   /**
    * Counter that bumps whenever data on the wire might have changed.
@@ -765,7 +775,12 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [push],
   );
   const openFirstLaunchWizard = useCallback(
-    () => push({ kind: 'firstLaunchWizard' }),
+    ({ notificationStep }: { notificationStep: boolean }) =>
+      push({ kind: 'firstLaunchWizard', notificationStep }),
+    [push],
+  );
+  const openNotificationShortcutHint = useCallback(
+    () => push({ kind: 'notificationShortcutHint' }),
     [push],
   );
 
@@ -892,6 +907,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openSyncStaleResume,
       openSyncAccountsConnect,
       openFirstLaunchWizard,
+      openNotificationShortcutHint,
       close,
       dataVersion,
       invalidateData,
@@ -925,6 +941,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openSyncStaleResume,
       openSyncAccountsConnect,
       openFirstLaunchWizard,
+      openNotificationShortcutHint,
       close,
       dataVersion,
       invalidateData,
