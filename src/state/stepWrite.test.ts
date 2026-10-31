@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createsInSteps, writeWithoutWaiting } from '@aperio/shared';
+import { createRunsInSteps, createsInSteps, writeWithoutWaiting } from '@aperio/shared';
 
 /**
  * Where a series is created in steps (decisions 227, 265): the target
@@ -28,6 +28,19 @@ describe('createsInSteps', () => {
     expect(createsInSteps(exchange, { rrule: 'FREQ=WEEKLY' })).toBe(false);
     expect(createsInSteps(exchange, { rrule: null, exceptions: ['x'] })).toBe(false);
     expect(createsInSteps(exchange, null)).toBe(false);
+  });
+
+  it('never for a create that keeps someone else’s meeting as theirs', () => {
+    // Review round 21 of #128: Exchange and Google take it in one request,
+    // its deletions with it.
+    expect(createRunsInSteps(exchange, { recurrence: withDeletions })).toBe(true);
+    expect(
+      createRunsInSteps(exchange, { recurrence: withDeletions, keeps_invitation: false }),
+    ).toBe(true);
+    expect(
+      createRunsInSteps(exchange, { recurrence: withDeletions, keeps_invitation: true }),
+    ).toBe(false);
+    expect(createRunsInSteps(caldav, { recurrence: withDeletions })).toBe(false);
   });
 
   it('a surface without a dialog just writes', async () => {

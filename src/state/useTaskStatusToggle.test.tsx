@@ -216,6 +216,22 @@ describe('useTaskStatusActions — what the user is told', () => {
     expect(said).toContain('dialogs.task.subtasks.familyNotAll');
   });
 
+  it('says nothing of a family member whose save stood in part with its status', async () => {
+    // Review round 21 of #128: it took the new status, yet the sentence said
+    // it did not.
+    vi.mocked(invoke)
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' });
+    const { result } = renderHook(() => useTaskStatusActions());
+    await act(async () => {
+      await result.current.set(TASKS[0], 'completed');
+    });
+    expect(announce).toHaveBeenCalledTimes(1);
+    const said = announce.mock.calls[0][0] as string;
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).not.toContain('dialogs.task.subtasks.familyNotAll');
+  });
+
   it('hands a failure to the surface that says where it shows', async () => {
     vi.mocked(invoke)
       .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })

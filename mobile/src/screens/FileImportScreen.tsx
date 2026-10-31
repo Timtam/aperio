@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 
 import {
-  createsInSteps,
+  createRunsInSteps,
   heldSentence,
   heldStatusSentence,
   importedCreate,
@@ -299,10 +299,10 @@ function FileImportList({
       try {
         // A series whose calendar writes its deletions one by one is created
         // in steps: the "please wait" dialog says so (decisions 227, 265).
-        await stepWriteWait(createsInSteps(calendar, entry.recurrence), () =>
-          createEvent(importedCreate(entry, intoOf(entry), calendarId, isHeld(index)), {
-            preserveRecurrenceZone: true,
-          }),
+        // Someone else's meeting kept as theirs goes in at once.
+        const create = importedCreate(entry, intoOf(entry), calendarId, isHeld(index));
+        await stepWriteWait(createRunsInSteps(calendar, create), () =>
+          createEvent(create, { preserveRecurrenceZone: true }),
         );
         done += 1;
         markImported(index);

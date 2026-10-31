@@ -9,6 +9,7 @@ import {
 import {
   eventWriteFailureReason,
   eventWriteLeftover,
+  familyNotAllSentence,
   joinNames,
   originalKeptSentence,
   readErrorMessage,
@@ -1173,11 +1174,10 @@ export default function TaskEditorModal({
           // the status being set (review round 17 of #128). Mirrors the
           // desktop.
           if (statusChanged && writeStatusLanded(err)) {
-            // The first failure's own reason, as on the desktop: the root's
-            // sentence says already that part landed (review round 18).
-            let first: unknown = null;
+            // As on the desktop (`familyNotAllSentence`).
+            let failures: unknown[];
             try {
-              [first] = await followEditorStatus(
+              failures = await followEditorStatus(
                 loaded.id,
                 form.status,
                 loaded.list_id,
@@ -1187,13 +1187,10 @@ export default function TaskEditorModal({
                 ),
               );
             } catch (planErr) {
-              first = planErr;
+              failures = [planErr];
             }
-            if (first != null) {
-              familyFailed = ` ${t('dialogs.task.subtasks.familyNotAll', {
-                reason: eventWriteFailureReason(first, t),
-              })}`;
-            }
+            const family = familyNotAllSentence(failures, t);
+            if (family) familyFailed = ` ${family}`;
           }
           throw err;
         }

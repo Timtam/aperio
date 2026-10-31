@@ -811,7 +811,8 @@ pub async fn create_event(
     }
     // A series with deleted occurrences is created bare and they are
     // cancelled one by one (decisions 202-213, 263-269): whether Google heeds
-    // a deletion line with a new series was never measured.
+    // a deletion line with a new series was never measured. The surfaces wait
+    // for it (`createRunsInSteps`), never for an import above.
     if new
         .recurrence
         .as_ref()

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { readErrorMessage, writeErrorMessage } from '@aperio/shared';
+import { readErrorMessage, writeErrorMessage, writeNeverLanded } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
@@ -64,18 +64,22 @@ export function TaskMembersDialog({
   // landing spot after an action removes/unmounts the control that had focus.
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      setShares(await taskListShares(listId));
-      setError(null);
-    } catch (err) {
-      // A read: a busy provider says so, never that nothing was changed.
-      setError(readErrorMessage(err, t));
-    } finally {
-      setLoading(false);
-    }
-  }, [listId, t]);
+  // `quiet` reads without the loading line, so the rows and the focus stay.
+  const reload = useCallback(
+    async (quiet = false) => {
+      if (!quiet) setLoading(true);
+      try {
+        setShares(await taskListShares(listId));
+        setError(null);
+      } catch (err) {
+        // A read: a busy provider says so, never that nothing was changed.
+        setError(readErrorMessage(err, t));
+      } finally {
+        if (!quiet) setLoading(false);
+      }
+    },
+    [listId, t],
+  );
 
   useEffect(() => {
     if (isOpen) {
@@ -125,7 +129,11 @@ export function TaskMembersDialog({
         await fn();
         await reload();
       } catch (err) {
-        // Only the write can land here: `reload` says its own failure.
+        // Only the write can land here: `reload` says its own failure. One
+        // that may have landed reads the members again first, as they now
+        // stand (review round 21 of #128); its sentence comes after, since a
+        // read clears the one before.
+        if (!writeNeverLanded(err)) await reload();
         setError(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
@@ -174,7 +182,9 @@ export function TaskMembersDialog({
     // `run`, which flipped `busy` (disabling the focused select — NVDA
     // lost focus) and reloaded the whole list (rebuilding the rows, so
     // the value appeared to snap back to "read" until the refetch). We
-    // mutate the single row and revert only on failure.
+    // mutate the single row and revert only on a failure that surely never
+    // landed; any other reads the members again, quietly, as they now stand
+    // (review round 21 of #128).
     setShares((rows) =>
       rows.map((r) => (r.user.id === share.user.id ? { ...r, right } : r)),
     );
@@ -184,12 +194,16 @@ export function TaskMembersDialog({
           t('dialogs.taskMembers.rightChanged', { name: share.user.name }),
         ),
       )
-      .catch((err) => {
-        setShares((rows) =>
-          rows.map((r) =>
-            r.user.id === share.user.id ? { ...r, right: prev } : r,
-          ),
-        );
+      .catch(async (err) => {
+        if (writeNeverLanded(err)) {
+          setShares((rows) =>
+            rows.map((r) =>
+              r.user.id === share.user.id ? { ...r, right: prev } : r,
+            ),
+          );
+        } else {
+          await reload(true);
+        }
         setError(writeErrorMessage(err, t));
       });
   };

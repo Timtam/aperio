@@ -7,6 +7,7 @@ import {
   eventWriteLeftover,
   eventWriteRefusal,
   exceptionsLossOf,
+  familyNotAllSentence,
   removeOriginalAfterCopy,
   stepDetail,
   writeAll,
@@ -624,5 +625,23 @@ describe('the reasons a frame about anything embeds (decision 273)', () => {
         expect(sentence, `${frame} ${key}`).toContain(reason);
       }
     }
+  });
+});
+
+describe('familyNotAllSentence', () => {
+  const landedWithStatus = { code: 'network', message: 'partly-saved: assignees' };
+  const statusMissed = { code: 'network', message: 'partly-saved: status' };
+  const busy = { code: 'forbidden', message: 'provider-busy: http-429' };
+
+  it('says the first write that kept its old status, with its reason', () => {
+    expect(familyNotAllSentence([landedWithStatus, busy, statusMissed], t)).toBe(
+      'Nicht jede Aufgabe darüber oder darunter hat den neuen Status übernommen: der Anbieter ist gerade ausgelastet.',
+    );
+    expect(familyNotAllSentence([statusMissed], t)).toMatch(/^Nicht jede Aufgabe/);
+  });
+
+  it('says nothing where every write took the new status (review round 21 of #128)', () => {
+    expect(familyNotAllSentence([], t)).toBe('');
+    expect(familyNotAllSentence([landedWithStatus, landedWithStatus], t)).toBe('');
   });
 });

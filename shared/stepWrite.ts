@@ -43,6 +43,25 @@ export function createsInSteps(
   );
 }
 
+/** A create, as far as `createRunsInSteps` asks. */
+export interface StepWriteCreate {
+  recurrence?: StepWriteRecurrence | null;
+  keeps_invitation?: boolean;
+}
+
+/**
+ * Whether this CREATE runs in steps in that calendar (`createsInSteps`) —
+ * never one that keeps someone else's meeting from a file as theirs (I6):
+ * Exchange and Google take it in one request, its deletions with it, before
+ * they would create a series in steps.
+ */
+export function createRunsInSteps(
+  target: StepWriteTarget | null | undefined,
+  create: StepWriteCreate,
+): boolean {
+  return !create.keeps_invitation && createsInSteps(target, create.recurrence);
+}
+
 /**
  * How a surface waits for a write: `write` runs either way; where `inSteps`
  * holds, the surface shows its "please wait" dialog while it runs and closes it

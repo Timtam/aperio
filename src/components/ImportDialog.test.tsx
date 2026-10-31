@@ -344,6 +344,36 @@ describe('ImportDialog → several appointments', () => {
     await waitFor(() => expect(waiting()).toBeNull());
   });
 
+  it('writes someone else’s series at once where the calendar keeps it as theirs', async () => {
+    // Review round 21 of #128: Exchange and Google take such an invitation in
+    // one request, its deletions with it; nothing is written in steps.
+    (CALENDARS[0] as { recurrence_capabilities?: unknown }).recurrence_capabilities = {
+      deletions_in_steps: true,
+    };
+    (CALENDARS[0] as { invitation_import?: string }).invitation_import = 'kept';
+    heldCreates.on = true;
+    const invitation = event('Jour fixe', {
+      organizer: 'erika@example.org',
+      attendees: ['Max <max@example.org>'],
+      recurrence: {
+        rrule: 'FREQ=WEEKLY',
+        exceptions: ['2026-11-25T13:00:00Z'],
+      } as ImportedEvent['recurrence'],
+    });
+    await open({ read: { events: [invitation], skipped: [] } });
+    const button = await screen.findByRole('button', { name: '1 Termin importieren' });
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'));
+    fireEvent.click(button);
+    await waitFor(() => expect(createRequests()).toHaveLength(1));
+    expect(createRequests()[0].keeps_invitation).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole('dialog', { name: /Vorgang läuft/ })).toBeNull();
+    await act(async () => {
+      heldCreates.release.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  });
+
   it('holds the calendar and the rows while it writes', async () => {
     heldCreates.on = true;
     await open({ read: READ });

@@ -144,6 +144,7 @@ import {
   worthCarrying,
   type CarryableFields,
   type CarryScope,
+  createRunsInSteps,
   createsInSteps,
   eventWriteLeftover,
   writeNeverLanded,
@@ -2021,11 +2022,12 @@ function EventEditorScreen({
         };
         // An imported series keeps the file's zone, or none, as a copy does
         // (decision 262). One whose calendar writes its deletions one by one is
-        // created in steps (decisions 227, 265).
+        // created in steps (decisions 227, 265), unless it goes in as someone
+        // else's meeting (I6).
         const created = await stepWriteWait(
-          createsInSteps(
+          createRunsInSteps(
             calendars.find((c) => c.id === calId),
-            recurrenceToSend,
+            request,
           ),
           () => createEvent(request, { preserveRecurrenceZone: imported != null }),
         );

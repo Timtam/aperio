@@ -1,5 +1,5 @@
 import {
-  eventWriteFailureReason,
+  familyNotAllSentence,
   failureOfWrites,
   planAncestorRecompute,
   planStatusCascade,
@@ -103,7 +103,7 @@ async function tryStatusWrites(
 export class CheckOffFailure {
   constructor(
     readonly task: unknown,
-    readonly family: unknown,
+    readonly family: readonly unknown[],
   ) {}
 }
 
@@ -114,9 +114,9 @@ export function checkOffErrorMessage(
   t: (key: string, vars?: Record<string, unknown>) => string,
 ): string {
   if (err instanceof CheckOffFailure) {
-    return `${writeErrorMessage(err.task, t)} ${t('dialogs.task.subtasks.familyNotAll', {
-      reason: eventWriteFailureReason(err.family, t),
-    })}`;
+    const sentence = writeErrorMessage(err.task, t);
+    const family = familyNotAllSentence(err.family, t);
+    return family ? `${sentence} ${family}` : sentence;
   }
   return writeErrorMessage(err, t);
 }
@@ -134,7 +134,12 @@ async function applyCheckOff(
   const own = failures.find((failure) => failure.taskId === task.id);
   if (own && writeStatusLanded(own.err)) {
     const rest = failures.filter((failure) => failure !== own);
-    throw rest.length > 0 ? new CheckOffFailure(own.err, rest[0].err) : own.err;
+    throw rest.length > 0
+      ? new CheckOffFailure(
+          own.err,
+          rest.map((failure) => failure.err),
+        )
+      : own.err;
   }
   throw failureOfWrites(
     'cascade',

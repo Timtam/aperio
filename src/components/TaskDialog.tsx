@@ -36,6 +36,7 @@ import {
   type CodedError,
   eventWriteFailureReason,
   eventWriteLeftover,
+  familyNotAllSentence,
   findOffer,
   joinNames,
   offerOptions,
@@ -1354,9 +1355,8 @@ export function TaskDialog({
       // without a step of its own is made. `true` when all were made.
       // The family's status writes after a root whose save stood in part
       // with its status: every one attempted; what did not take, as a
-      // sentence to follow the root's, empty when every one did. Its reason
-      // is the first failure's own: the root's sentence says already that
-      // part landed (review round 18 of #128). The phone says the same.
+      // sentence to follow the root's (`familyNotAllSentence`), empty when
+      // every one did. The phone says the same.
       const followFamily = async (
         writes: StatusWrite[],
         rows: Task[],
@@ -1372,10 +1372,8 @@ export function TaskDialog({
             failures.push(err);
           }
         }
-        if (failures.length === 0) return '';
-        return ` ${t('dialogs.task.subtasks.familyNotAll', {
-          reason: eventWriteFailureReason(failures[0], t),
-        })}`;
+        const family = familyNotAllSentence(failures, t);
+        return family ? ` ${family}` : '';
       };
 
       const makeDrafts = async (parent: Task): Promise<boolean> => {

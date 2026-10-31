@@ -10,7 +10,20 @@ import type { Section } from '@aperio/shared';
  */
 const MODULE = '../../mobile/src/state/sectionWrites';
 
-type Writes = typeof import('../../mobile/src/state/sectionWrites');
+/** The phone module's shape, written out here: a `typeof import()` of it
+ *  would pull it into the desktop's tsc after all (review round 21 of #128). */
+interface SectionWrite {
+  upsert?: Section;
+  remove?: string;
+  before?: readonly Section[];
+}
+interface Writes {
+  withWrite(writes: readonly SectionWrite[], write: SectionWrite): SectionWrite[];
+  overRead(
+    read: readonly Section[],
+    writes: readonly SectionWrite[],
+  ): { rows: Section[]; open: SectionWrite[] };
+}
 
 async function load(): Promise<Writes> {
   return (await import(/* @vite-ignore */ MODULE)) as Writes;

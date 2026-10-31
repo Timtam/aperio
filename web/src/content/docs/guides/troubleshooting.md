@@ -372,9 +372,11 @@ under their own heading, and saving keeps your changes to the task and
 creates the subtasks still missing. A subtask whose answer was lost may have
 been created: Aperio says so and does not offer it again; check it.
 
-When a task's status change was saved only in part, the tasks above and below
-it still take the new status, as when you check it off; if one does not, the
-message says so after its own sentence.
+When a task was saved only in part but its new status got through (a later
+step, such as its assignees, was turned away), the tasks above and below it
+still take the new status, as when you check it off; if one does not, the
+message says so after its own sentence. If the status itself did not get
+through, they keep theirs.
 
 What you can do: open the item again later and add what is missing.
 

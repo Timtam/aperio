@@ -126,6 +126,25 @@ describe('the phone check-off of a task saved in part with its status', () => {
     expect(said).toContain('dialogs.event.writeError.partlySaved');
     expect(said).toContain('dialogs.task.subtasks.familyNotAll');
   });
+
+  it('says nothing of a family member whose save stood in part with its status', async () => {
+    // Review round 21 of #128: it took the new status, yet the sentence said
+    // it did not.
+    const kid = { ...task('kid'), parent_id: 'root' } as unknown as Task;
+    updateTask
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' })
+      .mockRejectedValueOnce({ code: 'network', message: 'partly-saved: assignees' });
+    const phoneModule = (await import(/* @vite-ignore */ PHONE_TASK_TOGGLE)) as {
+      setTaskStatusTo: (task: Task, status: string, list: undefined, all: Task[]) => Promise<number>;
+      checkOffErrorMessage: (err: unknown, t: (key: string) => string) => string;
+    };
+    const failure = await phoneModule
+      .setTaskStatusTo(task('root'), 'completed', undefined, [task('root'), kid])
+      .then(() => null, (err: unknown) => err);
+    const said = phoneModule.checkOffErrorMessage(failure, (key) => key);
+    expect(said).toContain('dialogs.event.writeError.partlySaved');
+    expect(said).not.toContain('dialogs.task.subtasks.familyNotAll');
+  });
 });
 
 describe('the phone editor cascade after a list change', () => {

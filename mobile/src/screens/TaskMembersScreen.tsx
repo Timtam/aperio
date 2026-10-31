@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { readErrorMessage, writeErrorMessage } from '@aperio/shared';
+import { readErrorMessage, writeErrorMessage, writeNeverLanded } from '@aperio/shared';
 import {
   AccessibilityInfo,
   Pressable,
@@ -79,17 +79,21 @@ export default function TaskMembersScreen({
     navigation.setOptions({ title: t('dialogs.taskMembers.title', { list: name }) });
   }, [navigation, name, t]);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      setShares(await taskListShares(listId));
-      setError(null);
-    } catch (err) {
-      setError(readErrorMessage(err, t));
-    } finally {
-      setLoading(false);
-    }
-  }, [listId, t]);
+  // `quiet` reads without the loading line, so the rows and the focus stay.
+  const reload = useCallback(
+    async (quiet = false) => {
+      if (!quiet) setLoading(true);
+      try {
+        setShares(await taskListShares(listId));
+        setError(null);
+      } catch (err) {
+        setError(readErrorMessage(err, t));
+      } finally {
+        if (!quiet) setLoading(false);
+      }
+    },
+    [listId, t],
+  );
 
   useEffect(() => {
     void reload();
@@ -134,6 +138,10 @@ export default function TaskMembersScreen({
         await fn();
         await reload();
       } catch (err) {
+        // One that may have landed reads the members again first, as they now
+        // stand (review round 21 of #128); its sentence comes after, since a
+        // read clears the one before.
+        if (!writeNeverLanded(err)) await reload();
         setError(writeErrorMessage(err, t));
       } finally {
         setBusy(false);
@@ -172,8 +180,10 @@ export default function TaskMembersScreen({
     if (busy || share.right === right) return;
     const prev = share.right;
     // Optimistic in place: update just this row's right so the picker keeps its
-    // value + focus. Revert only on failure (no full reload, which would rebuild
-    // the rows and snap focus away — the desktop hit exactly this NVDA bug).
+    // value + focus. Revert only on a failure that surely never landed; any
+    // other reads the members again, quietly (no loading line, which would
+    // rebuild the rows and snap focus away — the desktop hit exactly this NVDA
+    // bug), as they now stand (review round 21 of #128).
     setShares((rows) =>
       rows.map((r) => (r.user.id === share.user.id ? { ...r, right } : r)),
     );
@@ -181,10 +191,14 @@ export default function TaskMembersScreen({
       .then(() =>
         announce(t('dialogs.taskMembers.rightChanged', { name: share.user.name })),
       )
-      .catch((err) => {
-        setShares((rows) =>
-          rows.map((r) => (r.user.id === share.user.id ? { ...r, right: prev } : r)),
-        );
+      .catch(async (err) => {
+        if (writeNeverLanded(err)) {
+          setShares((rows) =>
+            rows.map((r) => (r.user.id === share.user.id ? { ...r, right: prev } : r)),
+          );
+        } else {
+          await reload(true);
+        }
         setError(writeErrorMessage(err, t));
       });
   };

@@ -458,6 +458,22 @@ export function eventWriteFailureReason(err: unknown, t: Translate): string {
 }
 
 /**
+ * What a family's status writes failed with say behind the sentence of a
+ * task whose own save stood in part with its status (review rounds 17-21 of
+ * #128): that not every task above or below took the new status, with the
+ * first reason — the root's sentence says already that part landed. A write
+ * that stood in part with its status took it and is left out; empty when
+ * every one took it.
+ */
+export function familyNotAllSentence(failures: readonly unknown[], t: Translate): string {
+  const missed = failures.filter((err) => !writeStatusLanded(err));
+  if (missed.length === 0) return '';
+  return t('dialogs.task.subtasks.familyNotAll', {
+    reason: eventWriteFailureReason(missed[0], t),
+  });
+}
+
+/**
  * A refusal's sentence. A new series taken back after its deleted occurrences
  * could not all be deleted again (decision 203) says why in words — a machine
  * reason never reaches the reader — and, where an invitation may have gone

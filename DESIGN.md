@@ -1433,7 +1433,10 @@ Besprechung sagte sie dem Gast ab. Jetzt:
     `cal_core::step_write` (213, 263). Ob ein Kalender eine neue Serie so
     schreibt, sagt sein Manifest (`recurrence.deletions_in_steps`); es wird
     beim Lesen der Kalenderliste gestempelt und braucht keinen neuen
-    `CACHE_GENERATION`.
+    `CACHE_GENERATION`. Eine fremde Einladung aus einer Datei, die der
+    Kalender als ihre behält, geht bei Exchange und Google in einer Anfrage
+    hinein, ihre Löschungen mit ihr (I6): Für sie zeigt keine Oberfläche den
+    Wartedialog (`createRunsInSteps`, Prüfrunde 21 von #128).
   - **Ein ausgelasteter Anbieter (270-278, PR 7).** Weist ein Anbieter eine
     Anfrage ab, weil in kurzer Zeit zu viele kamen (429, Googles
     `rateLimitExceeded`, Exchanges `ErrorServerBusy`, ein 503 mit

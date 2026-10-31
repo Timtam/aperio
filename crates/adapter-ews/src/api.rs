@@ -770,7 +770,8 @@ pub async fn create_event(
     // Exchange takes a series' rule but not its deleted occurrences: such a
     // series is created bare and they are deleted again one by one (decisions
     // 202-213, 225, 263-266).
-    // A rule and deletions both, as the surfaces' wait asks (`createsInSteps`).
+    // A rule and deletions both, as the surfaces' wait asks
+    // (`createRunsInSteps`: an invitation kept went in above, in one request).
     if event
         .recurrence
         .as_ref()

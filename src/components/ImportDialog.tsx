@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  createsInSteps,
+  createRunsInSteps,
   heldSentence,
   heldStatusSentence,
   importedCreate,
@@ -367,10 +367,10 @@ function ImportList({
       try {
         // A series whose calendar writes its deletions one by one is created
         // in steps: the "please wait" dialog says so (decisions 227, 265).
-        await wait(createsInSteps(calendar, entry.recurrence), () =>
-          apiCreateEvent(importedCreate(entry, intoOf(entry), calendarId, isHeld(index)), {
-            preserveRecurrenceZone: true,
-          }),
+        // Someone else's meeting kept as theirs goes in at once.
+        const create = importedCreate(entry, intoOf(entry), calendarId, isHeld(index));
+        await wait(createRunsInSteps(calendar, create), () =>
+          apiCreateEvent(create, { preserveRecurrenceZone: true }),
         );
         done += 1;
         markImported(index);

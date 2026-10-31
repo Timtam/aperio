@@ -348,6 +348,20 @@ describe('TaskDialog: a status change whose save stood in part', () => {
     );
     expect(updates()).toHaveLength(3);
   });
+
+  it('says nothing of a family member whose save stood in part with its status', async () => {
+    // Review round 21 of #128: it took the new status, yet the sentence said
+    // it did not.
+    answers.update_task = [
+      () => Promise.reject({ code: 'network', message: 'partly-saved: assignees' }),
+      () => Promise.reject({ code: 'network', message: 'partly-saved: assignees' }),
+      (args) => Promise.resolve((args as { task: Task }).task),
+    ];
+    await completeParent();
+    const note = await screen.findByText(/nur zum Teil gespeichert/);
+    expect(note.textContent).not.toContain('Nicht jede Aufgabe');
+    expect(updates()).toHaveLength(3);
+  });
 });
 
 describe('TaskDialog: a list change and a status change in one save', () => {

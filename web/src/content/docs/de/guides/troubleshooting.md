@@ -402,9 +402,11 @@ deine Änderungen an der Aufgabe und legt die noch fehlenden Unteraufgaben an.
 Eine Unteraufgabe, deren Antwort verloren ging, wurde vielleicht angelegt:
 Aperio sagt das und bietet sie nicht noch einmal an; prüfe sie.
 
-Wurde die Statusänderung einer Aufgabe nur zum Teil gespeichert, übernehmen
-die Aufgaben darüber und darunter den neuen Status trotzdem, wie beim
-Abhaken; nimmt eine ihn nicht an, sagt die Meldung das danach.
+Wurde eine Aufgabe nur zum Teil gespeichert, kam ihr neuer Status aber an
+(ein späterer Schritt wie ihre Zuständigen wurde abgewiesen), übernehmen die
+Aufgaben darüber und darunter ihn trotzdem, wie beim Abhaken; nimmt eine ihn
+nicht an, sagt die Meldung das danach. Kam der Status selbst nicht an,
+behalten sie ihren.
 
 Was du tun kannst: Öffne das Element später noch einmal und ergänze, was
 fehlt.
