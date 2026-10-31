@@ -1408,6 +1408,7 @@
       "regroupFailed_other": "The {{count}} copies were updated, but the new entries could not be tied together as one appointment again.",
       "newPartMayStand": "In {{calendar}}, the series may now show twice from {{date}}: its new part could neither be completed nor deleted again, and the old one still runs on. Please check it there.",
       "maybeShownTwice": "In {{calendar}}, the series may now show twice from {{date}}: the old one could not be cut short, nor its new part deleted again. Please check it there.",
+      "tailMayStand": "In {{calendar}}, the series may now show twice from {{date}}: whether its new part was created is unclear ({{reason}}). Please check it there.",
       "standaloneMayStand": "In {{calendar}}, the appointment may now show twice on {{date}}: whether its single copy was created is unclear ({{reason}}). Please check it there.",
       "shiftRefused": "In {{calendar}}, the repeat cannot move with the new date or time: {{reason}}.",
       "unsureCut": "In {{calendar}}, the series may show twice from {{date}}: its new part was created, but whether the old one now ends before it is unclear. Please check it there.",

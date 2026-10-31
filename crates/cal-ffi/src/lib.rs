@@ -675,8 +675,9 @@ fn map_store_err(e: cal_core::Error) -> StoreError {
         E::Protocol(detail) => StoreError::Protocol { detail },
         E::Unsupported(detail) => StoreError::Unsupported { detail },
         E::Internal(detail) => StoreError::Storage { detail },
-        // Forbidden is the error the phone carries with its code intact
-        // (eventCoded); the token in front says which refusal it is.
+        // A refusal by the OS travels as Forbidden with its token in front:
+        // both shells read it as never landed, and `hostCoded` hands it to
+        // JavaScript as `forbidden` (decision 273).
         E::AccessNotGranted(detail) => StoreError::Forbidden {
             detail: cal_core::WriteRefusal::AccessNotGranted.message(&detail),
         },

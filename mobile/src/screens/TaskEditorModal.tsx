@@ -99,6 +99,7 @@ import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
 import {
   cascadeEditorStatus,
+  followEditorStatus,
   collectDescendants,
   recomputeAncestors,
 } from '../state/taskToggle';
@@ -1172,8 +1173,11 @@ export default function TaskEditorModal({
           // the status being set (review round 17 of #128). Mirrors the
           // desktop.
           if (statusChanged && writeStatusLanded(err)) {
+            // The first failure's own reason, as on the desktop: the root's
+            // sentence says already that part landed (review round 18).
+            let first: unknown = null;
             try {
-              await cascadeEditorStatus(
+              [first] = await followEditorStatus(
                 loaded.id,
                 form.status,
                 loaded.list_id,
@@ -1182,9 +1186,12 @@ export default function TaskEditorModal({
                   row.id === loaded.id ? { ...row, status: form.status } : row,
                 ),
               );
-            } catch (cascadeErr) {
+            } catch (planErr) {
+              first = planErr;
+            }
+            if (first != null) {
               familyFailed = ` ${t('dialogs.task.subtasks.familyNotAll', {
-                reason: eventWriteFailureReason(cascadeErr, t),
+                reason: eventWriteFailureReason(first, t),
               })}`;
             }
           }

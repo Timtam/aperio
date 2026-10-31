@@ -22,7 +22,6 @@ import { isSeriesOccurrence, selectableTaskLists } from '@aperio/shared';
 import { Calendar, listCalendars } from '../api/calendar';
 import {
   createSection,
-  getSections,
   getTaskById,
   getTasks,
 } from '../api/client';
@@ -82,7 +81,7 @@ function MoveCopyScreen({
   const params = route.params;
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const { taskLists, selectedTaskListIds, invalidateData } = useTaskStore();
+  const { taskLists, selectedTaskListIds, invalidateData, loadSections } = useTaskStore();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
   const showHiddenCalendarTargets = useShowHiddenCalendarTargets();
   const showHiddenTaskListTargets = useShowHiddenTaskListTargets();
@@ -185,7 +184,10 @@ function MoveCopyScreen({
       return;
     }
     let cancelled = false;
-    void getSections(targetContainerId)
+    // Through the store, as every other section picker: a section written
+    // here or in the list editor shows over the host's rows from before until
+    // its refresh lands (review round 18 of #128). Mirrors the desktop.
+    void loadSections(targetContainerId)
       .then((rows) => {
         if (!cancelled) setSections(rows);
       })
@@ -196,7 +198,7 @@ function MoveCopyScreen({
     return () => {
       cancelled = true;
     };
-  }, [targetContainerId, sectionsEnabled]);
+  }, [targetContainerId, sectionsEnabled, loadSections]);
 
   /**
    * Make a section in the target list and select it.
@@ -223,9 +225,12 @@ function MoveCopyScreen({
         position: 0,
       });
       // The section stands (277). The read after it serves the list's kept
-      // rows until its refresh lands, or fails: either way the new one is
-      // offered, at the top where it was made, and selected.
-      const rows = await getSections(targetContainerId).catch(() => null);
+      // rows until its refresh lands, or fails: the store lays it over them,
+      // there and on every other screen. Offered at the top where it was
+      // made, and selected.
+      const rows = await loadSections(targetContainerId, { upsert: created }).catch(
+        () => null,
+      );
       setSections((prev) => [
         created,
         ...(rows ?? prev).filter((section) => section.id !== created.id),
@@ -242,7 +247,7 @@ function MoveCopyScreen({
     } finally {
       sectionBusy.current = false;
     }
-  }, [sectionDraft, targetContainerId, t]);
+  }, [sectionDraft, targetContainerId, t, loadSections]);
 
   const sectionOptions = useMemo(
     () => [

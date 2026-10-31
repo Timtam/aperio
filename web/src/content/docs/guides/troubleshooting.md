@@ -373,8 +373,8 @@ creates the subtasks still missing. A subtask whose answer was lost may have
 been created: Aperio says so and does not offer it again; check it.
 
 When a task's status change was saved only in part, the tasks above and below
-it still take the new status, as when you check it off; one that does not is
-named after the message.
+it still take the new status, as when you check it off; if one does not, the
+message says so after its own sentence.
 
 What you can do: open the item again later and add what is missing.
 

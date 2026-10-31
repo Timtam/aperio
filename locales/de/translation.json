@@ -1405,6 +1405,7 @@
       "regroupFailed_other": "Die {{count}} Kopien wurden geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
       "newPartMayStand": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ließ sich weder fertigstellen noch wieder löschen, und der alte läuft weiter. Bitte dort prüfen.",
       "maybeShownTwice": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Die alte ließ sich nicht kürzen und ihr neuer Teil nicht wieder löschen. Bitte dort prüfen.",
+      "tailMayStand": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ob ihr neuer Teil angelegt wurde, ist unklar ({{reason}}). Bitte dort prüfen.",
       "standaloneMayStand": "In {{calendar}} steht der Termin am {{date}} möglicherweise doppelt: Ob seine Einzelkopie angelegt wurde, ist unklar ({{reason}}). Bitte dort prüfen.",
       "shiftRefused": "In {{calendar}} kann die Wiederholung nicht mit dem neuen Datum oder der neuen Uhrzeit wandern: {{reason}}.",
       "unsureCut": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ist angelegt, aber ob der alte jetzt davor endet, ist unklar. Bitte dort prüfen.",

@@ -396,6 +396,10 @@ impl CalendarFeature for MicrosoftGraphAdapter {
                 tracing::debug!(%err, event_id, "graph busy for the delete after /cancel; done");
                 Ok(())
             }
+            // Any other failure after the cancellation went out to every
+            // attendee is a later step's: never "nothing was changed" (review
+            // round 18 of #128).
+            Err(err) if cancelled => Err(to_core_error(err).after_landed("delete")),
             other => other.map_err(to_core_error),
         }
     }
@@ -1021,6 +1025,29 @@ mod delta_tests {
         del.assert_async().await;
     }
 
+    /// `/cancel` landed and mailed every attendee; a DELETE that fails after
+    /// it otherwise is a later step's, never "nothing was changed" (review
+    /// round 18 of #128).
+    #[tokio::test]
+    async fn a_refused_delete_after_cancel_did_change_something() {
+        let mut server = Server::new_async().await;
+        let _cancel = server
+            .mock("POST", "/me/events/ev-x/cancel")
+            .with_status(202)
+            .create_async()
+            .await;
+        let _del = server
+            .mock("DELETE", "/me/events/ev-x")
+            .with_status(409)
+            .create_async()
+            .await;
+        let err = adapter_for(&server)
+            .delete_event("ev-x", true)
+            .await
+            .unwrap_err();
+        assert!(!err.never_landed(), "{err:?}");
+    }
+
     /// The token endpoint turning a refresh away for throttling is a busy
     /// provider, never a sign-in failure: no new sign-in helps.
     #[tokio::test]
@@ -1123,7 +1150,8 @@ mod delta_tests {
     }
 
     /// ...but only after a cancel: without one, a 404 is an event not found,
-    /// and after one, any other failure is still a failure.
+    /// and after one, any other failure is still a failure — a later step's,
+    /// which may have changed something (review round 18 of #128).
     #[tokio::test]
     async fn a_delete_that_finds_nothing_without_a_cancel_is_not_found() {
         let mut server = Server::new_async().await;
@@ -1153,7 +1181,8 @@ mod delta_tests {
             .delete_event("ev-1", true)
             .await
             .unwrap_err();
-        assert!(matches!(err, CoreError::Protocol(_)), "{err:?}");
+        assert!(matches!(err, CoreError::Network(_)), "{err:?}");
+        assert!(!err.never_landed(), "{err:?}");
     }
 
     fn adapter_for(server: &Server) -> MicrosoftGraphAdapter {

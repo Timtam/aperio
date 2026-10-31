@@ -310,6 +310,10 @@ export function EventGroupCarryDialog({
         // Whether its standalone went out: one whose answer was lost may
         // stand (review round 17 of #128).
         let standaloneSent = false;
+        // Whether its new series went out, and whether its create answered:
+        // one whose answer was lost may stand (review round 18 of #128).
+        let tailSent = false;
+        let tailMade = false;
         try {
           const current = await getEventById(target.event_id, target.calendar_id);
           if (current == null) {
@@ -527,8 +531,9 @@ export function EventGroupCarryDialog({
                 ),
                 () => writeSeriesSplit(
                   {
-                    createTail: () =>
-                      createEvent(
+                    createTail: async () => {
+                      tailSent = true;
+                      const made = await createEvent(
                         {
                           calendar_id: target.calendar_id,
                           title: row.title,
@@ -550,7 +555,10 @@ export function EventGroupCarryDialog({
                         // A continuation of the copy's own series — its zone stays
                         // verbatim so both halves expand alike.
                         { preserveRecurrenceZone: true },
-                      ),
+                      );
+                      tailMade = true;
+                      return made;
+                    },
                     // The cut can make the provider bring deleted occurrences
                     // back as well (a zone it writes again, 247); any it could not
                     // delete again are said with this pass's doubts (253).
@@ -680,6 +688,18 @@ export function EventGroupCarryDialog({
               t('dialogs.eventGroupCarry.standaloneMayStand', {
                 calendar: calendarName(target.calendar_id),
                 date: cutoffDay(occurrence, i18n.language),
+                reason: eventWriteFailureReason(err, t),
+              }),
+            );
+            continue;
+          }
+          if (tailSent && !tailMade && splitAt != null && !writeNeverLanded(err)) {
+            // Its new series may stand, its answer lost, say: said, and not
+            // offered again, which would write it a second time.
+            unsure.push(
+              t('dialogs.eventGroupCarry.tailMayStand', {
+                calendar: calendarName(target.calendar_id),
+                date: cutoffDay(splitAt, i18n.language),
                 reason: eventWriteFailureReason(err, t),
               }),
             );

@@ -2300,14 +2300,12 @@ END:VCALENDAR</c:calendar-data>
         assert!(matches!(err, CaldavError::Network(_)), "{err:?}");
     }
 
-    /// A kept UID is no UID only this create can own: a 412 on the replay may
-    /// be the calendar's own copy of the appointment, so it is refused as
-    /// taken, as without the replay — never reported as created.
+    /// A kept UID that is no plain name goes into a fresh `{uuid}.ics`, which
+    /// only the first attempt can have made: a 412 on the replay is that
+    /// attempt landing, reported as created (review round 17 of #128;
+    /// "taken", the import offered it again).
     #[tokio::test]
     async fn a_kept_uid_that_is_no_plain_name_answering_412_after_a_retry_landed() {
-        // Review round 17 of #128: its resource is a fresh `{uuid}.ics`, which
-        // only the first attempt can have made; "taken", the import offered it
-        // again.
         let base = crate::http::first_attempt_lost_then(
             b"HTTP/1.1 412 Precondition Failed\r\ncontent-length: 0\r\n\r\n",
         )
@@ -2329,6 +2327,10 @@ END:VCALENDAR</c:calendar-data>
         assert!(created.id.ends_with("|urn:uuid:6f1c0a2e"), "{}", created.id);
     }
 
+    /// A kept UID that names the resource is no UID only this create can own:
+    /// a 412 on the replay may be the calendar's own copy of the appointment,
+    /// so it is refused as taken, as without the replay — never reported as
+    /// created.
     #[tokio::test]
     async fn a_kept_uid_answering_412_after_a_retry_is_taken() {
         let base = crate::http::first_attempt_lost_then(

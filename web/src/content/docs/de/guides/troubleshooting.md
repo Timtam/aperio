@@ -404,7 +404,7 @@ Aperio sagt das und bietet sie nicht noch einmal an; prüfe sie.
 
 Wurde die Statusänderung einer Aufgabe nur zum Teil gespeichert, übernehmen
 die Aufgaben darüber und darunter den neuen Status trotzdem, wie beim
-Abhaken; eine, die es nicht tut, nennt die Meldung danach.
+Abhaken; nimmt eine ihn nicht an, sagt die Meldung das danach.
 
 Was du tun kannst: Öffne das Element später noch einmal und ergänze, was
 fehlt.

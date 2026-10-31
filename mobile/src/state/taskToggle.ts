@@ -29,7 +29,20 @@ export async function applyStatusWrites(
   snapshot: Task[],
   autoSelfAssign: boolean,
 ): Promise<void> {
-  if (writes.length === 0) return;
+  const { failures, landed } = await tryStatusWrites(writes, snapshot, autoSelfAssign);
+  if (failures.length > 0) throw failureOfWrites('cascade', failures, landed);
+}
+
+/** [`applyStatusWrites`]'s writes, every one attempted: the failures as they
+ *  came, and whether any write landed. */
+async function tryStatusWrites(
+  writes: StatusWrite[],
+  snapshot: Task[],
+  autoSelfAssign: boolean,
+): Promise<{ failures: unknown[]; landed: boolean }> {
+  const failures: unknown[] = [];
+  let landed = false;
+  if (writes.length === 0) return { failures, landed };
   const byId = new Map(snapshot.map((t) => [t.id, t]));
   const nowIso = new Date().toISOString();
   // The first rejection no longer ends the round. A cascade is N separate
@@ -39,8 +52,6 @@ export async function applyStatusWrites(
   // kept and thrown at the end, so each caller's existing `catch` still
   // announces exactly as before — but where another write landed, it never
   // says "nothing was changed" (decision 277). Mirrors the desktop.
-  const failures: unknown[] = [];
-  let landed = false;
   for (const w of writes) {
     const target = byId.get(w.taskId);
     if (target == null) continue;
@@ -67,7 +78,7 @@ export async function applyStatusWrites(
       failures.push(err);
     }
   }
-  if (failures.length > 0) throw failureOfWrites('cascade', failures, landed);
+  return { failures, landed };
 }
 
 /**
@@ -134,6 +145,48 @@ export async function cascadeEditorStatus(
   list: TaskList | undefined,
   snapshot: Task[],
 ): Promise<void> {
+  const { writes, autoSelfAssign } = await planEditorStatus(
+    taskId,
+    newStatus,
+    listId,
+    list,
+    snapshot,
+  );
+  await applyStatusWrites(writes, snapshot, autoSelfAssign);
+}
+
+/**
+ * [`cascadeEditorStatus`] after a root whose save stood in part with its
+ * status (review rounds 17 and 18 of #128): every write attempted, the
+ * failures as they came, for the editor's sentence — the desktop's
+ * `followFamily`.
+ */
+export async function followEditorStatus(
+  taskId: string,
+  newStatus: TaskStatus,
+  listId: string,
+  list: TaskList | undefined,
+  snapshot: Task[],
+): Promise<unknown[]> {
+  const { writes, autoSelfAssign } = await planEditorStatus(
+    taskId,
+    newStatus,
+    listId,
+    list,
+    snapshot,
+  );
+  return (await tryStatusWrites(writes, snapshot, autoSelfAssign)).failures;
+}
+
+/** The family's writes an editor's status change makes, the root's own left
+ *  out, with the self-assign knob. */
+async function planEditorStatus(
+  taskId: string,
+  newStatus: TaskStatus,
+  listId: string,
+  list: TaskList | undefined,
+  snapshot: Task[],
+): Promise<{ writes: StatusWrite[]; autoSelfAssign: boolean }> {
   const behaviour = await readTaskBehaviour();
   const canInProgress = canStoreInProgress(list);
   const eff = effectiveForList(behaviour, listId);
@@ -141,7 +194,7 @@ export async function cascadeEditorStatus(
     cascadeEnabled: eff.cascade,
     ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   }).filter((w) => w.taskId !== taskId);
-  await applyStatusWrites(writes, snapshot, behaviour.autoSelfAssign);
+  return { writes, autoSelfAssign: behaviour.autoSelfAssign };
 }
 
 // The one shared check-off path for every task surface (TasksScreen + the

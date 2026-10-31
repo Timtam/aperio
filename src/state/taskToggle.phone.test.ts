@@ -77,3 +77,32 @@ describe('the phone status cascade (277)', () => {
     });
   });
 });
+
+describe('the family after a root saved in part with its status', () => {
+  it('tries every write and hands back each failure as it came', async () => {
+    // Review round 18 of #128: wrapped as the cascade's, its reason repeated
+    // the root's sentence, unlike the desktop's.
+    const kid = (id: string) =>
+      ({ ...task(id), parent_id: 'root' }) as unknown as Task;
+    const family = [{ ...task('root'), status: 'completed' } as Task, kid('k1'), kid('k2')];
+    updateTask.mockRejectedValueOnce(BUSY).mockResolvedValueOnce({});
+    const phoneModule = (await import(/* @vite-ignore */ PHONE_TASK_TOGGLE)) as {
+      followEditorStatus: (
+        taskId: string,
+        status: string,
+        listId: string,
+        list: undefined,
+        snapshot: Task[],
+      ) => Promise<unknown[]>;
+    };
+    const failures = await phoneModule.followEditorStatus(
+      'root',
+      'completed',
+      'L1',
+      undefined,
+      family,
+    );
+    expect(failures).toEqual([BUSY]);
+    expect(updateTask).toHaveBeenCalledTimes(2);
+  });
+});

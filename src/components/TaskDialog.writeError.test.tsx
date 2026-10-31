@@ -342,6 +342,10 @@ describe('TaskDialog: a status change whose save stood in part', () => {
     await completeParent();
     const note = await screen.findByText(/Nicht jede Aufgabe darüber oder darunter/);
     expect(note.textContent).toMatch(/^Die Änderung ist nur zum Teil gespeichert/);
+    // The failure's own reason, as on the phone (review round 18 of #128).
+    expect(note.textContent).toContain(
+      'Nicht jede Aufgabe darüber oder darunter hat den neuen Status übernommen: der Anbieter ist gerade ausgelastet.',
+    );
     expect(updates()).toHaveLength(3);
   });
 });

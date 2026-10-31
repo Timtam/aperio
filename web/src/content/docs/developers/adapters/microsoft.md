@@ -71,7 +71,9 @@ flow and token refresh; the adapter sends a `Bearer` token.
   the delete took the task's recurrence with it. A failure of that write
   after the task's own PATCH is `GraphError::PartlySaved` (277). A busy
   DELETE after a landed `/cancel` counts as done, as a 404 does: the meeting
-  is cancelled and off the calendar. A contact search says busy only where
+  is cancelled and off the calendar. Any other failure of that DELETE goes
+  through `after_landed`: the cancellation reached every attendee, so it never
+  reads as "nothing was changed". A contact search says busy only where
   neither source answered. A new contact whose photo upload fails is still
   returned, with `has_photo` false, and the editor says so.
 
