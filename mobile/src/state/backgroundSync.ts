@@ -7,7 +7,12 @@ import * as TaskManager from 'expo-task-manager';
 import CalFfi from '../../modules/cal-ffi';
 
 import { getUserPref } from '../api/prefs';
-import { cacheRefreshStatus, refreshExternalCache, syncNow, syncStatus } from '../api/sync';
+import {
+  cacheRefreshStatus,
+  refreshExternalCacheInBackground,
+  syncNow,
+  syncStatus,
+} from '../api/sync';
 import { logLine } from '../api/logs';
 import { markExternalCachesSettled, rescheduleReminders } from '../reminders/scheduler';
 import { refreshWidgetSnapshot } from './widgetSnapshot';
@@ -61,7 +66,9 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     // evidence on neither side of it.
     const started = Date.now();
     let applied = 0;
-    await refreshExternalCache().catch(() => undefined);
+    // Automatic, so un-forced: nobody asked, and a busy provider or a blip
+    // must fail a second round before it warns (decision 271).
+    await refreshExternalCacheInBackground().catch(() => undefined);
     if ((await syncStatus()).configured) {
       applied = (await syncNow('background')).applied;
     }

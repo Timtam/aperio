@@ -104,7 +104,7 @@ pub use day_start::{
     day_start_json, CarryOverDefault, DayStartIdentity, DayStartListSettings, DayStartMoved,
     DayStartPlan, DayStartQuestion, DayStartReminderGroups, DayStartReminderSettings, DayStartTask,
 };
-pub use error::{Error, Result};
+pub use error::{is_auth_shaped, Error, Result, STATUS_STEP};
 pub use event_anchor::{
     all_day_slot_day, plan_repairs, series_master_id, split_override_id, Anchored, Repair,
     OVERRIDE_ID_MARKER,
@@ -158,8 +158,9 @@ pub use signatures::{
 };
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use step_write::{
-    all_day_deletion_day, deletions_from_today, may_send, step_detail, step_detail_invited,
-    step_detail_why, DeletionsFromToday, SettleBudget, INVITED, OUT_OF_TIME, SERIES_WITH_DELETIONS,
+    all_day_deletion_day, busy_used_up, deletions_from_today, may_send, out_of_time_reason,
+    step_detail, step_detail_invited, step_detail_why, DeletionsFromToday, SettleBudget, INVITED,
+    OUT_OF_TIME, PROVIDER_BUSY, SERIES_WITH_DELETIONS,
 };
 pub use suggestion_decline::SuggestionDecline;
 pub use tail_exceptions::{
@@ -216,7 +217,7 @@ pub use types::{
     Weekday,
 };
 pub use write_leftover::WriteLeftover;
-pub use write_refusal::{SeriesRewrite, WriteRefusal};
+pub use write_refusal::{BusyDetail, SeriesRewrite, WriteRefusal};
 pub use zone_list::{
     listed_zone_labels, zone_choice, zone_choice_json, zone_labels_json, zone_search,
     zone_search_json, ListedOffset, ListedZone, MatchField, OffsetSign, RegionName, ZoneAlias,

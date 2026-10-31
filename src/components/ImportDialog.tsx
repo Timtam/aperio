@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  createRunsInSteps,
   heldSentence,
   heldStatusSentence,
   importedCreate,
@@ -14,6 +15,7 @@ import {
   rechosenForHeld,
   selectableEventCalendars,
   skippedSentence,
+  writeNeverLanded,
 } from '@aperio/shared';
 
 import { FocusableNote } from '../a11y/FocusableNote';
@@ -29,6 +31,7 @@ import { useHeldOnImport } from '../state/useHeldOnImport';
 import { useViewState } from '../state/viewStateContext';
 import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar';
 import { Modal } from './Modal';
+import { useStepWriteWait } from './useStepWriteWait';
 
 interface ImportDialogProps {
   isOpen: boolean;
@@ -114,6 +117,8 @@ function ImportNotice({
 interface ListProgress {
   chosen: Set<number>;
   imported: Set<number>;
+  /** Of `imported`, the rows that stand only in part. */
+  inPart: Set<number>;
   calendarId: string | null;
   /** The answer taken last, so it is not taken again on the way back. */
   answered: { calendarId: string; held: ReadonlySet<number> } | null;
@@ -127,6 +132,7 @@ function progressOf(read: FileImport): ListProgress {
     progress = {
       chosen: new Set(read.events.map((_, i) => i)),
       imported: new Set(),
+      inPart: new Set(),
       calendarId: null,
       answered: null,
     };
@@ -203,6 +209,8 @@ function ImportList({
   const [imported, setImported] = useState<ReadonlySet<number>>(
     () => new Set(progress.imported),
   );
+  const [inPart, setInPart] = useState<ReadonlySet<number>>(() => new Set(progress.inPart));
+  const { waitDialog, wait, hold } = useStepWriteWait();
   const [busy, setBusy] = useState(false);
   // Each notice is a value of its own: the same sentence for a second press
   // is focused and said again.
@@ -294,10 +302,16 @@ function ImportList({
 
   // Into the progress too: the editor's word arrives while the list is
   // unmounted under it.
+  // A row that stands only in part is not offered again either: importing
+  // it again would make it twice (decision 277).
   const markImported = useCallback(
-    (index: number) => {
+    (index: number, onlyInPart = false) => {
       progress.imported.add(index);
       setImported((prev) => new Set(prev).add(index));
+      if (onlyInPart) {
+        progress.inPart.add(index);
+        setInPart((prev) => new Set(prev).add(index));
+      }
     },
     [progress],
   );
@@ -316,7 +330,7 @@ function ImportList({
       calendarId,
       importFrom: event,
       importNote: null,
-      onImported: () => markImported(index),
+      onImported: (inPart) => markImported(index, inPart),
     });
   };
 
@@ -343,34 +357,52 @@ function ImportList({
     setBusy(true);
     setNotice(null);
     const failed: { title: string; err: unknown }[] = [];
+    const standing: { title: string; err: unknown }[] = [];
     let done = 0;
     // One after the other: a provider asked many times at once may turn the
-    // rest away as busy.
+    // rest away as busy. The "please wait" dialog opens at the first series
+    // that needs it and stays until the last is written.
+    const releaseWait = hold();
     for (const { event: entry, index } of toImport) {
       try {
-        await apiCreateEvent(importedCreate(entry, intoOf(entry), calendarId, isHeld(index)), {
-          preserveRecurrenceZone: true,
-        });
+        // A series whose calendar writes its deletions one by one is created
+        // in steps: the "please wait" dialog says so (decisions 227, 265).
+        // Someone else's meeting kept as theirs goes in at once.
+        const create = importedCreate(entry, intoOf(entry), calendarId, isHeld(index));
+        await wait(createRunsInSteps(calendar, create, own), () =>
+          apiCreateEvent(create, { preserveRecurrenceZone: true }),
+        );
         done += 1;
         markImported(index);
       } catch (err) {
-        failed.push({ title: entry.title, err });
+        // Only one that surely never landed is offered again; any other may
+        // stand (decision 277, review round 16 of #128).
+        if (writeNeverLanded(err)) {
+          failed.push({ title: entry.title, err });
+        } else {
+          standing.push({ title: entry.title, err });
+          markImported(index, true);
+        }
       }
     }
+    await releaseWait();
     setBusy(false);
-    if (done > 0) {
+    if (done > 0 || standing.length > 0) {
       writeLastUsedCalendar(calendarId);
       invalidateData();
     }
-    if (failed.length === 0) {
+    if (failed.length === 0 && standing.length === 0) {
       announce(t('fileImport.list.done', { count: done, calendar: calendarName }));
       onClose();
       return;
     }
-    setNotice(partlyImportedSentence(failed, done, toImport.length, calendarName, t));
+    setNotice(
+      partlyImportedSentence(failed, done, toImport.length, calendarName, t, standing),
+    );
   };
 
   return (
+    <>
     <Modal
       isOpen={isOpen}
       // Not while it writes: the outcome has to be said where it is seen.
@@ -423,7 +455,9 @@ function ImportList({
                 {done ? (
                   // A stop of its own, so the reader reaches it in the dialog.
                   <FocusableNote className="import-list__done">
-                    {`${event.title}, ${when(event)}, ${t('fileImport.list.imported')}`}
+                    {`${event.title}, ${when(event)}, ${t(
+                      inPart.has(index) ? 'fileImport.list.importedInPart' : 'fileImport.list.imported',
+                    )}`}
                   </FocusableNote>
                 ) : (
                   <>
@@ -492,5 +526,7 @@ function ImportList({
         </div>
       </div>
     </Modal>
+    {waitDialog}
+    </>
   );
 }

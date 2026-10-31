@@ -355,6 +355,7 @@ fn map_event(d: DeviceEvent) -> Result<Event> {
         None => created_at,
     };
     Ok(Event {
+        original_left_in: None,
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
@@ -498,6 +499,7 @@ fn map_reminder(d: DeviceReminder) -> Result<Task> {
         None => created_at,
     };
     Ok(Task {
+        original_left_in: None,
         id: d.id,
         list_id: d.list_id,
         title: d.title,

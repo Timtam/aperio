@@ -1,7 +1,7 @@
 // Imperative bridge for the "please wait" dialog while a series is created in
-// steps (decisions 227, 265): Exchange takes a new series without its deleted
-// occurrences, and the adapter deletes them again one by one, which can take up
-// to half a minute. The editor, the carry and Move/Copy call `stepWriteWait`
+// steps (decisions 227, 265): the calendar takes a new series without its
+// deleted occurrences, and the adapter removes them again one by one, which can
+// take up to half a minute. The editor, the carry and Move/Copy call `stepWriteWait`
 // around such a write, and each renders its own <StepWriteWaitHost /> inside
 // its screen: on iOS a dialog presents from the screen it is rendered in, and
 // one rendered at the app root could not present over a screen shown as a

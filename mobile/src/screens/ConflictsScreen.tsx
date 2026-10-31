@@ -10,7 +10,12 @@ import {
   View,
 } from 'react-native';
 
-import { groupSyncConflicts, type ConflictGroup } from '@aperio/shared';
+import {
+  type ConflictGroup,
+  groupSyncConflicts,
+  readErrorMessage,
+  writeErrorMessage,
+} from '@aperio/shared';
 
 import { getTaskById, listTaskLists } from '../api/client';
 import {
@@ -43,10 +48,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // label carries the item NAME + (per-field) the field, so a button never reads
 // identically to its siblings. Reading order per card: heading → group actions →
 // per-field details. No Tauri event bus on mobile → re-fetch after each resolve.
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** Conflict values are JSON-encoded scalars; decode for display, null → em-dash. */
 function decodeForDisplay(raw: string | null): string {
@@ -123,11 +124,11 @@ export default function ConflictsScreen({ navigation }: RootStackScreenProps<'Co
       setConflicts(await listSyncConflicts());
       setError(null);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(readErrorMessage(err, t));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // Load on mount + whenever the screen regains focus (a sync round may have
   // recorded more while we were away).
@@ -190,7 +191,7 @@ export default function ConflictsScreen({ navigation }: RootStackScreenProps<'Co
         if (remaining.length > 0) announce(t('dialogs.syncConflicts.resolved'));
       } catch (err) {
         // save_both is intentionally unsupported — surface it assertively.
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(
           choice === 'save_both'
@@ -229,7 +230,7 @@ export default function ConflictsScreen({ navigation }: RootStackScreenProps<'Co
           announce(t('dialogs.syncConflicts.resolvedGroup', { count: ids.size }));
         }
       } catch (err) {
-        const message = errorMessage(err);
+        const message = writeErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
         await load();

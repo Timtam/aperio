@@ -10,6 +10,9 @@ description = "Aperio — Cisco WebEx Meetings REST API adapter (DESIGN.md §11)
 
 [dependencies]
 vc-core.workspace = true
+# The busy-provider token the surfaces translate (decision 270): one source
+# for every adapter.
+cal-core.workspace = true
 async-trait.workspace = true
 base64 = "0.22"
 chrono.workspace = true

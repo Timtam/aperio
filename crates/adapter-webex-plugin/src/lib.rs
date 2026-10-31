@@ -329,7 +329,7 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
                 &redirect_uri,
             )
             .await
-            .map_err(|e| format!("Webex exchange: {e}"))?;
+            .map_err(|e| auth_failure("Webex exchange", e))?;
             serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
         }
         None | Some("full") => {
@@ -342,10 +342,24 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
                 &http,
             )
             .await
-            .map_err(|e| format!("Webex OAuth: {e}"))?;
+            .map_err(|e| auth_failure("Webex OAuth", e))?;
             serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
         }
         Some(other) => Err(format!("unknown interactive_auth phase: {other}")),
+    }
+}
+
+/// A sign-in phase's failure, with the token first where the error carries
+/// one (a busy token endpoint, decision 270), as the Google and Graph plugins
+/// say it (`plugin_sdk::auth_error`); anything else is named by its phase.
+fn auth_failure(phase: &str, err: plugin_sdk::vc_core::VcError) -> String {
+    match err {
+        plugin_sdk::vc_core::VcError::Forbidden(message)
+            if plugin_sdk::cal_core::WriteRefusal::parse(&message).is_some() =>
+        {
+            message
+        }
+        other => format!("{phase}: {other}"),
     }
 }
 
@@ -372,6 +386,22 @@ plugin_sdk::declare_lifecycle! {
 
 #[cfg(test)]
 mod tests {
+    /// A busy token endpoint keeps its token first in the auth failure the
+    /// host carries, so the surfaces say the provider is busy, not "sign in
+    /// again" (decision 270); any other failure is named by its phase.
+    #[test]
+    fn a_busy_sign_in_keeps_its_token_first() {
+        let busy = plugin_sdk::vc_core::VcError::Forbidden(
+            plugin_sdk::cal_core::WriteRefusal::ProviderBusy
+                .message(plugin_sdk::cal_core::BusyDetail::TooManyRequests.word()),
+        );
+        assert_eq!(
+            super::auth_failure("Webex OAuth", busy),
+            "provider-busy: http-429"
+        );
+        let other = plugin_sdk::vc_core::VcError::Network("reset".into());
+        assert!(super::auth_failure("Webex OAuth", other).starts_with("Webex OAuth: "));
+    }
 
     /// The manifest ships beside this crate and is the ONLY thing that tells
     /// the host how to set up a Webex account. Parsing it here means a typo

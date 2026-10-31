@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 
-import { isBirthdayCalendarId } from '@aperio/shared';
+import { isBirthdayCalendarId, readErrorMessage, writeErrorMessage } from '@aperio/shared';
 import type { ColorLabel } from '@aperio/shared';
 
 import { listAccounts, type Account } from '../api/accounts';
@@ -42,10 +42,6 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 // for the reader, an unchanged surface for everyone else.
 
 const LOCAL = 'local';
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function CalendarsScreen({
   navigation,
@@ -106,9 +102,9 @@ export default function CalendarsScreen({
       setColorLabels(labels);
       setAccountNames(new Map(accounts.map((a) => [a.id, a.display_name])));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(readErrorMessage(err, t));
     }
-  }, []);
+  }, [t]);
 
   // Reload on mount + whenever the screen regains focus (after the editor
   // renames / recolours / deletes a calendar).
@@ -144,7 +140,7 @@ export default function CalendarsScreen({
       pendingFocusId.current = created.id;
       announce(t('sidebar.calendarCreated', { name }));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = writeErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {

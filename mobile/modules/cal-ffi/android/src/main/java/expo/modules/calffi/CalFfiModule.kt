@@ -181,72 +181,53 @@ class CalFfiModule : Module() {
   }
 
   /**
-   * Re-throw a sync failure with its code intact.
+   * Re-throw any failure of the Rust host with the desktop's code and its own
+   * message (decision 273; TODO B9).
    *
-   * A `StoreException.Sync` carries the engine's own stable code, but Expo
-   * turns an unmapped exception into a JS error whose message is Kotlin's
-   * `toString()` — "code=auth, detail=..." — which the JS side can only show
-   * verbatim. So the phone printed the engine's English while the desktop,
-   * branching on that same code, showed a translated sentence.
+   * Expo turns an unmapped exception into a JS error whose message is
+   * Kotlin's `toString()` — "detail=provider-busy: http-429" — under a
+   * generic code, so the shared translator matched nothing: a refusal or a
+   * leftover token was read out in English, and a sync failure showed the
+   * engine's text. `CodedException` is the shape Expo surfaces as
+   * `error.code`. The codes are the desktop's (`CommandError`), so one
+   * translator serves both surfaces; a sync failure keeps the engine's own.
    *
-   * `CodedException` is the shape Expo surfaces as `error.code`, so the mobile
-   * frontend can map it exactly the way `useSyncErrorMessage` does on desktop.
-   * Everything else falls through untouched — a `StoreException.NotFound` was
-   * never the problem.
+   * NOT inline: every registration that calls the host wraps its body in it
+   * (check-ffi-bridges.mjs fails one that does not), and an inlined try/catch
+   * in each would grow the module's methods toward the JVM's 64 KB cap.
    */
-  private inline fun <T> coded(block: () -> T): T =
+  private fun <T> hostCoded(block: () -> T): T =
     try {
       block()
-    } catch (e: StoreException.Sync) {
-      throw CodedException(e.code, e.detail, e)
+    } catch (e: StoreException) {
+      throw when (e) {
+        is StoreException.Sync -> CodedException(e.code, e.detail, e)
+        is StoreException.Auth -> CodedException("auth", e.detail, e)
+        is StoreException.Forbidden -> CodedException("forbidden", e.detail, e)
+        is StoreException.NotFound -> CodedException("not_found", "not found", e)
+        is StoreException.Conflict -> CodedException("conflict", e.detail, e)
+        is StoreException.Network -> CodedException("network", e.detail, e)
+        is StoreException.Protocol -> CodedException("protocol", e.detail, e)
+        is StoreException.InvalidField ->
+          CodedException("invalid_input", "${e.field}: ${e.detail}", e)
+        is StoreException.Unsupported -> CodedException("unsupported", e.detail, e)
+        is StoreException.Open -> CodedException("internal", e.detail, e)
+        is StoreException.Storage -> CodedException("internal", e.detail, e)
+      }
     }
 
   /**
-   * Re-throw the ONE refusal a grouping request can meet with a code.
-   *
-   * `Conflict` is generic across the store, but at THIS call site it can only
-   * be one thing: both named events are already in different groups. The
-   * frontend has to say that sentence — "take one of them out first" — and it
-   * cannot, if all that arrives is an exception's `toString()`.
+   * [hostCoded] for a grouping request, whose one conflict can only mean that
+   * both named events are already in different groups: a sentence of its own
+   * ("take one of them out first").
    */
-  /**
-   * Re-throw a refused event write with its code and its own message.
-   *
-   * An adapter says WHY it refused with a token the surfaces translate
-   * (`cal_core::WriteRefusal`: "reply-only-invitation: title"), and the
-   * desktop's Tauri layer hands that text over with a code. Without this the
-   * phone got Kotlin's `toString()` — "detail=reply-only-invitation: title" —
-   * under Expo's generic `ERR_UNEXPECTED`, so the shared translator matched
-   * nothing and a blind user heard the English token read out.
-   *
-   * The codes are the desktop's (`forbidden`, `conflict`, `network`), so one
-   * translator serves both surfaces. A refused read (`cal_core::ReadRefusal`,
-   * the assignee pool) goes through here too.
-   */
-  private inline fun <T> eventCoded(block: () -> T): T =
-    try {
-      block()
-    } catch (e: StoreException.Forbidden) {
-      throw CodedException("forbidden", e.detail, e)
-    } catch (e: StoreException.Conflict) {
-      throw CodedException("conflict", e.detail, e)
-    } catch (e: StoreException.Network) {
-      throw CodedException("network", e.detail, e)
-    }
-
-  // A refused task write keeps its code — only a refusal (see the Swift twin).
-  private inline fun <T> refusalCoded(block: () -> T): T =
-    try {
-      block()
-    } catch (e: StoreException.Forbidden) {
-      throw CodedException("forbidden", e.detail, e)
-    }
-
-  private inline fun <T> groupCoded(block: () -> T): T =
-    try {
-      block()
-    } catch (e: StoreException.Conflict) {
-      throw CodedException("event_group_conflict", e.detail, e)
+  private fun <T> groupCoded(block: () -> T): T =
+    hostCoded {
+      try {
+        block()
+      } catch (e: StoreException.Conflict) {
+        throw CodedException("event_group_conflict", e.detail, e)
+      }
     }
 
   /**
@@ -255,16 +236,16 @@ class CalFfiModule : Module() {
    * `invalid_input` (unreadable, or too large: the detail then starts with
    * `import-too-large`), `internal` (not opened). The shared
    * `importFailureSentence` says why from these, in the reader's language.
+   * Every other error keeps its code through [hostCoded] (decision 273).
    */
-  private inline fun <T> importCoded(block: () -> T): T =
-    try {
-      block()
-    } catch (e: StoreException.Unsupported) {
-      throw CodedException("unsupported", e.detail, e)
-    } catch (e: StoreException.InvalidField) {
-      throw CodedException("invalid_input", e.detail, e)
-    } catch (e: StoreException.Storage) {
-      throw CodedException("internal", e.detail, e)
+  private fun <T> importCoded(block: () -> T): T =
+    hostCoded {
+      try {
+        block()
+      } catch (e: StoreException.InvalidField) {
+        // The detail alone: it starts with `import-too-large` when it is that.
+        throw CodedException("invalid_input", e.detail, e)
+      }
     }
 
   // Split across several `ModuleDefinitionBuilder` extensions rather than one
@@ -342,7 +323,9 @@ class CalFfiModule : Module() {
     // Number → widen the Int to the Rust u32.
 
     AsyncFunction("upcomingRemindersJson") { horizonMinutes: Int ->
-      host.upcomingRemindersJson(horizonMinutes.toUInt())
+      hostCoded {
+        host.upcomingRemindersJson(horizonMinutes.toUInt())
+      }
     }
 
     soundFunctions()
@@ -640,58 +623,78 @@ class CalFfiModule : Module() {
     // StoreException rejects the JS promise.
 
     AsyncFunction("taskListsJson") {
-      host.taskListsJson()
+      hostCoded {
+        host.taskListsJson()
+      }
     }
 
     AsyncFunction("createTaskListJson") { name: String ->
-      host.createTaskListJson(name)
+      hostCoded {
+        host.createTaskListJson(name)
+      }
     }
 
     AsyncFunction("reparentTaskList") { id: String, parentId: String? ->
-      host.reparentTaskList(id, parentId)
+      hostCoded {
+        host.reparentTaskList(id, parentId)
+      }
     }
 
     AsyncFunction("deleteTaskList") { id: String ->
-      host.deleteTaskList(id)
+      hostCoded {
+        host.deleteTaskList(id)
+      }
     }
 
     AsyncFunction("tasksJson") { listId: String ->
-      host.tasksJson(listId)
+      hostCoded {
+        host.tasksJson(listId)
+      }
     }
 
     AsyncFunction("taskJson") { id: String ->
-      host.taskJson(id)
+      hostCoded {
+        host.taskJson(id)
+      }
     }
 
     AsyncFunction("createTaskJson") { listId: String, newTaskJson: String ->
-      refusalCoded { host.createTaskJson(listId, newTaskJson) }
+      hostCoded { host.createTaskJson(listId, newTaskJson) }
     }
 
     AsyncFunction("updateTaskJson") { taskJson: String, previousListId: String? ->
-      refusalCoded { host.updateTaskJson(taskJson, previousListId) }
+      hostCoded { host.updateTaskJson(taskJson, previousListId) }
     }
 
     AsyncFunction("deleteTask") { taskId: String, listId: String? ->
-      refusalCoded { host.deleteTask(taskId, listId) }
+      hostCoded { host.deleteTask(taskId, listId) }
     }
 
     AsyncFunction("sectionsJson") { listId: String ->
-      host.sectionsJson(listId)
+      hostCoded {
+        host.sectionsJson(listId)
+      }
     }
 
     // `position` arrives from JS as a Number; the Rust signature takes a u32
     // (Kotlin UInt), which Expo can't coerce a JS Number to directly, so take
     // an Int and widen it here.
     AsyncFunction("createSectionJson") { listId: String, name: String, position: Int, colorLabel: String? ->
-      host.createSectionJson(listId, name, position.toUInt(), colorLabel)
+      hostCoded {
+        host.createSectionJson(listId, name, position.toUInt(), colorLabel)
+      }
     }
 
     AsyncFunction("updateSectionJson") { sectionJson: String ->
-      host.updateSectionJson(sectionJson)
+      hostCoded {
+        host.updateSectionJson(sectionJson)
+      }
     }
 
     AsyncFunction("deleteSection") { id: String, listId: String? ->
-      host.deleteSection(id, listId)
+      hostCoded {
+        host.deleteSection(id, listId)
+      }
     }
   }
 
@@ -704,31 +707,45 @@ class CalFfiModule : Module() {
     // StoreException rejects the JS promise.
 
     AsyncFunction("accountsJson") { lang: String? ->
-      host.accountsJson(lang)
+      hostCoded {
+        host.accountsJson(lang)
+      }
     }
 
     AsyncFunction("createAccountJson") { requestJson: String ->
-      host.createAccountJson(requestJson)
+      hostCoded {
+        host.createAccountJson(requestJson)
+      }
     }
 
     AsyncFunction("testAccountJson") { requestJson: String ->
-      host.testAccountJson(requestJson)
+      hostCoded {
+        host.testAccountJson(requestJson)
+      }
     }
 
     AsyncFunction("testAccountValuesJson") { requestJson: String ->
-      host.testAccountValuesJson(requestJson)
+      hostCoded {
+        host.testAccountValuesJson(requestJson)
+      }
     }
 
     AsyncFunction("runAccountActionJson") { requestJson: String ->
-      host.runAccountActionJson(requestJson)
+      hostCoded {
+        host.runAccountActionJson(requestJson)
+      }
     }.runOnQueue(slowScope)
 
     AsyncFunction("deleteAccount") { accountId: String ->
-      host.deleteAccount(accountId)
+      hostCoded {
+        host.deleteAccount(accountId)
+      }
     }
 
     AsyncFunction("renameAccountJson") { id: String, newName: String ->
-      host.renameAccountJson(id, newName)
+      hostCoded {
+        host.renameAccountJson(id, newName)
+      }
     }
 
     // Uniform JS surface with iOS. Nothing on Android calls it: the RN layer
@@ -736,7 +753,9 @@ class CalFfiModule : Module() {
     // each request through `noteDeviceCalendarAsked`. If called, the bridge only
     // reports whether READ_CALENDAR is granted.
     AsyncFunction("requestDeviceCalendarAccess") { events: Boolean, reminders: Boolean ->
-      host.requestDeviceCalendarAccess(events, reminders)
+      hostCoded {
+        host.requestDeviceCalendarAccess(events, reminders)
+      }
     }
 
     // What the OS allows for the device calendars, and whether to ask now
@@ -744,7 +763,9 @@ class CalFfiModule : Module() {
     // record (see `noteDeviceCalendarAsked`): the start check asks once per
     // device.
     AsyncFunction("deviceCalendarAccessJson") {
-      host.deviceCalendarAccessJson()
+      hostCoded {
+        host.deviceCalendarAccessJson()
+      }
     }
 
     // Aperio asked for the calendar permission on this device (decision 172).
@@ -758,15 +779,21 @@ class CalFfiModule : Module() {
     // + cached window, then kicks a warm pass). The recovery action for a "stuck"
     // external cache; credentials are untouched.
     AsyncFunction("resetAccountSync") { accountId: String ->
-      host.resetAccountSync(accountId)
+      hostCoded {
+        host.resetAccountSync(accountId)
+      }
     }
 
     AsyncFunction("listAccountsMissingCredentialsJson") { lang: String? ->
-      host.listAccountsMissingCredentialsJson(lang)
+      hostCoded {
+        host.listAccountsMissingCredentialsJson(lang)
+      }
     }
 
     AsyncFunction("setAccountSecret") { accountId: String, secret: String ->
-      host.setAccountSecret(accountId, secret)
+      hostCoded {
+        host.setAccountSecret(accountId, secret)
+      }
     }
   }
 
@@ -779,43 +806,55 @@ class CalFfiModule : Module() {
     // …) the mobile api-client maps.
 
     AsyncFunction("listCalendarsJson") {
-      host.listCalendarsJson()
+      hostCoded {
+        host.listCalendarsJson()
+      }
     }
 
     AsyncFunction("createCalendarJson") { requestJson: String ->
-      host.createCalendarJson(requestJson)
+      hostCoded {
+        host.createCalendarJson(requestJson)
+      }
     }
 
     AsyncFunction("deleteCalendar") { id: String ->
-      host.deleteCalendar(id)
+      hostCoded {
+        host.deleteCalendar(id)
+      }
     }
 
     AsyncFunction("getEventsJson") { requestJson: String ->
-      host.getEventsJson(requestJson)
+      hostCoded {
+        host.getEventsJson(requestJson)
+      }
     }
 
     AsyncFunction("getEventByIdJson") { id: String, calendarId: String? ->
-      host.getEventByIdJson(id, calendarId)
+      hostCoded {
+        host.getEventByIdJson(id, calendarId)
+      }
     }
 
     AsyncFunction("queryFreeBusyJson") { requestJson: String ->
-      host.queryFreeBusyJson(requestJson)
+      hostCoded {
+        host.queryFreeBusyJson(requestJson)
+      }
     }.runOnQueue(slowScope)
 
     AsyncFunction("createEventJson") { requestJson: String ->
-      eventCoded { host.createEventJson(requestJson) }
+      hostCoded { host.createEventJson(requestJson) }
     }
 
     AsyncFunction("updateEventJson") { eventJson: String, previousCalendarId: String? ->
-      eventCoded { host.updateEventJson(eventJson, previousCalendarId) }
+      hostCoded { host.updateEventJson(eventJson, previousCalendarId) }
     }
 
     AsyncFunction("deleteEvent") { id: String, calendarId: String?, sendCancellations: Boolean? ->
-      eventCoded { host.deleteEvent(id, calendarId, sendCancellations) }
+      hostCoded { host.deleteEvent(id, calendarId, sendCancellations) }
     }
 
     AsyncFunction("addEventExdateJson") { id: String, occurrence: String, calendarId: String?, sendCancellations: Boolean ->
-      eventCoded { host.addEventExdateJson(id, occurrence, calendarId, sendCancellations) }
+      hostCoded { host.addEventExdateJson(id, occurrence, calendarId, sendCancellations) }
     }
   }
 
@@ -825,7 +864,7 @@ class CalFfiModule : Module() {
     // one file read through the plugin for its format. Nothing is written.
 
     AsyncFunction("fileImportFormatsJson") { lang: String ->
-      host.fileImportFormatsJson(lang)
+      hostCoded { host.fileImportFormatsJson(lang) }
     }
 
     AsyncFunction("readImportFileJson") { path: String ->
@@ -956,65 +995,95 @@ class CalFfiModule : Module() {
     // sync event Rust-side so it propagates across devices.
 
     AsyncFunction("getUserPref") { key: String ->
-      host.getUserPref(key)
+      hostCoded {
+        host.getUserPref(key)
+      }
     }
 
     AsyncFunction("setUserPref") { key: String, value: String ->
-      host.setUserPref(key, value)
+      hostCoded {
+        host.setUserPref(key, value)
+      }
     }
 
     AsyncFunction("deleteUserPref") { key: String ->
-      host.deleteUserPref(key)
+      hostCoded {
+        host.deleteUserPref(key)
+      }
     }
 
     // ─── Colour labels (app-wide palette; local-only, always synced) ──────────
 
     AsyncFunction("listDayMarkersJson") { ->
-      host.listDayMarkersJson()
+      hostCoded {
+        host.listDayMarkersJson()
+      }
     }
 
     AsyncFunction("createDayMarkerJson") { name: String, symbol: String?, colorLabel: String? ->
-      host.createDayMarkerJson(name, symbol, colorLabel)
+      hostCoded {
+        host.createDayMarkerJson(name, symbol, colorLabel)
+      }
     }
 
     AsyncFunction("updateDayMarkerJson") { markerJson: String ->
-      host.updateDayMarkerJson(markerJson)
+      hostCoded {
+        host.updateDayMarkerJson(markerJson)
+      }
     }
 
     AsyncFunction("deleteDayMarker") { id: String ->
-      host.deleteDayMarker(id)
+      hostCoded {
+        host.deleteDayMarker(id)
+      }
     }
 
     AsyncFunction("dayLogJson") { day: String ->
-      host.dayLogJson(day)
+      hostCoded {
+        host.dayLogJson(day)
+      }
     }
 
     AsyncFunction("dayLogsInRangeJson") { from: String, to: String ->
-      host.dayLogsInRangeJson(from, to)
+      hostCoded {
+        host.dayLogsInRangeJson(from, to)
+      }
     }
 
     AsyncFunction("setDayLogJson") { logJson: String ->
-      host.setDayLogJson(logJson)
+      hostCoded {
+        host.setDayLogJson(logJson)
+      }
     }
 
     AsyncFunction("listColorLabelsJson") { ->
-      host.listColorLabelsJson()
+      hostCoded {
+        host.listColorLabelsJson()
+      }
     }
 
     AsyncFunction("createColorLabelJson") { name: String, hex: String ->
-      host.createColorLabelJson(name, hex)
+      hostCoded {
+        host.createColorLabelJson(name, hex)
+      }
     }
 
     AsyncFunction("getOrCreateAdHocColorLabelJson") { hex: String ->
-      host.getOrCreateAdHocColorLabelJson(hex)
+      hostCoded {
+        host.getOrCreateAdHocColorLabelJson(hex)
+      }
     }
 
     AsyncFunction("updateColorLabelJson") { labelJson: String ->
-      host.updateColorLabelJson(labelJson)
+      hostCoded {
+        host.updateColorLabelJson(labelJson)
+      }
     }
 
     AsyncFunction("deleteColorLabel") { id: String ->
-      host.deleteColorLabel(id)
+      hostCoded {
+        host.deleteColorLabel(id)
+      }
     }
 
     AsyncFunction("groupEventsJson") { membersJson: String ->
@@ -1022,68 +1091,98 @@ class CalFfiModule : Module() {
     }
 
     AsyncFunction("ungroupEventJson") { calendarId: String, eventId: String, bookkeeping: Boolean ->
-      host.ungroupEventJson(calendarId, eventId, bookkeeping)
+      hostCoded {
+        host.ungroupEventJson(calendarId, eventId, bookkeeping)
+      }
     }
 
     AsyncFunction("dissolveEventGroup") { groupId: String ->
-      host.dissolveEventGroup(groupId)
+      hostCoded {
+        host.dissolveEventGroup(groupId)
+      }
     }
 
     AsyncFunction("eventGroupsForEventsJson") { eventsJson: String ->
-      host.eventGroupsForEventsJson(eventsJson)
+      hostCoded {
+        host.eventGroupsForEventsJson(eventsJson)
+      }
     }
 
     AsyncFunction("declineGroupSuggestionJson") { firstJson: String, secondJson: String ->
-      host.declineGroupSuggestionJson(firstJson, secondJson)
+      hostCoded {
+        host.declineGroupSuggestionJson(firstJson, secondJson)
+      }
     }
 
     AsyncFunction("groupSuggestionDeclinesJson") { ->
-      host.groupSuggestionDeclinesJson()
+      hostCoded {
+        host.groupSuggestionDeclinesJson()
+      }
     }
 
     // Reminders Aperio keeps for one event and tells no provider about
     // (migration 0043).
     AsyncFunction("eventLocalRemindersJson") {
-      host.eventLocalRemindersJson()
+      hostCoded {
+        host.eventLocalRemindersJson()
+      }
     }
 
     AsyncFunction("setEventLocalRemindersJson") {
       calendarId: String, eventId: String, remindersJson: String, title: String, startsAt: String ->
-      host.setEventLocalRemindersJson(calendarId, eventId, remindersJson, title, startsAt)
+      hostCoded {
+        host.setEventLocalRemindersJson(calendarId, eventId, remindersJson, title, startsAt)
+      }
     }
 
     AsyncFunction("healEventLocalReminders") {
       calendarId: String, oldEventId: String, newEventId: String ->
-      host.healEventLocalReminders(calendarId, oldEventId, newEventId)
+      hostCoded {
+        host.healEventLocalReminders(calendarId, oldEventId, newEventId)
+      }
     }
 
     AsyncFunction("refreshEventLocalReminderSignature") {
       calendarId: String, eventId: String, title: String, startsAt: String ->
-      host.refreshEventLocalReminderSignature(calendarId, eventId, title, startsAt)
+      hostCoded {
+        host.refreshEventLocalReminderSignature(calendarId, eventId, title, startsAt)
+      }
     }
 
     AsyncFunction("setContainerColorLabel") { containerId: String, kind: String, colorLabelId: String? ->
-      host.setContainerColorLabel(containerId, kind, colorLabelId)
+      hostCoded {
+        host.setContainerColorLabel(containerId, kind, colorLabelId)
+      }
     }
 
     AsyncFunction("renameContainer") { containerId: String, kind: String, name: String ->
-      host.renameContainer(containerId, kind, name)
+      hostCoded {
+        host.renameContainer(containerId, kind, name)
+      }
     }
 
     AsyncFunction("setSectionColor") { sectionId: String, listId: String, colorLabelId: String? ->
-      host.setSectionColor(sectionId, listId, colorLabelId)
+      hostCoded {
+        host.setSectionColor(sectionId, listId, colorLabelId)
+      }
     }
 
     AsyncFunction("setEventColor") { eventId: String, calendarId: String, colorLabelId: String? ->
-      host.setEventColor(eventId, calendarId, colorLabelId)
+      hostCoded {
+        host.setEventColor(eventId, calendarId, colorLabelId)
+      }
     }
 
     AsyncFunction("searchJson") { query: String, filtersJson: String ->
-      host.searchJson(query, filtersJson)
+      hostCoded {
+        host.searchJson(query, filtersJson)
+      }
     }
 
     AsyncFunction("searchContactsJson") { query: String ->
-      host.searchContactsJson(query)
+      hostCoded {
+        host.searchContactsJson(query)
+      }
     }
   }
 
@@ -1096,41 +1195,55 @@ class CalFfiModule : Module() {
     // the new status.
 
     AsyncFunction("calendarCurrentUserEmail") { calendarId: String ->
-      host.calendarCurrentUserEmail(calendarId)
+      hostCoded {
+        host.calendarCurrentUserEmail(calendarId)
+      }
     }
 
     AsyncFunction("respondToEvent") { calendarId: String, eventId: String, status: String, sendResponse: Boolean ->
-      eventCoded { host.respondToEvent(calendarId, eventId, status, sendResponse) }
+      hostCoded { host.respondToEvent(calendarId, eventId, status, sendResponse) }
     }
 
     // Coded, so a refused read keeps its token (`cal_core::ReadRefusal`) and
     // the editor can say which permission the account's token lacks.
     AsyncFunction("taskListMembersJson") { listId: String ->
-      eventCoded { host.taskListMembersJson(listId) }
+      hostCoded { host.taskListMembersJson(listId) }
     }
 
     AsyncFunction("taskCurrentUserJson") { listId: String ->
-      host.taskCurrentUserJson(listId)
+      hostCoded {
+        host.taskCurrentUserJson(listId)
+      }
     }
 
     AsyncFunction("taskListSharesJson") { listId: String ->
-      host.taskListSharesJson(listId)
+      hostCoded {
+        host.taskListSharesJson(listId)
+      }
     }
 
     AsyncFunction("taskSearchUsersJson") { listId: String, query: String ->
-      host.taskSearchUsersJson(listId, query)
+      hostCoded {
+        host.taskSearchUsersJson(listId, query)
+      }
     }
 
     AsyncFunction("taskAddMember") { listId: String, memberRef: String, right: String? ->
-      host.taskAddMember(listId, memberRef, right)
+      hostCoded {
+        host.taskAddMember(listId, memberRef, right)
+      }
     }
 
     AsyncFunction("taskRemoveMember") { listId: String, memberRef: String ->
-      host.taskRemoveMember(listId, memberRef)
+      hostCoded {
+        host.taskRemoveMember(listId, memberRef)
+      }
     }
 
     AsyncFunction("taskSetMemberRight") { listId: String, memberRef: String, right: String ->
-      host.taskSetMemberRight(listId, memberRef, right)
+      hostCoded {
+        host.taskSetMemberRight(listId, memberRef, right)
+      }
     }
   }
 
@@ -1142,7 +1255,9 @@ class CalFfiModule : Module() {
     // creation) follows in a later phase.
 
     AsyncFunction("beginOauthJson") { pluginId: String, argsJson: String ->
-      host.beginOauthJson(pluginId, argsJson)
+      hostCoded {
+        host.beginOauthJson(pluginId, argsJson)
+      }
     }
 
 
@@ -1153,7 +1268,9 @@ class CalFfiModule : Module() {
     // StoreException rejects the JS promise with the plugin's actionable message.
 
     AsyncFunction("discoverJson") { pluginId: String, argsJson: String ->
-      host.discoverJson(pluginId, argsJson)
+      hostCoded {
+        host.discoverJson(pluginId, argsJson)
+      }
     }.runOnQueue(slowScope)
 
     // ─── Sync-target OAuth (Dropbox / Google Drive) ───────────────────────────
@@ -1162,7 +1279,9 @@ class CalFfiModule : Module() {
     // then calls configureSyncAdapterJson({kind:"dropbox"|"googledrive", …}).
 
     AsyncFunction("completeSyncOauthJson") { pluginId: String, requestJson: String ->
-      host.completeSyncOauthJson(pluginId, requestJson)
+      hostCoded {
+        host.completeSyncOauthJson(pluginId, requestJson)
+      }
     }.runOnQueue(slowScope)
 
     // ─── E2E sync encryption (§19.7) ──────────────────────────────────────────
@@ -1170,26 +1289,26 @@ class CalFfiModule : Module() {
     // write the encrypted dataset, encrypt every subsequent round).
 
     AsyncFunction("enableSyncEncryptionJson") { passphrase: String ->
-      coded { host.enableSyncEncryptionJson(passphrase) }
+      hostCoded { host.enableSyncEncryptionJson(passphrase) }
     }.runOnQueue(slowScope)
 
     // disableSyncEncryptionJson turns E2E OFF: rewrites every log + snapshot as
     // plaintext, flips the meta, drops the device key (other devices re-onboard).
     AsyncFunction("disableSyncEncryptionJson") { passphrase: String ->
-      coded { host.disableSyncEncryptionJson(passphrase) }
+      hostCoded { host.disableSyncEncryptionJson(passphrase) }
     }.runOnQueue(slowScope)
 
     // changeSyncPassphraseJson rotates the E2E passphrase (re-wraps the same
     // data key; existing devices keep working, future joins need the new one).
     AsyncFunction("changeSyncPassphraseJson") { oldPassphrase: String, newPassphrase: String ->
-      coded { host.changeSyncPassphraseJson(oldPassphrase, newPassphrase) }
+      hostCoded { host.changeSyncPassphraseJson(oldPassphrase, newPassphrase) }
     }.runOnQueue(slowScope)
 
     // adoptRemoteEncryptionJson: a peer turned E2E on while this device synced
     // plaintext; derive the key from the passphrase + swap to an encrypting
     // adapter so the next round (which had failed with encryption_required) works.
     AsyncFunction("adoptRemoteEncryptionJson") { passphrase: String ->
-      coded { host.adoptRemoteEncryptionJson(passphrase) }
+      hostCoded { host.adoptRemoteEncryptionJson(passphrase) }
     }.runOnQueue(slowScope)
   }
 
@@ -1200,122 +1319,176 @@ class CalFfiModule : Module() {
     // report; a thrown StoreException rejects the JS promise.
 
     AsyncFunction("configureSyncAdapterJson") { configJson: String ->
-      coded { host.configureSyncAdapterJson(configJson) }
+      hostCoded { host.configureSyncAdapterJson(configJson) }
     }.runOnQueue(slowScope)
 
     // The sync SCREEN's verb: point this device at an account it already has.
     // Probes the target before it commits, so it belongs on the slow queue with
     // the other network-touching calls.
     AsyncFunction("selectSyncAccount") { accountId: String ->
-      coded { host.selectSyncAccount(accountId) }
+      hostCoded { host.selectSyncAccount(accountId) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("syncStatusJson") {
-      coded { host.syncStatusJson() }
+      hostCoded { host.syncStatusJson() }
     }
 
     AsyncFunction("syncNowJson") { trigger: String ->
-      coded { host.syncNowJson(trigger) }
+      hostCoded { host.syncNowJson(trigger) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("disconnectSync") {
-      host.disconnectSync()
+      hostCoded {
+        host.disconnectSync()
+      }
     }
 
     AsyncFunction("getSyncAdapterSummaryJson") {
-      host.getSyncAdapterSummaryJson()
+      hostCoded {
+        host.getSyncAdapterSummaryJson()
+      }
     }
 
     AsyncFunction("pushNow") { trigger: String ->
-      host.pushNow(trigger).toInt()
+      hostCoded {
+        host.pushNow(trigger).toInt()
+      }
     }.runOnQueue(slowScope)
 
     AsyncFunction("listSyncLogJson") { limit: Int ->
-      host.listSyncLogJson(limit.toUInt())
+      hostCoded {
+        host.listSyncLogJson(limit.toUInt())
+      }
     }
 
     AsyncFunction("clearSyncLog") {
-      host.clearSyncLog()
+      hostCoded {
+        host.clearSyncLog()
+      }
     }
 
     AsyncFunction("compactNowJson") {
-      coded { host.compactNowJson() }
+      hostCoded { host.compactNowJson() }
     }.runOnQueue(slowScope)
 
     AsyncFunction("refreshExternalCache") {
-      host.refreshExternalCache()
+      hostCoded {
+        host.refreshExternalCache()
+      }
+    }
+
+    AsyncFunction("refreshAccountCache") { accountId: String ->
+      hostCoded {
+        host.refreshAccountCache(accountId)
+      }
+    }
+
+    AsyncFunction("refreshExternalCacheInBackground") {
+      hostCoded {
+        host.refreshExternalCacheInBackground()
+      }
     }
 
     AsyncFunction("getCacheRefreshStatusJson") {
-      host.getCacheRefreshStatusJson()
+      hostCoded {
+        host.getCacheRefreshStatusJson()
+      }
     }
 
     // Per-account refresh-error surface (silent-staleness warning).
     AsyncFunction("refreshErrorsJson") {
-      host.refreshErrorsJson()
+      hostCoded {
+        host.refreshErrorsJson()
+      }
     }
 
     AsyncFunction("warmCacheOnForeground") {
-      host.warmCacheOnForeground()
+      hostCoded {
+        host.warmCacheOnForeground()
+      }
     }
 
     // Contact sync (§10.5). The pass is driven from JS (manual button /
     // foreground); the interval + include-read-only prefs are device-local.
     AsyncFunction("syncContactsNow") { includeReadOnly: Boolean? ->
-      coded { host.syncContactsNow(includeReadOnly) }
+      hostCoded { host.syncContactsNow(includeReadOnly) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("getContactsSyncStatusJson") {
-      host.getContactsSyncStatusJson()
+      hostCoded {
+        host.getContactsSyncStatusJson()
+      }
     }
 
     AsyncFunction("setContactsSyncInterval") { minutes: Int ->
-      host.setContactsSyncInterval(minutes.toUInt()).toInt()
+      hostCoded {
+        host.setContactsSyncInterval(minutes.toUInt()).toInt()
+      }
     }
 
     AsyncFunction("setContactsIncludeReadOnlyOnSync") { enabled: Boolean ->
-      host.setContactsIncludeReadOnlyOnSync(enabled)
+      hostCoded {
+        host.setContactsIncludeReadOnlyOnSync(enabled)
+      }
     }
 
     AsyncFunction("clearContactsCache") {
-      host.clearContactsCache().toInt()
+      hostCoded {
+        host.clearContactsCache().toInt()
+      }
     }
 
     // Diagnostics / logs (§ Diagnostics).
     AsyncFunction("getLogLevel") {
-      host.getLogLevel()
+      hostCoded {
+        host.getLogLevel()
+      }
     }
 
     AsyncFunction("setLogLevel") { level: String ->
-      host.setLogLevel(level)
+      hostCoded {
+        host.setLogLevel(level)
+      }
     }
 
     AsyncFunction("getRecentLogs") { lines: Int? ->
-      host.getRecentLogs(lines?.toUInt())
+      hostCoded {
+        host.getRecentLogs(lines?.toUInt())
+      }
     }
 
     AsyncFunction("collectLogs") { redact: Boolean? ->
-      host.collectLogs(redact)
+      hostCoded {
+        host.collectLogs(redact)
+      }
     }
 
     AsyncFunction("clearLogs") {
-      host.clearLogs()
+      hostCoded {
+        host.clearLogs()
+      }
     }
 
     AsyncFunction("logsDirPath") {
-      host.logsDirPath()
+      hostCoded {
+        host.logsDirPath()
+      }
     }
 
     AsyncFunction("syncConflictCount") {
-      coded { host.syncConflictCount().toInt() }
+      hostCoded { host.syncConflictCount().toInt() }
     }
 
     AsyncFunction("listSyncConflictsJson") {
-      host.listSyncConflictsJson()
+      hostCoded {
+        host.listSyncConflictsJson()
+      }
     }
 
     AsyncFunction("resolveSyncConflict") { id: Int, choice: String ->
-      host.resolveSyncConflict(id.toLong(), choice)
+      hostCoded {
+        host.resolveSyncConflict(id.toLong(), choice)
+      }
     }
   }
 
@@ -1327,19 +1500,27 @@ class CalFfiModule : Module() {
     // builds the Android notification channel from the on-disk path.
 
     AsyncFunction("importSoundJson") { path: String ->
-      host.importSoundJson(path)
+      hostCoded {
+        host.importSoundJson(path)
+      }
     }
 
     AsyncFunction("listCustomSoundsJson") { ->
-      host.listCustomSoundsJson()
+      hostCoded {
+        host.listCustomSoundsJson()
+      }
     }
 
     AsyncFunction("customSoundPath") { sha256: String ->
-      host.customSoundPath(sha256)
+      hostCoded {
+        host.customSoundPath(sha256)
+      }
     }
 
     AsyncFunction("deleteCustomSound") { sha256: String ->
-      host.deleteCustomSound(sha256)
+      hostCoded {
+        host.deleteCustomSound(sha256)
+      }
     }
 
     // Create (once) a NotificationChannel whose sound is a user-imported custom
@@ -1393,43 +1574,63 @@ class CalFfiModule : Module() {
     // (local = device-local, external = provider-synced).
 
     AsyncFunction("contactListsJson") {
-      host.contactListsJson()
+      hostCoded {
+        host.contactListsJson()
+      }
     }
 
     AsyncFunction("contactsJson") { listId: String ->
-      host.contactsJson(listId)
+      hostCoded {
+        host.contactsJson(listId)
+      }
     }
 
     AsyncFunction("createContactJson") { listId: String, contactJson: String ->
-      host.createContactJson(listId, contactJson)
+      hostCoded {
+        host.createContactJson(listId, contactJson)
+      }
     }
 
     AsyncFunction("updateContactJson") { contactJson: String ->
-      host.updateContactJson(contactJson)
+      hostCoded {
+        host.updateContactJson(contactJson)
+      }
     }
 
     AsyncFunction("deleteContact") { id: String, listId: String? ->
-      host.deleteContact(id, listId)
+      hostCoded {
+        host.deleteContact(id, listId)
+      }
     }
 
     AsyncFunction("getContactPhotoJson") { id: String, listId: String? ->
-      host.getContactPhotoJson(id, listId)
+      hostCoded {
+        host.getContactPhotoJson(id, listId)
+      }
     }
 
     AsyncFunction("setContactPhotoJson") { id: String, listId: String?, photoJson: String ->
-      host.setContactPhotoJson(id, listId, photoJson)
+      hostCoded {
+        host.setContactPhotoJson(id, listId, photoJson)
+      }
     }
 
     AsyncFunction("deleteContactPhoto") { id: String, listId: String? ->
-      host.deleteContactPhoto(id, listId)
+      hostCoded {
+        host.deleteContactPhoto(id, listId)
+      }
     }
 
     AsyncFunction("createContactListJson") { name: String ->
-      host.createContactListJson(name)
+      hostCoded {
+        host.createContactListJson(name)
+      }
     }
 
     AsyncFunction("deleteContactList") { id: String ->
-      host.deleteContactList(id)
+      hostCoded {
+        host.deleteContactList(id)
+      }
     }
   }
 
@@ -1438,55 +1639,73 @@ class CalFfiModule : Module() {
     // ─── Meetings (network: they talk to the provider) ───────────────────────
 
     AsyncFunction("attachMeetingJson") { requestJson: String ->
-      host.attachMeetingJson(requestJson)
+      hostCoded {
+        host.attachMeetingJson(requestJson)
+      }
     }.runOnQueue(slowScope)
 
     AsyncFunction("detachMeetingJson") { requestJson: String ->
-      host.detachMeetingJson(requestJson)
+      hostCoded {
+        host.detachMeetingJson(requestJson)
+      }
     }.runOnQueue(slowScope)
 
     // Network: it asks the provider about the meeting.
     AsyncFunction("inspectEventMeetingJson") { requestJson: String ->
-      host.inspectEventMeetingJson(requestJson)
+      hostCoded {
+        host.inspectEventMeetingJson(requestJson)
+      }
     }.runOnQueue(slowScope)
 
     AsyncFunction("adoptMeetingJson") { requestJson: String ->
-      host.adoptMeetingJson(requestJson)
+      hostCoded {
+        host.adoptMeetingJson(requestJson)
+      }
     }
 
     AsyncFunction("eventMeetingJson") { eventId: String, calendarId: String? ->
-      host.eventMeetingJson(eventId, calendarId)
+      hostCoded {
+        host.eventMeetingJson(eventId, calendarId)
+      }
     }
 
     AsyncFunction("listAdapterKindsJson") { lang: String? ->
-      host.listAdapterKindsJson(lang)
+      hostCoded {
+        host.listAdapterKindsJson(lang)
+      }
     }
 
     AsyncFunction("accountFormSpecJson") { adapterKind: String, lang: String? ->
-      host.accountFormSpecJson(adapterKind, lang)
+      hostCoded {
+        host.accountFormSpecJson(adapterKind, lang)
+      }
     }
 
     // Pure (no network): builds the consent URL + PKCE verifier + state.
     AsyncFunction("beginAccountOauthJson") { adapterKind: String, valuesJson: String ->
-      host.beginAccountOauthJson(adapterKind, valuesJson)
+      hostCoded {
+        host.beginAccountOauthJson(adapterKind, valuesJson)
+      }
     }
 
     // Network: the token exchange, then the row + keychain + registration.
     AsyncFunction("connectAccountJson") { requestJson: String ->
-      host.connectAccountJson(requestJson)
+      hostCoded {
+        host.connectAccountJson(requestJson)
+      }
     }.runOnQueue(slowScope)
 
     // Re-sign-in for an EXISTING account. Both halves take only the account id:
     // everything else — which client, which redirect, whether there is a client
     // secret at all — the host reads off the account and its adapter's schema.
-    // `coded`, so `client_secret_required` reaches JS as error.code — the
+    // `hostCoded`, so `client_secret_required` reaches JS as error.code — the
     // second-device repair asks for the secret and retries on exactly that.
     AsyncFunction("beginAccountReconnectJson") { accountId: String ->
-      coded { host.beginAccountReconnectJson(accountId) }
+      hostCoded { host.beginAccountReconnectJson(accountId) }
     }
 
     AsyncFunction("completeAccountReconnectJson") { accountId: String, requestJson: String ->
-      coded { host.completeAccountReconnectJson(accountId, requestJson) }
+      hostCoded { host.completeAccountReconnectJson(accountId, requestJson) }
     }.runOnQueue(slowScope)
   }
 
@@ -1498,35 +1717,35 @@ class CalFfiModule : Module() {
     // dataset (deriving the E2E key from the passphrase when it's encrypted).
 
     AsyncFunction("previewSyncTargetJson") { configJson: String ->
-      coded { host.previewSyncTargetJson(configJson) }
+      hostCoded { host.previewSyncTargetJson(configJson) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("previewSyncTargetValuesJson") { requestJson: String ->
-      coded { host.previewSyncTargetValuesJson(requestJson) }
+      hostCoded { host.previewSyncTargetValuesJson(requestJson) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("acceptRemoteDatasetJson") { configJson: String, deviceName: String?, passphrase: String? ->
-      coded { host.acceptRemoteDatasetJson(configJson, deviceName, passphrase) }
+      hostCoded { host.acceptRemoteDatasetJson(configJson, deviceName, passphrase) }
     }.runOnQueue(slowScope)
 
     // adoptLocalDatasetJson initialises a FRESH dataset (the unified Connect
     // button's empty-target path), optionally enabling E2E at creation.
     AsyncFunction("adoptLocalDatasetJson") { configJson: String, deviceName: String?, passphrase: String? ->
-      coded { host.adoptLocalDatasetJson(configJson, deviceName, passphrase) }
+      hostCoded { host.adoptLocalDatasetJson(configJson, deviceName, passphrase) }
     }.runOnQueue(slowScope)
 
     // The same two answers, asked with the shared schema form's own values, and
     // committing to an ACCOUNT ROW rather than to device-local preferences.
     AsyncFunction("acceptRemoteDatasetValuesJson") { requestJson: String, deviceName: String?, passphrase: String? ->
-      coded { host.acceptRemoteDatasetValuesJson(requestJson, deviceName, passphrase) }
+      hostCoded { host.acceptRemoteDatasetValuesJson(requestJson, deviceName, passphrase) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("adoptLocalDatasetValuesJson") { requestJson: String, deviceName: String?, passphrase: String? ->
-      coded { host.adoptLocalDatasetValuesJson(requestJson, deviceName, passphrase) }
+      hostCoded { host.adoptLocalDatasetValuesJson(requestJson, deviceName, passphrase) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("resumeStaleDeviceJson") {
-      coded { host.resumeStaleDeviceJson() }
+      hostCoded { host.resumeStaleDeviceJson() }
     }.runOnQueue(slowScope)
   }
 
@@ -1538,49 +1757,53 @@ class CalFfiModule : Module() {
     // pinned manage the pin (no network). The JS layer shows the trust dialog.
 
     AsyncFunction("previewSftpHostKeyJson") { argsJson: String ->
-      coded { host.previewSftpHostKeyJson(argsJson) }
+      hostCoded { host.previewSftpHostKeyJson(argsJson) }
     }.runOnQueue(slowScope)
 
     // The same probe for an account the user is about to sync through — the
     // repair for a selectSyncAccount that refused an unconfirmed host key.
     // Returns the JSON `null` (no network) when the adapter pins no host key.
     AsyncFunction("previewSyncAccountHostKeyJson") { accountId: String ->
-      coded { host.previewSyncAccountHostKeyJson(accountId) }
+      hostCoded { host.previewSyncAccountHostKeyJson(accountId) }
     }.runOnQueue(slowScope)
 
     // Read-only, and no network: what this device already confirmed.
     AsyncFunction("syncAccountHostKeyPinJson") { accountId: String ->
-      coded { host.syncAccountHostKeyPinJson(accountId) }
+      hostCoded { host.syncAccountHostKeyPinJson(accountId) }
     }
 
     AsyncFunction("trustSftpHostKey") { hostPort: String, fingerprint: String ->
-      coded { host.trustSftpHostKey(hostPort, fingerprint) }
+      hostCoded { host.trustSftpHostKey(hostPort, fingerprint) }
     }
 
     AsyncFunction("forgetSftpHostKey") { hostPort: String ->
-      host.forgetSftpHostKey(hostPort)
+      hostCoded {
+        host.forgetSftpHostKey(hostPort)
+      }
     }
 
     AsyncFunction("pinnedSftpHostKey") { hostPort: String ->
-      host.pinnedSftpHostKey(hostPort)
+      hostCoded {
+        host.pinnedSftpHostKey(hostPort)
+      }
     }
 
     // §19 device registry: this device's own name, and the list of everyone the
     // dataset still counts as a participant.
     AsyncFunction("syncDeviceNameJson") {
-      coded { host.syncDeviceNameJson() }
+      hostCoded { host.syncDeviceNameJson() }
     }
 
     AsyncFunction("setSyncDeviceName") { name: String ->
-      coded { host.setSyncDeviceName(name) }
+      hostCoded { host.setSyncDeviceName(name) }
     }
 
     AsyncFunction("listSyncDevicesJson") {
-      coded { host.listSyncDevicesJson() }
+      hostCoded { host.listSyncDevicesJson() }
     }
 
     AsyncFunction("forgetSyncDevice") { deviceId: String ->
-      coded { host.forgetSyncDevice(deviceId) }
+      hostCoded { host.forgetSyncDevice(deviceId) }
     }
   }
 
@@ -1592,7 +1815,9 @@ class CalFfiModule : Module() {
     // is no App Group to cross and no container to resolve.
     // One line into the app's own rolling log — the twin of the iOS registration.
     AsyncFunction("logLine") { level: String, message: String ->
-      host.logLine(level, message)
+      hostCoded {
+        host.logLine(level, message)
+      }
     }
 
     AsyncFunction("writeWidgetSnapshot") { json: String ->

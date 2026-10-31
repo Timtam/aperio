@@ -198,13 +198,12 @@ setting by hand the rule the new date gives anyway. A monthly or yearly series t
 other months or years, such as one moved from the 31st to the 30th, moves its
 deletions by their place only as far as the two versions still line up; if a
 deletion lies beyond that, they all stay on their day, where a deleted
-occurrence can show again. CalDAV calendars keep those deletions, and so
-does Exchange from today on: it takes a new series without them, so Aperio
-deletes them there again one by one (see the box below); the ones before
-today show again, also in a series you split at an earlier occurrence. On
-Google a deleted occurrence can still come back for now, and Aperio knows
-deleted occurrences only about a year ahead, so one deleted further out comes
-back in the new series. And in an
+occurrence can show again. CalDAV calendars keep those deletions, and so do
+Exchange and Google from today on: Aperio creates the new series there without
+them and then removes them one by one (see the box below); the ones before
+today show again, also in a series you split at an earlier occurrence. Aperio
+knows a Google calendar's deleted occurrences only about a year ahead, so one
+deleted further out comes back in the new series. And in an
 all-day series on Google or CalDAV, an occurrence changed in another app also
 stays in the old series for now, so that day shows twice.
 **The whole series** opens the series itself, with its own start and end, even
@@ -243,16 +242,19 @@ the editor opens. On the desktop the form repeats it as the read-only field
 > time with the series' details. `Ctrl+D` on any appointment of a series
 > duplicates the whole series from its first appointment, in the same calendar.
 > A copy or a duplicate keeps the series' time zone. Moved or copied into
-> Exchange, or duplicated there, the new series keeps the deletions from today
-> on (see the next box); into Microsoft 365 it shows deleted occurrences again
-> for now. From a Google calendar, Aperio knows deleted occurrences from about
+> Exchange or Google, or duplicated there, the new series keeps the deletions
+> from today on (see the next box); into Microsoft 365 it shows deleted
+> occurrences again for now. From a Google calendar, Aperio knows deleted occurrences from about
 > three months before today to a year after (see
 > [Troubleshooting & Logs](/guides/troubleshooting/#an-occurrence-is-back-after-a-series-was-moved-copied-or-duplicated)).
 
-> **A new series on Exchange, and the wait:** Exchange takes a new series
-> without its deleted occurrences, so Aperio creates it first and then deletes
-> them there again one by one, from today on, and checks the result before it
-> invites anyone. That can take up to half a minute. Meanwhile Aperio shows
+> **A new series on Exchange or Google, and the wait:** Exchange takes a new
+> series without its deleted occurrences, and Google deletes an occurrence by
+> cancelling it, so Aperio creates the series first and then removes them there
+> one by one, from today on, and checks the result. On Exchange it invites
+> only after that check; on Google the invitees get their invitation with the
+> series and, when you notify them, a cancellation for each deleted occurrence
+> from today on. That can take up to half a minute. Meanwhile Aperio shows
 > the dialog **Working, please wait …**, on the desktop and in the mobile app,
 > with no button; `Escape` and the back button do not close it, and it closes
 > by itself when the work is done. If the deletions cannot all be made, Aperio
@@ -342,8 +344,10 @@ what makes them a group.
 If something goes wrong along the way, the dialog stays open and says which
 calendars could not be written; **Try the rest again** retries exactly those.
 Half-carried is the one state you have to see. A copy whose series may now show
-twice from the cut is different: its new part was created, so it is not offered
-again, and a note names its calendar and the day instead. When only such notes
+twice from the cut, or whose single copy may show twice on its day, is
+different: its new part or its copy was created, or may have been when its
+answer was lost, so it is not offered again, and a note names its calendar and
+the day instead; check it there. When only such notes
 are left, the dialog stays open with them and without **Try the rest again**.
 
 On Exchange, carrying a change to a copy's whole series can make Exchange drop
@@ -435,6 +439,17 @@ checkbox; **Edit …** is one of its actions (on iOS in the rotor).
   calendars write attendees only along with their invitations, so the list,
   which tells nobody, brings such a meeting there without them. In the editor
   they stay, and are invited.
+- **When not every one arrives**, the list says how many did, and names each
+  one that did not with its reason; a busy provider's ends with “try again
+  later”, and those stay checked. One that may not have arrived whole — a
+  series Aperio could neither finish nor remove again, an invitation Exchange
+  kept but did not finish, or one whose answer was lost — is marked “maybe not
+  imported whole” and not offered again, from the list or from its editor:
+  importing it once more could make it twice. Check it in the calendar. A
+  series whose skipped occurrences could not all be removed, and that Aperio
+  therefore removed again, reads “not imported” with its reason, and can be
+  imported again.
+  A series a calendar writes in steps shows the “please wait” dialog meanwhile.
 
 Times keep their zone, including the Windows zone names Outlook writes. A
 zone only the file itself defines (Outlook's "Customized Time Zone") gives

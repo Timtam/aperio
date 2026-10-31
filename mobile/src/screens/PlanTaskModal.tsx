@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { writeErrorMessage } from '@aperio/shared';
+import { eventWriteLeftover, writeErrorMessage } from '@aperio/shared';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -16,9 +16,11 @@ import { isoNextMonday, isoToday, isoTomorrow } from '@aperio/shared';
 import { getTaskById, updateTask } from '../api/client';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
+import { CloseOnlyNotice } from '../components/CloseOnlyNotice';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { formatLocalDate } from '../intl/dateTimeField';
 import { useTaskStore } from '../state/taskStoreContext';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -49,7 +51,13 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { invalidateData } = useTaskStore();
-  useCancelHeader(navigation);
+  // What the screen says in place of the form once a save landed in part:
+  // saving again would write twice what stands (273).
+  const { notice, showNotice } = useCloseOnlyNotice();
+  const closeNotice = useCallback(() => navigation.goBack(), [navigation]);
+  useCancelHeader(navigation, 'mobile.cancel', {
+    close: notice != null ? closeNotice : undefined,
+  });
 
   const [task, setTask] = useState<Task | null>(null);
   // Preload the custom field with the task's current scheduled date so
@@ -140,13 +148,19 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
         navigation.goBack();
       } catch (err) {
         const message = writeErrorMessage(err, t);
+        // The plan landed without one of its follow-up steps (273): said in
+        // place of the form, which only closes.
+        if (eventWriteLeftover(err)) {
+          showNotice(message);
+          return;
+        }
         setError(message);
         AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
       } finally {
         setSubmitting(false);
       }
     },
-    [task, t, fmtDate, navigation],
+    [task, t, fmtDate, navigation, showNotice],
   );
 
   const applyCustom = useCallback(() => {
@@ -164,6 +178,10 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
     { key: 'tomorrow', iso: isoTomorrow(), label: t('dialogs.plan.tomorrow') },
     { key: 'nextWeek', iso: isoNextMonday(), label: t('dialogs.plan.nextWeek') },
   ];
+
+  if (notice != null) {
+    return <CloseOnlyNotice sentence={notice} onClose={closeNotice} />;
+  }
 
   return (
     <FormScrollView

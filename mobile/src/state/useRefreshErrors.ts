@@ -136,6 +136,8 @@ function announceKey(cause: RefreshCause): string {
       return 'refreshErrors.announceAccess';
     case 'auth':
       return 'refreshErrors.announceAuth';
+    case 'busy':
+      return 'refreshErrors.announceBusy';
     case 'other':
       return 'refreshErrors.announce';
   }
@@ -149,6 +151,8 @@ export function refreshBannerKey(rows: readonly AccountRefreshErrors[]): string 
       return 'refreshErrors.bannerAccess';
     case 'auth':
       return 'refreshErrors.bannerAuth';
+    case 'busy':
+      return 'refreshErrors.bannerBusy';
     case 'other':
       return 'refreshErrors.banner';
     case null:

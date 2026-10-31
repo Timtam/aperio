@@ -179,7 +179,13 @@ pub async fn create_task(
     let mut result = map_task(entry, list_id);
     if needs_close {
         let path = format!("/tasks/{}/close", urlencoding(&result.id));
-        client.post_empty(&path).await?;
+        // The task stands: a failed close leaves it saved in part (decision
+        // 277), and creating it again would make a second one. Its status is
+        // a request of its own, as on an update (review round 17 of #128).
+        client
+            .post_empty(&path)
+            .await
+            .map_err(|err| err.after_landed(cal_core::STATUS_STEP))?;
         // Mirror the close in the returned struct so the caller
         // sees a consistent picture — saves a follow-up GET.
         result.status = TaskStatus::Completed;
@@ -189,10 +195,11 @@ pub async fn create_task(
 }
 
 /// `POST /tasks/{id}` with the field-update body, plus a separate
-/// `/close` or `/reopen` call to bring the server's
-/// `is_completed` flag in line with the desired status. Both API
-/// calls are idempotent — a `/close` against an already-completed
-/// task is a 204 no-op.
+/// `/close` or `/reopen` call where the server's `is_completed` flag
+/// differs from the desired status (critique P12: sent on every save, a
+/// throttled one made a title edit "only partly saved" with nothing more
+/// to save). Once the fields landed, a failed move or status call leaves
+/// the save in part (decision 277).
 pub async fn update_task(client: &TodoistClient, task: &Task) -> TodoistResult<Task> {
     let encoded = urlencoding(&task.id);
     let body = task_to_update_body(task);
@@ -207,6 +214,11 @@ pub async fn update_task(client: &TodoistClient, task: &Task) -> TodoistResult<T
     // reorders the task within its section.
     let current_section = entry.section_id.clone().filter(|s| !s.is_empty());
     let desired_section = task.section_id.clone().filter(|s| !s.is_empty());
+    // The status request comes after the move: a move that fails while one is
+    // still due leaves the status unchanged too, and says so with the status
+    // step — read as any other, a check-off would count as done (277).
+    let completed = matches!(task.status, TaskStatus::Completed);
+    let status_due = entry.is_completed != completed;
     if current_section != desired_section {
         let args = match &desired_section {
             Some(section_id) => {
@@ -216,17 +228,29 @@ pub async fn update_task(client: &TodoistClient, task: &Task) -> TodoistResult<T
             // detaches it from any section while keeping it in the list.
             None => serde_json::json!({ "id": task.id, "project_id": task.list_id }),
         };
-        sync_command(client, "item_move", args).await?;
+        let step = if status_due {
+            cal_core::STATUS_STEP
+        } else {
+            "move"
+        };
+        sync_command(client, "item_move", args)
+            .await
+            .map_err(|err| err.after_landed(step))?;
     }
-    // The update body never carries status — drive it via the
-    // dedicated endpoints. We unconditionally fire either close or
-    // reopen so the wire state matches `task.status` even if the
-    // caller is "fixing up" a desynced row.
-    let status_path = match task.status {
-        TaskStatus::Completed => format!("/tasks/{encoded}/close"),
-        _ => format!("/tasks/{encoded}/reopen"),
-    };
-    client.post_empty(&status_path).await?;
+    // The update body never carries status — drive it via the dedicated
+    // endpoints, where the update's answer says the server holds another
+    // completion state than the one asked for.
+    if status_due {
+        let status_path = if completed {
+            format!("/tasks/{encoded}/close")
+        } else {
+            format!("/tasks/{encoded}/reopen")
+        };
+        client
+            .post_empty(&status_path)
+            .await
+            .map_err(|err| err.after_landed(cal_core::STATUS_STEP))?;
+    }
     let mut result = map_task(entry, &task.list_id);
     // The update response shows the pre-close `is_completed`
     // value; patch it locally so the caller's `Task` matches what
@@ -340,6 +364,8 @@ pub async fn list_task_list_shares(
         .await
     {
         Ok(r) => r,
+        // A busy server is no answer about the members (decision 270).
+        Err(err) if crate::busy_detail(&err).is_some() => return Err(err),
         Err(_) => return Ok(Vec::new()),
     };
     let by_id: HashMap<String, &SyncCollaborator> = resp
@@ -824,6 +850,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     });
 
     Task {
+        original_left_in: None,
         assignees: extract_assignees(entry.assignee_id),
         id: entry.id,
         list_id: list_id.to_string(),
@@ -1589,6 +1616,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            original_left_in: None,
             scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
@@ -1642,13 +1670,17 @@ mod tests {
             .with_body(r#"{"sync_status":{}}"#)
             .create_async()
             .await;
+        // The task is open on the server and stays open: no status call
+        // (critique P12).
         let reopen = server
             .mock("POST", "/tasks/T1/reopen")
             .with_status(204)
+            .expect(0)
             .create_async()
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            original_left_in: None,
             scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
@@ -1704,13 +1736,17 @@ mod tests {
             .with_body(r#"{"sync_status":{}}"#)
             .create_async()
             .await;
+        // The task is open on the server and stays open: no status call
+        // (critique P12).
         let reopen = server
             .mock("POST", "/tasks/T1/reopen")
             .with_status(204)
+            .expect(0)
             .create_async()
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            original_left_in: None,
             scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
@@ -1763,6 +1799,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            original_left_in: None,
             scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
@@ -2035,6 +2072,7 @@ mod tests {
         // Unassigned ⇒ assignee_id present as null so the update
         // unassigns rather than leaving a stale assignee.
         let task = Task {
+            original_left_in: None,
             scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
@@ -2354,5 +2392,180 @@ mod tests {
         assert_eq!(body.duration, Some(90));
         // The amount means nothing without the unit beside it.
         assert_eq!(body.duration_unit, Some("minute"));
+    }
+
+    /// The task as an update sends it: open, in section S1.
+    fn open_task() -> Task {
+        serde_json::from_value(serde_json::json!({
+            "id": "T1", "list_id": "P1", "title": "Buy bread", "description": null,
+            "status": "completed", "priority": "medium", "scheduled_date": null,
+            "scheduled_time": null, "scheduled_end_time": null, "deadline_date": null,
+            "deadline_time": null, "recurrence": null, "resurface_date": null,
+            "series_id": null, "parent_id": null, "section_id": "S1", "color_label": null,
+            "reminders": [], "sound": null, "deadline_reminder_days": null,
+            "created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z",
+            "completed_at": null, "etag": null
+        }))
+        .unwrap()
+    }
+
+    const FIELDS_LANDED: &str = r#"{"id":"T1","project_id":"P1","content":"Buy bread","is_completed":false,"priority":1,"section_id":"S1"}"#;
+
+    /// An update a busy Todoist turned away did nothing: a busy provider.
+    #[tokio::test]
+    async fn a_429_to_the_fields_is_a_busy_provider() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/tasks/T1")
+            .with_status(429)
+            .create_async()
+            .await;
+        let err = update_task(&fixture_client(&server.url()), &open_task())
+            .await
+            .unwrap_err();
+        assert!(crate::to_core_error_for_tests(err).is_provider_busy());
+    }
+
+    /// The fields landed; the close met a busy server: partly saved.
+    #[tokio::test]
+    async fn a_busy_close_after_the_fields_is_partly_saved() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/tasks/T1")
+            .with_status(200)
+            .with_body(FIELDS_LANDED)
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/tasks/T1/close")
+            .with_status(429)
+            .create_async()
+            .await;
+        let err = update_task(&fixture_client(&server.url()), &open_task())
+            .await
+            .unwrap_err();
+        assert!(crate::to_core_error_for_tests(err).is_partly_saved());
+    }
+
+    /// The fields landed; the section move met a busy Sync API: partly saved.
+    #[tokio::test]
+    async fn a_busy_move_after_the_fields_is_partly_saved() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/tasks/T1")
+            .with_status(200)
+            .with_body(FIELDS_LANDED)
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/sync")
+            .with_status(429)
+            .create_async()
+            .await;
+        let mut task = open_task();
+        task.section_id = Some("S2".into());
+        let err = update_task(&fixture_client(&server.url()), &task)
+            .await
+            .unwrap_err();
+        assert!(crate::to_core_error_for_tests(err).is_partly_saved());
+    }
+
+    /// A Sync command the plan refuses is no throttle: never busy.
+    #[tokio::test]
+    async fn a_plan_limit_is_not_a_busy_provider() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/sync")
+            .with_status(200)
+            .with_body(
+                r#"{"sync_status":{"x":{"error_tag":"MAX_ITEMS_LIMIT_REACHED","error_code":46}}}"#,
+            )
+            .create_async()
+            .await;
+        let err = sync_command(
+            &fixture_client(&server.url()),
+            "item_move",
+            serde_json::json!({ "id": "T1" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(!crate::to_core_error_for_tests(err).is_provider_busy());
+    }
+
+    /// A task created as completed stands once the create landed: a busy
+    /// close leaves it saved in part, and creating it again would make two.
+    #[tokio::test]
+    async fn a_busy_close_after_a_create_is_partly_saved() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/tasks")
+            .with_status(200)
+            .with_body(r#"{"id":"T9","project_id":"P1","content":"Done","is_completed":false,"priority":1}"#)
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/tasks/T9/close")
+            .with_status(429)
+            .create_async()
+            .await;
+        let mut new = sample_new_task();
+        new.status = TaskStatus::Completed;
+        let err = create_task(&fixture_client(&server.url()), "P1", new)
+            .await
+            .unwrap_err();
+        let core = crate::to_core_error_for_tests(err);
+        assert!(core.is_partly_saved());
+        // The task stands open: its status did not go out with the fields.
+        assert!(!core.status_landed());
+    }
+
+    /// A busy server is no answer about a project's members.
+    #[tokio::test]
+    async fn busy_shares_are_an_error_not_an_empty_list() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/sync")
+            .with_status(429)
+            .create_async()
+            .await;
+        let err = list_task_list_shares(&fixture_client(&server.url()), "P1")
+            .await
+            .unwrap_err();
+        assert!(crate::to_core_error_for_tests(err).is_provider_busy());
+    }
+
+    /// A check-off whose section move met a busy Sync API never sent its
+    /// close: the save stands in part WITHOUT its status, so no host counts
+    /// the task as done and spawns its next turn (277).
+    #[tokio::test]
+    async fn a_busy_move_before_the_close_leaves_the_status_unsaved() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/tasks/T1")
+            .with_status(200)
+            .with_body(FIELDS_LANDED)
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/sync")
+            .with_status(429)
+            .create_async()
+            .await;
+        let close = server
+            .mock("POST", "/tasks/T1/close")
+            .expect(0)
+            .create_async()
+            .await;
+        let mut task = open_task();
+        task.status = TaskStatus::Completed;
+        task.section_id = Some("S2".into());
+        let err = crate::to_core_error_for_tests(
+            update_task(&fixture_client(&server.url()), &task)
+                .await
+                .unwrap_err(),
+        );
+        assert!(err.is_partly_saved(), "{err:?}");
+        assert!(!err.status_landed(), "{err:?}");
+        close.assert_async().await;
     }
 }

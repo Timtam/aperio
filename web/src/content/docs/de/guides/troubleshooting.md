@@ -73,17 +73,32 @@ Gibt das Betriebssystem die Daten eines Kontos nicht frei — die Kalender des
 Telefons ohne Zugriff —, steht beim Konto eine Zeile statt einer pro Kalender
 („Aperio darf die Kalender nicht lesen“), am Handy mit einer Schaltfläche, die
 die Konten öffnet, wo **Zugriff erlauben…** steht. Wo Aperio nur eines nennt,
-geht fehlender Zugriff einem Anmeldeproblem vor und ein Anmeldeproblem allem
-anderen. Ein Konto, das schon ausfällt, wird nur dann noch einmal angesagt,
-wenn seine Ursache schwerer wird.
+geht fehlender Zugriff einem Anmeldeproblem vor, ein Anmeldeproblem einem
+ausgelasteten Anbieter und ein ausgelasteter Anbieter allem anderen. Ein
+Konto, das schon ausfällt, wird nur dann noch einmal angesagt, wenn seine
+Ursache schwerer wird.
 
-Ein kurzer, einmaliger Verbindungsaussetzer löst die Warnung nicht aus:
-Ein Netzwerkfehler wird erst gezeigt, wenn er erneut auftritt — ein
-Kaltstart mit noch nicht bereitem Netz erzeugt so keinen Fehlalarm. Ein
-Anmeldeproblem, das sich nie von selbst behebt, erscheint sofort, und eine
-manuelle Aktualisierung meldet ihr Ergebnis immer unmittelbar, auch in den
-ersten Sekunden nach dem Start. Die Warnung verschwindet von selbst, sobald
-eine Aktualisierung wieder gelingt.
+Ist der Anbieter ausgelastet — er weist Anfragen ab, weil in kurzer Zeit
+viele kamen —, sagt die Warnung das, und dass du nichts tun musst: Am Desktop
+versucht Aperio es von selbst erneut, am Handy beim nächsten Aktualisieren,
+zum Beispiel wenn du die App wieder öffnest. Seine Zeilen sagen „Der Anbieter
+ist ausgelastet.“ Solange er ausgelastet ist, fragen die Ansichten ihn nicht
+nach dem, was sie schon zeigen; eine Woche oder ein Monat, die noch nie
+geladen wurden, oder eine Liste, die noch nie geladen wurde, werden trotzdem
+einmal angefragt.
+
+Ein kurzer, einmaliger Verbindungsaussetzer löst die Warnung nicht aus: Ein
+Netzwerkfehler oder ein ausgelasteter Anbieter wird erst gezeigt, wenn er bei
+einer zweiten automatischen Aktualisierung mindestens eine Minute nach der
+ersten wieder auftritt — ein Kaltstart mit noch nicht bereitem Netz erzeugt
+so keinen Fehlalarm, und die zwei oder drei Aktualisierungen beim Öffnen des
+Handys zählen einmal. Trifft eine Ansicht, die von sich aus anfragt, auf einen
+ausgelasteten Anbieter, zählt das nicht; jeder andere Fehler dabei zählt jedes
+Mal. Ein Anmeldeproblem, das sich nie von selbst behebt, erscheint sofort, und
+eine Aktualisierung, die du startest, oder die Änderung eines Kontos meldet
+ihr Ergebnis für die betroffenen Konten unmittelbar, auch in den ersten
+Sekunden nach dem Start. Die Warnung verschwindet von selbst, sobald eine
+Aktualisierung wieder gelingt.
 
 ## „Dieses Gerät“ aktualisiert sich nach dem Umzug auf ein neues Telefon nicht mehr
 
@@ -302,10 +317,11 @@ der alten Serie mit, sonst nichts:
   wieder da, mit Titel, Ort und Uhrzeit der Serie. Nach dem Verschieben ist
   seine eigene Änderung mit der alten Serie weg; nach dem Kopieren oder
   Duplizieren bleibt sie in der alten.
-- Nach Exchange verschoben oder kopiert, oder dort dupliziert, behält die
-  neue Serie die Löschungen ab heute: Exchange nimmt beim Anlegen einer Serie
-  keine an, deshalb löscht Aperio sie danach einzeln wieder. Die vor heute
-  erscheinen wieder.
+- Nach Exchange oder Google verschoben oder kopiert, oder dort dupliziert,
+  behält die neue Serie die Löschungen ab heute: Exchange nimmt beim Anlegen
+  einer Serie keine an, und Google löscht einen Termin, indem es ihn absagt,
+  deshalb entfernt Aperio sie danach einzeln. Die vor heute erscheinen
+  wieder.
 - Nach Microsoft 365 verschoben oder kopiert, zeigt die neue Serie gelöschte
   Termine vorerst wieder: Microsoft 365 nimmt beim Anlegen einer Serie keine
   Löschungen an.
@@ -318,17 +334,22 @@ Kalender.
 
 ## Aperio hat eine neue Serie wieder entfernt
 
-Exchange nimmt eine neue Serie ohne ihre gelöschten Termine an. Deshalb legt
-Aperio sie zuerst an und löscht die gelöschten Termine dort danach einzeln
-wieder, während der Dialog **Vorgang läuft, bitte warten …** zu sehen ist.
-Gelingt das nicht ganz — Exchange findet einen Termin nicht, antwortet zu
-langsam, oder die Serie hat danach nicht genau die Löschungen, die Aperio
-gemacht hat —, entfernt Aperio die neue Serie wieder und sagt das: Es wurde
-nichts geändert, die alte Serie ist, wie sie war. Die entfernte Serie liegt
-in den gelöschten Elementen von Exchange. Hatte die Serie Leute eingeladen,
-haben sie auch die Absage bekommen, und die Meldung sagt das. Sagt sie, es
-habe zu lange gedauert, hat Exchange langsam geantwortet oder Aperio warten
-lassen, oder die Serie hat ab heute sehr viele gelöschte Termine.
+Bei Exchange und Google legt Aperio eine neue Serie zuerst an und entfernt
+ihre gelöschten Termine dort danach einzeln, während der Dialog **Vorgang
+läuft, bitte warten …** zu sehen ist: Exchange nimmt eine neue Serie ohne sie
+an, und Google löscht einen Termin, indem es ihn absagt. Gelingt das nicht
+ganz — der Kalender findet einen Termin nicht, antwortet zu langsam, oder die
+Serie hat danach nicht genau die Löschungen, die Aperio gemacht hat —,
+entfernt Aperio die neue Serie wieder und sagt das: Es wurde nichts geändert,
+die alte Serie ist, wie sie war. Bei Exchange liegt die entfernte Serie in den
+gelöschten Elementen. Hatte die Serie Leute eingeladen, haben sie auch die
+Absage bekommen, und die Meldung sagt das; bei Google können sie, wenn du sie
+benachrichtigt hast, auch für jeden Termin eine Absage bekommen haben, den
+Aperio vorher abgesagt hatte. Sagt sie, es habe zu lange gedauert, hat der
+Kalender langsam geantwortet, oder die Serie hat ab heute sehr viele
+gelöschte Termine. Sagt sie, der Anbieter sei ausgelastet gewesen, hat der
+Kalender Aperio immer wieder warten lassen: Das tut er, wenn in kurzer Zeit
+viele Anfragen kommen.
 
 Was du tun kannst: Versuche es später noch einmal. Scheitert es weiter,
 schick das Protokoll mit der Meldung (siehe unten): Es nennt den Schritt, der
@@ -336,15 +357,72 @@ gescheitert ist, und warum, ohne Kennungen von Terminen oder Kalendern.
 
 ## Eine neue Serie steht möglicherweise zusätzlich im Kalender
 
-Konnte Aperio eine neue Serie bei Exchange weder fertigstellen noch wieder
-entfernen, sagt es, dass sie jetzt möglicherweise zusätzlich im Kalender
+Konnte Aperio eine neue Serie bei Exchange oder Google weder fertigstellen
+noch wieder entfernen, sagt es, dass sie jetzt möglicherweise zusätzlich im Kalender
 steht — neben der alten, ab dem Tag, an dem du geteilt hast, oder im anderen
 Kalender nach dem Verschieben oder Kopieren. Diese Meldung lässt sich nur
 schließen: Erneutes Speichern legte noch eine Serie an. Können schon
 Einladungen rausgegangen sein, sagt die Meldung auch das.
 
-Was du tun kannst: Öffne den Kalender, in Aperio oder in Outlook, und lösche
-die Serie, die doppelt da ist.
+Was du tun kannst: Öffne den Kalender, in Aperio oder in der App des
+Kalenders (Outlook, Google Kalender), und lösche die Serie, die doppelt da
+ist.
+
+## Der Anbieter ist gerade ausgelastet
+
+Kommen in kurzer Zeit viele Anfragen, weisen manche Anbieter weitere eine
+Weile ab. Aperio sagt dann „Der Anbieter ist gerade ausgelastet“: beim
+Speichern mit „Es wurde nichts geändert“, beim Laden, bei der Verfügbarkeit
+und bei Meetings ohne. In einem Editor bleibt deine Eingabe stehen; die
+Ansichten zeigen, was zuletzt geladen wurde. Konnten am Desktop die
+Abschnitte einer Liste noch nicht geladen werden, sagt das die
+Abschnittsauswahl im Aufgaben-Editor und unter Verschieben/Kopieren; ein
+Abschnitt, den du dort anlegst, steht trotzdem darin. Wie lange der
+Anbieter warten lässt, sagt Aperio nicht, es steht im Protokoll.
+
+Was du tun kannst: Warte einen Moment und versuche es noch einmal.
+
+## Eine Änderung wurde nur zum Teil gespeichert
+
+Manche Anbieter speichern eine Aufgabe, einen Termin oder einen Kontakt in
+mehreren Schritten: erst das Element, dann zum Beispiel die Zuständigen, das
+Foto oder die Mitglieder einer Gruppe. Ist der Anbieter nach dem ersten
+Schritt ausgelastet, steht das Element, aber nicht alles daran. Aperio sagt
+dann, dass die Änderung nur zum Teil gespeichert ist, und die Meldung lässt
+sich nur schließen: Erneutes Speichern legte das Element ein zweites Mal an.
+Die Ansicht lädt neu und zeigt, was beim Anbieter steht.
+
+Nimmt der Anbieter das Foto eines neuen Kontakts nicht an, steht der Kontakt
+ohne Foto, und Aperio sagt das.
+
+Legst du eine Aufgabe mit Unteraufgaben an und scheitert eine Unteraufgabe,
+bearbeitet der Editor danach die angelegte Aufgabe: Die noch nicht angelegten
+Unteraufgaben stehen unter einer eigenen Überschrift, und Speichern übernimmt
+deine Änderungen an der Aufgabe und legt die noch fehlenden Unteraufgaben an.
+Eine Unteraufgabe, deren Antwort verloren ging, wurde vielleicht angelegt:
+Aperio sagt das und bietet sie nicht noch einmal an; prüfe sie.
+
+Wurde eine Aufgabe nur zum Teil gespeichert, kam ihr neuer Status aber an
+(ein späterer Schritt wie ihre Zuständigen wurde abgewiesen), übernehmen die
+Aufgaben darüber und darunter ihn trotzdem, wie beim Abhaken; nimmt eine ihn
+nicht an, sagt die Meldung das danach. Kam der Status selbst nicht an, lässt
+der Editor sie, wie sie waren; beim Abhaken schreibt Aperio sie trotzdem, und
+manche können den neuen Status haben, während die Aufgabe ihren alten
+behielt.
+
+Was du tun kannst: Öffne das Element später noch einmal und ergänze, was
+fehlt.
+
+## Nach dem Verschieben steht das Original noch da
+
+Verschiebst du eine Aufgabe oder einen Termin in eine andere Liste oder einen
+anderen Kalender — außer zwischen zwei lokalen von Aperio, auch innerhalb
+eines Kontos —, legt Aperio dort eine Kopie an und löscht dann das Original. Ist der Anbieter beim Löschen ausgelastet, steht das
+Verschobene am Ziel, und das Original bleibt, wo es war. Aperio nennt die
+Liste oder den Kalender, in dem es noch steht.
+
+Was du tun kannst: Lösche das Original dort selbst. Verschiebe es nicht noch
+einmal, denn das legte am Ziel eine zweite Kopie an.
 
 ## Einen Fehler melden
 

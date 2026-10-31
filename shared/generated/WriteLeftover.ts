@@ -3,4 +3,4 @@
 /**
  * What a failed write may have left behind.
  */
-export type WriteLeftover = "created-may-stand";
+export type WriteLeftover = "created-may-stand" | "partly-saved";

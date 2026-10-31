@@ -1,8 +1,12 @@
 import {
+  familyNotAllSentence,
+  failureOfWrites,
   planAncestorRecompute,
   planStatusCascade,
   selfAssignOnStatusChange,
   todayIsoKey,
+  writeErrorMessage,
+  writeStatusLanded,
 } from '@aperio/shared';
 import type { StatusWrite, Task, TaskList, TaskStatus } from '@aperio/shared';
 
@@ -27,8 +31,32 @@ export async function applyStatusWrites(
   writes: StatusWrite[],
   snapshot: Task[],
   autoSelfAssign: boolean,
+  since?: Map<string, Task>,
 ): Promise<void> {
-  if (writes.length === 0) return;
+  const { failures, landed } = await tryStatusWrites(writes, snapshot, autoSelfAssign, since);
+  if (failures.length > 0) {
+    throw failureOfWrites(
+      'cascade',
+      failures.map((failure) => failure.err),
+      landed,
+    );
+  }
+}
+
+/** [`applyStatusWrites`]'s writes, every one attempted: the failures as they
+ *  came, by the task each write was planned for, and whether any write
+ *  landed. `since`: rows written after the plan, by the id it names them
+ *  under — a task a list change moved has a new id there (review round 20 of
+ *  #128). */
+async function tryStatusWrites(
+  writes: StatusWrite[],
+  snapshot: Task[],
+  autoSelfAssign: boolean,
+  since: Map<string, Task> = new Map(),
+): Promise<{ failures: { taskId: string; err: unknown }[]; landed: boolean }> {
+  const failures: { taskId: string; err: unknown }[] = [];
+  let landed = false;
+  if (writes.length === 0) return { failures, landed };
   const byId = new Map(snapshot.map((t) => [t.id, t]));
   const nowIso = new Date().toISOString();
   // The first rejection no longer ends the round. A cascade is N separate
@@ -36,10 +64,10 @@ export async function applyStatusWrites(
   // arbitrary prefix applied and the rest not — and which prefix depended on
   // nothing the user could see. Every write is attempted; the first error is
   // kept and thrown at the end, so each caller's existing `catch` still
-  // announces exactly as before.
-  let firstError: unknown;
+  // announces exactly as before — but where another write landed, it never
+  // says "nothing was changed" (decision 277). Mirrors the desktop.
   for (const w of writes) {
-    const target = byId.get(w.taskId);
+    const target = since.get(w.taskId) ?? byId.get(w.taskId);
     if (target == null) continue;
     // "me" is resolved per the task's list (session-cached); a list with no
     // identity yields null → the helper no-ops, as does the setting being off.
@@ -59,11 +87,65 @@ export async function applyStatusWrites(
         scheduled_date:
           w.scheduledDate !== undefined ? w.scheduledDate : target.scheduled_date,
       });
+      landed = true;
     } catch (err) {
-      firstError ??= err;
+      failures.push({ taskId: w.taskId, err });
     }
   }
-  if (firstError !== undefined) throw firstError;
+  return { failures, landed };
+}
+
+/**
+ * A check-off whose task changed — its save stood in part with its status —
+ * while part of its family did not (review round 20 of #128): said as the
+ * task's own sentence, then the family's, by [`checkOffErrorMessage`].
+ */
+export class CheckOffFailure {
+  constructor(
+    readonly task: unknown,
+    readonly family: readonly unknown[],
+  ) {}
+}
+
+/** What a failed check-off or status change says: the desktop's
+ *  `useTaskStatusActions` sentences. */
+export function checkOffErrorMessage(
+  err: unknown,
+  t: (key: string, vars?: Record<string, unknown>) => string,
+): string {
+  if (err instanceof CheckOffFailure) {
+    const sentence = writeErrorMessage(err.task, t);
+    const family = familyNotAllSentence(err.family, t);
+    return family ? `${sentence} ${family}` : sentence;
+  }
+  return writeErrorMessage(err, t);
+}
+
+/** A check-off's writes, `task` first: where its own save stood in part with
+ *  its status, what of the family failed goes with it, as on the desktop. */
+async function applyCheckOff(
+  task: Task,
+  writes: StatusWrite[],
+  snapshot: Task[],
+  autoSelfAssign: boolean,
+): Promise<void> {
+  const { failures, landed } = await tryStatusWrites(writes, snapshot, autoSelfAssign);
+  if (failures.length === 0) return;
+  const own = failures.find((failure) => failure.taskId === task.id);
+  if (own && writeStatusLanded(own.err)) {
+    const rest = failures.filter((failure) => failure !== own);
+    throw rest.length > 0
+      ? new CheckOffFailure(
+          own.err,
+          rest.map((failure) => failure.err),
+        )
+      : own.err;
+  }
+  throw failureOfWrites(
+    'cascade',
+    failures.map((failure) => failure.err),
+    landed,
+  );
 }
 
 /**
@@ -129,7 +211,52 @@ export async function cascadeEditorStatus(
   listId: string,
   list: TaskList | undefined,
   snapshot: Task[],
+  since?: Map<string, Task>,
 ): Promise<void> {
+  const { writes, autoSelfAssign } = await planEditorStatus(
+    taskId,
+    newStatus,
+    listId,
+    list,
+    snapshot,
+  );
+  await applyStatusWrites(writes, snapshot, autoSelfAssign, since);
+}
+
+/**
+ * [`cascadeEditorStatus`] after a root whose save stood in part with its
+ * status (review rounds 17 and 18 of #128): every write attempted, the
+ * failures as they came, for the editor's sentence — the desktop's
+ * `followFamily`.
+ */
+export async function followEditorStatus(
+  taskId: string,
+  newStatus: TaskStatus,
+  listId: string,
+  list: TaskList | undefined,
+  snapshot: Task[],
+): Promise<unknown[]> {
+  const { writes, autoSelfAssign } = await planEditorStatus(
+    taskId,
+    newStatus,
+    listId,
+    list,
+    snapshot,
+  );
+  return (await tryStatusWrites(writes, snapshot, autoSelfAssign)).failures.map(
+    (failure) => failure.err,
+  );
+}
+
+/** The family's writes an editor's status change makes, the root's own left
+ *  out, with the self-assign knob. */
+async function planEditorStatus(
+  taskId: string,
+  newStatus: TaskStatus,
+  listId: string,
+  list: TaskList | undefined,
+  snapshot: Task[],
+): Promise<{ writes: StatusWrite[]; autoSelfAssign: boolean }> {
   const behaviour = await readTaskBehaviour();
   const canInProgress = canStoreInProgress(list);
   const eff = effectiveForList(behaviour, listId);
@@ -137,7 +264,7 @@ export async function cascadeEditorStatus(
     cascadeEnabled: eff.cascade,
     ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   }).filter((w) => w.taskId !== taskId);
-  await applyStatusWrites(writes, snapshot, behaviour.autoSelfAssign);
+  return { writes, autoSelfAssign: behaviour.autoSelfAssign };
 }
 
 // The one shared check-off path for every task surface (TasksScreen + the
@@ -178,7 +305,7 @@ export async function applyTaskToggle(
     ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   });
   if (writes.length === 0) return null;
-  await applyStatusWrites(writes, allTasks, behaviour.autoSelfAssign);
+  await applyCheckOff(task, writes, allTasks, behaviour.autoSelfAssign);
   return nextStatus;
 }
 
@@ -210,7 +337,7 @@ export async function setTaskStatusTo(
     // applies it to such writes only); skip where the provider can't store it.
     ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   });
-  await applyStatusWrites(writes, allTasks, behaviour.autoSelfAssign);
+  await applyCheckOff(task, writes, allTasks, behaviour.autoSelfAssign);
   return Math.max(0, writes.length - 1);
 }
 

@@ -29,6 +29,8 @@ base64 = "0.22"
 ical-mapping = { workspace = true, features = ["test-fixtures"] }
 tokio = { workspace = true }
 mockito = "1"
+# Building a test write whose every field is named only where it matters.
+serde_json.workspace = true
 
 [lints]
 workspace = true

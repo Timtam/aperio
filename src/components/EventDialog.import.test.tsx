@@ -17,6 +17,8 @@ import type { Calendar, CalendarEvent, ImportedEvent } from '../api/types';
 const calendarRows = vi.hoisted(() => ({
   current: [] as Array<{ ical_uid?: string }> | 'pending',
 }));
+/** A create that fails, as the host answers it. */
+const createFails = vi.hoisted(() => ({ current: null as { code: string; message: string } | null }));
 const invokeMock = vi.hoisted(() =>
   vi.fn((command: string, payload?: unknown) => {
     if (command === 'get_events') {
@@ -25,6 +27,7 @@ const invokeMock = vi.hoisted(() =>
     }
     if (command === 'create_event') {
       const request = (payload as { request: Record<string, unknown> }).request;
+      if (createFails.current) return Promise.reject(createFails.current);
       return Promise.resolve({ ...request, id: 'created-1' } as unknown as CalendarEvent);
     }
     return Promise.resolve([]);
@@ -201,6 +204,18 @@ describe('EventDialog → an appointment from a file', () => {
     // The file's UID, so importing it again finds it (I4).
     expect(request.uid_to_keep).toBe('teams-series-0001@example.org');
     await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
+  });
+
+  it('tells the list a create that may stand, so it is not offered again', async () => {
+    // Review round 16 of #128: only a create that landed whole marked the
+    // list's row; one that stood in part stayed checked there.
+    createFails.current = { code: 'network', message: 'partly-saved: deletions' };
+    const onImported = vi.fn();
+    await openImport(onImported);
+    await asked();
+    fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
+    await waitFor(() => expect(onImported).toHaveBeenCalledWith(true));
+    createFails.current = null;
   });
 
   it('says when the calendar cannot tell whether it holds the appointment', async () => {

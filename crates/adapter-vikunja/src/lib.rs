@@ -297,10 +297,43 @@ impl TasksFeature for VikunjaAdapter {
     }
 }
 
+/// [`to_core_error`], for the tests of the request helpers.
+#[cfg(test)]
+pub(crate) fn to_core_error_for_tests(err: VikunjaError) -> CoreError {
+    to_core_error(err)
+}
+
+/// Whether Vikunja turned a request away because it is busy (decision 270):
+/// HTTP 429, which did nothing.
+pub(crate) fn busy_detail(err: &VikunjaError) -> Option<cal_core::BusyDetail> {
+    match err {
+        VikunjaError::Http { status, .. }
+            if matches!(
+                cal_core::WriteRefusal::turned_down_by_status(*status),
+                Some(cal_core::WriteRefusal::ProviderBusy)
+            ) =>
+        {
+            Some(cal_core::BusyDetail::TooManyRequests)
+        }
+        _ => None,
+    }
+}
+
 fn to_core_error(err: VikunjaError) -> CoreError {
     use VikunjaError::*;
+    // Throttling: nothing was done, try later (decision 270).
+    if let Some(detail) = busy_detail(&err) {
+        tracing::debug!(detail = detail.word(), %err, "vikunja is busy");
+        return CoreError::provider_busy(detail);
+    }
     match err {
         Network(m) => CoreError::Network(m),
+        // A later step failed after an earlier one landed (decision 277):
+        // never a refusal, by the core's rule.
+        PartlySaved { step, cause } => {
+            tracing::debug!(step, %cause, "vikunja saved the change in part");
+            to_core_error(*cause).after_landed(step)
+        }
         Http { status, message } => match status {
             401 | 403 => CoreError::Authentication(message),
             404 => CoreError::NotFound(message),

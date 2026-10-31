@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import {
+  createRunsInSteps,
   heldSentence,
   heldStatusSentence,
   importedCreate,
@@ -23,6 +24,7 @@ import {
   rechosenForHeld,
   selectableEventCalendars,
   skippedSentence,
+  writeNeverLanded,
   type ImportedEvent,
   type ImportInto,
 } from '@aperio/shared';
@@ -40,6 +42,8 @@ import { onImportedFromEditor } from '../state/importProgress';
 import { readLastUsedCalendar, writeLastUsedCalendar } from '../state/lastUsedCalendar';
 import { useCalendarOwnAddress } from '../state/useCalendarOwnAddress';
 import { useHeldOnImport } from '../state/useHeldOnImport';
+import { holdStepWriteWait, stepWriteWait } from '../state/stepWriteWait';
+import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 const announce = (message: string) => AccessibilityInfo.announceForAccessibility(message);
@@ -54,7 +58,21 @@ const announce = (message: string) => AccessibilityInfo.announceForAccessibility
  * action, the sighted-only twin of the visible Edit button, as the calendar
  * list's rows carry Manage.
  */
-export default function FileImportScreen({
+/**
+ * The list, with its own "please wait" host beside it (decisions 227, 265):
+ * on iOS a dialog presents from the screen it is rendered in, and one in a
+ * screen under this sheet could not present over it.
+ */
+export default function FileImportScreen(props: RootStackScreenProps<'FileImport'>) {
+  return (
+    <>
+      <FileImportList {...props} />
+      <StepWriteWaitHost />
+    </>
+  );
+}
+
+function FileImportList({
   route,
   navigation,
 }: RootStackScreenProps<'FileImport'>) {
@@ -118,8 +136,12 @@ export default function FileImportScreen({
     () => new Set(events.map((_, i) => i)),
   );
   const [imported, setImported] = useState<ReadonlySet<number>>(() => new Set());
-  const markImported = useCallback((index: number) => {
+  const [inPart, setInPart] = useState<ReadonlySet<number>>(() => new Set());
+  // A row that stands only in part is not offered again either: importing it
+  // again would make it twice (decision 277).
+  const markImported = useCallback((index: number, onlyInPart = false) => {
     setImported((prev) => new Set(prev).add(index));
+    if (onlyInPart) setInPart((prev) => new Set(prev).add(index));
   }, []);
   // The editor tells this list which of its rows it created.
   useEffect(() => onImportedFromEditor(token, markImported), [token, markImported]);
@@ -267,28 +289,45 @@ export default function FileImportScreen({
     setBusy(true);
     setNotice(null);
     const failed: { title: string; err: unknown }[] = [];
+    const standing: { title: string; err: unknown }[] = [];
     let done = 0;
     // One after the other: a provider asked many times at once may turn the
-    // rest away as busy.
+    // rest away as busy. The "please wait" dialog opens at the first series
+    // that needs it and stays until the last is written.
+    const releaseWait = holdStepWriteWait();
     for (const { event: entry, index } of toImport) {
       try {
-        await createEvent(importedCreate(entry, intoOf(entry), calendarId, isHeld(index)), {
-          preserveRecurrenceZone: true,
-        });
+        // A series whose calendar writes its deletions one by one is created
+        // in steps: the "please wait" dialog says so (decisions 227, 265).
+        // Someone else's meeting kept as theirs goes in at once.
+        const create = importedCreate(entry, intoOf(entry), calendarId, isHeld(index));
+        await stepWriteWait(createRunsInSteps(calendar, create, own), () =>
+          createEvent(create, { preserveRecurrenceZone: true }),
+        );
         done += 1;
         markImported(index);
       } catch (err) {
-        failed.push({ title: entry.title, err });
+        // Only one that surely never landed is offered again; any other may
+        // stand (decision 277, review round 16 of #128).
+        if (writeNeverLanded(err)) {
+          failed.push({ title: entry.title, err });
+        } else {
+          standing.push({ title: entry.title, err });
+          markImported(index, true);
+        }
       }
     }
+    await releaseWait();
     setBusy(false);
-    if (done > 0) void writeLastUsedCalendar(calendarId);
-    if (failed.length === 0) {
+    if (done > 0 || standing.length > 0) void writeLastUsedCalendar(calendarId);
+    if (failed.length === 0 && standing.length === 0) {
       announce(t('fileImport.list.done', { count: done, calendar: calendarName }));
       navigation.goBack();
       return;
     }
-    setNotice(partlyImportedSentence(failed, done, toImport.length, calendarName, t));
+    setNotice(
+      partlyImportedSentence(failed, done, toImport.length, calendarName, t, standing),
+    );
   };
 
   return (
@@ -334,7 +373,9 @@ export default function FileImportScreen({
           if (imported.has(index)) {
             return (
               <Text key={key} style={styles.done} accessibilityRole="text">
-                {`${event.title}, ${when(event)}, ${t('fileImport.list.imported')}`}
+                {`${event.title}, ${when(event)}, ${t(
+                  inPart.has(index) ? 'fileImport.list.importedInPart' : 'fileImport.list.imported',
+                )}`}
               </Text>
             );
           }

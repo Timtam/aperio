@@ -948,6 +948,7 @@ pub fn run() {
             // CACHE-3 — manual external-cache refresh + status for the
             // toolbar indicator.
             commands::refresh_external_cache,
+            commands::refresh_account_cache,
             commands::get_cache_refresh_status,
             commands::get_refresh_errors,
             commands::reset_account_sync,

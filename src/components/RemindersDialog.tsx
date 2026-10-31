@@ -7,11 +7,11 @@ import {
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { readErrorMessage } from '@aperio/shared';
 
 import {
   getEventById,
   getTaskById,
-  isCommandError,
   listUpcomingReminders,
   type UpcomingReminder,
 } from '../api/client';
@@ -62,11 +62,7 @@ export function RemindersDialog({ isOpen, onClose }: RemindersDialogProps) {
       })
       .catch((err) => {
         if (cancelled) return;
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          setError(String(err));
-        }
+        setError(readErrorMessage(err, t));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -74,7 +70,7 @@ export function RemindersDialog({ isOpen, onClose }: RemindersDialogProps) {
     return () => {
       cancelled = true;
     };
-  }, [isOpen]);
+  }, [isOpen, t]);
 
   useEffect(() => {
     if (focusIndex >= items.length) {

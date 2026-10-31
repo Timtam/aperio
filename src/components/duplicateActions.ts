@@ -1,8 +1,9 @@
 import {
   createsInSteps,
-  eventWriteFailureReason,
+  eventWriteErrorMessage,
   eventWriteLeftover,
   organizerOf,
+  writeFailureSentence,
   writeWithoutWaiting,
   type StepWriteOptions,
 } from '@aperio/shared';
@@ -86,8 +87,11 @@ export function duplicateFailedSentence(
     return t('dialogs.event.seriesLoadFailed', { title });
   }
   // A new series that may stand: said so, and not to be done again (210).
-  if (eventWriteLeftover(err)) return t('actions.copyMayStand', { title });
-  return t('actions.duplicateFailed', { title, reason: eventWriteFailureReason(err, t) });
+  // Any other leftover says its own sentence.
+  const leftover = eventWriteLeftover(err);
+  if (leftover?.leftover === 'created-may-stand') return t('actions.copyMayStand', { title });
+  if (leftover) return eventWriteErrorMessage(err, t);
+  return writeFailureSentence('actions.duplicateFailed', err, t, 'reason', { title });
 }
 
 export async function duplicateTask(task: Task): Promise<void> {
@@ -114,4 +118,32 @@ export async function duplicateTask(task: Task): Promise<void> {
     assignees: task.assignees,
     sound: task.sound,
   });
+}
+
+/**
+ * Ctrl+D and the context menu's Duplicate on a task: a flat copy in the same
+ * list, said either way — a failure in words, never an unhandled rejection or
+ * the console alone (decision 273). The list reads again both ways: the copy
+ * shows at once, and one that may stand shows on the next read.
+ */
+export async function duplicateTaskAndSay(
+  task: Task,
+  {
+    announce,
+    invalidateData,
+    t,
+  }: {
+    announce: (message: string) => void;
+    invalidateData: () => void;
+    t: (key: string, values?: Record<string, unknown>) => string;
+  },
+): Promise<void> {
+  try {
+    await duplicateTask(task);
+    invalidateData();
+    announce(t('actions.duplicated', { title: task.title }));
+  } catch (err) {
+    invalidateData();
+    announce(duplicateFailedSentence(err, task.title, t));
+  }
 }

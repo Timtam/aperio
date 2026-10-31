@@ -1,12 +1,13 @@
 //! A write that settles in steps: one request the provider confirms, then
 //! more that complete it — or that take it back (decisions 202-213).
 //!
-//! Exchange creates a series without its deleted occurrences (decision 140):
-//! the adapter creates it bare, deletes them again one by one and reads the
-//! series to prove it, and where that fails it deletes the series again. What
-//! such a write may take, which deletions it writes again and how its outcome
-//! names the invitees is decided once, here, for every adapter that writes a
-//! series this way. Each adapter keeps its own requests, its pacing and its
+//! A provider may not take a new series' deleted occurrences with it, or
+//! Aperio may not trust how it takes them: the adapter creates the series
+//! bare, removes them again one by one and checks the result, and where that
+//! fails it deletes the series again. A provider may invite with the series or
+//! only once it is proved. What such a write may take, which deletions it
+//! writes again and how its outcome names the invitees is decided once, here,
+//! for every adapter that writes a series this way. Each adapter keeps its own requests, its pacing and its
 //! clock: this crate reads no clock (it is compiled to WebAssembly too), so
 //! everything here takes the durations and days the adapter measured.
 
@@ -89,6 +90,39 @@ pub fn step_detail_why(detail: &str) -> &str {
 /// not be written again.
 pub const OUT_OF_TIME: &str = "time";
 
+/// The reason a step-wise write gives when it gave up because the provider
+/// kept asking it to wait (decision 276): the wait it asked for last did not
+/// fit the budget, or waiting for it used up half the time to settle or more
+/// ([`busy_used_up`]). With [`crate::WriteRefusal::DeletionsNotKept`] the
+/// surfaces say the provider was busy and to try again later; with
+/// [`crate::WriteLeftover::CreatedMayStand`] it is for the log only.
+/// [`OUT_OF_TIME`] stays for a slow provider and very many deletions.
+pub const PROVIDER_BUSY: &str = "busy";
+
+/// Whether waiting for a busy provider used up a decisive share of a
+/// step-wise write's time to settle: half of it or more (decision 276). A run
+/// that then runs out of time gives [`PROVIDER_BUSY`], not [`OUT_OF_TIME`].
+pub fn busy_used_up(waited: Duration, budget: SettleBudget) -> bool {
+    waited.saturating_mul(2) >= budget.settle
+}
+
+/// The reason a step-wise write gives for a step it cannot send in time
+/// (decision 276): [`PROVIDER_BUSY`] right after an answer that asked to wait,
+/// or once waiting for such answers took half the time to settle or more
+/// ([`busy_used_up`]); [`OUT_OF_TIME`] otherwise. `busy_waited` is what the
+/// run waited for those answers.
+pub fn out_of_time_reason(
+    after_busy: bool,
+    busy_waited: Duration,
+    budget: SettleBudget,
+) -> &'static str {
+    if after_busy || busy_used_up(busy_waited, budget) {
+        PROVIDER_BUSY
+    } else {
+        OUT_OF_TIME
+    }
+}
+
 /// The day an all-day deletion names on `device`: its own date where it is
 /// the device's midnight — the spelling the views and the device's own reads
 /// give —, else the day the 13:45 rule reads ([`all_day_slot_day`]), for a
@@ -156,6 +190,27 @@ pub fn deletions_from_today<D: TimeZone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_step_out_of_time_names_a_busy_provider_where_it_was() {
+        let budget = SERIES_WITH_DELETIONS;
+        assert_eq!(
+            out_of_time_reason(true, Duration::ZERO, budget),
+            PROVIDER_BUSY
+        );
+        assert_eq!(
+            out_of_time_reason(false, Duration::from_millis(7_500), budget),
+            PROVIDER_BUSY
+        );
+        assert_eq!(
+            out_of_time_reason(false, Duration::from_millis(7_499), budget),
+            OUT_OF_TIME
+        );
+        assert_eq!(
+            out_of_time_reason(false, Duration::ZERO, budget),
+            OUT_OF_TIME
+        );
+    }
 
     fn at(s: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)

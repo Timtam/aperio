@@ -14,6 +14,7 @@ import type { ColorLabel, Section, TaskList } from '@aperio/shared';
 import { listColorLabels } from '../api/colorLabels';
 import { getSections, listTaskLists } from '../api/client';
 import { useCacheReload } from './cacheObserver';
+import { overRead, withWrite, type SectionWrite } from './sectionWrites';
 import { TaskStoreContext } from './taskStoreContext';
 import {
   reconcileSelectionTracked,
@@ -22,6 +23,11 @@ import {
   type PersistedSelection,
   type SelectionSlice,
 } from './selection';
+
+/** A section write that landed, for the read after it (`loadSections`'
+ *  `afterWrite`): the section as written, or the one removed. The desktop's
+ *  twin is `CalendarStore`'s. */
+export type { SectionWrite } from './sectionWrites';
 
 /**
  * The mobile task store — the single context every task screen consumes.
@@ -41,7 +47,10 @@ export interface TaskStoreState {
   /** Cached sections per list id, populated lazily by `loadSections`. Empty in
    *  2b (the flat list doesn't group yet); the grouped screen (sub-3) fills it. */
   sectionsByList: Record<string, Section[]>;
-  loadSections: (listId: string) => Promise<Section[]>;
+  /** Read one list's sections into the cache. After a section write that
+   *  landed, `afterWrite` names it, and it shows until the list's refresh
+   *  brings the provider's rows. */
+  loadSections: (listId: string, afterWrite?: SectionWrite) => Promise<Section[]>;
   /** The app-wide colour-label palette (named + ad-hoc), so editors can offer a
    *  picker and rows can resolve a `color_label` id → its name. */
   colorLabels: ColorLabel[];
@@ -96,14 +105,56 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
     setTaskListSel((prev) => reconcileSelectionTracked(prev, list));
   }, []);
 
-  const loadSections = useCallback(async (listId: string) => {
+  const sectionsRef = useRef(sectionsByList);
+  sectionsRef.current = sectionsByList;
+  // The section writes that landed, per list, until a read shows them. After
+  // a write the host only invalidates an external list: its read serves the
+  // rows from before until the refresh it starts lands, and a refresh a busy
+  // provider turns away leaves them so. Laid over every read of the list,
+  // not only the first (review round 15 of #128); a later write of the same
+  // section takes the earlier one's place.
+  const writtenRef = useRef<Record<string, SectionWrite[]>>({});
+  // What the host served each list last, before any write is laid over it.
+  const servedRef = useRef<Record<string, Section[]>>({});
+  const loadSections = useCallback(async (listId: string, afterWrite?: SectionWrite) => {
+    if (afterWrite) {
+      writtenRef.current = {
+        ...writtenRef.current,
+        [listId]: withWrite(writtenRef.current[listId] ?? [], {
+          ...afterWrite,
+          before: servedRef.current[listId],
+        }),
+      };
+    }
     // Sorted HERE, once — every screen that renders sections reads this cache
     // (the tasks screen, the task editor, the list editor), so a comparator
     // repeated per screen is one that ends up applied in most of them.
-    const secs = sortSections(await getSections(listId));
+    let read: Section[];
+    try {
+      read = await getSections(listId);
+      servedRef.current = { ...servedRef.current, [listId]: read };
+    } catch (err) {
+      if (!afterWrite) throw err;
+      read = sectionsRef.current[listId] ?? [];
+    }
+    // What was written shows meanwhile, as on the desktop (277); a write the
+    // read shows already is done with.
+    const { rows, open } = overRead(read, writtenRef.current[listId] ?? []);
+    writtenRef.current = { ...writtenRef.current, [listId]: open };
+    const secs = sortSections(rows);
     setSectionsByList((prev) => ({ ...prev, [listId]: secs }));
     return secs;
   }, []);
+
+  // A list's sections refreshed in the background: every list held is read
+  // again, so a section written here, or elsewhere, shows as the provider
+  // keeps it.
+  const reloadSections = useCallback(() => {
+    for (const listId of Object.keys(sectionsRef.current)) {
+      void loadSections(listId).catch(() => {});
+    }
+  }, [loadSections]);
+  useCacheReload('sections', reloadSections);
 
   const refreshColorLabels = useCallback(async () => {
     setColorLabels(await listColorLabels());

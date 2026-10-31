@@ -1148,11 +1148,15 @@ external fun uniffi_cal_ffi_checksum_method_host_query_free_busy_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_read_import_file_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_refresh_account_cache(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_errors_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_event_local_reminder_signature(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_external_cache(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_refresh_external_cache_in_background(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_rename_account_json(
 ): Short
@@ -1556,11 +1560,15 @@ external fun uniffi_cal_ffi_fn_method_host_query_free_busy_json(`ptr`: Long,`req
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_read_import_file_json(`ptr`: Long,`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_refresh_account_cache(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_refresh_errors_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_refresh_event_local_reminder_signature(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`startsAt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_refresh_external_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_refresh_external_cache_in_background(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_rename_account_json(`ptr`: Long,`id`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -2387,10 +2395,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 4483.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_query_free_busy_json() != 44096.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_query_free_busy_json() != 34138.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_read_import_file_json() != 17526.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_refresh_account_cache() != 20722.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_errors_json() != 55989.toShort()) {
@@ -2400,6 +2411,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_external_cache() != 5904.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_refresh_external_cache_in_background() != 50536.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_rename_account_json() != 49761.toShort()) {
@@ -5454,10 +5468,11 @@ public interface HostInterface {
     /**
      * Attendee free/busy over `[range_start, range_end]` for the account owning
      * the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
-     * [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
-     * calendar, an unroutable account, or a provider that can't answer (no
-     * scheduling / permission denied) returns `[]` — the UI reads that as
-     * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+     * [{start, end}]}`). Best-effort: a LOCAL calendar, an unroutable
+     * account, and any failure other than a busy provider (no scheduling,
+     * permission denied) return `[]`. A busy provider is an error (decision
+     * 270): the editor says the check could not be made, never "all free".
+     * Mirrors the desktop `query_free_busy`.
      */
     fun `queryFreeBusyJson`(`requestJson`: kotlin.String): kotlin.String
     
@@ -5468,6 +5483,15 @@ public interface HostInterface {
      * Mirrors the desktop `read_import_file` command.
      */
     fun `readImportFileJson`(`path`: kotlin.String): kotlin.String
+    
+    /**
+     * [`Self::refresh_external_cache`] after a change of ONE account
+     * (added, edited, a sign-in or password stored again, a reset): the pass
+     * runs forced for that account only, and counts as an automatic round
+     * for the others (decision 271). Mirrors the desktop
+     * `refresh_account_cache`.
+     */
+    fun `refreshAccountCache`(`accountId`: kotlin.String)
     
     /**
      * Every account's currently-failing containers as a JSON
@@ -5491,6 +5515,15 @@ public interface HostInterface {
      * `refresh_external_cache`.
      */
     fun `refreshExternalCache`()
+    
+    /**
+     * The OS background round's warm pass (BGTaskScheduler, WorkManager):
+     * automatic, so UN-forced — a busy provider or a blip needs a second
+     * round before it shows, as on the desktop (decision 271) — but queued
+     * like [`Self::refresh_external_cache`], because the round was woken for
+     * data a running pass may already have read past.
+     */
+    fun `refreshExternalCacheInBackground`()
     
     /**
      * Rename an account's display name. Persists the row + syncs the change
@@ -8225,10 +8258,11 @@ open class Host: Disposable, AutoCloseable, HostInterface
     /**
      * Attendee free/busy over `[range_start, range_end]` for the account owning
      * the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
-     * [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
-     * calendar, an unroutable account, or a provider that can't answer (no
-     * scheduling / permission denied) returns `[]` — the UI reads that as
-     * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+     * [{start, end}]}`). Best-effort: a LOCAL calendar, an unroutable
+     * account, and any failure other than a busy provider (no scheduling,
+     * permission denied) return `[]`. A busy provider is an error (decision
+     * 270): the editor says the check could not be made, never "all free".
+     * Mirrors the desktop `query_free_busy`.
      */
     @Throws(StoreException::class)override fun `queryFreeBusyJson`(`requestJson`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
@@ -8261,6 +8295,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * [`Self::refresh_external_cache`] after a change of ONE account
+     * (added, edited, a sign-in or password stored again, a reset): the pass
+     * runs forced for that account only, and counts as an automatic round
+     * for the others (decision 271). Mirrors the desktop
+     * `refresh_account_cache`.
+     */override fun `refreshAccountCache`(`accountId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_refresh_account_cache(
+        it,
+        FfiConverterString.lower(`accountId`),_status)
+}
+    }
+    
     
 
     
@@ -8312,6 +8365,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_refresh_external_cache(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
+     * The OS background round's warm pass (BGTaskScheduler, WorkManager):
+     * automatic, so UN-forced — a busy provider or a blip needs a second
+     * round before it shows, as on the desktop (decision 271) — but queued
+     * like [`Self::refresh_external_cache`], because the round was woken for
+     * data a running pass may already have read past.
+     */override fun `refreshExternalCacheInBackground`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_refresh_external_cache_in_background(
         it,
         _status)
 }

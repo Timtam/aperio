@@ -13,7 +13,10 @@
 //! 2026-10-26). Exchange files the appointment in the default calendar,
 //! whichever folder the request went to (ICS-6), so in any other folder it is
 //! moved there afterwards (Toni, 2026-10-26). Then it is read back as it now
-//! stands.
+//! stands. Once the request stands, a later step that fails leaves something
+//! in the mailbox: the import was saved in part (decision 277), never
+//! "nothing was changed" — but for a move whose clean-up went: then nothing
+//! stands, whatever the move's answer was (review round 19 of #128).
 
 use base64::Engine as _;
 use cal_core::{Event, NewEvent};
@@ -71,6 +74,7 @@ pub(crate) async fn create(
         .await?;
     let request_ref = crate::mapping::parse_first_item_id(&made)?;
 
+    // The request stands from here on.
     let reply = client
         .post_soap(respond_to_meeting(
             &request_ref.id,
@@ -78,10 +82,12 @@ pub(crate) async fn create(
             "TentativelyAcceptItem",
             false,
         ))
-        .await?;
-    let made = parse_reply_items(&reply)?;
+        .await
+        .map_err(|err| err.after_landed("reply"))?;
+    let made = parse_reply_items(&reply).map_err(|err| err.after_landed("reply"))?;
     let appointment = made.appointment.ok_or_else(|| {
         EwsError::Protocol("the tentative reply made no appointment of the request".into())
+            .after_landed("reply")
     })?;
     if let Some(moved) = made.request {
         // Out of Deleted Items, recoverably. The appointment stands either
@@ -97,21 +103,26 @@ pub(crate) async fn create(
             appointment.id.clone(),
             appointment.change_key.clone(),
         )]))
-        .await?;
-    let item = parse_get_calendar_items_response(&detail)?
+        .await
+        .map_err(|err| err.after_landed("read-back"))?;
+    let item = parse_get_calendar_items_response(&detail)
+        .map_err(|err| err.after_landed("read-back"))?
         .into_iter()
         .next()
         .ok_or_else(|| {
             EwsError::Protocol("the imported invitation could not be read back".into())
+                .after_landed("read-back")
         })?;
-    to_event(item, calendar_id)
+    to_event(item, calendar_id).map_err(|err| err.after_landed("read-back"))
 }
 
 /// `appointment` in `folder_id`, moved there when Exchange filed it elsewhere
 /// (live round ICS-6: always the default calendar). A move that fails takes
 /// the appointment out again, recoverably and telling nobody (as an attendee's
 /// delete never does, ICS-4), so the import lands where it was asked to or
-/// not at all.
+/// not at all; a clean-up that fails too leaves it standing in the default
+/// calendar, saved in part. Every other failure here is after the
+/// appointment stands.
 async fn into_folder(
     client: &EwsClient,
     appointment: ItemRef,
@@ -119,24 +130,31 @@ async fn into_folder(
 ) -> EwsResult<ItemRef> {
     let answer = client
         .post_soap(get_item_parent_folder(&appointment.id))
-        .await?;
-    if parse_parent_folder_id(&answer)? == folder_id {
+        .await
+        .map_err(|err| err.after_landed("folder"))?;
+    if parse_parent_folder_id(&answer).map_err(|err| err.after_landed("folder"))? == folder_id {
         return Ok(appointment);
     }
     match client
         .post_soap(move_item(&appointment.id, folder_id))
         .await
     {
-        Ok(moved) => parse_first_item_id(&moved),
-        Err(err) => {
-            if let Err(cleanup) = client
-                .post_soap(delete_calendar_item(&appointment.id, None, false))
-                .await
-            {
+        Ok(moved) => parse_first_item_id(&moved).map_err(|err| err.after_landed("move")),
+        Err(err) => match client
+            .post_soap(delete_calendar_item(&appointment.id, None, false))
+            .await
+        {
+            // Deleted by its old id: no move landed, which gives the item a
+            // new one.
+            Ok(_) => Err(EwsError::TakenBack {
+                step: "move",
+                cause: Box::new(err),
+            }),
+            Err(cleanup) => {
                 tracing::warn!(target: "adapter_ews::invitation", %cleanup, "the imported invitation stayed in the default calendar after its move failed");
+                Err(err.after_landed("move"))
             }
-            Err(err)
-        }
+        },
     }
 }
 
@@ -512,6 +530,148 @@ mod tests {
         moved.assert_async().await;
         taken_out.assert_async().await;
         read.assert_async().await;
+    }
+
+    /// Review round 19 of #128: a move whose answer was not one of a refusal
+    /// — lost, or a code of Exchange's own — read as "maybe imported" once
+    /// its clean-up went, and the list never offered the meeting again.
+    #[tokio::test]
+    async fn a_failed_move_whose_clean_up_went_imported_nothing() {
+        let mut server = Server::new_async().await;
+        let _way = way_in(&mut server, "DEFAULT").await;
+        let _moved = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("<m:MoveItem>".into()))
+            .with_status(200)
+            .with_body(MOVE_REFUSED.replace("ErrorFolderNotFound", "ErrorMoveCopyFailed"))
+            .create_async()
+            .await;
+        let _taken_out = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                "DeleteType=\"MoveToDeletedItems\"".into(),
+            ))
+            .with_status(200)
+            .with_body(OK_DELETE)
+            .create_async()
+            .await;
+
+        let failed =
+            crate::api::create_event(&client_of(&server), "FOLDER|FCK", invitation(&[]), None)
+                .await
+                .unwrap_err();
+        let core = crate::to_core_error_for_tests(failed);
+        assert!(core.never_landed(), "{core:?}");
+        assert!(!core.is_provider_busy(), "{core:?}");
+    }
+
+    const BUSY_FAULT: &str = r#"<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultcode xmlns:a="http://schemas.microsoft.com/exchange/services/2006/types">a:ErrorServerBusy</faultcode><faultstring>busy</faultstring></s:Fault></s:Body></s:Envelope>"#;
+
+    /// The step a create stood at, as the adapter says it — and what the
+    /// shells receive of it says the import may stand, never that nothing
+    /// was made.
+    fn partly_saved_at(result: EwsResult<Event>) -> Option<&'static str> {
+        match result {
+            Err(EwsError::PartlySaved { step, cause }) => {
+                let core = crate::to_core_error_for_tests(EwsError::PartlySaved { step, cause });
+                assert!(!core.never_landed(), "{core:?}");
+                Some(step)
+            }
+            _ => None,
+        }
+    }
+
+    /// Review round 15 of #128: once the request stands, a busy Exchange
+    /// at a later step said nothing was changed, and the import list offered
+    /// the meeting again.
+    #[tokio::test]
+    async fn a_busy_reply_leaves_the_request_standing_in_part() {
+        let mut server = Server::new_async().await;
+        let _request = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("<m:CreateItem".into()))
+            .with_status(200)
+            .with_body(REQUEST_MADE)
+            .create_async()
+            .await;
+        let _reply = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("<t:TentativelyAcceptItem>".into()))
+            .with_status(500)
+            .with_body(BUSY_FAULT)
+            .create_async()
+            .await;
+
+        let result = create(
+            &client_of(&server),
+            "FOLDER|FCK",
+            &invitation(&[]),
+            "boss@example.net",
+            Some("toni@example.org"),
+        )
+        .await;
+
+        assert_eq!(partly_saved_at(result), Some("reply"));
+    }
+
+    #[tokio::test]
+    async fn a_busy_read_back_leaves_the_appointment_standing_in_part() {
+        let mut server = Server::new_async().await;
+        let _way = way_in(&mut server, "FOLDER").await;
+        let _read = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("<m:GetItem>".into()),
+                mockito::Matcher::Regex("<t:ItemId Id=\"APPT\" ChangeKey=\"CK1\"/>".into()),
+            ]))
+            .with_status(500)
+            .with_body(BUSY_FAULT)
+            .create_async()
+            .await;
+
+        let result = create(
+            &client_of(&server),
+            "FOLDER|FCK",
+            &invitation(&[]),
+            "boss@example.net",
+            Some("toni@example.org"),
+        )
+        .await;
+
+        assert_eq!(partly_saved_at(result), Some("read-back"));
+    }
+
+    #[tokio::test]
+    async fn a_refused_move_whose_clean_up_fails_leaves_the_appointment_standing_in_part() {
+        let mut server = Server::new_async().await;
+        let _way = way_in(&mut server, "DEFAULT").await;
+        let _moved = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("<m:MoveItem>".into()))
+            .with_status(200)
+            .with_body(MOVE_REFUSED)
+            .create_async()
+            .await;
+        let _kept = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex(
+                "DeleteType=\"MoveToDeletedItems\"".into(),
+            ))
+            .with_status(500)
+            .with_body(BUSY_FAULT)
+            .create_async()
+            .await;
+
+        let result = create(
+            &client_of(&server),
+            "FOLDER|FCK",
+            &invitation(&[]),
+            "boss@example.net",
+            Some("toni@example.org"),
+        )
+        .await;
+
+        assert_eq!(partly_saved_at(result), Some("move"));
     }
 
     #[test]

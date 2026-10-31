@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { CalendarEvent } from '../api/types';
+import type { CalendarEvent, Task } from '../api/types';
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
-import { duplicateEvent, duplicatedSentence, duplicateFailedSentence } from './duplicateActions';
+import {
+  duplicateEvent,
+  duplicatedSentence,
+  duplicateFailedSentence,
+  duplicateTaskAndSay,
+} from './duplicateActions';
 import { SeriesNotLoadedError } from '../state/moveActions';
 
 /**
@@ -126,5 +131,55 @@ describe('duplicateEvent', () => {
     const said = duplicateFailedSentence(new Error('Der Server antwortet nicht'), 'Standup', t);
     expect(said).toMatch(/^actions\.duplicateFailed/);
     expect(said).toMatch(/Der Server antwortet nicht/);
+  });
+
+  it('says to try later for a copy taken back because the provider was busy (276)', () => {
+    const t = (key: string, values?: Record<string, unknown>) => `${key} ${JSON.stringify(values)}`;
+    const takenBack = { code: 'forbidden', message: 'deletions-not-kept: busy' };
+    const said = duplicateFailedSentence(takenBack, 'Standup', t);
+    expect(said).toMatch(/^actions\.duplicateFailed/);
+    expect(said).toContain('dialogs.event.writeError.reason.deletionsNotKeptBusy');
+    expect(said).toMatch(/ common\.tryAgainLater /);
+    // Taken back for another reason: nothing to wait for.
+    const late = { code: 'forbidden', message: 'deletions-not-kept: time' };
+    expect(duplicateFailedSentence(late, 'Standup', t)).not.toContain('common.tryAgainLater');
+  });
+
+  it('says a copy that may stand only for a new series that may stand', () => {
+    const t = (key: string, values?: Record<string, unknown>) => `${key} ${JSON.stringify(values)}`;
+    const mayStand = { code: 'network', message: 'created-may-stand: time' };
+    expect(duplicateFailedSentence(mayStand, 'Standup', t)).toMatch(/^actions\.copyMayStand/);
+    const inPart = { code: 'network', message: 'partly-saved: children' };
+    expect(duplicateFailedSentence(inPart, 'Standup', t)).toMatch(
+      /^dialogs\.event\.writeError\.partlySaved/,
+    );
+  });
+});
+
+describe('duplicateTaskAndSay (Ctrl+D on a task)', () => {
+  const t = (key: string, values?: Record<string, unknown>) => `${key} ${JSON.stringify(values)}`;
+  const TASK = { id: 't1', list_id: 'L1', title: 'Einkaufen', assignees: [] } as unknown as Task;
+
+  it('says a busy provider in words, and reads the list again (273)', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockRejectedValue({ code: 'forbidden', message: 'provider-busy: http-429' });
+    const announce = vi.fn();
+    const invalidateData = vi.fn();
+    // Resolves: a failure is said, never an unhandled rejection.
+    await expect(duplicateTaskAndSay(TASK, { announce, invalidateData, t })).resolves.toBeUndefined();
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce.mock.calls[0][0]).toMatch(/^actions\.duplicateFailed /);
+    expect(announce.mock.calls[0][0]).toContain('dialogs.event.writeError.reason.providerBusy');
+    // A busy sentence always says to try later (decisions 272, 278).
+    expect(announce.mock.calls[0][0]).toMatch(/ common\.tryAgainLater /);
+    expect(invalidateData).toHaveBeenCalled();
+  });
+
+  it('says the copy when it lands', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({ ...TASK, id: 't2' });
+    const announce = vi.fn();
+    await duplicateTaskAndSay(TASK, { announce, invalidateData: () => {}, t });
+    expect(announce.mock.calls[0][0]).toMatch(/^actions\.duplicated /);
   });
 });

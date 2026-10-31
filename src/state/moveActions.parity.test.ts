@@ -16,7 +16,11 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('../../mobile/src/api/calendar', () => phone);
 vi.mock('../../mobile/src/api/client', () => ({ createTask: vi.fn(), updateTask: vi.fn() }));
 
-import { moveOrCopyEvent as desktopMoveOrCopy } from './moveActions';
+import {
+  moveEventToDay,
+  moveOrCopyEvent as desktopMoveOrCopy,
+  OriginalKeptError,
+} from './moveActions';
 
 /**
  * The phone's module, loaded through a path the type checker does not follow,
@@ -31,12 +35,12 @@ type MoveOrCopy = (
   targetCalendarId: string,
   mode: 'move' | 'copy',
   scope: 'occurrence' | 'series',
-) => Promise<void>;
-async function phoneMoveOrCopy(...args: Parameters<MoveOrCopy>): Promise<void> {
+) => Promise<CalendarEvent | null>;
+async function phoneMoveOrCopy(...args: Parameters<MoveOrCopy>): Promise<CalendarEvent | null> {
   const phoneModule = (await import(/* @vite-ignore */ PHONE_MOVE_ACTIONS)) as {
     moveOrCopyEvent: MoveOrCopy;
   };
-  await phoneModule.moveOrCopyEvent(...args);
+  return phoneModule.moveOrCopyEvent(...args);
 }
 
 /**
@@ -162,4 +166,60 @@ describe('a whole series moved or copied, on the desktop and the phone alike', (
       }
     }
   }
+});
+
+/**
+ * One occurrence moved to another calendar, on both surfaces, and one dragged
+ * to another day where its calendar keeps no exceptions (decision 277): the
+ * copy lands first, so a busy answer to the cancel of the original leaves the
+ * move partly saved, never "nothing was changed" — moving again would make a
+ * second copy.
+ */
+describe('an occurrence moved: a busy cancel after its copy landed keeps the original', () => {
+  const busy = { code: 'forbidden', message: 'provider-busy: http-429' };
+  const occurrence = FROM.occurrence(SHAPES.google);
+
+  it('desktop: the copy names where the original stayed', async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === 'add_event_exdate'
+        ? Promise.reject(busy)
+        : Promise.resolve({ id: 'copy', title: 'Standup', calendar_id: 'c2' }),
+    );
+    await expect(desktopMoveOrCopy(occurrence, 'c2', 'move', 'occurrence')).resolves.toEqual(
+      expect.objectContaining({ id: 'copy', original_left_in: 'c1' }),
+    );
+    expect(invokeMock.mock.calls.map((c) => c[0])).toEqual(['create_event', 'add_event_exdate']);
+  });
+
+  it('phone: the copy names where the original stayed', async () => {
+    phone.createEvent.mockResolvedValue({ id: 'copy', title: 'Standup', calendar_id: 'c2' });
+    phone.addEventExdate.mockRejectedValue(busy);
+    await expect(phoneMoveOrCopy(occurrence, 'c2', 'move', 'occurrence')).resolves.toEqual(
+      expect.objectContaining({ id: 'copy', original_left_in: 'c1' }),
+    );
+    expect(phone.createEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('desktop: any other failure of the cancel may have landed', async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === 'add_event_exdate'
+        ? Promise.reject({ code: 'not_found', message: 'gone' })
+        : Promise.resolve({}),
+    );
+    await expect(desktopMoveOrCopy(occurrence, 'c2', 'move', 'occurrence')).rejects.toEqual(
+      expect.objectContaining({ code: 'network' }),
+    );
+  });
+
+  it('desktop, dragged to another day', async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === 'add_event_exdate' ? Promise.reject(busy) : Promise.resolve({}),
+    );
+    // The drag's copy stands; the occurrence it left stayed, which the view
+    // says as a move whose original stayed.
+    await expect(moveEventToDay(occurrence, '2026-06-10', 'occurrence', null)).rejects.toBeInstanceOf(
+      OriginalKeptError,
+    );
+    expect(invokeMock.mock.calls.map((c) => c[0])).toEqual(['create_event', 'add_event_exdate']);
+  });
 });

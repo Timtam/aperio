@@ -17,11 +17,14 @@ const { invokeMock, onFile, invalidateData, announced } = vi.hoisted(() => {
     createGate: Promise<void> | null;
     updateFails: unknown;
     updateGate: Promise<void> | null;
+    /** The calendar a move's original stayed in (decision 277). */
+    originalLeftIn: string | null;
   } = {
     createFails: null,
     createGate: null,
     updateFails: null,
     updateGate: null,
+    originalLeftIn: null,
   };
   const announced: string[] = [];
   const invalidateData = vi.fn();
@@ -36,6 +39,9 @@ const { invokeMock, onFile, invalidateData, announced } = vi.hoisted(() => {
       const event = (payload as { event: Record<string, unknown> }).event;
       if (onFile.updateFails != null) return Promise.reject(onFile.updateFails);
       if (onFile.updateGate) return onFile.updateGate.then(() => event);
+      if (onFile.originalLeftIn) {
+        return Promise.resolve({ ...event, original_left_in: onFile.originalLeftIn });
+      }
       return Promise.resolve(event);
     }
     if (command === 'get_series_rows') {
@@ -67,6 +73,8 @@ const STORE = {
   selectedCalendarIds: new Set(['cal-home', 'cal-exchange']),
   selectedTaskListIds: new Set<string>(),
   sectionsByList: {},
+  sectionsWritten: {},
+  sectionsReadFailure: {},
   loadSections: () => Promise.resolve(),
 };
 vi.mock('../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
@@ -109,6 +117,7 @@ afterEach(() => {
   onFile.createGate = null;
   onFile.updateFails = null;
   onFile.updateGate = null;
+  onFile.originalLeftIn = null;
   announced.length = 0;
 });
 
@@ -231,5 +240,22 @@ describe('MoveCopyDialog → a series into a calendar that creates it in steps',
     expect(screen.queryByRole('button', { name: /^verschieben$|^move$/i })).toBeNull();
     expect(screen.getByRole('button', { name: /^schließen$/i })).toBeTruthy();
     expect(invalidateData).toHaveBeenCalled();
+  });
+
+  it('says where the original stayed when the provider was too busy to delete it (277)', async () => {
+    onFile.originalLeftIn = 'cal-home';
+    const onClose = vi.fn();
+    await copyTo(/Arbeit/, onClose, 'move');
+    submitMove();
+    const said = await screen.findByText(/ließ sich nicht entfernen|could not be removed/);
+    expect(said.textContent).toBe(
+      '„Teamrunde“ wurde verschoben, aber das Original in „Privat“ ließ sich nicht entfernen, weil der Anbieter gerade ausgelastet ist. Lösche es dort selbst; verschiebe es nicht noch einmal.',
+    );
+    await waitFor(() => expect(document.activeElement).toBe(said));
+    // Only Close: moving it again would make a second copy.
+    expect(screen.queryByRole('button', { name: /^verschieben$|^move$/i })).toBeNull();
+    expect(invalidateData).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /^schließen$/i }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

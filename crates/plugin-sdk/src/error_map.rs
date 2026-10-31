@@ -51,6 +51,22 @@ pub fn cal_error_to_response(err: CalError) -> PluginCallResult {
     error_response(status, &msg)
 }
 
+/// A plugin's interactive-auth error text, from the core error its adapter
+/// maps to. A message that starts with a refusal or a leftover token stays as
+/// it is, token first, so the host and the shells still read it: a busy token
+/// endpoint says the provider is busy, not "sign in again" (decision 270).
+/// Anything else reads `prefix: error`.
+pub fn auth_error(prefix: &str, err: &CalError) -> String {
+    let message = err.message();
+    if cal_core::WriteRefusal::parse(message).is_some()
+        || cal_core::WriteLeftover::parse(message).is_some()
+    {
+        message.to_string()
+    } else {
+        format!("{prefix}: {err}")
+    }
+}
+
 /// Map a `sync_core::SyncError` into a [`PluginCallResult`].
 /// `EncryptionRequired`, `SchemaTooOld` and `StaleDevice` are
 /// surfaced as Protocol with the formatted message — they're
@@ -118,6 +134,49 @@ mod tests {
         assert_eq!(slice, b"bad creds");
         let mut p = r.payload;
         unsafe { p.free_in_place() };
+    }
+
+    /// A busy provider is a refusal and a save made in part a network error
+    /// (decisions 270, 277): both cross with their status and their message
+    /// byte for byte, token first.
+    #[test]
+    fn a_busy_refusal_crosses_as_forbidden_and_a_partly_saved_as_network() {
+        use plugin_core::ffi::{PLUGIN_CALL_ERR_FORBIDDEN, PLUGIN_CALL_ERR_NETWORK};
+        for (err, status, message) in [
+            (
+                CalError::provider_busy(cal_core::BusyDetail::TooManyRequests),
+                PLUGIN_CALL_ERR_FORBIDDEN,
+                "provider-busy: http-429",
+            ),
+            (
+                CalError::partly_saved("members"),
+                PLUGIN_CALL_ERR_NETWORK,
+                "partly-saved: members",
+            ),
+        ] {
+            let r = cal_error_to_response(err);
+            assert_eq!(r.status, status);
+            let slice = unsafe { r.payload.as_slice() };
+            assert_eq!(slice, message.as_bytes());
+            let mut p = r.payload;
+            unsafe { p.free_in_place() };
+        }
+    }
+
+    /// An interactive-auth error keeps a token first; anything else is
+    /// named by its phase.
+    #[test]
+    fn auth_error_keeps_a_token_first() {
+        let busy = CalError::provider_busy(cal_core::BusyDetail::RateLimit);
+        assert_eq!(
+            auth_error("Google exchange", &busy),
+            "provider-busy: rate-limit"
+        );
+        let refused = CalError::Authentication("invalid_grant".into());
+        assert_eq!(
+            auth_error("Google exchange", &refused),
+            "Google exchange: authentication failed: invalid_grant"
+        );
     }
 
     /// A new series taken back is a refusal and one that may stand a network

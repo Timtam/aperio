@@ -16,24 +16,28 @@ import {
   deleteContact as apiDeleteContact,
   deleteContactPhoto as apiDeleteContactPhoto,
   getContactPhoto as apiGetContactPhoto,
-  isCommandError,
   setContactPhoto as apiSetContactPhoto,
   updateContact as apiUpdateContact,
 } from '../api/client';
 import {
   CONTACT_LABELS,
+  type ContactValue,
   deriveDisplayName,
+  eventWriteLeftover,
   fromContactValues,
+  type KnownContactLabel,
   knownLabel,
   toContactValues,
-  type ContactValue,
-  type KnownContactLabel,
+  writeAfterLanded,
+  writeErrorMessage,
 } from '@aperio/shared';
 
 import type { Contact, ContactAddress, ContactPhoto } from '../api/types';
 import { getContactListDisplayName } from '../intl/contactList';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
+import { useCloseOnlyNotice } from '../state/useCloseOnlyNotice';
+import { CloseOnlyNotice } from './CloseOnlyNotice';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
 import { ReadOnlyText } from './ReadOnlyText';
@@ -268,6 +272,9 @@ export function ContactDialog({
   const announce = useAnnouncer();
   const { contactLists } = useCalendarStore();
   const { invalidateData } = useDialogState();
+  // What the editor says in place of the form once a save landed in part:
+  // saving again would create the contact or group twice (273).
+  const { notice, showNotice } = useCloseOnlyNotice();
 
   const isEdit = contact !== null;
   const titleId = useId();
@@ -564,16 +571,22 @@ export function ContactDialog({
           // moved. The non-photo `update_contact` path explicitly
           // does NOT touch photo storage, so untouched photos
           // survive the field update without us doing anything.
-          if (photoDirty) {
+          // The contact itself was saved: a photo the provider turned away
+          // never reads as "nothing was changed" (decision 277).
+          if (photoDirty && !form.isGroup) {
             if (photo) {
-              await apiSetContactPhoto(contact.id, photo, form.listId);
+              await writeAfterLanded('photo', () =>
+                apiSetContactPhoto(contact.id, photo, form.listId),
+              );
               announce(
                 t('dialogs.contact.photoUpdated', {
                   name: payload.display_name,
                 }),
               );
             } else {
-              await apiDeleteContactPhoto(contact.id, form.listId);
+              await writeAfterLanded('photo', () =>
+                apiDeleteContactPhoto(contact.id, form.listId),
+              );
               announce(
                 t('dialogs.contact.photoRemoved', {
                   name: payload.display_name,
@@ -589,11 +602,24 @@ export function ContactDialog({
           // lets the adapter write the avatar in the same logical
           // operation (one local INSERT, one EWS CreateItem +
           // CreateAttachment, one CardDAV PUT with PHOTO embedded).
-          await apiCreateContact({
+          const created = await apiCreateContact({
             list_id: form.listId,
             ...payload,
-            photo: photo,
+            // A person only — a group keeps no photo. Mirrors the phone.
+            photo: form.isGroup ? null : photo,
           });
+          // A provider that stores the photo in a step of its own (Google)
+          // keeps the contact when that step fails, and says so by the row
+          // it returns: said, and only closed (273).
+          if (!form.isGroup && photo && !created.has_photo) {
+            invalidateData();
+            showNotice(
+              t('dialogs.contact.createdWithoutPhoto', {
+                name: payload.display_name,
+              }),
+            );
+            return;
+          }
           announce(
             t('dialogs.contact.created', { name: payload.display_name }),
           );
@@ -601,11 +627,15 @@ export function ContactDialog({
         invalidateData();
         onClose();
       } catch (err) {
-        if (isCommandError(err)) {
-          setError(`${err.code}: ${err.message}`);
-        } else {
-          setError(String(err));
+        // A contact or group that stands without one of its steps — a
+        // group's members (273): said in place of the form, which only
+        // closes, and the data reloads.
+        if (eventWriteLeftover(err)) {
+          invalidateData();
+          showNotice(writeErrorMessage(err, t));
+          return;
         }
+        setError(writeErrorMessage(err, t));
       } finally {
         setSubmitting(false);
       }
@@ -619,6 +649,7 @@ export function ContactDialog({
       announce,
       invalidateData,
       onClose,
+      showNotice,
     ],
   );
 
@@ -634,28 +665,40 @@ export function ContactDialog({
       invalidateData();
       onClose();
     } catch (err) {
-      if (isCommandError(err)) {
-        setError(`${err.code}: ${err.message}`);
-      } else {
-        setError(String(err));
-      }
+      // A delete whose answer was lost may have landed: the views read again
+      // (277); the dialog stays to say it.
+      invalidateData();
+      setError(writeErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }
   }, [contact, t, announce, invalidateData, onClose]);
+
+  const dialogTitle = t(
+    viewOnly
+      ? 'dialogs.contact.viewTitle'
+      : isEdit
+        ? 'dialogs.contact.editTitle'
+        : 'dialogs.contact.createTitle',
+  );
+
+  if (notice) {
+    return (
+      <CloseOnlyNotice
+        title={dialogTitle}
+        sentence={notice}
+        onClose={onClose}
+        className="modal--form modal--contact"
+      />
+    );
+  }
 
   return (
     <>
       <Modal
         isOpen={isOpen}
         onClose={onClose}
-        title={t(
-          viewOnly
-            ? 'dialogs.contact.viewTitle'
-            : isEdit
-              ? 'dialogs.contact.editTitle'
-              : 'dialogs.contact.createTitle',
-        )}
+        title={dialogTitle}
         className="modal--form modal--contact"
         dismissOnBackdrop={false}
       >
@@ -666,71 +709,75 @@ export function ContactDialog({
             </p>
           )}
 
-          <div className="form__field form__field--photo">
-            <span className="form__label">
-              {t('dialogs.contact.photoSectionLabel')}
-            </span>
-            <div className="contact-photo">
-              {photo ? (
-                <img
-                  className="contact-photo__preview"
-                  src={photoToDataUrl(photo)}
-                  alt={t('dialogs.contact.photoAltSet', {
-                    name: form.displayName || t('dialogs.contact.photoNone'),
-                  })}
-                />
-              ) : (
-                <div
-                  className="contact-photo__placeholder"
-                  role="img"
-                  aria-label={t('dialogs.contact.photoAltNone', {
-                    name: form.displayName || '',
-                  })}
-                >
-                  {photoLoading
-                    ? t('dialogs.contact.photoLoading')
-                    : t('dialogs.contact.photoNone')}
-                </div>
-              )}
-              {!viewOnly && (
-                <div className="contact-photo__actions">
-                  <input
-                    ref={photoInputRef}
-                    id={photoInputId}
-                    type="file"
-                    accept={ALLOWED_PHOTO_TYPES.join(',')}
-                    className="sr-only"
-                    onChange={(e) => void onPickPhoto(e)}
+          {/* A person only: a group keeps no photo, as on the phone (review
+              round 17 of #128). */}
+          {!form.isGroup && (
+            <div className="form__field form__field--photo">
+              <span className="form__label">
+                {t('dialogs.contact.photoSectionLabel')}
+              </span>
+              <div className="contact-photo">
+                {photo ? (
+                  <img
+                    className="contact-photo__preview"
+                    src={photoToDataUrl(photo)}
+                    alt={t('dialogs.contact.photoAltSet', {
+                      name: form.displayName || t('dialogs.contact.photoNone'),
+                    })}
                   />
-                  <button
-                    type="button"
-                    className="form__action"
-                    onClick={() => photoInputRef.current?.click()}
-                    aria-disabled={submitting || photoLoading || undefined}
+                ) : (
+                  <div
+                    className="contact-photo__placeholder"
+                    role="img"
+                    aria-label={t('dialogs.contact.photoAltNone', {
+                      name: form.displayName || '',
+                    })}
                   >
-                    {photo
-                      ? t('dialogs.contact.photoReplace')
-                      : t('dialogs.contact.photoChoose')}
-                  </button>
-                  {photo && (
+                    {photoLoading
+                      ? t('dialogs.contact.photoLoading')
+                      : t('dialogs.contact.photoNone')}
+                  </div>
+                )}
+                {!viewOnly && (
+                  <div className="contact-photo__actions">
+                    <input
+                      ref={photoInputRef}
+                      id={photoInputId}
+                      type="file"
+                      accept={ALLOWED_PHOTO_TYPES.join(',')}
+                      className="sr-only"
+                      onChange={(e) => void onPickPhoto(e)}
+                    />
                     <button
                       type="button"
                       className="form__action"
-                      onClick={onRemovePhoto}
-                      aria-disabled={submitting || undefined}
+                      onClick={() => photoInputRef.current?.click()}
+                      aria-disabled={submitting || photoLoading || undefined}
                     >
-                      {t('dialogs.contact.photoRemove')}
+                      {photo
+                        ? t('dialogs.contact.photoReplace')
+                        : t('dialogs.contact.photoChoose')}
                     </button>
-                  )}
-                </div>
-              )}
-              {photoError && (
-                <p role="alert" className="form__error">
-                  {photoError}
-                </p>
-              )}
+                    {photo && (
+                      <button
+                        type="button"
+                        className="form__action"
+                        onClick={onRemovePhoto}
+                        aria-disabled={submitting || undefined}
+                      >
+                        {t('dialogs.contact.photoRemove')}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {photoError && (
+                  <p role="alert" className="form__error">
+                    {photoError}
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {viewOnly && (
             <p className="form__hint form__hint--note">

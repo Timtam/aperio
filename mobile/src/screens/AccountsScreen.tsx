@@ -38,7 +38,7 @@ import {
   connectSchemaAccount,
   reconnectOAuthAccount,
 } from '../api/oauth';
-import { refreshExternalCache } from '../api/sync';
+import { refreshAccountCache } from '../api/sync';
 import { whenAppLockReleased, whileOsSheetOpen } from '../state/appLock';
 import {
   openDeviceAccessSettings,
@@ -50,13 +50,15 @@ import {
 } from '../state/deviceAccessGate';
 import { useRefreshErrors } from '../state/useRefreshErrors';
 import {
+  type AccountFormSpec,
   collectValues,
+  errorMessage,
   firstMissingField,
   missingStores,
+  type OsAccessReport,
+  readErrorMessage,
   restrictedStores,
   settingsStores,
-  type AccountFormSpec,
-  type OsAccessReport,
 } from '@aperio/shared';
 
 import { AccountSchemaForm } from '../components/AccountSchemaForm';
@@ -154,10 +156,6 @@ const CONTACTS_CAPABLE_KINDS: ReadonlySet<AdapterKind> = new Set<AdapterKind>([
 
 /** Frontend-only flag: once acknowledged, the privacy notice never re-appears. */
 const PREF_PRIVACY_NOTICE_ACK = 'contacts.privacyNoticeAcknowledged';
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function AccountsScreen() {
   const { t, i18n } = useTranslation();
@@ -310,7 +308,7 @@ export default function AccountsScreen() {
       setAccounts(accs);
       setMissingIds(new Set(missing.map((a) => a.id)));
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -397,7 +395,7 @@ export default function AccountsScreen() {
           }
         })
         .catch((err) => {
-          setError(errorMessage(err));
+          setError(readErrorMessage(err, t));
         });
     },
     [i18n.language, t],
@@ -474,7 +472,7 @@ export default function AccountsScreen() {
           setMode('schema');
         })
         .catch((err) => {
-          if (editRequest.current === token) setError(errorMessage(err));
+          if (editRequest.current === token) setError(readErrorMessage(err, t));
         });
     },
     [i18n.language, t],
@@ -511,7 +509,7 @@ export default function AccountsScreen() {
           announce(action.success);
         }
       } catch (err) {
-        const message = errorMessage(err);
+        const message = readErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       } finally {
@@ -537,7 +535,7 @@ export default function AccountsScreen() {
       setTestMessage(ok);
       announce(ok);
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -591,7 +589,7 @@ export default function AccountsScreen() {
         await load();
         pendingFocusId.current = updated.id;
         announce(t('dialogs.accounts.editSaved', { name }));
-        void refreshExternalCache().catch(() => undefined);
+        void refreshAccountCache(updated.id).catch(() => undefined);
         return;
       }
       // A browser sign-in hands the screen to a native auth session, which is a
@@ -615,7 +613,7 @@ export default function AccountsScreen() {
       await load();
       pendingFocusId.current = result.account.id;
       announce(t('dialogs.accounts.created', { name }));
-      void refreshExternalCache().catch(() => undefined);
+      void refreshAccountCache(result.account.id).catch(() => undefined);
       await maybeShowPrivacyNotice(schemaKind);
     } catch (err) {
       // OAUTH_NO_CODE is a typed sentinel, not a sentence — the deleted form
@@ -623,7 +621,7 @@ export default function AccountsScreen() {
       // token itself.
       const raw = errorMessage(err);
       const message =
-        raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : raw;
+        raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -696,12 +694,12 @@ export default function AccountsScreen() {
       pendingFocusId.current = created.id;
       announce(t('dialogs.accounts.created', { name: created.display_name }));
       // Warm the device calendar's events into the cache now (see `add`).
-      void refreshExternalCache().catch(() => undefined);
+      void refreshAccountCache(created.id).catch(() => undefined);
       // This grant is the screen's own, not one the next look should
       // announce as new.
       void refreshDeviceAccessReport();
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -727,7 +725,7 @@ export default function AccountsScreen() {
         setAccessDialogOpen(true);
       }
     } catch (err) {
-      const message = errorMessage(err);
+      const message = readErrorMessage(err, t);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -820,8 +818,8 @@ export default function AccountsScreen() {
       // containers from view — confirm first (destructive, irreversible bar a
       // re-add). The swipe action + the row's Delete button both route here.
       Alert.alert(
-        t('dialogs.accounts.deleteConfirmTitle', { name: account.display_name }),
-        t('dialogs.accounts.deleteConfirmMessage'),
+        t('dialogs.accounts.deleteTitle'),
+        t('dialogs.accounts.deleteMessage', { name: account.display_name }),
         [
           { text: t('mobile.cancel'), style: 'cancel' },
           {
@@ -835,7 +833,7 @@ export default function AccountsScreen() {
                   await load();
                   announce(t('mobile.deleted', { title: account.display_name }));
                 } catch (err) {
-                  const message = errorMessage(err);
+                  const message = readErrorMessage(err, t);
                   setError(message);
                   announce(t('mobile.error', { message }));
                 }
@@ -874,7 +872,7 @@ export default function AccountsScreen() {
         await load();
         announce(t('dialogs.accounts.renamed', { name }));
       } catch (err) {
-        const message = errorMessage(err);
+        const message = readErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       }
@@ -922,7 +920,7 @@ export default function AccountsScreen() {
         // Retry the failing containers right away — storing the grant alone
         // never contacts the provider, so the refresh-error warning would
         // otherwise outlive the repair until the next scheduled pass.
-        void refreshExternalCache().catch(() => undefined);
+        void refreshAccountCache(account.id).catch(() => undefined);
       } catch (err) {
         if ((err as { code?: string })?.code === 'client_secret_required') {
           // Not a dead end: reveal the field and say what is needed.
@@ -934,7 +932,7 @@ export default function AccountsScreen() {
         }
         const raw = errorMessage(err);
         const message =
-          raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : raw;
+          raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : readErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       }
@@ -956,7 +954,7 @@ export default function AccountsScreen() {
           t('dialogs.accounts.resyncStarted', { name: account.display_name }),
         );
       } catch (err) {
-        const message = errorMessage(err);
+        const message = readErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       }
@@ -984,11 +982,11 @@ export default function AccountsScreen() {
         );
         // Same rationale as reconnectOauth: retry now so the error surface
         // reflects the repair (or a still-wrong password) promptly.
-        void refreshExternalCache().catch(() => undefined);
+        void refreshAccountCache(account.id).catch(() => undefined);
       } catch (err) {
         // The secret stays in place on a registration failure — let the user
         // retry without re-typing (the field is still open).
-        const message = errorMessage(err);
+        const message = readErrorMessage(err, t);
         setError(message);
         announce(t('mobile.error', { message }));
       }

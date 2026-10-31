@@ -65,4 +65,5 @@ export * from './groupCarry';
 export * from './groupSuggestions';
 export * from './deviceRegistry';
 export * from './widgetSnapshot';
+export * from './movedOriginals';
 export * from './fileImport';

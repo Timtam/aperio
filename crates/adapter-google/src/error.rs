@@ -12,11 +12,34 @@ pub enum GoogleError {
     #[error("network error: {0}")]
     Network(String),
 
+    /// A request that never left: no connection could be made, or the
+    /// request could not be built. Nothing reached Google, unlike
+    /// [`GoogleError::Network`], where an answer was lost and the request
+    /// may have been carried out.
+    #[error("network error: {0}")]
+    Unreached(String),
+
     /// Unexpected HTTP status from a Google API call. Carries the
     /// status code so the trait-impl mapping can route 401 to
     /// re-authentication and 404 to "calendar gone".
     #[error("Google API returned HTTP {status}: {message}")]
     Http { status: u16, message: String },
+
+    /// Google turned the request away for throttling and did nothing: 429,
+    /// or 403 for a rate limit (decision 270). `retry_after` is what it asked
+    /// to wait, where it said.
+    #[error("google is busy ({}){}", detail.word(), wait_note(retry_after))]
+    Busy {
+        detail: cal_core::BusyDetail,
+        retry_after: Option<std::time::Duration>,
+    },
+
+    /// Google turned the request away because a usage limit is used up for a
+    /// while — 403 `quotaExceeded`, `dailyLimitExceeded`,
+    /// `calendarUsageLimitsExceeded` (decision 275): no sign-in helps, and
+    /// waiting seconds does not either.
+    #[error("google usage limit reached ({reason})")]
+    UsageLimit { reason: String },
 
     /// JSON we didn't expect — usually means Google changed the
     /// response shape or returned an error envelope we don't recognise.
@@ -50,13 +73,45 @@ pub enum GoogleError {
     /// invalid — empty client_id, malformed URL, etc.
     #[error("invalid configuration: {0}")]
     Config(String),
+
+    /// A new series was created, its deleted occurrences could not all be
+    /// cancelled (decisions 202, 203), and it was deleted again (`undone`) or
+    /// could not be (`!undone`, it may stand). `detail` is
+    /// [`cal_core::step_detail`]. Mapped to a refusal or a leftover, never to
+    /// an error a caller reads as "never landed" when something may stand.
+    #[error("the new series kept not its deleted occurrences ({detail})")]
+    NotKept { undone: bool, detail: String },
+
+    /// A save of several requests failed after an earlier one had landed
+    /// (decision 277): the change stands in part. `step` names the request
+    /// that failed, a word for the log; `cause` is why. Mapped to a leftover,
+    /// never to a refusal, which would say nothing was changed.
+    #[error("the change was saved in part, the {step} step failed: {cause}")]
+    PartlySaved {
+        step: &'static str,
+        cause: Box<GoogleError>,
+    },
 }
 
 pub type GoogleResult<T> = std::result::Result<T, GoogleError>;
 
+impl GoogleError {
+    /// This error, met by the `step` of a save after an earlier step landed.
+    pub(crate) fn after_landed(self, step: &'static str) -> Self {
+        GoogleError::PartlySaved {
+            step,
+            cause: Box::new(self),
+        }
+    }
+}
+
 impl From<reqwest::Error> for GoogleError {
     fn from(err: reqwest::Error) -> Self {
-        GoogleError::Network(err.to_string())
+        if err.is_connect() || err.is_builder() {
+            GoogleError::Unreached(err.to_string())
+        } else {
+            GoogleError::Network(err.to_string())
+        }
     }
 }
 
@@ -69,5 +124,14 @@ impl From<std::io::Error> for GoogleError {
 impl From<serde_json::Error> for GoogleError {
     fn from(err: serde_json::Error) -> Self {
         GoogleError::Protocol(format!("json: {err}"))
+    }
+}
+
+/// What a busy answer asked to wait, for the log lines that show its error:
+/// the sentences never say how long (decision 278), the log does.
+fn wait_note(wait: &Option<std::time::Duration>) -> String {
+    match wait {
+        Some(wait) => format!("; it asks to wait {} s", wait.as_secs()),
+        None => String::new(),
     }
 }

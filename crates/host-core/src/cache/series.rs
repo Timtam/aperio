@@ -240,6 +240,7 @@ mod tests {
     fn row(id: &str, year: i32, cancelled: bool) -> Event {
         let start = Utc.with_ymd_and_hms(year, 6, 1, 9, 0, 0).unwrap();
         Event {
+            original_left_in: None,
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,

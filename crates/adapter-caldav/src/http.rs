@@ -15,16 +15,25 @@
 //! request went out and before the answer came back, and then the server may
 //! have processed the first attempt. The replay's ANSWER then describes that
 //! attempt, not the replay: a guarded write gets 412 (its ETag is gone), a
-//! delete gets 404, a MKCALENDAR gets 405 (the collection exists). A caller
-//! for whom that answer matters asks `send_retrying_marked`, which says
-//! whether the first attempt may have reached the server — not after a
-//! connect failure, which never sent anything.
+//! delete gets 404, a MKCALENDAR gets 405 (the collection exists).
+//! Every write is sent with [`SendRetrying::send_write`], which says whether
+//! the first attempt may have reached the server — not after a connect
+//! failure, which never sent anything — and reads such a replay's failed
+//! answer the one way ([`WriteAnswer::settled`]): it may have been saved. A
+//! caller's own reading of a replay's answer goes first: a replayed 404 on a
+//! delete is gone, a 405 on a MKCALENDAR is a collection that exists, a 412
+//! on a create guarded by `If-None-Match` is the first attempt's resource
+//! where Aperio named it (a minted UID, or the fresh `{uuid}.ics` of a kept
+//! UID that is no plain name); where a kept UID names it, the 412 is
+//! `uid-taken`, replay or not.
 //!
 //! Deliberately NOT retried: timeouts (the server may be mid-processing
 //! — replaying a write could double-apply it), redirect-policy errors,
 //! and anything after response bytes started flowing.
 
 use reqwest::{RequestBuilder, Response};
+
+use crate::error::{CaldavError, CaldavResult};
 
 /// True for connection-level failures before any response arrived: connect
 /// errors and send-phase errors (a stale pooled socket, a connection reset
@@ -52,6 +61,47 @@ pub(crate) trait SendRetrying {
     /// attempt may have reached the server (see the module doc): then the
     /// answer may describe that attempt rather than the replay.
     async fn send_retrying_marked(self) -> reqwest::Result<(Response, bool)>;
+    /// A write, sent as [`Self::send_retrying_marked`] sends it, with its
+    /// answer to read through [`WriteAnswer::settled`].
+    async fn send_write(self) -> reqwest::Result<WriteAnswer>;
+}
+
+/// A write's answer, and whether it is a replay's whose first attempt may
+/// have reached the server.
+pub(crate) struct WriteAnswer {
+    pub(crate) response: Response,
+    pub(crate) replayed: bool,
+}
+
+impl WriteAnswer {
+    /// The answer as every write reads it, once the caller's own reading of a
+    /// replay went first. A replay whose first attempt may have landed and
+    /// that was answered with any failure is unsure: the answer may be about
+    /// the first attempt — a 412 because its new ETag refuses the replay, a
+    /// 429 or a 507 because it was taken (critique P24). Read as a refusal, a
+    /// caller would undo around a write that went through: splitting a series
+    /// deleted its new part while the old part was already cut short
+    /// (decision 144), and a busy answer would say nothing was changed. `what`
+    /// names the resource for the log and the message.
+    pub(crate) async fn settled(self, what: &str) -> CaldavResult<Response> {
+        if !self.replayed || self.response.status().is_success() {
+            return Ok(self.response);
+        }
+        // The answer itself is kept for the log: it may be the first attempt's,
+        // or a refusal the replay met on its own.
+        let status = self.response.status().as_u16();
+        let body = self.response.text().await.unwrap_or_default();
+        tracing::warn!(
+            resource = what,
+            status,
+            body = %body.chars().take(200).collect::<String>(),
+            "a replayed write was answered with a failure; the first attempt may have been saved",
+        );
+        Err(CaldavError::Network(format!(
+            "the connection to '{what}' broke after the change was sent \
+             (the replay was answered HTTP {status}); it may have been saved"
+        )))
+    }
 }
 
 impl SendRetrying for RequestBuilder {
@@ -66,7 +116,7 @@ impl SendRetrying for RequestBuilder {
         // request carries a string/no body. A non-clonable request just
         // skips the retry and surfaces the original error.
         let retry = self.try_clone();
-        match self.send().await {
+        let sent = match self.send().await {
             Err(err) if is_transient_send_error(&err) => match retry {
                 Some(builder) => {
                     let landed = first_attempt_may_have_landed(&err);
@@ -75,8 +125,87 @@ impl SendRetrying for RequestBuilder {
                 None => Err(err),
             },
             other => other.map(|response| (response, false)),
+        };
+        if let Ok((response, _)) = &sent {
+            log_busy_answer(response);
         }
+        sent
     }
+
+    async fn send_write(self) -> reqwest::Result<WriteAnswer> {
+        self.send_retrying_marked()
+            .await
+            .map(|(response, replayed)| WriteAnswer { response, replayed })
+    }
+}
+
+/// One line in the normal log for an answer that asks to slow down — 429, or
+/// 503 with `Retry-After` — with the wait the server names: the sentences
+/// never say how long (decision 278), the log does.
+fn log_busy_answer(response: &Response) {
+    let status = response.status();
+    let retry_after = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok());
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || (status == reqwest::StatusCode::SERVICE_UNAVAILABLE && retry_after.is_some())
+    {
+        tracing::info!(
+            status = status.as_u16(),
+            retry_after,
+            "the CalDAV server asks to slow down"
+        );
+    }
+}
+
+/// The error for a read's failed answer — a GET, a PROPFIND, a REPORT, or a
+/// free/busy POST, all of which write nothing: a 503 with `Retry-After` is a
+/// busy server (decision 270; a write answered so may have been carried out,
+/// so writes never come here), anything else its status. A 429 stays its
+/// status and reads as busy in `crate::busy_detail`.
+pub(crate) async fn read_failure(response: Response) -> CaldavError {
+    let status = response.status();
+    if status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+        && response
+            .headers()
+            .contains_key(reqwest::header::RETRY_AFTER)
+    {
+        return CaldavError::Busy(cal_core::BusyDetail::Unavailable);
+    }
+    let text = response.text().await.unwrap_or_default();
+    CaldavError::Http {
+        status: status.as_u16(),
+        message: if text.is_empty() {
+            status.canonical_reason().unwrap_or("").to_string()
+        } else {
+            text.chars().take(200).collect()
+        },
+    }
+}
+
+/// A server whose first connection reads the request and dies without an
+/// answer, and whose second answers the replay with `reply`. Returns its
+/// base URL.
+#[cfg(test)]
+pub(crate) async fn first_attempt_lost_then(reply: &'static [u8]) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        if let Ok((mut sock, _)) = listener.accept().await {
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).await;
+            drop(sock);
+        }
+        if let Ok((mut sock, _)) = listener.accept().await {
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).await;
+            let _ = sock.write_all(reply).await;
+            let _ = sock.shutdown().await;
+        }
+    });
+    base
 }
 
 #[cfg(test)]

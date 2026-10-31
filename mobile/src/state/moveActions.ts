@@ -4,15 +4,17 @@
 
 import type { Task } from '@aperio/shared';
 import {
+  afterLanded,
+  createsInSteps,
   isSeriesOccurrence,
   newSeriesRecurrence,
   occurrenceIsoOf,
   organizerOf,
   readSeriesRows,
   seriesIdOf,
-  createsInSteps,
-  writeWithoutWaiting,
+  removeOriginalAfterCopy,
   type StepWriteOptions,
+  writeWithoutWaiting,
 } from '@aperio/shared';
 
 import {
@@ -46,6 +48,10 @@ export async function surfaceTaskNow(task: Task): Promise<Task> {
  * external adapters reroute as create-on-target + delete-from-source, which
  * changes the parent id), then re-threads each child onto the returned parent id
  * so the family stays connected.
+ *
+ * Returns the rows as the host returned them, the task first, then each
+ * child: one whose original could not be deleted carries `original_left_in`
+ * (decision 277), for the surface to say.
  */
 export async function moveTaskToList(
   task: Task,
@@ -55,24 +61,32 @@ export async function moveTaskToList(
    *  task's existing `section_id` is not it: that id means something only
    *  inside the list it just left. */
   sectionId: string | null,
-): Promise<Task> {
+): Promise<Task[]> {
   const movedParent = await updateTask(
     { ...task, list_id: targetListId, section_id: sectionId },
     task.list_id,
   );
-  for (const child of children) {
-    await updateTask(
-      {
-        ...child,
-        list_id: targetListId,
-        parent_id: movedParent.id,
-        // A family in two sections is the same surprise as one in two lists.
-        section_id: sectionId,
-      },
-      child.list_id,
-    );
+  const moved = [movedParent];
+  try {
+    for (const child of children) {
+      const movedChild = await updateTask(
+        {
+          ...child,
+          list_id: targetListId,
+          parent_id: movedParent.id,
+          // A family in two sections is the same surprise as one in two lists.
+          section_id: sectionId,
+        },
+        child.list_id,
+      );
+      moved.push(movedChild);
+    }
+  } catch (err) {
+    // The task itself moved: a subtask's failure never reads as "nothing
+    // was changed" (decision 277).
+    throw afterLanded(err, 'subtasks');
   }
-  return movedParent;
+  return moved;
 }
 
 /**
@@ -81,6 +95,9 @@ export async function moveTaskToList(
  * target, then re-parents each child copy onto the new id — the original
  * family stays put. Copies land in a list whose MEMBERS differ, so they still
  * start unassigned; the section is now asked for rather than assumed.
+ *
+ * Returns the moved rows (see `moveTaskToList`); a copy deletes nothing and
+ * returns none.
  */
 export async function moveOrCopyTask(
   task: Task,
@@ -88,10 +105,9 @@ export async function moveOrCopyTask(
   mode: MoveCopyMode,
   children: Task[],
   sectionId: string | null,
-): Promise<void> {
+): Promise<Task[]> {
   if (mode === 'move') {
-    await moveTaskToList(task, targetListId, children, sectionId);
-    return;
+    return moveTaskToList(task, targetListId, children, sectionId);
   }
   const newParent = await createTask({
     list_id: targetListId,
@@ -113,28 +129,35 @@ export async function moveOrCopyTask(
     assignees: [],
     sound: task.sound,
   });
-  for (const child of children) {
-    await createTask({
-      list_id: targetListId,
-      title: child.title,
-      description: child.description,
-      status: child.status,
-      priority: child.priority,
-      effort: child.effort,
-      scheduled_date: child.scheduled_date,
-      scheduled_time: child.scheduled_time,
-      deadline_date: child.deadline_date,
-      deadline_time: child.deadline_time,
-      deadline_reminder_days: child.deadline_reminder_days,
-      recurrence: child.recurrence,
-      parent_id: newParent.id,
-      section_id: sectionId,
-      color_label: child.color_label,
-      reminders: child.reminders,
-      assignees: [],
-      sound: child.sound,
-    });
+  // The copy of the task itself stands: a subtask's failure never reads as
+  // "nothing was changed" (decision 277).
+  try {
+    for (const child of children) {
+      await createTask({
+        list_id: targetListId,
+        title: child.title,
+        description: child.description,
+        status: child.status,
+        priority: child.priority,
+        effort: child.effort,
+        scheduled_date: child.scheduled_date,
+        scheduled_time: child.scheduled_time,
+        deadline_date: child.deadline_date,
+        deadline_time: child.deadline_time,
+        deadline_reminder_days: child.deadline_reminder_days,
+        recurrence: child.recurrence,
+        parent_id: newParent.id,
+        section_id: sectionId,
+        color_label: child.color_label,
+        reminders: child.reminders,
+        assignees: [],
+        sound: child.sound,
+      });
+    }
+  } catch (err) {
+    throw afterLanded(err, 'subtasks');
   }
+  return [];
 }
 
 /**
@@ -155,6 +178,10 @@ export async function moveOrCopyTask(
  * expanded occurrence, or a provider override) starts at that occurrence and
  * an override carries no rule, so the master is loaded. Written from the row,
  * the series started at that occurrence and could lose its rule.
+ *
+ * Returns the moved row of a whole-series move, the one write that deletes an
+ * original: where it could not, the row carries `original_left_in` (decision
+ * 277), for the surface to say. `null` for everything else.
  */
 export async function moveOrCopyEvent(
   event: CalendarEvent,
@@ -162,7 +189,7 @@ export async function moveOrCopyEvent(
   mode: MoveCopyMode,
   scope: MoveCopyScope = 'series',
   steps: StepWriteOptions = {},
-): Promise<void> {
+): Promise<CalendarEvent | null> {
   const asOccurrence = scope === 'occurrence' && isSeriesOccurrence(event);
   // The other calendar creates the series anew: in steps where it writes its
   // deletions so (decisions 227, 265). Mirrors the desktop.
@@ -170,14 +197,13 @@ export async function moveOrCopyEvent(
 
   if (mode === 'move' && !asOccurrence) {
     const series = await newSeriesRowOf(event);
-    await wait(createsInSteps(steps.target, series.recurrence), () =>
+    return wait(createsInSteps(steps.target, series.recurrence), () =>
       updateEvent({ ...series, calendar_id: targetCalendarId }, series.calendar_id),
     );
-    return;
   }
 
   const source = asOccurrence ? event : await newSeriesRowOf(event);
-  await wait(!asOccurrence && createsInSteps(steps.target, source.recurrence), () =>
+  const created = await wait(!asOccurrence && createsInSteps(steps.target, source.recurrence), () =>
     createEvent(
       {
         calendar_id: targetCalendarId,
@@ -203,9 +229,17 @@ export async function moveOrCopyEvent(
   if (mode === 'move' && asOccurrence) {
     const occIso = occurrenceIsoOf(event);
     if (occIso) {
-      await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
+      // The copy stands: a busy provider that kept the original is said as a
+      // move whose original stayed, naming its calendar; any other failure
+      // never reads as "nothing was changed" (decision 277). Mirrors the
+      // desktop.
+      const removed = await removeOriginalAfterCopy('source-delete', () =>
+        addEventExdate(seriesIdOf(event), occIso, event.calendar_id),
+      );
+      if (!removed) return { ...created, original_left_in: event.calendar_id };
     }
   }
+  return null;
 }
 
 /**

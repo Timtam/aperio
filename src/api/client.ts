@@ -212,7 +212,8 @@ export const getEventById = (id: string, calendarId?: string) =>
 
 /** Look up attendee availability through the account that owns `calendarId`.
  *  Best-effort: returns `[]` for local calendars or when the provider can't
- *  answer (no error). `rangeStart`/`rangeEnd` are ISO 8601 strings. */
+ *  answer; a busy provider rejects (decision 270), and the editor says the
+ *  check could not be made. `rangeStart`/`rangeEnd` are ISO 8601 strings. */
 export const queryFreeBusy = (
   calendarId: string,
   emails: string[],
@@ -1500,6 +1501,11 @@ export type CacheRefreshStatusPayload = CacheRefreshStatus;
  *  Returns as soon as the pass is queued. */
 export const refreshExternalCache = () =>
   invoke<void>('refresh_external_cache');
+
+/** {@link refreshExternalCache} after a change of one account: forced for that
+ *  account only, an automatic round for the others (decision 271). */
+export const refreshAccountCache = (accountId: string) =>
+  invoke<void>('refresh_account_cache', { accountId });
 
 /** Current refresher status — seeds the toolbar indicator on mount. */
 export const getCacheRefreshStatus = () =>

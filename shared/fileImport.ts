@@ -2,8 +2,13 @@
 // plugin has read a file — which appointment the editor gets, and how what
 // was left out is said.
 
-import { codedError, errorMessageText, eventWriteFailureReason } from './eventWriteError';
-import { errorMessage } from './errors';
+import {
+  codedError,
+  errorMessageText,
+  eventWriteFailureReason,
+  saysBusy,
+} from './eventWriteError';
+import { errorMessage, withLaterForBusy } from './errors';
 import { joinNames } from './listWords';
 import type { ImportedEvent } from './generated/ImportedEvent';
 import type { InvitationImport } from './generated/InvitationImport';
@@ -374,9 +379,13 @@ export function importRowLabel(
 
 /**
  * What an import list says when some of the chosen appointments did not
- * arrive: how many did, of how many, and each one that did not by its title,
+ * arrive whole: how many did, of how many, each one that did not by its title,
  * with its own reason — never a sentence that says nothing was created after
- * some were.
+ * some were —, and each one that may stand (`standing`: a create that landed
+ * and failed later, or whose answer was lost; decision 277), not offered
+ * again. A busy
+ * provider's ends with "try again later" (decision 272), as every frame that
+ * embeds a busy reason does.
  */
 export function partlyImportedSentence(
   failed: readonly { title: string; err: unknown }[],
@@ -384,21 +393,32 @@ export function partlyImportedSentence(
   count: number,
   calendar: string,
   t: Translate,
+  standing: readonly { title: string; err: unknown }[] = [],
 ): string {
-  return t('fileImport.list.partly', {
-    done,
-    count,
-    calendar,
-    titles: joinNames(
-      failed.map((f) =>
+  const titled = (rows: readonly { title: string; err: unknown }[]) =>
+    joinNames(
+      rows.map((f) =>
         t('fileImport.list.failedTitle', {
           title: f.title,
           reason: eventWriteFailureReason(f.err, t),
         }),
       ),
       t,
-    ),
-  });
+    );
+  const head =
+    failed.length > 0
+      ? t('fileImport.list.partly', { done, count, calendar, titles: titled(failed) })
+      : t('fileImport.list.whole', { done, count, calendar });
+  const sentence = [
+    head,
+    standing.length > 0
+      ? t('fileImport.list.standing', { count: standing.length, titles: titled(standing) })
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const busy = failed.find((f) => saysBusy(f.err));
+  return busy ? withLaterForBusy(sentence, busy.err, t) : sentence;
 }
 
 /**
