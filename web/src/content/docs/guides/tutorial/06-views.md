@@ -20,9 +20,9 @@ to know them and switch between them.
 ## Switching views
 
 - Via the **view menu** in the toolbar.
-- By keyboard: in many setups the digits `1`–`7` are mapped to the views;
-  your actual mapping is in the [shortcut overview](/guides/keyboard-shortcuts/),
-  where you can change it.
+- By keyboard: `Ctrl+1` to `Ctrl+7` switch to the day, week, month, year,
+  agenda, task and contact view; all keys are in the
+  [shortcut overview](/guides/keyboard-shortcuts/).
 
 ## Navigating within a view
 
@@ -31,13 +31,32 @@ to know them and switch between them.
   list — everything with a time first, then the tasks without one. You never
   have to leave the list to learn what else the day holds. The band under the
   grid shows the same tasks for sighted users.
-- **Back and forward:** use `Page Up` / `Page Down` to page to the
-  previous/next period (week, month …).
-- **Today:** jumps back to the current day (default: `T` or "Today" in the
-  toolbar).
-- **Week numbers** are shown in the week and month views. They follow ISO
-  8601 in every language; if your week starts on another day than Monday,
-  a week carries the number of the ISO week most of its days fall in.
+- **Back and forward:** `Ctrl+←` / `Ctrl+→` page to the previous/next period
+  (day, week, month …) in every view; in the week and month grids
+  `Page Up` / `Page Down` do the same.
+- **Today:** `Ctrl+T` or "Today" in the toolbar jumps back to the current day.
+
+## Calendar weeks
+
+The week view's heading, the month view's rows and the date in the toolbar
+show the calendar week, for example "KW 45" in German and "Week 45" in
+English. Week numbers follow ISO 8601 in every language; if your week starts
+on another day than Monday, a week carries the number of the ISO week most of
+its days fall in.
+
+> **Keyboard & screen reader:** A screen reader hears the week in words, not
+> as letters: the week view's heading and its grid say "Week 45, November 2
+> to 8, 2026". A day's name carries the week only when you move into another
+> week — `↓` in the week view goes to the same day of the next week and
+> names that week, `→` within the week does not. Page with the toolbar
+> buttons instead and you hear the new week in the grid's name when you
+> return to it. Press `K` in the day, week,
+> month, year or agenda view to hear the week of the day you are on, with its
+> days.
+
+**Settings → General → Show and announce calendar weeks** turns the numbers
+and the spoken week off together, on every device you sync; `K` still answers
+when you ask.
 
 ## Visible hours in the hour grid
 

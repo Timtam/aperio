@@ -62,6 +62,11 @@ concepts), adapted to the way VoiceOver and TalkBack work:
   not read yet, it says "Loading …" after half a second, and the days fill in
   as soon as their events are read – also while your accounts are being
   refreshed.
+- **Calendar weeks.** The week view's heading names the week, shown as
+  "Week 45 · November 2, 2026 – November 8, 2026" and spoken as "Week 45,
+  November 2 to 8, 2026" — also when you page to another week. Switch off
+  **Settings → General → Show and announce calendar weeks** and it names the
+  dates alone; the choice syncs with your other devices.
 - **Group headings** (e.g. a task list or a section) are collapsible buttons
   that announce whether they are expanded or collapsed.
 - **The catalogues** – calendars, task lists, address books – give each entry a

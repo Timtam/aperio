@@ -60,6 +60,7 @@ export function CalendarPager({
   onPrev,
   onNext,
   periodLabel,
+  periodSpoken,
   children,
 }: {
   onPrev: () => void;
@@ -67,6 +68,11 @@ export function CalendarPager({
   /** Current period, e.g. "Week of 3 March" — shown + focused as the pager's
    *  own header under VoiceOver so focus never leaves the pager. */
   periodLabel: string;
+  /** The period as VoiceOver says it, when the shown text does not read
+   *  well aloud: "KW 45 · 2. November 2026 – 8. November 2026" is spoken
+   *  "Kalenderwoche 45, 2. bis 8. November 2026". The header's label and the
+   *  announcement on each change; `periodLabel` when unset. */
+  periodSpoken?: string;
   children: ReactNode;
 }) {
   const ref = useRef<ScrollView>(null);
@@ -76,6 +82,7 @@ export function CalendarPager({
 
   // The pager renders its own visible period header under VoiceOver (the screens
   // drop theirs via `useCalendarPagerOwnsHeading`), announced on each change.
+  const spoken = periodSpoken ?? periodLabel;
   const firstRun = useRef(true);
   useEffect(() => {
     // Only the native VoiceOver pager announces the period.
@@ -102,10 +109,10 @@ export function CalendarPager({
     // the action exists to deliver. Consume it here so the interrupting
     // utterance IS the informative one.
     AccessibilityInfo.announceForAccessibilityWithOptions(
-      takePeriodAnnounceOverride() ?? periodLabel,
+      takePeriodAnnounceOverride() ?? spoken,
       { queue: false },
     );
-  }, [periodLabel, screenReader]);
+  }, [spoken, screenReader]);
 
   // Register this screen's pager step under its route name so a VoiceOver
   // three-finger swipe made when focus is on chrome (a heading / the view
@@ -136,7 +143,11 @@ export function CalendarPager({
             else onPrev();
           }}
         >
-          <Text accessibilityRole="header" style={styles.pagerHeader}>
+          <Text
+            accessibilityRole="header"
+            accessibilityLabel={periodSpoken}
+            style={styles.pagerHeader}
+          >
             {periodLabel}
           </Text>
           {children}

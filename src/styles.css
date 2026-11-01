@@ -3853,6 +3853,14 @@ button[aria-disabled='true'] {
   grid-template-columns: 40px repeat(7, minmax(0, 1fr));
 }
 
+/* With calendar weeks switched off (`view.weekNumbers`) the KW column is not
+   drawn, and the head, the rows and the all-day lane are the 7 days alone. */
+.month-grid--no-weeks .month-grid__head,
+.month-grid--no-weeks .month-grid__row,
+.month-grid--no-weeks .month-grid__lane {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
 .month-grid__head {
   /* Pinned so the weekday labels stay visible while the month scrolls. */
   position: sticky;

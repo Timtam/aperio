@@ -66,6 +66,12 @@ von VoiceOver und TalkBack:
   App noch nicht gelesen hat, sagt sie nach einer halben Sekunde „Lädt …", und
   die Tage füllen sich, sobald ihre Termine gelesen sind – auch während deine
   Konten aktualisiert werden.
+- **Kalenderwochen.** Die Überschrift der Wochenansicht nennt die Woche,
+  sichtbar als „KW 45 · 2. November 2026 – 8. November 2026“ und gesprochen
+  als „Kalenderwoche 45, 2. bis 8. November 2026“ – auch wenn du zu einer
+  anderen Woche blätterst. Schaltest du **Einstellungen → Allgemein →
+  Kalenderwochen anzeigen und ansagen** ab, nennt sie nur die Tage; die Wahl
+  gilt auf allen Geräten, die du synchronisierst.
 - **Gruppenüberschriften** (z. B. eine Aufgabenliste oder ein Abschnitt) sind
   zusammenklappbare Schalter, die ansagen, ob sie auf- oder zugeklappt sind.
 - **Die Verwaltungslisten** – Kalender, Aufgabenlisten, Adressbücher – geben

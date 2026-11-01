@@ -1,19 +1,22 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { CalendarEvent } from '../../api/types';
 import type { WeekStart } from '../../state/viewMath';
 
 /**
- * The month view reads its events for every day its grid draws. The grid
- * begins on the week start, and the range it fetched began on Monday
- * whatever that was: with a Sunday or Saturday start the days at the grid's
- * edges stayed empty.
+ * What the month grid draws. It reads its events for every day it shows: the
+ * grid begins on the week start, and the range it fetched began on Monday
+ * whatever that was, so with a Sunday or Saturday start the days at the
+ * grid's edges stayed empty. And its week column goes with the switch
+ * `view.weekNumbers`, the all-day bars keeping to their days either way.
  */
 
 const h = vi.hoisted(() => {
   const viewState = {
     anchor: new Date(2026, 4, 15),
     weekStartsOn: 1 as WeekStart,
+    weekNumbers: true,
     setAnchor: () => {},
     goPrev: () => {},
     goNext: () => {},
@@ -34,7 +37,11 @@ const h = vi.hoisted(() => {
     invalidateData: () => {},
     dataVersion: 0,
   };
-  const events = { events: [], calendarById: new Map(), loading: false };
+  const events = {
+    events: [] as unknown[],
+    calendarById: new Map(),
+    loading: false,
+  };
   const tasks = { tasks: [], taskListById: new Map() };
   return { viewState, ranges, store, dialogState, events, tasks };
 });
@@ -85,6 +92,9 @@ vi.mock('../ExceptionsLossQuestion', () => ({
 afterEach(() => {
   document.body.innerHTML = '';
   h.ranges.length = 0;
+  h.viewState.weekStartsOn = 1;
+  h.viewState.weekNumbers = true;
+  h.events.events = [];
 });
 
 const day = (y: number, m: number, d: number) => new Date(y, m - 1, d);
@@ -120,5 +130,44 @@ describe('the month view reads every day its grid draws', () => {
     const range = await rangeFor(1);
     expect(range.start.getTime()).toBe(day(2026, 4, 27).getTime());
     expect(range.end.getTime()).toBeLessThan(day(2026, 6, 1).getTime());
+  });
+});
+
+describe('the week column of the month grid', () => {
+  // Wednesday, 13 May, to Thursday, 14 May 2026, in the grid's third week.
+  const conference = {
+    id: 'conference',
+    calendar_id: 'work',
+    title: 'Konferenz',
+    start: new Date(2026, 4, 13).toISOString(),
+    end: new Date(2026, 4, 15).toISOString(),
+    all_day: true,
+  } as unknown as CalendarEvent;
+
+  async function renderMonth() {
+    h.events.events = [conference];
+    const { MonthView } = await import('./MonthView');
+    const { container } = render(<MonthView />);
+    const bar = container.querySelector<HTMLElement>('.month-allday-bar');
+    if (!bar) throw new Error('the month view drew no all-day bar');
+    return { container, bar };
+  }
+
+  it('numbers each row, and the bars start one column in', async () => {
+    const { container, bar } = await renderMonth();
+    const rows = screen.getAllByRole('rowheader').map((cell) => cell.textContent);
+    expect(rows).toEqual(['18', '19', '20', '21', '22']);
+    expect(container.querySelector('.month-grid--no-weeks')).toBeNull();
+    // Wednesday is the third day: column 4 behind the week column.
+    expect(bar.style.gridColumn).toBe('4 / 6');
+  });
+
+  it('is gone with weeks switched off, and the bars keep to their days', async () => {
+    h.viewState.weekNumbers = false;
+    const { container, bar } = await renderMonth();
+    expect(screen.queryAllByRole('rowheader')).toEqual([]);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(7);
+    expect(container.querySelector('.month-grid--no-weeks')).not.toBeNull();
+    expect(bar.style.gridColumn).toBe('3 / 5');
   });
 });

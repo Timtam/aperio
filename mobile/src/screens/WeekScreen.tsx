@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { calendarWeekOf, localDateKey } from '@aperio/shared';
+import {
+  calendarWeekLabel,
+  calendarWeekOf,
+  calendarWeekRange,
+  calendarWeekSentence,
+  localDateKey,
+} from '@aperio/shared';
 
 import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
@@ -12,7 +18,8 @@ import { useCalendarPagerOwnsHeading } from '../components/useCalendarPagerOwnsH
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
-import { readWeekStart, type WeekStart } from '../settings/weekStart';
+import { peekWeekNumbers, readWeekNumbers } from '../settings/weekNumbers';
+import { peekWeekStart, readWeekStart, type WeekStart } from '../settings/weekStart';
 import type { RootStackScreenProps } from '../navigation/types';
 import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -24,8 +31,9 @@ import { chrome } from '../theme/uiScale';
 // (one accessible section per day). This screen owns only the week chrome: the
 // Day/Week/Month/Agenda switcher, the ISO-week header + prev/next-week nav, and
 // today / jump-to-date. The week starts on the synced `view.weekStart` pref
-// (Monday by default); the header shows the ISO-8601 week number (always
-// Monday-based, regardless of the visual start day).
+// (Monday by default). The header names the week (synced `view.weekNumbers`,
+// on by default): the ISO week most of the displayed days fall in, seen as
+// "KW 45" and spoken as "Kalenderwoche 45, 2. bis 8. November 2026".
 
 /** Local-midnight clone of `date`. */
 function localMidnight(date: Date): Date {
@@ -55,12 +63,18 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     const seed = route.params?.anchor ? new Date(route.params.anchor) : new Date();
     return localMidnight(Number.isNaN(seed.getTime()) ? new Date() : seed);
   });
-  const [weekStart, setWeekStart] = useState<WeekStart>(1);
+  // Start on the values the app read at launch, so the heading is right from
+  // the first frame and the VoiceOver pager does not announce a correction.
+  const [weekStart, setWeekStart] = useState<WeekStart>(peekWeekStart);
+  const [weekNumbers, setWeekNumbers] = useState<boolean>(peekWeekNumbers);
 
-  // Read the synced week-start pref on mount + whenever the screen regains focus
-  // (it can change in Settings on this or another device).
+  // Read the synced week prefs on mount + whenever the screen regains focus
+  // (they can change in Settings on this or another device).
   useEffect(() => {
-    const read = () => void readWeekStart().then(setWeekStart);
+    const read = () => {
+      void readWeekStart().then(setWeekStart);
+      void readWeekNumbers().then(setWeekNumbers);
+    };
     const unsubscribe = navigation.addListener('focus', read);
     read();
     return unsubscribe;
@@ -83,15 +97,23 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
 
   // The number is the core's (`cal_core::calendar_week`), the same rule the
   // desktop asks: ISO 8601, the ISO week most of the displayed days fall in.
-  const isoWeek = useMemo(
-    () => calendarWeekOf(localDateKey(days[0]), weekStart).week,
+  const week = useMemo(
+    () => calendarWeekOf(localDateKey(days[0]), weekStart),
     [days, weekStart],
   );
 
-  const weekLabel = useMemo(
+  // Seen and spoken apart: "KW 45" is spelled out letter by letter and the
+  // dash read as "minus", so the screen reader hears its own sentence.
+  const weekLabel = useMemo(() => {
+    const dates = `${fmtShortDate(days[0])} – ${fmtShortDate(days[6])}`;
+    return weekNumbers ? `${calendarWeekLabel(t, week)} · ${dates}` : dates;
+  }, [days, fmtShortDate, t, week, weekNumbers]);
+  const weekSpoken = useMemo(
     () =>
-      `${t('views.week.kw', { week: isoWeek })} · ${fmtShortDate(days[0])} – ${fmtShortDate(days[6])}`,
-    [days, fmtShortDate, isoWeek, t],
+      weekNumbers
+        ? calendarWeekSentence(t, i18n.language, week)
+        : calendarWeekRange(t, i18n.language, week),
+    [i18n.language, t, week, weekNumbers],
   );
 
   // Announce the period on navigation (the three-finger swipe / prev-next change
@@ -121,8 +143,8 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     lastAnchor.current = anchor.getTime();
     lastWeekStart.current = weekStart;
     if (pagerOwnsHeading) return;
-    if (anchorChanged && weekChanged) announce(weekLabel);
-  }, [anchor, days, weekLabel, announce, pagerOwnsHeading]);
+    if (anchorChanged && weekChanged) announce(weekSpoken);
+  }, [anchor, days, weekSpoken, announce, pagerOwnsHeading]);
 
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
 
@@ -157,7 +179,11 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
           <Text style={styles.navButtonText} importantForAccessibility="no">‹</Text>
         </Pressable>
         {!pagerOwnsHeading && (
-          <Text style={styles.rangeHeading} accessibilityRole="header">
+          <Text
+            style={styles.rangeHeading}
+            accessibilityRole="header"
+            accessibilityLabel={weekSpoken}
+          >
             {weekLabel}
           </Text>
         )}
@@ -193,6 +219,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         onPrev={() => stepWeek(-1)}
         onNext={() => stepWeek(1)}
         periodLabel={weekLabel}
+        periodSpoken={weekSpoken}
       >
         <CalendarDayList
           navigation={navigation}

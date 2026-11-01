@@ -55,6 +55,8 @@ export function GeneralPanel() {
   const {
     weekStartsOn,
     setWeekStartsOn,
+    weekNumbers,
+    setWeekNumbers,
     timeStepMinutes,
     setTimeStepMinutes,
     startOnToday,
@@ -231,6 +233,17 @@ export function GeneralPanel() {
         </label>
         <p className="form__hint">
           {t('dialogs.settings.general.weekStartHint')}
+        </p>
+        <label className="general-panel__toggle">
+          <input
+            type="checkbox"
+            checked={weekNumbers}
+            onChange={(e) => setWeekNumbers(e.target.checked)}
+          />
+          <span>{t('dialogs.settings.general.weekNumbersLabel')}</span>
+        </label>
+        <p className="form__hint general-panel__toggle-hint">
+          {t('dialogs.settings.general.weekNumbersHint')}
         </p>
         <label className="form__field">
           <span className="form__label">

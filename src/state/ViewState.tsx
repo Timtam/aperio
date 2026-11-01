@@ -48,6 +48,10 @@ const START_ON_TODAY_PREF = 'view.startOnToday';
  *  consistency) or hide them. Reminders for cancelled events are always
  *  suppressed regardless of this toggle. */
 const SHOW_CANCELLED_PREF = 'view.showCancelledEvents';
+/** Synced pref: show and announce calendar weeks (default on). Off hides the
+ *  number from every view and the toolbar and keeps it out of what the screen
+ *  reader hears; the K key still says the week on request. */
+const WEEK_NUMBERS_PREF = 'view.weekNumbers';
 /** Synced prefs: whether HIDDEN (deselected) but writable calendars / task lists
  *  are still offered as assignment targets in the editors + move/copy pickers
  *  (default on). Off = only currently-visible containers are pickable. */
@@ -116,6 +120,8 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
   // out in `useEvents`; reminders for them are always suppressed core-side.
   const [showCancelledEvents, setShowCancelledEventsState] =
     useState<boolean>(true);
+  // Synced pref: show and announce calendar weeks (default on).
+  const [weekNumbers, setWeekNumbersState] = useState<boolean>(true);
   // Synced prefs: offer hidden (deselected) writable containers as targets in
   // the pickers (default on until the round-trip returns).
   const [showHiddenCalendarTargets, setShowHiddenCalendarTargetsState] =
@@ -143,6 +149,14 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         // Backend unreachable → keep the default (show).
+      });
+    getUserPref(WEEK_NUMBERS_PREF)
+      .then((raw) => {
+        if (cancelled || raw == null) return;
+        setWeekNumbersState(raw !== 'false');
+      })
+      .catch(() => {
+        // Backend unreachable → keep the default (on).
       });
     // Hydrate the "show hidden … as targets" prefs (default on until returned).
     getUserPref(TIME_STEP_PREF)
@@ -227,6 +241,10 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     setShowCancelledEventsState(v);
     void setUserPref(SHOW_CANCELLED_PREF, v ? 'true' : 'false');
   }, []);
+  const setWeekNumbers = useCallback((v: boolean) => {
+    setWeekNumbersState(v);
+    void setUserPref(WEEK_NUMBERS_PREF, v ? 'true' : 'false');
+  }, []);
   const setTimeStepMinutes = useCallback((v: TimeStepMinutes) => {
     setTimeStepMinutesState(v);
     void setUserPref(TIME_STEP_PREF, String(v));
@@ -258,6 +276,8 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       setStartOnToday,
       showCancelledEvents,
       setShowCancelledEvents,
+      weekNumbers,
+      setWeekNumbers,
       showHiddenCalendarTargets,
       timeStepMinutes,
       setTimeStepMinutes,
@@ -282,6 +302,8 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       setStartOnToday,
       showCancelledEvents,
       setShowCancelledEvents,
+      weekNumbers,
+      setWeekNumbers,
       showHiddenCalendarTargets,
       timeStepMinutes,
       setTimeStepMinutes,

@@ -134,7 +134,8 @@ export function MonthView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { ask: askLoss, dialog: lossDialog } = useExceptionsLossQuestion();
-  const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
+  const { anchor, setAnchor, goPrev, goNext, weekStartsOn, weekNumbers } =
+    useViewState();
   const { openEventDialog, openTaskDialog, openCreateChooser, invalidateData } =
     useDialogState();
   // The chip menu hands a locked invitation's delete to this view's own
@@ -876,12 +877,20 @@ export function MonthView() {
               : cellId(focusIndex)
           }
           onKeyDown={handleKeyDown}
-          className="month-grid"
+          className={
+            'month-grid' + (weekNumbers ? '' : ' month-grid--no-weeks')
+          }
         >
           <div role="row" className="month-grid__head">
-            <div role="columnheader" className="month-grid__kw" aria-label="KW">
-              {t('views.month.kwShort')}
-            </div>
+            {weekNumbers && (
+              <div
+                role="columnheader"
+                className="month-grid__kw"
+                aria-label="KW"
+              >
+                {t('views.month.kwShort')}
+              </div>
+            )}
             {cells.slice(0, 7).map((d) => (
               <div
                 key={d.toISOString()}
@@ -949,12 +958,13 @@ export function MonthView() {
                       );
                       const isBarFocused =
                         focusedEvId === bar.event.id;
-                      // The lane shares the row's 8-column layout
-                      // (40 px KW + 7 day columns), so day columns
-                      // start at grid index 2.
+                      // The lane shares the row's layout: 40 px KW + 7
+                      // day columns, so day columns start at grid index
+                      // 2, or the 7 day columns alone with weeks off.
+                      const weekCols = weekNumbers ? 1 : 0;
                       const style: React.CSSProperties &
                         Record<string, string> = {
-                        gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`,
+                        gridColumn: `${bar.startCol + weekCols} / ${bar.endCol + 1 + weekCols}`,
                         gridRow: String(bar.lane + 1),
                       };
                       if (color.hex)
@@ -1022,9 +1032,11 @@ export function MonthView() {
                   className="month-grid__row"
                   style={{ minHeight: rowMinHeight }}
                 >
-                <div role="rowheader" className="month-grid__kw">
-                  {rowWeeks[row]}
-                </div>
+                {weekNumbers && (
+                  <div role="rowheader" className="month-grid__kw">
+                    {rowWeeks[row]}
+                  </div>
+                )}
                 {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
                   const flatIndex = row * 7 + col;
                   const dayItems = itemsByDay.get(keyOf(day)) ?? [];
