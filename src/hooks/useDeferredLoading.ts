@@ -30,9 +30,15 @@ import { useEffect, useState } from 'react';
 export function useDeferredLoading(
   loading: boolean,
   delayMs = 200,
+  restartKey?: string | number,
 ): boolean {
   const [show, setShow] = useState(false);
 
+  // `restartKey` starts the window afresh while the load goes on, for a view
+  // whose range changed again before the indicator showed: paging on through
+  // uncached weeks, each page turn announced. The indicator then follows a
+  // full delay after the last one, never in the same frame, where only the
+  // later of two announcements is spoken.
   useEffect(() => {
     if (!loading) {
       setShow(false);
@@ -40,7 +46,7 @@ export function useDeferredLoading(
     }
     const timer = setTimeout(() => setShow(true), delayMs);
     return () => clearTimeout(timer);
-  }, [loading, delayMs]);
+  }, [loading, delayMs, restartKey]);
 
   return show;
 }

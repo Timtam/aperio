@@ -48,11 +48,20 @@ its days fall in.
 > as letters: the week view's heading and its grid say "Week 45, November 2
 > to 8, 2026". A day's name carries the week only when you move into another
 > week — `↓` in the week view goes to the same day of the next week and
-> names that week, `→` within the week does not. Page with the toolbar
-> buttons instead and you hear the new week in the grid's name when you
-> return to it. Press `K` in the day, week,
-> month, year or agenda view to hear the week of the day you are on, with its
-> days.
+> names that week, `→` within the week does not. Press `K` in the day,
+> week, month, year or agenda view to hear the week of the day you are on,
+> with its days.
+
+> **Paging is never silent:** With the focus outside the grid — on a toolbar
+> button, say — Previous, Today and Next (and `Ctrl+←`, `Ctrl+T`, `Ctrl+→`)
+> announce the new period: the week as above, the day with its date (and the
+> week when you move into another one), the month ("December 2026"), the
+> year, and the day the agenda now starts on. With the focus in the grid, the
+> cell or entry you land on says it instead, whenever paging changed it: in
+> the day view the entry you are on names the new date in front, until you
+> move to another entry. Where nothing changed — the same meeting still
+> first in the agenda, an empty day, Today on today — you hear the
+> announcement.
 
 **Settings → General → Show and announce calendar weeks** turns the numbers
 and the spoken week off together, on every device you sync; `K` still answers

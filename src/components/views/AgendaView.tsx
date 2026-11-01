@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { CalendarEvent } from '../../api/types';
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { usePageTurnAnnouncement } from '../../hooks/usePageTurnAnnouncement';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
@@ -144,7 +145,8 @@ export function AgendaView() {
   }, [occurrences.length, focusIndex]);
 
   // Deferred indicator — see DayView for the full rationale.
-  const showLoading = useDeferredLoading(loading);
+  // Restarted on every new range (see WeekView).
+  const showLoading = useDeferredLoading(loading, 200, range.start.getTime());
   useEffect(() => {
     if (showLoading) announce(t('views.loading'));
   }, [showLoading, announce, t]);
@@ -155,6 +157,14 @@ export function AgendaView() {
     [idPrefix],
   );
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
+  // Paged from outside the list, onto a stretch with nothing in it, or with
+  // the same entry first: say where the agenda now starts. Where the focused
+  // entry or the check-in button renamed itself, it names the day.
+  usePageTurnAnnouncement(
+    t('views.agenda.pageFrom', { day: fmt.format(range.start, 'PPPP') }),
+    listRef,
+    { focusNameSays: true },
+  );
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
     null,

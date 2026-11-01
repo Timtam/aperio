@@ -827,7 +827,7 @@ Entschieden (Toni, 2026-11-01):
   sich nichts.
 - [x] **Schritt 2:** Wochenansicht auf beiden Geräten: Rastername und
   Überschrift mit dem ganzen Satz, KW im Zellnamen beim Wochenwechsel
-  (`useWeekChangeCue`), Taste K in Tag, Woche, Monat, Jahr und Agenda, KW im
+  (`useDayStepCue`), Taste K in Tag, Woche, Monat, Jahr und Agenda, KW im
   Datum der Symbolleiste, der Schalter auf beiden Geräten. Ausgeschaltet fällt
   auch die KW-Spalte der Monatsansicht weg. Am Handy spricht `CalendarPager`
   den Satz über `periodSpoken`, die Überschrift trägt ihn als Namen; Wochenanfang
@@ -839,14 +839,29 @@ Entschieden (Toni, 2026-11-01):
   Tastenliste, Tutorial-Kapitel 10 und `06-views` (beide Sprachen)
   berichtigt; der Abschnitt „Anpassen“ ist aus beiden verschwunden, weil es
   die Einstellung „Tastaturkürzel“ nicht gibt (DESIGN §15.10 plant sie).
-- [ ] **Schritt 3 und 4:** Der Hinweis des Schalters verspricht die Ansage
-  beim Wochenwechsel bisher nur für die Wochenansicht; mit jedem Schritt um
-  die neue Stelle erweitern (beide Sprachen, Desktop und Handy).
-- [ ] **Schritt 3:** Ansage beim Blättern am Desktop (Symbolleiste, Strg+Pfeil,
+- [ ] **Schritt 4:** Der Hinweis des Schalters verspricht die Ansage beim
+  Wochenwechsel bisher für Woche und Tag; mit Schritt 4 um den Monat
+  erweitern (beide Sprachen, Desktop und Handy).
+- [x] **Schritt 3:** Ansage beim Blättern am Desktop (Symbolleiste, Strg+Pfeil,
   Strg+T), wenn der Fokus nicht im Raster liegt: „Kalenderwoche 46, 9. bis 15.
   November 2026“, in der Tagesansicht das Datum und die KW nur beim
   Wochenwechsel. Am Handy die Tagesansicht. DESIGN Zeile ~239 an das
-  tatsächliche Verhalten anpassen.
+  tatsächliche Verhalten anpassen. Entschieden (Toni, 2026-11-01):
+  - In **allen** Kalenderansichten, nicht nur Woche und Tag: Monat „Dezember
+    2026“, Jahr „2027“, Agenda ihr erster Tag. Blättern ist nie stumm.
+  - Tagesansicht am Desktop: Liegt der Fokus in der Liste, trägt nach einem
+    Tageswechsel der aktive Eintrag vorn das Datum, beim Wochenwechsel auch
+    die KW (wie die Wochenzelle, keine zweite Ansage). Ist der Tag leer oder
+    liegt der Fokus außerhalb, kommt eine Ansage.
+  - Tagesansicht am Handy: die KW nur beim Wochenwechsel in der Ansage beim
+    Blättern („Montag, 9. November 2026, Kalenderwoche 46“); die Überschrift
+    bleibt das Datum.
+  Gebaut: `pageTurn` im Ansichtszustand, `usePageTurnAnnouncement` in allen
+  fünf Kalenderansichten (schweigt nur, wenn der Seitenwechsel das
+  Fokussierte umbenannt hat, am Bildschirm beurteilt), `useDayStepCue` (aus
+  `useWeekChangeCue`) für Woche und Tag, `periodAnnouncement` am
+  `CalendarPager`, der Ladehinweis beginnt seine Frist bei jedem neuen
+  Zeitraum neu; der Hinweis des Schalters nennt jetzt Woche und Tag.
 - [ ] **Schritt 4:** Monat: am Desktop Zeilen- und Spaltenköpfe für
   Screenreader ausblenden (der Spaltenkopf hat fest das deutsche
   `aria-label="KW"`), KW im Zellnamen beim Wochenwechsel; am Handy der erste

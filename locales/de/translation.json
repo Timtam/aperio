@@ -668,8 +668,8 @@
         "weekStartLabel": "Wochenanfang",
         "weekStartHint": "Bestimmt, mit welchem Wochentag die Wochen- und Monatsansicht beginnt. Die Nummer der Kalenderwoche ist die ISO-Kalenderwoche (ISO 8601), in die die meisten Tage der angezeigten Woche fallen; bei Montag als Wochenanfang ist das genau die ISO-Woche.",
         "weekNumbersLabel": "Kalenderwochen anzeigen und ansagen",
-        "weekNumbersHint": "Wenn aktiv, steht die Kalenderwoche in der Wochen- und Monatsansicht und im Datum der Symbolleiste, und in der Wochenansicht hört der Screenreader sie, sobald du in eine andere Woche wechselst. Die Taste K sagt die Woche in jeder Kalenderansicht an, auch wenn der Schalter aus ist. Wird zwischen deinen Geräten synchronisiert.",
-        "weekNumbersHintMobile": "Wenn aktiv, steht die Kalenderwoche über der Wochenansicht, und der Screenreader hört sie mit. Wird zwischen deinen Geräten synchronisiert.",
+        "weekNumbersHint": "Wenn aktiv, steht die Kalenderwoche in der Wochen- und Monatsansicht und im Datum der Symbolleiste. Der Screenreader hört sie in der Wochen- und der Tagesansicht, sobald du in eine andere Woche wechselst, auch beim Blättern. Die Taste K sagt die Woche in jeder Kalenderansicht an, auch wenn der Schalter aus ist. Wird zwischen deinen Geräten synchronisiert.",
+        "weekNumbersHintMobile": "Wenn aktiv, steht die Kalenderwoche über der Wochenansicht, und der Screenreader hört sie mit; in der Tagesansicht hört er sie, wenn du in eine andere Woche blätterst. Wird zwischen deinen Geräten synchronisiert.",
         "startOnTodayLabel": "Beim Start heutiges Datum anzeigen",
         "startOnTodayHint": "Wenn aktiv, öffnet jede Kalenderansicht bei jedem App-Start auf dem heutigen Tag statt auf dem zuletzt geöffneten. Wird zwischen deinen Geräten synchronisiert.",
         "showCancelledLabel": "Abgesagte Termine anzeigen",
@@ -2471,6 +2471,8 @@
     },
     "day": {
       "eventList": "Termine und Aufgaben des Tages",
+      "dayWithWeek": "{{day}}, {{week}}",
+      "entryAfterDayChange": "{{day}}, {{entry}}",
       "tasksHeading": "Aufgaben",
       "empty": "Nichts an diesem Tag.",
       "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}",
@@ -2503,6 +2505,7 @@
       "title": "Agenda",
       "empty": "Keine Termine im Zeitraum.",
       "eventList": "Termine in der Agenda",
+      "pageFrom": "Ab {{day}}",
       "dayLabel_one": "{{day}}, 1 Termin",
       "dayLabel_other": "{{day}}, {{count}} Termine",
       "eventLabel": "{{day}}, {{title}}, {{time}}, Kalender: {{calendar}}"

@@ -12,6 +12,7 @@ import {
 
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { usePageTurnAnnouncement } from '../../hooks/usePageTurnAnnouncement';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
 import { localDateKey } from '../../intl/dateKey';
@@ -665,7 +666,8 @@ export function MonthView() {
   );
 
   // Deferred indicator — see DayView for the rationale.
-  const showLoading = useDeferredLoading(loading);
+  // Restarted on every new range (see WeekView).
+  const showLoading = useDeferredLoading(loading, 200, range.start.getTime());
   useEffect(() => {
     if (showLoading) announce(t('views.loading'));
   }, [showLoading, announce, t]);
@@ -841,6 +843,11 @@ export function MonthView() {
   // identical (and so it can't be lost to var inheritance / calc resolution).
   const rowMinHeight = `${(2 + maxItems * 1.4).toFixed(2)}rem`;
   const gridRef = useAutoFocus<HTMLDivElement>(!loading);
+  // Paged from outside the grid: say the month. In the grid the new cell
+  // names its date, and with it the month; so does the check-in button.
+  usePageTurnAnnouncement(fmt.format(anchor, 'MMMM yyyy'), gridRef, {
+    focusNameSays: true,
+  });
 
   // The month grid scrolls (see `.month-grid` in styles.css): each week row
   // grows to fit its busiest day, so EVERY event is shown rather than capped to

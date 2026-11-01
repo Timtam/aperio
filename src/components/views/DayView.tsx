@@ -4,6 +4,8 @@ import { endOfDay, isSameDay, startOfDay } from 'date-fns';
 
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { useDayStepCue } from '../../hooks/useDayStepCue';
+import { usePageTurnAnnouncement } from '../../hooks/usePageTurnAnnouncement';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
 import {
@@ -117,6 +119,8 @@ import {
   withDeletionsNotRestored,
   writeErrorMessage,
   originalKeptSentence,
+  calendarWeekName,
+  calendarWeekOf,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event row gets at `eventBlockFactor === 1`
@@ -243,7 +247,8 @@ export function DayView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { ask: askLoss, dialog: lossDialog } = useExceptionsLossQuestion();
-  const { anchor, setAnchor } = useViewState();
+  const { anchor, setAnchor, pageTurn, weekStartsOn, weekNumbers } =
+    useViewState();
   const { openEventDialog, openTaskDialog, openMoveCopy, invalidateData, stepWriteWait } =
     useDialogState();
   // A Ctrl+D on its way (see the handler).
@@ -652,7 +657,8 @@ export function DayView() {
   // views with cached data — never flashes "Lädt …". Only genuine
   // waits (CalDAV cold start, slow iCal feed) cross the threshold
   // and surface the indicator + the SR announcement.
-  const showLoading = useDeferredLoading(loading);
+  // Restarted on every new day (see WeekView).
+  const showLoading = useDeferredLoading(loading, 200, range.start.getTime());
   useEffect(() => {
     if (showLoading) announce(t('views.loading'));
   }, [showLoading, announce, t]);
@@ -689,6 +695,76 @@ export function DayView() {
     // and focusIndex is unchanged (otherwise the effect wouldn't re-run).
   }, [focusIndex, itemId, listItems.length, dayKey, listMode, slotByIdx]);
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
+
+  // What a day change says (TODO B15 step 3). NVDA in the list reads only the
+  // active entry, which keeps its place when the day changes, so after a day
+  // change made with the focus in the list that entry names the new date in
+  // front — and the week with it when the day lies in another week. Moving to
+  // another entry, or leaving the list, drops it. Paged from outside the
+  // list, the day is announced instead.
+  const dayWeek = useMemo(
+    () => calendarWeekOf(dayKey, weekStartsOn),
+    [dayKey, weekStartsOn],
+  );
+  const [dayStep, dropDayStep] = useDayStepCue(
+    dayKey,
+    dayWeek.firstDay,
+    listRef.current?.contains(document.activeElement) ?? false,
+  );
+  const dayWithWeek = (withWeek: boolean) =>
+    withWeek
+      ? t('views.day.dayWithWeek', {
+          day: fmt.format(anchor, 'PPPP'),
+          week: calendarWeekName(t, dayWeek),
+        })
+      : fmt.format(anchor, 'PPPP');
+  const dayName = dayWithWeek(weekNumbers && dayStep.crossedWeek);
+  // The page turn the day last moved at. Today pressed on today moves
+  // nothing; it is said as the date alone, not with the week an older step
+  // crossed.
+  const [dayMovedAt, setDayMovedAt] = useState({ dayKey, pageTurn });
+  let movedAt = dayMovedAt;
+  if (dayMovedAt.dayKey !== dayKey) {
+    movedAt = { dayKey, pageTurn };
+    setDayMovedAt(movedAt);
+  }
+  const dayAnnouncement = dayWithWeek(
+    weekNumbers && dayStep.crossedWeek && movedAt.pageTurn === pageTurn,
+  );
+  /** The name of entry `i`, with the new day in front where it carries it. */
+  const withDayCue = (i: number, entry: string) =>
+    dayStep.inWidget && i === focusIndex
+      ? t('views.day.entryAfterDayChange', { day: dayName, entry })
+      : entry;
+  /** A move the user makes to another entry: the day was said, drop it. A
+   *  key that cannot move (↑ on the first entry) moves nothing and drops
+   *  nothing, or NVDA would read the same entry as if it were another. */
+  const moveFocus = useCallback(
+    (next: number) => {
+      if (next !== focusIndex) dropDayStep();
+      setFocusIndex(next);
+    },
+    [dropDayStep, focusIndex],
+  );
+  usePageTurnAnnouncement(dayAnnouncement, listRef, { pending: loading });
+  // A day change in the list onto a day whose entries were still loading:
+  // the page turn left it to the list. Once they have settled, say the day if
+  // the list stayed empty — once per day change, so deleting the day's last
+  // entry later says nothing of the kind.
+  const lastDay = useRef(dayKey);
+  const awaitingDay = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastDay.current !== dayKey) {
+      lastDay.current = dayKey;
+      awaitingDay.current = loading && dayStep.inWidget ? dayKey : null;
+    }
+    if (loading || awaitingDay.current !== dayKey) return;
+    awaitingDay.current = null;
+    if (dayStep.inWidget && listItems.length === 0) {
+      announce(dayAnnouncement);
+      dropDayStep();
+    }
+  }, [dayKey, loading, listItems.length, dayStep.inWidget, announce, dayAnnouncement, dropDayStep]);
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
     null,
@@ -1125,19 +1201,19 @@ export function DayView() {
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setFocusIndex((i) => Math.min(i + 1, listItems.length - 1));
+          moveFocus(Math.min(focusIndex + 1, listItems.length - 1));
           return;
         case 'ArrowUp':
           e.preventDefault();
-          setFocusIndex((i) => Math.max(i - 1, 0));
+          moveFocus(Math.max(focusIndex - 1, 0));
           return;
         case 'Home':
           e.preventDefault();
-          setFocusIndex(0);
+          moveFocus(0);
           return;
         case 'End':
           e.preventDefault();
-          setFocusIndex(listItems.length - 1);
+          moveFocus(listItems.length - 1);
           return;
         case 'Enter': {
           // Enter always opens the editor — for events the
@@ -1210,6 +1286,7 @@ export function DayView() {
     [
       listItems,
       focusIndex,
+      moveFocus,
       invalidateData,
       openEventDialog,
       openTaskDialog,
@@ -1356,6 +1433,12 @@ export function DayView() {
             listItems.length > 0 ? itemId(focusIndex) : undefined
           }
           onKeyDown={handleKeyDown}
+          onBlur={(e) => {
+            // The day was said; coming back, the entry need not say it again.
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+              dropDayStep();
+            }
+          }}
           onDragOver={handleGridDragOver}
           onDragLeave={handleGridDragLeave}
           onDrop={handleGridDrop}
@@ -1423,7 +1506,8 @@ export function DayView() {
                   id={itemId(i)}
                   role="option"
                   aria-selected={focused}
-                  aria-label={
+                  aria-label={withDayCue(
+                    i,
                     t('views.day.taskLabel', {
                       title: task.title,
                       time: timeStr,
@@ -1432,10 +1516,10 @@ export function DayView() {
                       progress: subtaskProgressSuffix(t, task.id, tasks),
                       assignee: assigneeSuffix(t, task.assignees),
                     }) +
-                    subtaskParentSuffix(t, task, tasks) +
-                    effortSuffix(t, task.effort) +
-                    (task.recurrence ? t('views.tasks.recurringOccurrence') : '')
-                  }
+                      subtaskParentSuffix(t, task, tasks) +
+                      effortSuffix(t, task.effort) +
+                      (task.recurrence ? t('views.tasks.recurringOccurrence') : ''),
+                  )}
                   className={
                     'day-list__item day-list__item--task' +
                     (focused ? ' day-list__item--focused' : '') +
@@ -1493,7 +1577,7 @@ export function DayView() {
                           dragOriginRef.current = null;
                         }
                   }
-                  onClick={() => setFocusIndex(i)}
+                  onClick={() => moveFocus(i)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
                     openTaskDialog(seriesTaskOf(task));
@@ -1501,7 +1585,7 @@ export function DayView() {
                   onContextMenu={(ev) => {
                     ev.preventDefault();
                     ev.stopPropagation();
-                    setFocusIndex(i);
+                    moveFocus(i);
                     void openAnyTaskMenu(task);
                   }}
                 >
@@ -1623,7 +1707,7 @@ export function DayView() {
                 id={itemId(i)}
                 role="option"
                 aria-selected={focused}
-                aria-label={aria}
+                aria-label={withDayCue(i, aria)}
                 // List mode clips the visible title to the duration height — give
                 // sighted users the full title on hover (SR users already get it
                 // from the aria-label above).
@@ -1664,18 +1748,18 @@ export function DayView() {
                 onDragStart={(dev) => {
                   setEventDrag(dev.dataTransfer, ev);
                 }}
-                onClick={() => setFocusIndex(i)}
+                onClick={() => moveFocus(i)}
                 onDoubleClick={(dcev) => {
                   // Open the editor, mirroring the task chips (single click
                   // just moves focus; the keyboard path is Enter).
                   dcev.stopPropagation();
-                  setFocusIndex(i);
+                  moveFocus(i);
                   openEventDialog(ev);
                 }}
                 onContextMenu={(cmev) => {
                   cmev.preventDefault();
                   cmev.stopPropagation();
-                  setFocusIndex(i);
+                  moveFocus(i);
                   void openEventMenu(ev);
                 }}
               >

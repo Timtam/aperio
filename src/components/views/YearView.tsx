@@ -14,6 +14,7 @@ import {
 } from 'date-fns';
 
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { usePageTurnAnnouncement } from '../../hooks/usePageTurnAnnouncement';
 import { useDateFormat } from '../../intl/dateFormat';
 import { type WeekStart } from '../../state/viewMath';
 import { useViewState } from '../../state/viewStateContext';
@@ -46,6 +47,11 @@ export function YearView() {
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-month-${i}`;
   const listRef = useAutoFocus<HTMLDivElement>();
+  // Paged from outside the list: say the year. In the list the focused month
+  // names its year.
+  usePageTurnAnnouncement(fmt.format(anchor, 'yyyy'), listRef, {
+    focusNameSays: true,
+  });
 
   const openMonth = useCallback(
     (date: Date) => {

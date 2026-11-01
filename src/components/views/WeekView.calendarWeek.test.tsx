@@ -10,18 +10,21 @@ import type { WeekStart } from '../../state/viewMath';
  * week on entry and a cell carries it only when a step in the grid crossed
  * into another week — ↓ moves a whole week, the case Toni heard nothing in.
  * The name then holds until the next step, or a reload of the items would
- * make NVDA read the cell again. A step from outside the grid is heard on
- * entering it, through the grid's own name.
+ * make NVDA read the cell again. A page turn from outside the grid — the
+ * toolbar's buttons — is announced (step 3), and the grid's own name carries
+ * the week on entering it, so the cell does not repeat it.
  */
 
 const h = vi.hoisted(() => {
   type State = {
     anchor: Date;
+    pageTurn: number;
     weekStartsOn: WeekStart;
     weekNumbers: boolean;
   };
   let state: State = {
     anchor: new Date(2026, 10, 4),
+    pageTurn: 0,
     weekStartsOn: 1,
     weekNumbers: true,
   };
@@ -30,10 +33,11 @@ const h = vi.hoisted(() => {
     state = { ...state, ...patch };
     listeners.forEach((l) => l());
   };
+  /** Back or Forward: a page turn, as ViewState counts it. */
   const shift = (days: number) => {
     const next = new Date(state.anchor);
     next.setDate(next.getDate() + days);
-    set({ anchor: next });
+    set({ anchor: next, pageTurn: state.pageTurn + 1 });
   };
   const viewState = {
     get: () => state,
@@ -70,7 +74,8 @@ const h = vi.hoisted(() => {
   const noEvents = { events: [] as unknown[], calendarById: new Map(), loading: false };
   const events = { current: noEvents, none: noEvents };
   const tasks = { tasks: [], taskListById: new Map() };
-  return { viewState, store, dialogState, events, tasks };
+  const announce = vi.fn();
+  return { viewState, store, dialogState, events, tasks, announce };
 });
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: () => Promise.resolve([]) }));
@@ -120,7 +125,7 @@ vi.mock('../../state/dialogStateContext', () => ({ useDialogState: () => h.dialo
 vi.mock('../../state/useDayLogSummaries', () => ({
   useDayLogSummaries: () => ({ symbolsFor: () => '', spokenFor: () => '' }),
 }));
-vi.mock('../../a11y/announcerContext', () => ({ useAnnouncer: () => () => {} }));
+vi.mock('../../a11y/announcerContext', () => ({ useAnnouncer: () => h.announce }));
 vi.mock('../DayCheckInButton', () => ({ DayCheckInButton: () => null }));
 vi.mock('../BacklogRail', () => ({ BacklogRail: () => null }));
 vi.mock('../ExceptionsLossQuestion', () => ({
@@ -128,8 +133,14 @@ vi.mock('../ExceptionsLossQuestion', () => ({
 }));
 
 beforeEach(() => {
-  h.viewState.set({ anchor: new Date(2026, 10, 4), weekStartsOn: 1, weekNumbers: true });
+  h.viewState.set({
+    anchor: new Date(2026, 10, 4),
+    pageTurn: 0,
+    weekStartsOn: 1,
+    weekNumbers: true,
+  });
   h.events.current = h.events.none;
+  h.announce.mockReset();
 });
 
 const WORK = { id: 'work', name: 'Arbeit', read_only: false } as unknown as Calendar;
@@ -201,6 +212,8 @@ describe('the week view says the calendar week', () => {
     expect(activeCellName()).toBe(
       'Donnerstag, 12. November 2026, Kalenderwoche 46, 0 Einträge',
     );
+    // The cell says it; no announcement on top of it.
+    expect(h.announce).not.toHaveBeenCalled();
     press('ArrowRight');
     expect(activeCellName()).toBe('Freitag, 13. November 2026, 0 Einträge');
   });
@@ -227,13 +240,16 @@ describe('the week view says the calendar week', () => {
     expect(activeCellName()).toBe(named);
   });
 
-  it('not in the cell when the week was paged from outside the grid', async () => {
+  it('as an announcement, not in the cell, when paged from outside the grid', async () => {
     await renderWeek();
     const outside = document.createElement('button');
     document.body.appendChild(outside);
     outside.focus();
-    // The toolbar's "next" button, say.
+    // The toolbar's "next" button, say: the week is announced right away.
     act(() => h.viewState.actions.goNext());
+    expect(h.announce).toHaveBeenCalledWith(
+      'Kalenderwoche 46, 9. bis 15. November 2026',
+    );
     expect(grid()).toHaveAttribute(
       'aria-label',
       'Wochenraster, Kalenderwoche 46, 9. bis 15. November 2026',

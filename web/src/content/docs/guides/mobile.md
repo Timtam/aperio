@@ -64,9 +64,11 @@ concepts), adapted to the way VoiceOver and TalkBack work:
   refreshed.
 - **Calendar weeks.** The week view's heading names the week, shown as
   "Week 45 · November 2, 2026 – November 8, 2026" and spoken as "Week 45,
-  November 2 to 8, 2026" — also when you page to another week. Switch off
-  **Settings → General → Show and announce calendar weeks** and it names the
-  dates alone; the choice syncs with your other devices.
+  November 2 to 8, 2026" — also when you page to another week. The day view
+  names the week when you page into another one: "Monday, November 9, 2026,
+  Week 46". Switch off **Settings → General → Show and announce calendar
+  weeks** and the week view names the dates alone and the day view leaves
+  the week out; the choice syncs with your other devices.
 - **Group headings** (e.g. a task list or a section) are collapsible buttons
   that announce whether they are expanded or collapsed.
 - **The catalogues** – calendars, task lists, address books – give each entry a
