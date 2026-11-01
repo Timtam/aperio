@@ -66,8 +66,10 @@ export function calendarWeekOf(dayKey: string, weekStartsOn: number): CalendarWe
 // speech synthesizer spells out letter by letter. Seen: "KW 45". The year
 // joins only when the week touches two calendar years, and then it is the
 // year the number counts in. A range always says "bis", never a dash, which
-// the synthesizer reads as "minus" or skips; and no number is followed by a
-// full stop, which it would read as an ordinal.
+// the synthesizer reads as "minus" or skips; and the week's number is never
+// followed by a full stop, which it would read as an ordinal ("46." is
+// "sechsundvierzigste"). The day numbers of a German range are ordinals and
+// keep theirs.
 
 type Translate = (key: string, vars?: Record<string, unknown>) => string;
 

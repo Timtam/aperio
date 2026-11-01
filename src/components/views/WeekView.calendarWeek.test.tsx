@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Calendar, CalendarEvent } from '../../api/types';
 import type { WeekStart } from '../../state/viewMath';
 
 /**
@@ -66,7 +67,8 @@ const h = vi.hoisted(() => {
     invalidateData: () => {},
     dataVersion: 0,
   };
-  const events = { current: { events: [], calendarById: new Map(), loading: false } };
+  const noEvents = { events: [] as unknown[], calendarById: new Map(), loading: false };
+  const events = { current: noEvents, none: noEvents };
   const tasks = { tasks: [], taskListById: new Map() };
   return { viewState, store, dialogState, events, tasks };
 });
@@ -127,7 +129,28 @@ vi.mock('../ExceptionsLossQuestion', () => ({
 
 beforeEach(() => {
   h.viewState.set({ anchor: new Date(2026, 10, 4), weekStartsOn: 1, weekNumbers: true });
+  h.events.current = h.events.none;
 });
+
+const WORK = { id: 'work', name: 'Arbeit', read_only: false } as unknown as Calendar;
+function meeting(id: string, day: number): CalendarEvent {
+  return {
+    id,
+    calendar_id: WORK.id,
+    title: `Planung ${day}`,
+    description: null,
+    location: null,
+    start: new Date(2026, 10, day, 10, 0).toISOString(),
+    end: new Date(2026, 10, day, 11, 0).toISOString(),
+    all_day: false,
+    recurrence: null,
+    color_label: null,
+    reminders: [],
+    attendees: [],
+    organizer: null,
+    organized_elsewhere: false,
+  } as unknown as CalendarEvent;
+}
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -215,6 +238,34 @@ describe('the week view says the calendar week', () => {
       'aria-label',
       'Wochenraster, Kalenderwoche 46, 9. bis 15. November 2026',
     );
+    expect(activeCellName()).toBe('Mittwoch, 11. November 2026, 0 Einträge');
+  });
+
+  it('from an entry too: a week step lands on the day, which says the week', async () => {
+    // A meeting on Wednesday of this week and of the next.
+    h.events.current = {
+      events: [meeting('a', 4), meeting('b', 11)],
+      calendarById: new Map([[WORK.id, WORK]]),
+      loading: false,
+    };
+    await renderWeek();
+    press('Tab');
+    expect(activeCellName()).toContain('Planung 4');
+    press('ArrowDown');
+    expect(activeCellName()).toBe(
+      'Mittwoch, 11. November 2026, Kalenderwoche 46, 1 Eintrag',
+    );
+  });
+
+  it('once on coming back: the grid says it, the cell no longer', async () => {
+    await renderWeek();
+    press('ArrowDown');
+    expect(activeCellName()).toContain('Kalenderwoche 46');
+    // Out to the toolbar and back in, or a dialog opened and closed.
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    act(() => outside.focus());
+    act(() => grid().focus());
     expect(activeCellName()).toBe('Mittwoch, 11. November 2026, 0 Einträge');
   });
 

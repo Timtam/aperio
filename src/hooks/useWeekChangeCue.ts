@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 /**
  * Whether the active day has just moved into another calendar week: the one
@@ -14,7 +14,9 @@ import { useState } from 'react';
  * The answer holds until the active day moves again: a reload of the day's
  * items re-renders the cell, and a name that changed then would make NVDA
  * read the cell a second time. A changed week start alone, with the day
- * staying put, moves no cue.
+ * staying put, moves no cue. The second value drops the cue, for the grid to
+ * call when the focus leaves it: coming back, the grid's name says the week
+ * and the cell would say it again.
  *
  * Derived during render rather than in an effect, so the name is right in the
  * same frame that moves `aria-activedescendant`.
@@ -23,10 +25,14 @@ export function useWeekChangeCue(
   activeDayKey: string,
   weekKey: string,
   inGrid: boolean,
-): boolean {
+): [cue: boolean, drop: () => void] {
   const [track, setTrack] = useState({ activeDayKey, weekKey, cue: false });
+  const drop = useCallback(
+    () => setTrack((current) => (current.cue ? { ...current, cue: false } : current)),
+    [],
+  );
   if (track.activeDayKey === activeDayKey && track.weekKey === weekKey) {
-    return track.cue;
+    return [track.cue, drop];
   }
   const moved = track.activeDayKey !== activeDayKey;
   const next = {
@@ -35,5 +41,5 @@ export function useWeekChangeCue(
     cue: moved ? inGrid && weekKey !== track.weekKey : track.cue,
   };
   setTrack(next);
-  return next.cue;
+  return [next.cue, drop];
 }

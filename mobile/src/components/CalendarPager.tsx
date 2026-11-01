@@ -61,6 +61,7 @@ export function CalendarPager({
   onNext,
   periodLabel,
   periodSpoken,
+  announceKey,
   children,
 }: {
   onPrev: () => void;
@@ -73,6 +74,12 @@ export function CalendarPager({
    *  "Kalenderwoche 45, 2. bis 8. November 2026". The header's label and the
    *  announcement on each change; `periodLabel` when unset. */
   periodSpoken?: string;
+  /** What makes a page turn, for a screen whose text can change without
+   *  one: the week heading also changes when the week start or the week
+   *  numbers arrive from Settings or a sync round, and that must not sound
+   *  like paging. When set, the period is announced when this key changes;
+   *  otherwise whenever the text does. */
+  announceKey?: string | number;
   children: ReactNode;
 }) {
   const ref = useRef<ScrollView>(null);
@@ -83,6 +90,11 @@ export function CalendarPager({
   // The pager renders its own visible period header under VoiceOver (the screens
   // drop theirs via `useCalendarPagerOwnsHeading`), announced on each change.
   const spoken = periodSpoken ?? periodLabel;
+  // Read through a ref: with `announceKey` set the effect must not run for a
+  // text change, but when it runs it says the text of this render.
+  const spokenRef = useRef(spoken);
+  spokenRef.current = spoken;
+  const announceOn = announceKey ?? spoken;
   const firstRun = useRef(true);
   useEffect(() => {
     // Only the native VoiceOver pager announces the period.
@@ -109,10 +121,10 @@ export function CalendarPager({
     // the action exists to deliver. Consume it here so the interrupting
     // utterance IS the informative one.
     AccessibilityInfo.announceForAccessibilityWithOptions(
-      takePeriodAnnounceOverride() ?? spoken,
+      takePeriodAnnounceOverride() ?? spokenRef.current,
       { queue: false },
     );
-  }, [spoken, screenReader]);
+  }, [announceOn, screenReader]);
 
   // Register this screen's pager step under its route name so a VoiceOver
   // three-finger swipe made when focus is on chrome (a heading / the view

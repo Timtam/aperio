@@ -22,6 +22,10 @@ const CALENDAR_VIEWS: ReadonlySet<ViewId> = new Set([
  * days — "Kalenderwoche 45, 2. bis 8. November 2026" (TODO B15). A request,
  * so it answers whether or not weeks are shown and announced otherwise.
  *
+ * The day is the anchor, which the day, week, month and year views move
+ * with their focus. A view that moves its focus without it — the agenda's
+ * entries — names the focused entry's day in `data-active-day` on its list.
+ *
  * Only inside the calendar view itself. The sidebar finds entries by their
  * first letters, so a K there belongs to it, as it does in every text field;
  * the backlog is a region of its own that stands on no day, and its groups
@@ -44,7 +48,10 @@ export function useCalendarWeekKey(): void {
       const region = e.target.closest<HTMLElement>('[data-region]');
       if (region?.dataset.region !== 'view') return;
       e.preventDefault();
-      const week = calendarWeekOf(localDateKey(anchor), weekStartsOn);
+      const day =
+        e.target.closest<HTMLElement>('[data-active-day]')?.dataset.activeDay ??
+        localDateKey(anchor);
+      const week = calendarWeekOf(day, weekStartsOn);
       announce(calendarWeekSentence(t, i18n.language, week));
     };
     window.addEventListener('keydown', onKeyDown);

@@ -116,6 +116,24 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     [i18n.language, t, week, weekNumbers],
   );
 
+  // A page turn: the anchor moved into another week. The heading also changes
+  // when the week start or the week numbers arrive (Settings, a sync round
+  // from another device), and the VoiceOver pager must not announce that as
+  // if the user had paged, so it announces on this count, not on the text.
+  const weekKey = localDateKey(days[0]);
+  const [turn, setTurn] = useState({ anchor: anchor.getTime(), weekKey, count: 0 });
+  let pageTurn = turn.count;
+  if (turn.anchor !== anchor.getTime() || turn.weekKey !== weekKey) {
+    const moved = turn.anchor !== anchor.getTime();
+    const next = {
+      anchor: anchor.getTime(),
+      weekKey,
+      count: moved && weekKey !== turn.weekKey ? turn.count + 1 : turn.count,
+    };
+    setTurn(next);
+    pageTurn = next.count;
+  }
+
   // Announce the period on navigation (the three-finger swipe / prev-next change
   // the week silently otherwise). Keyed on the ANCHOR, not the label: the synced
   // week-start pref hydrates ASYNC after mount and recomputes the label, and a
@@ -220,6 +238,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         onNext={() => stepWeek(1)}
         periodLabel={weekLabel}
         periodSpoken={weekSpoken}
+        announceKey={pageTurn}
       >
         <CalendarDayList
           navigation={navigation}

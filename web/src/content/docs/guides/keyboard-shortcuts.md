@@ -3,7 +3,8 @@ title: "Keyboard Shortcuts"
 ---
 
 This page summarizes the keyboard shortcuts. On macOS, `Cmd` takes the place
-of `Ctrl`.
+of `Ctrl`, except in `Ctrl+Tab`, which stays `Ctrl` (`Cmd+Tab` belongs to the
+system).
 
 ## General
 

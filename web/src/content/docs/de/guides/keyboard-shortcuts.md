@@ -3,7 +3,8 @@ title: "Tastaturkürzel"
 ---
 
 Diese Seite fasst die Tastenkürzel zusammen. Unter macOS steht `Cmd` an der
-Stelle von `Strg`.
+Stelle von `Strg`, außer in `Strg+Tab`, das `Strg` bleibt (`Cmd+Tab` gehört
+dem System).
 
 ## Allgemein
 

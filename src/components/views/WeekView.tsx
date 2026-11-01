@@ -767,6 +767,8 @@ export function WeekView() {
     dayIndex: focusIndex,
     setDayIndex: (next) => setAnchor(days[next]),
     onDayChange: dayChangeAnnouncer,
+    // ↑/↓ step a week and keep the index: the day key resets the item.
+    dayKey: keyOf(days[focusIndex] ?? days[0]),
   });
 
   // The currently focused event (if any) drives the lane bar's
@@ -1304,7 +1306,8 @@ export function WeekView() {
           return;
         }
         // Arrow keys fall through to day navigation below, which will
-        // also reset eventIndex via the focusIndex effect.
+        // also reset eventIndex: a new day, or a new week on the same
+        // weekday, both move the day key the navigation hook watches.
       }
 
       switch (e.key) {
@@ -1400,7 +1403,7 @@ export function WeekView() {
   // grid crossed into another one; the grid's own name carries it on entry.
   // Read at render, the moment the step lands: the arrow keys and Ctrl+→
   // step with the focus in the grid, the toolbar's buttons from outside.
-  const weekChanged = useWeekChangeCue(
+  const [weekChanged, dropWeekCue] = useWeekChangeCue(
     keyOf(days[focusIndex] ?? days[0]),
     weekKey,
     gridRef.current?.contains(document.activeElement) ?? false,
@@ -1448,6 +1451,12 @@ export function WeekView() {
               : cellId(focusIndex)
           }
           onKeyDown={handleKeyDown}
+          onBlur={(e) => {
+            // Back in the grid, its name says the week; the cell need not.
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+              dropWeekCue();
+            }
+          }}
           className="week-grid"
         >
           <div

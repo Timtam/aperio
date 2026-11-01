@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ViewId, WeekStart } from '../state/viewMath';
@@ -35,7 +35,7 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-async function renderShell() {
+async function renderShell(activeDay?: string) {
   const { useCalendarWeekKey } = await import('./useCalendarWeekKey');
   function Shell() {
     useCalendarWeekKey();
@@ -45,7 +45,12 @@ async function renderShell() {
           <button type="button">Kalender</button>
         </div>
         <div data-region="view">
-          <div role="grid" tabIndex={0} aria-label="Wochenraster" />
+          <div
+            role="grid"
+            tabIndex={0}
+            aria-label="Wochenraster"
+            data-active-day={activeDay}
+          />
           <input aria-label="Suche" />
           <div data-region="backlog">
             <button type="button">Backlog</button>
@@ -72,12 +77,29 @@ describe('the K key', () => {
     expect(h.announce).toHaveBeenCalledWith('Kalenderwoche 45, 1. bis 7. November 2026');
   });
 
-  it('answers in every view that stands on a day, and with weeks switched off', async () => {
-    h.viewState.view = 'agenda';
+  it.each<ViewId>(['day', 'week', 'month', 'year', 'agenda'])(
+    'answers in the %s view',
+    async (view) => {
+      h.viewState.view = view;
+      await renderShell();
+      fireEvent.keyDown(screen.getByRole('grid'), { key: 'k' });
+      expect(h.announce).toHaveBeenCalledWith('Kalenderwoche 45, 2. bis 8. November 2026');
+    },
+  );
+
+  it('answers with weeks switched off: it is a request', async () => {
     h.viewState.weekNumbers = false;
     await renderShell();
     fireEvent.keyDown(screen.getByRole('grid'), { key: 'k' });
-    expect(h.announce).toHaveBeenCalledTimes(1);
+    expect(h.announce).toHaveBeenCalledWith('Kalenderwoche 45, 2. bis 8. November 2026');
+  });
+
+  it('says the week of the day a view names as its focus, the agenda entry', async () => {
+    // The agenda starts on 4 November; its focused entry is on 18 November.
+    h.viewState.view = 'agenda';
+    await renderShell('2026-11-18');
+    fireEvent.keyDown(screen.getByRole('grid'), { key: 'k' });
+    expect(h.announce).toHaveBeenCalledWith('Kalenderwoche 47, 16. bis 22. November 2026');
   });
 
   it('leaves the letter to the sidebar and text fields, and the backlog alone', async () => {
@@ -88,13 +110,16 @@ describe('the K key', () => {
     expect(h.announce).not.toHaveBeenCalled();
   });
 
-  it('is no shortcut with a modifier, and none in the task and contact views', async () => {
+  it('is no shortcut with a modifier', async () => {
     await renderShell();
     fireEvent.keyDown(screen.getByRole('grid'), { key: 'k', ctrlKey: true });
     fireEvent.keyDown(screen.getByRole('grid'), { key: 'k', altKey: true });
+    fireEvent.keyDown(screen.getByRole('grid'), { key: 'k', metaKey: true });
     expect(h.announce).not.toHaveBeenCalled();
-    cleanup();
-    h.viewState.view = 'tasks';
+  });
+
+  it.each<ViewId>(['tasks', 'contacts'])('is none in the %s view', async (view) => {
+    h.viewState.view = view;
     await renderShell();
     fireEvent.keyDown(screen.getByRole('grid'), { key: 'k' });
     expect(h.announce).not.toHaveBeenCalled();

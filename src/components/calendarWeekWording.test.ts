@@ -12,8 +12,9 @@ import i18n from '../i18n';
 /**
  * How a week is written, the same words on both devices
  * (`shared/calendarWeek.ts`). Spoken it says "Kalenderwoche", never "KW",
- * which a synthesizer spells out; a range says "bis", never a dash; no
- * number is followed by a full stop, which would be read as an ordinal.
+ * which a synthesizer spells out; a range says "bis", never a dash; the
+ * week's number is never followed by a full stop, which would be read as an
+ * ordinal.
  */
 
 const de = i18n.getFixedT('de');

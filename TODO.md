@@ -832,9 +832,16 @@ Entschieden (Toni, 2026-11-01):
   auch die KW-Spalte der Monatsansicht weg. Am Handy spricht `CalendarPager`
   den Satz über `periodSpoken`, die Überschrift trägt ihn als Namen; Wochenanfang
   und Schalter liest die App beim Start mit, damit der Pager keine korrigierte
-  Überschrift ansagt. Tastenliste und `06-views` (beide Sprachen) berichtigt;
-  aus der Tastenliste ist der Abschnitt „Anpassen“ verschwunden, weil es die
-  Einstellung „Tastaturkürzel“ nicht gibt (DESIGN §15.10 plant sie).
+  Überschrift ansagt; der Pager sagt in der Woche nur noch an, wenn der Anker
+  in eine andere Woche wechselt, nicht, wenn eine Einstellung die Überschrift
+  ändert. In der Agenda sagt K die Woche des fokussierten Eintrags. Der
+  Desktop übernimmt per Sync geänderte Ansichts-Einstellungen ohne Neustart.
+  Tastenliste, Tutorial-Kapitel 10 und `06-views` (beide Sprachen)
+  berichtigt; der Abschnitt „Anpassen“ ist aus beiden verschwunden, weil es
+  die Einstellung „Tastaturkürzel“ nicht gibt (DESIGN §15.10 plant sie).
+- [ ] **Schritt 3 und 4:** Der Hinweis des Schalters verspricht die Ansage
+  beim Wochenwechsel bisher nur für die Wochenansicht; mit jedem Schritt um
+  die neue Stelle erweitern (beide Sprachen, Desktop und Handy).
 - [ ] **Schritt 3:** Ansage beim Blättern am Desktop (Symbolleiste, Strg+Pfeil,
   Strg+T), wenn der Fokus nicht im Raster liegt: „Kalenderwoche 46, 9. bis 15.
   November 2026“, in der Tagesansicht das Datum und die KW nur beim

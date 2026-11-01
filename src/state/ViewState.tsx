@@ -18,6 +18,7 @@ import {
   isValidTimeStep,
   type TimeStepMinutes,
 } from './viewMath';
+import { useUserPrefsChanged } from './useUserPrefsChanged';
 import { ViewStateContext, type ViewStateValue } from './viewStateContext';
 
 /**
@@ -61,6 +62,17 @@ const SHOW_HIDDEN_TASK_LIST_TARGETS_PREF = 'pickers.showHiddenTaskListTargets';
  *  Minute-by-minute is the browser default and it is a lot of presses for a
  *  half-past-nine meeting; Outlook steps in 5, Google in 15. */
 const TIME_STEP_PREF = 'editor.timeStepMinutes';
+/** Every synced pref this provider reads, at mount and again when a sync
+ *  round changes it. */
+const OWNED_PREFS = [
+  WEEK_START_PREF,
+  START_ON_TODAY_PREF,
+  SHOW_CANCELLED_PREF,
+  WEEK_NUMBERS_PREF,
+  SHOW_HIDDEN_CALENDAR_TARGETS_PREF,
+  SHOW_HIDDEN_TASK_LIST_TARGETS_PREF,
+  TIME_STEP_PREF,
+] as const;
 
 
 function isValidWeekStart(n: number): n is WeekStart {
@@ -130,72 +142,54 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     useState<boolean>(true);
   const [timeStepMinutes, setTimeStepMinutesState] =
     useState<TimeStepMinutes>(DEFAULT_TIME_STEP);
-  useEffect(() => {
-    let cancelled = false;
-    getUserPref(WEEK_START_PREF)
-      .then((raw) => {
-        if (cancelled || raw == null) return;
+  // Read the synced prefs this provider owns: all of them at mount, and the
+  // ones a sync round changed afterwards, so a choice made on another device
+  // applies here without a restart. Each keeps its default until its answer
+  // arrives, and keeps it when the backend is unreachable.
+  const readPrefs = useCallback(
+    (keys: readonly string[], alive: () => boolean = () => true) => {
+      const read = (key: string, apply: (raw: string) => void) => {
+        if (!keys.includes(key)) return;
+        getUserPref(key)
+          .then((raw) => {
+            if (alive() && raw != null) apply(raw);
+          })
+          .catch(() => {});
+      };
+      read(WEEK_START_PREF, (raw) => {
         const n = Number(raw);
         if (isValidWeekStart(n)) setWeekStartsOnState(n);
-      })
-      .catch(() => {
-        // Backend unreachable during init → keep the Monday default.
       });
-    // Hydrate the show-cancelled pref (default on until the round-trip returns).
-    getUserPref(SHOW_CANCELLED_PREF)
-      .then((raw) => {
-        if (cancelled || raw == null) return;
-        setShowCancelledEventsState(raw !== 'false');
-      })
-      .catch(() => {
-        // Backend unreachable → keep the default (show).
-      });
-    getUserPref(WEEK_NUMBERS_PREF)
-      .then((raw) => {
-        if (cancelled || raw == null) return;
-        setWeekNumbersState(raw !== 'false');
-      })
-      .catch(() => {
-        // Backend unreachable → keep the default (on).
-      });
-    // Hydrate the "show hidden … as targets" prefs (default on until returned).
-    getUserPref(TIME_STEP_PREF)
-      .then((raw) => {
-        if (cancelled || raw == null) return;
+      read(SHOW_CANCELLED_PREF, (raw) =>
+        setShowCancelledEventsState(raw !== 'false'),
+      );
+      read(WEEK_NUMBERS_PREF, (raw) => setWeekNumbersState(raw !== 'false'));
+      read(TIME_STEP_PREF, (raw) => {
         const n = Number(raw);
         if (isValidTimeStep(n)) setTimeStepMinutesState(n);
-      })
-      .catch(() => {
-        // Backend unreachable → keep the default step.
       });
-    getUserPref(SHOW_HIDDEN_CALENDAR_TARGETS_PREF)
-      .then((raw) => {
-        if (cancelled || raw == null) return;
-        setShowHiddenCalendarTargetsState(raw !== 'false');
-      })
-      .catch(() => {});
-    getUserPref(SHOW_HIDDEN_TASK_LIST_TARGETS_PREF)
-      .then((raw) => {
-        if (cancelled || raw == null) return;
-        setShowHiddenTaskListTargetsState(raw !== 'false');
-      })
-      .catch(() => {});
-    // Hydrate the synced start-on-today pref. This only refreshes the toggle
-    // state + the local mirror (written back by the persist effect) for the
-    // NEXT launch — it deliberately does NOT move the current anchor, so a
-    // sync arriving mid-session can't yank the day the user is looking at.
-    getUserPref(START_ON_TODAY_PREF)
-      .then((raw) => {
-        if (cancelled || raw == null) return;
-        setStartOnTodayState(raw === 'true');
-      })
-      .catch(() => {
-        // Backend unreachable → keep the synchronous local-mirror value.
-      });
+      read(SHOW_HIDDEN_CALENDAR_TARGETS_PREF, (raw) =>
+        setShowHiddenCalendarTargetsState(raw !== 'false'),
+      );
+      read(SHOW_HIDDEN_TASK_LIST_TARGETS_PREF, (raw) =>
+        setShowHiddenTaskListTargetsState(raw !== 'false'),
+      );
+      // Start-on-today only refreshes the toggle state + the local mirror
+      // (written back by the persist effect) for the NEXT launch — it
+      // deliberately does NOT move the current anchor, so a sync arriving
+      // mid-session can't yank the day the user is looking at.
+      read(START_ON_TODAY_PREF, (raw) => setStartOnTodayState(raw === 'true'));
+    },
+    [],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    readPrefs(OWNED_PREFS, () => !cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [readPrefs]);
+  useUserPrefsChanged(OWNED_PREFS, (changed) => readPrefs(changed));
 
   useEffect(() => {
     try {

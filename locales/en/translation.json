@@ -671,7 +671,7 @@
         "weekStartLabel": "First day of the week",
         "weekStartHint": "Sets which weekday the week and month views start on. The calendar week number is the ISO week (ISO 8601) that most days of the displayed week fall in; with Monday as the first day it is exactly the ISO week.",
         "weekNumbersLabel": "Show and announce calendar weeks",
-        "weekNumbersHint": "When on, the calendar week shows in the week and month views and in the toolbar date, and the screen reader hears it as soon as you move into another week. The K key announces the week in every calendar view, even when this is off. Synced between your devices.",
+        "weekNumbersHint": "When on, the calendar week shows in the week and month views and in the toolbar date, and in the week view the screen reader hears it as soon as you move into another week. The K key announces the week in every calendar view, even when this is off. Synced between your devices.",
         "weekNumbersHintMobile": "When on, the calendar week shows above the week view, and the screen reader hears it too. Synced between your devices.",
         "startOnTodayLabel": "Open on today at launch",
         "startOnTodayHint": "When on, every calendar view opens on today each time you start the app, instead of the day you last had open. Synced across your devices.",
