@@ -54,6 +54,7 @@ import uniffi.cal_ffi.applySignature as uniffiApplySignature
 import uniffi.cal_ffi.dayStart as uniffiDayStart
 import uniffi.cal_ffi.taskSettings as uniffiTaskSettings
 import uniffi.cal_ffi.recurrenceSummary as uniffiRecurrenceSummary
+import uniffi.cal_ffi.calendarWeeks as uniffiCalendarWeeks
 import uniffi.cal_ffi.seriesShift as uniffiSeriesShift
 import uniffi.cal_ffi.tailExceptions as uniffiTailExceptions
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
@@ -663,6 +664,11 @@ class CalFfiModule : Module() {
     // A repeat rule in words: keys and values the surface renders.
     Function("recurrenceSummary") { inputJson: String ->
       uniffiRecurrenceSummary(inputJson)
+    }
+
+    // The calendar week each day is shown in, with its ISO number.
+    Function("calendarWeeks") { inputJson: String ->
+      uniffiCalendarWeeks(inputJson)
     }
   }
 

@@ -36,7 +36,9 @@ Kapitel lernst du sie kennen und wechselst zwischen ihnen.
   vorigen/nächsten Zeitraum (Woche, Monat …).
 - **Heute:** springt zurück auf den aktuellen Tag (Standard: `T` oder
   „Heute" in der Symbolleiste).
-- **Kalenderwochen** werden in den Wochen- und Monatsansichten angezeigt.
+- **Kalenderwochen** werden in den Wochen- und Monatsansichten angezeigt. Sie
+  folgen in jeder Sprache ISO 8601; beginnt deine Woche nicht am Montag, trägt
+  eine Woche die Nummer der ISO-Woche, in die die meisten ihrer Tage fallen.
 
 ## Sichtbare Stunden im Stundenraster
 

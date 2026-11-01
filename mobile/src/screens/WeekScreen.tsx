@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { calendarWeekOf, localDateKey } from '@aperio/shared';
+
 import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarDayList } from '../components/CalendarDayList';
@@ -45,18 +47,6 @@ function startOfWeekLocal(date: Date, weekStartsOn: WeekStart): Date {
   return d;
 }
 
-/** Standard ISO-8601 week number (1–53) — the week is the one containing its
- *  Thursday; week 1 is the week with the year's first Thursday. */
-function isoWeekNumber(date: Date): number {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = (d.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
-  d.setUTCDate(d.getUTCDate() - dayNum + 3); // Thursday of this ISO week
-  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
-  const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
-  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
-  return 1 + Math.round((d.getTime() - firstThursday.getTime()) / 604800000);
-}
-
 export default function WeekScreen({ navigation, route }: RootStackScreenProps<'Week'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -91,9 +81,12 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     [i18n.language],
   );
 
-  // ISO week of the visual week's 4th day — Monday-based regardless of the
-  // visual start (matches the desktop header).
-  const isoWeek = useMemo(() => isoWeekNumber(addDays(days[0], 3)), [days]);
+  // The number is the core's (`cal_core::calendar_week`), the same rule the
+  // desktop asks: ISO 8601, the ISO week most of the displayed days fall in.
+  const isoWeek = useMemo(
+    () => calendarWeekOf(localDateKey(days[0]), weekStart).week,
+    [days, weekStart],
+  );
 
   const weekLabel = useMemo(
     () =>

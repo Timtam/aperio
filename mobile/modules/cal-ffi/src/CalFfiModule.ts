@@ -189,6 +189,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  or why the rule has no sentence. */
   recurrenceSummary(inputJson: string): string;
 
+  /** The calendar week each day is shown in, with its ISO number: one
+   *  question for many days. */
+  calendarWeeks(inputJson: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

@@ -33,6 +33,7 @@ import {
   withDeletionsNotRestored,
   writeErrorMessage,
   originalKeptSentence,
+  calendarWeeks,
 } from '@aperio/shared';
 import { useDateFormat } from '../../intl/dateFormat';
 import {
@@ -153,6 +154,16 @@ export function MonthView() {
   const cells = useMemo(
     () => buildMonthGrid(anchor, weekStartsOn),
     [anchor, weekStartsOn],
+  );
+  // Each row's calendar week, from the core (`cal_core::calendar_week`): one
+  // question for the whole grid.
+  const rowWeeks = useMemo(
+    () =>
+      calendarWeeks(
+        cells.filter((_, i) => i % 7 === 0).map(localDateKey),
+        weekStartsOn,
+      ).map((answer) => answer.week.week),
+    [cells, weekStartsOn],
   );
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
   const { events: allEvents, calendarById, loading } = useEvents(range);
@@ -1008,7 +1019,7 @@ export function MonthView() {
                   style={{ minHeight: rowMinHeight }}
                 >
                 <div role="rowheader" className="month-grid__kw">
-                  {fmt.isoWeek(addDays(rowStart, 3))}
+                  {rowWeeks[row]}
                 </div>
                 {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
                   const flatIndex = row * 7 + col;

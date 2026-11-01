@@ -1,7 +1,6 @@
 import {
   format as dfFormat,
   formatDistanceToNow as dfFormatDistanceToNow,
-  getISOWeek as dfGetISOWeek,
   type Locale,
 } from 'date-fns';
 import { de as deLocale } from 'date-fns/locale/de';
@@ -12,11 +11,9 @@ import { useMemo } from 'react';
 /**
  * date-fns wiring keyed off the active i18next language.
  *
- * The app uses ISO-8601 calendar weeks throughout (DESIGN.md section 5.2)
- * — Monday-start, the first week of a year being the one with at least
- * four days in that year. `date-fns`' `getISOWeek` implements this; we
- * re-export it from here so the rest of the app doesn't have to know
- * about date-fns directly.
+ * Calendar-week numbers are not here: they are a rule, and the core answers
+ * them for both surfaces (`calendarWeeks` in `@aperio/shared`, DESIGN.md
+ * section 5.2).
  */
 
 const LOCALES: Record<string, Locale> = {
@@ -34,7 +31,6 @@ export function localeFor(language: string): Locale {
 export interface DateFormatter {
   format: (date: Date | number, pattern: string) => string;
   formatRelative: (date: Date | number) => string;
-  isoWeek: (date: Date | number) => number;
   locale: Locale;
 }
 
@@ -53,7 +49,6 @@ export function useDateFormat(): DateFormatter {
       format: (date, pattern) => dfFormat(date, pattern, { locale }),
       formatRelative: (date) =>
         dfFormatDistanceToNow(date, { locale, addSuffix: true }),
-      isoWeek: (date) => dfGetISOWeek(date),
     };
   }, [i18n.language]);
 }

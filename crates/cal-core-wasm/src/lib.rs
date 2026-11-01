@@ -439,3 +439,9 @@ pub fn tail_exceptions(input_json: &str) -> Result<String, JsValue> {
 pub fn recurrence_summary(input_json: &str) -> Result<String, JsValue> {
     rules::recurrence_summary(input_json).map_err(to_js)
 }
+
+/// The calendar week each day is shown in, with its ISO number (DESIGN §5.2).
+#[wasm_bindgen(js_name = calendarWeeks)]
+pub fn calendar_weeks(input_json: &str) -> Result<String, JsValue> {
+    rules::calendar_weeks(input_json).map_err(to_js)
+}

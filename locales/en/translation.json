@@ -669,7 +669,7 @@
         "languageEnglish": "English",
         "viewsHeading": "Views",
         "weekStartLabel": "First day of the week",
-        "weekStartHint": "Sets which weekday the week and month views start on. Calendar week numbers stay ISO 8601 (Monday-based).",
+        "weekStartHint": "Sets which weekday the week and month views start on. The calendar week number is the ISO week (ISO 8601) that most days of the displayed week fall in; with Monday as the first day it is exactly the ISO week.",
         "startOnTodayLabel": "Open on today at launch",
         "startOnTodayHint": "When on, every calendar view opens on today each time you start the app, instead of the day you last had open. Synced across your devices.",
         "showCancelledLabel": "Show cancelled events",

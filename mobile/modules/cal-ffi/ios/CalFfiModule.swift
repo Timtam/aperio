@@ -527,6 +527,11 @@ public class CalFfiModule: Module {
       try recurrenceSummary(inputJson: inputJson)
     }
 
+    // The calendar week each day is shown in, with its ISO number.
+    Function("calendarWeeks") { (inputJson: String) -> String in
+      try calendarWeeks(inputJson: inputJson)
+    }
+
     // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
     // The full task / list / section domain crosses as a JSON string in the
     // cal_core serde shape — identical to the desktop's Tauri payloads — so this
