@@ -25,9 +25,9 @@ describe('viewMath', () => {
     expect(end.getTime() - start.getTime()).toBeGreaterThan(23 * 60 * 60 * 1000);
   });
 
-  it('week view starts on Monday (ISO 8601) by default', () => {
+  it('week view with a Monday start begins on Monday (ISO 8601)', () => {
     // 2026-05-19 is a Tuesday → range starts Monday 2026-05-18.
-    const { start } = visibleRange('week', REF);
+    const { start } = visibleRange('week', REF, 1);
     expect(start.getDay()).toBe(1);
   });
 
@@ -42,7 +42,7 @@ describe('viewMath', () => {
     // This used to assert the range STOPPED at the month's own edges, which
     // is what left the grid's padding days empty — the view draws whole
     // weeks. The month itself must still be fully inside it.
-    const { start, end } = visibleRange('month', REF);
+    const { start, end } = visibleRange('month', REF, 1);
     expect(start <= new Date(REF.getFullYear(), REF.getMonth(), 1)).toBe(true);
     expect(end >= new Date(REF.getFullYear(), REF.getMonth() + 1, 0)).toBe(true);
   });

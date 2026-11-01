@@ -165,7 +165,11 @@ export function MonthView() {
       ).map((answer) => answer.week.week),
     [cells, weekStartsOn],
   );
-  const range = useMemo(() => visibleRange('month', anchor), [anchor]);
+  // The same week start as the grid: the range has to hold every day it draws.
+  const range = useMemo(
+    () => visibleRange('month', anchor, weekStartsOn),
+    [anchor, weekStartsOn],
+  );
   const { events: allEvents, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
   const { visualEffortSizing, priorityScale } = useTaskCascadeEnabled();
