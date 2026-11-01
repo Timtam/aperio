@@ -207,17 +207,23 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     }
   }, [view, anchor, focusedCalendarId, startOnToday]);
 
+  // Counts the user's requests for another period (Back, Today, Forward,
+  // Ctrl+←/→, Ctrl+T), so a view can say the period it now shows.
+  const [pageTurn, setPageTurn] = useState(0);
   const setView = useCallback((v: ViewId) => setViewState(v), []);
   const setAnchor = useCallback((d: Date) => setAnchorState(d), []);
-  const jumpToToday = useCallback(() => setAnchorState(today()), []);
-  const goPrev = useCallback(
-    () => setAnchorState((d) => prevPeriod(view, d)),
-    [view],
-  );
-  const goNext = useCallback(
-    () => setAnchorState((d) => nextPeriod(view, d)),
-    [view],
-  );
+  const jumpToToday = useCallback(() => {
+    setAnchorState(today());
+    setPageTurn((n) => n + 1);
+  }, []);
+  const goPrev = useCallback(() => {
+    setAnchorState((d) => prevPeriod(view, d));
+    setPageTurn((n) => n + 1);
+  }, [view]);
+  const goNext = useCallback(() => {
+    setAnchorState((d) => nextPeriod(view, d));
+    setPageTurn((n) => n + 1);
+  }, [view]);
   const enterFocus = useCallback(
     (calendarId: string) => setFocusedCalendarId(calendarId),
     [],
@@ -256,6 +262,7 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     () => ({
       view,
       anchor,
+      pageTurn,
       setView,
       setAnchor,
       jumpToToday,
@@ -282,6 +289,7 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     [
       view,
       anchor,
+      pageTurn,
       setView,
       setAnchor,
       jumpToToday,

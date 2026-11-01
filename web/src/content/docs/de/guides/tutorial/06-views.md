@@ -50,11 +50,18 @@ eine Woche die Nummer der ISO-Woche, in die die meisten ihrer Tage fallen.
 > „Kalenderwoche 45, 2. bis 8. November 2026“. Der Name eines Tages trägt die
 > Woche nur, wenn du in eine andere Woche wechselst – `↓` geht in der
 > Wochenansicht zum selben Tag der nächsten Woche und nennt diese Woche, `→`
-> innerhalb der Woche nicht. Blätterst du stattdessen mit den Knöpfen der
-> Symbolleiste, hörst du die neue Woche im Namen des Rasters, wenn du dorthin
-> zurückkehrst. Mit `K` hörst du in der Tages-, Wochen-, Monats-,
-> Jahres- und Agendaansicht die Woche des Tages, auf dem du stehst, mit ihren
-> Tagen.
+> innerhalb der Woche nicht. Mit `K` hörst du in der Tages-, Wochen-,
+> Monats-, Jahres- und Agendaansicht die Woche des Tages, auf dem du stehst,
+> mit ihren Tagen.
+
+> **Blättern ist nie stumm:** Liegt der Fokus außerhalb des Rasters – etwa auf
+> einem Knopf der Symbolleiste –, sagen Zurück, Heute und Vor (und `Strg+←`,
+> `Strg+T`, `Strg+→`) den neuen Zeitraum an: die Woche wie oben, den Tag mit
+> seinem Datum (und der Woche, wenn du in eine andere wechselst), den Monat
+> („Dezember 2026“), das Jahr und den Tag, mit dem die Agenda jetzt beginnt.
+> Liegt der Fokus im Raster, sagt es die Zelle oder der Eintrag, auf dem du
+> landest: In der Tagesansicht nennt der Eintrag, auf dem du stehst, vorn das
+> neue Datum, bis du zu einem anderen Eintrag gehst.
 
 **Einstellungen → Allgemein → Kalenderwochen anzeigen und ansagen** schaltet
 die Nummern und die gesprochene Woche gemeinsam ab, auf allen Geräten, die du

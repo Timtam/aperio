@@ -10,11 +10,14 @@ import type { WeekStart } from '../../state/viewMath';
  * whatever that was, so with a Sunday or Saturday start the days at the
  * grid's edges stayed empty. And its week column goes with the switch
  * `view.weekNumbers`, the all-day bars keeping to their days either way.
+ * Paged from outside the grid, it says the month it now shows (TODO B15
+ * step 3); in the grid the new cell names its date, and with it the month.
  */
 
 const h = vi.hoisted(() => {
   const viewState = {
     anchor: new Date(2026, 4, 15),
+    pageTurn: 0,
     weekStartsOn: 1 as WeekStart,
     weekNumbers: true,
     setAnchor: () => {},
@@ -43,7 +46,8 @@ const h = vi.hoisted(() => {
     loading: false,
   };
   const tasks = { tasks: [], taskListById: new Map() };
-  return { viewState, ranges, store, dialogState, events, tasks };
+  const announce = vi.fn();
+  return { viewState, ranges, store, dialogState, events, tasks, announce };
 });
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: () => Promise.resolve([]) }));
@@ -82,7 +86,7 @@ vi.mock('../../state/dialogStateContext', () => ({ useDialogState: () => h.dialo
 vi.mock('../../state/useDayLogSummaries', () => ({
   useDayLogSummaries: () => ({ symbolsFor: () => '', spokenFor: () => '' }),
 }));
-vi.mock('../../a11y/announcerContext', () => ({ useAnnouncer: () => () => {} }));
+vi.mock('../../a11y/announcerContext', () => ({ useAnnouncer: () => h.announce }));
 vi.mock('../DayCheckInButton', () => ({ DayCheckInButton: () => null }));
 vi.mock('../BacklogRail', () => ({ BacklogRail: () => null }));
 vi.mock('../ExceptionsLossQuestion', () => ({
@@ -94,6 +98,9 @@ afterEach(() => {
   h.ranges.length = 0;
   h.viewState.weekStartsOn = 1;
   h.viewState.weekNumbers = true;
+  h.viewState.anchor = new Date(2026, 4, 15);
+  h.viewState.pageTurn = 0;
+  h.announce.mockReset();
   h.events.events = [];
 });
 
@@ -169,5 +176,36 @@ describe('the week column of the month grid', () => {
     expect(screen.getAllByRole('columnheader')).toHaveLength(7);
     expect(container.querySelector('.month-grid--no-weeks')).not.toBeNull();
     expect(bar.style.gridColumn).toBe('3 / 5');
+  });
+});
+
+describe('a page turn in the month view', () => {
+  async function renderMonth() {
+    const { MonthView } = await import('./MonthView');
+    return render(<MonthView />);
+  }
+  function turnTo(anchor: Date) {
+    h.viewState.anchor = anchor;
+    h.viewState.pageTurn += 1;
+  }
+
+  it('says the month when paged from outside the grid', async () => {
+    const view = await renderMonth();
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    turnTo(new Date(2026, 5, 15));
+    const { MonthView } = await import('./MonthView');
+    view.rerender(<MonthView />);
+    expect(h.announce).toHaveBeenCalledWith('Juni 2026');
+  });
+
+  it('leaves it to the new cell with the focus in the grid', async () => {
+    const view = await renderMonth();
+    screen.getByRole('grid').focus();
+    turnTo(new Date(2026, 5, 15));
+    const { MonthView } = await import('./MonthView');
+    view.rerender(<MonthView />);
+    expect(h.announce).not.toHaveBeenCalled();
   });
 });

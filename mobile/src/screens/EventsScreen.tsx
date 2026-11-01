@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { calendarWeekName, calendarWeekOf, localDateKey } from '@aperio/shared';
+
 import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarDayList } from '../components/CalendarDayList';
@@ -13,6 +15,8 @@ import { SegmentedSelect } from '../components/SegmentedSelect';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
 import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
+import { peekWeekNumbers, readWeekNumbers } from '../settings/weekNumbers';
+import { peekWeekStart, readWeekStart, type WeekStart } from '../settings/weekStart';
 import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
@@ -67,6 +71,47 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
     day: 'numeric',
   });
 
+  // The synced week prefs, from the values the app read at launch, re-read
+  // whenever the screen regains focus (Settings, another device).
+  const [weekStart, setWeekStart] = useState<WeekStart>(peekWeekStart);
+  const [weekNumbers, setWeekNumbers] = useState<boolean>(peekWeekNumbers);
+  useEffect(() => {
+    const read = () => {
+      void readWeekStart().then(setWeekStart);
+      void readWeekNumbers().then(setWeekNumbers);
+    };
+    const unsubscribe = navigation.addListener('focus', read);
+    read();
+    return unsubscribe;
+  }, [navigation]);
+
+  // Whether the last day change crossed into another calendar week (TODO B15
+  // step 3): then the announcement names it, "Montag, 9. November 2026,
+  // Kalenderwoche 46". The heading stays the date. A changed week start alone,
+  // with the day staying put, crosses nothing.
+  const dayKey = localDateKey(day);
+  const week = useMemo(() => calendarWeekOf(dayKey, weekStart), [dayKey, weekStart]);
+  const [step, setStep] = useState({ dayKey, weekKey: week.firstDay, crossedWeek: false });
+  let crossedWeek = step.crossedWeek;
+  if (step.dayKey !== dayKey || step.weekKey !== week.firstDay) {
+    const moved = step.dayKey !== dayKey;
+    const next = {
+      dayKey,
+      weekKey: week.firstDay,
+      crossedWeek: moved ? week.firstDay !== step.weekKey : step.crossedWeek,
+    };
+    setStep(next);
+    crossedWeek = next.crossedWeek;
+  }
+  const daySpoken =
+    weekNumbers && crossedWeek
+      ? t('views.day.dayWithWeek', { day: dayLabel, week: calendarWeekName(t, week) })
+      : dayLabel;
+  // Read through a ref: the announcement is keyed on the day, and a week pref
+  // that arrives late must not sound like paging.
+  const daySpokenRef = useRef(daySpoken);
+  daySpokenRef.current = daySpoken;
+
   // Announce the period on navigation (the three-finger swipe / prev-next change
   // the day silently otherwise). Skip the first render — nothing changed yet.
   // Mirrors MonthScreen.
@@ -78,7 +123,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
       return;
     }
     if (pagerOwnsHeading) return;
-    AccessibilityInfo.announceForAccessibility(dayLabel);
+    AccessibilityInfo.announceForAccessibility(daySpokenRef.current);
   }, [dayLabel, pagerOwnsHeading]);
 
   const goToday = useCallback(() => setDay(localMidnight(new Date())), []);
@@ -200,6 +245,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         onPrev={() => stepDay(-1)}
         onNext={() => stepDay(1)}
         periodLabel={dayLabel}
+        periodAnnouncement={daySpoken}
       >
         <CalendarDayList
           navigation={navigation}

@@ -61,6 +61,7 @@ export function CalendarPager({
   onNext,
   periodLabel,
   periodSpoken,
+  periodAnnouncement,
   announceKey,
   children,
 }: {
@@ -74,6 +75,10 @@ export function CalendarPager({
    *  "Kalenderwoche 45, 2. bis 8. November 2026". The header's label and the
    *  announcement on each change; `periodLabel` when unset. */
   periodSpoken?: string;
+  /** What is announced on a page turn, when it says more than the header:
+   *  the day view adds the week when the new day lies in another one, and
+   *  its header stays the date. `periodSpoken` when unset. */
+  periodAnnouncement?: string;
   /** What makes a page turn, for a screen whose text can change without
    *  one: the week heading also changes when the week start or the week
    *  numbers arrive from Settings or a sync round, and that must not sound
@@ -92,8 +97,9 @@ export function CalendarPager({
   const spoken = periodSpoken ?? periodLabel;
   // Read through a ref: with `announceKey` set the effect must not run for a
   // text change, but when it runs it says the text of this render.
-  const spokenRef = useRef(spoken);
-  spokenRef.current = spoken;
+  const announcement = periodAnnouncement ?? spoken;
+  const announcementRef = useRef(announcement);
+  announcementRef.current = announcement;
   const announceOn = announceKey ?? spoken;
   const firstRun = useRef(true);
   useEffect(() => {
@@ -121,7 +127,7 @@ export function CalendarPager({
     // the action exists to deliver. Consume it here so the interrupting
     // utterance IS the informative one.
     AccessibilityInfo.announceForAccessibilityWithOptions(
-      takePeriodAnnounceOverride() ?? spokenRef.current,
+      takePeriodAnnounceOverride() ?? announcementRef.current,
       { queue: false },
     );
   }, [announceOn, screenReader]);

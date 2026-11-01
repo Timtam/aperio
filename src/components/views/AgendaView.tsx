@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { CalendarEvent } from '../../api/types';
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { usePageTurnAnnouncement } from '../../hooks/usePageTurnAnnouncement';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
@@ -155,6 +156,13 @@ export function AgendaView() {
     [idPrefix],
   );
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
+  // Paged from outside the list, or onto a stretch with nothing in it: say
+  // where the agenda now starts. In the list the focused entry names its day.
+  usePageTurnAnnouncement(
+    t('views.agenda.pageFrom', { day: fmt.format(range.start, 'PPPP') }),
+    listRef,
+    occurrences.length > 0,
+  );
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
     null,

@@ -15,6 +15,14 @@ import {
 export interface ViewStateValue {
   view: ViewId;
   anchor: Date;
+  /**
+   * Counts the user's requests for another period: Back, Today and Forward
+   * (toolbar, Ctrl+←/→, Ctrl+T, and the week grid's ↑/↓, which step a
+   * week). A view watches it to say the period it now shows when nothing
+   * focused in it says so (`usePageTurnAnnouncement`). Other anchor moves —
+   * a day step in a grid, a jump from search — do not count.
+   */
+  pageTurn: number;
   setView: (v: ViewId) => void;
   setAnchor: (d: Date) => void;
   jumpToToday: () => void;

@@ -11,8 +11,12 @@ function Probe() {
     <div>
       <span data-testid="view">{v.view}</span>
       <span data-testid="anchor">{v.anchor.toISOString()}</span>
+      <span data-testid="page-turn">{v.pageTurn}</span>
       <button type="button" onClick={() => v.setView('month')}>
         set-month
+      </button>
+      <button type="button" onClick={() => v.setAnchor(new Date(2026, 10, 5))}>
+        set-anchor
       </button>
     </div>
   );
@@ -125,6 +129,23 @@ describe('useViewShortcuts', () => {
     expect(screen.getByTestId('anchor').textContent).toContain('2000-01-01');
     dispatch('t');
     expect(screen.getByTestId('anchor').textContent).not.toContain('2000-01-01');
+  });
+
+  it('counts a page turn for Back, Today and Forward, and none for a step', () => {
+    render(
+      <ViewStateProvider>
+        <Probe />
+      </ViewStateProvider>,
+    );
+    const turns = () => screen.getByTestId('page-turn').textContent;
+    expect(turns()).toBe('0');
+    dispatch('ArrowRight');
+    dispatch('ArrowLeft');
+    dispatch('t');
+    expect(turns()).toBe('3');
+    // A day step in a grid sets the anchor directly: no page turn.
+    act(() => screen.getByRole('button', { name: 'set-anchor' }).click());
+    expect(turns()).toBe('3');
   });
 
   it('does not fire shortcuts inside form controls', () => {
