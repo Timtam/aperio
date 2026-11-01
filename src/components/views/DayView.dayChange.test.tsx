@@ -182,6 +182,8 @@ beforeEach(() => {
 async function renderDay() {
   const { DayView } = await import('./DayView');
   const view = render(<DayView />);
+  // Let the day log's read settle inside act.
+  await act(async () => {});
   return { view, DayView };
 }
 
@@ -194,17 +196,32 @@ function activeName(): string {
   if (!option) throw new Error('the list reports no active entry');
   return option.getAttribute('aria-label') ?? '';
 }
+/** A page turn: Back or Forward, or Today on the day it stands on. */
+async function page(direction: 'back' | 'forward' | 'today') {
+  const { goPrev, goNext, jumpToToday } = h.viewState.actions;
+  await act(async () => {
+    if (direction === 'back') goPrev();
+    else if (direction === 'forward') goNext();
+    else jumpToToday();
+  });
+}
 /** A page turn made with the focus in the list (Ctrl+→, say). */
-function pageInList(days: number) {
+async function pageInList(direction: 'back' | 'forward') {
   act(() => list().focus());
-  act(() => (days < 0 ? h.viewState.actions.goPrev() : h.viewState.actions.goNext()));
+  await page(direction);
+}
+/** The focus on a button outside the list, as on the toolbar. */
+function focusOutside() {
+  const outside = document.createElement('button');
+  document.body.appendChild(outside);
+  act(() => outside.focus());
 }
 
 describe('a day change in the day view', () => {
   it('puts the new date in front of the active entry', async () => {
     await renderDay();
     expect(activeName()).toMatch(/^Termin: Planung/);
-    pageInList(1);
+    await pageInList('forward');
     expect(activeName()).toMatch(/^Mittwoch, 4\. November 2026, Termin: Review/);
     expect(h.announce).not.toHaveBeenCalled();
   });
@@ -212,7 +229,7 @@ describe('a day change in the day view', () => {
   it('and the week, when the day lies in another week', async () => {
     h.viewState.set({ anchor: new Date(2026, 10, 8) });
     await renderDay();
-    pageInList(1);
+    await pageInList('forward');
     expect(activeName()).toMatch(
       /^Montag, 9\. November 2026, Kalenderwoche 46, Termin: Wochenstart/,
     );
@@ -220,7 +237,7 @@ describe('a day change in the day view', () => {
 
   it('only until the user moves to another entry', async () => {
     await renderDay();
-    pageInList(1);
+    await pageInList('forward');
     fireEvent.keyDown(list(), { key: 'ArrowDown' });
     expect(activeName()).toMatch(/^Termin: Retro/);
     fireEvent.keyDown(list(), { key: 'ArrowUp' });
@@ -229,7 +246,7 @@ describe('a day change in the day view', () => {
 
   it('keeps it through a reload of the items', async () => {
     const { view, DayView } = await renderDay();
-    pageInList(1);
+    await pageInList('forward');
     const named = activeName();
     h.events.current = { ...h.events.current };
     view.rerender(<DayView />);
@@ -238,18 +255,56 @@ describe('a day change in the day view', () => {
 
   it('is announced when paged from outside the list', async () => {
     await renderDay();
-    const outside = document.createElement('button');
-    document.body.appendChild(outside);
-    act(() => outside.focus());
-    act(() => h.viewState.actions.goNext());
+    focusOutside();
+    await page('forward');
     expect(h.announce).toHaveBeenCalledWith('Mittwoch, 4. November 2026');
     expect(activeName()).toMatch(/^Termin: Review/);
+  });
+
+  it('keeps the date when a key cannot move', async () => {
+    await renderDay();
+    await pageInList('forward');
+    const named = activeName();
+    // ↑ on the first entry: nothing moves, so nothing is re-read.
+    fireEvent.keyDown(list(), { key: 'ArrowUp' });
+    expect(activeName()).toBe(named);
+  });
+
+  it('says Today on today as the date alone, not with an older week', async () => {
+    h.viewState.set({ anchor: new Date(2026, 10, 9) });
+    await renderDay();
+    focusOutside();
+    await page('back');
+    expect(h.announce).toHaveBeenLastCalledWith('Sonntag, 8. November 2026, Kalenderwoche 45');
+    await page('today');
+    expect(h.announce).toHaveBeenLastCalledWith('Sonntag, 8. November 2026');
+  });
+
+  it('waits for a day that is still loading, then says it if it stays empty', async () => {
+    h.viewState.set({ anchor: new Date(2026, 10, 9) });
+    const { view, DayView } = await renderDay();
+    h.events.current = { ...h.events.current, events: [], loading: true };
+    await pageInList('back');
+    expect(h.announce).not.toHaveBeenCalled();
+    // The day's read answers: nothing on Sunday.
+    h.events.current = { ...h.events.current, loading: false };
+    await act(async () => view.rerender(<DayView />));
+    expect(h.announce).toHaveBeenCalledTimes(1);
+    expect(h.announce).toHaveBeenCalledWith('Sonntag, 8. November 2026, Kalenderwoche 45');
+  });
+
+  it('says nothing of a day when its last entry goes later', async () => {
+    const { view, DayView } = await renderDay();
+    await pageInList('forward');
+    h.events.current = { ...h.events.current, events: [] };
+    await act(async () => view.rerender(<DayView />));
+    expect(h.announce).not.toHaveBeenCalled();
   });
 
   it('is announced once when the new day has nothing to carry it', async () => {
     h.viewState.set({ anchor: new Date(2026, 10, 9) });
     await renderDay();
-    pageInList(-1);
+    await pageInList('back');
     expect(h.announce).toHaveBeenCalledTimes(1);
     expect(h.announce).toHaveBeenCalledWith('Sonntag, 8. November 2026, Kalenderwoche 45');
   });
@@ -257,7 +312,7 @@ describe('a day change in the day view', () => {
   it('says no week with weeks switched off', async () => {
     h.viewState.set({ anchor: new Date(2026, 10, 8), weekNumbers: false });
     await renderDay();
-    pageInList(1);
+    await pageInList('forward');
     expect(activeName()).toMatch(/^Montag, 9\. November 2026, Termin: Wochenstart/);
   });
 });

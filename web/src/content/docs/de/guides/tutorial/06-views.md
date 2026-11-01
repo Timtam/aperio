@@ -60,8 +60,10 @@ eine Woche die Nummer der ISO-Woche, in die die meisten ihrer Tage fallen.
 > seinem Datum (und der Woche, wenn du in eine andere wechselst), den Monat
 > („Dezember 2026“), das Jahr und den Tag, mit dem die Agenda jetzt beginnt.
 > Liegt der Fokus im Raster, sagt es die Zelle oder der Eintrag, auf dem du
-> landest: In der Tagesansicht nennt der Eintrag, auf dem du stehst, vorn das
-> neue Datum, bis du zu einem anderen Eintrag gehst.
+> landest, wenn das Blättern ihn verändert hat: In der Tagesansicht nennt der
+> Eintrag, auf dem du stehst, vorn das neue Datum, bis du zu einem anderen
+> Eintrag gehst. Wo sich nichts verändert – derselbe Termin bleibt in der
+> Agenda vorn, ein leerer Tag, Heute auf heute –, hörst du die Ansage.
 
 **Einstellungen → Allgemein → Kalenderwochen anzeigen und ansagen** schaltet
 die Nummern und die gesprochene Woche gemeinsam ab, auf allen Geräten, die du

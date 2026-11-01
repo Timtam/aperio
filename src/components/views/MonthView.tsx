@@ -666,7 +666,8 @@ export function MonthView() {
   );
 
   // Deferred indicator — see DayView for the rationale.
-  const showLoading = useDeferredLoading(loading);
+  // Restarted on every new range (see WeekView).
+  const showLoading = useDeferredLoading(loading, 200, range.start.getTime());
   useEffect(() => {
     if (showLoading) announce(t('views.loading'));
   }, [showLoading, announce, t]);
@@ -843,8 +844,10 @@ export function MonthView() {
   const rowMinHeight = `${(2 + maxItems * 1.4).toFixed(2)}rem`;
   const gridRef = useAutoFocus<HTMLDivElement>(!loading);
   // Paged from outside the grid: say the month. In the grid the new cell
-  // names its date, and with it the month.
-  usePageTurnAnnouncement(fmt.format(anchor, 'MMMM yyyy'), gridRef, true);
+  // names its date, and with it the month; so does the check-in button.
+  usePageTurnAnnouncement(fmt.format(anchor, 'MMMM yyyy'), gridRef, {
+    focusNameSays: true,
+  });
 
   // The month grid scrolls (see `.month-grid` in styles.css): each week row
   // grows to fit its busiest day, so EVERY event is shown rather than capped to

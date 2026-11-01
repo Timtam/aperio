@@ -1,12 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type SetStateAction,
-} from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { endOfDay, isSameDay, startOfDay } from 'date-fns';
 
@@ -255,7 +247,8 @@ export function DayView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { ask: askLoss, dialog: lossDialog } = useExceptionsLossQuestion();
-  const { anchor, setAnchor, weekStartsOn, weekNumbers } = useViewState();
+  const { anchor, setAnchor, pageTurn, weekStartsOn, weekNumbers } =
+    useViewState();
   const { openEventDialog, openTaskDialog, openMoveCopy, invalidateData, stepWriteWait } =
     useDialogState();
   // A Ctrl+D on its way (see the handler).
@@ -664,7 +657,8 @@ export function DayView() {
   // views with cached data — never flashes "Lädt …". Only genuine
   // waits (CalDAV cold start, slow iCal feed) cross the threshold
   // and surface the indicator + the SR announcement.
-  const showLoading = useDeferredLoading(loading);
+  // Restarted on every new day (see WeekView).
+  const showLoading = useDeferredLoading(loading, 200, range.start.getTime());
   useEffect(() => {
     if (showLoading) announce(t('views.loading'));
   }, [showLoading, announce, t]);
@@ -717,39 +711,60 @@ export function DayView() {
     dayWeek.firstDay,
     listRef.current?.contains(document.activeElement) ?? false,
   );
-  const dayName =
-    weekNumbers && dayStep.crossedWeek
+  const dayWithWeek = (withWeek: boolean) =>
+    withWeek
       ? t('views.day.dayWithWeek', {
           day: fmt.format(anchor, 'PPPP'),
           week: calendarWeekName(t, dayWeek),
         })
       : fmt.format(anchor, 'PPPP');
+  const dayName = dayWithWeek(weekNumbers && dayStep.crossedWeek);
+  // The page turn the day last moved at. Today pressed on today moves
+  // nothing; it is said as the date alone, not with the week an older step
+  // crossed.
+  const [dayMovedAt, setDayMovedAt] = useState({ dayKey, pageTurn });
+  let movedAt = dayMovedAt;
+  if (dayMovedAt.dayKey !== dayKey) {
+    movedAt = { dayKey, pageTurn };
+    setDayMovedAt(movedAt);
+  }
+  const dayAnnouncement = dayWithWeek(
+    weekNumbers && dayStep.crossedWeek && movedAt.pageTurn === pageTurn,
+  );
   /** The name of entry `i`, with the new day in front where it carries it. */
   const withDayCue = (i: number, entry: string) =>
     dayStep.inWidget && i === focusIndex
       ? t('views.day.entryAfterDayChange', { day: dayName, entry })
       : entry;
-  /** A move the user makes to another entry: the day was said, drop it. */
+  /** A move the user makes to another entry: the day was said, drop it. A
+   *  key that cannot move (↑ on the first entry) moves nothing and drops
+   *  nothing, or NVDA would read the same entry as if it were another. */
   const moveFocus = useCallback(
-    (next: SetStateAction<number>) => {
-      dropDayStep();
+    (next: number) => {
+      if (next !== focusIndex) dropDayStep();
       setFocusIndex(next);
     },
-    [dropDayStep],
+    [dropDayStep, focusIndex],
   );
-  usePageTurnAnnouncement(dayName, listRef, true);
-  // Paged in the list onto a day that has nothing in it: no entry to carry
-  // the day, so say it — once, when the day's list has settled, and never
-  // again for that day (deleting its last entry is not a day change).
-  const settledDay = useRef(dayKey);
+  usePageTurnAnnouncement(dayAnnouncement, listRef, { pending: loading });
+  // A day change in the list onto a day whose entries were still loading:
+  // the page turn left it to the list. Once they have settled, say the day if
+  // the list stayed empty — once per day change, so deleting the day's last
+  // entry later says nothing of the kind.
+  const lastDay = useRef(dayKey);
+  const awaitingDay = useRef<string | null>(null);
   useEffect(() => {
-    if (loading || settledDay.current === dayKey) return;
-    settledDay.current = dayKey;
+    if (lastDay.current !== dayKey) {
+      lastDay.current = dayKey;
+      awaitingDay.current = loading && dayStep.inWidget ? dayKey : null;
+    }
+    if (loading || awaitingDay.current !== dayKey) return;
+    awaitingDay.current = null;
     if (dayStep.inWidget && listItems.length === 0) {
-      announce(dayName);
+      announce(dayAnnouncement);
       dropDayStep();
     }
-  }, [dayKey, loading, listItems.length, dayStep.inWidget, announce, dayName, dropDayStep]);
+  }, [dayKey, loading, listItems.length, dayStep.inWidget, announce, dayAnnouncement, dropDayStep]);
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
     null,
@@ -1186,11 +1201,11 @@ export function DayView() {
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          moveFocus((i) => Math.min(i + 1, listItems.length - 1));
+          moveFocus(Math.min(focusIndex + 1, listItems.length - 1));
           return;
         case 'ArrowUp':
           e.preventDefault();
-          moveFocus((i) => Math.max(i - 1, 0));
+          moveFocus(Math.max(focusIndex - 1, 0));
           return;
         case 'Home':
           e.preventDefault();

@@ -53,12 +53,15 @@ its days fall in.
 > with its days.
 
 > **Paging is never silent:** With the focus outside the grid — on a toolbar
-> button, say — Back, Today and Forward (and `Ctrl+←`, `Ctrl+T`, `Ctrl+→`)
+> button, say — Previous, Today and Next (and `Ctrl+←`, `Ctrl+T`, `Ctrl+→`)
 > announce the new period: the week as above, the day with its date (and the
 > week when you move into another one), the month ("December 2026"), the
 > year, and the day the agenda now starts on. With the focus in the grid, the
-> cell or entry you land on says it instead: in the day view the entry you
-> are on names the new date in front, until you move to another entry.
+> cell or entry you land on says it instead, whenever paging changed it: in
+> the day view the entry you are on names the new date in front, until you
+> move to another entry. Where nothing changed — the same meeting still
+> first in the agenda, an empty day, Today on today — you hear the
+> announcement.
 
 **Settings → General → Show and announce calendar weeks** turns the numbers
 and the spoken week off together, on every device you sync; `K` still answers

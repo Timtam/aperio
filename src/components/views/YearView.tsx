@@ -49,7 +49,9 @@ export function YearView() {
   const listRef = useAutoFocus<HTMLDivElement>();
   // Paged from outside the list: say the year. In the list the focused month
   // names its year.
-  usePageTurnAnnouncement(fmt.format(anchor, 'yyyy'), listRef, true);
+  usePageTurnAnnouncement(fmt.format(anchor, 'yyyy'), listRef, {
+    focusNameSays: true,
+  });
 
   const openMonth = useCallback(
     (date: Date) => {

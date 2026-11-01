@@ -1179,7 +1179,9 @@ export function WeekView() {
   requestDeleteRef.current = requestDelete;
 
   // Deferred indicator — see DayView for the rationale.
-  const showLoading = useDeferredLoading(loading);
+  // Restarted on every new range, so "Lädt …" never lands in the frame of a
+  // page turn's announcement, where the later of two would be the only one.
+  const showLoading = useDeferredLoading(loading, 200, range.start.getTime());
   useEffect(() => {
     if (showLoading) announce(t('views.loading'));
   }, [showLoading, announce, t]);
@@ -1411,7 +1413,7 @@ export function WeekView() {
   );
   const weekCue = weekNumbers && dayStep.inWidget && dayStep.crossedWeek;
   // Paged from outside the grid: say the week. In the grid the cell says it.
-  usePageTurnAnnouncement(weekNumbers ? weekSentence : weekRange, gridRef, true);
+  usePageTurnAnnouncement(weekNumbers ? weekSentence : weekRange, gridRef);
 
   return (
     <section className="view view--week" aria-label={t('views.week.title')}>

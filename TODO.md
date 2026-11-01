@@ -857,9 +857,11 @@ Entschieden (Toni, 2026-11-01):
     Blättern („Montag, 9. November 2026, Kalenderwoche 46“); die Überschrift
     bleibt das Datum.
   Gebaut: `pageTurn` im Ansichtszustand, `usePageTurnAnnouncement` in allen
-  fünf Kalenderansichten, `useDayStepCue` (aus `useWeekChangeCue`) für Woche
-  und Tag, `periodAnnouncement` am `CalendarPager`; der Hinweis des Schalters
-  nennt jetzt Woche und Tag.
+  fünf Kalenderansichten (schweigt nur, wenn der Seitenwechsel das
+  Fokussierte umbenannt hat, am Bildschirm beurteilt), `useDayStepCue` (aus
+  `useWeekChangeCue`) für Woche und Tag, `periodAnnouncement` am
+  `CalendarPager`, der Ladehinweis beginnt seine Frist bei jedem neuen
+  Zeitraum neu; der Hinweis des Schalters nennt jetzt Woche und Tag.
 - [ ] **Schritt 4:** Monat: am Desktop Zeilen- und Spaltenköpfe für
   Screenreader ausblenden (der Spaltenkopf hat fest das deutsche
   `aria-label="KW"`), KW im Zellnamen beim Wochenwechsel; am Handy der erste
