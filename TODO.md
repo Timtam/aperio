@@ -871,7 +871,12 @@ Entschieden (Toni, 2026-11-01):
   bei ↓, am Zeilenrand und beim Seitenwechsel im Raster), `dayKey` an der
   Tab-Navigation; am Handy `headerWeeks` an `CalendarDayList` aus
   `weekOpenings` (gemeinsame Regel, auch für Schritt 5). Tag und Monat lesen
-  den Wochenanfang; die Agenda am Handy folgt mit Schritt 5.
+  den Wochenanfang; die Agenda am Handy folgt mit Schritt 5. Tab in eine
+  andere Woche nennt sie in der Tab-Ansage; die Auswahl eines Eintrags fällt
+  beim Tageswechsel schon beim Rendern weg (`useEventTabNavigation`), sonst
+  hörte man nach einem Seitenwechsel von einem Eintrag aus Monat und Zelle.
+  Blättern von außerhalb des Monatsrasters sagt den Monat, nicht die Woche;
+  der Hinweis des Schalters sagt es so.
 - [ ] **Schritt 5:** Agenda auf beiden Geräten (Desktop: bewegliche Regel wie
   im Raster, auch rückwärts; Handy: fester Platz am ersten Kopf einer Woche)
   und die Backlog-Überschriften am Desktop („Diese Woche, Kalenderwoche 45, 3

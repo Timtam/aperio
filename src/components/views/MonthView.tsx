@@ -397,14 +397,27 @@ export function MonthView() {
 
   const dayChangeAnnouncer = useCallback(
     (newDayIdx: number, item: MonthDayItem) => {
+      // Tab crosses weeks in a month: the entry it lands on is what NVDA
+      // reads, not the cell, so this announcement names the new week.
+      const newWeek = rowWeeks[Math.floor(newDayIdx / 7)];
+      const crossed =
+        weekNumbers &&
+        newWeek != null &&
+        newWeek.firstDay !== rowWeeks[Math.floor(focusIndex / 7)]?.firstDay;
       announce(
-        t('views.month.tabAnnounce', {
-          day: fmt.format(cells[newDayIdx], 'PPPP'),
-          title: item.title,
-        }),
+        crossed
+          ? t('views.month.tabAnnounceWeek', {
+              day: fmt.format(cells[newDayIdx], 'PPPP'),
+              week: calendarWeekName(t, newWeek),
+              title: item.title,
+            })
+          : t('views.month.tabAnnounce', {
+              day: fmt.format(cells[newDayIdx], 'PPPP'),
+              title: item.title,
+            }),
       );
     },
-    [announce, cells, fmt, t],
+    [announce, cells, fmt, t, rowWeeks, weekNumbers, focusIndex],
   );
 
   const {
@@ -866,6 +879,11 @@ export function MonthView() {
   );
   const weekCue =
     weekNumbers && dayStep.inWidget && dayStep.crossedWeek && activeWeek != null;
+  // On an entry the cell is not read, and Tab said the week; coming back to
+  // the cell with Escape need not say it again.
+  useEffect(() => {
+    if (eventIndex !== null) dropDayStep();
+  }, [eventIndex, dropDayStep]);
 
   // The month grid scrolls (see `.month-grid` in styles.css): each week row
   // grows to fit its busiest day, so EVERY event is shown rather than capped to

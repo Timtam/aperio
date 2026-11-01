@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CalendarEvent } from '../../api/types';
@@ -20,7 +20,11 @@ const h = vi.hoisted(() => {
     pageTurn: 0,
     weekStartsOn: 1 as WeekStart,
     weekNumbers: true,
-    setAnchor: () => {},
+    // Moves the anchor in place: the next render, whatever triggers it,
+    // reads the new day (Tab re-renders through its own selection).
+    setAnchor: (d: Date) => {
+      viewState.anchor = d;
+    },
     goPrev: () => {},
     goNext: () => {},
   };
@@ -167,6 +171,9 @@ describe('the week column of the month grid', () => {
     const headers = [...container.querySelectorAll('[role="rowheader"]')];
     expect(headers.every((cell) => cell.getAttribute('aria-hidden') === 'true')).toBe(true);
     expect(screen.queryAllByRole('rowheader')).toEqual([]);
+    // The weekday headings and the week column's head too.
+    expect(container.querySelectorAll('[role="columnheader"]')).toHaveLength(8);
+    expect(screen.queryAllByRole('columnheader')).toEqual([]);
     const rows = headers.map((cell) => cell.textContent);
     expect(rows).toEqual(['18', '19', '20', '21', '22']);
     expect(container.querySelector('.month-grid--no-weeks')).toBeNull();
@@ -254,5 +261,124 @@ describe('the week in the name of a month cell', () => {
     screen.getByRole('grid').focus();
     await stepTo(view, new Date(2026, 4, 22));
     expect(activeCellName()).toBe('Freitag, 22. Mai 2026, 0 Einträge');
+  });
+});
+
+describe('the week in a month cell, beyond plain steps', () => {
+  function activeCell(): HTMLElement {
+    const grid = screen.getByRole('grid');
+    const id = grid.getAttribute('aria-activedescendant');
+    const cell = id ? document.getElementById(id) : null;
+    if (!cell) throw new Error('the grid reports no active cell');
+    return cell;
+  }
+  function meeting(id: string, title: string, month: number, day: number): CalendarEvent {
+    return {
+      id,
+      calendar_id: 'work',
+      title,
+      start: new Date(2026, month - 1, day, 10, 0).toISOString(),
+      end: new Date(2026, month - 1, day, 11, 0).toISOString(),
+      all_day: false,
+    } as unknown as CalendarEvent;
+  }
+  async function renderMonth() {
+    const { MonthView } = await import('./MonthView');
+    const view = render(<MonthView />);
+    const rerender = () => act(() => view.rerender(<MonthView />));
+    return { rerender };
+  }
+  function pageTo(anchor: Date) {
+    h.viewState.anchor = anchor;
+    h.viewState.pageTurn += 1;
+  }
+  function outsideButton() {
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    return button;
+  }
+
+  it('paged from outside the grid: the month is said, the cell holds no week', async () => {
+    const { rerender } = await renderMonth();
+    act(() => outsideButton().focus());
+    pageTo(new Date(2026, 5, 15));
+    rerender();
+    expect(h.announce).toHaveBeenCalledWith('Juni 2026');
+    act(() => screen.getByRole('grid').focus());
+    expect(activeCell().getAttribute('aria-label')).toBe('Montag, 15. Juni 2026, 0 Einträge');
+  });
+
+  it('paged in the grid: the new cell names the week, nothing else is said', async () => {
+    const { rerender } = await renderMonth();
+    act(() => screen.getByRole('grid').focus());
+    pageTo(new Date(2026, 5, 15));
+    rerender();
+    expect(activeCell().getAttribute('aria-label')).toBe(
+      'Montag, 15. Juni 2026, Kalenderwoche 25, 0 Einträge',
+    );
+    expect(h.announce).not.toHaveBeenCalled();
+  });
+
+  it('once on coming back to the grid', async () => {
+    const { rerender } = await renderMonth();
+    act(() => screen.getByRole('grid').focus());
+    h.viewState.anchor = new Date(2026, 4, 22);
+    rerender();
+    expect(activeCell().getAttribute('aria-label')).toContain('Kalenderwoche 21');
+    act(() => outsideButton().focus());
+    act(() => screen.getByRole('grid').focus());
+    expect(activeCell().getAttribute('aria-label')).toBe('Freitag, 22. Mai 2026, 0 Einträge');
+  });
+
+  it('a page turn from an entry lands on the cell, even on the same cell index', async () => {
+    // 15 February and 15 March 2026 both sit at index 20 of their grids.
+    h.viewState.anchor = new Date(2026, 1, 15);
+    h.events.events = [meeting('feb', 'Planung', 2, 15), meeting('mar', 'Review', 3, 15)];
+    const { rerender } = await renderMonth();
+    const grid = screen.getByRole('grid');
+    act(() => grid.focus());
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    expect(grid.getAttribute('aria-activedescendant')).toMatch(/-ev-0$/);
+    pageTo(new Date(2026, 2, 15));
+    rerender();
+    expect(grid.getAttribute('aria-activedescendant')).not.toMatch(/-ev-/);
+    expect(activeCell().getAttribute('aria-label')).toBe(
+      'Sonntag, 15. März 2026, Kalenderwoche 11, 1 Eintrag',
+    );
+    expect(h.announce).not.toHaveBeenCalled();
+  });
+
+  it('a page turn from an entry onto a day with none: the cell, said once', async () => {
+    // The selected entry's place does not exist on 15 March: no frame may
+    // point there, or the turn reads as nothing renamed and is said twice.
+    h.viewState.anchor = new Date(2026, 1, 15);
+    h.events.events = [meeting('feb', 'Planung', 2, 15)];
+    const { rerender } = await renderMonth();
+    const grid = screen.getByRole('grid');
+    act(() => grid.focus());
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    pageTo(new Date(2026, 2, 15));
+    rerender();
+    expect(activeCell().getAttribute('aria-label')).toBe(
+      'Sonntag, 15. März 2026, Kalenderwoche 11, 0 Einträge',
+    );
+    expect(h.announce).not.toHaveBeenCalled();
+  });
+
+  it('Tab into another week names it, and Escape does not repeat it', async () => {
+    // Sunday, 24 May is empty; Monday, 25 May has a meeting.
+    h.viewState.anchor = new Date(2026, 4, 24);
+    h.events.events = [meeting('mon', 'Planung', 5, 25)];
+    await renderMonth();
+    const grid = screen.getByRole('grid');
+    act(() => grid.focus());
+    act(() => {
+      fireEvent.keyDown(grid, { key: 'Tab' });
+    });
+    expect(h.announce).toHaveBeenCalledWith('Montag, 25. Mai 2026, Kalenderwoche 22: Planung');
+    act(() => {
+      fireEvent.keyDown(grid, { key: 'Escape' });
+    });
+    expect(activeCell().getAttribute('aria-label')).toBe('Montag, 25. Mai 2026, 1 Eintrag');
   });
 });
