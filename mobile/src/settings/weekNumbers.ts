@@ -4,10 +4,10 @@ import { getUserPref, setUserPref } from '../api/prefs';
 // the `view.weekNumbers` user-pref (a §19.2.1 always-sync key), the mobile twin
 // of the desktop ViewState's `weekNumbers`. When ON (the default) the week
 // view's heading names the week, seen as "KW 45" and spoken as "Kalenderwoche
-// 45", the month list names it on the first day of each week, and the day
-// view's announcement on a week change; when OFF none of them does.
-// GeneralSettingsScreen is the toggle; WeekScreen, MonthScreen and
-// EventsScreen read it.
+// 45", the month list and the agenda name it on the first day of each week,
+// and the day view's announcement on a week change; when OFF none of them
+// does. GeneralSettingsScreen is the toggle; WeekScreen, MonthScreen,
+// AgendaScreen and EventsScreen read it.
 //
 // The last value read or written is kept here, and the app reads it once at
 // launch: a screen then starts on the stored choice instead of the default,

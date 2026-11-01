@@ -50,6 +50,7 @@ import { useViewState } from '../state/viewStateContext';
 import { useTasks } from '../state/useTasks';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { isTaskDeferred } from './views/taskGrouping';
+import { backlogSectionNames } from '../intl/backlogSections';
 
 /** Parse a `YYYY-MM-DD` day key into a LOCAL Date (no UTC drift). */
 function parseDayKey(key: string): Date {
@@ -118,7 +119,7 @@ export function BacklogRail() {
   const { width, setWidth } = useBacklogWidth();
   // Where a week begins is the user's setting, not a constant — the same one
   // the month grid lays its columns out by.
-  const { weekStartsOn } = useViewState();
+  const { weekStartsOn, weekNumbers } = useViewState();
   const rootRef = useRef<HTMLElement>(null);
 
   // Drag the column's right edge to resize; the width persists and the grid
@@ -238,6 +239,13 @@ export function BacklogRail() {
     () => [...byWeek.later, ...priorityBacklog],
     [byWeek.later, priorityBacklog],
   );
+  // Seen "Diese Woche (3) · KW 45", heard "Diese Woche, Kalenderwoche 45,
+  // 3 Aufgaben" (TODO B15 step 5).
+  const sectionNames = backlogSectionNames(t, weeks, weekStartsOn, weekNumbers, {
+    thisWeek: byWeek.thisWeek.length,
+    nextWeek: byWeek.nextWeek.length,
+    rest: everythingElse.length,
+  });
 
   // Per-chip color follows the task → section → list chain. Sections load
   // lazily, so trigger a load for every list that has a rail task.
@@ -329,25 +337,19 @@ export function BacklogRail() {
             sections={[
               {
                 key: 'this-week',
-                heading: t('views.backlog.thisWeekHeading', {
-                  count: byWeek.thisWeek.length,
-                }),
+                ...sectionNames.thisWeek,
                 items: byWeek.thisWeek,
               },
               {
                 key: 'next-week',
-                heading: t('views.backlog.nextWeekHeading', {
-                  count: byWeek.nextWeek.length,
-                }),
+                ...sectionNames.nextWeek,
                 items: byWeek.nextWeek,
               },
               {
                 // The section mixes dated and undated rows; a chip without a
                 // deadline simply renders none.
                 key: 'rest',
-                heading: t('views.backlog.restHeading', {
-                  count: everythingElse.length,
-                }),
+                ...sectionNames.rest,
                 items: everythingElse,
               },
             ]}
@@ -375,7 +377,12 @@ export function BacklogRail() {
 
 interface BacklogSection {
   key: string;
+  /** What the eye reads above the section. */
   heading: string;
+  /** The section's name for the ear, when the heading does not read well
+   *  aloud ("Diese Woche, Kalenderwoche 45, 3 Aufgaben"); the heading names
+   *  the group when unset. */
+  spoken?: string;
   items: Task[];
 }
 
@@ -628,7 +635,8 @@ export function BacklogList({
         <ul
           key={section.key}
           role="group"
-          aria-labelledby={`${groupId}-${section.key}`}
+          aria-label={section.spoken}
+          aria-labelledby={section.spoken ? undefined : `${groupId}-${section.key}`}
           className="backlog-rail__section"
         >
           <li

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { CalendarEvent } from '../../api/types';
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { useDayStepCue } from '../../hooks/useDayStepCue';
 import { usePageTurnAnnouncement } from '../../hooks/usePageTurnAnnouncement';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { localDateKey } from '../../intl/dateKey';
@@ -23,6 +24,11 @@ import {
   eventWriteErrorMessage,
   shownInNotice,
   withDeletionsNotRestored,
+  calendarWeekLabel,
+  calendarWeekName,
+  calendarWeeks,
+  weekOpenings,
+  type CalendarWeek,
 } from '@aperio/shared';
 import {
   expandToDayOccurrences,
@@ -68,7 +74,7 @@ import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 export function AgendaView() {
   const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
-  const { anchor } = useViewState();
+  const { anchor, weekStartsOn, weekNumbers } = useViewState();
   const fmt = useDateFormat();
   const { openEventDialog, openMoveCopy, invalidateData, stepWriteWait } = useDialogState();
   // A Ctrl+D on its way (see the handler).
@@ -100,7 +106,7 @@ export function AgendaView() {
   // Expand multi-day all-day events into one renderable row per
   // covered day. A 14-day vacation becomes 14 rows, each carrying
   // "Tag 3 von 14" position info; keyboard focus / Enter / Delete
-  // operate on the underlying event via `occurrences[focusIndex].ev`.
+  // operate on the underlying event via `occurrences[activeIndex].ev`.
   const allOccurrences = useMemo(
     () => expandToDayOccurrences(events, range),
     [events, range],
@@ -143,6 +149,9 @@ export function AgendaView() {
       setFocusIndex(Math.max(0, occurrences.length - 1));
     }
   }, [occurrences.length, focusIndex]);
+  // The entry the list stands on in this render, the shrink already applied:
+  // what the screen reader is pointed at and what the week cue compares.
+  const activeIndex = Math.min(focusIndex, Math.max(0, occurrences.length - 1));
 
   // Deferred indicator — see DayView for the full rationale.
   // Restarted on every new range (see WeekView).
@@ -157,6 +166,41 @@ export function AgendaView() {
     [idPrefix],
   );
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
+
+  // The calendar week of each entry, from the core, and the days that open a
+  // week in the list: their separator shows it for the eye (TODO B15 step 5).
+  const occurrenceWeeks = useMemo(
+    () =>
+      calendarWeeks(
+        occurrences.map((occ) => localDateKey(occ.day)),
+        weekStartsOn,
+      ).map((answer) => answer.week),
+    [occurrences, weekStartsOn],
+  );
+  const weekLabelOnDay = useMemo(() => {
+    if (!weekNumbers) return new Map<string, string>();
+    const dayKeys = [...new Set(occurrences.map((occ) => localDateKey(occ.day)))];
+    return new Map(
+      weekOpenings(dayKeys, weekStartsOn).map((answer) => [
+        answer.day,
+        calendarWeekLabel(t, answer.week),
+      ]),
+    );
+  }, [occurrences, weekNumbers, weekStartsOn, t]);
+  // The entry a step lands on names its week when the step crossed into
+  // another one, forward or back: the step here is an entry, not a day, so
+  // the next meeting on the same day says no week again. Read from the index
+  // clamped here, in render: the effect above corrects the state a frame
+  // later, and that frame stood on no entry and pointed at none.
+  const focusedOccurrence = occurrences[activeIndex];
+  const [entryStep, dropEntryStep] = useDayStepCue(
+    focusedOccurrence
+      ? `${eventInstanceKey(focusedOccurrence.ev)}@${localDateKey(focusedOccurrence.day)}`
+      : '',
+    occurrenceWeeks[activeIndex]?.firstDay ?? '',
+    listRef.current?.contains(document.activeElement) ?? false,
+  );
+  const weekCue = weekNumbers && entryStep.inWidget && entryStep.crossedWeek;
   // Paged from outside the list, onto a stretch with nothing in it, or with
   // the same entry first: say where the agenda now starts. Where the focused
   // entry or the check-in button renamed itself, it names the day.
@@ -252,7 +296,7 @@ export function AgendaView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const ev = occurrences[focusIndex]?.ev;
+      const ev = occurrences[activeIndex]?.ev;
       if (e.ctrlKey || e.metaKey) {
         if (e.key.toLowerCase() === 'd' && !e.shiftKey && !e.altKey) {
           e.preventDefault();
@@ -328,7 +372,7 @@ export function AgendaView() {
           e.preventDefault();
           if (ev) {
             const target = e.currentTarget as HTMLElement;
-            const id = itemId(focusIndex);
+            const id = itemId(activeIndex);
             const node = target.ownerDocument?.getElementById(id);
             const rect = node?.getBoundingClientRect();
             const pos = rect
@@ -344,7 +388,7 @@ export function AgendaView() {
     },
     [
       occurrences,
-      focusIndex,
+      activeIndex,
       invalidateData,
       openEventDialog,
       openMoveCopy,
@@ -388,16 +432,22 @@ export function AgendaView() {
         tabIndex={0}
         aria-label={t('views.agenda.eventList')}
         aria-activedescendant={
-          occurrences.length > 0 ? itemId(focusIndex) : undefined
+          occurrences.length > 0 ? itemId(activeIndex) : undefined
         }
         // The day of the focused entry: the agenda moves its own focus, not
         // the anchor, and the K key says the week of this day.
         data-active-day={
-          occurrences[focusIndex]
-            ? localDateKey(occurrences[focusIndex].day)
+          occurrences[activeIndex]
+            ? localDateKey(occurrences[activeIndex].day)
             : undefined
         }
         onKeyDown={handleKeyDown}
+        onBlur={(e) => {
+          // Back in the list, the entry need not say the week again.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            dropEntryStep();
+          }
+        }}
         className="agenda-list"
       >
         {occurrences.length === 0 ? (
@@ -405,13 +455,16 @@ export function AgendaView() {
             {t('views.agenda.empty')}
           </li>
         ) : (
-          renderOccurrences(occurrences, focusIndex, {
+          renderOccurrences(occurrences, activeIndex, {
             groupRows,
             calendarById,
             labelById,
             fmt,
             t,
             itemId,
+            weekCue,
+            weekOf: (i) => occurrenceWeeks[i],
+            weekLabelOnDay,
             onSelect: setFocusIndex,
             onOpen: (event) => {
               openEventDialog(event);
@@ -458,6 +511,12 @@ interface RenderContext {
   fmt: ReturnType<typeof useDateFormat>;
   t: (key: string, vars?: Record<string, unknown>) => string;
   itemId: (i: number) => string;
+  /** Whether the focused entry names its week: the step onto it crossed
+   *  into another one. */
+  weekCue: boolean;
+  weekOf: (i: number) => CalendarWeek | undefined;
+  /** "KW 45" on the separators of the days that open a week. */
+  weekLabelOnDay: ReadonlyMap<string, string>;
   onSelect: (i: number) => void;
   onOpen: (event: CalendarEvent, index: number) => void;
   onContextMenu: (event: CalendarEvent, index: number) => void;
@@ -487,6 +546,7 @@ function renderOccurrences(
           className="agenda-list__day"
         >
           {ctx.fmt.format(day, 'PPPP')}
+          {ctx.weekLabelOnDay.has(dayKey) && ` · ${ctx.weekLabelOnDay.get(dayKey)}`}
         </li>,
       );
     }
@@ -496,8 +556,10 @@ function renderOccurrences(
     const timeLabel = ev.all_day
       ? ctx.t('views.allDay')
       : `${ctx.fmt.format(new Date(ev.start), 'p')} – ${ctx.fmt.format(new Date(ev.end), 'p')}`;
-    const ariaBase = ctx.t('views.agenda.eventLabel', {
+    const week = i === focusIndex && ctx.weekCue ? ctx.weekOf(i) : undefined;
+    const ariaBase = ctx.t(week ? 'views.agenda.eventLabelWeek' : 'views.agenda.eventLabel', {
       day: ctx.fmt.format(day, 'PPPP'),
+      week: week ? calendarWeekName(ctx.t, week) : undefined,
       title: ev.title,
       time: timeLabel,
       calendar: cal?.name ?? '—',

@@ -50,7 +50,10 @@ its days fall in.
 > only when you move into another week — `↓` goes to the same day of the
 > next week and names that week, `→` within the week does not, `→` past its
 > last day does. The month grid's week numbers and weekday headings are for
-> the eye; the day's own name says all of it. Press `K` in the day,
+> the eye; the day's own name says all of it. In the agenda the entry you
+> move to names the week when it lies in another one than the last, forward
+> and back, and the day separators show it where a week begins. Press `K` in
+> the day,
 > week, month, year or agenda view to hear the week of the day you are on,
 > with its days.
 
@@ -123,7 +126,8 @@ back onto the backlog to **clear** its day and deadline.
 > **Keyboard & screen reader:** The backlog is **one listbox**, with a group
 > for each part: Tab or `F6` lands on it once, and the arrow keys go through
 > every task, from one part into the next — a screen reader names the part as
-> you enter it. `Page Up`/`Page Down` jump to the part before or after,
+> you enter it, with its week and how many tasks it holds: "This week, Week
+> 45, 3 tasks"; on screen it reads "This week (3) · Week 45". `Page Up`/`Page Down` jump to the part before or after,
 > `Home`/`End` to the first or last task. `Enter` opens a task, `Shift+D` opens
 > the plan dialog (assign a day), and the context-menu key (or `Shift+F10`)
 > opens the task menu.
