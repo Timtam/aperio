@@ -787,7 +787,7 @@ Vordergrund vorkommt. Nach einer Rückkehr läuft zuerst der unterbrochene
 Durchlauf zu Ende (um 09:33:22 noch 4,2 s); bis 218 wartet ein Schreiben in
 dieser Zeit darauf, danach nur noch der Durchlauf.
 
-### B15 · Kalenderwoche für Screenreader, Desktop und Handy `[~]`
+### B15 · Kalenderwoche für Screenreader, Desktop und Handy `[x]`
 
 Gemeldet von Toni am 2026-11-01: Screenreader hören die Kalenderwoche nirgends.
 Am Desktop steht sie nur in der Überschrift der Wochenansicht und in den
@@ -839,7 +839,7 @@ Entschieden (Toni, 2026-11-01):
   Tastenliste, Tutorial-Kapitel 10 und `06-views` (beide Sprachen)
   berichtigt; der Abschnitt „Anpassen“ ist aus beiden verschwunden, weil es
   die Einstellung „Tastaturkürzel“ nicht gibt (DESIGN §15.10 plant sie).
-- [ ] **Schritt 5:** Der Hinweis des Schalters verspricht die Ansage beim
+- [x] **Schritt 5:** Der Hinweis des Schalters verspricht die Ansage beim
   Wochenwechsel bisher für Tag, Woche und Monat; mit Schritt 5 um die Agenda
   und den Backlog erweitern (beide Sprachen, Desktop und Handy).
 - [x] **Schritt 3:** Ansage beim Blättern am Desktop (Symbolleiste, Strg+Pfeil,
@@ -877,10 +877,15 @@ Entschieden (Toni, 2026-11-01):
   hörte man nach einem Seitenwechsel von einem Eintrag aus Monat und Zelle.
   Blättern von außerhalb des Monatsrasters sagt den Monat, nicht die Woche;
   der Hinweis des Schalters sagt es so.
-- [ ] **Schritt 5:** Agenda auf beiden Geräten (Desktop: bewegliche Regel wie
+- [x] **Schritt 5:** Agenda auf beiden Geräten (Desktop: bewegliche Regel wie
   im Raster, auch rückwärts; Handy: fester Platz am ersten Kopf einer Woche)
   und die Backlog-Überschriften am Desktop („Diese Woche, Kalenderwoche 45, 3
   Aufgaben“, mit Pluralformen).
+  Gebaut: am Desktop hängt der Hinweis am Eintrag (`useDayStepCue` mit dem
+  Schlüssel des Termins), die Trenner zeigen die KW, wo eine Woche beginnt;
+  am Handy trägt die Überschrift des ersten Tages jeder Woche sie
+  (`weekOpenings`); der Backlog über `src/intl/backlogSections.ts`, sichtbar
+  „Diese Woche (3) · KW 45“.
 
 ### B14 · Folgeaufgaben aus Prüfungen und Nebenbefunden `[ ]`
 

@@ -91,6 +91,30 @@ async function open() {
 }
 
 describe('the backlog list', () => {
+  it('names a section for the ear when it has a spoken name', async () => {
+    const { BacklogList } = await import('./BacklogRail');
+    render(
+      <BacklogList
+        labelledBy="rail"
+        labelById={new Map()}
+        todayKey="2026-10-31"
+        sections={[
+          {
+            key: 'this-week',
+            heading: 'Diese Woche (1) · KW 44',
+            spoken: 'Diese Woche, Kalenderwoche 44, 1 Aufgabe',
+            items: [A],
+          },
+        ]}
+      />,
+    );
+    expect(
+      screen.getByRole('group', { name: 'Diese Woche, Kalenderwoche 44, 1 Aufgabe' }),
+    ).toBeInTheDocument();
+    // The eye still reads the heading.
+    expect(screen.getByText('Diese Woche (1) · KW 44')).toBeInTheDocument();
+  });
+
   it('is one tab stop with a named group per section that has tasks', async () => {
     const { list } = await open();
     expect(screen.getAllByRole('listbox')).toHaveLength(1);

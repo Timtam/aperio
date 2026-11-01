@@ -73,9 +73,10 @@ von VoiceOver und TalkBack:
   andere blätterst: „Montag, 9. November 2026, Kalenderwoche 46“. In der
   Monatsansicht nennt der erste Tag jeder Woche sie: „Montag, 2. November
   2026, Kalenderwoche 45, 3 Einträge“, sichtbar als „KW 45“ neben dem Datum.
+  Die Agenda tut dasselbe am ersten Tag, den sie in einer Woche erreicht.
   Schaltest du **Einstellungen → Allgemein → Kalenderwochen anzeigen und
-  ansagen** ab, nennt die Wochenansicht nur die Tage, und Tages- und
-  Monatsansicht nennen keine Woche; die Wahl gilt auf allen Geräten, die du
+  ansagen** ab, nennt die Wochenansicht nur die Tage, und Tages-, Monats- und
+  Agendaansicht nennen keine Woche; die Wahl gilt auf allen Geräten, die du
   synchronisierst.
 - **Gruppenüberschriften** (z. B. eine Aufgabenliste oder ein Abschnitt) sind
   zusammenklappbare Schalter, die ansagen, ob sie auf- oder zugeklappt sind.

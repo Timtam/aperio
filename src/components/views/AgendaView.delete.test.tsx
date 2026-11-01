@@ -57,7 +57,7 @@ const STORE = {
   colorLabels: [],
   selectedCalendarIds: new Set([ICLOUD.id]),
 };
-const VIEW_STATE = { anchor: new Date(2026, 5, 15) };
+const VIEW_STATE = { anchor: new Date(2026, 5, 15), weekStartsOn: 1, weekNumbers: true };
 /** How often the view asked for its data to be read again. */
 let invalidations = 0;
 /** What the "please wait" dialog said where a write failed (decision 210). */

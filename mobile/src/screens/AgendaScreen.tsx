@@ -30,6 +30,9 @@ import {
   memberFromEvent,
   seriesIdOf,
   withoutDuplicateMeetings,
+  calendarWeekLabel,
+  calendarWeekName,
+  weekOpenings,
 } from '@aperio/shared';
 
 import {
@@ -62,6 +65,8 @@ import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { editEventWithScope } from '../state/eventEditScope';
 import type { RootStackScreenProps } from '../navigation/types';
+import { peekWeekNumbers, readWeekNumbers } from '../settings/weekNumbers';
+import { peekWeekStart, readWeekStart, type WeekStart } from '../settings/weekStart';
 import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
@@ -353,6 +358,31 @@ export default function AgendaScreen({
     return counts;
   }, [visibleOccurrences]);
 
+  // The synced week prefs, from the values the app read at launch, re-read
+  // whenever the screen regains focus (Settings, another device).
+  const [weekStart, setWeekStart] = useState<WeekStart>(peekWeekStart);
+  const [weekNumbers, setWeekNumbers] = useState<boolean>(peekWeekNumbers);
+  useEffect(() => {
+    const read = () => {
+      void readWeekStart().then(setWeekStart);
+      void readWeekNumbers().then(setWeekNumbers);
+    };
+    const unsubscribe = navigation.addListener('focus', read);
+    read();
+    return unsubscribe;
+  }, [navigation]);
+  // The first day each week reaches in the list names that week in its
+  // header (TODO B15 step 5): a fixed place, as in the month list.
+  const headerWeeks = useMemo(() => {
+    if (!weekNumbers) return new Map<string, { name: string; label: string }>();
+    return new Map(
+      weekOpenings([...dayCounts.keys()], weekStart).map((answer) => [
+        answer.day,
+        { name: calendarWeekName(t, answer.week), label: calendarWeekLabel(t, answer.week) },
+      ]),
+    );
+  }, [dayCounts, t, weekNumbers, weekStart]);
+
   const readOnlyIds = useMemo(
     () => new Set(calendars.filter((c) => c.read_only).map((c) => c.id)),
     [calendars],
@@ -642,10 +672,14 @@ export default function AgendaScreen({
                     key={`h-${key}`}
                     accessible
                     accessibilityRole="header"
-                    accessibilityLabel={t('views.agenda.dayLabel', {
-                      day: fmtFullDate(occ.day),
-                      count: dayCounts.get(key) ?? 0,
-                    })}
+                    accessibilityLabel={t(
+                      headerWeeks.has(key) ? 'views.agenda.dayLabelWeek' : 'views.agenda.dayLabel',
+                      {
+                        day: fmtFullDate(occ.day),
+                        week: headerWeeks.get(key)?.name,
+                        count: dayCounts.get(key) ?? 0,
+                      },
+                    )}
                     accessibilityActions={headerActions}
                     onAccessibilityAction={(e) => runHeaderAction(e.nativeEvent.actionName)}
                     onLongPress={
@@ -661,6 +695,7 @@ export default function AgendaScreen({
                   >
                     <Text style={styles.dayHeader} importantForAccessibility="no">
                       {fmtFullDate(occ.day)}
+                      {headerWeeks.has(key) ? ` · ${headerWeeks.get(key)?.label}` : ''}
                     </Text>
                   </Pressable>,
                 );

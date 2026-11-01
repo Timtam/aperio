@@ -20,15 +20,15 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 const CALENDAR = { id: 'work', name: 'Arbeit', read_only: false } as unknown as Calendar;
 
-function meeting(id: string, title: string, day: number): CalendarEvent {
+function meeting(id: string, title: string, day: number, hour = 10): CalendarEvent {
   return {
     id,
     calendar_id: CALENDAR.id,
     title,
     description: null,
     location: null,
-    start: new Date(2026, 10, day, 10, 0).toISOString(),
-    end: new Date(2026, 10, day, 11, 0).toISOString(),
+    start: new Date(2026, 10, day, hour, 0).toISOString(),
+    end: new Date(2026, 10, day, hour + 1, 0).toISOString(),
     all_day: false,
     recurrence: null,
     color_label: null,
@@ -39,9 +39,14 @@ function meeting(id: string, title: string, day: number): CalendarEvent {
   } as unknown as CalendarEvent;
 }
 
-// Wednesday, 4 November, in week 45, and Wednesday, 18 November, in week 47.
+// Wednesday 4 and Thursday 5 November, in week 45, and Wednesday 18, in 47.
 // Stable identities: a fresh array per render would re-derive the rows forever.
-const EVENTS = [meeting('a', 'Planung', 4), meeting('b', 'Review', 18)];
+const EVENTS = [
+  meeting('a', 'Planung', 4),
+  meeting('c', 'Retro', 5),
+  meeting('b', 'Review', 18),
+  meeting('d', 'Ausblick', 18, 15),
+];
 const CALENDAR_BY_ID = new Map([[CALENDAR.id, CALENDAR]]);
 const GROUPS: unknown[] = [];
 const STORE = {
@@ -49,7 +54,12 @@ const STORE = {
   colorLabels: [],
   selectedCalendarIds: new Set([CALENDAR.id]),
 };
-const VIEW_STATE = { anchor: new Date(2026, 10, 4), pageTurn: 0 };
+const VIEW_STATE = {
+  anchor: new Date(2026, 10, 4),
+  pageTurn: 0,
+  weekStartsOn: 1,
+  weekNumbers: true,
+};
 const announce = vi.fn();
 const DIALOG_STATE = {
   openEventDialog: () => {},
@@ -84,6 +94,8 @@ describe('the agenda names the day of its focused entry', () => {
     await screen.findByText(/Review/);
     expect(list).toHaveAttribute('data-active-day', '2026-11-04');
     fireEvent.keyDown(list, { key: 'ArrowDown' });
+    expect(list).toHaveAttribute('data-active-day', '2026-11-05');
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
     expect(list).toHaveAttribute('data-active-day', '2026-11-18');
   });
 });
@@ -91,6 +103,7 @@ describe('the agenda names the day of its focused entry', () => {
 beforeEach(() => {
   VIEW_STATE.anchor = new Date(2026, 10, 4);
   VIEW_STATE.pageTurn = 0;
+  VIEW_STATE.weekNumbers = true;
   announce.mockReset();
 });
 
@@ -116,5 +129,56 @@ describe('a page turn in the agenda', () => {
     VIEW_STATE.pageTurn += 1;
     view.rerender(<AgendaView />);
     expect(announce).not.toHaveBeenCalled();
+  });
+});
+
+describe('the week in the agenda', () => {
+  function activeName(list: HTMLElement): string {
+    const id = list.getAttribute('aria-activedescendant');
+    return (id && document.getElementById(id)?.getAttribute('aria-label')) || '';
+  }
+
+  it('the entry a step lands on names its week when the step crossed into another', async () => {
+    const { AgendaView } = await import('./AgendaView');
+    render(<AgendaView />);
+    const list = await screen.findByRole('listbox');
+    await screen.findByText(/Review/);
+    list.focus();
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    // Thursday, in the same week: no week.
+    expect(activeName(list)).toMatch(/^Donnerstag, 5\. November 2026, Retro/);
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    expect(activeName(list)).toMatch(/^Mittwoch, 18\. November 2026, Kalenderwoche 47, Review/);
+    // The next meeting that day is a step within the week.
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    expect(activeName(list)).toMatch(/^Mittwoch, 18\. November 2026, Ausblick/);
+    fireEvent.keyDown(list, { key: 'ArrowUp' });
+    // Back, too.
+    fireEvent.keyDown(list, { key: 'ArrowUp' });
+    expect(activeName(list)).toMatch(/^Donnerstag, 5\. November 2026, Kalenderwoche 45, Retro/);
+  });
+
+  it('the separators show the week on the first day each week reaches', async () => {
+    const { AgendaView } = await import('./AgendaView');
+    const { container } = render(<AgendaView />);
+    await screen.findByText(/Review/);
+    const separators = [...container.querySelectorAll('.agenda-list__day')].map((li) => li.textContent);
+    expect(separators).toEqual([
+      'Mittwoch, 4. November 2026 · KW 45',
+      'Donnerstag, 5. November 2026',
+      'Mittwoch, 18. November 2026 · KW 47',
+    ]);
+  });
+
+  it('says and shows no week with weeks switched off', async () => {
+    VIEW_STATE.weekNumbers = false;
+    const { AgendaView } = await import('./AgendaView');
+    const { container } = render(<AgendaView />);
+    const list = await screen.findByRole('listbox');
+    await screen.findByText(/Review/);
+    list.focus();
+    fireEvent.keyDown(list, { key: 'End' });
+    expect(activeName(list)).toMatch(/^Mittwoch, 18\. November 2026, Ausblick/);
+    expect(container.textContent).not.toContain('KW');
   });
 });

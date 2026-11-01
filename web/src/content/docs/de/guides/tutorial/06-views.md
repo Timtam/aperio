@@ -52,7 +52,10 @@ eine Woche die Nummer der ISO-Woche, in die die meisten ihrer Tage fallen.
 > wechselst – `↓` geht zum selben Tag der nächsten Woche und nennt diese
 > Woche, `→` innerhalb der Woche nicht, `→` über ihren letzten Tag hinaus
 > schon. Wochennummern und Wochentage am Rand des Monatsrasters sind fürs
-> Auge; der Name des Tages sagt alles. Mit `K` hörst du in der Tages-, Wochen-,
+> Auge; der Name des Tages sagt alles. In der Agenda nennt der Eintrag, zu dem
+> du gehst, die Woche, wenn er in einer anderen liegt als der vorige, vorwärts
+> wie rückwärts, und die Trenner der Tage zeigen sie, wo eine Woche beginnt.
+> Mit `K` hörst du in der Tages-, Wochen-,
 > Monats-, Jahres- und Agendaansicht die Woche des Tages, auf dem du stehst,
 > mit ihren Tagen.
 
@@ -129,7 +132,9 @@ eine geplante Aufgabe wieder auf dem Backlog ab, um Tag und Deadline zu
 > **Tastatur & Screenreader:** Der Backlog ist **eine Listbox** mit einer
 > Gruppe je Teil: Tab oder `F6` landet einmal darauf, und die Pfeiltasten gehen
 > durch alle Aufgaben, von einem Teil in den nächsten — ein Screenreader nennt
-> den Teil, sobald du hineinkommst. `Bild auf`/`Bild ab` springen zum Teil davor
+> den Teil, sobald du hineinkommst, mit seiner Woche und der Zahl seiner
+> Aufgaben: „Diese Woche, Kalenderwoche 45, 3 Aufgaben“; sichtbar steht dort
+> „Diese Woche (3) · KW 45“. `Bild auf`/`Bild ab` springen zum Teil davor
 > oder danach, `Pos1`/`Ende` zur ersten oder letzten Aufgabe. `Eingabe` öffnet
 > eine Aufgabe, `Umschalt+D` öffnet den Plan-Dialog (Tag zuweisen), und die
 > Kontextmenü-Taste (oder `Umschalt+F10`) öffnet das Aufgabenmenü.
