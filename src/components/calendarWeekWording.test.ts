@@ -6,6 +6,7 @@ import {
   calendarWeekOf,
   calendarWeekRange,
   calendarWeekSentence,
+  weekOpenings,
 } from '@aperio/shared';
 import i18n from '../i18n';
 
@@ -69,5 +70,39 @@ describe('a week, written', () => {
     expect(calendarWeekSentence(de, 'de', sundayStart)).toBe(
       'Kalenderwoche 45, 1. bis 7. November 2026',
     );
+  });
+});
+
+describe('the days of a list that open a week', () => {
+  const november = Array.from({ length: 30 }, (_, i) => `2026-11-${String(i + 1).padStart(2, '0')}`);
+
+  it('in a month: the 1st, then each week start', () => {
+    expect(weekOpenings(november, 1).map((answer) => answer.day)).toEqual([
+      '2026-11-01',
+      '2026-11-02',
+      '2026-11-09',
+      '2026-11-16',
+      '2026-11-23',
+      '2026-11-30',
+    ]);
+  });
+
+  it('with the week starting on Sunday', () => {
+    expect(weekOpenings(november, 0).map((answer) => answer.day)).toEqual([
+      '2026-11-01',
+      '2026-11-08',
+      '2026-11-15',
+      '2026-11-22',
+      '2026-11-29',
+    ]);
+  });
+
+  it('in a list that skips days: the first day each week reaches', () => {
+    const agenda = ['2026-11-03', '2026-11-05', '2026-11-12', '2026-11-13', '2026-11-30'];
+    expect(weekOpenings(agenda, 1).map((answer) => [answer.day, answer.week.week])).toEqual([
+      ['2026-11-03', 45],
+      ['2026-11-12', 46],
+      ['2026-11-30', 49],
+    ]);
   });
 });

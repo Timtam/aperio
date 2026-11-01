@@ -12,6 +12,7 @@ import {
 
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { useDayStepCue } from '../../hooks/useDayStepCue';
 import { usePageTurnAnnouncement } from '../../hooks/usePageTurnAnnouncement';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
@@ -34,6 +35,7 @@ import {
   withDeletionsNotRestored,
   writeErrorMessage,
   originalKeptSentence,
+  calendarWeekName,
   calendarWeeks,
 } from '@aperio/shared';
 import { useDateFormat } from '../../intl/dateFormat';
@@ -158,13 +160,14 @@ export function MonthView() {
     [anchor, weekStartsOn],
   );
   // Each row's calendar week, from the core (`cal_core::calendar_week`): one
-  // question for the whole grid.
+  // question for the whole grid. A row begins on the week start, so its first
+  // day is the week's.
   const rowWeeks = useMemo(
     () =>
       calendarWeeks(
         cells.filter((_, i) => i % 7 === 0).map(localDateKey),
         weekStartsOn,
-      ).map((answer) => answer.week.week),
+      ).map((answer) => answer.week),
     [cells, weekStartsOn],
   );
   // The same week start as the grid: the range has to hold every day it draws.
@@ -413,6 +416,8 @@ export function MonthView() {
     dayIndex: focusIndex,
     setDayIndex: (next) => setAnchor(cells[next]),
     onDayChange: dayChangeAnnouncer,
+    // A month on can land on the same cell index: the day key resets the item.
+    dayKey: keyOf(cells[focusIndex] ?? anchor),
   });
 
   // Same lane model as WeekView, but applied per week-row of the
@@ -848,6 +853,19 @@ export function MonthView() {
   usePageTurnAnnouncement(fmt.format(anchor, 'MMMM yyyy'), gridRef, {
     focusNameSays: true,
   });
+  // The cell a step lands on names its week when the step crossed into
+  // another one (TODO B15 step 4): ↓ always does, ← and → at a row's edge,
+  // and a page turn with the focus in the grid. NVDA reads neither the row
+  // headers nor the column headers here, only the cell (see the week view).
+  const activeRow = Math.floor(focusIndex / 7);
+  const activeWeek = rowWeeks[activeRow];
+  const [dayStep, dropDayStep] = useDayStepCue(
+    keyOf(cells[focusIndex] ?? anchor),
+    activeWeek?.firstDay ?? '',
+    gridRef.current?.contains(document.activeElement) ?? false,
+  );
+  const weekCue =
+    weekNumbers && dayStep.inWidget && dayStep.crossedWeek && activeWeek != null;
 
   // The month grid scrolls (see `.month-grid` in styles.css): each week row
   // grows to fit its busiest day, so EVERY event is shown rather than capped to
@@ -884,17 +902,21 @@ export function MonthView() {
               : cellId(focusIndex)
           }
           onKeyDown={handleKeyDown}
+          onBlur={(e) => {
+            // Back in the grid, the cell need not say the week again.
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+              dropDayStep();
+            }
+          }}
           className={
             'month-grid' + (weekNumbers ? '' : ' month-grid--no-weeks')
           }
         >
-          <div role="row" className="month-grid__head">
+          {/* For the eye only: NVDA in the grid reads the cell, whose name
+              holds the weekday, the date and, on a week change, the week. */}
+          <div role="row" className="month-grid__head" aria-hidden="true">
             {weekNumbers && (
-              <div
-                role="columnheader"
-                className="month-grid__kw"
-                aria-label="KW"
-              >
+              <div role="columnheader" className="month-grid__kw">
                 {t('views.month.kwShort')}
               </div>
             )}
@@ -1040,8 +1062,12 @@ export function MonthView() {
                   style={{ minHeight: rowMinHeight }}
                 >
                 {weekNumbers && (
-                  <div role="rowheader" className="month-grid__kw">
-                    {rowWeeks[row]}
+                  <div
+                    role="rowheader"
+                    className="month-grid__kw"
+                    aria-hidden="true"
+                  >
+                    {rowWeeks[row]?.week}
                   </div>
                 )}
                 {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
@@ -1066,10 +1092,16 @@ export function MonthView() {
                       aria-selected={focused}
                       aria-current={isSameDay(day, today) ? 'date' : undefined}
                       aria-label={[
-                        t('views.month.dayAnnounce', {
-                          day: fmt.format(day, 'PPPP'),
-                          count: dayItems.length,
-                        }),
+                        t(
+                          focused && weekCue
+                            ? 'views.month.dayAnnounceWeek'
+                            : 'views.month.dayAnnounce',
+                          {
+                            day: fmt.format(day, 'PPPP'),
+                            week: activeWeek ? calendarWeekName(t, activeWeek) : '',
+                            count: dayItems.length,
+                          },
+                        ),
                         spokenFor(keyOf(day)),
                       ]
                         .filter(Boolean)

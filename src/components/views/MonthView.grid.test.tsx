@@ -162,7 +162,12 @@ describe('the week column of the month grid', () => {
 
   it('numbers each row, and the bars start one column in', async () => {
     const { container, bar } = await renderMonth();
-    const rows = screen.getAllByRole('rowheader').map((cell) => cell.textContent);
+    // Seen, not heard: NVDA in the grid reads the cell, and the headers are
+    // hidden from it.
+    const headers = [...container.querySelectorAll('[role="rowheader"]')];
+    expect(headers.every((cell) => cell.getAttribute('aria-hidden') === 'true')).toBe(true);
+    expect(screen.queryAllByRole('rowheader')).toEqual([]);
+    const rows = headers.map((cell) => cell.textContent);
     expect(rows).toEqual(['18', '19', '20', '21', '22']);
     expect(container.querySelector('.month-grid--no-weeks')).toBeNull();
     // Wednesday is the third day: column 4 behind the week column.
@@ -172,8 +177,8 @@ describe('the week column of the month grid', () => {
   it('is gone with weeks switched off, and the bars keep to their days', async () => {
     h.viewState.weekNumbers = false;
     const { container, bar } = await renderMonth();
-    expect(screen.queryAllByRole('rowheader')).toEqual([]);
-    expect(screen.getAllByRole('columnheader')).toHaveLength(7);
+    expect(container.querySelectorAll('[role="rowheader"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[role="columnheader"]')).toHaveLength(7);
     expect(container.querySelector('.month-grid--no-weeks')).not.toBeNull();
     expect(bar.style.gridColumn).toBe('3 / 5');
   });
@@ -207,5 +212,47 @@ describe('a page turn in the month view', () => {
     const { MonthView } = await import('./MonthView');
     view.rerender(<MonthView />);
     expect(h.announce).not.toHaveBeenCalled();
+  });
+});
+
+describe('the week in the name of a month cell', () => {
+  /** The name of the cell the grid reports as active. */
+  function activeCellName(): string {
+    const grid = screen.getByRole('grid');
+    const id = grid.getAttribute('aria-activedescendant');
+    const cell = id ? document.getElementById(id) : null;
+    if (!cell) throw new Error('the grid reports no active cell');
+    return cell.getAttribute('aria-label') ?? '';
+  }
+  /** A step in the grid: the anchor moves with the focus there. */
+  async function stepTo(view: { rerender: (ui: React.ReactElement) => void }, anchor: Date) {
+    const { MonthView } = await import('./MonthView');
+    h.viewState.anchor = anchor;
+    view.rerender(<MonthView />);
+  }
+
+  it('says the week when a step crossed into another, and only then', async () => {
+    const { MonthView } = await import('./MonthView');
+    const view = render(<MonthView />);
+    screen.getByRole('grid').focus();
+    // Friday, 15 May; ↓ goes to Friday, 22 May, in the next week.
+    await stepTo(view, new Date(2026, 4, 22));
+    expect(activeCellName()).toBe('Freitag, 22. Mai 2026, Kalenderwoche 21, 0 Einträge');
+    // → to Saturday stays in that week.
+    await stepTo(view, new Date(2026, 4, 23));
+    expect(activeCellName()).toBe('Samstag, 23. Mai 2026, 0 Einträge');
+    // → again, past Sunday, crosses into the next.
+    await stepTo(view, new Date(2026, 4, 25));
+    expect(activeCellName()).toBe('Montag, 25. Mai 2026, Kalenderwoche 22, 0 Einträge');
+  });
+
+  it('not on entering the grid, and not with weeks switched off', async () => {
+    const { MonthView } = await import('./MonthView');
+    const view = render(<MonthView />);
+    expect(activeCellName()).toBe('Freitag, 15. Mai 2026, 0 Einträge');
+    h.viewState.weekNumbers = false;
+    screen.getByRole('grid').focus();
+    await stepTo(view, new Date(2026, 4, 22));
+    expect(activeCellName()).toBe('Freitag, 22. Mai 2026, 0 Einträge');
   });
 });

@@ -46,9 +46,11 @@ its days fall in.
 
 > **Keyboard & screen reader:** A screen reader hears the week in words, not
 > as letters: the week view's heading and its grid say "Week 45, November 2
-> to 8, 2026". A day's name carries the week only when you move into another
-> week — `↓` in the week view goes to the same day of the next week and
-> names that week, `→` within the week does not. Press `K` in the day,
+> to 8, 2026". In the week and month grids a day's name carries the week
+> only when you move into another week — `↓` goes to the same day of the
+> next week and names that week, `→` within the week does not, `→` past its
+> last day does. The month grid's week numbers and weekday headings are for
+> the eye; the day's own name says all of it. Press `K` in the day,
 > week, month, year or agenda view to hear the week of the day you are on,
 > with its days.
 
