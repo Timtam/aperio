@@ -64,8 +64,20 @@ export function isValidTimeStep(n: number): n is TimeStepMinutes {
   return (TIME_STEP_CHOICES as readonly number[]).includes(n);
 }
 
-/** Range visible in the given view, anchored at `date`. The week range
- *  honours the configurable `weekStartsOn` (defaults to Monday/ISO). */
+/** Range visible in the given view, anchored at `date`. The week and the
+ *  month grid begin on `weekStartsOn`, which those two views must pass: with
+ *  a Monday default the month view fetched a Monday-based range under a grid
+ *  that began on Sunday (or Saturday), and the days at the grid's edges
+ *  stayed empty. */
+export function visibleRange(
+  view: 'week' | 'month',
+  date: Date,
+  weekStartsOn: WeekStart,
+): { start: Date; end: Date };
+export function visibleRange(
+  view: Exclude<ViewId, 'week' | 'month'>,
+  date: Date,
+): { start: Date; end: Date };
 export function visibleRange(
   view: ViewId,
   date: Date,
