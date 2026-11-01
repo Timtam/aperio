@@ -20,6 +20,7 @@ import {
   installTaskPriorityRules,
   installTextCollation,
   installRecurrenceSummaryRules,
+  installCalendarWeekRules,
   installSeriesShiftRules,
   installTailExceptionsRules,
   installSeriesClockRules,
@@ -70,6 +71,7 @@ import {
   normalPriority,
   priorityRank,
   recurrenceSummaryJson,
+  calendarWeeksJson,
   seriesShiftJson,
   tailExceptionsJson,
   seriesClockZoneThroughCore,
@@ -209,6 +211,10 @@ initCoreRules()
     // A repeat rule in words (84a): the locked invitation shows it, and
     // so does the editor when the picker cannot rebuild the stored rule.
     installRecurrenceSummaryRules({ recurrenceSummaryJson });
+
+    // The calendar week a day is shown in, with its ISO number (DESIGN §5.2):
+    // the week and month views and, later, every place that names a week.
+    installCalendarWeekRules({ calendarWeeksJson });
 
     // The clock a series repeats on: which stored zone names are a zone.
     installSeriesClockRules({

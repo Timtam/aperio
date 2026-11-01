@@ -1,0 +1,246 @@
+{
+  "description": "The calendar week a displayed week is numbered by (cal_core::calendar_week, DESIGN §5.2): ISO 8601, the ISO week the fourth day of the displayed week falls in. Expected values computed with Python's date.isocalendar(), independently of the Rust and the TypeScript. Read by the core's contract test and by shared/calendarWeek.contract.test.ts.",
+  "cases": [
+    {
+      "name": "an ordinary Wednesday, Monday start",
+      "day": "2026-11-04",
+      "weekStartsOn": 1,
+      "expect": {
+        "week": 45,
+        "weekYear": 2026,
+        "firstDay": "2026-11-02",
+        "lastDay": "2026-11-08",
+        "sameMonth": true,
+        "spansYears": false
+      }
+    },
+    {
+      "name": "53 weeks in 2020: New Year's Eve",
+      "day": "2020-12-31",
+      "weekStartsOn": 1,
+      "expect": {
+        "week": 53,
+        "weekYear": 2020,
+        "firstDay": "2020-12-28",
+        "lastDay": "2021-01-03",
+        "sameMonth": false,
+        "spansYears": true
+      }
+    },
+    {
+      "name": "the same week reaches into January",
+      "day": "2021-01-03",
+      "weekStartsOn": 1,
+      "expect": {
+        "week": 53,
+        "weekYear": 2020,
+        "firstDay": "2020-12-28",
+        "lastDay": "2021-01-03",
+        "sameMonth": false,
+        "spansYears": true
+      }
+    },
+    {
+      "name": "week 1 of 2025 begins in December",
+      "day": "2024-12-30",
+      "weekStartsOn": 1,
+      "expect": {
+        "week": 1,
+        "weekYear": 2025,
+        "firstDay": "2024-12-30",
+        "lastDay": "2025-01-05",
+        "sameMonth": false,
+        "spansYears": true
+      }
+    },
+    {
+      "name": "week 1 of 2026 begins in December",
+      "day": "2025-12-29",
+      "weekStartsOn": 1,
+      "expect": {
+        "week": 1,
+        "weekYear": 2026,
+        "firstDay": "2025-12-29",
+        "lastDay": "2026-01-04",
+        "sameMonth": false,
+        "spansYears": true
+      }
+    },
+    {
+      "name": "53 weeks in 2026",
+      "day": "2026-12-28",
+      "weekStartsOn": 1,
+      "expect": {
+        "week": 53,
+        "weekYear": 2026,
+        "firstDay": "2026-12-28",
+        "lastDay": "2027-01-03",
+        "sameMonth": false,
+        "spansYears": true
+      }
+    },
+    {
+      "name": "53 weeks in 2026, its last day in January",
+      "day": "2027-01-03",
+      "weekStartsOn": 1,
+      "expect": {
+        "week": 53,
+        "weekYear": 2026,
+        "firstDay": "2026-12-28",
+        "lastDay": "2027-01-03",
+        "sameMonth": false,
+        "spansYears": true
+      }
+    },
+    {
+      "name": "the first week of 2027",
+      "day": "2027-01-04",
+      "weekStartsOn": 1,
+      "expect": {
+        "week": 1,
+        "weekYear": 2027,
+        "firstDay": "2027-01-04",
+        "lastDay": "2027-01-10",
+        "sameMonth": true,
+        "spansYears": false
+      }
+    },
+    {
+      "name": "a Sunday with a Monday start ends the week before",
+      "day": "2026-11-01",
+      "weekStartsOn": 1,
+      "expect": {
+        "week": 44,
+        "weekYear": 2026,
+        "firstDay": "2026-10-26",
+        "lastDay": "2026-11-01",
+        "sameMonth": false,
+        "spansYears": false
+      }
+    },
+    {
+      "name": "the same Sunday with a Sunday start opens the next",
+      "day": "2026-11-01",
+      "weekStartsOn": 0,
+      "expect": {
+        "week": 45,
+        "weekYear": 2026,
+        "firstDay": "2026-11-01",
+        "lastDay": "2026-11-07",
+        "sameMonth": true,
+        "spansYears": false
+      }
+    },
+    {
+      "name": "a Saturday start, the week across two months",
+      "day": "2026-11-01",
+      "weekStartsOn": 6,
+      "expect": {
+        "week": 45,
+        "weekYear": 2026,
+        "firstDay": "2026-10-31",
+        "lastDay": "2026-11-06",
+        "sameMonth": false,
+        "spansYears": false
+      }
+    },
+    {
+      "name": "a Sunday start at the turn of the year",
+      "day": "2026-12-27",
+      "weekStartsOn": 0,
+      "expect": {
+        "week": 53,
+        "weekYear": 2026,
+        "firstDay": "2026-12-27",
+        "lastDay": "2027-01-02",
+        "sameMonth": false,
+        "spansYears": true
+      }
+    },
+    {
+      "name": "a Sunday start, the first week of 2027",
+      "day": "2027-01-03",
+      "weekStartsOn": 0,
+      "expect": {
+        "week": 1,
+        "weekYear": 2027,
+        "firstDay": "2027-01-03",
+        "lastDay": "2027-01-09",
+        "sameMonth": true,
+        "spansYears": false
+      }
+    },
+    {
+      "name": "a week across two months in one year",
+      "day": "2026-10-28",
+      "weekStartsOn": 1,
+      "expect": {
+        "week": 44,
+        "weekYear": 2026,
+        "firstDay": "2026-10-26",
+        "lastDay": "2026-11-01",
+        "sameMonth": false,
+        "spansYears": false
+      }
+    }
+  ],
+  "batch": {
+    "days": [
+      "2026-11-01",
+      "2026-11-02",
+      "2026-11-08",
+      "2026-11-09"
+    ],
+    "weekStartsOn": 1,
+    "expect": [
+      {
+        "day": "2026-11-01",
+        "startsWeek": false,
+        "week": {
+          "week": 44,
+          "weekYear": 2026,
+          "firstDay": "2026-10-26",
+          "lastDay": "2026-11-01",
+          "sameMonth": false,
+          "spansYears": false
+        }
+      },
+      {
+        "day": "2026-11-02",
+        "startsWeek": true,
+        "week": {
+          "week": 45,
+          "weekYear": 2026,
+          "firstDay": "2026-11-02",
+          "lastDay": "2026-11-08",
+          "sameMonth": true,
+          "spansYears": false
+        }
+      },
+      {
+        "day": "2026-11-08",
+        "startsWeek": false,
+        "week": {
+          "week": 45,
+          "weekYear": 2026,
+          "firstDay": "2026-11-02",
+          "lastDay": "2026-11-08",
+          "sameMonth": true,
+          "spansYears": false
+        }
+      },
+      {
+        "day": "2026-11-09",
+        "startsWeek": true,
+        "week": {
+          "week": 46,
+          "weekYear": 2026,
+          "firstDay": "2026-11-09",
+          "lastDay": "2026-11-15",
+          "sameMonth": true,
+          "spansYears": false
+        }
+      }
+    ]
+  }
+}

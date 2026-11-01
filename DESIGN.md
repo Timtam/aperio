@@ -868,7 +868,8 @@ in Code, den dieselbe Änderung gerade erst geschrieben hatte.
 ### 5.2 Wochenstart & Kalenderwochen-Anzeige
 
 - Wochenanfang ist frei konfigurierbar (Montag / Sonntag / beliebig)
-- Kalenderwochen werden nach **ISO 8601** berechnet
+- Kalenderwochen werden nach **ISO 8601** berechnet, in jeder Sprache gleich. Eine angezeigte Woche trägt die Nummer der ISO-Woche, in die ihr vierter Tag fällt, also die ISO-Woche mit den meisten ihrer sieben Tage. Bei Montag als Wochenanfang ist das genau die ISO-Woche jedes Tags; bei einem anderen Anfang trägt jeder Tag der angezeigten Woche dieselbe Nummer, sodass ein Tag in der App nie zwei Nummern hat. Ein Beispiel: Sonntag, 1. November 2026, liegt bei Montag als Anfang in KW 44, bei Sonntag als Anfang in KW 45.
+- Die Regel liegt einmal im Kern (`cal_core::calendar_week`, `calendar_weeks_json`); der Desktop fragt sie über WebAssembly, das Handy über UniFFI, beide über die Tür `shared/calendarWeek.ts`. Die Antwort nennt außer Nummer und Wochenjahr den ersten und letzten Tag der angezeigten Woche, ob beide im selben Monat liegen (wie der Bereich geschrieben wird) und ob die Woche zwei Kalenderjahre berührt (dann nennen die Texte das Wochenjahr), im Stapel je Tag auch, ob er eine Woche beginnt. Festgehalten in `crates/cal-core/tests/fixtures/calendarWeek.json`, unabhängig vom Code berechnet; Rust und TypeScript lesen dieselbe Datei.
 - In der Wochenansicht wird die KW-Nummer direkt im Ansichts-Header angezeigt, zusammen mit dem Datumsbereich
 - Anzeige-Beispiel: `KW 20 · 12.–18. Mai 2025`
 - In der Monatsansicht kann optional die KW-Nummer am Zeilenanfang jeder Woche eingeblendet werden (konfigurierbar)

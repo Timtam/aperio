@@ -787,6 +787,66 @@ Vordergrund vorkommt. Nach einer Rückkehr läuft zuerst der unterbrochene
 Durchlauf zu Ende (um 09:33:22 noch 4,2 s); bis 218 wartet ein Schreiben in
 dieser Zeit darauf, danach nur noch der Durchlauf.
 
+### B15 · Kalenderwoche für Screenreader, Desktop und Handy `[~]`
+
+Gemeldet von Toni am 2026-11-01: Screenreader hören die Kalenderwoche nirgends.
+Am Desktop steht sie nur in der Überschrift der Wochenansicht und in den
+Zeilenköpfen der Monatsansicht; beide bekommen nie den Fokus, und NVDA liest
+die Zeilenköpfe auch beim Zeilenwechsel nicht (Tonis Test: Pfeil runter sagt in
+Woche und Monat nur „Samstag, 31. Oktober 2026, 5 Einträge“). Blättern mit
+Zurück, Heute, Vor oder Strg+Pfeil ist stumm, solange der Fokus nicht im Raster
+liegt. Am Handy hat nur die Wochenansicht die KW; Tag, Monat und Agenda zeigen
+sie auch Sehenden nicht.
+
+Entschieden (Toni, 2026-11-01):
+- Gesprochen „Kalenderwoche 45“, sichtbar „KW 45“. Englisch „Week 45“.
+- In Rastern und Listen nur, wenn die Woche wechselt: Der Name der Tageszelle
+  trägt die KW nur, wenn der neue Tag in einer anderen Woche liegt als der
+  vorige, nicht bei jedem Termin und nicht bei jedem Tag. Er bleibt bis zum
+  nächsten Schritt, damit NVDA die Zelle nach dem Laden nicht neu vorliest.
+  Reihenfolge im Namen: Datum, Kalenderwoche, Anzahl, dann die
+  Zusammenfassung; auf die Zahl folgt nie ein Punkt, sonst liest die
+  Sprachausgabe „sechsundvierzigste“.
+- Ein Schalter „Kalenderwochen anzeigen und ansagen“ neben dem Wochenanfang,
+  überall gültig, Standard an, auf dem schon synchronisierten
+  `view.weekNumbers`. Sichtbares und Gesprochenes schaltet er gemeinsam.
+- Abruf am Desktop mit der Taste K („Kalenderwoche 45, 2. bis 8. November
+  2026“) und die KW im Datum der Symbolleiste, in jeder Ansicht.
+- Jahr nur, wenn die Woche zwei Kalenderjahre berührt: „Kalenderwoche 53 des
+  Jahres 2026“, sichtbar „KW 53 (2026)“. Bereiche mit „bis“, nie mit Strich;
+  den Satz baut `shared/calendarWeek.ts` einmal für beide Geräte aus der
+  Antwort des Kerns.
+- Nicht jetzt: Tagesstart-Rückblick, Schnellwahl, Jahresansicht, Widgets.
+  Sprung zu KW n später als eigener Bogen.
+
+- [x] **Schritt 0:** Monatsansicht lädt mit Sonntag oder Samstag als
+  Wochenanfang die Randtage (#136).
+- [x] **Schritt 1:** Die Regel liegt im Kern (`cal_core::calendar_week`),
+  Desktop über WebAssembly, Handy über UniFFI, eine Tür in `shared/`, eine
+  gemeinsame Vorlage. Die drei Kopien in TypeScript sind weg; sichtbar ändert
+  sich nichts.
+- [ ] **Schritt 2:** Wochenansicht auf beiden Geräten: Rastername mit KW am
+  Desktop, KW im Zellnamen beim Wochenwechsel, Taste K, KW im Datum der
+  Symbolleiste, der Schalter; am Handy der gesprochene Text über
+  `CalendarPager` (unter VoiceOver spricht der Pager die Überschrift, nicht
+  `WeekScreen`), für TalkBack und ohne Screenreader die Überschrift selbst.
+  Tastenliste und `06-views` (beide Sprachen) dabei berichtigen: dort steht
+  noch `T` statt Strg+T und `1`–`7` statt Strg+1 bis Strg+9.
+- [ ] **Schritt 3:** Ansage beim Blättern am Desktop (Symbolleiste, Strg+Pfeil,
+  Strg+T), wenn der Fokus nicht im Raster liegt: „Kalenderwoche 46, 9. bis 15.
+  November 2026“, in der Tagesansicht das Datum und die KW nur beim
+  Wochenwechsel. Am Handy die Tagesansicht. DESIGN Zeile ~239 an das
+  tatsächliche Verhalten anpassen.
+- [ ] **Schritt 4:** Monat: am Desktop Zeilen- und Spaltenköpfe für
+  Screenreader ausblenden (der Spaltenkopf hat fest das deutsche
+  `aria-label="KW"`), KW im Zellnamen beim Wochenwechsel; am Handy der erste
+  Tag jeder Woche in der Monatsliste mit KW. Die Handy-Bildschirme Tag, Monat
+  und Agenda lesen dafür den Wochenanfang (heute nur `WeekScreen`).
+- [ ] **Schritt 5:** Agenda auf beiden Geräten (Desktop: bewegliche Regel wie
+  im Raster, auch rückwärts; Handy: fester Platz am ersten Kopf einer Woche)
+  und die Backlog-Überschriften am Desktop („Diese Woche, Kalenderwoche 45, 3
+  Aufgaben“, mit Pluralformen).
+
 ### B14 · Folgeaufgaben aus Prüfungen und Nebenbefunden `[ ]`
 
 Folgeaufgaben aus Prüfungen und Nebenbefunden. Bis 2026-10-15 lagen sie als

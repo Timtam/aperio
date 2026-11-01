@@ -56,6 +56,7 @@ import {
   installTaskPriorityRules,
   installTextCollation,
   installRecurrenceSummaryRules,
+  installCalendarWeekRules,
   installSeriesShiftRules,
   installTailExceptionsRules,
   installSeriesClockRules,
@@ -102,6 +103,7 @@ import {
   normalPriority,
   priorityRank,
   recurrenceSummaryJson,
+  calendarWeeksJson,
   seriesShiftJson,
   tailExceptionsJson,
   seriesClockZoneThroughCore,
@@ -178,6 +180,7 @@ installTaskSettingsRules({ taskSettingsJson });
 installSeriesShiftRules({ seriesShiftJson });
 installTailExceptionsRules({ tailExceptionsJson });
 installRecurrenceSummaryRules({ recurrenceSummaryJson });
+installCalendarWeekRules({ calendarWeeksJson });
 installSeriesClockRules({
   seriesClockZone: seriesClockZoneThroughCore,
   canonicalZone: canonicalZoneThroughCore,

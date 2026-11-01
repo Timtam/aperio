@@ -17,6 +17,7 @@ import {
   installDayStartRules,
   installTaskSettingsRules,
   installRecurrenceSummaryRules,
+  installCalendarWeekRules,
   installSeriesShiftRules,
   installTailExceptionsRules,
   installSeriesClockRules,
@@ -193,6 +194,12 @@ installTailExceptionsRules({
 // the editor when the picker cannot rebuild the stored rule.
 installRecurrenceSummaryRules({
   recurrenceSummaryJson: (inputJson: string) => CalFfi.recurrenceSummary(inputJson),
+});
+
+// The calendar week a day is shown in, with its ISO number (DESIGN §5.2): the
+// same rule the desktop asks through WebAssembly.
+installCalendarWeekRules({
+  calendarWeeksJson: (inputJson: string) => CalFfi.calendarWeeks(inputJson),
 });
 
 // The clock a series repeats on: which stored zone names are a zone. Every

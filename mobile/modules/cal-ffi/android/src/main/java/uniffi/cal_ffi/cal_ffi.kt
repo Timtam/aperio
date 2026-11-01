@@ -826,6 +826,8 @@ external fun uniffi_cal_ffi_checksum_func_auto_date_on_start(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_backlog_weeks(
 ): Short
+external fun uniffi_cal_ffi_checksum_func_calendar_weeks(
+): Short
 external fun uniffi_cal_ffi_checksum_func_canonical_zone(
 ): Short
 external fun uniffi_cal_ffi_checksum_func_carry_onto_fields(
@@ -1702,6 +1704,8 @@ external fun uniffi_cal_ffi_fn_func_auto_date_on_start(`inputJson`: RustBuffer.B
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_backlog_weeks(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_func_calendar_weeks(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_canonical_zone(`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_func_carry_onto_fields(`inputJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1916,6 +1920,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_backlog_weeks() != 39931.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_func_calendar_weeks() != 41884.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_func_canonical_zone() != 54179.toShort()) {
@@ -10792,6 +10799,21 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
             return FfiConverterString.lift(
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_func_backlog_weeks(
+    
+        FfiConverterString.lower(`inputJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The calendar week each day is shown in, with its ISO number (DESIGN §5.2):
+         * the desktop asks the same rule through WebAssembly.
+         */
+    @Throws(StoreException::class) fun `calendarWeeks`(`inputJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_func_calendar_weeks(
     
         FfiConverterString.lower(`inputJson`),_status)
 }

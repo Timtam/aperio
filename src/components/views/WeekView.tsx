@@ -109,6 +109,7 @@ import {
   withDeletionsNotRestored,
   writeErrorMessage,
   originalKeptSentence,
+  calendarWeekOf,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
@@ -1374,10 +1375,9 @@ export function WeekView() {
   );
 
   const today = useMemo(() => new Date(), []);
-  // KW stays ISO-8601 regardless of the visual week start: derive it from a
-  // stable mid-week day (Thursday for a Monday start — unchanged default) so
-  // a Sunday/Saturday start doesn't slip the number to the adjacent ISO week.
-  const isoWeek = fmt.isoWeek(addDays(weekStart, 3));
+  // The number is the core's (`cal_core::calendar_week`): ISO 8601, the ISO
+  // week most of the displayed days fall in, whatever the week start.
+  const isoWeek = calendarWeekOf(localDateKey(weekStart), weekStartsOn).week;
   // Wait for the first fetch before focusing so the screen reader
   // announces the real day-event count, not the initial empty one.
   const gridRef = useAutoFocus<HTMLDivElement>(!loading);

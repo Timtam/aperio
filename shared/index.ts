@@ -30,6 +30,7 @@ export * from './taskSettings';
 export * from './seriesShift';
 export * from './tailExceptions';
 export * from './recurrenceSummary';
+export * from './calendarWeek';
 export * from './intlNames';
 export * from './eventWriteError';
 export * from './stepWrite';

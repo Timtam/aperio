@@ -41,7 +41,7 @@
 use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 
-use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
+use chrono::{Duration, NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "collation")]
@@ -313,10 +313,8 @@ pub fn tasks_on_days(input: &DayInput) -> BTreeMap<NaiveDate, Vec<DayTaskRow>> {
 /// `week_starts_on` is the user's own setting (0 = Sunday … 6 = Saturday), so
 /// a Sunday week runs Sunday–Saturday and a Monday week Monday–Sunday.
 pub fn backlog_weeks(today: NaiveDate, week_starts_on: u32) -> BacklogWeeks {
-    // How far back the week's first day lies. The +7 keeps the result positive
-    // for every combination of weekday and setting.
-    let back = (today.weekday().num_days_from_sunday() + 7 - week_starts_on % 7) % 7;
-    let start = today - Duration::days(i64::from(back));
+    // The same first day the calendar week is numbered from.
+    let start = crate::calendar_week::first_day_of_week(today, week_starts_on);
     BacklogWeeks {
         this_week_start: start,
         this_week_end: start + Duration::days(6),

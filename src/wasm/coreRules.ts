@@ -59,6 +59,7 @@ import init, {
   seriesShift as wasmSeriesShift,
   tailExceptions as wasmTailExceptions,
   recurrenceSummary as wasmRecurrenceSummary,
+  calendarWeeks as wasmCalendarWeeks,
   seriesClockZone as wasmSeriesClockZone,
   canonicalZone as wasmCanonicalZone,
   expansionClock as wasmExpansionClock,
@@ -344,6 +345,12 @@ export function tailExceptionsJson(inputJson: string): string {
 export function recurrenceSummaryJson(inputJson: string): string {
   assertReady();
   return wasmRecurrenceSummary(inputJson);
+}
+
+/** See `cal_core::calendar_week::calendar_weeks_json`. */
+export function calendarWeeksJson(inputJson: string): string {
+  assertReady();
+  return wasmCalendarWeeks(inputJson);
 }
 
 /** See `cal_core::series_clock_zone`: the stored name, or `''` for UTC. */

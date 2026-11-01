@@ -572,6 +572,16 @@ pub fn recurrence_summary(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// The calendar week each day is shown in, with its ISO number (DESIGN §5.2):
+/// the desktop asks the same rule through WebAssembly.
+#[uniffi::export]
+pub fn calendar_weeks(input_json: String) -> Result<String, StoreError> {
+    cal_core::calendar_weeks_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "calendar weeks question".into(),
+        detail: e.to_string(),
+    })
+}
+
 #[uniffi::export]
 pub fn collapse_event_groups(input_json: String) -> Result<String, StoreError> {
     cal_core::collapse_event_groups_json(&input_json).map_err(|e| StoreError::InvalidField {

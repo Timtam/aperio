@@ -35,7 +35,9 @@ to know them and switch between them.
   previous/next period (week, month …).
 - **Today:** jumps back to the current day (default: `T` or "Today" in the
   toolbar).
-- **Week numbers** are shown in the week and month views.
+- **Week numbers** are shown in the week and month views. They follow ISO
+  8601 in every language; if your week starts on another day than Monday,
+  a week carries the number of the ISO week most of its days fall in.
 
 ## Visible hours in the hour grid
 
