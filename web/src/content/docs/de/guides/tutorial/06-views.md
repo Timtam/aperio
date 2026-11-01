@@ -47,10 +47,12 @@ eine Woche die Nummer der ISO-Woche, in die die meisten ihrer Tage fallen.
 
 > **Tastatur & Screenreader:** Der Screenreader hört die Woche in Worten,
 > nicht als Buchstaben: Überschrift und Raster der Wochenansicht sagen
-> „Kalenderwoche 45, 2. bis 8. November 2026“. Der Name eines Tages trägt die
-> Woche nur, wenn du in eine andere Woche wechselst – `↓` geht in der
-> Wochenansicht zum selben Tag der nächsten Woche und nennt diese Woche, `→`
-> innerhalb der Woche nicht. Mit `K` hörst du in der Tages-, Wochen-,
+> „Kalenderwoche 45, 2. bis 8. November 2026“. Im Wochen- und Monatsraster
+> trägt der Name eines Tages die Woche nur, wenn du in eine andere Woche
+> wechselst – `↓` geht zum selben Tag der nächsten Woche und nennt diese
+> Woche, `→` innerhalb der Woche nicht, `→` über ihren letzten Tag hinaus
+> schon. Wochennummern und Wochentage am Rand des Monatsrasters sind fürs
+> Auge; der Name des Tages sagt alles. Mit `K` hörst du in der Tages-, Wochen-,
 > Monats-, Jahres- und Agendaansicht die Woche des Tages, auf dem du stehst,
 > mit ihren Tagen.
 

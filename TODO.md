@@ -839,9 +839,9 @@ Entschieden (Toni, 2026-11-01):
   Tastenliste, Tutorial-Kapitel 10 und `06-views` (beide Sprachen)
   berichtigt; der Abschnitt „Anpassen“ ist aus beiden verschwunden, weil es
   die Einstellung „Tastaturkürzel“ nicht gibt (DESIGN §15.10 plant sie).
-- [ ] **Schritt 4:** Der Hinweis des Schalters verspricht die Ansage beim
-  Wochenwechsel bisher für Woche und Tag; mit Schritt 4 um den Monat
-  erweitern (beide Sprachen, Desktop und Handy).
+- [ ] **Schritt 5:** Der Hinweis des Schalters verspricht die Ansage beim
+  Wochenwechsel bisher für Tag, Woche und Monat; mit Schritt 5 um die Agenda
+  und den Backlog erweitern (beide Sprachen, Desktop und Handy).
 - [x] **Schritt 3:** Ansage beim Blättern am Desktop (Symbolleiste, Strg+Pfeil,
   Strg+T), wenn der Fokus nicht im Raster liegt: „Kalenderwoche 46, 9. bis 15.
   November 2026“, in der Tagesansicht das Datum und die KW nur beim
@@ -862,11 +862,21 @@ Entschieden (Toni, 2026-11-01):
   `useWeekChangeCue`) für Woche und Tag, `periodAnnouncement` am
   `CalendarPager`, der Ladehinweis beginnt seine Frist bei jedem neuen
   Zeitraum neu; der Hinweis des Schalters nennt jetzt Woche und Tag.
-- [ ] **Schritt 4:** Monat: am Desktop Zeilen- und Spaltenköpfe für
+- [x] **Schritt 4:** Monat: am Desktop Zeilen- und Spaltenköpfe für
   Screenreader ausblenden (der Spaltenkopf hat fest das deutsche
   `aria-label="KW"`), KW im Zellnamen beim Wochenwechsel; am Handy der erste
   Tag jeder Woche in der Monatsliste mit KW. Die Handy-Bildschirme Tag, Monat
   und Agenda lesen dafür den Wochenanfang (heute nur `WeekScreen`).
+  Gebaut: Köpfe `aria-hidden`, `useDayStepCue` auch im Monat (Zelle mit KW
+  bei ↓, am Zeilenrand und beim Seitenwechsel im Raster), `dayKey` an der
+  Tab-Navigation; am Handy `headerWeeks` an `CalendarDayList` aus
+  `weekOpenings` (gemeinsame Regel, auch für Schritt 5). Tag und Monat lesen
+  den Wochenanfang; die Agenda am Handy folgt mit Schritt 5. Tab in eine
+  andere Woche nennt sie in der Tab-Ansage; die Auswahl eines Eintrags fällt
+  beim Tageswechsel schon beim Rendern weg (`useEventTabNavigation`), sonst
+  hörte man nach einem Seitenwechsel von einem Eintrag aus Monat und Zelle.
+  Blättern von außerhalb des Monatsrasters sagt den Monat, nicht die Woche;
+  der Hinweis des Schalters sagt es so.
 - [ ] **Schritt 5:** Agenda auf beiden Geräten (Desktop: bewegliche Regel wie
   im Raster, auch rückwärts; Handy: fester Platz am ersten Kopf einer Woche)
   und die Backlog-Überschriften am Desktop („Diese Woche, Kalenderwoche 45, 3

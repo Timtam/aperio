@@ -52,6 +52,21 @@ export function calendarWeeks(dayKeys: string[], weekStartsOn: number): DayCalen
   return JSON.parse(installedRules.calendarWeeksJson(JSON.stringify(input))) as DayCalendarWeek[];
 }
 
+/**
+ * The days of a list that open a calendar week in it: the first day in the
+ * list of each week, so a list that skips days (an agenda) still names every
+ * week it reaches, and the list's first day names the week it starts in
+ * wherever that falls. In `dayKeys` order, which must be ascending.
+ */
+export function weekOpenings(dayKeys: string[], weekStartsOn: number): DayCalendarWeek[] {
+  let previous: string | null = null;
+  return calendarWeeks(dayKeys, weekStartsOn).filter((answer) => {
+    const opens = answer.week.firstDay !== previous;
+    previous = answer.week.firstDay;
+    return opens;
+  });
+}
+
 /** The calendar week one day is shown in. */
 export function calendarWeekOf(dayKey: string, weekStartsOn: number): CalendarWeek {
   const [answer] = calendarWeeks([dayKey], weekStartsOn);

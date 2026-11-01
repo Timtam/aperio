@@ -1412,6 +1412,11 @@ export function WeekView() {
     gridRef.current?.contains(document.activeElement) ?? false,
   );
   const weekCue = weekNumbers && dayStep.inWidget && dayStep.crossedWeek;
+  // On an entry the cell is not read; coming back to the cell with Escape
+  // need not say the week again.
+  useEffect(() => {
+    if (eventIndex !== null) dropDayStep();
+  }, [eventIndex, dropDayStep]);
   // Paged from outside the grid: say the week. In the grid the cell says it.
   usePageTurnAnnouncement(weekNumbers ? weekSentence : weekRange, gridRef);
 

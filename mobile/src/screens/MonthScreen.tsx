@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { calendarWeekLabel, calendarWeekName, localDateKey, weekOpenings } from '@aperio/shared';
+
 import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarDayList } from '../components/CalendarDayList';
@@ -11,6 +13,8 @@ import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
+import { peekWeekNumbers, readWeekNumbers } from '../settings/weekNumbers';
+import { peekWeekStart, readWeekStart, type WeekStart } from '../settings/weekStart';
 import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
@@ -20,8 +24,10 @@ import { chrome } from '../theme/uiScale';
 // the shared linear CalendarDayList scoped to the calendar month (the 1st to the
 // last, no adjacent-month padding — padding only serves a visual grid). This
 // screen owns the month chrome: the Day/Week/Month/Agenda switcher, the month
-// header + prev/next-month nav, and today / jump-to-date. (Unlike Week, the
-// month-days list needs no week-start — there's no week grouping or padding.)
+// header + prev/next-month nav, and today / jump-to-date. The list has no
+// week grouping or padding, but the first day of each week in it names that
+// week (synced `view.weekNumbers`, on by default), so the week start counts
+// here too (TODO B15 step 4).
 
 /** Local-midnight clone of `date`. */
 function localMidnight(date: Date): Date {
@@ -41,6 +47,20 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
     [],
   );
 
+  // The synced week prefs, from the values the app read at launch, re-read
+  // whenever the screen regains focus (Settings, another device).
+  const [weekStart, setWeekStart] = useState<WeekStart>(peekWeekStart);
+  const [weekNumbers, setWeekNumbers] = useState<boolean>(peekWeekNumbers);
+  useEffect(() => {
+    const read = () => {
+      void readWeekStart().then(setWeekStart);
+      void readWeekNumbers().then(setWeekNumbers);
+    };
+    const unsubscribe = navigation.addListener('focus', read);
+    read();
+    return unsubscribe;
+  }, [navigation]);
+
   // Every day of the anchor's calendar month (1st → last) + the covering range.
   const { days, range } = useMemo(() => {
     const y = anchor.getFullYear();
@@ -50,6 +70,18 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
     const end = new Date(y, m, daysInMonth, 23, 59, 59, 999);
     return { days: ds, range: { start: new Date(y, m, 1), end } };
   }, [anchor]);
+
+  // The headers that name their week: the first day of each week in the
+  // list, and the 1st, which opens the list's first week wherever it falls.
+  const headerWeeks = useMemo(() => {
+    if (!weekNumbers) return undefined;
+    return new Map(
+      weekOpenings(days.map(localDateKey), weekStart).map((answer) => [
+        answer.day,
+        { name: calendarWeekName(t, answer.week), label: calendarWeekLabel(t, answer.week) },
+      ]),
+    );
+  }, [days, t, weekNumbers, weekStart]);
 
   const monthLabel = useMemo(
     () => anchor.toLocaleDateString(i18n.language, { month: 'long', year: 'numeric' }),
@@ -147,6 +179,7 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
           gridLabel={t('views.month.gridLabel')}
           emptyText={t('views.month.empty')}
           dayAnnounceKey="views.month.dayAnnounce"
+          headerWeeks={headerWeeks}
           // "Go to the current task" on a recurring-task projection: move the
           // month window to the day the real row lives on.
           onJumpToDay={(day) => setAnchor(localMidnight(day))}

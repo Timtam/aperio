@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import type { CalendarEvent } from '../api/types';
 
@@ -76,7 +76,14 @@ export interface UseEventTabNavigationResult {
   setEventIndex: (next: number | null) => void;
 }
 
-import { useState } from 'react';
+/** The entry selected in a day, and the day it was selected in. `dayKey`
+ *  null: selected by Tab for the day it moves to, whose key the host has not
+ *  rendered yet. */
+interface Selection {
+  index: number | null;
+  dayIndex: number;
+  dayKey: string | null | undefined;
+}
 
 export function useEventTabNavigation<T = CalendarEvent>(
   opts: UseEventTabNavigationOptions<T>,
@@ -89,28 +96,38 @@ export function useEventTabNavigation<T = CalendarEvent>(
     [buckets],
   );
 
-  const [eventIndex, setEventIndex] = useState<number | null>(null);
-
-  // The host resets eventIndex to null whenever the day changes via
-  // arrow keys, but Tab needs to *change* the day AND keep an event
-  // selected. We mark "this day change is mine, don't reset" through
-  // a ref so the day-effect runs without clobbering the new event.
-  const keepEventRef = useRef(false);
-  useEffect(() => {
-    if (keepEventRef.current) {
-      keepEventRef.current = false;
-      return;
-    }
-    setEventIndex(null);
-  }, [dayIndex, dayKey]);
-
-  // Clamp when the focused day's event list shrinks (e.g. delete).
+  // The selection belongs to the day it was made in. When the host stands
+  // on another day — an arrow key, a page turn, a week step on the same
+  // weekday — it is dropped, and so is an index past the end of a list
+  // that shrank (a delete). Both during render, so the frame that moves the
+  // day already points at the day cell: an effect left one frame on a chip
+  // of the old index, which may not exist on the new day, and a page turn's
+  // announcement judged that frame as nothing renamed. Tab moves the day
+  // AND selects an entry on it, so its selection is marked for its target.
+  const [selection, setSelection] = useState<Selection>({
+    index: null,
+    dayIndex,
+    dayKey,
+  });
+  let current = selection;
+  if (current.dayIndex !== dayIndex) {
+    current = { index: null, dayIndex, dayKey };
+  } else if (current.dayKey === null) {
+    current = { ...current, dayKey };
+  } else if (current.dayKey !== dayKey) {
+    current = { index: null, dayIndex, dayKey };
+  }
   const dayEventCount = buckets[dayIndex]?.items.length ?? 0;
-  useEffect(() => {
-    if (eventIndex !== null && eventIndex >= dayEventCount) {
-      setEventIndex(dayEventCount > 0 ? dayEventCount - 1 : null);
-    }
-  }, [dayEventCount, eventIndex]);
+  if (current.index !== null && current.index >= dayEventCount) {
+    current = { ...current, index: dayEventCount > 0 ? dayEventCount - 1 : null };
+  }
+  if (current !== selection) setSelection(current);
+  const eventIndex = current.index;
+
+  const setEventIndex = useCallback(
+    (next: number | null) => setSelection({ index: next, dayIndex, dayKey }),
+    [dayIndex, dayKey],
+  );
 
   // Translate a (dayIdx, evIdx) pair into a single flat index for
   // chronological cycling. The reverse mapping walks the buckets again
@@ -184,14 +201,15 @@ export function useEventTabNavigation<T = CalendarEvent>(
     (next: { dayIdx: number; evIdx: number }) => {
       const dayChanged = next.dayIdx !== dayIndex;
       if (dayChanged) {
-        keepEventRef.current = true;
         setDayIndex(next.dayIdx);
         const item = buckets[next.dayIdx]?.items[next.evIdx];
         if (item && onDayChange) onDayChange(next.dayIdx, item);
+        setSelection({ index: next.evIdx, dayIndex: next.dayIdx, dayKey: null });
+      } else {
+        setEventIndex(next.evIdx);
       }
-      setEventIndex(next.evIdx);
     },
-    [dayIndex, setDayIndex, buckets, onDayChange],
+    [dayIndex, setDayIndex, buckets, onDayChange, setEventIndex],
   );
 
   const handleTab = useCallback(
@@ -231,7 +249,7 @@ export function useEventTabNavigation<T = CalendarEvent>(
     ],
   );
 
-  const clear = useCallback(() => setEventIndex(null), []);
+  const clear = useCallback(() => setEventIndex(null), [setEventIndex]);
 
   return { eventIndex, clear, handleTab, setEventIndex };
 }

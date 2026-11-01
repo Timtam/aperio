@@ -403,6 +403,14 @@ export interface CalendarDayListProps {
    * and without this the only way there was paging the calendar by hand).
    */
   onJumpToDay?: (day: Date) => void;
+  /**
+   * Days whose header names their calendar week, by `YYYY-MM-DD` key: seen as
+   * "KW 45" beside the date, spoken as "Kalenderwoche 45" between the date and
+   * the count, under the `…Week` variant of `dayAnnounceKey`. The month list
+   * passes the first day of each week in it (TODO B15 step 4); a day not in
+   * the map, or no map, says no week.
+   */
+  headerWeeks?: ReadonlyMap<string, { name: string; label: string }>;
 }
 
 export function CalendarDayList({
@@ -415,6 +423,7 @@ export function CalendarDayList({
   showDayHeaders = true,
   dayLayout,
   onJumpToDay,
+  headerWeeks,
 }: CalendarDayListProps) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -2250,14 +2259,16 @@ export function CalendarDayList({
               // and custom actions on a raw Text host have platform quirks —
               // this is the ONLY per-day create path here, so it rides the
               // proven pattern. role="header" keeps the headings rotor.
+              const headerWeek = headerWeeks?.get(b.key);
               rows.push(
                 <Pressable
                   key={`h-${b.key}`}
                   accessible
                   accessibilityRole="header"
                   accessibilityLabel={[
-                    t(dayAnnounceKey, {
+                    t(headerWeek ? `${dayAnnounceKey}Week` : dayAnnounceKey, {
                       day: fmtFullDate(b.date),
+                      week: headerWeek?.name,
                       count: b.count,
                     }),
                     // Appended to the heading's own name rather than standing
@@ -2285,6 +2296,7 @@ export function CalendarDayList({
                 >
                   <Text style={styles.dayHeader} importantForAccessibility="no">
                     {fmtFullDate(b.date)}
+                    {headerWeek ? ` · ${headerWeek.label}` : ''}
                     {(() => {
                       const symbols = compactDaySummary(
                         dayLogsByKey.get(b.key),
