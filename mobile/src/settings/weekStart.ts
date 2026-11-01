@@ -5,8 +5,8 @@ import { getUserPref, setUserPref } from '../api/prefs';
 // the desktop ViewState's `weekStartsOn`. Drives the Week view's day order
 // (Monday by default) and, with it, the week's number: the ISO week most of
 // the displayed days fall in (`cal_core::calendar_week`). Read by WeekScreen,
-// MonthScreen and EventsScreen, set by SettingsScreen (the picker), the same
-// read/write/parse pattern as ./language.
+// MonthScreen, AgendaScreen and EventsScreen, set by SettingsScreen (the
+// picker), the same read/write/parse pattern as ./language.
 //
 // The last value read or written is kept here, and the app reads it once at
 // launch (see ./weekNumbers): a screen then starts on the stored start day

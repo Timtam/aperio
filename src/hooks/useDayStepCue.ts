@@ -13,6 +13,8 @@ export interface DayStepCue {
   crossedWeek: boolean;
 }
 
+const NO_CUE: DayStepCue = { inWidget: false, crossedWeek: false };
+
 /**
  * What the last step onto the active day changed (TODO B15). A screen reader
  * in a grid or list reads only what it lands on, so a new week, or in the day
@@ -21,10 +23,15 @@ export interface DayStepCue {
  * and `crossedWeek`; the day view's active entry names the date when
  * `inWidget`, and the week with it when `crossedWeek`.
  *
- * `activeDayKey` is the day the widget stands on, `weekKey` the first day of
- * the week it is shown in, `inWidget` whether the step happens with the focus
- * in the widget — read at render, the moment the step lands: the arrow keys
- * and Ctrl+→ step with the focus there, the toolbar's buttons from outside.
+ * `activeKey` is what the widget stands on — a day in the grids and the day
+ * view, an entry in the agenda, where a second meeting on the same day is a
+ * step within the week — and '' while it stands on nothing (a list that is
+ * empty or still loading): that is no step, and the next entry is compared
+ * with the last one there was. `weekKey` is the first day of the week the
+ * active thing is shown in, `inWidget` whether the step happens with the
+ * focus in the widget — read at render, the moment the step lands: the arrow
+ * keys and Ctrl+→ step with the focus there, the toolbar's buttons from
+ * outside.
  *
  * The cue holds until the active day moves again: a reload of the items
  * re-renders the name, and a name that changed then would make NVDA read it
@@ -37,12 +44,12 @@ export interface DayStepCue {
  * same frame that moves `aria-activedescendant`.
  */
 export function useDayStepCue(
-  activeDayKey: string,
+  activeKey: string,
   weekKey: string,
   inWidget: boolean,
 ): [cue: DayStepCue, drop: () => void] {
   const [track, setTrack] = useState({
-    activeDayKey,
+    activeKey,
     weekKey,
     cue: { inWidget: false, crossedWeek: false },
   });
@@ -55,12 +62,13 @@ export function useDayStepCue(
       ),
     [],
   );
-  if (track.activeDayKey === activeDayKey && track.weekKey === weekKey) {
+  if (activeKey === '') return [NO_CUE, drop];
+  if (track.activeKey === activeKey && track.weekKey === weekKey) {
     return [track.cue, drop];
   }
-  const moved = track.activeDayKey !== activeDayKey;
+  const moved = track.activeKey !== activeKey;
   const next = {
-    activeDayKey,
+    activeKey,
     weekKey,
     cue: moved
       ? { inWidget, crossedWeek: weekKey !== track.weekKey }

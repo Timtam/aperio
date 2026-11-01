@@ -106,7 +106,7 @@ export function AgendaView() {
   // Expand multi-day all-day events into one renderable row per
   // covered day. A 14-day vacation becomes 14 rows, each carrying
   // "Tag 3 von 14" position info; keyboard focus / Enter / Delete
-  // operate on the underlying event via `occurrences[focusIndex].ev`.
+  // operate on the underlying event via `occurrences[activeIndex].ev`.
   const allOccurrences = useMemo(
     () => expandToDayOccurrences(events, range),
     [events, range],
@@ -149,6 +149,9 @@ export function AgendaView() {
       setFocusIndex(Math.max(0, occurrences.length - 1));
     }
   }, [occurrences.length, focusIndex]);
+  // The entry the list stands on in this render, the shrink already applied:
+  // what the screen reader is pointed at and what the week cue compares.
+  const activeIndex = Math.min(focusIndex, Math.max(0, occurrences.length - 1));
 
   // Deferred indicator — see DayView for the full rationale.
   // Restarted on every new range (see WeekView).
@@ -186,13 +189,15 @@ export function AgendaView() {
   }, [occurrences, weekNumbers, weekStartsOn, t]);
   // The entry a step lands on names its week when the step crossed into
   // another one, forward or back: the step here is an entry, not a day, so
-  // the next meeting on the same day says no week again.
-  const focusedOccurrence = occurrences[focusIndex];
+  // the next meeting on the same day says no week again. Read from the index
+  // clamped here, in render: the effect above corrects the state a frame
+  // later, and that frame stood on no entry and pointed at none.
+  const focusedOccurrence = occurrences[activeIndex];
   const [entryStep, dropEntryStep] = useDayStepCue(
     focusedOccurrence
       ? `${eventInstanceKey(focusedOccurrence.ev)}@${localDateKey(focusedOccurrence.day)}`
       : '',
-    occurrenceWeeks[focusIndex]?.firstDay ?? '',
+    occurrenceWeeks[activeIndex]?.firstDay ?? '',
     listRef.current?.contains(document.activeElement) ?? false,
   );
   const weekCue = weekNumbers && entryStep.inWidget && entryStep.crossedWeek;
@@ -291,7 +296,7 @@ export function AgendaView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const ev = occurrences[focusIndex]?.ev;
+      const ev = occurrences[activeIndex]?.ev;
       if (e.ctrlKey || e.metaKey) {
         if (e.key.toLowerCase() === 'd' && !e.shiftKey && !e.altKey) {
           e.preventDefault();
@@ -367,7 +372,7 @@ export function AgendaView() {
           e.preventDefault();
           if (ev) {
             const target = e.currentTarget as HTMLElement;
-            const id = itemId(focusIndex);
+            const id = itemId(activeIndex);
             const node = target.ownerDocument?.getElementById(id);
             const rect = node?.getBoundingClientRect();
             const pos = rect
@@ -383,7 +388,7 @@ export function AgendaView() {
     },
     [
       occurrences,
-      focusIndex,
+      activeIndex,
       invalidateData,
       openEventDialog,
       openMoveCopy,
@@ -427,13 +432,13 @@ export function AgendaView() {
         tabIndex={0}
         aria-label={t('views.agenda.eventList')}
         aria-activedescendant={
-          occurrences.length > 0 ? itemId(focusIndex) : undefined
+          occurrences.length > 0 ? itemId(activeIndex) : undefined
         }
         // The day of the focused entry: the agenda moves its own focus, not
         // the anchor, and the K key says the week of this day.
         data-active-day={
-          occurrences[focusIndex]
-            ? localDateKey(occurrences[focusIndex].day)
+          occurrences[activeIndex]
+            ? localDateKey(occurrences[activeIndex].day)
             : undefined
         }
         onKeyDown={handleKeyDown}
@@ -450,7 +455,7 @@ export function AgendaView() {
             {t('views.agenda.empty')}
           </li>
         ) : (
-          renderOccurrences(occurrences, focusIndex, {
+          renderOccurrences(occurrences, activeIndex, {
             groupRows,
             calendarById,
             labelById,

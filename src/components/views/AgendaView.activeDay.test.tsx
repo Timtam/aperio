@@ -76,8 +76,10 @@ const MENU = { openForEvent: () => {} };
 vi.mock('../../state/calendarStoreContext', () => ({ useCalendarStore: () => STORE }));
 vi.mock('../../state/viewStateContext', () => ({ useViewState: () => VIEW_STATE }));
 vi.mock('../../state/dialogStateContext', () => ({ useDialogState: () => DIALOG_STATE }));
+/** What the calendar holds now; a test swaps in another stable array. */
+const SHOWN = { events: EVENTS };
 vi.mock('../../state/useEvents', () => ({
-  useEvents: () => ({ events: EVENTS, calendarById: CALENDAR_BY_ID, loading: false }),
+  useEvents: () => ({ events: SHOWN.events, calendarById: CALENDAR_BY_ID, loading: false }),
 }));
 vi.mock('../../state/useEventGroups', () => ({
   useEventGroups: (events: CalendarEvent[]) => ({ groups: GROUPS, events }),
@@ -104,6 +106,7 @@ beforeEach(() => {
   VIEW_STATE.anchor = new Date(2026, 10, 4);
   VIEW_STATE.pageTurn = 0;
   VIEW_STATE.weekNumbers = true;
+  SHOWN.events = EVENTS;
   announce.mockReset();
 });
 
@@ -180,5 +183,44 @@ describe('the week in the agenda', () => {
     fireEvent.keyDown(list, { key: 'End' });
     expect(activeName(list)).toMatch(/^Mittwoch, 18\. November 2026, Ausblick/);
     expect(container.textContent).not.toContain('KW');
+  });
+});
+
+describe('the week in the agenda when the list changes under the focus', () => {
+  function activeName(list: HTMLElement): string {
+    const id = list.getAttribute('aria-activedescendant');
+    return (id && document.getElementById(id)?.getAttribute('aria-label')) || '';
+  }
+  /** On Ausblick, the last entry, with its week already said. */
+  async function onTheLastEntry() {
+    const { AgendaView } = await import('./AgendaView');
+    const view = render(<AgendaView />);
+    const list = await screen.findByRole('listbox');
+    await screen.findByText(/Ausblick/);
+    list.focus();
+    fireEvent.keyDown(list, { key: 'End' });
+    fireEvent.keyDown(list, { key: 'ArrowUp' });
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    expect(activeName(list)).toMatch(/^Mittwoch, 18\. November 2026, Ausblick/);
+    return { list, rerender: () => view.rerender(<AgendaView />) };
+  }
+
+  it('the entry that takes the place of a deleted one names no week it did not cross', async () => {
+    const { list, rerender } = await onTheLastEntry();
+    // Ausblick is deleted; Review, on the same day, is now the last entry.
+    SHOWN.events = EVENTS.slice(0, 3);
+    rerender();
+    expect(activeName(list)).toMatch(/^Mittwoch, 18\. November 2026, Review/);
+  });
+
+  it('a list that empties for a moment is no step: the next entry is compared with the last', async () => {
+    const { list, rerender } = await onTheLastEntry();
+    // A reload: nothing while it reads, then the 18th alone. The focus starts
+    // again at the top, on Review, in the week Ausblick was in.
+    SHOWN.events = [];
+    rerender();
+    SHOWN.events = EVENTS.slice(2);
+    rerender();
+    expect(activeName(list)).toMatch(/^Mittwoch, 18\. November 2026, Review/);
   });
 });
