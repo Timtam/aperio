@@ -15,6 +15,7 @@
 import type { CalendarWeek } from './generated/CalendarWeek';
 import type { CalendarWeeksInput } from './generated/CalendarWeeksInput';
 import type { DayCalendarWeek } from './generated/DayCalendarWeek';
+import { monthName } from './intlNames';
 
 export type { CalendarWeek, CalendarWeeksInput, DayCalendarWeek };
 
@@ -56,4 +57,80 @@ export function calendarWeekOf(dayKey: string, weekStartsOn: number): CalendarWe
   const [answer] = calendarWeeks([dayKey], weekStartsOn);
   if (answer === undefined) throw new Error('the core answered no week for one day');
   return answer.week;
+}
+
+// ── How a week is written ───────────────────────────────────────────────────
+//
+// Both devices say a week the same way, so the words are built here once from
+// the core's answer. Spoken: "Kalenderwoche 45" — never "KW 45", which a
+// speech synthesizer spells out letter by letter. Seen: "KW 45". The year
+// joins only when the week touches two calendar years, and then it is the
+// year the number counts in. A range always says "bis", never a dash, which
+// the synthesizer reads as "minus" or skips; and the week's number is never
+// followed by a full stop, which it would read as an ordinal ("46." is
+// "sechsundvierzigste"). The day numbers of a German range are ordinals and
+// keep theirs.
+
+type Translate = (key: string, vars?: Record<string, unknown>) => string;
+
+/** Year, month and day of a `YYYY-MM-DD` key. */
+function partsOf(dayKey: string): { year: number; month: number; day: number } {
+  const [year, month, day] = dayKey.split('-').map(Number);
+  return { year, month, day };
+}
+
+/** The week as it is spoken: "Kalenderwoche 45", or "Kalenderwoche 53 des
+ *  Jahres 2026" when the week touches two calendar years. */
+export function calendarWeekName(t: Translate, week: CalendarWeek): string {
+  return week.spansYears
+    ? t('views.week.kwSpokenYear', { week: week.week, year: week.weekYear })
+    : t('views.week.kwSpoken', { week: week.week });
+}
+
+/** The week as it is seen: "KW 45", or "KW 53 (2026)". */
+export function calendarWeekLabel(t: Translate, week: CalendarWeek): string {
+  return week.spansYears
+    ? t('views.week.kwYear', { week: week.week, year: week.weekYear })
+    : t('views.week.kw', { week: week.week });
+}
+
+/** The week's days, first to last: "2. bis 8. November 2026", "26. Oktober
+ *  bis 1. November 2026", "28. Dezember 2026 bis 3. Januar 2027". */
+export function calendarWeekRange(t: Translate, language: string, week: CalendarWeek): string {
+  const from = partsOf(week.firstDay);
+  const to = partsOf(week.lastDay);
+  if (week.sameMonth) {
+    return t('views.week.rangeSameMonth', {
+      fromDay: from.day,
+      toDay: to.day,
+      month: monthName(language, to.month),
+      year: to.year,
+    });
+  }
+  if (!week.spansYears) {
+    return t('views.week.rangeSameYear', {
+      fromDay: from.day,
+      fromMonth: monthName(language, from.month),
+      toDay: to.day,
+      toMonth: monthName(language, to.month),
+      year: to.year,
+    });
+  }
+  return t('views.week.rangeYears', {
+    fromDay: from.day,
+    fromMonth: monthName(language, from.month),
+    fromYear: from.year,
+    toDay: to.day,
+    toMonth: monthName(language, to.month),
+    toYear: to.year,
+  });
+}
+
+/** The whole week in one sentence, what the K key and a grid's name say:
+ *  "Kalenderwoche 45, 2. bis 8. November 2026". */
+export function calendarWeekSentence(t: Translate, language: string, week: CalendarWeek): string {
+  return t('views.week.kwSentence', {
+    name: calendarWeekName(t, week),
+    range: calendarWeekRange(t, language, week),
+  });
 }

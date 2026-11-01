@@ -20,9 +20,9 @@ Kapitel lernst du sie kennen und wechselst zwischen ihnen.
 ## Zwischen Ansichten wechseln
 
 - Über das **Ansichtsmenü** in der Symbolleiste.
-- Per Tastatur: in vielen Programmen sind die Ziffern `1`–`7` für die
-  Ansichten belegt; deine tatsächliche Belegung findest du in der
-  [Kürzel-Übersicht](/de/guides/keyboard-shortcuts/) und kannst sie dort anpassen.
+- Per Tastatur: `Strg+1` bis `Strg+7` wechseln zur Tages-, Wochen-, Monats-,
+  Jahres-, Agenda-, Aufgaben- und Kontaktansicht; alle Tasten stehen in der
+  [Kürzel-Übersicht](/de/guides/keyboard-shortcuts/).
 
 ## Navigieren in einer Ansicht
 
@@ -32,13 +32,33 @@ Kapitel lernst du sie kennen und wechselst zwischen ihnen.
   brauchst die Liste also nicht zu verlassen, um zu erfahren, was der Tag noch
   bringt. Das Band unter dem Raster zeigt dieselben Aufgaben für sehende
   Nutzer.
-- **Vor und zurück:** mit `Bild auf` / `Bild ab` blätterst du zum
-  vorigen/nächsten Zeitraum (Woche, Monat …).
-- **Heute:** springt zurück auf den aktuellen Tag (Standard: `T` oder
-  „Heute" in der Symbolleiste).
-- **Kalenderwochen** werden in den Wochen- und Monatsansichten angezeigt. Sie
-  folgen in jeder Sprache ISO 8601; beginnt deine Woche nicht am Montag, trägt
-  eine Woche die Nummer der ISO-Woche, in die die meisten ihrer Tage fallen.
+- **Vor und zurück:** mit `Strg+←` / `Strg+→` blätterst du in jeder Ansicht
+  zum vorigen/nächsten Zeitraum (Tag, Woche, Monat …); im Wochen- und
+  Monatsraster tun `Bild auf` / `Bild ab` dasselbe.
+- **Heute:** `Strg+T` oder „Heute" in der Symbolleiste springt zurück auf den
+  aktuellen Tag.
+
+## Kalenderwochen
+
+Die Überschrift der Wochenansicht, die Zeilen der Monatsansicht und das Datum
+in der Symbolleiste zeigen die Kalenderwoche, etwa „KW 45“. Die Nummern
+folgen in jeder Sprache ISO 8601; beginnt deine Woche nicht am Montag, trägt
+eine Woche die Nummer der ISO-Woche, in die die meisten ihrer Tage fallen.
+
+> **Tastatur & Screenreader:** Der Screenreader hört die Woche in Worten,
+> nicht als Buchstaben: Überschrift und Raster der Wochenansicht sagen
+> „Kalenderwoche 45, 2. bis 8. November 2026“. Der Name eines Tages trägt die
+> Woche nur, wenn du in eine andere Woche wechselst – `↓` geht in der
+> Wochenansicht zum selben Tag der nächsten Woche und nennt diese Woche, `→`
+> innerhalb der Woche nicht. Blätterst du stattdessen mit den Knöpfen der
+> Symbolleiste, hörst du die neue Woche im Namen des Rasters, wenn du dorthin
+> zurückkehrst. Mit `K` hörst du in der Tages-, Wochen-, Monats-,
+> Jahres- und Agendaansicht die Woche des Tages, auf dem du stehst, mit ihren
+> Tagen.
+
+**Einstellungen → Allgemein → Kalenderwochen anzeigen und ansagen** schaltet
+die Nummern und die gesprochene Woche gemeinsam ab, auf allen Geräten, die du
+synchronisierst; `K` antwortet weiterhin, wenn du fragst.
 
 ## Sichtbare Stunden im Stundenraster
 

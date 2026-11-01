@@ -2,10 +2,9 @@
 title: "Tastaturkürzel"
 ---
 
-Diese Seite fasst die Standard-Tastenkürzel zusammen. Die tatsächliche
-Belegung kann je nach Plattform und deinen Anpassungen abweichen –
-maßgeblich ist immer deine eigene Konfiguration unter **Einstellungen →
-Tastaturkürzel**, wo du jedes Kürzel ändern kannst.
+Diese Seite fasst die Tastenkürzel zusammen. Unter macOS steht `Cmd` an der
+Stelle von `Strg`, außer in `Strg+Tab`, das `Strg` bleibt (`Cmd+Tab` gehört
+dem System).
 
 ## Allgemein
 
@@ -52,19 +51,10 @@ Einträge dem Anbieter.
 
 | Aktion | Kürzel |
 |---|---|
-| Heute anzeigen | `T` |
-| Voriger Zeitraum | `Bild auf` |
-| Nächster Zeitraum | `Bild ab` |
+| Heute anzeigen | `Strg+T` |
+| Voriger / nächster Zeitraum | `Strg+←` / `Strg+→` |
+| Voriger / nächster Zeitraum im Wochen- und Monatsraster | `Bild auf` / `Bild ab` |
 | In Ansicht/Liste bewegen | `Pfeiltasten` |
-| Ansicht wechseln | `1`–`7` (sofern belegt) |
-
-## Anpassen
-
-Unter **Einstellungen → Tastaturkürzel** kannst du jede Aktion mit einer
-eigenen Tastenkombination belegen. Bereits vergebene Kombinationen werden
-als Konflikt angezeigt, sodass du keine versehentlichen Doppelbelegungen
-anlegst.
-
-> **Screenreader-Hinweis:** Die Kürzel-Liste in den Einstellungen ist als
-> Tabelle bzw. Liste ausgezeichnet und lässt sich Zeile für Zeile vorlesen.
-> So kannst du dir jederzeit die aktuelle Belegung ansagen lassen.
+| Wochenansicht: derselbe Tag eine Woche früher oder später | `↑` / `↓` |
+| Ansicht wechseln: Tag, Woche, Monat, Jahr, Agenda, Aufgaben, Kontakte | `Strg+1`–`Strg+7` |
+| Kalenderwoche mit ihren Tagen ansagen (Tages-, Wochen-, Monats-, Jahres- und Agendaansicht) | `K` |

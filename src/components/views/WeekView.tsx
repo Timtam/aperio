@@ -7,6 +7,7 @@ import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
+import { useWeekChangeCue } from '../../hooks/useWeekChangeCue';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import {
@@ -109,7 +110,11 @@ import {
   withDeletionsNotRestored,
   writeErrorMessage,
   originalKeptSentence,
+  calendarWeekLabel,
+  calendarWeekName,
   calendarWeekOf,
+  calendarWeekRange,
+  calendarWeekSentence,
 } from '@aperio/shared';
 
 /** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
@@ -261,7 +266,8 @@ export function WeekView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { ask: askLoss, dialog: lossDialog } = useExceptionsLossQuestion();
-  const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
+  const { anchor, setAnchor, goPrev, goNext, weekStartsOn, weekNumbers } =
+    useViewState();
   const { openEventDialog, openTaskDialog, openCreateChooser, invalidateData } =
     useDialogState();
 
@@ -761,6 +767,8 @@ export function WeekView() {
     dayIndex: focusIndex,
     setDayIndex: (next) => setAnchor(days[next]),
     onDayChange: dayChangeAnnouncer,
+    // ↑/↓ step a week and keep the index: the day key resets the item.
+    dayKey: keyOf(days[focusIndex] ?? days[0]),
   });
 
   // The currently focused event (if any) drives the lane bar's
@@ -1298,7 +1306,8 @@ export function WeekView() {
           return;
         }
         // Arrow keys fall through to day navigation below, which will
-        // also reset eventIndex via the focusIndex effect.
+        // also reset eventIndex: a new day, or a new week on the same
+        // weekday, both move the day key the navigation hook watches.
       }
 
       switch (e.key) {
@@ -1377,17 +1386,41 @@ export function WeekView() {
   const today = useMemo(() => new Date(), []);
   // The number is the core's (`cal_core::calendar_week`): ISO 8601, the ISO
   // week most of the displayed days fall in, whatever the week start.
-  const isoWeek = calendarWeekOf(localDateKey(weekStart), weekStartsOn).week;
+  const weekKey = localDateKey(weekStart);
+  const week = useMemo(
+    () => calendarWeekOf(weekKey, weekStartsOn),
+    [weekKey, weekStartsOn],
+  );
+  // Seen and spoken apart: "KW 45" is spelled out letter by letter, so the
+  // heading's text is for the eye and a hidden sentence for the ear.
+  const weekName = calendarWeekName(t, week);
+  const weekRange = calendarWeekRange(t, i18n.language, week);
+  const weekSentence = calendarWeekSentence(t, i18n.language, week);
   // Wait for the first fetch before focusing so the screen reader
   // announces the real day-event count, not the initial empty one.
   const gridRef = useAutoFocus<HTMLDivElement>(!loading);
+  // The cell the active day lands on names the week only when a step in the
+  // grid crossed into another one; the grid's own name carries it on entry.
+  // Read at render, the moment the step lands: the arrow keys and Ctrl+→
+  // step with the focus in the grid, the toolbar's buttons from outside.
+  const [weekChanged, dropWeekCue] = useWeekChangeCue(
+    keyOf(days[focusIndex] ?? days[0]),
+    weekKey,
+    gridRef.current?.contains(document.activeElement) ?? false,
+  );
+  const weekCue = weekNumbers && weekChanged;
 
   return (
     <section className="view view--week" aria-label={t('views.week.title')}>
       <header className="view__header">
         <h2>
-          {t('views.week.kw', { week: isoWeek })} ·{' '}
-          {fmt.format(weekStart, 'PPP')} – {fmt.format(days[6], 'PPP')}
+          <span aria-hidden="true">
+            {weekNumbers && <>{calendarWeekLabel(t, week)} · </>}
+            {fmt.format(weekStart, 'PPP')} – {fmt.format(days[6], 'PPP')}
+          </span>
+          <span className="sr-only">
+            {weekNumbers ? weekSentence : weekRange}
+          </span>
         </h2>
         {/* Acts on the FOCUSED day, not on a fixed one — one button for the
             week instead of seven tab stops to reach the day you meant. */}
@@ -1406,7 +1439,11 @@ export function WeekView() {
           ref={gridRef}
           role="grid"
           data-region-target
-          aria-label={t('views.week.gridLabel')}
+          aria-label={
+            weekNumbers
+              ? `${t('views.week.gridLabel')}, ${weekSentence}`
+              : t('views.week.gridLabel')
+          }
           tabIndex={0}
           aria-activedescendant={
             eventIndex !== null
@@ -1414,6 +1451,12 @@ export function WeekView() {
               : cellId(focusIndex)
           }
           onKeyDown={handleKeyDown}
+          onBlur={(e) => {
+            // Back in the grid, its name says the week; the cell need not.
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+              dropWeekCue();
+            }
+          }}
           className="week-grid"
         >
           <div
@@ -1632,11 +1675,17 @@ export function WeekView() {
                   aria-selected={focused}
                   aria-current={isSameDay(day, today) ? 'date' : undefined}
                   aria-label={[
-                    t('views.week.dayAnnounce', {
-                      day: fmt.format(day, 'PPPP'),
-                      // Events + tasks (timed + untimed) — every chip in the cell.
-                      count: timedItems.length + untimedTasks.length,
-                    }),
+                    t(
+                      focused && weekCue
+                        ? 'views.week.dayAnnounceWeek'
+                        : 'views.week.dayAnnounce',
+                      {
+                        day: fmt.format(day, 'PPPP'),
+                        week: weekName,
+                        // Events + tasks (timed + untimed) — every chip in the cell.
+                        count: timedItems.length + untimedTasks.length,
+                      },
+                    ),
                     spokenFor(dayKey),
                   ]
                     .filter(Boolean)

@@ -1,5 +1,11 @@
 import { useTranslation } from 'react-i18next';
 
+import {
+  calendarWeekLabel,
+  calendarWeekName,
+  calendarWeekOf,
+} from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import { localDateKey } from '../intl/dateKey';
 import { useDateFormat } from '../intl/dateFormat';
@@ -38,7 +44,16 @@ export function Toolbar() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
-  const { view, setView, anchor, jumpToToday, goPrev, goNext } = useViewState();
+  const {
+    view,
+    setView,
+    anchor,
+    jumpToToday,
+    goPrev,
+    goNext,
+    weekStartsOn,
+    weekNumbers,
+  } = useViewState();
   const { openQuickAdd, openQuickAddTask, openSearch, openReminders } =
     useDialogState();
   const { dayViewMode, setDayViewMode } = useTaskCascadeEnabled();
@@ -48,6 +63,11 @@ export function Toolbar() {
   // surfaces (the only views that render the hour-grid / list). It hides
   // entirely elsewhere so it doesn't add noise to month / year / tasks.
   const showDayViewToggle = view === 'day' || view === 'week';
+
+  // The calendar week of the day the views stand on, beside its date.
+  const week = weekNumbers
+    ? calendarWeekOf(localDateKey(anchor), weekStartsOn)
+    : null;
 
   return (
     <div
@@ -149,6 +169,14 @@ export function Toolbar() {
 
       <div className="toolbar__anchor" aria-live="off">
         {fmt.format(anchor, 'PPPP')}
+        {week && (
+          <>
+            {/* "KW 45" for the eye, "Kalenderwoche 45" for the ear: the
+                abbreviation is spelled out letter by letter. */}
+            <span aria-hidden="true"> · {calendarWeekLabel(t, week)}</span>
+            <span className="sr-only">, {calendarWeekName(t, week)}</span>
+          </>
+        )}
       </div>
 
       <div

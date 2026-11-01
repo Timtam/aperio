@@ -3,13 +3,12 @@ title: "10 – Tastaturkürzel"
 ---
 
 Aperio ist vollständig mit der Tastatur bedienbar. In diesem Kapitel lernst
-du die wichtigsten Kürzel kennen und passt sie bei Bedarf an. Eine
-vollständige Liste findest du in der
+du die wichtigsten Kürzel kennen. Eine vollständige Liste findest du in der
 [Kürzel-Referenz](/de/guides/keyboard-shortcuts/).
 
 ## Die wichtigsten Kürzel
 
-| Aktion | Standard-Kürzel |
+| Aktion | Kürzel |
 |---|---|
 | Termin schnell anlegen | `Strg+N` |
 | Neuer Termin (volles Formular) | `Strg+Umschalt+N` |
@@ -21,39 +20,32 @@ vollständige Liste findest du in der
 | Eintrag löschen | `Entf` |
 | Suche öffnen | `Strg+F` |
 | Erinnerungs-Übersicht öffnen | `Strg+Umschalt+R` |
-| Heute anzeigen | `T` |
-| Voriger / nächster Zeitraum | `Bild auf` / `Bild ab` |
+| Heute anzeigen | `Strg+T` |
+| Voriger / nächster Zeitraum | `Strg+←` / `Strg+→` |
+| Kalenderwoche mit ihren Tagen ansagen | `K` |
 | Zwischen Bereichen wechseln | `Tab` / `Umschalt+Tab` |
 | Dialog abbrechen | `Esc` |
 | Einstellungen öffnen | `Strg+,` |
 
-> **Hinweis:** Die genaue Belegung kann je nach Plattform und deinen
-> eigenen Anpassungen abweichen. Maßgeblich ist immer deine eigene
-> Konfiguration (siehe unten).
-
-## Kürzel anpassen
-
-1. Öffne die **Einstellungen** und gehe zu **Tastaturkürzel**.
-2. Suche die gewünschte Aktion in der Liste.
-3. Wähle sie aus und drücke die neue Tastenkombination.
-4. Konflikte mit bereits belegten Kürzeln werden dir angezeigt.
+> **Hinweis:** Unter macOS steht `Cmd` an der Stelle von `Strg`.
 
 ## Navigation – kurz zusammengefasst
 
 - **Pfeiltasten:** in Ansichten und Listen bewegen.
-- **Tab:** zwischen Seitenleiste, Symbolleiste und Ansicht wechseln.
+- **Tab:** zwischen Seitenleiste, Symbolleiste und Ansicht wechseln; `F6`
+  springt zwischen den Bereichen.
 - **Eingabe / Leertaste / Entf:** öffnen / abhaken / löschen.
 - **Esc:** Dialoge und Menüs schließen.
 
 > **Screenreader-Hinweis:** Alle Aktionen sind ohne Maus erreichbar.
 > Schaltflächen tragen Beschriftungen, Menüs sind als Menü ausgezeichnet,
 > und der Anwendungsmodus sorgt dafür, dass deine Tastenanschläge direkt bei
-> Aperio ankommen. Die vollständige, jederzeit aktuelle Belegung kannst du
-> in den Einstellungen einsehen und vorlesen lassen.
+> Aperio ankommen. Die [Kürzel-Referenz](/de/guides/keyboard-shortcuts/)
+> nennt jede Taste in Tabellen, die sich Zeile für Zeile lesen lassen.
 
 ## Zusammenfassung
 
-Du kennst die wichtigsten Kürzel und weißt, wie du sie anpasst. Damit hast
-du das Tutorial abgeschlossen – in der Referenz findest du die vollständige
+Du kennst die wichtigsten Kürzel. Damit hast du das Tutorial
+abgeschlossen – in der Referenz findest du die vollständige
 [Kürzel-Übersicht](/de/guides/keyboard-shortcuts/) und Tipps zur
 [Barrierefreiheit](/de/guides/accessibility/).

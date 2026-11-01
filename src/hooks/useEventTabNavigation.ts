@@ -49,6 +49,14 @@ export interface UseEventTabNavigationOptions<T = CalendarEvent> {
    * read out something like "Wednesday, Aug 21: Team meeting".
    */
   onDayChange?: (newDayIndex: number, item: T) => void;
+  /**
+   * The day the host stands on, for a host whose step can move it without
+   * moving `dayIndex`: the week view's ↓ goes to the same weekday of the next
+   * week, the same index. A change drops the item selection like a day
+   * change does, so the step lands on the day cell, whose name says the new
+   * week.
+   */
+  dayKey?: string;
 }
 
 export interface UseEventTabNavigationResult {
@@ -73,7 +81,7 @@ import { useState } from 'react';
 export function useEventTabNavigation<T = CalendarEvent>(
   opts: UseEventTabNavigationOptions<T>,
 ): UseEventTabNavigationResult {
-  const { buckets, dayIndex, setDayIndex, onDayChange } = opts;
+  const { buckets, dayIndex, setDayIndex, onDayChange, dayKey } = opts;
 
   // Total item count across the visible period — drives wrap-around.
   const total = useMemo(
@@ -94,7 +102,7 @@ export function useEventTabNavigation<T = CalendarEvent>(
       return;
     }
     setEventIndex(null);
-  }, [dayIndex]);
+  }, [dayIndex, dayKey]);
 
   // Clamp when the focused day's event list shrinks (e.g. delete).
   const dayEventCount = buckets[dayIndex]?.items.length ?? 0;

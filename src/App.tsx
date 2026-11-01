@@ -17,6 +17,7 @@ import { MonthView } from './components/views/MonthView';
 import { TaskView } from './components/views/TaskView';
 import { WeekView } from './components/views/WeekView';
 import { YearView } from './components/views/YearView';
+import { useCalendarWeekKey } from './hooks/useCalendarWeekKey';
 import { useDialogShortcuts } from './hooks/useDialogShortcuts';
 import { useFileDrop } from './hooks/useFileDrop';
 import { useRegionFocus } from './hooks/useRegionFocus';
@@ -125,6 +126,7 @@ export function App() {
 function Shell() {
   const { t } = useTranslation();
   useViewShortcuts();
+  useCalendarWeekKey();
   useDialogShortcuts();
   useFileDrop();
   const { mode } = useDialogState();

@@ -825,13 +825,23 @@ Entschieden (Toni, 2026-11-01):
   Desktop über WebAssembly, Handy über UniFFI, eine Tür in `shared/`, eine
   gemeinsame Vorlage. Die drei Kopien in TypeScript sind weg; sichtbar ändert
   sich nichts.
-- [ ] **Schritt 2:** Wochenansicht auf beiden Geräten: Rastername mit KW am
-  Desktop, KW im Zellnamen beim Wochenwechsel, Taste K, KW im Datum der
-  Symbolleiste, der Schalter; am Handy der gesprochene Text über
-  `CalendarPager` (unter VoiceOver spricht der Pager die Überschrift, nicht
-  `WeekScreen`), für TalkBack und ohne Screenreader die Überschrift selbst.
-  Tastenliste und `06-views` (beide Sprachen) dabei berichtigen: dort steht
-  noch `T` statt Strg+T und `1`–`7` statt Strg+1 bis Strg+9.
+- [x] **Schritt 2:** Wochenansicht auf beiden Geräten: Rastername und
+  Überschrift mit dem ganzen Satz, KW im Zellnamen beim Wochenwechsel
+  (`useWeekChangeCue`), Taste K in Tag, Woche, Monat, Jahr und Agenda, KW im
+  Datum der Symbolleiste, der Schalter auf beiden Geräten. Ausgeschaltet fällt
+  auch die KW-Spalte der Monatsansicht weg. Am Handy spricht `CalendarPager`
+  den Satz über `periodSpoken`, die Überschrift trägt ihn als Namen; Wochenanfang
+  und Schalter liest die App beim Start mit, damit der Pager keine korrigierte
+  Überschrift ansagt; der Pager sagt in der Woche nur noch an, wenn der Anker
+  in eine andere Woche wechselt, nicht, wenn eine Einstellung die Überschrift
+  ändert. In der Agenda sagt K die Woche des fokussierten Eintrags. Der
+  Desktop übernimmt per Sync geänderte Ansichts-Einstellungen ohne Neustart.
+  Tastenliste, Tutorial-Kapitel 10 und `06-views` (beide Sprachen)
+  berichtigt; der Abschnitt „Anpassen“ ist aus beiden verschwunden, weil es
+  die Einstellung „Tastaturkürzel“ nicht gibt (DESIGN §15.10 plant sie).
+- [ ] **Schritt 3 und 4:** Der Hinweis des Schalters verspricht die Ansage
+  beim Wochenwechsel bisher nur für die Wochenansicht; mit jedem Schritt um
+  die neue Stelle erweitern (beide Sprachen, Desktop und Handy).
 - [ ] **Schritt 3:** Ansage beim Blättern am Desktop (Symbolleiste, Strg+Pfeil,
   Strg+T), wenn der Fokus nicht im Raster liegt: „Kalenderwoche 46, 9. bis 15.
   November 2026“, in der Tagesansicht das Datum und die KW nur beim

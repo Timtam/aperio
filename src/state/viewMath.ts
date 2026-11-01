@@ -36,8 +36,8 @@ export type ViewId =
 /**
  * Which weekday a week visually starts on, as `date-fns`' `weekStartsOn`
  * (0 = Sunday … 6 = Saturday). Configurable per user (DESIGN.md §5.2,
- * synced pref `view.weekStart`). NOTE: this only affects the visual
- * column order — KW numbers stay ISO-8601 (Monday-based) regardless.
+ * synced pref `view.weekStart`). The week's number follows it: the ISO week
+ * most of the displayed days fall in (`cal_core::calendar_week`).
  */
 export type WeekStart = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 

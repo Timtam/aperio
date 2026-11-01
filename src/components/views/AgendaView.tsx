@@ -380,6 +380,13 @@ export function AgendaView() {
         aria-activedescendant={
           occurrences.length > 0 ? itemId(focusIndex) : undefined
         }
+        // The day of the focused entry: the agenda moves its own focus, not
+        // the anchor, and the K key says the week of this day.
+        data-active-day={
+          occurrences[focusIndex]
+            ? localDateKey(occurrences[focusIndex].day)
+            : undefined
+        }
         onKeyDown={handleKeyDown}
         className="agenda-list"
       >

@@ -36,6 +36,8 @@ import { SyncStatusContext } from './state/syncStatusContext';
 import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import { loadThemeModePref } from './theme/themeMode';
 import { readStartOnToday } from './settings/startOnToday';
+import { readWeekNumbers } from './settings/weekNumbers';
+import { readWeekStart } from './settings/weekStart';
 import { navigationRef } from './navigation/navigationRef';
 import { IncomingFileImport } from './state/IncomingFileImport';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
@@ -624,7 +626,9 @@ function AppContent() {
     // `navReady`, so a pinned theme is resolved BEFORE the first visible
     // frame (the splash screen covers the wait) instead of racing it and
     // flashing the system palette on cold start. The synced start-on-today
-    // pref joins them so, when on, the restored views open on today.
+    // pref joins them so, when on, the restored views open on today, and the
+    // two week prefs so the calendar screens start on the stored week start
+    // and week numbers instead of correcting their heading after opening.
     const navRestore = Promise.all([
       AsyncStorage.getItem(NAV_STATE_KEY),
       readStartOnToday(),
@@ -648,7 +652,12 @@ function AppContent() {
         }
       })
       .catch(() => {});
-    Promise.allSettled([navRestore, loadThemeModePref()]).then(() => {
+    Promise.allSettled([
+      navRestore,
+      loadThemeModePref(),
+      readWeekStart(),
+      readWeekNumbers(),
+    ]).then(() => {
       if (!cancelled) setNavReady(true);
     });
     return () => {

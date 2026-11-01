@@ -37,7 +37,13 @@ import {
   readShowCancelledEvents,
   writeShowCancelledEvents,
 } from '../settings/showCancelledEvents';
-import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
+import { peekWeekNumbers, readWeekNumbers, writeWeekNumbers } from '../settings/weekNumbers';
+import {
+  peekWeekStart,
+  readWeekStart,
+  writeWeekStart,
+  type WeekStart,
+} from '../settings/weekStart';
 import { useAppBadgePref } from '../state/appBadge';
 import { useAppLockPref, whenAppLockReleased, whileOsSheetOpen } from '../state/appLock';
 import { ensurePermission, rescheduleReminders } from '../reminders/scheduler';
@@ -74,7 +80,8 @@ export default function GeneralSettingsScreen() {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const [language, setLanguage] = useState<LanguageChoice>('system');
-  const [weekStart, setWeekStart] = useState<WeekStart>(1);
+  const [weekStart, setWeekStart] = useState<WeekStart>(peekWeekStart);
+  const [weekNumbers, setWeekNumbers] = useState(peekWeekNumbers);
   const timeStep = useTimeStep();
   const timeStepOptions = TIME_STEP_CHOICES.map((m) => ({
     value: m,
@@ -221,6 +228,7 @@ export default function GeneralSettingsScreen() {
     useCallback(() => {
       void readLanguageChoice().then(setLanguage);
       void readWeekStart().then(setWeekStart);
+      void readWeekNumbers().then(setWeekNumbers);
       void readTaskBehaviour().then((b) => setDayViewMode(b.dayViewMode));
       void readStartOnToday().then(setStartOnToday);
       void readShowCancelledEvents().then(setShowCancelled);
@@ -252,6 +260,11 @@ export default function GeneralSettingsScreen() {
   const onWeekStartChange = useCallback((next: WeekStart) => {
     setWeekStart(next);
     void writeWeekStart(next);
+  }, []);
+
+  const onWeekNumbersChange = useCallback((next: boolean) => {
+    setWeekNumbers(next);
+    void writeWeekNumbers(next);
   }, []);
 
   const onDayViewModeChange = useCallback((next: 'grid' | 'list') => {
@@ -300,6 +313,12 @@ export default function GeneralSettingsScreen() {
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.settings.general.weekStartHint')}
         </Text>
+        <SwitchRow
+          label={t('dialogs.settings.general.weekNumbersLabel')}
+          hint={t('dialogs.settings.general.weekNumbersHintMobile')}
+          value={weekNumbers}
+          onToggle={() => onWeekNumbersChange(!weekNumbers)}
+        />
         <RadioGroup<TimeStepMinutes>
           label={t('dialogs.settings.general.timeStepLabel')}
           labelAsHeading

@@ -2,10 +2,9 @@
 title: "Keyboard Shortcuts"
 ---
 
-This page summarizes the default keyboard shortcuts. The actual mapping can
-differ by platform and your own adjustments – your own configuration under
-**Settings → Keyboard shortcuts**, where you can change every shortcut, is
-always authoritative.
+This page summarizes the keyboard shortcuts. On macOS, `Cmd` takes the place
+of `Ctrl`, except in `Ctrl+Tab`, which stays `Ctrl` (`Cmd+Tab` belongs to the
+system).
 
 ## General
 
@@ -51,18 +50,10 @@ Deleting asks first. In a read-only address book — a global address list, say
 
 | Action | Shortcut |
 |---|---|
-| Show today | `T` |
-| Previous period | `Page Up` |
-| Next period | `Page Down` |
+| Show today | `Ctrl+T` |
+| Previous / next period | `Ctrl+←` / `Ctrl+→` |
+| Previous / next period in the week and month grids | `Page Up` / `Page Down` |
 | Move within view/list | `Arrow keys` |
-| Switch view | `1`–`7` (where assigned) |
-
-## Customizing
-
-Under **Settings → Keyboard shortcuts** you can assign your own key
-combination to every action. Combinations already in use are shown as a
-conflict, so you don't create accidental duplicates.
-
-> **Screen-reader note:** The shortcut list in the settings is marked up as a
-> table or list and can be read row by row. This lets you have the current
-> mapping read out to you at any time.
+| Week view: the same day one week earlier or later | `↑` / `↓` |
+| Switch view: day, week, month, year, agenda, tasks, contacts | `Ctrl+1`–`Ctrl+7` |
+| Say the calendar week and its days (day, week, month, year and agenda view) | `K` |

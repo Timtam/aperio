@@ -30,9 +30,10 @@ export interface ViewStateValue {
   enterFocus: (calendarId: string) => void;
   exitFocus: () => void;
   /**
-   * Visual first day of the week (0 = Sunday … 6 = Saturday), a synced
+   * First day of the displayed week (0 = Sunday … 6 = Saturday), a synced
    * user preference (`view.weekStart`, DESIGN.md §5.2). Defaults to Monday.
-   * Only affects column order; KW numbers stay ISO-8601.
+   * A week carries the number of the ISO week most of its days fall in
+   * (`cal_core::calendar_week`).
    */
   weekStartsOn: WeekStart;
   setWeekStartsOn: (d: WeekStart) => void;
@@ -54,6 +55,15 @@ export interface ViewStateValue {
    */
   showCancelledEvents: boolean;
   setShowCancelledEvents: (v: boolean) => void;
+  /**
+   * Show and announce calendar weeks: the number in the week and month views
+   * and in the toolbar date, and the spoken week when the active day moves
+   * into another week. A synced user preference (`view.weekNumbers`);
+   * defaults to ON. Seen and spoken switch together; the K key says the week
+   * on request either way.
+   */
+  weekNumbers: boolean;
+  setWeekNumbers: (v: boolean) => void;
   /**
    * Offer HIDDEN (deselected) but writable calendars / task lists as assignment
    * targets in the editors + move/copy pickers. Synced user preferences
