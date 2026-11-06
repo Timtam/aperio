@@ -96,9 +96,9 @@ In the event dialog you can also set:
 > the times, the place, the description and the guest list are all there to
 > read, each one a stop your screen reader reaches, but none of them can be
 > changed. The dialog says so in a line above the fields. The description
-> is a document of its own: on the desktop NVDA switches to browse mode when
-> you reach it, so the arrow keys read it line by line, and `Tab` leaves it
-> for the next field.
+> is a read-only text field: on the desktop NVDA stays in focus mode, the
+> arrow keys read it line by line, `Ctrl+arrow` word by word, and `Tab`
+> leaves it for the next field.
 >
 > What you can still do: answer (Accept, Tentative, Decline), set your own
 > reminders — attached ones the calendar keeps, or private ones only Aperio
