@@ -4254,9 +4254,14 @@ es mitbringt.
   nur Meetings verwalten, die er selbst angelegt hat und lokal noch erinnert:
   nicht eines aus der Weboberfläche des Anbieters, nicht eines vom Zweitgerät,
   nicht eines aus einer Einladung.
-- `list_meetings(start, end)` zählt die geplanten Meetings eines Zeitraums auf.
-  Erst das macht Meetings **ohne Kalendereintrag** überhaupt sichtbar; der Host
-  baut daraus einen schreibgeschützten Kalender (`host_core::vc_calendar`).
+- `list_meetings(start, end)` zählt die geplanten Meetings eines Zeitraums auf,
+  **einen Eintrag je Termin**. Erst das macht Meetings **ohne Kalendereintrag**
+  überhaupt sichtbar; der Host baut daraus einen schreibgeschützten Kalender
+  (`host_core::vc_calendar`). Bei Webex heißt das `meetingType=scheduledMeeting`:
+  ohne den Typ liefert Webex die Serien (`meetingSeries`), jede nur einmal mit
+  ihrem nächsten Termin und zu einer Zeit, die der Zone der Serie nicht folgte,
+  sodass eine im Sommer begonnene Serie nach der Zeitumstellung eine Stunde
+  daneben stand (Toni, 2026-11-06).
 
 Ebenfalls seit ABI 3 nimmt `delete_meeting` ein **Objekt** statt einer nackten
 Meeting-ID: `{id, notify_attendees}` (`vc_core::MeetingRemoval`). Ein Meeting

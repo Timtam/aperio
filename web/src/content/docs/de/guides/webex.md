@@ -145,6 +145,8 @@ Sobald ein Webex-Konto verbunden ist, legt Aperio einen **schreibgeschützten
 Kalender mit dem Namen dieses Kontos** an, in dem genau diese Meetings stehen.
 Er verhält sich wie jeder andere Kalender: in der Seitenleiste ein- und
 ausschalten, in Tages- und Wochenansicht sehen, aus dem Kontextmenü beitreten.
+Eine Serie steht dort mit jedem ihrer Termine, jeder zu der Zeit, die Webex ihm
+gibt, auch über die Zeitumstellung hinweg.
 
 Ein Meeting, das schon einen Kalendereintrag hat — weil Aperio es angelegt hat
 oder eine Einladung es mitgebracht hat —, steht nicht doppelt da. Aperio führt
