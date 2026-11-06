@@ -18,6 +18,8 @@ interface TestEvent extends RecurringEventLike {
   calendar_id: string;
   title: string;
   all_day: boolean;
+  location?: string | null;
+  description?: string | null;
 }
 
 const baseEvent: TestEvent = {
@@ -189,6 +191,43 @@ describe('buildWidgetSnapshot — grouped copies', () => {
     const events = snap.items.filter((i) => i.kind === 'event');
     expect(events).toHaveLength(1);
     expect(events[0]?.id).toBe('ev-private');
+  });
+});
+
+describe('buildWidgetSnapshot — meetings', () => {
+  const JOIN = 'https://x.webex.com/j.php?MTID=s1';
+  // A weekly Webex meeting: the account's meetings calendar lists every
+  // occurrence, and the invitation in the work calendar carries the link too.
+  const meetingOn = (day: number): TestEvent => ({
+    ...baseEvent,
+    id: `vc::s1_202608${String(day).padStart(2, '0')}T080000Z`,
+    calendar_id: 'acc::meetings',
+    title: 'Jour fixe',
+    location: JOIN,
+    start: localAt(2026, 8, day, 10, 0).toISOString(),
+    end: localAt(2026, 8, day, 11, 0).toISOString(),
+  });
+  const invitationOn = (day: number): TestEvent => ({
+    ...baseEvent,
+    id: `inv-${day}`,
+    calendar_id: 'work',
+    title: 'Jour fixe',
+    description: `Beitreten: ${JOIN}`,
+    start: localAt(2026, 8, day, 10, 0).toISOString(),
+    end: localAt(2026, 8, day, 11, 0).toISOString(),
+  });
+
+  it('shows a meeting the day also holds as a calendar entry once, on every day', () => {
+    const snapshot = build({
+      events: [meetingOn(3), invitationOn(3), meetingOn(4), invitationOn(4)],
+      now: localAt(2026, 8, 3, 7, 0),
+    });
+    expect(snapshot.items.map((i) => i.id)).toEqual(['inv-3', 'inv-4']);
+  });
+
+  it('keeps a meeting that has no calendar entry', () => {
+    const snapshot = build({ events: [meetingOn(3)], now: localAt(2026, 8, 3, 7, 0) });
+    expect(snapshot.items.map((i) => i.id)).toEqual([meetingOn(3).id]);
   });
 });
 

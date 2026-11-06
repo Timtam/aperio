@@ -435,8 +435,9 @@ mehrdeutig und stoppt alles.
 
 **Ein wiederkehrender Termin wird nicht angefasst.** Mitglieder einer Gruppe
 sind Serien. Webex listet ein wiederkehrendes Meeting als eine Zeile **pro
-Termin** mit je eigener ID, und eine Serien-ID liefert die Listen-Antwort nicht
-— es gibt also keine Serie, die ein Mitglied benennen könnte. Und ein Meeting,
+Termin** mit je eigener ID. Die Antwort nennt zwar die Serie
+(`meetingSeriesId`), Aperio trägt sie aber nicht in den Termin weiter — es gibt
+also keine Serie, die ein Mitglied benennen könnte. Und ein Meeting,
 das *nicht* wiederkehrt, während der Termin es tut, ist an den meisten Tagen
 tatsächlich nicht da. In beiden Fällen behauptete die Gruppe an jedem Tag außer
 einem eine Kopie, die es dort nicht gibt. Der Filter versteckt die Doppelung
@@ -464,8 +465,9 @@ sie sich uneins sind. Genau deshalb ist die Ausnahme keine Kosmetik.
 
 Damit wanderte auch das Filtern: `useEvents` (Desktop) und `load()` (mobil)
 liefern jetzt **alles**, und gefiltert wird dort, wo die Gruppen bekannt sind —
-`useEventGroups` bzw. die Ansichten selbst. Das Paaren braucht beide Zeilen, und
-die gab es vorher nach dem Filter nicht mehr.
+`useEventGroups` bzw. die Ansichten selbst, und der Widget-Schnappschuss
+(`shared/widgetSnapshot.ts`) je Tag vor dem Falten. Das Paaren braucht beide
+Zeilen, und die gab es vorher nach dem Filter nicht mehr.
 
 **Schreibrechte klären sich von selbst.** Der Meeting-Kalender ist nur lesbar,
 und das ist überall richtig behandelt: Gruppieren geht auf nur lesbaren Zeilen

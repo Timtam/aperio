@@ -345,6 +345,15 @@ pub async fn resolve_meeting(state: &ApiState, join_url: &str) -> VcResult<Optio
 /// "`to` minus seven days", which is a different window than the caller asked
 /// for and would silently under-report.
 ///
+/// One entry per occurrence (`meetingType=scheduledMeeting`), each with the
+/// time Webex gives it in the series' own zone. Without the type Webex answers
+/// with the series (`meetingSeries` is its default): ONE entry per series, the
+/// next occurrence only — a weekly meeting showed once, the one of this
+/// morning vanished — and at a time that did not follow the series' zone:
+/// after the change to winter time a series begun in summer stood an hour
+/// off (Toni, 2026-11-06). A single meeting is a series of one, with one
+/// occurrence.
+///
 /// Paging follows the `Link` header (RFC 5988), which Webex uses across its
 /// API. The page count is bounded — a runaway `next` chain would otherwise turn
 /// one calendar scroll into an unbounded walk, and a plugin call has no
@@ -360,7 +369,7 @@ pub async fn list_meetings(
         ));
     }
     let mut path = format!(
-        "/meetings?from={}&to={}&max={MAX_PER_PAGE}",
+        "/meetings?meetingType=scheduledMeeting&from={}&to={}&max={MAX_PER_PAGE}",
         urlencode(&wire_time(start)),
         urlencode(&wire_time(end)),
     );
@@ -1045,6 +1054,61 @@ mod tests {
         assert!(!details
             .iter()
             .any(|d| d.label_key.as_deref() == Some("join.phone.more")));
+    }
+
+    #[tokio::test]
+    async fn listing_asks_for_each_occurrence_and_keeps_its_own_time() {
+        // A weekly series at 10:00 in Berlin, across the change to winter
+        // time: 08:00 UTC in October, 09:00 UTC in November. Asked for the
+        // series, Webex gave one entry, the next occurrence, an hour off.
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("GET", "/meetings")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("meetingType".into(), "scheduledMeeting".into()),
+                mockito::Matcher::UrlEncoded("from".into(), "2026-10-12T00:00:00Z".into()),
+                mockito::Matcher::UrlEncoded("to".into(), "2026-11-09T00:00:00Z".into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r#"{"items":[
+                    {"id":"s1_20261019T080000Z","meetingSeriesId":"s1","meetingType":"scheduledMeeting",
+                     "title":"Jour fixe","webLink":"https://x.webex.com/j.php?MTID=s1",
+                     "start":"2026-10-19T08:00:00Z","end":"2026-10-19T09:00:00Z","timezone":"Europe/Berlin"},
+                    {"id":"s1_20261102T090000Z","meetingSeriesId":"s1","meetingType":"scheduledMeeting",
+                     "title":"Jour fixe","webLink":"https://x.webex.com/j.php?MTID=s1",
+                     "start":"2026-11-02T09:00:00Z","end":"2026-11-02T10:00:00Z","timezone":"Europe/Berlin"}
+                ]}"#,
+            )
+            .create_async()
+            .await;
+        let state = crate::api::tests_support::state(&server.url());
+        let from = Utc.with_ymd_and_hms(2026, 10, 12, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 11, 9, 0, 0, 0).unwrap();
+        let meetings = list_meetings(&state, from, to).await.unwrap();
+        m.assert_async().await;
+        let shown: Vec<_> = meetings
+            .iter()
+            .map(|m| (m.id.as_str(), m.start_time.unwrap().to_rfc3339()))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (
+                    "s1_20261019T080000Z",
+                    "2026-10-19T08:00:00+00:00".to_string()
+                ),
+                (
+                    "s1_20261102T090000Z",
+                    "2026-11-02T09:00:00+00:00".to_string()
+                ),
+            ]
+        );
+        // The join link is the series', so a calendar entry carrying it still
+        // hides the occurrence as a duplicate.
+        assert!(meetings
+            .iter()
+            .all(|m| m.join_url == "https://x.webex.com/j.php?MTID=s1"));
     }
 
     #[tokio::test]

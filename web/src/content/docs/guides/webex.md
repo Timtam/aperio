@@ -138,7 +138,8 @@ you get is the meeting starting.
 Once a Webex account is connected, Aperio adds a **read-only calendar named
 after that account**, holding exactly those meetings. It behaves like any other
 calendar: toggle it in the sidebar, see the meetings in the day and week views,
-join them from the context menu.
+join them from the context menu. A series shows every one of its occurrences,
+each at the time Webex gives it, across the change of the clocks too.
 
 A meeting that already has a calendar entry — because Aperio created it, or
 because an invitation brought it in — is not listed twice. Aperio matches the

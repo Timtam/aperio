@@ -21,7 +21,8 @@ import {
   isRecurringProjection,
 } from './expandTaskOccurrences';
 import { collapseEventGroups } from './collapseEventGroups';
-import type { EventGroup } from './eventGroups';
+import { eventGroupMemberKey, indexEventGroups, type EventGroup } from './eventGroups';
+import { withoutDuplicateMeetings } from './meetingEvents';
 import { expandAll, seriesIdOf, type RecurringEventLike } from './recurrence';
 import { groupTasksByDay } from './taskDay';
 import { compareTitles } from './ordering';
@@ -147,9 +148,16 @@ export interface WidgetSnapshot {
   items: WidgetItem[];
 }
 
+/** An event the widget can take: a recurring one, with the two fields a
+ *  meeting's join link travels in (both optional, as a source may lack them). */
+export type WidgetEvent = RecurringEventLike & {
+  location?: string | null;
+  description?: string | null;
+};
+
 /** Everything the builder needs, gathered by the caller — which is the only
  *  part that differs between platforms. */
-export interface WidgetSnapshotInput<E extends RecurringEventLike> {
+export interface WidgetSnapshotInput<E extends WidgetEvent> {
   /** Events as the backend returns them: masters, unexpanded. */
   events: E[];
   /** Which events mean the same appointment (DESIGN-event-groups.md).
@@ -300,7 +308,7 @@ function dayKeysThrough(now: Date, horizonDays: number): string[] {
 
 /** Collapse each group to one row, a day at a time. See the call site for why
  *  the bucketing is not optional. */
-function foldPerDay<E extends RecurringEventLike>(
+function foldPerDay<E extends WidgetEvent>(
   expanded: E[],
   groups: readonly EventGroup[],
   calendarIdOf: (event: E) => string,
@@ -311,10 +319,28 @@ function foldPerDay<E extends RecurringEventLike>(
     const key = localDateKey(new Date(ev.start));
     byDay.set(key, [...(byDay.get(key) ?? []), ev]);
   }
+  const grouped = indexEventGroups(groups);
   const kept: E[] = [];
   for (const dayEvents of byDay.values()) {
-    const rows = collapseEventGroups(
+    // A meeting the day also holds as a calendar entry — the same join link —
+    // is shown once, as in every view (`shared/meetingEvents.ts`). A grouped
+    // row stays for the fold below, which hides it while counting it. Per day,
+    // because the Webex calendar lists every occurrence of a series.
+    const shown = withoutDuplicateMeetings(
       dayEvents.map((ev) => ({
+        calendar_id: calendarIdOf(ev),
+        location: ev.location ?? null,
+        description: ev.description ?? null,
+        source: ev,
+      })),
+      (row) => grouped.has(eventGroupMemberKey(row.calendar_id, seriesIdOf(row.source))),
+    ).map((row) => row.source);
+    if (groups.length === 0) {
+      kept.push(...shown);
+      continue;
+    }
+    const rows = collapseEventGroups(
+      shown.map((ev) => ({
         id: seriesIdOf(ev),
         calendar_id: calendarIdOf(ev),
         start: ev.start,
@@ -342,7 +368,7 @@ function foldPerDay<E extends RecurringEventLike>(
  *     drops cancelled, completed, and undated subtasks, and resolves the
  *     scheduled-vs-deadline question.
  */
-export function buildWidgetSnapshot<E extends RecurringEventLike>(
+export function buildWidgetSnapshot<E extends WidgetEvent>(
   input: WidgetSnapshotInput<E>,
 ): WidgetSnapshot {
   const {
@@ -401,10 +427,7 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
   // user opens the widget to see. Filtering first can only leave copies that
   // are still to come, so whichever one stands for the group is one of them.
   const live = expanded.filter((ev) => new Date(ev.end).getTime() > nowMs);
-  const foldedEvents =
-    eventGroups && eventGroups.length > 0
-      ? foldPerDay(live, eventGroups, calendarIdOf, allDayOf)
-      : live;
+  const foldedEvents = foldPerDay(live, eventGroups ?? [], calendarIdOf, allDayOf);
   for (const ev of foldedEvents) {
     const containerId = calendarIdOf(ev);
     const color = eventColorOf?.(ev) ?? undefined;

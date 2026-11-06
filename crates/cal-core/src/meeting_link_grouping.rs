@@ -329,8 +329,9 @@ pub fn find_meeting_link_pairs(
         // ONE meeting per account per appointment, and this is load-bearing.
         //
         // A provider may list a recurring meeting as one row per occurrence,
-        // each with an id of its own — Webex does, and its list response
-        // carries no series id for us to collapse them by. Without this rule
+        // each with an id of its own — Webex does. Its response names the
+        // series (`meetingSeriesId`), but the adapter does not carry that into
+        // the event, so there is nothing to collapse them by. Without this rule
         // the day view would hand over a different meeting id every morning,
         // each one a new member: the group would grow by one a day, forever,
         // and the count on the row would climb with it. An appointment has one
