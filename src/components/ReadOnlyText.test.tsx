@@ -46,6 +46,25 @@ describe('ReadOnlyText', () => {
     expect([text.selectionStart, text.selectionEnd]).toEqual([6, 6]);
   });
 
+  it('keeps a selection made upwards growing upwards after the text is put back', () => {
+    const text = field();
+    text.setSelectionRange(2, 8, 'backward');
+    text.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertCompositionText', cancelable: false }));
+    text.value = 'Er´e';
+    text.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText' }));
+    expect([text.selectionStart, text.selectionEnd, text.selectionDirection]).toEqual([2, 8, 'backward']);
+  });
+
+  it('puts back the text it shows now, after the value changed', () => {
+    const { rerender } = render(<ReadOnlyText label="Notizen" value="Alt" />);
+    rerender(<ReadOnlyText label="Notizen" value="Neu aus dem Abgleich" />);
+    const text = screen.getByRole('textbox', { name: 'Notizen' }) as HTMLTextAreaElement;
+    text.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertCompositionText', cancelable: false }));
+    text.value = 'Neu aus dem Abgleich´';
+    text.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText' }));
+    expect(text.value).toBe('Neu aus dem Abgleich');
+  });
+
   it('takes nothing by paste, cut or drop', () => {
     const text = field();
     for (const name of ['paste', 'cut', 'drop']) {

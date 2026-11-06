@@ -1826,6 +1826,9 @@ button[aria-disabled='true'] {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: var(--space-1) var(--space-2);
+  /* As tall as its text, wrapped lines included, between these bounds: the
+     block it replaced grew with its content too. */
+  field-sizing: content;
   min-height: 80px;
   max-height: 16em;
   overflow: auto;

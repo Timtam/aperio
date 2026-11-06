@@ -29,19 +29,33 @@ export function ReadOnlyText({ label, value }: { label: string; value: string })
   // A textarea holds its lines with "\n" alone; a value with "\r\n" would
   // never equal what it shows, and be put back on every render.
   const text = value.replace(/\r\n?/g, '\n');
+  // Read by the listeners, which are set up once: a value that changes (a
+  // sync refresh) is the one put back from the first frame it is shown.
+  const shown = useRef(text);
+  shown.current = text;
 
   useEffect(() => {
     const field = ref.current;
     if (!field) return;
-    let kept: [number, number] = [0, 0];
+    // The selection with its direction: one made upwards with Shift+Up must
+    // grow upwards again after the text is put back.
+    let kept: { start: number; end: number; direction: 'forward' | 'backward' | 'none' } = {
+      start: 0,
+      end: 0,
+      direction: 'none',
+    };
     const refuse = (e: Event) => {
-      kept = [field.selectionStart, field.selectionEnd];
+      kept = {
+        start: field.selectionStart,
+        end: field.selectionEnd,
+        direction: field.selectionDirection,
+      };
       if (e.cancelable) e.preventDefault();
     };
     const putBack = () => {
-      if (field.value === text) return;
-      field.value = text;
-      field.setSelectionRange(kept[0], kept[1]);
+      if (field.value === shown.current) return;
+      field.value = shown.current;
+      field.setSelectionRange(kept.start, kept.end, kept.direction);
     };
     const block = (e: Event) => e.preventDefault();
     field.addEventListener('beforeinput', refuse);
@@ -58,9 +72,8 @@ export function ReadOnlyText({ label, value }: { label: string; value: string })
       field.removeEventListener('cut', block);
       field.removeEventListener('drop', block);
     };
-  }, [text]);
+  }, []);
 
-  const lines = text.split('\n').length;
   return (
     <div className="form__field">
       <label className="form__label" htmlFor={id}>
@@ -73,7 +86,9 @@ export function ReadOnlyText({ label, value }: { label: string; value: string })
         aria-readonly="true"
         value={text}
         onChange={ignoreChange}
-        rows={Math.min(Math.max(lines, 3), 10)}
+        // The height follows the text (field-sizing in the style); three
+        // rows where that is not supported.
+        rows={3}
         spellCheck={false}
         autoComplete="off"
       />
