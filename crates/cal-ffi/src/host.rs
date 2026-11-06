@@ -6828,7 +6828,7 @@ impl Host {
         let now = chrono::Utc::now();
         let latest = now + chrono::Duration::minutes(i64::from(horizon_minutes));
         let shared = self.db.shared();
-        let mut triggers = self.runtime.block_on(async {
+        let triggers = self.runtime.block_on(async {
             let mut acc =
                 host_core::reminders::enumerate_triggers(&shared, &self.registry, now, latest)
                     .await;
@@ -6850,38 +6850,106 @@ impl Host {
             }
             acc
         });
-        triggers.sort_by_key(|t| t.trigger_at);
-        let mut seen = std::collections::HashSet::new();
-        let dtos: Vec<serde_json::Value> = triggers
-            .into_iter()
-            // Strictly future: a trigger at exactly `now` can't be scheduled as a
-            // future OS notification (and `enumerate_triggers` includes the
-            // `>= now` boundary), so drop it — honouring the "future-only"
-            // contract + matching the JS scheduler's `> now` gate. Dedup after,
-            // so an excluded boundary trigger doesn't consume a `seen` slot.
-            .filter(|t| t.trigger_at > now && seen.insert((t.item_id.clone(), t.trigger_at)))
-            .map(|t| {
-                serde_json::json!({
-                    "item_id": t.item_id,
-                    "item_kind": t.item_kind,
-                    "container_id": t.container_id,
-                    "title": t.title,
-                    "body": t.body,
-                    "trigger_at": t.trigger_at.to_rfc3339(),
-                    // Occurrence start/end + all-day flag so the scheduler can build
-                    // a localized all-day body ("Ganztägig · 24. Juni bis 26. Juni")
-                    // instead of the meaningless "00:00" a midnight start formats to.
-                    "start": t.start.to_rfc3339(),
-                    "end": t.relevant_until.to_rfc3339(),
-                    "all_day": t.all_day,
-                    // The §14.4 effective sound (reminder→item→container→global),
-                    // already resolved on the Trigger — the mobile scheduler maps
-                    // it to the OS notification sound (System vs Silent).
-                    "sound": t.sound,
-                })
-            })
+        to_json(&reminder_dtos(triggers, now, None))
+    }
+
+    /// The notifications to schedule AND the Live Activity plan, from ONE
+    /// reminder scan (DESIGN-live-activities.md).
+    ///
+    /// `reminders` is what [`Self::upcoming_reminders_json`] answers for the
+    /// same horizon, each entry with `absorbed`: whether a section of the plan
+    /// IS that reminder. A platform may leave the absorbed ones out of the
+    /// notifications only once it has taken the plan over. `plan` is
+    /// `cal_core::live_activity`'s plan. One scan, because two read every
+    /// account live and could see two different states — a reminder doubled
+    /// or lost between them.
+    ///
+    /// `hidden_calendars_json` is a JSON array of calendar ids hidden on this
+    /// device; visibility is device-local, so it comes in.
+    pub fn live_activity_plan_json(
+        &self,
+        horizon_minutes: u32,
+        hidden_calendars_json: String,
+    ) -> Result<String, StoreError> {
+        let hidden: Vec<String> = from_json("hidden calendars", &hidden_calendars_json)?;
+        let now = chrono::Utc::now();
+        let latest = now + chrono::Duration::minutes(i64::from(horizon_minutes));
+        // Far enough back to find the last reminder of an appointment that is
+        // still running; the rule itself never lets one lead by more than two
+        // hours.
+        let earliest = now - chrono::Duration::hours(LIVE_ACTIVITY_LOOKBACK_HOURS);
+        let shared = self.db.shared();
+        // The follow-up of the horizon's last appointment may be later that
+        // day, so the occurrences reach a day further than the reminders.
+        let mut sink =
+            host_core::reminders::OccurrenceSink::new(earliest, latest + chrono::Duration::days(1));
+        let triggers = self.runtime.block_on(async {
+            let mut acc = host_core::reminders::enumerate_scan(
+                &shared,
+                &self.registry,
+                earliest,
+                latest,
+                Some(&mut sink),
+            )
+            .await;
+            // As in `upcoming_reminders_json`. Birthdays are all-day, so they
+            // never open a window; they are here for the notification list.
+            for t in host_core::reminders::enumerate_birthday_triggers(
+                &self.adapter,
+                &self.registry,
+                &self.cache,
+                &shared,
+            )
+            .await
+            {
+                if t.trigger_at >= now && t.trigger_at <= latest {
+                    acc.push(t);
+                }
+            }
+            acc
+        });
+        let occurrences = sink.into_occurrences();
+        let mut refs: Vec<(String, String)> = occurrences
+            .iter()
+            .map(|occ| (occ.calendar_id.clone(), occ.series_id.clone()))
             .collect();
-        to_json(&dtos)
+        refs.sort();
+        refs.dedup();
+        // Best-effort, as the widget reads them: without groups the copies are
+        // not folded, which is how it looked before groups existed.
+        let groups = EventGroupsRepo::new(&shared)
+            .groups_for_events(&refs)
+            .unwrap_or_else(|err| {
+                tracing::warn!(
+                    ?err,
+                    "live activity plan: event groups unreadable; copies not folded"
+                );
+                Vec::new()
+            });
+        let input = cal_core::live_activity::LiveActivityInput {
+            now,
+            horizon_end: latest,
+            occurrences,
+            triggers: triggers
+                .iter()
+                .filter(|t| matches!(t.item_kind, host_core::reminders::ItemKind::Event))
+                .map(|t| cal_core::live_activity::LiveTrigger {
+                    item_id: t.item_id.clone(),
+                    calendar_id: t.container_id.clone(),
+                    occurrence_start: t.start,
+                    fire_at: t.trigger_at,
+                    absolute: t.absolute,
+                })
+                .collect(),
+            groups,
+            hidden_calendars: hidden,
+        };
+        let plan = cal_core::live_activity::live_activity_plan(&input);
+        let absorbed = plan.absorbed();
+        to_json(&serde_json::json!({
+            "reminders": reminder_dtos(triggers, now, Some(&absorbed)),
+            "plan": plan,
+        }))
     }
 
     // ── Custom reminder sounds (§14.4 / §19.2.2) ──────────────────────────────
@@ -9974,6 +10042,70 @@ fn unbuildable_err(err: host_core::sync_target::Unbuildable) -> StoreError {
             }
         }
     }
+}
+
+/// How far back [`Host::live_activity_plan_json`] looks for the last reminder
+/// of an appointment that is still running. A day: an appointment that started
+/// longer ago than that, and still runs, is not one a lock-screen countdown is
+/// for.
+const LIVE_ACTIVITY_LOOKBACK_HOURS: i64 = 24;
+
+/// The notification list both reminder doors answer with: strictly future,
+/// sorted by trigger time, one per `(item_id, trigger_at)`.
+///
+/// With `absorbed`, each entry also says whether a Live Activity section is
+/// this reminder (`"absorbed": true`). The comparison happens here, on
+/// instants: the plan and the list spell the same moment differently, and a
+/// frontend matching them as text would match nothing.
+fn reminder_dtos(
+    mut triggers: Vec<host_core::reminders::Trigger>,
+    now: chrono::DateTime<chrono::Utc>,
+    absorbed: Option<&std::collections::BTreeSet<cal_core::live_activity::LiveTriggerKey>>,
+) -> Vec<serde_json::Value> {
+    triggers.sort_by_key(|t| t.trigger_at);
+    let mut seen = std::collections::HashSet::new();
+    let dtos: Vec<serde_json::Value> = triggers
+        .into_iter()
+        // Strictly future: a trigger at exactly `now` can't be scheduled as a
+        // future OS notification (and `enumerate_triggers` includes the
+        // `>= now` boundary), so drop it — honouring the "future-only"
+        // contract + matching the JS scheduler's `> now` gate. Dedup after,
+        // so an excluded boundary trigger doesn't consume a `seen` slot.
+        .filter(|t| t.trigger_at > now && seen.insert((t.item_id.clone(), t.trigger_at)))
+        .map(|t| {
+            let is_absorbed = absorbed.map(|absorbed| {
+                absorbed.contains(&cal_core::live_activity::LiveTriggerKey {
+                    item_id: t.item_id.clone(),
+                    calendar_id: t.container_id.clone(),
+                    occurrence_start: t.start,
+                    fire_at: t.trigger_at,
+                })
+            });
+            let mut dto = serde_json::json!({
+                "item_id": t.item_id,
+                "item_kind": t.item_kind,
+                "container_id": t.container_id,
+                "title": t.title,
+                "body": t.body,
+                "trigger_at": t.trigger_at.to_rfc3339(),
+                // Occurrence start/end + all-day flag so the scheduler can build
+                // a localized all-day body ("Ganztägig · 24. Juni bis 26. Juni")
+                // instead of the meaningless "00:00" a midnight start formats to.
+                "start": t.start.to_rfc3339(),
+                "end": t.relevant_until.to_rfc3339(),
+                "all_day": t.all_day,
+                // The §14.4 effective sound (reminder→item→container→global),
+                // already resolved on the Trigger — the mobile scheduler maps
+                // it to the OS notification sound (System vs Silent).
+                "sound": t.sound,
+            });
+            if let Some(is_absorbed) = is_absorbed {
+                dto["absorbed"] = serde_json::json!(is_absorbed);
+            }
+            dto
+        })
+        .collect();
+    dtos
 }
 
 #[cfg(test)]
@@ -13556,6 +13688,126 @@ mod tests {
         assert_eq!(caps["manageable_sections"], serde_json::json!(true));
         assert_eq!(caps["nested_projects"], serde_json::json!(true));
         assert_eq!(caps["task_recurrence"], serde_json::json!(true));
+    }
+
+    /// The plan and the notification list come from one scan, and a section's
+    /// signal names an entry of that very list — the key a platform leaves
+    /// out once it has taken the plan over.
+    #[test]
+    fn the_live_activity_plan_names_reminders_of_its_own_list() {
+        use chrono::{DateTime, Timelike, Utc};
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        // An hour from now, on the minute, with a reminder 15 minutes before:
+        // the reminder is still to come, and well within the two-hour lead.
+        let now = Utc::now();
+        let start = (now + chrono::Duration::hours(1))
+            .with_second(0)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap();
+        let end = start + chrono::Duration::minutes(30);
+        let request = serde_json::json!({
+            "calendar_id": cal,
+            "title": "Standup",
+            "description": null,
+            "location": "Raum 2.14",
+            "start": start.to_rfc3339(),
+            "end": end.to_rfc3339(),
+            "all_day": false,
+            "recurrence": null,
+            "color_label": null,
+            "reminders": [{"kind": {"type": "relative", "minutes_before": 15}, "sound": null}],
+            "sound": null,
+            "attendees": []
+        });
+        let event_id = serde_json::from_str::<serde_json::Value>(
+            &host.create_event_json(request.to_string()).unwrap(),
+        )
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let answer: serde_json::Value =
+            serde_json::from_str(&host.live_activity_plan_json(10_080, "[]".into()).unwrap())
+                .unwrap();
+        let instant = |v: &serde_json::Value| v.as_str().unwrap().parse::<DateTime<Utc>>().unwrap();
+
+        // The list is the one the plain door gives.
+        let plain: serde_json::Value =
+            serde_json::from_str(&host.upcoming_reminders_json(10_080).unwrap()).unwrap();
+        let keys = |list: &serde_json::Value| -> Vec<(String, DateTime<Utc>)> {
+            list.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    (
+                        r["item_id"].as_str().unwrap().to_string(),
+                        instant(&r["trigger_at"]),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(keys(&answer["reminders"]), keys(&plain), "{answer}");
+
+        let chains = answer["plan"]["chains"].as_array().unwrap();
+        assert_eq!(chains.len(), 1, "{answer}");
+        let first = &chains[0]["sections"][0];
+        assert_eq!(first["event"]["title"], "Standup");
+        assert_eq!(first["event"]["location"], "Raum 2.14");
+        let signal = &first["signal"][0];
+        let entry = answer["reminders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["item_id"] == serde_json::json!(event_id))
+            .expect("the reminder is in the list");
+        // Same reminder, spelled differently: compare instants, never text.
+        assert_eq!(signal["item_id"], entry["item_id"]);
+        assert_eq!(signal["calendar_id"], entry["container_id"]);
+        assert_eq!(
+            instant(&signal["occurrence_start"]),
+            instant(&entry["start"])
+        );
+        assert_eq!(instant(&signal["fire_at"]), instant(&entry["trigger_at"]));
+        assert_eq!(
+            instant(&signal["fire_at"]),
+            start - chrono::Duration::minutes(15)
+        );
+        // And the list says so itself, so no frontend has to match the two.
+        assert_eq!(entry["absorbed"], serde_json::json!(true));
+        assert!(
+            answer["reminders"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r["item_id"] != serde_json::json!(event_id))
+                .all(|r| r["absorbed"] == serde_json::json!(false)),
+            "{answer}"
+        );
+        // The plain door has no such field.
+        assert!(plain
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r.get("absorbed").is_none()));
+
+        // A calendar hidden on this device opens no window; its reminder is
+        // still in the list, because hiding is the platform's filter there.
+        let hidden: serde_json::Value = serde_json::from_str(
+            &host
+                .live_activity_plan_json(10_080, serde_json::json!([cal]).to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(hidden["plan"]["chains"], serde_json::json!([]));
+        assert!(hidden["reminders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["absorbed"] == serde_json::json!(false)));
+        assert_eq!(keys(&hidden["reminders"]), keys(&plain));
     }
 
     #[test]

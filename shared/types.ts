@@ -211,3 +211,11 @@ export type { SkippedPart } from './generated/SkippedPart';
 export type { InvitationImport } from './generated/InvitationImport';
 export type { SkippedKind } from './generated/SkippedKind';
 export type { ImportFormat } from './generated/ImportFormat';
+// The Live Activity plan for events (DESIGN-live-activities.md), decided by
+// `cal_core::live_activity` and read by the phone.
+export type { LiveActivityPlan } from './generated/LiveActivityPlan';
+export type { LiveActivityChain } from './generated/LiveActivityChain';
+export type { LiveActivitySection } from './generated/LiveActivitySection';
+export type { LiveActivityEvent } from './generated/LiveActivityEvent';
+export type { LiveActivityFollowUp } from './generated/LiveActivityFollowUp';
+export type { LiveTriggerKey } from './generated/LiveTriggerKey';
