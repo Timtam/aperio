@@ -147,18 +147,16 @@ describe('EventDialog → an invitation somebody else organizes', () => {
     expect(attendees.value).toContain('boss@example.net');
   });
 
-  it('gives the description as a document to read line by line, not a read-only field', async () => {
-    // A read-only textarea let NVDA say its first line only (Toni,
-    // 2026-10-26): no caret is followed in it.
+  it('gives the description as a field to read line by line, marked read-only, not readonly', async () => {
+    // A readonly textarea let NVDA say its first line only (Toni, 2026-10-26),
+    // a role="document" switched modes unreliably (2026-11-02): ReadOnlyText.
     await open({ ...INVITATION, description: 'Zeile eins\r\n\r\nZeile drei' } as CalendarEvent);
-    const text = screen.getByRole('document', { name: /^beschreibung$|^description$/i });
-    expect(text.getAttribute('tabindex')).toBe('0');
-    expect(Array.from(text.children, (line) => line.textContent)).toEqual([
-      'Zeile eins',
-      '',
-      'Zeile drei',
-    ]);
-    expect(document.querySelector('textarea')).toBeNull();
+    const text = screen.getByRole('textbox', {
+      name: /^beschreibung$|^description$/i,
+    }) as HTMLTextAreaElement;
+    expect(text.getAttribute('aria-readonly')).toBe('true');
+    expect(text.readOnly).toBe(false);
+    expect(text.value).toBe('Zeile eins\n\nZeile drei');
   });
 
   it('keeps what an attendee may do: answer, set reminders, ask about availability', async () => {

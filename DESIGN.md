@@ -194,15 +194,7 @@ Die wichtigste einzelne ARIA-Entscheidung für das native Gefühl ist die Verwen
 
 **Wichtige Einschränkung:** `role="application"` deaktiviert die automatische Lesbarkeit von statischem Text. Deshalb müssen alle informativen Inhalte explizit per `aria-label`, `aria-describedby` oder `aria-live` zugänglich gemacht werden – es gibt keinen Fallback auf lineares Lesen mehr.
 
-**Ausnahmen innerhalb der App:** Bereiche mit dokumentartigem Charakter (z.B. die Beschreibung eines Termins im Detail-Panel, falls sie längeren Fließtext enthält) erhalten lokal `role="document"`, damit NVDA dort temporär in den Browse-Modus wechseln kann:
-
-```html
-<div role="document" aria-label="Terminbeschreibung">
-  Längerer Beschreibungstext des Termins...
-</div>
-```
-
-Der Nutzer kann in solchen Bereichen bewusst mit `NVDA+Space` zwischen den Modi wechseln.
+**Mehrzeiliger Text zum Lesen, nicht zum Ändern** (die Beschreibung einer gesperrten Einladung, Notizen eines schreibgeschützten Adressbuchs): kein `role="document"`. Ein fokussierbares Dokument mitten in der Anwendung lässt NVDA einen eigenen kleinen Lesemodus aufbauen, im Hintergrund und meist ohne Moduston, und nach `NVDA+Space` bleibt das Feld im Fokusmodus hängen; Toni (2026-11-02): „manchmal klappt es, meistens wechselt er nicht korrekt zwischen Lese- und Fokusmodus“. Auch kein `<textarea readonly>`: NVDA folgt darin keinem Cursor und liest nur die erste Zeile, ebenso mit dem Cursor, den Chromium 157 schreibgeschützten Feldern gibt (Test 2026-11-06). Sondern ein bearbeitbares `<textarea aria-readonly="true">`, das jede Änderung selbst zurücknimmt (`src/components/ReadOnlyText.tsx`): NVDA bleibt im Fokusmodus wie in jedem anderen Feld, sagt „schreibgeschützt“ und liest mit den Pfeiltasten Zeile, Wort und Zeichen. Abgefangen wird über `beforeinput`; eine Komposition (Tottaste, Diktat, Emoji-Feld) lässt sich nicht abfangen, darum werden Text und Cursor danach zurückgesetzt, und Einfügen, Ausschneiden und Ablegen sind gesperrt.
 
 ### 3.3 Navigationsmuster je Ansicht
 
