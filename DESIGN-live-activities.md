@@ -1,6 +1,6 @@
 # Live-Aktivitäten für Termine — Entwurf
 
-Status: **entschieden, nichts gebaut.** Toni hat die Form am 6. November 2026
+Status: **entschieden; Stufe 1 (Regel im Kern) gebaut.** Toni hat die Form am 6. November 2026
 festgelegt, in zwei Runden: vor der Recherche (Start, Inhalt, Überblenden) und
 danach (iOS-26-Einplanung, ein Signal, iOS-Text, Anschluss, ohne Erinnerung,
 ganztägig, Standardwert). Die Recherche lief als Workflow mit drei Code-Lesern
@@ -146,7 +146,10 @@ als Eingabe und liefert einen **Plan**. Sie liest nichts selbst.
   Ort, für Kopien und Anschluss;
 - die Termingruppen;
 - die verborgenen Kalender des Geräts (sie sind gerätelokal, wie beim Widget);
-- „jetzt“, die **Zeitzone des Geräts** (für „am selben Tag“) und der Horizont.
+- „jetzt“ und der Horizont;
+- je Vorkommen sein **Ortstag** auf dem Gerät (für „am selben Tag“ und für das
+  Falten je Tag). Der Kern bekommt Tage statt einer Zone, wie überall sonst:
+  Die Zone kennt der Host.
 
 Der Horizont zählt **Vorkommen**, nicht Auslöser: Hat ein Vorkommen einen
 Auslöser im Horizont, kommen alle seine Auslöser bis zu seinem Ende mit. Sonst
@@ -168,9 +171,11 @@ Erinnerung doppelt oder verschwunden.
   gelaufene Gruppen sind getrennte Termine, wie in den Ansichten. Zwei echte
   Termine mit derselben Adresse bleiben zwei.
 - Verborgene Kalender fallen **vor** dem Zusammenlegen weg.
-- Angezeigt wird die Kopie, die die Faltung der Ansichten zeigt
-  (`collapse_event_groups`, mit den Zeilen in der Reihenfolge der Ansichten).
-  Der Schlüssel einer gefalteten Gruppe ist der kleinste Mitglieds-Schlüssel,
+- Angezeigt wird die Kopie, die die Faltung wählt (`collapse_event_groups`:
+  die erste, die man bearbeiten kann). Die Ansichten nehmen die Zeilen in der
+  Reihenfolge, in der die Konten antworten; der Kern sortiert sie vorher fest
+  (Beginn, Kalender, Id), damit dieselben Daten immer gleich falten. Der
+  Schlüssel einer gefalteten Gruppe ist der kleinste Mitglieds-Schlüssel,
   damit er nicht davon abhängt, welche Kopie gerade vorn steht.
 
 ### Das Fenster
@@ -192,8 +197,9 @@ Zukünftige). Die neue Tür schaut deshalb zurück.
 ### Ketten und Überblenden
 
 Zu jedem Zeitpunkt zeigt die Aktivität das **laufende Fenster mit dem spätesten
-Beginn**. Gleichstand: früherer Terminbeginn, dann Titel, dann Schlüssel. Daraus
-folgt:
+Beginn**. Gleichstand: früherer Terminbeginn, dann Schlüssel. (Kein Titel: Die
+Textordnung ist im Kern ein abschaltbares Feature, und für einen Gleichstand
+zählt nur, dass dieselben Daten immer dasselbe zeigen.) Daraus folgt:
 
 - Beginnt das Fenster von B, während A läuft, zeigt die Aktivität ab da B.
 - Endet B vor A (B liegt mitten in A), zeigt sie danach wieder A.
@@ -243,9 +249,14 @@ hat je Kette:
   Anschluss beginnt, oder Android darf ab hier hervorheben.
 
 Jeder Abschnitt trägt: von, bis, den angezeigten Termin (Schlüssel, Id,
-Kalender, Beginn des Vorkommens, Titel, Ort, Beginn, Ende), seinen Anschluss
-(Titel, Beginn), ob er hervorgehoben werden darf, und als Signal-Abschnitt die
-aufgegangenen Auslöser samt Ton, Titel und Text der Erinnerung.
+Kalender, ursprünglicher Beginn des Vorkommens, Titel, Ort, Beginn, Ende),
+seinen Anschluss (Titel, Beginn), ob der Termin schon begonnen hat, ob er
+hervorgehoben werden darf, und als Signal-Abschnitt die Schlüssel der
+aufgegangenen Auslöser. Ton, Titel und Text der Erinnerung stehen in der
+Benachrichtigungs-Liste unter demselben Schlüssel.
+
+**Ort:** Ist der Ort nichts als eine Beitreten-Adresse (bei Meeting-Zeilen
+üblich), zeigt die Aktivität keinen. Vorgelesen ist eine URL kein Raum.
 
 Die Texte baut der Kern nicht. Er liefert Zeitpunkte; Wörter und Sprache kommen
 wie beim Widget aus den Übersetzungen der App (`locales/`).
