@@ -516,6 +516,10 @@ Fünf Prüfer (Kern, Adapter, Desktop, Handy, Doku), je mit einem Gegenprüfer:
   (`ReadOnlyText`, `role="document"`, eine Zeile je Block): NVDA wechselt
   dort in den Lesemodus, `Tab` führt hinaus. Ebenso die mehrzeiligen Felder
   eines schreibgeschützten Adressbuchs (Notizen, Mitglieder, Straße).
+  Abgelöst am 2026-11-06: Das Dokument wechselte den Modus unzuverlässig.
+  `ReadOnlyText` ist jetzt ein bearbeitbares Textfeld mit
+  `aria-readonly`, das jede Änderung zurücknimmt; NVDA bleibt im Fokusmodus
+  (DESIGN.md §3.2.1).
 - **Fokus nach dem Import** (Toni, 2026-10-26: Strg+O aus der
   Kalenderansicht, danach hing NVDA zwischen Fokus- und Lesemodus). Im Code
   keine Ursache: Der Editor schließt wie beim gewöhnlichen Anlegen, und wry

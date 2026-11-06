@@ -1814,21 +1814,26 @@ button[aria-disabled='true'] {
   cursor: default;
 }
 
-/* A locked description as text to read (`role="document"`, see
-   EventDialog's ReadOnlyText): looks like the read-only field it replaced,
-   keeps the file's lines, and scrolls when long. */
-.form__read-text {
+/* A locked description to read (ReadOnlyText): an editable textarea marked
+   `aria-readonly` that turns every change back, so it does not match
+   `[readonly]` above and is styled here to look the same. It keeps the
+   text's lines and scrolls when long. Two classes, so `.form textarea`
+   does not win over it. */
+.form__field .form__read-text {
+  font: inherit;
   color: var(--color-fg-muted);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: var(--space-1) var(--space-2);
+  /* As tall as its text, wrapped lines included, between these bounds: the
+     block it replaced grew with its content too. */
+  field-sizing: content;
   min-height: 80px;
   max-height: 16em;
   overflow: auto;
   overflow-wrap: anywhere;
-  cursor: default;
-  user-select: text;
+  resize: vertical;
 }
 
 /* A hint that warns rather than merely informs (e.g. staged subtasks the
