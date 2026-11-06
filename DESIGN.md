@@ -2804,6 +2804,10 @@ Fehlt eine referenzierte Custom-Datei lokal, fällt die Wiedergabe auf den Syste
 - Die Snooze- und Öffnen-Aktionen sind per Tastatur erreichbar (plattformseitig)
 - In der App selbst gibt es eine **Erinnerungs-Übersicht** (zugänglich per `Ctrl+Shift+R`): eine chronologische Liste aller anstehenden und vergangenen Erinnerungen, vollständig tastaturnavigierbar
 
+### 14.7 Live-Aktivitäten (Handy, geplant)
+
+Vom Auslösen der letzten Erinnerung eines Termins bis zu seinem Ende zeigt das Handy Titel, Zeit, Ort und Anschlusstermin dauerhaft: auf iOS als Live-Aktivität (Sperrbildschirm, Dynamic Island), auf Android als laufende Benachrichtigung, ab Android 16 hervorgehoben. Die letzte Erinnerung wird dabei selbst zur Aktivität. Die Regel liegt im Kern. Entwurf, Entscheidungen und Stufen: [DESIGN-live-activities.md](DESIGN-live-activities.md).
+
 ---
 
 ## 15. Native Desktop-Erfahrung & Tastaturkürzel
