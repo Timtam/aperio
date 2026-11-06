@@ -9,7 +9,8 @@
 //!
 //! - An appointment's **window** runs from its last reminder that fires before
 //!   it ends, to its end. No reminder, no window. All-day, cancelled and hidden
-//!   events have none.
+//!   events have none, and neither has one whose last reminder is more than
+//!   [`MAX_LEAD_MINUTES`] before its start.
 //! - Copies of one appointment (members of a group that agree on the time, and
 //!   a videoconference meeting whose invitation is in view) are ONE
 //!   appointment with ONE window.
@@ -47,6 +48,16 @@ use crate::EventGroup;
 /// reminder an hour ahead is therefore an ordinary ongoing notification until
 /// this point.
 pub const PROMOTE_LEAD_MINUTES: i64 = 15;
+
+/// How long before the start a last reminder may be and still become an
+/// activity (Toni, 2026-11-06).
+///
+/// A reminder "one day before" is a reminder to plan, not one to watch a clock
+/// by: an activity from there would sit on the lock screen all day, and iOS
+/// ends any activity after eight hours anyway. Further ahead than this, the
+/// reminder stays an ordinary notification and the appointment gets no
+/// activity at all.
+pub const MAX_LEAD_MINUTES: i64 = 120;
 
 /// One occurrence of a timed or all-day event, expanded by the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -455,6 +466,10 @@ fn windows(input: &LiveActivityInput, appointments: &[Appointment]) -> Vec<Windo
         if end <= input.now || start >= input.horizon_end {
             continue;
         }
+        let shown_start = occurrences[appointment.shown].start;
+        if shown_start - start > Duration::minutes(MAX_LEAD_MINUTES) {
+            continue;
+        }
         let mut absorbed: Vec<LiveTriggerKey> = candidates
             .iter()
             .filter(|trigger| trigger.fire_at == start)
@@ -743,6 +758,24 @@ mod tests {
                 "10:00-11:00 A promoted started".to_string(),
             ]]
         );
+    }
+
+    #[test]
+    fn a_last_reminder_more_than_two_hours_ahead_makes_no_activity() {
+        let a = event("A", at(12, 0), at(13, 0));
+        let plan = live_activity_plan(&input(vec![a.clone()], vec![reminder(&a, at(9, 59))]));
+        assert!(plan.chains.is_empty());
+        // Exactly two hours is still an activity.
+        let plan = live_activity_plan(&input(vec![a.clone()], vec![reminder(&a, at(10, 0))]));
+        assert_eq!(plan.chains.len(), 1);
+        // What counts is the LAST reminder: a day-ahead one beside a
+        // quarter-hour one changes nothing.
+        let day_ahead = reminder(&a, at(12, 0) - Duration::days(1));
+        let plan = live_activity_plan(&input(
+            vec![a.clone()],
+            vec![day_ahead, reminder(&a, at(11, 45))],
+        ));
+        assert_eq!(plan.chains[0].start, at(11, 45));
     }
 
     #[test]

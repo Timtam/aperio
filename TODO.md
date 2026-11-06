@@ -207,10 +207,11 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   Anschluss, Hervorhebung ab 15 Minuten vor Beginn, Signal-Abschnitte mit den
   aufgegangenen Auslösern. Reine Funktion, Tests (Fälle im Entwurf).
   ↳ `live_activity_plan(&LiveActivityInput) -> LiveActivityPlan`, dazu
-  `LiveActivityPlan::absorbed()` für die Mengen-Differenz. 17 Tests, neun
+  `LiveActivityPlan::absorbed()` für die Mengen-Differenz. 18 Tests, zehn
   Gegenproben (Gleichstand, Signal nur am Fensterbeginn, feste Zeit an einer
   Serie, Anschluss je Abschnitt, Meeting-Paar, Hervorhebung, Ort ohne
-  Beitreten-Adresse, gefaltete Kopien, beendete Fenster) trafen je ihren Test.
+  Beitreten-Adresse, gefaltete Kopien, beendete Fenster, höchstens 2 Stunden
+  Vorlauf) trafen je ihren Test. Den Vorlauf hat Toni beim Bau entschieden.
   Die Ausgabetypen gehen als TypeScript nach `shared/generated/`; noch kein
   Aufrufer. Der Kern bekommt Ortstage statt einer Zone.
 - [ ] **2 · Tür:** öffentliche Aufklapp-Funktion in Rust statt der privaten

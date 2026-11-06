@@ -53,6 +53,11 @@ Statusleiste.
     bleibt ohne Aperio wahr. Der eine Inhaltswechsel, den iOS ohne App erlaubt,
     geht ans Überblenden. (Die mitlaufende Angabe kennt nur **eine** Einheit;
     die genauen Uhrzeiten stehen deshalb daneben, siehe Darstellung.)
+11. **Höchstens 2 Stunden Vorlauf** (nachträglich, beim Bau von Stufe 1): Liegt
+    die letzte Erinnerung mehr als 2 Stunden vor Beginn, gibt es keine
+    Aktivität, und die Erinnerung bleibt eine gewöhnliche Benachrichtigung. Eine
+    Erinnerung „1 Tag vorher“ ist eine zum Planen, nicht eine, nach der man die
+    Uhr beobachtet.
 
 ## Was die Plattformen erlauben
 
@@ -186,6 +191,8 @@ Erinnerung doppelt oder verschwunden.
   **vor dem Ende** liegt. Auslöser am Ende oder danach zählen nicht. Gibt es
   keinen, gibt es kein Fenster. Erinnerungen nach dem Beginn sind erlaubt.
 - **Ende** = das späteste Ende der Kopien.
+- **Vorlauf:** Liegt der Beginn des Fensters mehr als 2 Stunden vor dem
+  Terminbeginn, gibt es kein Fenster (Entscheidung 11).
 - **Feste Erinnerungszeit an einer Serie** (absolute Erinnerung) gehört nur zum
   ersten Vorkommen, das nach ihr endet, wie heute beim Planen. Sonst begänne an
   diesem einen Zeitpunkt ein Fenster für jedes Vorkommen.
