@@ -114,6 +114,8 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
 - [ ] Handler: snooze (neu planen), mark-done, open-from-notification
 - Einstieg: `src-tauri/src/reminders.rs` (`fire()`), Notification-Builder um `.action()` erweitern.
 - [ ] **Tippen auf eine Erinnerung öffnet den Termin** (Wunsch Toni, 2026-10-05;
+  die Handy-Hälfte ist Stufe 3 von A12, weil die Live-Aktivität dieselbe Route
+  braucht;
   DESIGN §14.3 „Öffnen“). Heute bringt ein Tipp auf iOS und Android nur die App
   nach vorn, auf dem zuletzt offenen Bildschirm; unter Windows tut ein Klick
   nichts (kein Klick-Handler, Fenster bleibt verborgen). Befund (nur gelesen):
@@ -188,12 +190,42 @@ stehen. „Termin morgen um 11 in Aperio" in einem Satz geht nicht; Siri fragt d
 Parameter nach. Für einen Screenreader-Nutzer ist der geführte Dialog eher ein
 Vorteil.
 
-- Offen: Live Activities brauchen einen Start aus dem Vordergrund oder per Push;
-  Aperio hat keinen Server und entfernt das Push-Entitlement bewusst. Ein
-  Countdown „ohne Zutun" ist unter iOS damit nicht erreichbar, unter Android
-  über eine dauerhafte Benachrichtigung aus dem Hintergrund-Worker schon.
+- Live Activities: überholt durch A12. Ab iOS 26 plant Aperio sie ohne Push
+  im Voraus ein (`Activity.request(..., start:)`).
 - Einstieg: `mobile/plugins/`, `mobile/modules/cal-ffi/ios/CalFfiModule.swift`
   (Datenbankpfad), `crates/cal-ffi/src/host.rs` (Lesepfad).
+
+### A12 · Live-Aktivitäten für Termine (Handy) `[ ]`
+Vom Auslösen der letzten Erinnerung bis zum Ende des Termins: Titel, Zeit, Ort
+und Anschlusstermin, auf iOS als Live-Aktivität, auf Android als laufende (ab
+Android 16 hervorgehobene) Benachrichtigung. Die letzte Erinnerung wird selbst
+zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
+[DESIGN-live-activities.md](DESIGN-live-activities.md) (Toni, 2026-11-06).
+
+- [ ] **1 · Regel im Kern:** `cal-core::live_activity` mit eigenen
+  Eingabetypen: Vorkommens-Schlüssel, Kopien, Fenster, Ketten, Abschnitte,
+  Anschluss, Hervorhebung ab 15 Minuten vor Beginn, Signal-Abschnitte mit den
+  aufgegangenen Auslösern. Reine Funktion, Tests (Fälle im Entwurf).
+- [ ] **2 · Tür:** öffentliche Aufklapp-Funktion in Rust statt der privaten
+  Kopie in `host-core/reminders.rs`; Auslöser mit Ort; Aufzählung schaut
+  zurück; EIN Lesevorgang liefert Benachrichtigungen und Plan
+  (`liveActivityPlanJson`); Brücken iOS und Android; TS-Typ und Hülle.
+- [ ] **3 · Antippen öffnet den Termin** (Handy-Hälfte von A5): Kalender und
+  Beginn des Vorkommens in der Benachrichtigung, Antwort-Hörer auch beim
+  Kaltstart.
+- [ ] **4 · iOS:** Ansichten und `ActivityConfiguration` in der Widget-
+  Erweiterung, `NSSupportsLiveActivities`, Attribut-Struktur doppelt mit
+  Wächter, Brücke, Abgleich (Vordergrund, Hintergrund, Kaltstart aus dem
+  gemerkten Plan), iOS-26-Einplanung mit einem Signal, Wegwischen, Schalter
+  und iOS-Hinweis, Texte en/de, Hilfe-Seite.
+- [ ] **5 · Android:** Plan-Ablage, Signal- und Wegwisch-Datei, Alarm- und
+  Neustart-Empfänger, Benachrichtigung (Countdown, Hervorhebung, neu oder
+  still), genaue Alarme mit Rückfall, Antippen, ein Signal mit Rückfall auf
+  Expo, Hervorhebungs-Hinweis, `POST_PROMOTED_NOTIFICATIONS`, Hilfe-Seite.
+- [ ] **Nach Tonis iOS-Test:** Überleben eingeplante Aktivitäten keinen
+  Neustart, auf iOS nicht mehr weglassen (zwei Signale)? Tonis Entscheidung.
+- [ ] **Folgepunkt:** Termine aus dem Gerätekalender (ihre Erinnerungen stellt
+  das Betriebssystem, Aperio zählt sie nicht auf).
 
 ### A6 · Offline-Queue für externe APIs (§18.2)
 - [ ] SQLite-Queue, die Mutationen an externe Kalender/Aufgaben (create/update/delete event+task) offline puffert
