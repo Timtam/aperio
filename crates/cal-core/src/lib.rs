@@ -26,6 +26,7 @@ pub mod file_import;
 pub mod group_carry;
 pub mod group_suggestion;
 pub mod invitation;
+pub mod live_activity;
 pub mod meeting_events;
 pub mod meeting_link_grouping;
 pub mod os_access;

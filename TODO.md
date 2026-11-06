@@ -202,10 +202,18 @@ Android 16 hervorgehobene) Benachrichtigung. Die letzte Erinnerung wird selbst
 zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
 [DESIGN-live-activities.md](DESIGN-live-activities.md) (Toni, 2026-11-06).
 
-- [ ] **1 · Regel im Kern:** `cal-core::live_activity` mit eigenen
+- [x] **1 · Regel im Kern:** `cal-core::live_activity` mit eigenen
   Eingabetypen: Vorkommens-Schlüssel, Kopien, Fenster, Ketten, Abschnitte,
   Anschluss, Hervorhebung ab 15 Minuten vor Beginn, Signal-Abschnitte mit den
   aufgegangenen Auslösern. Reine Funktion, Tests (Fälle im Entwurf).
+  ↳ `live_activity_plan(&LiveActivityInput) -> LiveActivityPlan`, dazu
+  `LiveActivityPlan::absorbed()` für die Mengen-Differenz. 18 Tests, zehn
+  Gegenproben (Gleichstand, Signal nur am Fensterbeginn, feste Zeit an einer
+  Serie, Anschluss je Abschnitt, Meeting-Paar, Hervorhebung, Ort ohne
+  Beitreten-Adresse, gefaltete Kopien, beendete Fenster, höchstens 2 Stunden
+  Vorlauf) trafen je ihren Test. Den Vorlauf hat Toni beim Bau entschieden.
+  Die Ausgabetypen gehen als TypeScript nach `shared/generated/`; noch kein
+  Aufrufer. Der Kern bekommt Ortstage statt einer Zone.
 - [ ] **2 · Tür:** öffentliche Aufklapp-Funktion in Rust statt der privaten
   Kopie in `host-core/reminders.rs`; Auslöser mit Ort; Aufzählung schaut
   zurück; EIN Lesevorgang liefert Benachrichtigungen und Plan
