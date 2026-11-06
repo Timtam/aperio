@@ -54,3 +54,11 @@ export function navigateNested<ScreenName extends keyof RootStackParamList>(
     navigationRef.dispatch(CommonActions.navigate(tab, { screen, params }));
   }
 }
+
+/** Until the navigation can take a screen: at once once it is up, a moment
+ *  when what asks (a shared file, a tapped notification) started the app. */
+export async function whenNavigationReady(): Promise<void> {
+  for (let tries = 0; tries < 100 && !navigationRef.isReady(); tries += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}

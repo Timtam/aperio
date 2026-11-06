@@ -114,8 +114,7 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
 - [ ] Handler: snooze (neu planen), mark-done, open-from-notification
 - Einstieg: `src-tauri/src/reminders.rs` (`fire()`), Notification-Builder um `.action()` erweitern.
 - [ ] **Tippen auf eine Erinnerung öffnet den Termin** (Wunsch Toni, 2026-10-05;
-  die Handy-Hälfte ist Stufe 3 von A12, weil die Live-Aktivität dieselbe Route
-  braucht;
+  die Handy-Hälfte ist gebaut, A12 Stufe 3; offen ist der Desktop;
   DESIGN §14.3 „Öffnen“). Heute bringt ein Tipp auf iOS und Android nur die App
   nach vorn, auf dem zuletzt offenen Bildschirm; unter Windows tut ein Klick
   nichts (kein Klick-Handler, Fenster bleibt verborgen). Befund (nur gelesen):
@@ -218,9 +217,14 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   Kopie in `host-core/reminders.rs`; Auslöser mit Ort; Aufzählung schaut
   zurück; EIN Lesevorgang liefert Benachrichtigungen und Plan
   (`liveActivityPlanJson`); Brücken iOS und Android; TS-Typ und Hülle.
-- [ ] **3 · Antippen öffnet den Termin** (Handy-Hälfte von A5): Kalender und
+- [x] **3 · Antippen öffnet den Termin** (Handy-Hälfte von A5): Kalender und
   Beginn des Vorkommens in der Benachrichtigung, Antwort-Hörer auch beim
   Kaltstart.
+  ↳ Toni, 2026-11-07: ein Serientermin öffnet das Vorkommen ohne Vorab-Frage;
+  die Tageswechsel-Benachrichtigung öffnet die Übersicht gleich mit. Schreiben
+  und Lesen der Daten in `shared/reminderTap.ts` (vitest), geöffnet nach dem
+  Entsperren (`ReminderTapRouter`). Die Live-Aktivität hängt sich später an
+  dieselbe Route.
 - [ ] **4 · iOS:** Ansichten und `ActivityConfiguration` in der Widget-
   Erweiterung, `NSSupportsLiveActivities`, Attribut-Struktur doppelt mit
   Wächter, Brücke, Abgleich (Vordergrund, Hintergrund, Kaltstart aus dem

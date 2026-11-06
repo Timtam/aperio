@@ -25,6 +25,7 @@ import './a11y/gestureHost';
 import { useSyncTriggers } from './api/syncTriggers';
 import { AppLockGate } from './components/AppLockGate';
 import DayStartReviewModal from './components/DayStartReviewModal';
+import { ReminderTapRouter } from './reminders/ReminderTapRouter';
 import { EventScopeDialogHost } from './components/EventScopeDialogHost';
 import { DeviceAccessGate } from './components/DeviceAccessGate';
 import { FirstLaunchWizardGate } from './components/FirstLaunchWizardGate';
@@ -749,6 +750,10 @@ function AppContent() {
               store, so they mount inside the provider; the review modal overlays
               the focused tab when the gate opens it. */}
           <DayStartChecks />
+          {/* A tap on a reminder opens its appointment or task, on the
+              day-start notification the review (TODO A5). After the unlock,
+              like the review: both present above the lock cover. */}
+          <ReminderTapRouter />
           {/* §19.11 first-launch wizard gate. On a genuinely fresh instance (no
               account / no sync / empty store) it opens the wizard once;
               otherwise it's a no-op. */}

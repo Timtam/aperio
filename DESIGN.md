@@ -2652,6 +2652,8 @@ Gemessen am 2026-10-31 mit Toni auf Windows 11 Insider 26220 (NVDA):
 
 **Handy**: Dort entscheidet die Berechtigung des Betriebssystems. `Einstellungen → Allgemein → Benachrichtigungstöne` zeigt, ob sie erteilt ist (erlaubt; noch nicht erlaubt; nicht erlaubt, nur die Systemeinstellungen können es erlauben; nicht prüfbar), mit „Benachrichtigungen erlauben“ (fragt das Betriebssystem; ein Ja plant die Erinnerungen sofort ein) oder sonst „Systemeinstellungen öffnen“. Neu gelesen, wenn der Bildschirm sichtbar wird und wenn die App in den Vordergrund zurückkehrt (`mobile/src/state/notificationPermission.ts`).
 
+**Antippen (Handy, gebaut).** Ein Tipp auf eine Erinnerung öffnet ihren Termin oder ihre Aufgabe, ein Tipp auf die Tageswechsel-Benachrichtigung die Tageswechsel-Übersicht, auch wenn sie heute schon lief. Ein Serientermin öffnet das Vorkommen der Erinnerung ohne Vorab-Frage (Toni, 2026-11-07); der Umfang bleibt im Editor wählbar. Eine Einzeländerung öffnet sich selbst, die Einladung eines anderen als Serie, wie aus dem Kalender. Was die Benachrichtigung trägt und was ein Tipp daraus liest, steht an einer Stelle (`shared/reminderTap.ts`); geöffnet wird erst nach dem Entsperren, weil Editor und Übersicht über der Sperre lägen (`mobile/src/reminders/ReminderTapRouter.tsx`). Der Desktop-Klick auf den Toast fehlt noch (TODO A5).
+
 #### Benachrichtigungsinhalt (Beispiel Termin)
 
 ```

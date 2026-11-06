@@ -19,6 +19,7 @@ import { settleExternalCaches } from './cacheSettle';
 import { notify } from './notify';
 import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
+import { onDayStartReviewRequested } from './dayStartRequest';
 import { isDayStartReviewSnoozed } from './dayStartSnooze';
 import { whenDeviceAccessSettled } from './deviceAccessGate';
 import { whenStartupSettled } from './startupGate';
@@ -364,6 +365,19 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
 
   const openReview = useCallback(() => setReviewOpen(true), []);
   const closeReview = useCallback(() => setReviewOpen(false), []);
+
+  // A tap on the day-start notification (`ReminderTapRouter`) opens the review
+  // now — also when today's pass has run or a snooze holds, because the user
+  // asked. The review reads its own rows and closes itself when nothing is
+  // left. Held, like every pass here, while the lock covers the app.
+  const [requested, setRequested] = useState(false);
+  useEffect(() => onDayStartReviewRequested(() => setRequested(true)), []);
+  useEffect(() => {
+    if (!requested || appLocked) return;
+    setRequested(false);
+    invalidateData();
+    setReviewOpen(true);
+  }, [requested, appLocked, invalidateData]);
 
   const runInner = useCallback(() => {
     void (async () => {
