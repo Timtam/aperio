@@ -1,19 +1,32 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
+  afterStartLabelKey,
+  afterStartOffered,
+  allDayKindFor,
+  allDayKindOption,
+  allDayReminderOf,
   atStartLabelKey,
+  clockOfText,
+  clockText,
+  DEFAULT_ALL_DAY_CLOCK,
   DEFAULT_MINUTES_BEFORE,
+  isAfterStart,
+  minutesBeforeOfAllDay,
   RELATIVE_UNIT_MINUTES,
   reminderKindFor,
   reminderKindOption,
   relativeAmount,
   splitRelativeMinutes,
+  type AllDayKindOption,
+  type AllDayReminder,
   type RelativeUnit,
   type ReminderKindOption,
 } from '@aperio/shared';
 
 import type { Reminder } from '../api/types';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { SoundPicker } from './SoundPicker';
 
 /**
@@ -23,10 +36,16 @@ import { SoundPicker } from './SoundPicker';
  * The kinds the local engine supports (the rules in `shared/reminderKinds.ts`):
  *  - **Relative** — fire N minutes / hours / days before the event
  *    start or task due date.
- *  - **At start** — fire when the appointment starts or the task is due; an
- *    all-day appointment on its day. Stored as relative, 0 minutes before.
+ *  - **At start** — fire when the appointment starts or the task is due.
+ *    Stored as relative, 0 minutes before.
+ *  - **After start** — fire N minutes / hours / days after the start
+ *    (negative minutes), only where it arrives (TODO B7 222).
  *  - **Absolute** — fire at a fixed wall-clock time.
  *  - **At app start** — fire on the next launch after the due time.
+ *
+ * An all-day appointment's rows read differently: a day (the day itself, N
+ * days before, N days after) and a clock time (the day-start time or one of
+ * its own), the reading the planner gives its own reminders.
  *
  * E-mail reminders are an adapter-side feature and land with Phase 6.
  * Per-reminder sound overrides land with the asset store in the sync
@@ -65,10 +84,17 @@ export interface RemindersEditorProps {
    */
   mode: 'event' | 'task';
   /**
-   * The reminders are an all-day appointment's: "at start" then reads "on the
-   * day", since it rings at the time the day starts, not at a start time.
+   * The reminders are an all-day appointment's: each row is a day and a clock
+   * time instead of minutes before a start it does not have.
    */
   allDay?: boolean;
+  /**
+   * The calendar keeps a reminder after the start
+   * (`CalendarRow.reminder_capabilities.after_start`). Where it does not, "after
+   * the start" is offered only for a row that stays in Aperio, and a row that
+   * has it anyway says it will not arrive.
+   */
+  afterStartKept?: boolean;
   /**
    * Show the per-row "Applies" choice — only in Aperio, or attached to new
    * events. Only the calendar-defaults panel turns this on, and only for
@@ -96,21 +122,18 @@ export interface RemindersEditorProps {
   allowAppStart?: boolean;
 }
 
-const DEFAULT_RELATIVE: Reminder = {
-  kind: { type: 'relative', minutes_before: DEFAULT_MINUTES_BEFORE },
-  sound: null,
-};
-
 export function RemindersEditor({
   value,
   onChange,
   mode,
   allDay = false,
+  afterStartKept = false,
   placement = false,
   placementSurface = 'calendar',
   allowAppStart = true,
 }: RemindersEditorProps) {
   const { t } = useTranslation();
+  const allDayRows = mode === 'event' && allDay;
 
   const update = useCallback(
     (i: number, next: EditableReminder) => {
@@ -131,11 +154,18 @@ export function RemindersEditor({
   );
 
   const add = useCallback(() => {
+    // An all-day row starts on the day itself at the day-start time, which
+    // every calendar keeps; any other row 15 minutes before.
+    const minutes = allDayRows ? 0 : DEFAULT_MINUTES_BEFORE;
     onChange([
       ...value,
-      { ...DEFAULT_RELATIVE, attach: placementSurface === 'event' },
+      {
+        kind: { type: 'relative', minutes_before: minutes },
+        sound: null,
+        attach: placementSurface === 'event',
+      },
     ]);
-  }, [value, onChange, placementSurface]);
+  }, [value, onChange, placementSurface, allDayRows]);
 
   return (
     <fieldset className="form__field reminders">
@@ -152,7 +182,8 @@ export function RemindersEditor({
                 onChange={(next) => update(i, next)}
                 onRemove={() => remove(i)}
                 mode={mode}
-                allDay={allDay}
+                allDayRow={allDayRows}
+                afterStartKept={afterStartKept}
                 position={i + 1}
                 placement={placement}
                 placementSurface={placementSurface}
@@ -179,8 +210,10 @@ interface ReminderRowProps {
   onChange: (next: EditableReminder) => void;
   onRemove: () => void;
   mode: 'event' | 'task';
-  /** An all-day appointment's row — see `RemindersEditorProps`. */
-  allDay: boolean;
+  /** An all-day appointment's row: a day and a clock time. */
+  allDayRow: boolean;
+  /** The calendar keeps "after the start" — see `RemindersEditorProps`. */
+  afterStartKept: boolean;
   /** 1-based index used in the row's aria-label. */
   position: number;
   /** Show the "Applies" choice. */
@@ -196,22 +229,35 @@ function ReminderRow({
   onChange,
   onRemove,
   mode,
-  allDay,
+  allDayRow,
+  afterStartKept,
   position,
   placement,
   placementSurface,
   allowAppStart,
 }: ReminderRowProps) {
   const { t } = useTranslation();
-  const option = reminderKindOption(value.kind);
-  // Never drop the kind a row already has: a list stored before the offer was
-  // withdrawn must still read as what it is, and stay changeable.
-  const showAppStart = allowAppStart || option === 'app_start';
-
-  const setKind = (next: ReminderKindOption) => {
-    if (next === option) return;
-    onChange({ ...value, kind: reminderKindFor(next, new Date()) });
-  };
+  // Only where it arrives; a task list says nothing about it, so a task row
+  // shows one it already has but is not offered a new one.
+  const afterStart =
+    mode === 'event' && afterStartOffered(value, { keptByCalendar: afterStartKept, placement });
+  // A row that has it where it does not arrive says so, next to the kind.
+  const notKept = mode === 'event' && isAfterStart(value.kind) && !afterStart;
+  const notKeptText = `${t('reminders.afterStartNotKept')}${
+    placement ? ` ${t('reminders.afterStartKeptInAperio')}` : ''
+  }`;
+  const hintId = useId();
+  // NVDA in focus mode never stops on a static paragraph inside the dialog's
+  // role=application: the hint describes the row's selects, and is said once
+  // when it appears (the placement just changed, another calendar was picked)
+  // — not on opening, where the selects' description carries it.
+  const announce = useAnnouncer();
+  const wasNotKept = useRef(notKept);
+  useEffect(() => {
+    if (notKept && !wasNotKept.current) announce(notKeptText);
+    wasNotKept.current = notKept;
+  }, [notKept, notKeptText, announce]);
+  const describedBy = notKept ? hintId : undefined;
 
   return (
     <div
@@ -219,37 +265,29 @@ function ReminderRow({
       role="group"
       aria-label={t('reminders.rowLabel', { n: position })}
     >
-      <label className="form__field">
-        <span className="form__label">{t('reminders.kindLabel')}</span>
-        <select
-          value={option}
-          onChange={(e) => setKind(e.target.value as ReminderKindOption)}
-        >
-          <option value="relative">
-            {t(
-              mode === 'event'
-                ? 'reminders.kind.relativeEvent'
-                : 'reminders.kind.relativeTask',
-            )}
-          </option>
-          <option value="at_start">{t(atStartLabelKey(mode, allDay))}</option>
-          <option value="absolute">{t('reminders.kind.absolute')}</option>
-          {showAppStart && (
-            <option value="app_start">{t('reminders.kind.appStart')}</option>
-          )}
-        </select>
-      </label>
-
-      {option === 'relative' && value.kind.type === 'relative' && (
-        <RelativeFields
-          minutes={value.kind.minutes_before}
-          onChange={(minutes) =>
-            onChange({
-              ...value,
-              kind: { type: 'relative', minutes_before: minutes },
-            })
-          }
+      {allDayRow ? (
+        <AllDayKindFields
+          value={value}
+          onChange={onChange}
+          afterStart={afterStart}
+          allowAppStart={allowAppStart}
+          describedBy={describedBy}
         />
+      ) : (
+        <TimedKindFields
+          value={value}
+          onChange={onChange}
+          mode={mode}
+          afterStart={afterStart}
+          allowAppStart={allowAppStart}
+          describedBy={describedBy}
+        />
+      )}
+
+      {notKept && (
+        <p className="form__hint" id={hintId}>
+          {notKeptText}
+        </p>
       )}
 
       {value.kind.type === 'absolute' && (
@@ -291,6 +329,7 @@ function ReminderRow({
           <span className="form__label">{t('reminders.placement.label')}</span>
           <select
             value={value.attach ? 'attach' : 'local'}
+            aria-describedby={describedBy}
             onChange={(e) =>
               onChange(withPlacement(value, e.target.value === 'attach'))
             }
@@ -319,7 +358,219 @@ function ReminderRow({
   );
 }
 
+interface KindFieldsProps {
+  value: EditableReminder;
+  onChange: (next: EditableReminder) => void;
+  /** "After the start" may be chosen for this row. */
+  afterStart: boolean;
+  allowAppStart: boolean;
+  /** The id of the row's "will not arrive" hint, while it shows. */
+  describedBy?: string;
+}
+
+/** The kind of a row with a start time (or a task's due time), and its
+ *  amount and unit. */
+function TimedKindFields({
+  value,
+  onChange,
+  mode,
+  afterStart,
+  allowAppStart,
+  describedBy,
+}: KindFieldsProps & { mode: 'event' | 'task' }) {
+  const { t } = useTranslation();
+  const option = reminderKindOption(value.kind);
+  // Never drop the kind a row already has: a list stored before the offer was
+  // withdrawn must still read as what it is, and stay changeable.
+  const showAppStart = allowAppStart || option === 'app_start';
+  const showAfterStart = afterStart || option === 'after_start';
+
+  const setKind = (next: ReminderKindOption) => {
+    if (next === option) return;
+    onChange({ ...value, kind: reminderKindFor(next, new Date()) });
+  };
+  const setMinutes = (minutes_before: number) =>
+    onChange({ ...value, kind: { type: 'relative', minutes_before } });
+
+  return (
+    <>
+      <label className="form__field">
+        <span className="form__label">{t('reminders.kindLabel')}</span>
+        <select
+          value={option}
+          aria-describedby={describedBy}
+          onChange={(e) => setKind(e.target.value as ReminderKindOption)}
+        >
+          <option value="relative">
+            {t(
+              mode === 'event'
+                ? 'reminders.kind.relativeEvent'
+                : 'reminders.kind.relativeTask',
+            )}
+          </option>
+          <option value="at_start">{t(atStartLabelKey(mode, false))}</option>
+          {showAfterStart && (
+            <option value="after_start">{t(afterStartLabelKey(mode))}</option>
+          )}
+          <option value="absolute">{t('reminders.kind.absolute')}</option>
+          {showAppStart && (
+            <option value="app_start">{t('reminders.kind.appStart')}</option>
+          )}
+        </select>
+      </label>
+
+      {option === 'relative' && value.kind.type === 'relative' && (
+        <RelativeFields minutes={value.kind.minutes_before} onChange={setMinutes} />
+      )}
+      {option === 'after_start' && value.kind.type === 'relative' && (
+        <RelativeFields
+          minutes={-value.kind.minutes_before}
+          onChange={(minutes) => setMinutes(-minutes)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The kind of an all-day appointment's row: the day itself, N days before or
+ * after, each at the day-start time or at a clock time of its own.
+ */
+function AllDayKindFields({
+  value,
+  onChange,
+  afterStart,
+  allowAppStart,
+  describedBy,
+}: KindFieldsProps) {
+  const { t } = useTranslation();
+  const option = allDayKindOption(value.kind);
+  const showAppStart = allowAppStart || option === 'app_start';
+  const showDaysAfter = afterStart || option === 'days_after';
+
+  const setKind = (next: AllDayKindOption) => {
+    if (next === option) return;
+    onChange({ ...value, kind: allDayKindFor(next, new Date()) });
+  };
+
+  return (
+    <>
+      <label className="form__field">
+        <span className="form__label">{t('reminders.kindLabel')}</span>
+        <select
+          value={option}
+          aria-describedby={describedBy}
+          onChange={(e) => setKind(e.target.value as AllDayKindOption)}
+        >
+          <option value="on_day">{t('reminders.kind.onTheDay')}</option>
+          <option value="days_before">{t('reminders.kind.daysBefore')}</option>
+          {showDaysAfter && (
+            <option value="days_after">{t('reminders.kind.daysAfter')}</option>
+          )}
+          <option value="absolute">{t('reminders.kind.absolute')}</option>
+          {showAppStart && (
+            <option value="app_start">{t('reminders.kind.appStart')}</option>
+          )}
+        </select>
+      </label>
+
+      {value.kind.type === 'relative' && (
+        <AllDayFields
+          // A new kind starts its fields afresh (the day-start time).
+          key={option}
+          reminder={allDayReminderOf(value.kind.minutes_before)}
+          // A clock time on the day itself is after its midnight: only where
+          // "after the start" arrives, or on a row that has one already.
+          clockOnTheDay={afterStart}
+          onChange={(next) =>
+            onChange({
+              ...value,
+              kind: { type: 'relative', minutes_before: minutesBeforeOfAllDay(next) },
+            })
+          }
+        />
+      )}
+    </>
+  );
+}
+
+interface AllDayFieldsProps {
+  reminder: AllDayReminder;
+  clockOnTheDay: boolean;
+  onChange: (next: AllDayReminder) => void;
+}
+
+function AllDayFields({ reminder, clockOnTheDay, onChange }: AllDayFieldsProps) {
+  const { t } = useTranslation();
+  const { day, clock } = reminder;
+  // Whether the row is set to a time of its own. Its own state, not read off
+  // the value: 00:00 is stored as the whole day (it rings at the day-start
+  // time), and an hour typed with its leading zero passes through 00:00 —
+  // read off the value, the focused field vanished under the keyboard.
+  const [ownTime, setOwnTime] = useState(clock !== null);
+  useEffect(() => {
+    if (clock !== null) setOwnTime(true);
+  }, [clock]);
+  // Once shown, the time choice stays for the row: choosing the day-start
+  // time on the day itself must not remove the control that has focus.
+  const [clockShown] = useState(clock !== null);
+  const offerClock = day !== 0 || clockOnTheDay || clockShown || ownTime;
+
+  const setDays = (typed: number) => {
+    const n = relativeAmount(typed);
+    onChange({ day: day < 0 ? -n : n, clock });
+  };
+
+  return (
+    <div className="form__row reminders__relative">
+      {day !== 0 && (
+        <label className="form__field">
+          <span className="form__label">{t('reminders.daysLabel')}</span>
+          <input
+            type="number"
+            min={1}
+            max={999}
+            value={Math.abs(day)}
+            onChange={(e) => setDays(Number(e.target.value))}
+          />
+        </label>
+      )}
+      {offerClock && (
+        <label className="form__field">
+          <span className="form__label">{t('reminders.timeLabel')}</span>
+          <select
+            value={ownTime ? 'clock' : 'day_start'}
+            onChange={(e) => {
+              const own = e.target.value === 'clock';
+              setOwnTime(own);
+              onChange({ day, clock: own ? DEFAULT_ALL_DAY_CLOCK : null });
+            }}
+          >
+            <option value="day_start">{t('reminders.time.dayStart')}</option>
+            <option value="clock">{t('reminders.time.clock')}</option>
+          </select>
+        </label>
+      )}
+      {ownTime && (
+        <label className="form__field">
+          <span className="form__label">{t('reminders.clockLabel')}</span>
+          <input
+            type="time"
+            value={clockText(clock ?? 0)}
+            onChange={(e) => {
+              const next = clockOfText(e.target.value);
+              // 00:00 is the whole day, stored so; the field stays.
+              if (next !== null) onChange({ day, clock: next === 0 ? null : next });
+            }}
+          />
+        </label>
+      )}
+    </div>
+  );
+}
+
 interface RelativeFieldsProps {
+  /** How far from the start, in minutes: before or after, the caller knows. */
   minutes: number;
   onChange: (minutes: number) => void;
 }

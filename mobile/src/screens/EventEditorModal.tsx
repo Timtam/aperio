@@ -24,6 +24,7 @@ import {
   importInto,
   importIntoSentence,
   importOwner,
+  allDayDefaultKind,
   allDayFormEndDate,
   allDayWireEnd,
   applyDateTimeChange,
@@ -615,9 +616,20 @@ function EventEditorScreen({
     if (editing || calendarDefaults.loading || remindersTouchedRef.current) return;
     const offered: EditableReminder[] = calendarDefaults.value
       .filter((d) => d.attach === true)
-      .map(({ kind, sound }) => ({ kind, sound, attach: true }));
+      // Into an all-day appointment as the Host writes it: whole days
+      // (`apply_default_reminder_policy`, TODO B7 222). Switching all-day on
+      // or off re-offers the untouched rows in the other form.
+      .map(({ kind, sound }) => ({
+        kind: allDay ? allDayDefaultKind(kind) : kind,
+        sound,
+        attach: true,
+      }));
+    // Read before the updater, not inside it: StrictMode calls an updater
+    // twice with the same `prev`, and the first call moves the ref on — the
+    // second then saw its own offer as "mine" and refused the swap. Captured
+    // here, both calls decide alike.
+    const mine = offeredRemindersRef.current;
     setReminders((prev) => {
-      const mine = offeredRemindersRef.current;
       // Rows the user (or a prefill from an earlier appointment) put there
       // stay: only an EMPTY list, or exactly what this effect last offered,
       // may be replaced by another calendar's offer. Empty has to count on its
@@ -632,7 +644,7 @@ function EventEditorScreen({
       offeredRemindersRef.current = offered;
       return offered;
     });
-  }, [editing, calId, calendarDefaults.loading, calendarDefaults.value]);
+  }, [editing, calId, calendarDefaults.loading, calendarDefaults.value, allDay]);
 
   useEffect(() => {
     if (!editing || original == null || calendarDefaults.loading) return;
@@ -653,12 +665,38 @@ function EventEditorScreen({
     // them they ride on the appointment, so each row has to read as attached.
     // Whatever the private-reminder load already appended stays — that is
     // stored data, not a default this overlay owns.
+    // On an all-day appointment as the planner rings a default: whole days
+    // at the day-start time (TODO B7 222), so the row says what happens.
     setReminders((prev) => [
-      ...attached.map(({ kind, sound }) => ({ kind, sound, attach: true })),
+      ...attached.map(({ kind, sound }) => ({
+        kind: original.all_day ? allDayDefaultKind(kind) : kind,
+        sound,
+        attach: true,
+      })),
       ...prev.filter((r) => r.attach === false),
     ]);
     setKeepRemindersAsDefault(true);
   }, [editing, original, calendarDefaults.loading, calendarDefaults.value]);
+
+  // Switched between all-day and timed while the overlaid defaults are
+  // untouched, they follow, so the rows keep saying how the default rings
+  // (TODO B7 222); the private rows beside them stay.
+  useEffect(() => {
+    if (!editing || !keepRemindersAsDefault || remindersTouchedRef.current) return;
+    const attached = calendarDefaults.value
+      .filter((d) => d.attach === true)
+      .map(({ kind, sound }) => ({
+        kind: allDay ? allDayDefaultKind(kind) : kind,
+        sound,
+        attach: true,
+      }));
+    setReminders((prev) => {
+      const next = [...attached, ...prev.filter((r) => r.attach === false)];
+      return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
+    });
+    // Only the switch moves them; the rest is read as it stands then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allDay]);
 
   useEffect(() => {
     void (async () => {
@@ -2714,6 +2752,12 @@ function EventEditorScreen({
         // defaults: don't offer what stays silent.
         allowAppStart={targetAccountId === 'local'}
         allDay={allDay}
+        // Whether "after the start" reaches this calendar: its adapter's
+        // manifest says (TODO B7 222). A calendar not yet listed keeps nothing
+        // more.
+        afterStartKept={
+          calendars.find((c) => c.id === calId)?.reminder_capabilities?.after_start ?? false
+        }
         onChange={(next) => {
           setReminders(next);
           // The moment the user touches the editor the rows become REAL

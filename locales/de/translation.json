@@ -113,7 +113,7 @@
     "deleteCalendarMessage": "„{{name}}“ löschen? Die zugehörigen Termine werden ebenfalls entfernt.",
     "manageCalendar": "Verwalten",
     "birthdayCalendarReminders": "Erinnerungen",
-    "birthdayCalendarRemindersHint": "Standard-Erinnerungen für diesen Geburtstagskalender – zum Beispiel eine Woche vorher. Geburtstage sind ganztägig, daher wird eine Erinnerung zum Tagesbeginn ausgelöst statt am Abend zuvor.",
+    "birthdayCalendarRemindersHint": "Standard-Erinnerungen für diesen Geburtstagskalender – zum Beispiel eine Woche vorher um 9 Uhr. Geburtstage sind ganztägig: Jede Erinnerung ist ein Tag (der Geburtstag selbst, Tage vorher oder danach) und eine Uhrzeit. Ohne eigene Uhrzeit gilt die des Tagesstarts.",
     "duplicate": "Duplizieren",
     "addSubtask": "Unteraufgabe hinzufügen",
     "plan": "Einplanen",
@@ -287,11 +287,24 @@
       "atStart": "Zu Beginn",
       "atDue": "Bei Fälligkeit",
       "onTheDay": "Am Tag selbst",
+      "afterStart": "Nach Beginn",
+      "afterDue": "Nach Fälligkeit",
+      "daysBefore": "Tage vorher",
+      "daysAfter": "Tage danach",
       "absolute": "Zu festem Zeitpunkt",
       "appStart": "Beim nächsten App-Start nach Fälligkeit"
     },
     "amountLabel": "Anzahl",
     "unitLabel": "Einheit",
+    "daysLabel": "Anzahl Tage",
+    "timeLabel": "Uhrzeit",
+    "clockLabel": "Eigene Uhrzeit",
+    "afterStartNotKept": "Dieser Kalender speichert keine Erinnerung nach Beginn, sie kommt dort nicht an.",
+    "afterStartKeptInAperio": "Mit „Nur in Aperio“ bleibt sie erhalten.",
+    "time": {
+      "dayStart": "Zur Tagesstart-Uhrzeit",
+      "clock": "Zu einer eigenen Uhrzeit"
+    },
     "unit": {
       "minutes": "Minuten",
       "hours": "Stunden",

@@ -1,36 +1,45 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import {
+  afterStartLabelKey,
+  afterStartOffered,
+  allDayKindFor,
+  allDayKindOption,
+  allDayReminderOf,
   atStartLabelKey,
+  clockOfText,
+  clockText,
+  DEFAULT_ALL_DAY_CLOCK,
   DEFAULT_MINUTES_BEFORE,
+  isAfterStart,
+  minutesBeforeOfAllDay,
   RELATIVE_UNIT_MINUTES,
   reminderKindFor,
   reminderKindOption,
   relativeAmount,
   splitRelativeMinutes,
+  type AllDayKindOption,
+  type AllDayReminder,
   type RelativeUnit,
   type Reminder,
   type ReminderKindOption,
 } from '@aperio/shared';
 
+import { announceAround } from '../a11y/speechHold';
 import { useListFocusManager, type RowRefCallback } from '../a11y/useListFocusManager';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { SelectFieldButton } from './SelectFieldButton';
 
 // Mobile reminders editor — faithful RN port of the desktop RemindersEditor.
-// The local engine supports relative / at-start / absolute / app-start
-// reminders (e-mail is adapter-side; per-reminder sound is the desktop-only
-// asset store, so sound is forced null here). Which kind a stored reminder
-// shows as, and what a chosen kind becomes, is `shared/reminderKinds.ts`, the
-// same rules the desktop uses. Reminders cross as cal_core::Reminder[] in the
-// item JSON — no native change.
-
-const DEFAULT_RELATIVE: Reminder = {
-  kind: { type: 'relative', minutes_before: DEFAULT_MINUTES_BEFORE },
-  sound: null,
-};
+// The local engine supports relative / at-start / after-start / absolute /
+// app-start reminders (e-mail is adapter-side; per-reminder sound is the
+// desktop-only asset store, so sound is forced null here). An all-day
+// appointment's rows are a day and a clock time. Which kind a stored reminder
+// shows as, what a chosen kind becomes, and where "after the start" is offered
+// is `shared/reminderKinds.ts`, the same rules the desktop uses. Reminders
+// cross as cal_core::Reminder[] in the item JSON — no native change.
 
 /**
  * A row of this editor. The task and event editors pass plain reminders; the
@@ -41,6 +50,7 @@ const DEFAULT_RELATIVE: Reminder = {
 export type EditableReminder = Reminder & { attach?: boolean };
 
 type Placement = 'local' | 'attach';
+type ClockChoice = 'day_start' | 'clock';
 
 /** A row with its placement set, always written out.
  *
@@ -77,6 +87,7 @@ export function RemindersEditor({
   onChange,
   mode = 'task',
   allDay = false,
+  afterStartKept = false,
   placement = false,
   placementSurface = 'calendar',
   allowAppStart = true,
@@ -86,10 +97,14 @@ export function RemindersEditor({
   /** Whether the relative reminder anchors on a task's due date ("Before due")
    *  or an event's start ("Before start"). Mirrors the desktop editor's mode. */
   mode?: 'event' | 'task';
-  /** The reminders are an all-day appointment's: "at start" then reads "on
-   *  the day", since it rings at the time the day starts, not at a start
-   *  time. */
+  /** The reminders are an all-day appointment's: each row is a day and a
+   *  clock time instead of minutes before a start it does not have. */
   allDay?: boolean;
+  /** The calendar keeps a reminder after the start
+   *  (`CalendarRow.reminder_capabilities.after_start`). Where it does not,
+   *  "after the start" is offered only for a row that stays in Aperio, and a
+   *  row that has it anyway says it will not arrive. */
+  afterStartKept?: boolean;
   /** Show the per-row "Applies" choice — only in Aperio, or attached to new
    *  events. Only the calendar editor turns this on, and only for calendars
    *  whose new appointments can carry reminders at all. */
@@ -110,6 +125,7 @@ export function RemindersEditor({
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const allDayRows = mode === 'event' && allDay;
   // Move SR focus to the new/sibling row after add/remove (RN won't on its own).
   const { registerRow, registerAdd, onAdd, onRemove } = useListFocusManager(
     value.length,
@@ -127,9 +143,16 @@ export function RemindersEditor({
   };
   const add = () => {
     onAdd();
+    // An all-day row starts on the day itself at the day-start time, which
+    // every calendar keeps; any other row 15 minutes before.
+    const minutes = allDayRows ? 0 : DEFAULT_MINUTES_BEFORE;
     onChange([
       ...value,
-      { ...DEFAULT_RELATIVE, attach: placementSurface === 'event' },
+      {
+        kind: { type: 'relative', minutes_before: minutes },
+        sound: null,
+        attach: placementSurface === 'event',
+      },
     ]);
   };
 
@@ -147,7 +170,8 @@ export function RemindersEditor({
             key={i}
             value={reminder}
             mode={mode}
-            allDay={allDay}
+            allDayRow={allDayRows}
+            afterStartKept={afterStartKept}
             position={i + 1}
             placement={placement}
             placementSurface={placementSurface}
@@ -176,7 +200,8 @@ function ReminderRow({
   onChange,
   onRemove,
   mode,
-  allDay,
+  allDayRow,
+  afterStartKept,
   position,
   placement,
   placementSurface,
@@ -187,8 +212,10 @@ function ReminderRow({
   onChange: (next: EditableReminder) => void;
   onRemove: () => void;
   mode: 'event' | 'task';
-  /** An all-day appointment's row — see the editor's props. */
-  allDay: boolean;
+  /** An all-day appointment's row: a day and a clock time. */
+  allDayRow: boolean;
+  /** The calendar keeps "after the start" — see the editor's props. */
+  afterStartKept: boolean;
   position: number;
   /** Show the "Applies" choice. */
   placement: boolean;
@@ -201,11 +228,23 @@ function ReminderRow({
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  // An email kind (adapter-side) shows as relative until re-picked.
-  const kindOption = reminderKindOption(value.kind);
-  // Never drop the kind a row already has: a list stored before the offer was
-  // withdrawn must still read as what it is, and stay changeable.
-  const showAppStart = allowAppStart || kindOption === 'app_start';
+  // Only where it arrives; a task list says nothing about it, so a task row
+  // shows one it already has but is not offered a new one.
+  const afterStart =
+    mode === 'event' && afterStartOffered(value, { keptByCalendar: afterStartKept, placement });
+  // A row that has it where it does not arrive says so, next to the kind.
+  const notKept = mode === 'event' && isAfterStart(value.kind) && !afterStart;
+  const notKeptText = `${t('reminders.afterStartNotKept')}${
+    placement ? ` ${t('reminders.afterStartKeptInAperio')}` : ''
+  }`;
+  // Said once when it appears (the placement just changed, another calendar
+  // was picked): it sits above the control that changed, so a swipe would
+  // not reach it. On opening it is simply next in the row.
+  const wasNotKept = useRef(notKept);
+  useEffect(() => {
+    if (notKept && !wasNotKept.current) announceAround(notKeptText);
+    wasNotKept.current = notKept;
+  }, [notKept, notKeptText]);
 
   return (
     <View style={styles.row}>
@@ -213,41 +252,29 @@ function ReminderRow({
         {t('reminders.rowLabel', { n: position })}
       </Text>
 
-      <SelectFieldButton<ReminderKindOption>
-        label={t('reminders.kindLabel')}
-        value={kindOption}
-        options={[
-          {
-            value: 'relative',
-            label: t(
-              mode === 'event'
-                ? 'reminders.kind.relativeEvent'
-                : 'reminders.kind.relativeTask',
-            ),
-          },
-          { value: 'at_start', label: t(atStartLabelKey(mode, allDay)) },
-          { value: 'absolute', label: t('reminders.kind.absolute') },
-          ...(showAppStart
-            ? [{ value: 'app_start' as const, label: t('reminders.kind.appStart') }]
-            : []),
-        ]}
-        onChange={(next) => {
-          // Choosing the kind the row already has changes nothing: it would
-          // turn "30 minutes before" back into the default 15. An email row
-          // only SHOWS as "before start"; choosing it makes it one.
-          if (next === kindOption && value.kind.type !== 'email') return;
-          onChange({ ...value, kind: reminderKindFor(next, new Date()) });
-        }}
-      />
-
-      {kindOption === 'relative' && value.kind.type === 'relative' && (
-        <RelativeFields
+      {allDayRow ? (
+        <AllDayKindFields
+          value={value}
+          onChange={onChange}
           position={position}
-          minutes={value.kind.minutes_before}
-          onChange={(minutes) =>
-            onChange({ ...value, kind: { type: 'relative', minutes_before: minutes } })
-          }
+          afterStart={afterStart}
+          allowAppStart={allowAppStart}
         />
+      ) : (
+        <TimedKindFields
+          value={value}
+          onChange={onChange}
+          mode={mode}
+          position={position}
+          afterStart={afterStart}
+          allowAppStart={allowAppStart}
+        />
+      )}
+
+      {notKept && (
+        <Text style={styles.hint} accessibilityRole="text">
+          {notKeptText}
+        </Text>
       )}
 
       {value.kind.type === 'absolute' && (
@@ -301,12 +328,280 @@ function ReminderRow({
   );
 }
 
+interface KindFieldsProps {
+  value: EditableReminder;
+  onChange: (next: EditableReminder) => void;
+  position: number;
+  /** "After the start" may be chosen for this row. */
+  afterStart: boolean;
+  allowAppStart: boolean;
+}
+
+/** The kind of a row with a start time (or a task's due time), and its
+ *  amount and unit. */
+function TimedKindFields({
+  value,
+  onChange,
+  mode,
+  position,
+  afterStart,
+  allowAppStart,
+}: KindFieldsProps & { mode: 'event' | 'task' }) {
+  const { t } = useTranslation();
+  // An email kind (adapter-side) shows as relative until re-picked.
+  const kindOption = reminderKindOption(value.kind);
+  // Never drop the kind a row already has: a list stored before the offer was
+  // withdrawn must still read as what it is, and stay changeable.
+  const showAppStart = allowAppStart || kindOption === 'app_start';
+  const showAfterStart = afterStart || kindOption === 'after_start';
+  const setMinutes = (minutes_before: number) =>
+    onChange({ ...value, kind: { type: 'relative', minutes_before } });
+
+  return (
+    <>
+      <SelectFieldButton<ReminderKindOption>
+        label={t('reminders.kindLabel')}
+        value={kindOption}
+        options={[
+          {
+            value: 'relative',
+            label: t(
+              mode === 'event'
+                ? 'reminders.kind.relativeEvent'
+                : 'reminders.kind.relativeTask',
+            ),
+          },
+          { value: 'at_start', label: t(atStartLabelKey(mode, false)) },
+          ...(showAfterStart
+            ? [{ value: 'after_start' as const, label: t(afterStartLabelKey(mode)) }]
+            : []),
+          { value: 'absolute', label: t('reminders.kind.absolute') },
+          ...(showAppStart
+            ? [{ value: 'app_start' as const, label: t('reminders.kind.appStart') }]
+            : []),
+        ]}
+        onChange={(next) => {
+          // Choosing the kind the row already has changes nothing: it would
+          // turn "30 minutes before" back into the default 15. An email row
+          // only SHOWS as "before start"; choosing it makes it one.
+          if (next === kindOption && value.kind.type !== 'email') return;
+          onChange({ ...value, kind: reminderKindFor(next, new Date()) });
+        }}
+      />
+
+      {kindOption === 'relative' && value.kind.type === 'relative' && (
+        <RelativeFields
+          position={position}
+          minutes={value.kind.minutes_before}
+          onChange={setMinutes}
+        />
+      )}
+      {kindOption === 'after_start' && value.kind.type === 'relative' && (
+        <RelativeFields
+          position={position}
+          minutes={-value.kind.minutes_before}
+          onChange={(minutes) => setMinutes(-minutes)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The kind of an all-day appointment's row: the day itself, N days before or
+ * after, each at the day-start time or at a clock time of its own.
+ */
+function AllDayKindFields({ value, onChange, position, afterStart, allowAppStart }: KindFieldsProps) {
+  const { t } = useTranslation();
+  const kindOption = allDayKindOption(value.kind);
+  const showAppStart = allowAppStart || kindOption === 'app_start';
+  const showDaysAfter = afterStart || kindOption === 'days_after';
+
+  return (
+    <>
+      <SelectFieldButton<AllDayKindOption>
+        label={t('reminders.kindLabel')}
+        value={kindOption}
+        options={[
+          { value: 'on_day', label: t('reminders.kind.onTheDay') },
+          { value: 'days_before', label: t('reminders.kind.daysBefore') },
+          ...(showDaysAfter
+            ? [{ value: 'days_after' as const, label: t('reminders.kind.daysAfter') }]
+            : []),
+          { value: 'absolute', label: t('reminders.kind.absolute') },
+          ...(showAppStart
+            ? [{ value: 'app_start' as const, label: t('reminders.kind.appStart') }]
+            : []),
+        ]}
+        onChange={(next) => {
+          // The kind it already has changes nothing (see TimedKindFields).
+          if (next === kindOption && value.kind.type !== 'email') return;
+          onChange({ ...value, kind: allDayKindFor(next, new Date()) });
+        }}
+      />
+
+      {value.kind.type === 'relative' && (
+        <AllDayFields
+          // A new kind starts its fields afresh (the day-start time).
+          key={kindOption}
+          position={position}
+          reminder={allDayReminderOf(value.kind.minutes_before)}
+          // A clock time on the day itself is after its midnight: only where
+          // "after the start" arrives, or on a row that has one already.
+          clockOnTheDay={afterStart}
+          onChange={(next) =>
+            onChange({
+              ...value,
+              kind: { type: 'relative', minutes_before: minutesBeforeOfAllDay(next) },
+            })
+          }
+        />
+      )}
+    </>
+  );
+}
+
+/** The own time an all-day row shows: 00:00 for the whole day. */
+function shownClock(clock: number | null): string {
+  return clockText(clock ?? 0);
+}
+
+function AllDayFields({
+  position,
+  reminder,
+  clockOnTheDay,
+  onChange,
+}: {
+  position: number;
+  reminder: AllDayReminder;
+  clockOnTheDay: boolean;
+  onChange: (next: AllDayReminder) => void;
+}) {
+  const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
+  const { day, clock } = reminder;
+  const rowPrefix = t('reminders.rowLabel', { n: position });
+  // Whether the row is set to a time of its own. Its own state, not read off
+  // the value: 00:00 is stored as the whole day (it rings at the day-start
+  // time), and an edit passes through "0:00" — read off the value, the
+  // focused field vanished under the keyboard.
+  const [ownTime, setOwnTime] = useState(clock !== null);
+  // Once shown, the time choice stays for the row: choosing the day-start
+  // time on the day itself must not remove the control that had focus.
+  const [clockShown] = useState(clock !== null);
+  const offerClock = day !== 0 || clockOnTheDay || clockShown || ownTime;
+  // What is typed into the clock field, kept while it is not yet a time.
+  const [clockDraft, setClockDraft] = useState(shownClock(clock));
+  // The row's time changed from outside (a row removed above this one, so
+  // another reminder sits here now): show that one. A draft that already
+  // reads as this time is the user's own spelling and stays.
+  useEffect(() => {
+    if (clock !== null) setOwnTime(true);
+    setClockDraft((draft) => ((clockOfText(draft) || null) === clock ? draft : shownClock(clock)));
+  }, [clock]);
+
+  return (
+    <View style={styles.relativeRow}>
+      {day !== 0 && (
+        <WholeNumberField
+          label={t('reminders.daysLabel')}
+          accessibilityLabel={`${rowPrefix} – ${t('reminders.daysLabel')}`}
+          value={Math.abs(day)}
+          onChange={(n) => onChange({ day: day < 0 ? -n : n, clock })}
+        />
+      )}
+      {offerClock && (
+        <SelectFieldButton<ClockChoice>
+          label={t('reminders.timeLabel')}
+          value={ownTime ? 'clock' : 'day_start'}
+          options={[
+            { value: 'day_start', label: t('reminders.time.dayStart') },
+            { value: 'clock', label: t('reminders.time.clock') },
+          ]}
+          onChange={(next) => {
+            if (next === (ownTime ? 'clock' : 'day_start')) return;
+            const own = next === 'clock';
+            const nextClock = own ? DEFAULT_ALL_DAY_CLOCK : null;
+            setOwnTime(own);
+            setClockDraft(shownClock(nextClock));
+            onChange({ day, clock: nextClock });
+          }}
+        />
+      )}
+      {ownTime && (
+        <View style={styles.amountField}>
+          <Text style={styles.label}>{t('reminders.clockLabel')}</Text>
+          <TextInput
+            style={styles.input}
+            value={clockDraft}
+            onChangeText={(text) => {
+              setClockDraft(text);
+              const next = clockOfText(text);
+              // 00:00 is the whole day, stored so; the field stays.
+              if (next !== null) onChange({ day, clock: next === 0 ? null : next });
+            }}
+            // What could not be read as a time goes back to the time the
+            // row keeps, so the field never says one it does not save.
+            onBlur={() => setClockDraft(shownClock(clock))}
+            placeholder="HH:MM"
+            keyboardType="numbers-and-punctuation"
+            accessibilityLabel={`${rowPrefix} – ${t('reminders.clockLabel')}`}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+      )}
+    </View>
+  );
+}
+
+/**
+ * A whole number from 1, typed. It may stand empty while it is edited — a
+ * field that put its 1 straight back made "7" into "17" — and goes back to
+ * the kept number when it is left empty or wrong.
+ */
+function WholeNumberField({
+  label,
+  accessibilityLabel,
+  value,
+  onChange,
+}: {
+  label: string;
+  accessibilityLabel: string;
+  value: number;
+  onChange: (n: number) => void;
+}) {
+  const styles = useThemedStyles(makeStyles);
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => {
+    setDraft((d) => (Number(d) === value ? d : String(value)));
+  }, [value]);
+  return (
+    <View style={styles.amountField}>
+      <Text style={styles.label}>{label}</Text>
+      <TextInput
+        style={styles.input}
+        value={draft}
+        onChangeText={(text) => {
+          setDraft(text);
+          const n = Math.trunc(Number(text));
+          if (text.trim() !== '' && Number.isFinite(n) && n >= 1) onChange(relativeAmount(n));
+        }}
+        onBlur={() => setDraft(String(value))}
+        keyboardType="number-pad"
+        accessibilityLabel={accessibilityLabel}
+      />
+    </View>
+  );
+}
+
 function RelativeFields({
   position,
   minutes,
   onChange,
 }: {
   position: number;
+  /** How far from the start, in minutes: before or after, the caller knows. */
   minutes: number;
   onChange: (minutes: number) => void;
 }) {
@@ -316,16 +611,12 @@ function RelativeFields({
   const rowPrefix = t('reminders.rowLabel', { n: position });
   return (
     <View style={styles.relativeRow}>
-      <View style={styles.amountField}>
-        <Text style={styles.label}>{t('reminders.amountLabel')}</Text>
-        <TextInput
-          style={styles.input}
-          value={String(amount)}
-          onChangeText={(v) => onChange(relativeAmount(Number(v)) * RELATIVE_UNIT_MINUTES[unit])}
-          keyboardType="number-pad"
-          accessibilityLabel={`${rowPrefix} – ${t('reminders.amountLabel')}`}
-        />
-      </View>
+      <WholeNumberField
+        label={t('reminders.amountLabel')}
+        accessibilityLabel={`${rowPrefix} – ${t('reminders.amountLabel')}`}
+        value={amount}
+        onChange={(n) => onChange(n * RELATIVE_UNIT_MINUTES[unit])}
+      />
       <SelectFieldButton<RelativeUnit>
         label={t('reminders.unitLabel')}
         value={unit}
