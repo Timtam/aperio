@@ -486,6 +486,13 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  now, as a JSON array of `{item_id, item_kind, title, body, trigger_at}`
    *  sorted ascending — for scheduling ahead-of-time OS local notifications. */
   upcomingRemindersJson(horizonMinutes: number): Promise<string>;
+  /** The notification list (`upcomingRemindersJson`'s, each entry with
+   *  `absorbed`) AND the Live Activity plan, from ONE reminder scan: JSON
+   *  `{reminders, plan}`. `hiddenCalendarsJson` is a JSON array of calendar
+   *  ids hidden on this device. An absorbed reminder IS a section of the plan;
+   *  a platform may drop it from the notifications only once it has taken the
+   *  plan over (DESIGN-live-activities.md). */
+  liveActivityPlanJson(horizonMinutes: number, hiddenCalendarsJson: string): Promise<string>;
 
   // ── Custom reminder sounds (§14.4) ──
   /** Import an audio file (local `path` from the document picker) into the

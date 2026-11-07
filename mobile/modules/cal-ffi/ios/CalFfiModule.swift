@@ -970,6 +970,17 @@ public class CalFfiModule: Module {
       }
     }.runOnQueue(remindersQueue)
 
+    // Live Activities for events (DESIGN-live-activities.md): the notification
+    // list AND the plan from one reminder scan, so on the same queue.
+    AsyncFunction("liveActivityPlanJson") { (horizonMinutes: Int, hiddenCalendarsJson: String) -> String in
+      try self.hostCoded {
+        try self.host.liveActivityPlanJson(
+          horizonMinutes: UInt32(horizonMinutes),
+          hiddenCalendarsJson: hiddenCalendarsJson
+        )
+      }
+    }.runOnQueue(remindersQueue)
+
     // ─── Custom reminder sounds (§14.4 / §19.2.2) ─────────────────────────────
     // iOS can't use a runtime file as a notification sound, so here these drive
     // import + in-app preview + sync only; the notification falls back to default.

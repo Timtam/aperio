@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use cal_core::live_activity::LiveOccurrence;
 use cal_core::{
     is_mine_or_unassigned, series_master_id, ContactsFeature, DateRange, Event, EventRecurrence,
     NewEvent, RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind, SoundConfig, Task,
@@ -65,6 +66,11 @@ pub struct Trigger {
     /// Effective notification sound, already resolved through the §14.4
     /// hierarchy (reminder → item → container → global → System).
     pub sound: SoundConfig,
+    /// The reminder is at a fixed time rather than relative to the start. On a
+    /// series every occurrence reports that same instant; the Live Activity rule
+    /// gives it to the one occurrence it belongs to
+    /// (`cal_core::live_activity`).
+    pub absolute: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -102,9 +108,11 @@ const EXTERNAL_FUTURE_DAYS: i64 = 90;
 /// drive per-occurrence expansion; `calendar_id` resolves the §14.4 container
 /// sound; `all_day` routes the reminder to the day-carryover anchor instead of
 /// a minutes-before-midnight offset; `rrule_tzid` is the zone a series expands
-/// in, the one the calendar views expand it in.
+/// in, the one the calendar views expand it in. `location` and `description`
+/// are only read for the Live Activity plan ([`OccurrenceSink`]).
 const EVENT_QUERY: &str = "SELECT id, title, start_utc, end_utc, reminders, \
-    rrule, rrule_exceptions, calendar_id, all_day, rrule_tzid FROM events";
+    rrule, rrule_exceptions, calendar_id, all_day, rrule_tzid, location, \
+    description FROM events";
 
 /// `SELECT id, title, scheduled_date, scheduled_time, deadline_date,
 /// deadline_time, reminders, recurrence, list_id FROM tasks` — `recurrence` is
@@ -124,6 +132,17 @@ pub fn enumerate_local_triggers(
     db: &SharedConn,
     earliest: DateTime<Utc>,
     latest: DateTime<Utc>,
+) -> Vec<Trigger> {
+    enumerate_local_scan(db, earliest, latest, None)
+}
+
+/// [`enumerate_local_triggers`], and with a `sink` also every occurrence of
+/// every local event it reads — reminders or not — for the Live Activity plan.
+pub fn enumerate_local_scan(
+    db: &SharedConn,
+    earliest: DateTime<Utc>,
+    latest: DateTime<Utc>,
+    mut sink: Option<&mut OccurrenceSink>,
 ) -> Vec<Trigger> {
     let sound_prefs = SoundPrefs::load(db);
     // Read the day-carryover anchor BEFORE locking the connection — the pref
@@ -161,6 +180,8 @@ pub fn enumerate_local_triggers(
                 let calendar_id: String = row.get(7).unwrap_or_default();
                 let all_day: bool = row.get(8).unwrap_or(false);
                 let rrule_tzid: Option<String> = row.get(9).unwrap_or(None);
+                let location: Option<String> = row.get(10).unwrap_or(None);
+                let description: Option<String> = row.get(11).unwrap_or(None);
                 // The calendar's defaults ride along — the same merge rule
                 // `event_triggers` applies to adapter-backed calendars.
                 let reminders = effective_reminders(
@@ -174,9 +195,6 @@ pub fn enumerate_local_triggers(
                         .map(Vec::as_slice)
                         .unwrap_or(&[]),
                 );
-                if reminders.is_empty() {
-                    continue;
-                }
                 let Ok(start) = start_str.parse::<DateTime<Utc>>() else {
                     continue;
                 };
@@ -190,6 +208,28 @@ pub fn enumerate_local_triggers(
                     // zone stepped in UTC here and its reminders drifted by DST.
                     tzid: rrule_tzid,
                 });
+                // Every event counts for the plan, reminders or not: one
+                // without can still be what comes next. Local events are
+                // Aperio's own and never cancelled.
+                if let Some(sink) = sink.as_deref_mut() {
+                    sink.push(
+                        OccurrenceSource {
+                            id: &id,
+                            calendar_id: &calendar_id,
+                            title: &title,
+                            location: location.as_deref(),
+                            description: description.as_deref(),
+                            start,
+                            end,
+                            all_day,
+                            cancelled: false,
+                        },
+                        recurrence.as_ref(),
+                    );
+                }
+                if reminders.is_empty() {
+                    continue;
+                }
                 acc.extend(occurrence_triggers(
                     &id,
                     ItemKind::Event,
@@ -281,6 +321,20 @@ pub async fn enumerate_external_triggers(
     registry: &Arc<AdapterRegistry>,
     db: &SharedConn,
 ) -> Vec<Trigger> {
+    enumerate_external_scan(registry, db, None).await
+}
+
+/// [`enumerate_external_triggers`], and with a `sink` also every occurrence of
+/// every event it reads, for the Live Activity plan.
+///
+/// With a sink the device-local accounts are READ too, though they still ring
+/// nothing here: their appointments are real ones that can come next, or be a
+/// copy of an appointment that does have a reminder.
+pub async fn enumerate_external_scan(
+    registry: &Arc<AdapterRegistry>,
+    db: &SharedConn,
+    mut sink: Option<&mut OccurrenceSink>,
+) -> Vec<Trigger> {
     let now = Utc::now();
     let from = now - ChronoDuration::days(EXTERNAL_PAST_DAYS);
     let to = now + ChronoDuration::days(EXTERNAL_FUTURE_DAYS);
@@ -331,7 +385,8 @@ pub async fn enumerate_external_triggers(
 
     // ── Calendars → events ────────────────────────────────────────────────
     for (account_id, adapter) in registry.snapshot_calendar_adapters() {
-        if device_accounts.contains(&account_id) {
+        let device_local = device_accounts.contains(&account_id);
+        if device_local && sink.is_none() {
             continue;
         }
         let calendars = match adapter.list_calendars().await {
@@ -350,6 +405,12 @@ pub async fn enumerate_external_triggers(
                     continue;
                 }
             };
+            if let Some(sink) = sink.as_deref_mut() {
+                sink.push_events(&events);
+            }
+            if device_local {
+                continue;
+            }
             // The events of this calendar are in hand and the window is the
             // one a reminder could fire in — the moment to find rows whose
             // event the provider reminted. Whatever moved follows in the map
@@ -485,13 +546,144 @@ pub async fn enumerate_triggers(
     earliest: DateTime<Utc>,
     latest: DateTime<Utc>,
 ) -> Vec<Trigger> {
-    let mut acc = enumerate_local_triggers(db, earliest, latest);
-    for t in enumerate_external_triggers(registry, db).await {
+    enumerate_scan(db, registry, earliest, latest, None).await
+}
+
+/// [`enumerate_triggers`], and with a `sink` the occurrences of every event the
+/// SAME pass read. The Live Activity plan and the notification list then come
+/// from one reading: two passes read every account live and could see two
+/// different states, and a reminder would be doubled or lost between them.
+pub async fn enumerate_scan(
+    db: &SharedConn,
+    registry: &Arc<AdapterRegistry>,
+    earliest: DateTime<Utc>,
+    latest: DateTime<Utc>,
+    mut sink: Option<&mut OccurrenceSink>,
+) -> Vec<Trigger> {
+    let mut acc = enumerate_local_scan(db, earliest, latest, sink.as_deref_mut());
+    for t in enumerate_external_scan(registry, db, sink).await {
         if t.trigger_at >= earliest && t.trigger_at <= latest {
             acc.push(t);
         }
     }
     acc
+}
+
+/// Where a scan collects the occurrences it reads, for the Live Activity plan
+/// (`cal_core::live_activity`): every event, with or without reminders, expanded
+/// into occurrences that overlap `[from, to]`, each with its local day on this
+/// device.
+pub struct OccurrenceSink {
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    device: RruleTz,
+    occurrences: Vec<LiveOccurrence>,
+}
+
+/// One event's fields, as both the local rows and the adapters' events have
+/// them.
+struct OccurrenceSource<'a> {
+    id: &'a str,
+    calendar_id: &'a str,
+    title: &'a str,
+    location: Option<&'a str>,
+    description: Option<&'a str>,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    all_day: bool,
+    cancelled: bool,
+}
+
+impl OccurrenceSink {
+    /// On this device's clock.
+    pub fn new(from: DateTime<Utc>, to: DateTime<Utc>) -> Self {
+        Self::on_clock(from, to, device_clock())
+    }
+
+    /// On a given clock, so a test does not depend on the machine's zone.
+    fn on_clock(from: DateTime<Utc>, to: DateTime<Utc>, device: RruleTz) -> Self {
+        Self {
+            from,
+            to,
+            device,
+            occurrences: Vec::new(),
+        }
+    }
+
+    pub fn into_occurrences(self) -> Vec<LiveOccurrence> {
+        self.occurrences
+    }
+
+    /// An adapter's events, with the slots their single changes stand in for
+    /// taken out of the series — exactly as [`event_triggers`] takes them out.
+    fn push_events(&mut self, events: &[Event]) {
+        let overridden = override_slots(events.iter().map(|ev| ev.id.as_str()));
+        for ev in events {
+            let recurrence = ev
+                .recurrence
+                .as_ref()
+                .map(|rec| without_overridden_slots(rec, overridden.get(ev.id.as_str())));
+            self.push(
+                OccurrenceSource {
+                    id: &ev.id,
+                    calendar_id: &ev.calendar_id,
+                    title: &ev.title,
+                    location: ev.location.as_deref(),
+                    description: ev.description.as_deref(),
+                    start: ev.start,
+                    end: ev.end,
+                    all_day: ev.all_day,
+                    cancelled: ev.cancelled,
+                },
+                recurrence.as_ref(),
+            );
+        }
+    }
+
+    fn push(&mut self, event: OccurrenceSource<'_>, recurrence: Option<&EventRecurrence>) {
+        let duration = (event.end - event.start).max(ChronoDuration::zero());
+        let starts = match recurrence {
+            // An occurrence that began before `from` and still runs counts, so
+            // the expansion starts a duration earlier.
+            Some(rec) => expand_occurrences(
+                event.start,
+                &rec.rrule,
+                &rec.exceptions,
+                rec.tzid.as_deref(),
+                event.all_day,
+                self.device,
+                self.from - duration,
+                self.to,
+            ),
+            None => vec![event.start],
+        };
+        // A single change of a series names the slot it stands in for; that is
+        // its identity, whatever time it has been moved to.
+        let slot = cal_core::split_override_id(event.id)
+            .ok()
+            .flatten()
+            .map(|(_, slot)| slot);
+        for start in starts {
+            let end = start + duration;
+            if end < self.from || start > self.to {
+                continue;
+            }
+            self.occurrences.push(LiveOccurrence {
+                item_id: event.id.to_string(),
+                calendar_id: event.calendar_id.to_string(),
+                series_id: series_master_id(event.id).to_string(),
+                original_start: slot.or(recurrence.map(|_| start)),
+                title: event.title.to_string(),
+                location: event.location.map(str::to_string),
+                description: event.description.map(str::to_string),
+                start,
+                end,
+                local_day: start.with_timezone(&self.device).date_naive(),
+                all_day: event.all_day,
+                cancelled: event.cancelled,
+            });
+        }
+    }
 }
 
 /// `app_start` reminders (whose due time has already passed) from the LOCAL
@@ -544,6 +736,7 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
                                 ContainerKind::Calendar,
                                 &calendar_id,
                             ),
+                            absolute: false,
                         });
                     }
                 }
@@ -592,6 +785,7 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
                                 ContainerKind::TaskList,
                                 &list_id,
                             ),
+                            absolute: false,
                         });
                     }
                 }
@@ -1108,6 +1302,7 @@ fn occurrence_triggers(
                 // §14.4: per-reminder override wins, else fall through
                 // item → container → global → System.
                 sound: sound_prefs.resolve(r.sound.as_ref(), item_id, container_kind, container_id),
+                absolute: matches!(r.kind, ReminderKind::Absolute { .. }),
             });
         }
     }
@@ -3813,6 +4008,7 @@ mod tests {
             start: now + ChronoDuration::minutes(at_offset_min),
             all_day: false,
             sound: SoundConfig::default(),
+            absolute: false,
         }
     }
 
@@ -4155,5 +4351,156 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── Occurrences for the Live Activity plan ────────────────────────────
+
+    fn berlin_sink(from: DateTime<Utc>, to: DateTime<Utc>) -> OccurrenceSink {
+        OccurrenceSink::on_clock(from, to, RruleTz::Tz(chrono_tz::Europe::Berlin))
+    }
+
+    #[test]
+    fn the_local_scan_collects_every_occurrence_reminders_or_not() {
+        let db = prefs_db();
+        let start = Utc.with_ymd_and_hms(2026, 11, 9, 9, 0, 0).unwrap();
+        let reminders = serde_json::to_string(&one_hour_before()).unwrap();
+        insert_local_event(&db, "with", "cal", &reminders, start);
+        insert_local_event(
+            &db,
+            "without",
+            "cal",
+            "[]",
+            start + ChronoDuration::hours(2),
+        );
+        // Late on the 9th in UTC, already the 10th in Berlin.
+        insert_local_event(&db, "late", "cal", "[]", start + ChronoDuration::hours(14));
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE events SET location = 'Raum 2.14', description = 'Agenda' WHERE id = 'with'",
+                params![],
+            )
+            .unwrap();
+        let (from, to) = (
+            start - ChronoDuration::days(1),
+            start + ChronoDuration::days(1),
+        );
+        let mut sink = berlin_sink(from, to);
+        let triggers = enumerate_local_scan(&db, from, to, Some(&mut sink));
+        // The reminders are what they were without a sink.
+        let fired: Vec<&str> = triggers.iter().map(|t| t.item_id.as_str()).collect();
+        assert_eq!(fired, vec!["with"]);
+        let mut occurrences = sink.into_occurrences();
+        occurrences.sort_by_key(|o| o.start);
+        let ids: Vec<&str> = occurrences.iter().map(|o| o.item_id.as_str()).collect();
+        assert_eq!(ids, vec!["with", "without", "late"]);
+        let with = &occurrences[0];
+        assert_eq!(with.location.as_deref(), Some("Raum 2.14"));
+        assert_eq!(with.description.as_deref(), Some("Agenda"));
+        assert_eq!(with.end, start + ChronoDuration::hours(1));
+        assert_eq!(with.original_start, None);
+        assert_eq!(with.series_id, "with");
+        assert_eq!(
+            with.local_day,
+            NaiveDate::from_ymd_opt(2026, 11, 9).unwrap()
+        );
+        assert_eq!(
+            occurrences[2].local_day,
+            NaiveDate::from_ymd_opt(2026, 11, 10).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_local_series_gives_each_occurrence_its_own_slot() {
+        let db = prefs_db();
+        let start = Utc.with_ymd_and_hms(2026, 11, 9, 9, 0, 0).unwrap();
+        insert_local_event(&db, "daily", "cal", "[]", start);
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE events SET rrule = 'FREQ=DAILY;COUNT=3' WHERE id = 'daily'",
+                params![],
+            )
+            .unwrap();
+        let mut sink = berlin_sink(
+            start - ChronoDuration::hours(1),
+            start + ChronoDuration::days(5),
+        );
+        enumerate_local_scan(&db, start, start + ChronoDuration::days(5), Some(&mut sink));
+        let slots: Vec<Option<DateTime<Utc>>> = sink
+            .into_occurrences()
+            .into_iter()
+            .map(|o| o.original_start)
+            .collect();
+        assert_eq!(
+            slots,
+            (0..3)
+                .map(|day| Some(start + ChronoDuration::days(day)))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_moved_single_change_keeps_its_slot_and_takes_it_out_of_the_series() {
+        let master = make_recurring_event("FREQ=DAILY;COUNT=3", Vec::new());
+        let slot = master.start + ChronoDuration::days(1);
+        let mut moved = make_event(Vec::new());
+        moved.id = format!("{}::rid::{}", master.id, slot.to_rfc3339());
+        moved.start = slot + ChronoDuration::hours(2);
+        moved.end = moved.start + ChronoDuration::hours(1);
+        let mut sink = berlin_sink(
+            master.start - ChronoDuration::hours(1),
+            master.start + ChronoDuration::days(4),
+        );
+        sink.push_events(&[master.clone(), moved.clone()]);
+        let mut occurrences = sink.into_occurrences();
+        occurrences.sort_by_key(|o| o.start);
+        let seen: Vec<(String, DateTime<Utc>, Option<DateTime<Utc>>)> = occurrences
+            .iter()
+            .map(|o| (o.item_id.clone(), o.start, o.original_start))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                (master.id.clone(), master.start, Some(master.start)),
+                (moved.id.clone(), moved.start, Some(slot)),
+                (
+                    master.id.clone(),
+                    master.start + ChronoDuration::days(2),
+                    Some(master.start + ChronoDuration::days(2))
+                ),
+            ]
+        );
+        assert!(occurrences.iter().all(|o| o.series_id == master.id));
+    }
+
+    #[test]
+    fn a_trigger_says_whether_its_reminder_is_at_a_fixed_time() {
+        let at = Utc.with_ymd_and_hms(2026, 5, 20, 7, 0, 0).unwrap();
+        let ev = make_event(vec![
+            Reminder {
+                kind: ReminderKind::Absolute { at },
+                sound: None,
+            },
+            rel(15),
+        ]);
+        let triggers = ev_triggers(
+            &[ev],
+            &[],
+            Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),
+        );
+        let mut flags: Vec<(DateTime<Utc>, bool)> = triggers
+            .iter()
+            .map(|t| (t.trigger_at, t.absolute))
+            .collect();
+        flags.sort();
+        assert_eq!(
+            flags,
+            vec![
+                (at, true),
+                (Utc.with_ymd_and_hms(2026, 5, 20, 7, 45, 0).unwrap(), false)
+            ]
+        );
     }
 }
