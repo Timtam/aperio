@@ -339,9 +339,16 @@ export default function CalendarEditorModal({
               device calendar (its alarms are the OS's, never written). */}
           <RemindersEditor
             mode="event"
-            // A birthday calendar holds nothing but all-day events, so its
-            // "at start" rings on the day itself.
+            // A birthday calendar holds nothing but all-day events: its rows
+            // are a day and a clock time.
             allDay={isBirthday}
+            // A read-only calendar has no placement choice: every default stays
+            // in Aperio and rings there. Not a device calendar: the planner
+            // rings nothing of it.
+            afterStartKept={
+              (calendar?.reminder_capabilities?.after_start ?? false) ||
+              (calendar?.read_only === true && accountKind !== ADAPTER_KIND_DEVICE_CALENDAR)
+            }
             value={defaultReminders.value}
             onChange={defaultReminders.save}
             placement={placementOffered}

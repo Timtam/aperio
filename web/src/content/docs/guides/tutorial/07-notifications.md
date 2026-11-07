@@ -14,10 +14,15 @@ react to them.
      **Amount** and **Unit** (minutes, hours, days). A new row starts at 15
      minutes.
    - **At start**, for tasks **When due**: exactly when the event starts or
-     the task is due. A task without a time rings at 9 a.m. On an all-day
-     event this kind is called **On the day** and rings on its day at the time
-     of the **Day-start trigger** (**Settings → Tasks**; 00:00 by default and
-     with "App start only").
+     the task is due. A task without a time rings at 9 a.m.
+   - **After start**: how long afterwards, with **Amount** and **Unit**. It is
+     only there where it arrives: in calendars that keep such a reminder
+     (iCloud and other CalDAV calendars, Aperio's own calendars), and for a
+     reminder **Only in Aperio**. Google, Exchange and Outlook only know
+     reminders before the start; a row there that has "After start" anyway,
+     say from a copied event, says that it will not arrive. It rings even if
+     the event is over by then. For tasks it is called **After due**; Aperio
+     shows it there but does not offer it anew.
    - **At fixed time**: on a date at a time.
    - **On next app start after due**: Aperio on the desktop tells you the
      next time it starts once the moment has passed. This only works for
@@ -25,6 +30,9 @@ react to them.
      this kind; the phone does not fire it.
 4. You can add several reminders per entry.
 5. **Save**.
+
+On an all-day event the list looks different, see
+[All-day events and birthdays](#all-day-events-and-birthdays).
 
 A reminder you set in another app for the moment of the event, such as "At
 time of event" on the iPhone, shows in Aperio as **At start** and stays that
@@ -124,7 +132,9 @@ they are not the appointment's: they ring on top of whatever it carries, and
 the calendar's settings page is where they belong.
 
 A default reminder can be a lead time ("before start"), come at the start
-("at start", on a birthday calendar "on the day") or be a fixed date and time.
+("at start"), after the start (where the calendar keeps that, or **Only in
+Aperio**) or be a fixed date and time. A birthday calendar picks a day and a
+time, like an all-day event.
 "On next app start" is missing here on purpose: it only ever fires for a
 reminder set on an entry itself, so as a calendar default it would be a setting
 that saves and then stays silent.
@@ -158,20 +168,39 @@ Aperio** so nothing is written into the appointment at all.
 
 ### All-day events and birthdays
 
-All-day events have no time of day, so a reminder isn't fired "one hour before"
-(i.e. the previous evening) but **at the day-carryover time** – the same time as
-your day-start reminders. A lead time counts in whole **days**: "1 week before"
-fires seven days earlier at the day-carryover time.
+An all-day event has no start for minutes to count from. Its reminder is
+therefore a **day** and a **time**. In the **Type** field you pick **On the
+day**, **Days before** or **Days after** (the last two with **Number of
+days**). In the **Time** field you pick **At the day-start time** or **At a time
+of its own** and enter it under **Own time**. The day-start time is that of the
+**Day-start trigger** (**Settings → Tasks**; 00:00 by default and with "App
+start only"), the same as for your day-start reminders. 00:00 as its own time
+counts as the day-start time. A new row starts as "On the day" at the
+day-start time.
 
-The same applies to the automatically generated **birthday calendars** — and
-those remind you **on the day itself**, at the day-carryover time, without you
-setting anything up. A birthday calendar exists because you want to be told, so
+This is also how the iPhone writes its alerts for all-day events, and how they
+ring: "On day of event (9 AM)" shows as "On the day" at 09:00, "1 day before
+(9 AM)" as "Days before", 1 day, at 09:00. A time on the day itself and "Days
+after" lie after the event's midnight; like "After start", they are only there
+where they arrive.
+
+A calendar's default reminder applies to timed and all-day events alike. On an
+all-day event it therefore counts in whole **days**, at the day-start time:
+"15 minutes before" rings on the day itself, not the evening before, "1 week
+before" seven days earlier. When you create an all-day event in such a
+calendar, an attached default is already in this form in the editor.
+
+The automatically generated **birthday calendars** hold only all-day events,
+and their default reminders are those events' only ones. They are therefore a
+day and a time, like the reminders on an all-day event, and ring exactly as
+they are set, without rounding. Left as they come, they remind you **on the
+day itself** at the day-start time, without you setting anything up. A birthday calendar exists because you want to be told, so
 it starts switched on.
 
 Under **Settings → Calendars** (on the phone via **Reminders** in the calendar
-list) you can change that: give it a lead time such as "1 week before", add
-several reminders, or remove them all — an emptied list stays empty and the
-calendar goes quiet.
+list) you can change that, with a day and a time as on an all-day event: say
+"Days before", 7 days, at 09:00, several reminders, or remove them all — an
+emptied list stays empty and the calendar goes quiet.
 
 ### Cancelled events
 

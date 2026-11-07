@@ -15,10 +15,16 @@ lernst, wie du auf sie reagierst.
      beginnt mit 15 Minuten.
    - **Zu Beginn**, bei Aufgaben **Bei Fälligkeit**: genau dann, wenn der
      Termin beginnt oder die Aufgabe fällig ist. Eine Aufgabe ohne Uhrzeit
-     meldet sich um 9 Uhr. Bei einem ganztägigen Termin heißt diese Art
-     **Am Tag selbst** und meldet sich an seinem Tag zur Uhrzeit des
-     **Tageswechsel-Auslösers** (**Einstellungen → Aufgaben**; standardmäßig
-     und bei „Nur beim App-Start“ 00:00).
+     meldet sich um 9 Uhr.
+   - **Nach Beginn**: wie lange nachher, mit **Anzahl** und **Einheit**. Es
+     gibt sie nur, wo sie ankommt: in Kalendern, die so eine Erinnerung
+     speichern (iCloud und andere CalDAV-Kalender, Aperios eigene Kalender),
+     und für eine Erinnerung **Nur in Aperio**. Google, Exchange und Outlook
+     kennen nur Erinnerungen vor Beginn; hat eine Zeile dort trotzdem „Nach
+     Beginn“, etwa aus einem kopierten Termin, sagt sie, dass sie nicht
+     ankommt. Sie klingelt auch, wenn der Termin dann schon vorbei ist. Bei
+     Aufgaben heißt sie **Nach Fälligkeit**; Aperio zeigt sie dort, bietet sie
+     aber nicht neu an.
    - **Zu festem Zeitpunkt**: an einem Datum zu einer Uhrzeit.
    - **Beim nächsten App-Start nach Fälligkeit**: Aperio am Desktop meldet
      sich beim nächsten Start, wenn der Zeitpunkt verstrichen ist. Das klappt
@@ -26,6 +32,9 @@ lernst, wie du auf sie reagierst.
      Anbieter speichert diese Art; das Handy löst sie nicht aus.
 4. Du kannst mehrere Erinnerungen pro Eintrag hinzufügen.
 5. **Speichern**.
+
+Bei einem ganztägigen Termin sieht die Liste anders aus, siehe
+[Ganztägige Termine und Geburtstage](#ganztägige-termine-und-geburtstage).
 
 Eine Erinnerung, die du in einer anderen App genau zum Termin gesetzt hast,
 etwa am iPhone „Zum Ereigniszeitpunkt“, steht in Aperio als **Zu Beginn** und
@@ -134,8 +143,10 @@ sondern klingeln zusätzlich zu dem, was er trägt – und dafür ist die
 Einstellungsseite des Kalenders da.
 
 Eine Standard-Erinnerung kann ein Vorlauf sein („Vor Beginn"), genau zum
-Beginn kommen („Zu Beginn", bei einem Geburtstagskalender „Am Tag selbst") oder
-ein fester Zeitpunkt sein. „Beim nächsten App-Start" fehlt hier mit Absicht: Diese Art wird nur
+Beginn kommen („Zu Beginn"), nach dem Beginn (wo der Kalender das speichert,
+oder **Nur in Aperio**) oder ein fester Zeitpunkt sein. Ein
+Geburtstagskalender wählt wie ein ganztägiger Termin einen Tag und eine
+Uhrzeit. „Beim nächsten App-Start" fehlt hier mit Absicht: Diese Art wird nur
 ausgelöst, wenn sie am Eintrag selbst gesetzt ist – als Kalender-Standard wäre
 sie eine Einstellung, die sich speichern lässt und dann stumm bleibt.
 
@@ -171,20 +182,42 @@ geschrieben.
 
 ### Ganztägige Termine und Geburtstage
 
-Ganztägige Termine haben keine Uhrzeit, daher wird eine Erinnerung nicht „eine
-Stunde vorher" (also am Vorabend) ausgelöst, sondern **zum Tageswechsel** – zur
-selben Zeit wie deine Tages-Erinnerungen. Ein Vorlauf zählt dabei in ganzen
-**Tagen**: „1 Woche vorher" feuert sieben Tage früher zum Tageswechsel.
+Ein ganztägiger Termin hat keinen Beginn, von dem aus Minuten zählen. Seine
+Erinnerung ist darum ein **Tag** und eine **Uhrzeit**. Im Feld **Typ** wählst
+du **Am Tag selbst**, **Tage vorher** oder **Tage danach** (bei den beiden
+letzten mit **Anzahl Tage**). Im Feld **Uhrzeit** wählst du **Zur
+Tagesstart-Uhrzeit** oder **Zu einer eigenen Uhrzeit** und trägst sie unter
+**Eigene Uhrzeit** ein. Die Tagesstart-Uhrzeit ist die des
+**Tageswechsel-Auslösers** (**Einstellungen → Aufgaben**; standardmäßig und bei
+„Nur beim App-Start“ 00:00), also dieselbe wie die deiner Tages-Erinnerungen.
+00:00 als eigene Uhrzeit gilt als Tagesstart-Uhrzeit. Eine neue Zeile beginnt
+mit „Am Tag selbst“ zur Tagesstart-Uhrzeit.
 
-Das gilt auch für die automatisch erzeugten **Geburtstagskalender** — und die
-erinnern **am Tag selbst**, zur Tageswechsel-Zeit, ohne dass du etwas einrichten
-musst. Ein Geburtstagskalender existiert, weil du erinnert werden willst, also
+So schreibt auch das iPhone seine Hinweise für ganztägige Termine, und so
+klingeln sie: „Am Tag des Ereignisses (9:00)“ steht als „Am Tag selbst“ um
+09:00, „1 Tag vorher (9:00)“ als „Tage vorher“, 1 Tag, um 09:00. Eine Uhrzeit
+am Tag selbst und „Tage danach“ liegen nach Mitternacht des Termins; es gibt
+sie, wie „Nach Beginn“, nur wo sie ankommen.
+
+Eine Standard-Erinnerung des Kalenders gilt für Termine mit Uhrzeit und für
+ganztägige zugleich. An einem ganztägigen Termin zählt sie darum in ganzen
+**Tagen**, zur Tagesstart-Uhrzeit: „15 Minuten vorher“ klingelt am Tag selbst,
+nicht am Vorabend, „1 Woche vorher“ sieben Tage früher. Legst du in so einem
+Kalender einen ganztägigen Termin an, steht ein angehängter Standard schon in
+dieser Form im Editor.
+
+Die automatisch erzeugten **Geburtstagskalender** haben nur ganztägige Termine,
+und ihre Standard-Erinnerungen sind deren einzige. Sie sind darum ein Tag und
+eine Uhrzeit wie die Erinnerungen an einem ganztägigen Termin und klingeln
+genau so, wie sie eingestellt sind, ohne Runden. Ohne eigene Einstellung
+erinnern sie **am Tag selbst** zur Tagesstart-Uhrzeit, ohne dass du etwas
+einrichten musst. Ein Geburtstagskalender existiert, weil du erinnert werden willst, also
 ist er von Anfang an eingeschaltet.
 
 Unter **Einstellungen → Kalender** (auf dem Handy über **Erinnerungen** in der
-Kalenderliste) änderst du das: eine Vorlaufzeit wie „1 Woche vorher", mehrere
-Erinnerungen, oder alle entfernen — eine geleerte Liste bleibt leer und der
-Kalender schweigt.
+Kalenderliste) änderst du das, mit Tag und Uhrzeit wie an einem ganztägigen
+Termin: etwa „Tage vorher“, 7 Tage, um 09:00, mehrere Erinnerungen, oder alle
+entfernen — eine geleerte Liste bleibt leer und der Kalender schweigt.
 
 ### Abgesagte Termine
 

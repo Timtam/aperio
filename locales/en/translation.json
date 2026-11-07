@@ -113,7 +113,7 @@
     "deleteCalendarMessage": "Delete \"{{name}}\"? Its events are removed too.",
     "manageCalendar": "Manage",
     "birthdayCalendarReminders": "Reminders",
-    "birthdayCalendarRemindersHint": "Default reminders for this birthday calendar — for example one week before. Birthdays are all-day, so a reminder fires at the start of the day rather than the night before.",
+    "birthdayCalendarRemindersHint": "Default reminders for this birthday calendar — for example one week before at 9 AM. Birthdays are all-day: each reminder is a day (the birthday itself, days before or after) and a time. Without a time of its own, it rings at the day-start time.",
     "duplicate": "Duplicate",
     "addSubtask": "Add subtask",
     "plan": "Plan",
@@ -287,11 +287,24 @@
       "atStart": "At start",
       "atDue": "When due",
       "onTheDay": "On the day",
+      "afterStart": "After start",
+      "afterDue": "After due",
+      "daysBefore": "Days before",
+      "daysAfter": "Days after",
       "absolute": "At fixed time",
       "appStart": "On next app start after due"
     },
     "amountLabel": "Amount",
     "unitLabel": "Unit",
+    "daysLabel": "Number of days",
+    "timeLabel": "Time",
+    "clockLabel": "Own time",
+    "afterStartNotKept": "This calendar keeps no reminder after the start, so it will not arrive there.",
+    "afterStartKeptInAperio": "With “Only in Aperio” it is kept.",
+    "time": {
+      "dayStart": "At the day-start time",
+      "clock": "At a time of its own"
+    },
     "unit": {
       "minutes": "Minutes",
       "hours": "Hours",
