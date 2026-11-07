@@ -2582,6 +2582,7 @@ Erinnerungen können sowohl für **Termine** als auch für **Aufgaben** konfigur
 |---|---|
 | **Zeitbasiert (relativ, Termin)** | X Minuten / Stunden / Tage vor Terminbeginn |
 | **Zeitbasiert (relativ, Aufgabe)** | X Minuten / Stunden / Tage vor der Deadline bzw. dem geplanten Tag |
+| **Zu Beginn / Bei Fälligkeit** | Genau zum Terminbeginn bzw. zur Fälligkeit (Aufgabe ohne Uhrzeit: 09:00); bei ganztägigen Terminen „Am Tag selbst“ zur Tagesstart-Uhrzeit (`tasks.dayStartTrigger`, standardmäßig 00:00; „Nur beim App-Start“ zählt als 00:00). Gespeichert als relativ mit 0 Minuten, wie jeder Anbieter sie schreibt (RFC 5545 `TRIGGER:PT0S`, Google und Outlook 0 Minuten); die Editoren zeigen sie als eigene Art (Regel `shared/reminderKinds.ts`) |
 | **Zeitbasiert (absolut)** | Fester Zeitpunkt (z.B. "12. Mai, 09:00 Uhr") |
 | **Beim Öffnen der App** | Erinnerung beim nächsten App-Start nach dem Fälligkeitszeitpunkt |
 | **E-Mail** | Erinnerung per E-Mail (wo vom jeweiligen Adapter unterstützt) |

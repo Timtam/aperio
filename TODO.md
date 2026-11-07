@@ -606,73 +606,18 @@ Siehe DESIGN §4.2.
 ### B7 · Erinnerungs-Feinheiten (§14) `[~]`
 - [~] E-Mail-Reminder: UI-Option + (Adapter-)Versand — lokaler Scheduler überspringt sie derzeit bewusst.  
   ↳ Adapter-Hälfte für Google + CalDAV FERTIG (round-trippt als providereigener E-Mail-Alarm — Aperio verschickt selbst nie Mail, genau wie §14 es verlangt). Die UI-Option fehlt auf beiden Oberflächen.
-- [ ] **Erinnerung zum Beginn (221).** Gewünscht von Toni am 2026-10-06. Alle
-  Kalender-Anbieter sehen eine Erinnerung genau zum Beginn vor: RFC 5545
-  (`TRIGGER:PT0S`), der iPhone-Kalender („Zum Ereigniszeitpunkt“, englisch
-  „At time of event“), Google (0 bis 40320 Minuten), Exchange und Graph (mit
-  eigenem Ein-Schalter, 0 heißt nicht „aus“). Bei Aufgaben bieten Todoist
-  („At time of task“) und Vikunja („Zum Fälligkeitsdatum“) es als eigene
-  Auswahl an. Google Tasks meldet sich nur selbst zum gesetzten Zeitpunkt
-  (ohne Uhrzeit um 9 Uhr) und hat keine einstellbare Erinnerung; seine API
-  kennt weder eine Erinnerung noch die Uhrzeit. Microsoft To Do kennt nur
-  einen festen Zeitpunkt. Kern, beide Erinnerungsplaner und alle
-  Kalender-Adapter, die Erinnerungen tragen (CalDAV/iCloud, Google, Exchange,
-  Graph, lokal, iCal lesend), können `minutes_before: 0` schon; die
-  eingebaute Geburtstags-Erinnerung nutzt es. Der Gerätekalender (iPhone und
-  Android) trägt gar keine Erinnerungen, und der Planer überspringt
-  Gerätekonten ganz. Nur der Erinnerungs-Editor sperrt die 0
-  (`RemindersEditor.tsx` beider Oberflächen: eine eingetippte 0 wird zu 1, ein
-  Wechsel der Einheit ebenso; am Desktop hat das Feld zudem `min={1}`, das
-  eine vorhandene 0 am Speichern hindert). Das Handy hat das vom Desktop
-  übernommen; eine Begründung steht nirgends. Entschieden: eine eigene Art im
-  Typ-Feld neben „Vor Beginn“ und „Zu festem Zeitpunkt“, „Zu Beginn“, bei
-  Aufgaben „Bei Fälligkeit“, bei ganztägigen Terminen „Am Tag selbst“ (dort
-  klingelt 0 zur Tagesstart-Uhrzeit, standardmäßig 00:00). Anzahl und Einheit
-  fallen dann weg. Gespeichert bleibt `Relative` mit 0, die Art wird daraus
-  abgeleitet; zurück zu „Vor Beginn“ ergibt 15 Minuten. Desktop und Handy im
-  selben Build, sonst könnte eine 0 vom Handy, etwa als Standard-Erinnerung
-  eines Kalenders, am Desktop jeden neuen Termin dieses Kalenders
-  unspeicherbar machen (nächster Punkt). Dazu Texte deutsch und englisch, ein
-  Muster mit 0 in `shared/contracts/calendarDefaultReminders.json`,
-  Editor-Tests (nur der Desktop hat einen Testläufer), DESIGN §14.1 und die
-  Anleitung.
-- [ ] **Desktop speichert eine Erinnerung zum Beginn nicht.** Schon heute:
-  Kommt eine solche Erinnerung von iCloud, Google oder Outlook, etwa im
-  iPhone-Kalender gesetzt, zeigt der Editor „Vor Beginn, Anzahl 0, Minuten“.
-  Das Feld (`min={1}`) steht in einem Formular mit Absende-Knopf ohne
-  `noValidate`; die Eingabeprüfung des Browsers verweigert dann vermutlich das
-  Speichern und setzt den Fokus auf das Feld „Anzahl“. Ob NVDA dazu sagt,
-  warum, ist offen. Aus dem Code abgeleitet, nicht ausprobiert. In den
-  Desktop-Editor kommt dieselbe 0 auch über Titel-Vorschläge (im Editor und
-  aus dem Schnell-Hinzufügen) und über die angehängten Standard-Erinnerungen
-  eines Kalenders. Eine 0 als Standard kann der Desktop heute sogar selbst
-  speichern: Das Anzahl-Feld prüft `> 0` vor dem Abrunden
-  (`RemindersEditor.tsx`). Steht im Feld auf einmal eine Zahl zwischen 0 und
-  1, wird der Wert deshalb 0, etwa nach dem Einfügen von 0,5 oder nach einem
-  Komma vor der ersten Ziffer (aus 15 wird 0,15). Ersetzt eine getippte 0
-  dagegen den ganzen Inhalt, springt das Feld sofort auf 1. Das Einfügen und
-  das Komma sind in Chromium nachgestellt, nicht in Aperio selbst. Die
-  Kalender-Einstellungen speichern ohne Formular, also ohne die Prüfung von
-  `min={1}`. Duplizieren
-  (Strg+D) und Verschieben oder Kopieren öffnen
-  keinen Editor; sie tragen die 0 unverändert weiter, und erst die Kopie lässt
-  sich danach am Desktop ebenso nicht speichern. Am Handy bleibt die 0
-  erhalten, solange niemand Typ, Anzahl oder Einheit anfasst: Dort löst schon
-  das erneute Wählen des bereits gewählten Werts eine Änderung aus, im
-  Typ-Feld („Vor Beginn“) zu 15 Minuten davor, im Einheiten-Feld („Minuten“)
-  zu 1 Minute davor (`SelectFieldButton` prüft den Wert nicht). Eine Erinnerung nach dem
-  Beginn sperrt das Speichern genauso (nächster Punkt). Mit 221 erledigt, für
-  Erinnerungen nach dem Beginn mit 222.
 - [ ] **Erinnerung nach dem Beginn (222).** CalDAV und iCloud kennen sie (ein
   positiver `TRIGGER`, den Aperio als negatives `minutes_before` liest),
   Vikunja auch (Aperio liest Vikunja-Erinnerungen aber noch gar nicht); der
-  Kern erlaubt negative Werte. Heute zeigen beide Editoren sie als „0 Minuten
-  vor Beginn“ (`splitRelative` fasst alles bis 0 zusammen), und wer Anzahl
-  oder Einheit ändert, macht daraus eine Erinnerung davor; am Handy genügt
-  schon, im Typ- oder Einheiten-Feld den bereits gewählten Wert erneut zu
-  wählen (voriger Punkt). Ton oder „Gilt“ zu ändern lässt sie, wie sie ist.
-  Am Desktop sperrt sie wie die 0 zudem das Speichern (voriger Punkt); am
-  Handy bleibt sie erhalten, solange niemand Typ, Anzahl oder Einheit
+  Kern erlaubt negative Werte. Heute zeigen beide Editoren sie als „Vor
+  Beginn, Anzahl 0“ (`splitRelativeMinutes` in `shared/reminderKinds.ts`
+  fasst alles unter 0 zusammen; „Zu Beginn“ gilt nur für genau 0), und wer
+  Anzahl oder Einheit ändert, macht daraus eine Erinnerung davor. Ton oder
+  „Gilt“ zu ändern lässt sie, wie sie ist. Am Desktop sperrt sie zudem das
+  Speichern: Das Anzahl-Feld (`min={1}`) steht in einem Formular mit
+  Absende-Knopf ohne `noValidate`, die Eingabeprüfung des Browsers verweigert
+  dann vermutlich das Speichern (aus dem Code abgeleitet, nicht ausprobiert).
+  Am Handy bleibt sie erhalten, solange niemand Anzahl oder Einheit
   anfasst. Entschieden: richtig zeigen („10
   Minuten nach Beginn“) und anlegbar machen, als eigene Art „Nach Beginn“, nur
   wo sie ankommt: bei Kalendern, deren Anbieter sie speichert (CalDAV), bei
@@ -682,7 +627,25 @@ Siehe DESIGN §4.2.
   Gerätekonten ganz. Welcher Kalender das kann, sagt eine Fähigkeit im
   Manifest, nicht der Name des Adapters. Zu prüfen: ob der Planer eine
   Erinnerung nach dem Ende des Termins noch auslöst, und was „nach Beginn“ bei
-  ganztägigen Terminen heißt.
+  ganztägigen Terminen heißt. Vermutlich der häufigste Fall (Prüfrunde zu 221,
+  nicht ausprobiert): Der iPhone-Hinweis „Am Tag des Ereignisses (9:00)“ an
+  einem ganztägigen Termin ist `TRIGGER:PT9H`, also -540 Minuten. Der Desktop
+  zeigt ihn als „Vor Beginn, Anzahl 0“ und speichert den Termin dann nicht,
+  auch wenn man nur den Titel ändert; der Planer rundet ganztägige Erinnerungen
+  auf ganze Tage (`round(-540/1440)` = 0) und klingelt dann zur
+  Tagesstart-Uhrzeit statt um 9 Uhr.
+- [ ] **„Beim nächsten App-Start“ klingelt bei jedem Start.** Gefunden in der
+  Prüfrunde zu 221 (2026-11-07, aus dem Code gelesen, nicht ausprobiert).
+  `fire_app_start_reminders` (`src-tauri/src/reminders.rs`) löst beim Start
+  jede Erinnerung dieser Art aus, deren Zeitpunkt vorbei ist
+  (`enumerate_app_start_triggers` in `crates/host-core/src/reminders.rs`),
+  und merkt sich nirgends, dass sie schon kam: Die Menge der ausgelösten
+  Erinnerungen lebt nur im Speicher. `TASK_QUERY` liest auch keinen Status,
+  fragt also nicht, ob eine Aufgabe erledigt ist. Eine gestern fällige, längst
+  abgehakte Aufgabe meldet sich so bei jedem Desktop-Start wieder, solange es
+  sie gibt. Gemeint ist laut DESIGN §14.1 und Beschriftung der nächste Start
+  nach Fälligkeit. Zu tun: Ausgelöstes dauerhaft merken und erledigte
+  Aufgaben auslassen.
 - [ ] **Exchange-Aufgaben: Speichern schaltet die Erinnerung aus.** Hat eine
   Exchange-Aufgabe eine Erinnerung ohne eigenen Zeitpunkt (`ReminderIsSet`
   ohne `ReminderDueBy`), liest Aperio sie als „0 Minuten vor Fälligkeit“
@@ -695,12 +658,14 @@ Siehe DESIGN §4.2.
   Tagesstart-Planung und der stille Deadline-Pin, der eine heute fällige
   Aufgabe ohne Zutun speichert, also genau am Fälligkeitstag. Auch das
   Verschieben in eine andere Exchange-Liste legt sie dort mit
-  `ReminderIsSet=false` neu an. Nur der Desktop-Editor selbst speichert die 0
-  nicht (`min={1}`).
+  `ReminderIsSet=false` neu an. Beide Editoren zeigen sie seit 221 als „Bei
+  Fälligkeit“ und lassen sie stehen; ausgeschaltet wird sie im Adapter.
 - [ ] **Editoren bieten an, was verloren geht.** Relative
   Aufgaben-Erinnerungen überleben nur bei lokalen Listen: Exchange und To Do
   schreiben nur die erste feste Erinnerung, CalDAV-Aufgaben, Google Tasks,
-  Vikunja, Todoist und die iPhone-Erinnerungen (Gerätekonto) gar keine. Beide
+  Vikunja, Todoist und die iPhone-Erinnerungen (Gerätekonto) gar keine. Das
+  gilt auch für „Bei Fälligkeit“ (221), das als relative Erinnerung mit 0
+  gespeichert wird. Beide
   Aufgaben-Editoren bieten trotzdem jede Art an, auch „Beim nächsten
   App-Start nach Fälligkeit“ (`allowAppStart` gilt dort, weil nicht gesetzt).
   Der Termin-Editor folgt der Regel „nichts anbieten, was still bleibt“ bisher
@@ -714,7 +679,7 @@ Siehe DESIGN §4.2.
   Der Adapter verwirft sie, und bleibt keine Erinnerung übrig, gelten die
   Standard-Erinnerungen des Google-Kalenders. Bei Exchange und Microsoft 365
   kommt ebenfalls keine feste Uhrzeit an und von mehreren Erinnerungen „Vor
-  Beginn“ nur die erste. Bei Gerätekalendern bietet das Handy Erinnerungen
+  Beginn“ und „Zu Beginn“ nur die erste. Bei Gerätekalendern bietet das Handy Erinnerungen
   an, die der Adapter verwirft und der Planer überspringt. Beide Editoren
   sollten nach der Fähigkeit des Kalenders oder der Liste nur anbieten, was
   ankommt, oder es sagen.
@@ -4402,6 +4367,26 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 
 #### B7 · Erinnerungs-Feinheiten (§14) `[~]` — erledigte Punkte
 
+- [x] **Erinnerung zum Beginn (221)** und **Desktop speichert eine
+  Erinnerung zum Beginn nicht** (2026-11-07, Branch `feat/reminder-at-start`).
+  Gewünscht von Toni am 2026-10-06. Beide Editoren bieten im Typ-Feld eine
+  eigene Art „Zu Beginn“, bei Aufgaben „Bei Fälligkeit“, bei ganztägigen
+  Terminen und im Geburtstagskalender „Am Tag selbst“; Anzahl und Einheit
+  fallen dann weg. Gespeichert bleibt `Relative` mit 0, wie jeder Anbieter sie
+  schreibt; zurück zu „Vor Beginn“ ergibt 15 Minuten. Damit erscheint eine 0
+  vom iPhone, von Google oder Outlook, aus Titel-Vorschlägen, Kopien oder
+  Kalender-Standards nicht mehr als „Anzahl 0“ im Feld mit `min={1}`, und der
+  Desktop speichert sie. Das Anzahl-Feld kürzt erst auf eine ganze Zahl und
+  prüft dann (eine eingefügte 0,5 wird 1 Minute, nicht 0). Am Handy ändert
+  das erneute Wählen des schon gewählten Typs oder der Einheit nichts mehr
+  (ein Wächter im Editor, nicht in `SelectFieldButton`: dort ist ein erneutes
+  Wählen beim Schnell-Hinzufügen eine bewusste Tat).  
+  ↳ Regel einmal in `shared/reminderKinds.ts` (welche Art eine Erinnerung
+  zeigt, was eine gewählte Art wird, die Worte je Ort, Anzahl und Einheit),
+  beide Editoren nur ausführend; Tests `src/intl/reminderKinds.test.ts` und
+  `src/components/RemindersEditor.test.tsx`, Muster `relative-0-at-start` im
+  Vertrag `shared/contracts/calendarDefaultReminders.json` (TypeScript und
+  Rust lesen ihn). DESIGN §14.1, Anleitung 07 in beiden Sprachen.
 - [-] Per-Vorkommen-Sound-Override, ohne das Vorkommen aus der Serie herauslösen zu müssen.  
   ↳ HINFÄLLIG: §14.4 wurde am 2026-06-04 (27459041) umgeschrieben — der Item-Override ist per Design serien-gebunden. Eine Vorkommen-Ebene wäre ein NEUER Wunsch, keine Lücke.
 - [x] **Windows zeigt Erinnerungen, mit Ton** (2026-10-31, Branch

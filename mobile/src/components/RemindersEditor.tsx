@@ -2,41 +2,33 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import type { Reminder } from '@aperio/shared';
+import {
+  atStartLabelKey,
+  DEFAULT_MINUTES_BEFORE,
+  RELATIVE_UNIT_MINUTES,
+  reminderKindFor,
+  reminderKindOption,
+  relativeAmount,
+  splitRelativeMinutes,
+  type RelativeUnit,
+  type Reminder,
+  type ReminderKindOption,
+} from '@aperio/shared';
 
 import { useListFocusManager, type RowRefCallback } from '../a11y/useListFocusManager';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { SelectFieldButton } from './SelectFieldButton';
 
-// Mobile reminders editor — faithful RN port of the desktop RemindersEditor in
-// `task` mode. The local engine supports relative / absolute / app-start
+// Mobile reminders editor — faithful RN port of the desktop RemindersEditor.
+// The local engine supports relative / at-start / absolute / app-start
 // reminders (e-mail is adapter-side; per-reminder sound is the desktop-only
-// asset store, so sound is forced null here). Reminders cross as
-// cal_core::Reminder[] in the task JSON — no native change.
-
-type ReminderKindOption = 'relative' | 'absolute' | 'app_start';
-type RelativeUnit = 'minutes' | 'hours' | 'days';
-
-const UNIT_FACTORS: Record<RelativeUnit, number> = {
-  minutes: 1,
-  hours: 60,
-  days: 60 * 24,
-};
-
-/** Decompose `minutes_before` into the largest whole unit + amount. */
-function splitRelative(minutes: number): { amount: number; unit: RelativeUnit } {
-  if (minutes <= 0) return { amount: 0, unit: 'minutes' };
-  if (minutes % UNIT_FACTORS.days === 0) {
-    return { amount: minutes / UNIT_FACTORS.days, unit: 'days' };
-  }
-  if (minutes % UNIT_FACTORS.hours === 0) {
-    return { amount: minutes / UNIT_FACTORS.hours, unit: 'hours' };
-  }
-  return { amount: minutes, unit: 'minutes' };
-}
+// asset store, so sound is forced null here). Which kind a stored reminder
+// shows as, and what a chosen kind becomes, is `shared/reminderKinds.ts`, the
+// same rules the desktop uses. Reminders cross as cal_core::Reminder[] in the
+// item JSON — no native change.
 
 const DEFAULT_RELATIVE: Reminder = {
-  kind: { type: 'relative', minutes_before: 15 },
+  kind: { type: 'relative', minutes_before: DEFAULT_MINUTES_BEFORE },
   sound: null,
 };
 
@@ -58,22 +50,6 @@ type Placement = 'local' | 'attach';
  *  which is the behaviour it always had. */
 function withPlacement(row: EditableReminder, attach: boolean): EditableReminder {
   return { kind: row.kind, sound: row.sound, attach };
-}
-
-function defaultsForKind(kind: ReminderKindOption): Reminder['kind'] {
-  switch (kind) {
-    case 'relative':
-      return { type: 'relative', minutes_before: 15 };
-    case 'absolute': {
-      // Default to the next full hour tomorrow.
-      const at = new Date();
-      at.setMinutes(0, 0, 0);
-      at.setDate(at.getDate() + 1);
-      return { type: 'absolute', at: at.toISOString() };
-    }
-    case 'app_start':
-      return { type: 'app_start' };
-  }
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -100,6 +76,7 @@ export function RemindersEditor({
   value,
   onChange,
   mode = 'task',
+  allDay = false,
   placement = false,
   placementSurface = 'calendar',
   allowAppStart = true,
@@ -109,6 +86,10 @@ export function RemindersEditor({
   /** Whether the relative reminder anchors on a task's due date ("Before due")
    *  or an event's start ("Before start"). Mirrors the desktop editor's mode. */
   mode?: 'event' | 'task';
+  /** The reminders are an all-day appointment's: "at start" then reads "on
+   *  the day", since it rings at the time the day starts, not at a start
+   *  time. */
+  allDay?: boolean;
   /** Show the per-row "Applies" choice — only in Aperio, or attached to new
    *  events. Only the calendar editor turns this on, and only for calendars
    *  whose new appointments can carry reminders at all. */
@@ -166,6 +147,7 @@ export function RemindersEditor({
             key={i}
             value={reminder}
             mode={mode}
+            allDay={allDay}
             position={i + 1}
             placement={placement}
             placementSurface={placementSurface}
@@ -194,6 +176,7 @@ function ReminderRow({
   onChange,
   onRemove,
   mode,
+  allDay,
   position,
   placement,
   placementSurface,
@@ -204,6 +187,8 @@ function ReminderRow({
   onChange: (next: EditableReminder) => void;
   onRemove: () => void;
   mode: 'event' | 'task';
+  /** An all-day appointment's row — see the editor's props. */
+  allDay: boolean;
   position: number;
   /** Show the "Applies" choice. */
   placement: boolean;
@@ -216,14 +201,8 @@ function ReminderRow({
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  // Local-store task reminders are relative/absolute/app_start; an email kind
-  // (adapter-side) would show as relative until re-picked — won't occur here.
-  const kindOption: ReminderKindOption =
-    value.kind.type === 'absolute'
-      ? 'absolute'
-      : value.kind.type === 'app_start'
-        ? 'app_start'
-        : 'relative';
+  // An email kind (adapter-side) shows as relative until re-picked.
+  const kindOption = reminderKindOption(value.kind);
   // Never drop the kind a row already has: a list stored before the offer was
   // withdrawn must still read as what it is, and stay changeable.
   const showAppStart = allowAppStart || kindOption === 'app_start';
@@ -246,15 +225,22 @@ function ReminderRow({
                 : 'reminders.kind.relativeTask',
             ),
           },
+          { value: 'at_start', label: t(atStartLabelKey(mode, allDay)) },
           { value: 'absolute', label: t('reminders.kind.absolute') },
           ...(showAppStart
             ? [{ value: 'app_start' as const, label: t('reminders.kind.appStart') }]
             : []),
         ]}
-        onChange={(next) => onChange({ ...value, kind: defaultsForKind(next) })}
+        onChange={(next) => {
+          // Choosing the kind the row already has changes nothing: it would
+          // turn "30 minutes before" back into the default 15. An email row
+          // only SHOWS as "before start"; choosing it makes it one.
+          if (next === kindOption && value.kind.type !== 'email') return;
+          onChange({ ...value, kind: reminderKindFor(next, new Date()) });
+        }}
       />
 
-      {value.kind.type === 'relative' && (
+      {kindOption === 'relative' && value.kind.type === 'relative' && (
         <RelativeFields
           position={position}
           minutes={value.kind.minutes_before}
@@ -326,7 +312,7 @@ function RelativeFields({
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const { amount, unit } = splitRelative(minutes);
+  const { amount, unit } = splitRelativeMinutes(minutes);
   const rowPrefix = t('reminders.rowLabel', { n: position });
   return (
     <View style={styles.relativeRow}>
@@ -335,11 +321,7 @@ function RelativeFields({
         <TextInput
           style={styles.input}
           value={String(amount)}
-          onChangeText={(v) => {
-            const n = Math.trunc(Number(v));
-            const safe = Number.isFinite(n) && n > 0 ? n : 1;
-            onChange(safe * UNIT_FACTORS[unit]);
-          }}
+          onChangeText={(v) => onChange(relativeAmount(Number(v)) * RELATIVE_UNIT_MINUTES[unit])}
           keyboardType="number-pad"
           accessibilityLabel={`${rowPrefix} – ${t('reminders.amountLabel')}`}
         />
@@ -352,7 +334,11 @@ function RelativeFields({
           { value: 'hours', label: t('reminders.unit.hours') },
           { value: 'days', label: t('reminders.unit.days') },
         ]}
-        onChange={(next) => onChange(Math.max(1, amount) * UNIT_FACTORS[next])}
+        onChange={(next) => {
+          // The unit it already has changes nothing (see the kind field).
+          if (next === unit) return;
+          onChange(Math.max(1, amount) * RELATIVE_UNIT_MINUTES[next]);
+        }}
       />
     </View>
   );

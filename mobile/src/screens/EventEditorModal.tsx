@@ -2713,6 +2713,7 @@ function EventEditorScreen({
         // it could never fire, attached or private. Same rule as the calendar
         // defaults: don't offer what stays silent.
         allowAppStart={targetAccountId === 'local'}
+        allDay={allDay}
         onChange={(next) => {
           setReminders(next);
           // The moment the user touches the editor the rows become REAL

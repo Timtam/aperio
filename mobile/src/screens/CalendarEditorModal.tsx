@@ -339,6 +339,9 @@ export default function CalendarEditorModal({
               device calendar (its alarms are the OS's, never written). */}
           <RemindersEditor
             mode="event"
+            // A birthday calendar holds nothing but all-day events, so its
+            // "at start" rings on the day itself.
+            allDay={isBirthday}
             value={defaultReminders.value}
             onChange={defaultReminders.save}
             placement={placementOffered}
