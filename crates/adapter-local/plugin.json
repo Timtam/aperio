@@ -23,6 +23,9 @@
     }
   },
   "signed": false,
+  "reminders": {
+    "after_start": true
+  },
   "tasks": {
     "task_span": true,
     "nested_projects": true,

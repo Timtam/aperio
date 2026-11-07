@@ -11,6 +11,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import {
+  allDayDefaultKind,
   applySignature,
   importInto,
   importIntoSentence,
@@ -434,9 +435,11 @@ export function EventDialog({
         ...base,
         // The placement flag is the calendar's business, never an event's:
         // only the reminder itself is shown (and, once touched, sent).
+        // On an all-day appointment as the planner rings a default: whole days
+        // at the day-start time (TODO B7 222), so the row says what happens.
         reminders: [
           ...attachedDefaultsFor(event.calendar_id).map(({ kind, sound }) => ({
-            kind,
+            kind: event.all_day ? allDayDefaultKind(kind) : kind,
             sound,
             attach: true,
           })),
@@ -817,6 +820,27 @@ export function EventDialog({
   // calendar's default reminders into it (the calendar's "attach" mode); an
   // emptied list after a touch is a choice — "no reminder" — and stays so.
   const remindersTouchedRef = useRef(false);
+  // The calendar's attached defaults stand in for an appointment with no
+  // reminders of its own, rounded to whole days while it is all-day (TODO B7
+  // 222). Switched between all-day and timed while they are untouched, they
+  // follow, so the rows keep saying how the default rings; the private rows
+  // beside them stay as they are.
+  useEffect(() => {
+    if (!isEdit || !event || !keepRemindersAsDefault || remindersTouchedRef.current) return;
+    const attached = attachedDefaultsFor(event.calendar_id).map(({ kind, sound }) => ({
+      kind: form.allDay ? allDayDefaultKind(kind) : kind,
+      sound,
+      attach: true,
+    }));
+    setForm((prev) => {
+      const next = [...attached, ...prev.reminders.filter((r) => r.attach === false)];
+      return JSON.stringify(next) === JSON.stringify(prev.reminders)
+        ? prev
+        : { ...prev, reminders: next };
+    });
+    // Only the switch moves them; the rest is read as it stands then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.allDay]);
   // "Notify attendees": defaults ON. Only meaningful (and only shown) when
   // the calendar supports server-side scheduling AND the event has
   // attendees; on submit we gate the wire flag on those too.
@@ -1262,13 +1286,25 @@ export function EventDialog({
       ? []
       : getCreateDefaultsFor(form.calendarId)
           .filter((d) => d.attach === true)
-          .map(({ kind, sound }) => ({ kind, sound, attach: true })),
+          // Into an all-day appointment as the host writes it: whole days
+          // (`apply_default_reminder_policy`, TODO B7 222). Switching all-day
+          // on or off re-offers the untouched rows in the other form.
+          .map(({ kind, sound }) => ({
+            kind: form.allDay ? allDayDefaultKind(kind) : kind,
+            sound,
+            attach: true,
+          })),
   );
   useEffect(() => {
     if (!isOpen || isEdit || remindersTouchedRef.current) return;
     const offered = JSON.parse(offeredJson) as EditableReminder[];
+    // Read before the updater, not inside it: StrictMode calls an updater
+    // twice with the same `prev`, and the first call moves the ref on — the
+    // second then saw its own offer as "mine", refused the swap and kept the
+    // old rows (a calendar change, the all-day switch). Captured here, both
+    // calls decide alike.
+    const mine = autoReminders.current;
     setForm((prev) => {
-      const mine = autoReminders.current;
       // Rows the user (or a prefill) put there stay: only an EMPTY list, or
       // exactly what this effect last offered, may be replaced by another
       // calendar's offer.
@@ -3211,6 +3247,13 @@ export function EventDialog({
           // rule as the calendar defaults: don't offer what stays silent.
           allowAppStart={targetIsLocal}
           allDay={form.allDay}
+          // Whether "after the start" reaches this calendar: its adapter's
+          // manifest says (TODO B7 222). A calendar not yet listed keeps
+          // nothing more.
+          afterStartKept={
+            calendars.find((c) => c.id === form.calendarId)?.reminder_capabilities
+              ?.after_start ?? false
+          }
         />
 
         {/* §14.4 per-event sound override. Edit-only: the key is the

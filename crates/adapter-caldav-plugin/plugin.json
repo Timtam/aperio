@@ -18,6 +18,9 @@
     }
   },
   "signed": false,
+  "reminders": {
+    "after_start": true
+  },
   "tasks": {
     "task_span": true,
     "subtasks": true,

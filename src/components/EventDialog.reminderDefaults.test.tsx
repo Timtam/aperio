@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import type { DefaultReminder } from '@aperio/shared';
 import type { Calendar, CalendarEvent } from '../api/types';
@@ -195,6 +195,29 @@ describe('EventDialog → the calendar defaults it shows', () => {
     await openEditor([IN_APERIO, ATTACHED]);
     await waitFor(() => expect(reminderRows()).toHaveLength(1));
   });
+  it('lets an untouched default follow the all-day switch', async () => {
+    // A timed appointment with no reminders shows the default as it is; made
+    // all-day, the planner rings the default as whole days, and the row says so.
+    await openEditor([ATTACHED]);
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Ganztägig|All day/i }));
+    await waitFor(() => {
+      const kind = within(reminderRows()[0]).getByRole('combobox', { name: /Typ|Type/ });
+      expect((kind as HTMLSelectElement).value).toBe('on_day');
+    });
+  });
+
+  it('shows a default on an all-day appointment as the planner rings it', async () => {
+    // "1 hour before" as the calendar's default rings on the day itself at
+    // the day-start time (TODO B7 222). As the appointment's own row it would
+    // read exactly, 23:00 the evening before — so the row shows it rounded,
+    // and touching it saves what it shows.
+    await openEditor([ATTACHED], { event: { ...EVENT, all_day: true } });
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+    const kind = within(reminderRows()[0]).getByRole('combobox', { name: /Typ|Type/ });
+    expect((kind as HTMLSelectElement).value).toBe('on_day');
+    expect(within(reminderRows()[0]).queryByLabelText(/Eigene Uhrzeit|Own time/)).toBeNull();
+  });
 });
 
 describe('EventDialog → creating an appointment', () => {
@@ -213,6 +236,19 @@ describe('EventDialog → creating an appointment', () => {
     );
     await screen.findByRole('combobox', { name: /kalender/i });
   }
+
+  it('offers the defaults of an all-day appointment as whole days', async () => {
+    // The host writes an attached default into a new all-day appointment
+    // rounded to whole days (`apply_default_reminder_policy`); the row offered
+    // here says the same, and follows the all-day switch while untouched.
+    await openCreate([ATTACHED]);
+    await waitFor(() => expect(reminderRows()).toHaveLength(1));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Ganztägig|All day/i }));
+    await waitFor(() => {
+      const kind = within(reminderRows()[0]).getByRole('combobox', { name: /Typ|Type/ });
+      expect((kind as HTMLSelectElement).value).toBe('on_day');
+    });
+  });
 
   it("offers the calendar's attached defaults as editable rows", async () => {
     // They would be written in on save either way. Showing them is what lets

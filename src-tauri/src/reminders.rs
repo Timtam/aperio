@@ -405,7 +405,8 @@ impl ReminderScheduler {
     /// eligible) reminder triggers for the scheduler. Lookahead is bounded by
     /// `MAX_HORIZON_DAYS`; the past bound reaches `CATCH_UP_HORIZON` so reminders
     /// that lapsed while the app was closed still make it into the scan (the
-    /// relevance filter then drops the ones whose event has already happened).
+    /// catch-up filter then keeps a past one only while the later of its event's
+    /// end and its own moment is at most `CATCH_UP_GRACE` ago).
     async fn collect_pending_triggers(&self) -> Vec<Trigger> {
         let now = Utc::now();
         let earliest = now - ChronoDuration::days(CATCH_UP_HORIZON);
@@ -414,12 +415,18 @@ impl ReminderScheduler {
 
         // De-duplicate (same item_id + same trigger time appearing from both
         // local SQLite and an external adapter — keep the first occurrence).
+        // Of twins at one moment (a fixed-time reminder on a series rings from
+        // every occurrence) the first that has not ended when it rings comes
+        // first, as on the phone (`reminder_dtos`); the sort is stable, so
+        // local still comes before external.
+        out.sort_by_key(|t| (t.trigger_at, t.relevant_until <= t.trigger_at));
         let mut seen: HashSet<(String, String)> = HashSet::new();
         out.retain(|t| seen.insert((t.item_id.clone(), t.trigger_at.to_rfc3339())));
 
         // Catch-up filter. Future triggers always stay (the worker schedules
         // them via tokio::sleep). Past triggers stay only when the event itself
-        // is still relevant — see `catchup_eligible`.
+        // is still relevant, or the reminder itself is fresh — see
+        // `catchup_eligible`.
         out.retain(|t| catchup_eligible(t, now, CATCH_UP_GRACE));
 
         // Filter out anything we already fired in this process.
@@ -515,8 +522,9 @@ impl ReminderScheduler {
 /// quiet stretch.
 const MAX_HORIZON_DAYS: i64 = 30;
 /// How far back the scheduler reaches for catch-up candidates — reminders whose
-/// trigger time lapsed while the app was closed. The relevance filter drops
-/// anything where the event is already over, so this is a scan-size guard.
+/// trigger time lapsed while the app was closed. The catch-up filter drops
+/// anything whose event and own moment both lie more than `CATCH_UP_GRACE`
+/// back, so this is a scan-size guard.
 const CATCH_UP_HORIZON: i64 = 7;
 /// How far back the Ctrl+Shift+R overview looks for already-passed reminders.
 const OVERVIEW_PAST_DAYS: i64 = 7;

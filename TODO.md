@@ -606,34 +606,6 @@ Siehe DESIGN §4.2.
 ### B7 · Erinnerungs-Feinheiten (§14) `[~]`
 - [~] E-Mail-Reminder: UI-Option + (Adapter-)Versand — lokaler Scheduler überspringt sie derzeit bewusst.  
   ↳ Adapter-Hälfte für Google + CalDAV FERTIG (round-trippt als providereigener E-Mail-Alarm — Aperio verschickt selbst nie Mail, genau wie §14 es verlangt). Die UI-Option fehlt auf beiden Oberflächen.
-- [ ] **Erinnerung nach dem Beginn (222).** CalDAV und iCloud kennen sie (ein
-  positiver `TRIGGER`, den Aperio als negatives `minutes_before` liest),
-  Vikunja auch (Aperio liest Vikunja-Erinnerungen aber noch gar nicht); der
-  Kern erlaubt negative Werte. Heute zeigen beide Editoren sie als „Vor
-  Beginn, Anzahl 0“ (`splitRelativeMinutes` in `shared/reminderKinds.ts`
-  fasst alles unter 0 zusammen; „Zu Beginn“ gilt nur für genau 0), und wer
-  Anzahl oder Einheit ändert, macht daraus eine Erinnerung davor. Ton oder
-  „Gilt“ zu ändern lässt sie, wie sie ist. Am Desktop sperrt sie zudem das
-  Speichern: Das Anzahl-Feld (`min={1}`) steht in einem Formular mit
-  Absende-Knopf ohne `noValidate`, die Eingabeprüfung des Browsers verweigert
-  dann vermutlich das Speichern (aus dem Code abgeleitet, nicht ausprobiert).
-  Am Handy bleibt sie erhalten, solange niemand Anzahl oder Einheit
-  anfasst. Entschieden: richtig zeigen („10
-  Minuten nach Beginn“) und anlegbar machen, als eigene Art „Nach Beginn“, nur
-  wo sie ankommt: bei Kalendern, deren Anbieter sie speichert (CalDAV), bei
-  lokalen Kalendern und bei Erinnerungen „Nur in Aperio“. Google, Exchange und
-  Graph kennen nur Minuten davor. In den Kalender des Telefons (iPhone wie
-  Android) schreibt Aperio gar keine Erinnerung, und der Planer überspringt
-  Gerätekonten ganz. Welcher Kalender das kann, sagt eine Fähigkeit im
-  Manifest, nicht der Name des Adapters. Zu prüfen: ob der Planer eine
-  Erinnerung nach dem Ende des Termins noch auslöst, und was „nach Beginn“ bei
-  ganztägigen Terminen heißt. Vermutlich der häufigste Fall (Prüfrunde zu 221,
-  nicht ausprobiert): Der iPhone-Hinweis „Am Tag des Ereignisses (9:00)“ an
-  einem ganztägigen Termin ist `TRIGGER:PT9H`, also -540 Minuten. Der Desktop
-  zeigt ihn als „Vor Beginn, Anzahl 0“ und speichert den Termin dann nicht,
-  auch wenn man nur den Titel ändert; der Planer rundet ganztägige Erinnerungen
-  auf ganze Tage (`round(-540/1440)` = 0) und klingelt dann zur
-  Tagesstart-Uhrzeit statt um 9 Uhr.
 - [ ] **„Beim nächsten App-Start“ klingelt bei jedem Start.** Gefunden in der
   Prüfrunde zu 221 (2026-11-07, aus dem Code gelesen, nicht ausprobiert).
   `fire_app_start_reminders` (`src-tauri/src/reminders.rs`) löst beim Start
@@ -646,6 +618,20 @@ Siehe DESIGN §4.2.
   sie gibt. Gemeint ist laut DESIGN §14.1 und Beschriftung der nächste Start
   nach Fälligkeit. Zu tun: Ausgelöstes dauerhaft merken und erledigte
   Aufgaben auslassen.
+- [ ] **CalDAV liest Hinweise „zum Ende“ und Apples Platzhalter falsch.**
+  Gefunden in der Recherche zu 222 (2026-11-07, aus dem Code gelesen, nicht
+  ausprobiert). `parse_valarms` (`crates/ical-mapping/src/mapping.rs`) prüft
+  weder `RELATED` noch `ACTION`. Ein `TRIGGER;RELATED=END:-PT5M` (5 Minuten vor
+  dem Ende) wird als 5 Minuten vor dem BEGINN gelesen und klingelt dann; beim
+  Umschreiben eines eigenen Termins geht er als solcher hinaus (bei
+  Einladungen bleibt er Byte für Byte). Apples Platzhalter für „kein Hinweis“
+  (`ACTION:NONE`, `TRIGGER;VALUE=DATE-TIME:19760401T005545Z`,
+  `X-APPLE-DEFAULT-ALARM:TRUE`, laut einem SOGo-Bericht von 2014) würde als
+  feste Erinnerung am 1. April 1976 gelesen und im Editor als „Zu festem
+  Zeitpunkt“ gezeigt. Zu tun: `ACTION:NONE` überspringen; `RELATED=END`
+  entweder modellieren oder ganz unangetastet lassen (fremde iCal-Teile
+  ganz oder gar nicht). Wochen (`-P1W`) liest der Parser
+  auch nicht, ein solcher Hinweis fällt weg.
 - [ ] **Exchange-Aufgaben: Speichern schaltet die Erinnerung aus.** Hat eine
   Exchange-Aufgabe eine Erinnerung ohne eigenen Zeitpunkt (`ReminderIsSet`
   ohne `ReminderDueBy`), liest Aperio sie als „0 Minuten vor Fälligkeit“
@@ -665,7 +651,9 @@ Siehe DESIGN §4.2.
   schreiben nur die erste feste Erinnerung, CalDAV-Aufgaben, Google Tasks,
   Vikunja, Todoist und die iPhone-Erinnerungen (Gerätekonto) gar keine. Das
   gilt auch für „Bei Fälligkeit“ (221), das als relative Erinnerung mit 0
-  gespeichert wird. Beide
+  gespeichert wird. „Nach Fälligkeit“ (222) zeigen beide Editoren, bieten es
+  aber nicht neu an, weil eine Aufgabenliste keine Fähigkeit dafür nennt; die
+  lokale Liste könnte es speichern. Beide
   Aufgaben-Editoren bieten trotzdem jede Art an, auch „Beim nächsten
   App-Start nach Fälligkeit“ (`allowAppStart` gilt dort, weil nicht gesetzt).
   Der Termin-Editor folgt der Regel „nichts anbieten, was still bleibt“ bisher
@@ -676,8 +664,10 @@ Siehe DESIGN §4.2.
   erst, wenn ein Desktop den Eintrag per Sync bekommt und neu startet. In
   einer externen Aufgabenliste klingelt sie nirgends: Kein Adapter schreibt
   diese Art, und der Desktop sammelt sie nur aus Aperios lokalem Speicher. Bei Google kommt eine feste Uhrzeit „An diesem Termin“ nicht an:
-  Der Adapter verwirft sie, und bleibt keine Erinnerung übrig, gelten die
-  Standard-Erinnerungen des Google-Kalenders. Bei Exchange und Microsoft 365
+  Der Adapter verwirft sie, und bleibt keine Erinnerung übrig, hat der Termin
+  bei Google keine (seit TODO B7 222; vorher galten dann die
+  Standard-Erinnerungen des Google-Kalenders, eine Erinnerung, die niemand
+  gesetzt hatte). Bei Exchange und Microsoft 365
   kommt ebenfalls keine feste Uhrzeit an und von mehreren Erinnerungen „Vor
   Beginn“ und „Zu Beginn“ nur die erste. Bei Gerätekalendern bietet das Handy Erinnerungen
   an, die der Adapter verwirft und der Planer überspringt. Beide Editoren
@@ -4367,6 +4357,81 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 
 #### B7 · Erinnerungs-Feinheiten (§14) `[~]` — erledigte Punkte
 
+- [x] **Erinnerung nach dem Beginn (222).** CalDAV und iCloud kennen sie (ein
+  positiver `TRIGGER`, den Aperio als negatives `minutes_before` liest),
+  Vikunja auch (Aperio liest Vikunja-Erinnerungen aber noch gar nicht); der
+  Kern erlaubt negative Werte. Heute zeigen beide Editoren sie als „Vor
+  Beginn, Anzahl 0“ (`splitRelativeMinutes` in `shared/reminderKinds.ts`
+  fasst alles unter 0 zusammen; „Zu Beginn“ gilt nur für genau 0), und wer
+  Anzahl oder Einheit ändert, macht daraus eine Erinnerung davor. Ton oder
+  „Gilt“ zu ändern lässt sie, wie sie ist. Am Desktop sperrt sie zudem das
+  Speichern: Das Anzahl-Feld (`min={1}`) steht in einem Formular mit
+  Absende-Knopf ohne `noValidate`, die Eingabeprüfung des Browsers verweigert
+  dann vermutlich das Speichern (aus dem Code abgeleitet, nicht ausprobiert).
+  Am Handy bleibt sie erhalten, solange niemand Anzahl oder Einheit
+  anfasst. Entschieden: richtig zeigen („10
+  Minuten nach Beginn“) und anlegbar machen, als eigene Art „Nach Beginn“, nur
+  wo sie ankommt: bei Kalendern, deren Anbieter sie speichert (CalDAV), bei
+  lokalen Kalendern und bei Erinnerungen „Nur in Aperio“. Google, Exchange und
+  Graph kennen nur Minuten davor. In den Kalender des Telefons (iPhone wie
+  Android) schreibt Aperio gar keine Erinnerung, und der Planer überspringt
+  Gerätekonten ganz. Welcher Kalender das kann, sagt eine Fähigkeit im
+  Manifest, nicht der Name des Adapters. Zu prüfen: ob der Planer eine
+  Erinnerung nach dem Ende des Termins noch auslöst, und was „nach Beginn“ bei
+  ganztägigen Terminen heißt. Vermutlich der häufigste Fall (Prüfrunde zu 221,
+  nicht ausprobiert): Der iPhone-Hinweis „Am Tag des Ereignisses (9:00)“ an
+  einem ganztägigen Termin ist `TRIGGER:PT9H`, also -540 Minuten. Der Desktop
+  zeigt ihn als „Vor Beginn, Anzahl 0“ und speichert den Termin dann nicht,
+  auch wenn man nur den Titel ändert; der Planer rundet ganztägige Erinnerungen
+  auf ganze Tage (`round(-540/1440)` = 0) und klingelt dann zur
+  Tagesstart-Uhrzeit statt um 9 Uhr.  
+  ↳ Entschieden mit Toni am 2026-11-07: (1) ganztägig zählen Erinnerungen am
+  Termin selbst genau ab Mitternacht (RFC, iPhone, Google), Kalender-Standards
+  in ganzen Tagen zur Tagesstart-Uhrzeit (Juli-Regel), Geburtstagskalender
+  genau (zweite Fassung: die erste, „Tag runden, Uhrzeit übernehmen“, schob
+  „Am Tag selbst um 18:00“ auf den nächsten Tag); (2) der Editor zeigt und legt ganztägig „Am Tag selbst“ oder
+  „N Tage vorher“ an, je zur Tagesstart-Uhrzeit oder zu einer eigenen
+  (09:00); (3) nach dem Terminende klingelt sie, überall gleich; (4) Google,
+  Exchange und Outlook lassen sie weg, der Editor bietet sie dort nicht an
+  und sagt es bei einer vorhandenen Zeile. **Teil 1 (Kern) gebaut**, Branch
+  `feat/reminder-after-start-core`: Ganztags-Regel (`AllDayReading`,
+  `effective_reminders_by_origin`),
+  Desktop holt nach am eigenen Zeitpunkt (`catchup_eligible`), Serien klappen
+  jedes Vorkommen auf, dessen Erinnerung ins Fenster fällt (das Handy verlor
+  sie bei einem laufenden Vorkommen), Google/EWS/Graph lassen sie weg und
+  protokollieren es, Manifest-Fähigkeit `reminders.after_start` (CalDAV und
+  lokal) auf `CalendarRow.reminder_capabilities`, Geburtstagskalender immer.
+  DESIGN §14.1. Prüfrunde (12 Befunde): angehängte Standards gehen in
+  ganztägige Termine auf ganze Tage gerundet; ein Standard klingelt neben einer
+  eigenen Erinnerung gleichen Werts, wenn er zu einem anderen Zeitpunkt
+  klingelt; Google schaltet seine eigenen Standards nicht mehr ein, wenn es
+  gegebene Erinnerungen alle weglässt (auch eine feste Uhrzeit); bei Zwillingen
+  einer festen Uhrzeit nennen beide Geräte das Vorkommen, das noch nicht vorbei
+  ist; Plugin-Doku `reminders`. **Teil 1 nur zusammen mit Teil 2 ausliefern**:
+  der Kern liest die eigenen Erinnerungen ganztägiger Termine schon genau, die
+  alten Editoren legen dort aber noch „15 Minuten vorher“ an (klingelt am
+  Vorabend um 23:45), und Geburtstags-Standards zählen genau, ohne
+  Ganztags-Editor. Teil 2, die Editoren beider Apps, sollte bringen: Art „Nach
+  Beginn“ mit Anzahl und Einheit, nur wo die Fähigkeit oder „Nur in Aperio“
+  gilt; ganztägige Zeilen (auch der Geburtstagskalender) mit Tag und Uhrzeit;
+  Hinweis bei einer Zeile, die nicht ankommt; die Vorbelegung angehängter
+  Standards im Termin-Editor ganztägig auf ganze Tage runden wie
+  `apply_default_reminder_policy`; Anleitung 07 (der Absatz „Ganztägige Termine
+  haben keine Uhrzeit …“ in beiden Sprachen) und der Hinweis
+  `mobile.birthdayCalendarRemindersHint`.  
+  ↳ **Teil 2 (Editoren) gebaut**, Branch `feat/reminder-after-start-editors`,
+  gestapelt auf Teil 1: beide Editoren mit der Art „Nach Beginn“ (Aufgaben:
+  „Nach Fälligkeit“, gezeigt, nicht neu angeboten, weil eine Aufgabenliste
+  keine Fähigkeit nennt), angeboten nach `afterStartOffered` (Fähigkeit des
+  Kalenders oder „Nur in Aperio“), Hinweis bei einer Zeile, die nicht ankommt;
+  ganztägige Zeilen (Termine und Geburtstagskalender) als Tag und Uhrzeit
+  (`AllDayReminder`, `allDayReminderOf`, `minutesBeforeOfAllDay` in
+  `shared/reminderKinds.ts`; Uhrzeit am Tag selbst und „Tage danach“ nur wo
+  „nach Beginn“ ankommt); vorbelegte angehängte Standards ganztägig auf ganze
+  Tage gerundet (`allDayDefaultKind`); Anleitung 07 und Geburtstags-Hinweis
+  in beiden Sprachen; DESIGN §14.1. Aperio schreibt eine Erinnerung zum
+  Beginn als `TRIGGER:P0D` (gültig nach RFC 5545; das iPhone schreibt
+  `PT0S`).
 - [x] **Erinnerung zum Beginn (221)** und **Desktop speichert eine
   Erinnerung zum Beginn nicht** (2026-11-07, Branch `feat/reminder-at-start`).
   Gewünscht von Toni am 2026-10-06. Beide Editoren bieten im Typ-Feld eine

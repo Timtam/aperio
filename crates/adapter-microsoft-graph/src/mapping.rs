@@ -981,6 +981,7 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
         new.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
         new.all_day,
     );
+    let reminder_minutes = first_reminder_minutes(&new.reminders);
     let body = EventWriteBody {
         subject: Some(new.title.clone()),
         body: new.description.clone().map(|c| EventBodyWrite {
@@ -994,8 +995,8 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
             .location
             .clone()
             .map(|l| EventLocationWrite { display_name: l }),
-        is_reminder_on: first_reminder_minutes(&new.reminders).is_some(),
-        reminder_minutes_before_start: first_reminder_minutes(&new.reminders),
+        is_reminder_on: reminder_minutes.is_some(),
+        reminder_minutes_before_start: reminder_minutes,
         recurrence: match new.recurrence.as_ref() {
             Some(r) => Some(rrule_to_recurrence(&r.rrule, new.start)?),
             None => None,
@@ -1012,6 +1013,7 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
         ev.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
         ev.all_day,
     );
+    let reminder_minutes = first_reminder_minutes(&ev.reminders);
     Ok(EventWriteBody {
         subject: Some(ev.title.clone()),
         body: ev.description.clone().map(|c| EventBodyWrite {
@@ -1025,8 +1027,8 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
             .location
             .clone()
             .map(|l| EventLocationWrite { display_name: l }),
-        is_reminder_on: first_reminder_minutes(&ev.reminders).is_some(),
-        reminder_minutes_before_start: first_reminder_minutes(&ev.reminders),
+        is_reminder_on: reminder_minutes.is_some(),
+        reminder_minutes_before_start: reminder_minutes,
         recurrence: match ev.recurrence.as_ref() {
             Some(r) => Some(rrule_to_recurrence(&r.rrule, ev.start)?),
             None => None,
@@ -1085,7 +1087,19 @@ fn first_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
     // We take the first Relative reminder; everything else
     // (Absolute, AppStart, Email) stays local-only because Graph
     // has nowhere to put it.
+    //
+    // `reminderMinutesBeforeStart` counts minutes BEFORE the start, on the
+    // same Exchange store whose schema allows nothing below 0. A reminder
+    // after the start (negative) is left out and named in the log, as decided
+    // 2026-11-07 (TODO B7 222); the next relative reminder takes the slot.
     reminders.iter().find_map(|r| match r.kind {
+        ReminderKind::Relative { minutes_before } if minutes_before < 0 => {
+            tracing::warn!(
+                minutes_after_start = -minutes_before,
+                "reminder after the start left out: Outlook keeps only reminders before it"
+            );
+            None
+        }
         ReminderKind::Relative { minutes_before } => Some(minutes_before),
         _ => None,
     })
@@ -1830,6 +1844,24 @@ fn day_name_to_weekday(s: &str) -> Option<cal_core::Weekday> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── reminders after the start (TODO B7 222) ───────────────────────────
+    fn after_start_rel(minutes_before: i64) -> Reminder {
+        Reminder {
+            kind: ReminderKind::Relative { minutes_before },
+            sound: None,
+        }
+    }
+
+    #[test]
+    fn the_one_outlook_reminder_is_never_after_the_start() {
+        assert_eq!(
+            first_reminder_minutes(&[after_start_rel(-10), after_start_rel(15)]),
+            Some(15)
+        );
+        assert_eq!(first_reminder_minutes(&[after_start_rel(0)]), Some(0));
+        assert_eq!(first_reminder_minutes(&[after_start_rel(-10)]), None);
+    }
 
     // ── description round-trip ────────────────────────────────────────────
     //

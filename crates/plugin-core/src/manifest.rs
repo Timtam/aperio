@@ -73,6 +73,27 @@ fn yes() -> bool {
     true
 }
 
+/// What a calendar adapter keeps of an event's reminders, beyond the
+/// reminders before the start that every calendar provider keeps (TODO B7
+/// 222). The editors offer a kind only where it arrives, and where it is
+/// written anyway — a copy, an import, an attached default — the adapter
+/// leaves it out rather than fail the write.
+///
+/// Every flag defaults to `false`, the opposite of
+/// [`RecurrenceCapabilities`]: a provider that refuses such a reminder fails
+/// the whole create, so an absent manifest must not unlock it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct ReminderCapabilities {
+    /// Keeps a reminder AFTER the start ("10 minutes after the start"; RFC
+    /// 5545 a positive `TRIGGER`), and with it an all-day reminder at a clock
+    /// time on the day itself ("On the day, 09:00"). CalDAV and iCloud do,
+    /// and Aperio's own store; Google, Exchange and Outlook count only
+    /// minutes before the start.
+    #[serde(default)]
+    pub after_start: bool,
+}
+
 /// Which recurrence shapes a calendar adapter can faithfully
 /// round-trip. Declared (optionally) in `plugin.json` so the
 /// EventDialog can grey out options the source can't store — e.g.
@@ -606,6 +627,13 @@ pub struct PluginManifest {
     /// so existing manifests and non-calendar plugins need no change.
     #[serde(default)]
     pub recurrence: RecurrenceCapabilities,
+
+    /// What this adapter keeps of an event's reminders beyond those before
+    /// the start, surfaced to the reminder editors so they offer only what
+    /// arrives. Absent → [`ReminderCapabilities::default`]: nothing more,
+    /// which is what Google, Exchange and Outlook can do.
+    #[serde(default)]
+    pub reminders: ReminderCapabilities,
 
     /// Which task-organisation features this adapter supports
     /// (nested projects, sections, subtasks, …), surfaced to the

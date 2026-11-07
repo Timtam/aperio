@@ -324,9 +324,14 @@ export function CalendarsPanel() {
                 value={getDefaultsFor(cal.id)}
                 onChange={(next) => setDefaultsFor(cal.id, next)}
                 mode="event"
-                // A birthday calendar holds nothing but all-day events, so
-                // its "at start" rings on the day itself.
+                // A birthday calendar holds nothing but all-day events: its
+                // rows are a day and a clock time.
                 allDay={isBirthdayCalendarId(cal.id)}
+                // A row from before the field existed (a cached snapshot) keeps
+                // nothing more. A read-only calendar has no placement choice:
+                // every default stays in Aperio and rings there, so "after the
+                // start" arrives whatever its adapter keeps.
+                afterStartKept={(cal.reminder_capabilities?.after_start ?? false) || cal.read_only}
                 placement={placementFor(cal)}
                 // "On next app start" is host-local by construction and could
                 // never ring as a calendar default — see the editor's prop.

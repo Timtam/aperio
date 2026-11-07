@@ -2901,8 +2901,20 @@ fn cut_end_day(
     .ok_or_else(|| day_zone_refusal("no-wall"))
 }
 
+/// The one reminder Exchange keeps: the first relative one BEFORE the start.
+/// `ReminderMinutesBeforeStart` is schema-bound to 0 and up, so a reminder
+/// after the start (negative) would fail the whole write; it is left out and
+/// named in the log, as decided 2026-11-07 (TODO B7 222). The next relative
+/// reminder takes the slot.
 fn first_relative_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
     reminders.iter().find_map(|r| match &r.kind {
+        ReminderKind::Relative { minutes_before } if *minutes_before < 0 => {
+            tracing::warn!(
+                minutes_after_start = -*minutes_before,
+                "reminder after the start left out: Exchange keeps only reminders before it"
+            );
+            None
+        }
         ReminderKind::Relative { minutes_before } => Some(*minutes_before),
         _ => None,
     })
@@ -4798,6 +4810,32 @@ pub fn parse_server_time_zones(xml: &str) -> EwsResult<ServerTimeZones> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── reminders after the start (TODO B7 222) ───────────────────────────
+    fn after_start_rel(minutes_before: i64) -> Reminder {
+        Reminder {
+            kind: ReminderKind::Relative { minutes_before },
+            sound: None,
+        }
+    }
+
+    #[test]
+    fn the_one_exchange_reminder_is_never_after_the_start() {
+        // ReminderMinutesBeforeStart is 0 and up; the first reminder BEFORE
+        // the start takes the slot, one after it is left out.
+        assert_eq!(
+            first_relative_reminder_minutes(&[after_start_rel(-10), after_start_rel(15)]),
+            Some(15)
+        );
+        assert_eq!(
+            first_relative_reminder_minutes(&[after_start_rel(0)]),
+            Some(0)
+        );
+        assert_eq!(
+            first_relative_reminder_minutes(&[after_start_rel(-10)]),
+            None
+        );
+    }
 
     #[test]
     fn parses_get_user_availability_busy_blocks_by_mailbox_order() {

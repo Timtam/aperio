@@ -13,7 +13,7 @@
 // field added in Rust therefore fails to compile here until its default is
 // written down too.
 
-import type { RecurrenceCapabilities, TaskCapabilities } from './types';
+import type { RecurrenceCapabilities, ReminderCapabilities, TaskCapabilities } from './types';
 
 /** Mirrors `plugin_core::RecurrenceCapabilities::default()` — full RFC 5545. */
 export const DEFAULT_RECURRENCE_CAPABILITIES: RecurrenceCapabilities = {
@@ -26,6 +26,13 @@ export const DEFAULT_RECURRENCE_CAPABILITIES: RecurrenceCapabilities = {
   count: true,
   until: true,
   deletions_in_steps: false,
+};
+
+/** Mirrors `plugin_core::ReminderCapabilities::default()` — nothing beyond
+ *  reminders before the start, the safe answer for a calendar nobody vouched
+ *  for (TODO B7 222). */
+export const DEFAULT_REMINDER_CAPABILITIES: ReminderCapabilities = {
+  after_start: false,
 };
 
 /** Mirrors `plugin_core::TaskCapabilities::default()` — flat lists,

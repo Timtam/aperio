@@ -23,6 +23,7 @@ fn manifest() -> PluginManifest {
         description: Some("Bundled".into()),
         signed: false,
         recurrence: Default::default(),
+        reminders: Default::default(),
         tasks: Default::default(),
         account: None,
         adapter_kind: None,

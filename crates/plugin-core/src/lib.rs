@@ -64,7 +64,7 @@ pub use manager::{
 };
 pub use manifest::{
     resolve_kind_name, AdapterKindInfo, KindName, PluginManifest, RecurrenceCapabilities,
-    RecurrenceFreq, TaskAssignment, TaskCapabilities, MANIFEST_FILENAME,
+    RecurrenceFreq, ReminderCapabilities, TaskAssignment, TaskCapabilities, MANIFEST_FILENAME,
 };
 pub use plugin_type::PluginType;
 pub use shim::{

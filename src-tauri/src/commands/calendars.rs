@@ -14,7 +14,8 @@ use super::cache_swr;
 use super::cache_swr::TauriCacheObserver;
 use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SeriesRows, SyncScope};
 
-use plugin_core::{PluginManager, RecurrenceCapabilities};
+use host_core::builtin_adapters::{local_reminder_capabilities, reminder_capabilities_for_account};
+use plugin_core::{PluginManager, RecurrenceCapabilities, ReminderCapabilities};
 
 use super::birthdays::{
     is_birthday_calendar_id, list_birthday_calendars, synthesise_birthday_events,
@@ -159,7 +160,14 @@ pub async fn list_calendars(
                 .unwrap_or_else(|| LOCAL_ID.to_string());
             let recurrence_capabilities =
                 recurrence_caps_for_account(&account_id, &account_kinds, &plugin_manager);
-            CalendarRow::new(cal, account_id, recurrence_capabilities)
+            let reminder_capabilities =
+                reminder_capabilities_for_account(&plugin_manager, &account_id, &account_kinds);
+            CalendarRow::new(
+                cal,
+                account_id,
+                recurrence_capabilities,
+                reminder_capabilities,
+            )
         })
         .collect();
     for (cal, account_id) in birthday_rows {
@@ -168,8 +176,14 @@ pub async fn list_calendars(
         // but kept consistent.
         let recurrence_capabilities =
             recurrence_caps_for_account(&account_id, &account_kinds, &plugin_manager);
-        // `new` stamps the birthday layer from the id.
-        decorated.push(CalendarRow::new(cal, account_id, recurrence_capabilities));
+        // `new` stamps the birthday layer from the id, and with it the
+        // reminders a birthday calendar keeps (all: they stay in Aperio).
+        decorated.push(CalendarRow::new(
+            cal,
+            account_id,
+            recurrence_capabilities,
+            ReminderCapabilities::default(),
+        ));
     }
     Ok(decorated)
 }
@@ -256,11 +270,12 @@ pub async fn create_calendar(
         }));
     }
     // Local calendars live in the host's own SQLite store, which has no
-    // recurrence restrictions — full RFC-5545.
+    // recurrence restrictions — full RFC-5545 — and keeps any reminder.
     Ok(CalendarRow::new(
         cal,
         LOCAL_ID.to_string(),
         RecurrenceCapabilities::default(),
+        local_reminder_capabilities(),
     ))
 }
 

@@ -515,6 +515,7 @@ mod tests {
             description: None,
             signed: false,
             recurrence: Default::default(),
+            reminders: Default::default(),
             tasks: Default::default(),
             account: None,
             adapter_kind: None,

@@ -35,7 +35,7 @@
 //! anything here changing.
 
 use cal_core::{Calendar, ContactList, TaskList};
-use plugin_core::{RecurrenceCapabilities, TaskCapabilities};
+use plugin_core::{RecurrenceCapabilities, ReminderCapabilities, TaskCapabilities};
 use serde::Serialize;
 
 use crate::birthdays::{birthday_layer, BirthdayLayer};
@@ -55,6 +55,11 @@ pub struct CalendarRow {
     pub inner: Calendar,
     pub account_id: String,
     pub recurrence_capabilities: RecurrenceCapabilities,
+    /// What the calendar keeps of an event's reminders beyond those before
+    /// the start, from its adapter's manifest
+    /// ([`crate::builtin_adapters::reminder_capabilities_for_account`]). A
+    /// birthday calendar keeps everything: its reminders never leave Aperio.
+    pub reminder_capabilities: ReminderCapabilities,
     /// Set on a synthesised birthday calendar (DESIGN §10.3), and only there:
     /// which contact list it shows. The row's `name` is then that list's own
     /// name, and a frontend builds what it shows — "Geburtstage – Familie" —
@@ -70,12 +75,22 @@ impl CalendarRow {
         inner: Calendar,
         account_id: String,
         recurrence_capabilities: RecurrenceCapabilities,
+        reminder_capabilities: ReminderCapabilities,
     ) -> Self {
         let birthdays = birthday_layer(&inner);
+        // A birthday calendar's reminders are Aperio's own (its defaults ring
+        // through `enumerate_birthday_triggers`), whatever account the
+        // contacts come from.
+        let reminder_capabilities = if birthdays.is_some() {
+            ReminderCapabilities { after_start: true }
+        } else {
+            reminder_capabilities
+        };
         Self {
             inner,
             account_id,
             recurrence_capabilities,
+            reminder_capabilities,
             birthdays,
         }
     }
