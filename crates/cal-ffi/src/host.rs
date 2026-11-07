@@ -10063,6 +10063,16 @@ fn reminder_dtos(
     absorbed: Option<&std::collections::BTreeSet<cal_core::live_activity::LiveTriggerKey>>,
 ) -> Vec<serde_json::Value> {
     triggers.sort_by_key(|t| t.trigger_at);
+    // The list keeps one entry per (item_id, trigger_at), whichever twin came
+    // first; the plan may have absorbed the other. So a reminder is absorbed
+    // when ANY trigger of its group is — or the kept twin would be scheduled
+    // by Expo while the absorbed one rings in the activity.
+    let absorbed_pairs: Option<std::collections::HashSet<(String, chrono::DateTime<chrono::Utc>)>> =
+        absorbed.map(|keys| {
+            keys.iter()
+                .map(|key| (key.item_id.clone(), key.fire_at))
+                .collect()
+        });
     let mut seen = std::collections::HashSet::new();
     let dtos: Vec<serde_json::Value> = triggers
         .into_iter()
@@ -10073,14 +10083,9 @@ fn reminder_dtos(
         // so an excluded boundary trigger doesn't consume a `seen` slot.
         .filter(|t| t.trigger_at > now && seen.insert((t.item_id.clone(), t.trigger_at)))
         .map(|t| {
-            let is_absorbed = absorbed.map(|absorbed| {
-                absorbed.contains(&cal_core::live_activity::LiveTriggerKey {
-                    item_id: t.item_id.clone(),
-                    calendar_id: t.container_id.clone(),
-                    occurrence_start: t.start,
-                    fire_at: t.trigger_at,
-                })
-            });
+            let is_absorbed = absorbed_pairs
+                .as_ref()
+                .map(|pairs| pairs.contains(&(t.item_id.clone(), t.trigger_at)));
             let mut dto = serde_json::json!({
                 "item_id": t.item_id,
                 "item_kind": t.item_kind,
@@ -13688,6 +13693,43 @@ mod tests {
         assert_eq!(caps["manageable_sections"], serde_json::json!(true));
         assert_eq!(caps["nested_projects"], serde_json::json!(true));
         assert_eq!(caps["task_recurrence"], serde_json::json!(true));
+    }
+
+    /// Twins of one reminder (the same item and time, reached twice) are one
+    /// list entry, whichever came first; it is absorbed when the plan took
+    /// either twin, or Expo would ring it beside the activity.
+    #[test]
+    fn a_reminder_is_absorbed_when_the_plan_took_its_twin() {
+        use chrono::TimeZone;
+        let fire = chrono::Utc.with_ymd_and_hms(2026, 11, 9, 9, 50, 0).unwrap();
+        let start = chrono::Utc.with_ymd_and_hms(2026, 11, 9, 10, 0, 0).unwrap();
+        let now = chrono::Utc.with_ymd_and_hms(2026, 11, 9, 8, 0, 0).unwrap();
+        let twin = |calendar: &str| host_core::reminders::Trigger {
+            item_id: "ev".into(),
+            item_kind: host_core::reminders::ItemKind::Event,
+            container_id: calendar.into(),
+            title: "Standup".into(),
+            body: String::new(),
+            trigger_at: fire,
+            relevant_until: start + chrono::Duration::hours(1),
+            start,
+            all_day: false,
+            sound: cal_core::SoundConfig::default(),
+            absolute: false,
+        };
+        // The plan absorbed the SECOND twin; the list keeps the first.
+        let absorbed: std::collections::BTreeSet<_> = [cal_core::live_activity::LiveTriggerKey {
+            item_id: "ev".into(),
+            calendar_id: "second".into(),
+            occurrence_start: start,
+            fire_at: fire,
+        }]
+        .into_iter()
+        .collect();
+        let list = reminder_dtos(vec![twin("first"), twin("second")], now, Some(&absorbed));
+        assert_eq!(list.len(), 1, "{list:?}");
+        assert_eq!(list[0]["container_id"], "first");
+        assert_eq!(list[0]["absorbed"], serde_json::json!(true));
     }
 
     /// The plan and the notification list come from one scan, and a section's

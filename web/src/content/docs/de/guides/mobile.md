@@ -200,6 +200,37 @@ Termine** (standardmäßig an, nur dieses Gerät). Schalten die iPhone-Einstellu
 Live-Aktivitäten für Aperio aus, sagt das eine Zeile unter dem Schalter, mit
 einem Knopf zu diesen Einstellungen.
 
+## Live-Aktivitäten (Android)
+
+Auf Android ist es eine **laufende Benachrichtigung**: Von der letzten Erinnerung
+eines Termins bis zu seinem Ende steht sie in der Benachrichtigungsleiste, mit
+dem Titel und einem Satz, „Beginnt um 10:00 · Raum 2.14 · Danach: Review um
+11:00“, ab Beginn „Läuft bis 11:00 · …“, und einem Countdown daneben. Sie ist
+diese Erinnerung: Sie meldet sich einmal, mit dem Ton der Erinnerung, und
+TalkBack liest sie einmal vor; alle Änderungen danach kommen still. Ist die
+Erinnerung des nächsten Termins fällig, übernimmt eine neue Benachrichtigung
+und meldet sich, wie es diese Erinnerung täte.
+
+- **Auf neueren Android-Versionen (ab 16 QPR1)** erscheint sie auch in der
+  Statusleiste als Live Update, aber erst 15 Minuten vor Beginn: Google erlaubt das für einen Termin, der gleich
+  beginnt, nicht für einen, der noch bevorsteht. Lässt Android Aperio nicht
+  hervorheben, sagt das eine Zeile unter dem Schalter, mit einem Knopf zu dieser
+  Einstellung; die Benachrichtigung selbst erscheint trotzdem.
+- Dieselben Ausnahmen wie auf dem iPhone: keine ganztägigen Termine, keine ohne
+  Erinnerung, keine aus dem Gerätekalender, keine, deren letzte Erinnerung mehr
+  als zwei Stunden vor Beginn liegt.
+- Wischst du sie weg, bleibt sie weg, bis eine eigene Erinnerung kommt: die des
+  nächsten Termins oder eine neue für denselben Termin. Ein Tipp öffnet den
+  Termin.
+- Sie braucht keine geöffnete App: Sie ist vorausgeplant und kommt nach einem
+  Neustart oder einem App-Update wieder. Eine Erinnerung, deren Zeitpunkt das
+  Telefon verpasst hat (ausgeschaltet oder im Tiefschlaf), meldet sich, sobald
+  es geht, solange ihr Termin läuft.
+
+Ein- und ausschalten unter **Einstellungen, Allgemein, Live-Aktivitäten für
+Termine** (standardmäßig an, nur dieses Gerät). Ausgeschaltet ist jede
+Erinnerung wieder eine gewöhnliche Benachrichtigung.
+
 ## Widget auf dem Startbildschirm (iOS)
 
 **Als Nächstes** zeigt die nächsten Termine und fälligen Aufgaben auf dem

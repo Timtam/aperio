@@ -44,6 +44,7 @@ export * from './derivedCreate';
 export * from './notifyAttendees';
 export * from './reminderTap';
 export * from './liveActivityIos';
+export * from './liveActivityAndroid';
 export * from './contactChannels';
 export * from './dayMarkers';
 export * from './quickDates';

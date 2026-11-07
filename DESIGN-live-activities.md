@@ -1,6 +1,6 @@
 # Live-Aktivitäten für Termine — Entwurf
 
-Status: **entschieden; Stufe 1 (Regel im Kern), Stufe 2 (Tür), Stufe 3 (Antippen öffnet den Termin) und Stufe 4 (iOS) gebaut; Android folgt.** Toni hat die Form am 6. November 2026
+Status: **entschieden; alle fünf Stufen gebaut (Kern, Tür, Antippen, iOS, Android).** Toni hat die Form am 6. November 2026
 festgelegt, in zwei Runden: vor der Recherche (Start, Inhalt, Überblenden) und
 danach (iOS-26-Einplanung, ein Signal, iOS-Text, Anschluss, ohne Erinnerung,
 ganztägig, Standardwert). Die Recherche lief als Workflow mit drei Code-Lesern
@@ -380,6 +380,56 @@ Ein `PendingIntent` direkt auf die Aktivität der App (Android 12 verbietet den
 Umweg über einen Empfänger), mit Termin, Kalender und Beginn des Vorkommens.
 Die App liest ihn selbst aus, denn an Expos Benachrichtigungs-Weiterleitung geht
 er vorbei.
+
+### Gebaut (Stufe 5)
+
+- **Übergabe:** `shared/liveActivityAndroid.ts` (`androidHandover`, mit vitest
+  geprüft) macht aus dem Plan eine flache, zeitlich geordnete Liste von
+  Abschnitten, Zeitpunkte als Millisekunden, je Abschnitt der Kanal seiner
+  Erinnerung und, wenn er eine ist, eine feste Signal-Id. JavaScript
+  (`mobile/src/liveActivities/androidActivities.ts`) übergibt sie im
+  Erinnerungs-Durchlauf; erst danach lässt Expo die aufgegangenen Erinnerungen
+  weg. Scheitert die Übergabe, bleiben alle bei Expo.
+- **Benachrichtiger:** `LiveActivityNotifier.kt` legt den Plan ab und stellt
+  genau einen Alarm, für die nächste Grenze. Eigene Dateien für die Signale, die
+  geklingelt haben, für weggewischte Termine und für die angezeigte
+  Benachrichtigung; eine neue Übergabe vergisst davon nichts.
+- **Ein Signal:** Klingelt jede fällige, noch nicht erklungene Erinnerung der
+  laufenden Kette, auch wenn ein Alarm zu spät kam und ihr Abschnitt schon
+  vorbei ist: verspätet, aber nie verloren (keine 5-Minuten-Gnade mehr, denn
+  die hätte eine späte Erinnerung stumm gemacht, wo Expo sie hörbar gebracht
+  hätte). Eine neue Benachrichtigung auf dem Kanal der Erinnerung; jeder andere
+  Abschnitt ändert die angezeigte still, ein unveränderter wird nicht neu
+  gepostet. Gemerkt wird je Erinnerung, als Paar aus Termin-Id und Zeitpunkt
+  (dem Schlüssel, nach dem die Liste ihre Doppel zusammenlegt), nicht je
+  Terminschlüssel, der sich mit den Kopien ändern kann. JavaScript sagt bei jeder
+  Übergabe, welche vergangenen Erinnerungen Expo noch hielt und also brachte
+  (`rangByExpo`); die zählen als erklungen. Die Markierung `absorbed` gilt für
+  die ganze Doppel-Gruppe eines Listeneintrags.
+- **Scheitern:** Scheitert die Übergabe, hält der Benachrichtiger nichts mehr
+  (Plan, Alarm und Anzeige weg), und Expo bekommt alle Erinnerungen zurück; die
+  nächste Übergabe zählt dann die ganze Vergangenheit als Expos.
+- **Text:** Uhrzeiten in Aperios Sprache mit Region und 12/24-Stunden-Wahl des
+  Geräts, Wörter aus Aperio. Countdown sichtbar daneben, `CATEGORY_EVENT`,
+  kein `tickerText` (er ginge auch gesperrt in die Ansage), `setTimeoutAfter`
+  bis zum Ende der Kette als Netz; ein Wegwischen zur oder nach der geplanten
+  Endzeit zählt nicht. Vor Android 8 setzt die Benachrichtigung Ton und
+  Priorität selbst, weil es keine Kanäle gibt.
+- **Wegwischen** gilt für den Termin und den Rest seiner Kette, bis eine eigene
+  Erinnerung kommt; eine Erinnerung, die der Nutzer noch nicht gesehen hat,
+  kommt trotzdem.
+- **Hervorhebung:** die Bitte (`android.requestPromotedOngoing`) für Abschnitte ab
+  15 Minuten vor Beginn, nie eingefärbt; `POST_PROMOTED_NOTIFICATIONS` im
+  Manifest des Moduls. Die Bitte wirkt erst ab Android 16 QPR1 (36.1). Darf
+  Aperio dort nicht hervorheben, sagt das eine Zeile unter dem Schalter, mit
+  einem Knopf zur Systemseite.
+- **Alarme:** genau, wo erlaubt (`USE_EXACT_ALARM` ab Android 13,
+  `SCHEDULE_EXACT_ALARM` bis 12), sonst ungenau. Der nächste Alarm wird vor dem
+  Anzeigen gestellt, damit ein Fehler die Kette nicht reißt; alle Einstiege
+  sind synchronisiert. Ein Empfänger für Neustart, App-Update und Zeit- oder
+  Zonenwechsel zeigt den laufenden Abschnitt neu und stellt den Alarm.
+- **Antippen:** dieselbe Adresse wie auf dem iPhone, `aperio://event?…`, jeder
+  Wert mit `Uri.encode`; gelesen vom `ReminderTapRouter` über Linking.
 
 ## iOS
 

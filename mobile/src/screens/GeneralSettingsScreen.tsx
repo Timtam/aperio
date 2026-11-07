@@ -221,6 +221,42 @@ export default function GeneralSettingsScreen() {
     });
     return () => sub.remove();
   }, [sayAfterUnlock, t]);
+  // Android: the ongoing notification exists everywhere; from Android 16 it
+  // can be promoted to a Live Update, which the user may forbid per app.
+  const [promotion, setPromotion] = useState<{ supported: boolean; allowed: boolean } | null>(
+    null,
+  );
+  const promotionTrip = useRef(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const read = () =>
+      CalFfi.liveActivityPromotionJson()
+        .then((json) => {
+          const next = JSON.parse(json) as { supported: boolean; allowed: boolean };
+          setPromotion(next);
+          return next;
+        })
+        .catch(() => {
+          setPromotion(null);
+          return null;
+        });
+    void read();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      void read().then((next) => {
+        if (!promotionTrip.current || next == null) return;
+        promotionTrip.current = false;
+        void sayAfterUnlock(
+          t(
+            next.allowed
+              ? 'dialogs.settings.general.liveActivitiesPromotionOn'
+              : 'dialogs.settings.general.liveActivitiesPromotionOff',
+          ),
+        );
+      });
+    });
+    return () => sub.remove();
+  }, [sayAfterUnlock, t]);
   // Device-local OS background sync (default on) — wakes the app to sync while
   // it's backgrounded/closed; the OS decides the exact timing.
   const [bgSync, setBgSync] = useBackgroundSyncPref();
@@ -498,7 +534,7 @@ export default function GeneralSettingsScreen() {
                 </Text>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={t('mobile.notificationPermission.openSettings')}
+                  accessibilityLabel={t('dialogs.settings.general.liveActivitiesOpenSettings')}
                   onPress={() => {
                     liveSettingsTrip.current = true;
                     void Linking.openSettings().catch(() => {
@@ -508,7 +544,41 @@ export default function GeneralSettingsScreen() {
                   style={({ pressed }) => [styles.button, pressed && styles.pressed]}
                 >
                   <Text style={styles.buttonText} importantForAccessibility="no">
-                    {t('mobile.notificationPermission.openSettings')}
+                    {t('dialogs.settings.general.liveActivitiesOpenSettings')}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+          </>
+        )}
+        {Platform.OS === 'android' && (
+          <>
+            <SwitchRow
+              label={t('dialogs.settings.general.liveActivitiesLabel')}
+              hint={t('dialogs.settings.general.liveActivitiesHintAndroid')}
+              value={liveActivities}
+              // Re-planned at once: off removes the notification and brings
+              // every reminder back to the ordinary ones.
+              onToggle={() => void setLiveActivities(!liveActivities).then(rescheduleReminders)}
+            />
+            {liveActivities && promotion?.supported === true && !promotion.allowed && (
+              <>
+                <Text style={styles.hint} accessibilityRole="text">
+                  {t('dialogs.settings.general.liveActivitiesPromotionOff')}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('dialogs.settings.general.liveActivitiesPromotionOpen')}
+                  onPress={() => {
+                    promotionTrip.current = true;
+                    void CalFfi.openLiveActivityPromotionSettings().catch(() => {
+                      promotionTrip.current = false;
+                    });
+                  }}
+                  style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+                >
+                  <Text style={styles.buttonText} importantForAccessibility="no">
+                    {t('dialogs.settings.general.liveActivitiesPromotionOpen')}
                   </Text>
                 </Pressable>
               </>

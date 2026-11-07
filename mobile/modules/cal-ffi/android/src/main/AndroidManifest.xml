@@ -1,5 +1,43 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!--
+    Live Activities for appointments (DESIGN-live-activities.md): Android 16
+    promotes an ongoing notification to a Live Update only with this
+    (install-time) permission. The exact alarms ride on the app's
+    USE_EXACT_ALARM, the reboot on expo-notifications' RECEIVE_BOOT_COMPLETED,
+    declared again here so the receiver below does not depend on Expo.
+  -->
+  <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+  <!--
+    Android 12 only: USE_EXACT_ALARM exists from 13, and without an exact-alarm
+    right an alarm may come an hour late. Granted at install there.
+  -->
+  <uses-permission
+      android:name="android.permission.SCHEDULE_EXACT_ALARM"
+      android:maxSdkVersion="32" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <application>
+    <!--
+      The Live Activity's alarm and the swipe on its notification. Not
+      exported: only Aperio's own PendingIntents reach it.
+    -->
+    <receiver
+        android:name="expo.modules.calffi.LiveActivityReceiver"
+        android:exported="false" />
+    <!--
+      A reboot, an app update or a clock change: alarms are gone or wrong.
+      Exported because these are system broadcasts; each is protected, so no
+      other app can send it.
+    -->
+    <receiver
+        android:name="expo.modules.calffi.LiveActivityRestartReceiver"
+        android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        <action android:name="android.intent.action.TIME_SET" />
+        <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+      </intent-filter>
+    </receiver>
     <!--
       The home-screen widget. Declared in the MODULE's manifest, which the
       Android build merges into the app's — so no config plugin is needed to

@@ -182,6 +182,35 @@ Switch it under **Settings, General, Live Activities for appointments**
 (default on, this device only). If the iPhone settings turn Live Activities off
 for Aperio, a line below the switch says so, with a button to those settings.
 
+## Live Activities (Android)
+
+On Android the same thing is an **ongoing notification**: from an
+appointment's last reminder until it ends it stays in the notification shade
+with the title and one sentence, "Starts at 10:00 · Room 2.14 · Next: Review at
+11:00", from the start "Runs until 11:00 · …", and a countdown beside it. It is
+that reminder: it rings once, with the reminder's sound, and TalkBack reads it
+once; the changes after that are silent. When the next appointment's reminder
+is due, a new notification takes over, and rings as that reminder would.
+
+- **Newer Android versions (16 QPR1 and later)** also show it in the status bar
+  as a Live Update, but only from 15 minutes before the start: Google allows that for an appointment
+  about to begin, not for one still ahead. If Android does not let Aperio
+  promote it, a line under the switch says so, with a button to that setting;
+  the notification itself still appears.
+- The same exceptions as on the iPhone: no all-day appointments, none without a
+  reminder, none from the phone's own calendar, none whose last reminder is more
+  than two hours before the start.
+- Swiping it away keeps it away until a reminder of its own comes: the next
+  appointment's, or a new one for the same appointment. Tapping it opens the
+  appointment.
+- It needs no open app: it is planned ahead, and comes back after a restart or
+  an app update. A reminder whose moment the phone missed (switched off, or
+  asleep) rings as soon as it can, as long as its appointment runs.
+
+Switch it under **Settings, General, Live Activities for appointments**
+(default on, this device only). Off, every reminder is an ordinary notification
+again.
+
 ## Home-screen widget (iOS)
 
 **Up Next** shows your next events and due tasks on the home screen. Add it the
