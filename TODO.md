@@ -213,10 +213,17 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   Vorlauf) trafen je ihren Test. Den Vorlauf hat Toni beim Bau entschieden.
   Die Ausgabetypen gehen als TypeScript nach `shared/generated/`; noch kein
   Aufrufer. Der Kern bekommt Ortstage statt einer Zone.
-- [ ] **2 · Tür:** öffentliche Aufklapp-Funktion in Rust statt der privaten
-  Kopie in `host-core/reminders.rs`; Auslöser mit Ort; Aufzählung schaut
-  zurück; EIN Lesevorgang liefert Benachrichtigungen und Plan
+- [x] **2 · Tür:** EIN Lesevorgang liefert Benachrichtigungen und Plan
   (`liveActivityPlanJson`); Brücken iOS und Android; TS-Typ und Hülle.
+  ↳ Anders als geplant keine neue öffentliche Aufklapp-Funktion: Der
+  Erinnerungs-Durchlauf sammelt die Vorkommen selbst (`OccurrenceSink` in
+  `host-core/reminders.rs`), mit derselben Aufklappung und denselben
+  verdrängten Einzeländerungen wie seine Auslöser. Der Ort kommt über die
+  Vorkommen statt über den Auslöser; der Auslöser bekam nur `absolute`. Jeder
+  Listeneintrag trägt `absorbed`, damit keine Oberfläche Zeitpunkte als Text
+  vergleicht. Rückblick ein Tag; Gerätekalender zählen als Anschluss und Kopie.
+  Gegenproben trafen je ihren Test; der Gerätekalender-Zweig hat keinen Test,
+  weil kein Schein-Adapter für ihn existiert. Noch kein Aufrufer.
 - [x] **3 · Antippen öffnet den Termin** (Handy-Hälfte von A5): Kalender und
   Beginn des Vorkommens in der Benachrichtigung, Antwort-Hörer auch beim
   Kaltstart.

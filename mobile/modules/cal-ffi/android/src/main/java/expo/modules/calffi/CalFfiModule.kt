@@ -384,6 +384,8 @@ class CalFfiModule : Module() {
       }
     }.runOnQueue(remindersScope)
 
+    liveActivityFunctions()
+
     soundFunctions()
 
     preferenceFunctions()
@@ -1554,6 +1556,17 @@ class CalFfiModule : Module() {
   }
 
   /** Lifted out of `definition()` — see the note there. */
+  // Live Activities for events (DESIGN-live-activities.md). The plan comes from
+  // the same reminder scan as the notification list, so it runs on the same
+  // queue: three to five seconds of live reads, never in front of a check-off.
+  private fun ModuleDefinitionBuilder.liveActivityFunctions() {
+    AsyncFunction("liveActivityPlanJson") { horizonMinutes: Int, hiddenCalendarsJson: String ->
+      hostCoded {
+        host.liveActivityPlanJson(horizonMinutes.toUInt(), hiddenCalendarsJson)
+      }
+    }.runOnQueue(remindersScope)
+  }
+
   private fun ModuleDefinitionBuilder.soundFunctions() {
     // ─── Custom reminder sounds (§14.4 / §19.2.2) ─────────────────────────────
     // Content-addressed audio store behind SoundSource::Custom; the sync round

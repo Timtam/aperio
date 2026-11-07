@@ -1,6 +1,6 @@
 # Live-Aktivitäten für Termine — Entwurf
 
-Status: **entschieden; Stufe 1 (Regel im Kern) gebaut.** Toni hat die Form am 6. November 2026
+Status: **entschieden; Stufe 1 (Regel im Kern), Stufe 2 (Tür) und Stufe 3 (Antippen öffnet den Termin) gebaut.** Toni hat die Form am 6. November 2026
 festgelegt, in zwei Runden: vor der Recherche (Start, Inhalt, Überblenden) und
 danach (iOS-26-Einplanung, ein Signal, iOS-Text, Anschluss, ohne Erinnerung,
 ganztägig, Standardwert). Die Recherche lief als Workflow mit drei Code-Lesern
@@ -246,9 +246,20 @@ Android und iOS); im Zweifel bleibt die Benachrichtigung.
 
 ### Der Plan
 
-Die Tür liefert **beides** aus einem Lesevorgang: die vollständige Liste der
-Benachrichtigungen (wie heute `upcoming_reminders_json`) und den Plan. Der Plan
-hat je Kette:
+Die Tür (`live_activity_plan_json` in `crates/cal-ffi/src/host.rs`, am Handy
+`liveActivityPlan` in `mobile/src/api/liveActivities.ts`) liefert **beides**
+aus einem Lesevorgang: die vollständige Liste der Benachrichtigungen (wie
+`upcoming_reminders_json`) und den Plan. Jeder Eintrag der Liste sagt dabei
+selbst, ob er in einem Abschnitt aufgeht (`absorbed`). Der Vergleich geschieht im
+Kern auf Zeitpunkten: Plan und Liste schreiben denselben Zeitpunkt verschieden
+(`Z` gegen `+00:00`), und ein Textvergleich in einer Oberfläche träfe nichts.
+
+Der Lesevorgang schaut **einen Tag** zurück, um die letzte Erinnerung eines
+laufenden Termins zu finden, und sammelt die Vorkommen bis einen Tag nach dem
+Horizont, für den Anschluss. Termine aus dem Gerätekalender liest er dabei mit:
+Sie bekommen keine Auslöser (die Erinnerungen stellt das Betriebssystem), sind
+aber echte Termine, die als Anschluss oder als Kopie zählen. Lokale Termine sind
+nie abgesagt. Der Plan hat je Kette:
 
 - die Schlüssel ihrer Fenster, Beginn und Ende;
 - eine Liste von **Abschnitten**. Ein Abschnitt endet, wo sich etwas Sichtbares

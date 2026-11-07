@@ -1130,6 +1130,8 @@ external fun uniffi_cal_ffi_checksum_method_host_list_sync_devices_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_sync_log_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_live_activity_plan_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_log_line(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_logs_dir_path(
@@ -1541,6 +1543,8 @@ external fun uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(`ptr`: Long,
 external fun uniffi_cal_ffi_fn_method_host_list_sync_devices_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_sync_log_json(`ptr`: Long,`limit`: Int,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_live_activity_plan_json(`ptr`: Long,`horizonMinutes`: Int,`hiddenCalendarsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_log_line(`ptr`: Long,`level`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -2376,6 +2380,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_log_json() != 60629.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_live_activity_plan_json() != 2880.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_log_line() != 17206.toShort()) {
@@ -5373,6 +5380,23 @@ public interface HostInterface {
     fun `listSyncLogJson`(`limit`: kotlin.UInt): kotlin.String
     
     /**
+     * The notifications to schedule AND the Live Activity plan, from ONE
+     * reminder scan (DESIGN-live-activities.md).
+     *
+     * `reminders` is what [`Self::upcoming_reminders_json`] answers for the
+     * same horizon, each entry with `absorbed`: whether a section of the plan
+     * IS that reminder. A platform may leave the absorbed ones out of the
+     * notifications only once it has taken the plan over. `plan` is
+     * `cal_core::live_activity`'s plan. One scan, because two read every
+     * account live and could see two different states — a reminder doubled
+     * or lost between them.
+     *
+     * `hidden_calendars_json` is a JSON array of calendar ids hidden on this
+     * device; visibility is device-local, so it comes in.
+     */
+    fun `liveActivityPlanJson`(`horizonMinutes`: kotlin.UInt, `hiddenCalendarsJson`: kotlin.String): kotlin.String
+    
+    /**
      * Write one line into the app's own rolling log — the file the Logs
      * screen shows and the support bundle exports.
      *
@@ -8061,6 +8085,35 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_list_sync_log_json(
         it,
         FfiConverterUInt.lower(`limit`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The notifications to schedule AND the Live Activity plan, from ONE
+     * reminder scan (DESIGN-live-activities.md).
+     *
+     * `reminders` is what [`Self::upcoming_reminders_json`] answers for the
+     * same horizon, each entry with `absorbed`: whether a section of the plan
+     * IS that reminder. A platform may leave the absorbed ones out of the
+     * notifications only once it has taken the plan over. `plan` is
+     * `cal_core::live_activity`'s plan. One scan, because two read every
+     * account live and could see two different states — a reminder doubled
+     * or lost between them.
+     *
+     * `hidden_calendars_json` is a JSON array of calendar ids hidden on this
+     * device; visibility is device-local, so it comes in.
+     */
+    @Throws(StoreException::class)override fun `liveActivityPlanJson`(`horizonMinutes`: kotlin.UInt, `hiddenCalendarsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_live_activity_plan_json(
+        it,
+        FfiConverterUInt.lower(`horizonMinutes`),FfiConverterString.lower(`hiddenCalendarsJson`),_status)
 }
     }
     )

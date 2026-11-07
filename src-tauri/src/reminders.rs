@@ -591,6 +591,7 @@ mod tests {
                 source: cal_core::SoundSource::System,
                 volume: 100,
             },
+            absolute: false,
         }
     }
 
