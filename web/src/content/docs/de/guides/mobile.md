@@ -162,6 +162,39 @@ zurückkehrst. Eine Änderung in den Systemeinstellungen siehst du also auf dem
 Rückweg. Kommst du über diesen Knopf aus den Systemeinstellungen zurück, sagt
 Aperio die Zeile an.
 
+## Live-Aktivitäten (iPhone)
+
+Von der **letzten Erinnerung** eines Termins bis zu seinem Ende hält das iPhone
+ihn auf dem Sperrbildschirm und in der Dynamic Island: Titel, **10:00 – 11:10**,
+wie weit Beginn und Ende entfernt sind („Beginn in 10 Minuten, Ende in 1
+Stunde“), Ort und was an dem Tag danach kommt („Danach: Review um 11:00“).
+Ist die Erinnerung des nächsten Termins fällig, während noch einer läuft,
+wechselt die Aktivität zu ihm.
+
+- **Ab iOS 26:** Aperio plant bei jedem Öffnen die nächsten zwei Aktivitäten
+  ein, und das iPhone startet sie zur Erinnerung von selbst. Die Aktivität ist
+  dann die Erinnerung: Sie meldet sich statt der Benachrichtigung. Eine stumme
+  Erinnerung bleibt eine Benachrichtigung.
+- **iOS 17 bis 25:** Die Aktivität startet, wenn du Aperio im Zeitraum eines
+  Termins öffnest, zum Beispiel per Tipp auf seine Erinnerung. Die Erinnerung
+  bleibt eine Benachrichtigung.
+- Keine Aktivität für ganztägige Termine, für Termine ohne Erinnerung, für
+  Termine aus dem iPhone-Kalender oder wenn die letzte Erinnerung mehr als zwei
+  Stunden vor Beginn liegt.
+- Wischst du eine Aktivität weg, bleibt dieser Termin weg; der nächste Termin
+  mit eigener Erinnerung kommt wieder.
+- Ein Tipp öffnet den Termin.
+
+VoiceOver liest jede Aktivität als einen Satz, die mitlaufenden Zeiten
+eingeschlossen. Ohne laufendes Aperio ändert das iPhone eine Aktivität nur
+einmal von selbst: zum nächsten Termin, oder zu **Vorbei**, wenn nichts folgt.
+Das Beenden und alles Spätere warten, bis du Aperio wieder öffnest.
+
+Ein- und ausschalten unter **Einstellungen, Allgemein, Live-Aktivitäten für
+Termine** (standardmäßig an, nur dieses Gerät). Schalten die iPhone-Einstellungen
+Live-Aktivitäten für Aperio aus, sagt das eine Zeile unter dem Schalter, mit
+einem Knopf zu diesen Einstellungen.
+
 ## Widget auf dem Startbildschirm (iOS)
 
 **Als Nächstes** zeigt die nächsten Termine und fälligen Aufgaben auf dem

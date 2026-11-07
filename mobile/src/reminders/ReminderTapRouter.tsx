@@ -1,4 +1,11 @@
-import { eventTapParams, isBirthdayEventId, reminderTapOf, type ReminderTap } from '@aperio/shared';
+import {
+  eventTapParams,
+  isBirthdayEventId,
+  reminderTapOf,
+  reminderTapOfUrl,
+  type ReminderTap,
+} from '@aperio/shared';
+import * as Linking from 'expo-linking';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
 
@@ -9,6 +16,11 @@ import { useAppLockLocked } from '../state/appLockContext';
 import { closeDayStartReview, requestDayStartReview } from '../state/dayStartRequest';
 
 let tapCount = 0;
+
+/** Whether the address the app was launched with was taken: once per run of
+ *  the JavaScript, as `Linking.getInitialURL` answers with it for the whole
+ *  run (as in IncomingFileImport). */
+let initialUrlTaken = false;
 
 /** A route of its own for every tap: navigating to an editor of the same name
  *  otherwise reuses the one that is up and replaces its params under state
@@ -63,7 +75,8 @@ async function openTap(tap: ReminderTap, isLocked: () => boolean): Promise<'open
 
 /**
  * A tap on a reminder opens its appointment or task; a tap on the day-start
- * notification opens the day-start review (TODO A5, DESIGN §14.3).
+ * notification opens the day-start review (TODO A5, DESIGN §14.3); a tap on a
+ * Live Activity opens its appointment (DESIGN-live-activities.md).
  *
  * The response is the LAST one the OS handed over, which also covers the tap
  * that started the app. It is cleared once taken, so a remount does not open
@@ -90,6 +103,21 @@ export function ReminderTapRouter() {
     const tap = reminderTapOf(response.notification.request.content.data);
     if (tap != null) setWaiting(tap);
   }, [response]);
+
+  // A tapped Live Activity opens Aperio with its address, at launch or while
+  // it runs. Other addresses (a shared calendar file) are someone else's.
+  useEffect(() => {
+    const take = (url: string | null) => {
+      const tap = url ? reminderTapOfUrl(url) : null;
+      if (tap != null) setWaiting(tap);
+    };
+    if (!initialUrlTaken) {
+      initialUrlTaken = true;
+      void Linking.getInitialURL().then(take);
+    }
+    const subscription = Linking.addEventListener('url', ({ url }) => take(url));
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     if (waiting == null || locked) return;

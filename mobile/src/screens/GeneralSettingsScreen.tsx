@@ -46,7 +46,9 @@ import {
 } from '../settings/weekStart';
 import { useAppBadgePref } from '../state/appBadge';
 import { useAppLockPref, whenAppLockReleased, whileOsSheetOpen } from '../state/appLock';
+import CalFfi from '../../modules/cal-ffi';
 import { ensurePermission, rescheduleReminders } from '../reminders/scheduler';
+import { useLiveActivitiesPref } from '../state/liveActivitiesPref';
 import {
   useNotificationPermission,
   type NotificationPermission,
@@ -178,6 +180,26 @@ export default function GeneralSettingsScreen() {
   const [haptics, setHaptics] = useHapticsPref();
   // Device-local app-icon badge (today's open tasks + upcoming events; default on).
   const [appBadge, setAppBadge] = useAppBadgePref();
+  // Live Activities for appointments (iPhone; default on), and whether iOS's
+  // own switch for Aperio allows them — read again on every return, so a
+  // change in the iPhone settings shows on the way back.
+  const [liveActivities, setLiveActivities] = useLiveActivitiesPref();
+  const [liveActivitiesSystemOn, setLiveActivitiesSystemOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    const read = () =>
+      void CalFfi.liveActivitySupportJson()
+        .then((json) => {
+          const support = JSON.parse(json) as { available: boolean; enabled: boolean };
+          setLiveActivitiesSystemOn(support.available ? support.enabled : null);
+        })
+        .catch(() => setLiveActivitiesSystemOn(null));
+    read();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') read();
+    });
+    return () => sub.remove();
+  }, []);
   // Device-local OS background sync (default on) — wakes the app to sync while
   // it's backgrounded/closed; the OS decides the exact timing.
   const [bgSync, setBgSync] = useBackgroundSyncPref();
@@ -438,6 +460,35 @@ export default function GeneralSettingsScreen() {
           value={appBadge}
           onToggle={() => setAppBadge(!appBadge)}
         />
+        {Platform.OS === 'ios' && (
+          <>
+            <SwitchRow
+              label={t('dialogs.settings.general.liveActivitiesLabel')}
+              hint={t('dialogs.settings.general.liveActivitiesHint')}
+              value={liveActivities}
+              // Re-planned at once: off ends the running activities and brings
+              // every reminder back as a notification.
+              onToggle={() => void setLiveActivities(!liveActivities).then(rescheduleReminders)}
+            />
+            {liveActivities && liveActivitiesSystemOn === false && (
+              <>
+                <Text style={styles.hint} accessibilityRole="text">
+                  {t('dialogs.settings.general.liveActivitiesSystemOff')}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('mobile.notificationPermission.openSettings')}
+                  onPress={() => void Linking.openSettings().catch(() => {})}
+                  style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+                >
+                  <Text style={styles.buttonText} importantForAccessibility="no">
+                    {t('mobile.notificationPermission.openSettings')}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+          </>
+        )}
       </View>
 
       <View style={styles.section}>

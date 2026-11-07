@@ -494,6 +494,32 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  plan over (DESIGN-live-activities.md). */
   liveActivityPlanJson(horizonMinutes: number, hiddenCalendarsJson: string): Promise<string>;
 
+  // ── Live Activities, iOS only (ActivityKit; DESIGN-live-activities.md) ──
+  // The rules are in `shared/liveActivityIos.ts`; these only carry them out.
+  /** JSON `{available, enabled, canSchedule}`: iOS 17 or later (the widget
+   *  extension that draws an activity needs it), iOS's per-app switch, and
+   *  iOS 26 or later (an activity can be scheduled ahead). */
+  liveActivitySupportJson(): Promise<string>;
+  /** JSON `[{id, chainKey, state}]` of Aperio's activities, `state` one of
+   *  `pending`, `active`, `stale`, `ended`, `dismissed`. */
+  liveActivityListJson(): Promise<string>;
+  /** Start an activity now, without an alert; `contentJson` is an
+   *  `ActivityContent`. Resolves with its id. Throws when iOS refuses. */
+  liveActivityStart(chainKey: string, contentJson: string): Promise<string>;
+  /** iOS 26: schedule an activity to start at `startAt` (RFC 3339) with an
+   *  alert. Resolves with its id. Throws when iOS refuses or is older. */
+  liveActivitySchedule(
+    chainKey: string,
+    contentJson: string,
+    startAt: string,
+    alertTitle: string,
+    alertBody: string,
+  ): Promise<string>;
+  /** Change a running activity's content. */
+  liveActivityUpdate(id: string, contentJson: string): Promise<void>;
+  /** End an activity at once (a waiting one never starts). */
+  liveActivityEnd(id: string): Promise<void>;
+
   // ── Custom reminder sounds (§14.4) ──
   /** Import an audio file (local `path` from the document picker) into the
    *  content-addressed store; returns JSON `{sha256, ext, path}`. Validates

@@ -34,7 +34,9 @@ module.exports = {
   bundleIdentifier: '.widget',
   // AppIntents is what makes a widget button do something without opening
   // the app — see Actions.swift.
-  frameworks: ['SwiftUI', 'WidgetKit', 'AppIntents'],
+  // ActivityKit draws the Live Activity of an appointment
+  // (EventLiveActivity.swift); the app's native module starts it.
+  frameworks: ['SwiftUI', 'WidgetKit', 'AppIntents', 'ActivityKit'],
   entitlements: {
     'com.apple.security.application-groups': [APP_GROUP],
   },

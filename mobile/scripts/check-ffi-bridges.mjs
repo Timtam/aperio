@@ -605,6 +605,14 @@ const ONLY_ON = new Map([
   ['enableBackgroundRefresh', ['ios', 'the short BGAppRefreshTask wake-up exists only on iOS']],
   ['disableBackgroundRefresh', ['ios', 'cancels that iOS-only wake-up']],
   ['writeVoicePickers', ['ios', 'feeds the Siri intents, which exist only on iOS']],
+  ...[
+    'liveActivitySupportJson',
+    'liveActivityListJson',
+    'liveActivityStart',
+    'liveActivitySchedule',
+    'liveActivityUpdate',
+    'liveActivityEnd',
+  ].map((name) => [name, ['ios', 'ActivityKit; Android shows its live notification natively']]),
   [
     'takeIncomingFileJson',
     ['android', 'a shared or opened file arrives as an Android intent; iOS hands it to Linking'],
