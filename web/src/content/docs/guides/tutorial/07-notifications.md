@@ -8,10 +8,27 @@ react to them.
 ## Adding a reminder
 
 1. Open an event or a task for editing.
-2. In the **Reminder** field, choose how long beforehand you want to be
-   notified (e.g. 10 minutes, 1 hour, 1 day).
-3. You can add several reminders per entry.
-4. **Save**.
+2. Under **Reminders**, **Add reminder** adds a new row.
+3. In the **Type** field, choose when it comes:
+   - **Before start**, for tasks **Before due**: how long beforehand, with
+     **Amount** and **Unit** (minutes, hours, days). A new row starts at 15
+     minutes.
+   - **At start**, for tasks **When due**: exactly when the event starts or
+     the task is due. A task without a time rings at 9 a.m. On an all-day
+     event this kind is called **On the day** and rings on its day at the time
+     of the **Day-start trigger** (**Settings → Tasks**; 00:00 by default and
+     with "App start only").
+   - **At fixed time**: on a date at a time.
+   - **On next app start after due**: Aperio on the desktop tells you the
+     next time it starts once the moment has passed. This only works for
+     entries in Aperio's own calendars and lists, since no provider stores
+     this kind; the phone does not fire it.
+4. You can add several reminders per entry.
+5. **Save**.
+
+A reminder you set in another app for the moment of the event, such as "At
+time of event" on the iPhone, shows in Aperio as **At start** and stays that
+way when you save.
 
 ## Notifications on Windows
 
@@ -93,9 +110,9 @@ too – the iOS Calendar app, or a voice assistant reading your iCloud calendar.
 Only appointments you create *after* the switch get it written in; an
 appointment you gave reminders of your own, or deliberately none, keeps that
 choice, and an event without reminders of its own still gets the entry in
-Aperio. Exchange and Outlook calendars store a single "minutes before" reminder,
-so only the first such entry is attached there; an entry at a fixed time does
-not reach those appointments.
+Aperio. Exchange and Outlook calendars store a single "before start" or "at
+start" reminder, so only the first such entry is attached there; an entry at a
+fixed time does not reach those appointments.
 
 An attached entry is not a surprise at save time. Create an appointment in such
 a calendar and the editor already shows those rows, marked **on this event**:
@@ -106,7 +123,8 @@ afterwards. Entries that stay **only in Aperio** are not shown there, because
 they are not the appointment's: they ring on top of whatever it carries, and
 the calendar's settings page is where they belong.
 
-A default reminder can be a lead time ("before start") or a fixed date and time.
+A default reminder can be a lead time ("before start"), come at the start
+("at start", on a birthday calendar "on the day") or be a fixed date and time.
 "On next app start" is missing here on purpose: it only ever fires for a
 reminder set on an entry itself, so as a calendar default it would be a setting
 that saves and then stays silent.
@@ -172,8 +190,9 @@ as the time. **On this appointment** is what a reminder has always been: Aperio
 writes it into the appointment, the calendar stores it, and every other client
 of that calendar reminds you too – your phone's calendar app, a voice assistant
 reading your account out loud, and anyone else you share the calendar with.
-Exchange and Outlook calendars store a single "minutes before" reminder per
-appointment, so only the first attached one survives there; a second, or one at
+Exchange and Outlook calendars store a single "before start" or "at start"
+reminder per appointment, so only the first attached one survives there; a
+second, or one at
 a fixed time, is better set to **Only in Aperio**.
 
 **Only in Aperio** keeps it here. The appointment on the server stays untouched,

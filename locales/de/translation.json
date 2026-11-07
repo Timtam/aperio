@@ -284,6 +284,9 @@
     "kind": {
       "relativeEvent": "Vor Beginn",
       "relativeTask": "Vor Fälligkeit",
+      "atStart": "Zu Beginn",
+      "atDue": "Bei Fälligkeit",
+      "onTheDay": "Am Tag selbst",
       "absolute": "Zu festem Zeitpunkt",
       "appStart": "Beim nächsten App-Start nach Fälligkeit"
     },

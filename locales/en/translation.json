@@ -284,6 +284,9 @@
     "kind": {
       "relativeEvent": "Before start",
       "relativeTask": "Before due",
+      "atStart": "At start",
+      "atDue": "When due",
+      "onTheDay": "On the day",
       "absolute": "At fixed time",
       "appStart": "On next app start after due"
     },

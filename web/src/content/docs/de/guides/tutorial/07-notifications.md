@@ -8,10 +8,28 @@ lernst, wie du auf sie reagierst.
 ## Eine Erinnerung hinzufügen
 
 1. Öffne einen Termin oder eine Aufgabe zum Bearbeiten.
-2. Im Feld **Erinnerung** wählst du, wie lange vorher du benachrichtigt
-   werden möchtest (z. B. 10 Minuten, 1 Stunde, 1 Tag).
-3. Du kannst mehrere Erinnerungen pro Eintrag hinzufügen.
-4. **Speichern**.
+2. Unter **Erinnerungen** legt **Erinnerung hinzufügen** eine neue Zeile an.
+3. Im Feld **Typ** wählst du, wann sie kommt:
+   - **Vor Beginn**, bei Aufgaben **Vor Fälligkeit**: wie lange vorher, mit
+     **Anzahl** und **Einheit** (Minuten, Stunden, Tage). Eine neue Zeile
+     beginnt mit 15 Minuten.
+   - **Zu Beginn**, bei Aufgaben **Bei Fälligkeit**: genau dann, wenn der
+     Termin beginnt oder die Aufgabe fällig ist. Eine Aufgabe ohne Uhrzeit
+     meldet sich um 9 Uhr. Bei einem ganztägigen Termin heißt diese Art
+     **Am Tag selbst** und meldet sich an seinem Tag zur Uhrzeit des
+     **Tageswechsel-Auslösers** (**Einstellungen → Aufgaben**; standardmäßig
+     und bei „Nur beim App-Start“ 00:00).
+   - **Zu festem Zeitpunkt**: an einem Datum zu einer Uhrzeit.
+   - **Beim nächsten App-Start nach Fälligkeit**: Aperio am Desktop meldet
+     sich beim nächsten Start, wenn der Zeitpunkt verstrichen ist. Das klappt
+     nur bei Einträgen in Aperios eigenen Kalendern und Listen, denn kein
+     Anbieter speichert diese Art; das Handy löst sie nicht aus.
+4. Du kannst mehrere Erinnerungen pro Eintrag hinzufügen.
+5. **Speichern**.
+
+Eine Erinnerung, die du in einer anderen App genau zum Termin gesetzt hast,
+etwa am iPhone „Zum Ereigniszeitpunkt“, steht in Aperio als **Zu Beginn** und
+bleibt beim Speichern so.
 
 ## Benachrichtigungen unter Windows
 
@@ -101,9 +119,9 @@ Sprachassistent, der deinen iCloud-Kalender vorliest. Hineingeschrieben wird er
 nur in Termine, die du *nach* dem Umschalten anlegst; ein Termin mit eigenen
 Erinnerungen oder bewusst ohne behält diese Wahl, und ein Termin ohne eigene
 Erinnerungen bekommt den Eintrag in Aperio weiterhin. Exchange- und
-Outlook-Kalender speichern eine einzige „Minuten vorher"-Erinnerung; dort wird
-nur der erste solche Eintrag angehängt, eine feste Uhrzeit kommt in diesen
-Terminen nicht an.
+Outlook-Kalender speichern eine einzige Erinnerung „Vor Beginn" oder „Zu
+Beginn"; dort wird nur der erste solche Eintrag angehängt, eine feste Uhrzeit
+kommt in diesen Terminen nicht an.
 
 Ein angehängter Eintrag ist beim Speichern keine Überraschung. Legst du in so
 einem Kalender einen Termin an, zeigt der Editor diese Zeilen bereits an,
@@ -115,8 +133,9 @@ die **nur in Aperio** gelten, stehen dort nicht: Sie gehören nicht zum Termin,
 sondern klingeln zusätzlich zu dem, was er trägt – und dafür ist die
 Einstellungsseite des Kalenders da.
 
-Eine Standard-Erinnerung kann ein Vorlauf sein („Vor Beginn") oder ein fester
-Zeitpunkt. „Beim nächsten App-Start" fehlt hier mit Absicht: Diese Art wird nur
+Eine Standard-Erinnerung kann ein Vorlauf sein („Vor Beginn"), genau zum
+Beginn kommen („Zu Beginn", bei einem Geburtstagskalender „Am Tag selbst") oder
+ein fester Zeitpunkt sein. „Beim nächsten App-Start" fehlt hier mit Absicht: Diese Art wird nur
 ausgelöst, wenn sie am Eintrag selbst gesetzt ist – als Kalender-Standard wäre
 sie eine Einstellung, die sich speichern lässt und dann stumm bleibt.
 
@@ -186,8 +205,8 @@ gilt. **An diesem Termin** ist das, was eine Erinnerung immer war: Aperio
 schreibt sie in den Termin, der Kalender speichert sie, und jede andere App, die
 diesen Kalender liest, erinnert ebenfalls – die Kalender-App deines Telefons,
 ein Sprachassistent, der dein Konto vorliest, und jeder, mit dem du den Kalender
-teilst. Exchange- und Outlook-Kalender speichern eine einzige „Minuten
-vorher"-Erinnerung pro Termin; dort überlebt nur die erste angehängte, eine
+teilst. Exchange- und Outlook-Kalender speichern eine einzige Erinnerung „Vor
+Beginn" oder „Zu Beginn" pro Termin; dort überlebt nur die erste angehängte, eine
 zweite oder eine zu fester Uhrzeit setzt du besser auf **Nur in Aperio**.
 
 **Nur in Aperio** behält sie hier. Der Termin auf dem Server bleibt unberührt,

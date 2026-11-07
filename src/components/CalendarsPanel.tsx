@@ -324,6 +324,9 @@ export function CalendarsPanel() {
                 value={getDefaultsFor(cal.id)}
                 onChange={(next) => setDefaultsFor(cal.id, next)}
                 mode="event"
+                // A birthday calendar holds nothing but all-day events, so
+                // its "at start" rings on the day itself.
+                allDay={isBirthdayCalendarId(cal.id)}
                 placement={placementFor(cal)}
                 // "On next app start" is host-local by construction and could
                 // never ring as a calendar default — see the editor's prop.

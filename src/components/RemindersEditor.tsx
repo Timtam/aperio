@@ -1,6 +1,18 @@
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import {
+  atStartLabelKey,
+  DEFAULT_MINUTES_BEFORE,
+  RELATIVE_UNIT_MINUTES,
+  reminderKindFor,
+  reminderKindOption,
+  relativeAmount,
+  splitRelativeMinutes,
+  type RelativeUnit,
+  type ReminderKindOption,
+} from '@aperio/shared';
+
 import type { Reminder } from '../api/types';
 import { SoundPicker } from './SoundPicker';
 
@@ -8,10 +20,11 @@ import { SoundPicker } from './SoundPicker';
  * Editor for the `reminders` field on an event or task (DESIGN.md
  * section 14).
  *
- * Phase 5 ships the three reminder types the local engine actually
- * supports:
+ * The kinds the local engine supports (the rules in `shared/reminderKinds.ts`):
  *  - **Relative** — fire N minutes / hours / days before the event
  *    start or task due date.
+ *  - **At start** — fire when the appointment starts or the task is due; an
+ *    all-day appointment on its day. Stored as relative, 0 minutes before.
  *  - **Absolute** — fire at a fixed wall-clock time.
  *  - **At app start** — fire on the next launch after the due time.
  *
@@ -52,6 +65,11 @@ export interface RemindersEditorProps {
    */
   mode: 'event' | 'task';
   /**
+   * The reminders are an all-day appointment's: "at start" then reads "on the
+   * day", since it rings at the time the day starts, not at a start time.
+   */
+  allDay?: boolean;
+  /**
    * Show the per-row "Applies" choice — only in Aperio, or attached to new
    * events. Only the calendar-defaults panel turns this on, and only for
    * calendars whose new appointments can carry reminders at all.
@@ -78,28 +96,8 @@ export interface RemindersEditorProps {
   allowAppStart?: boolean;
 }
 
-type RelativeUnit = 'minutes' | 'hours' | 'days';
-
-const UNIT_FACTORS: Record<RelativeUnit, number> = {
-  minutes: 1,
-  hours: 60,
-  days: 60 * 24,
-};
-
-/** Decompose `minutes_before` into the largest whole unit + amount. */
-function splitRelative(minutes: number): { amount: number; unit: RelativeUnit } {
-  if (minutes <= 0) return { amount: 0, unit: 'minutes' };
-  if (minutes % UNIT_FACTORS.days === 0) {
-    return { amount: minutes / UNIT_FACTORS.days, unit: 'days' };
-  }
-  if (minutes % UNIT_FACTORS.hours === 0) {
-    return { amount: minutes / UNIT_FACTORS.hours, unit: 'hours' };
-  }
-  return { amount: minutes, unit: 'minutes' };
-}
-
 const DEFAULT_RELATIVE: Reminder = {
-  kind: { type: 'relative', minutes_before: 15 },
+  kind: { type: 'relative', minutes_before: DEFAULT_MINUTES_BEFORE },
   sound: null,
 };
 
@@ -107,6 +105,7 @@ export function RemindersEditor({
   value,
   onChange,
   mode,
+  allDay = false,
   placement = false,
   placementSurface = 'calendar',
   allowAppStart = true,
@@ -153,6 +152,7 @@ export function RemindersEditor({
                 onChange={(next) => update(i, next)}
                 onRemove={() => remove(i)}
                 mode={mode}
+                allDay={allDay}
                 position={i + 1}
                 placement={placement}
                 placementSurface={placementSurface}
@@ -179,6 +179,8 @@ interface ReminderRowProps {
   onChange: (next: EditableReminder) => void;
   onRemove: () => void;
   mode: 'event' | 'task';
+  /** An all-day appointment's row — see `RemindersEditorProps`. */
+  allDay: boolean;
   /** 1-based index used in the row's aria-label. */
   position: number;
   /** Show the "Applies" choice. */
@@ -194,19 +196,21 @@ function ReminderRow({
   onChange,
   onRemove,
   mode,
+  allDay,
   position,
   placement,
   placementSurface,
   allowAppStart,
 }: ReminderRowProps) {
   const { t } = useTranslation();
-  const kindType = value.kind.type;
+  const option = reminderKindOption(value.kind);
   // Never drop the kind a row already has: a list stored before the offer was
   // withdrawn must still read as what it is, and stay changeable.
-  const showAppStart = allowAppStart || kindType === 'app_start';
+  const showAppStart = allowAppStart || option === 'app_start';
 
   const setKind = (next: ReminderKindOption) => {
-    onChange({ ...value, kind: defaultsForKind(next, mode) });
+    if (next === option) return;
+    onChange({ ...value, kind: reminderKindFor(next, new Date()) });
   };
 
   return (
@@ -218,7 +222,7 @@ function ReminderRow({
       <label className="form__field">
         <span className="form__label">{t('reminders.kindLabel')}</span>
         <select
-          value={kindType}
+          value={option}
           onChange={(e) => setKind(e.target.value as ReminderKindOption)}
         >
           <option value="relative">
@@ -228,6 +232,7 @@ function ReminderRow({
                 : 'reminders.kind.relativeTask',
             )}
           </option>
+          <option value="at_start">{t(atStartLabelKey(mode, allDay))}</option>
           <option value="absolute">{t('reminders.kind.absolute')}</option>
           {showAppStart && (
             <option value="app_start">{t('reminders.kind.appStart')}</option>
@@ -235,7 +240,7 @@ function ReminderRow({
         </select>
       </label>
 
-      {value.kind.type === 'relative' && (
+      {option === 'relative' && value.kind.type === 'relative' && (
         <RelativeFields
           minutes={value.kind.minutes_before}
           onChange={(minutes) =>
@@ -314,28 +319,6 @@ function ReminderRow({
   );
 }
 
-type ReminderKindOption = 'relative' | 'absolute' | 'app_start';
-
-function defaultsForKind(
-  kind: ReminderKindOption,
-  _mode: 'event' | 'task',
-): Reminder['kind'] {
-  switch (kind) {
-    case 'relative':
-      return { type: 'relative', minutes_before: 15 };
-    case 'absolute': {
-      // Default to the next full hour tomorrow — far enough that the
-      // user is unlikely to leave it as-is by accident.
-      const at = new Date();
-      at.setMinutes(0, 0, 0);
-      at.setDate(at.getDate() + 1);
-      return { type: 'absolute', at: at.toISOString() };
-    }
-    case 'app_start':
-      return { type: 'app_start' };
-  }
-}
-
 interface RelativeFieldsProps {
   minutes: number;
   onChange: (minutes: number) => void;
@@ -343,14 +326,14 @@ interface RelativeFieldsProps {
 
 function RelativeFields({ minutes, onChange }: RelativeFieldsProps) {
   const { t } = useTranslation();
-  const { amount, unit } = splitRelative(minutes);
+  const { amount, unit } = splitRelativeMinutes(minutes);
 
   const setAmount = (next: number) => {
-    const n = Number.isFinite(next) && next > 0 ? Math.floor(next) : 1;
-    onChange(n * UNIT_FACTORS[unit]);
+    onChange(relativeAmount(next) * RELATIVE_UNIT_MINUTES[unit]);
   };
   const setUnit = (next: RelativeUnit) => {
-    onChange(Math.max(1, amount) * UNIT_FACTORS[next]);
+    if (next === unit) return;
+    onChange(Math.max(1, amount) * RELATIVE_UNIT_MINUTES[next]);
   };
 
   return (

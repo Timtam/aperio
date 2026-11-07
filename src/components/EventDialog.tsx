@@ -3210,6 +3210,7 @@ export function EventDialog({
           // external calendar it could never fire, attached or private. Same
           // rule as the calendar defaults: don't offer what stays silent.
           allowAppStart={targetIsLocal}
+          allDay={form.allDay}
         />
 
         {/* §14.4 per-event sound override. Edit-only: the key is the

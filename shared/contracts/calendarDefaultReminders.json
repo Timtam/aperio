@@ -36,6 +36,14 @@
       ]
     },
     {
+      "name": "relative-0-at-start",
+      "note": "A reminder at the moment of the appointment (\"At start\"; on an all-day event or a birthday calendar \"On the day\"). Both editors offer it as its own kind and store it as zero minutes before, which is what every provider writes for it; an editor that only took amounts from 1 would turn it into a minute before, or refuse to save it.",
+      "stored": "[{\"kind\":{\"type\":\"relative\",\"minutes_before\":0},\"sound\":null,\"attach\":true}]",
+      "entries": [
+        { "kind": "relative", "minutes_before": 0, "attach": true, "hasSound": false }
+      ]
+    },
+    {
       "name": "legacy-without-the-placement-flag",
       "note": "Written before the placement choice existed, and by an older device that still does not know the field. It has to keep meaning what it always meant: in Aperio.",
       "stored": "[{\"kind\":{\"type\":\"relative\",\"minutes_before\":30},\"sound\":null}]",
