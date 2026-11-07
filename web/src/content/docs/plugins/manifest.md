@@ -56,8 +56,10 @@ reads it to discover the plugin before loading any code.
 
 ## Capability detail blocks
 
-Optional per-capability objects refine what the UI offers. They default
-permissively when absent, so you only set what differs.
+Optional per-capability objects refine what the UI offers. Most flags default
+permissively when absent, so you only set what differs. A few are opted into
+instead (`task_span`, `reminders.after_start`): they default to `false`, because
+claiming them wrongly costs more than missing them.
 
 ### `tasks`
 
@@ -77,6 +79,19 @@ permissively when absent, so you only set what differs.
 A calendar-capability block exists analogously for things like recurrence
 support. Set only the flags that apply; everything else falls back to the
 cal-core-native default.
+
+### `reminders`
+
+What your calendars keep of an event's reminders beyond those before the start,
+which every calendar backend keeps.
+
+| Field | Meaning |
+|---|---|
+| `after_start` | The backend stores a reminder AFTER the start ("10 minutes after the start"; in iCalendar a positive `TRIGGER`), and with it an all-day reminder at a clock time on the day itself ("on the day, 09:00"). Default `false`. Set it only where such a reminder survives the round trip: the CalDAV adapter and the local store do; Google, Exchange and Outlook count only minutes before the start, and their adapters leave such a reminder out rather than fail the write. The reminder editors offer the kind only where this is `true`, or for a reminder that stays in Aperio. |
+
+```json
+"reminders": { "after_start": true }
+```
 
 ## `adapter_kind` — the routing key
 

@@ -508,20 +508,26 @@ mod tests {
             synthesise_calendar("list-id", "Family"),
             LOCAL_ID.to_string(),
             Default::default(),
+            Default::default(),
         );
         let json = serde_json::to_value(&row).expect("a row serializes");
         assert_eq!(json["name"], "Family");
         assert_eq!(json["birthdays"]["contact_list_id"], "list-id");
         assert_eq!(json["birthdays"]["list_name"], "Family");
+        // Its reminders never leave Aperio, so it keeps every kind (TODO B7
+        // 222), whatever its account would say.
+        assert_eq!(json["reminder_capabilities"]["after_start"], true);
         let mut plain = synthesise_calendar("list-id", "Family");
         plain.id = "caldav-calendar-1".into();
         let json = serde_json::to_value(crate::wire::CalendarRow::new(
             plain,
             LOCAL_ID.to_string(),
             Default::default(),
+            Default::default(),
         ))
         .expect("a row serializes");
         assert!(json.get("birthdays").is_none());
+        assert_eq!(json["reminder_capabilities"]["after_start"], false);
     }
 
     #[test]

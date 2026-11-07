@@ -2582,12 +2582,25 @@ Erinnerungen können sowohl für **Termine** als auch für **Aufgaben** konfigur
 |---|---|
 | **Zeitbasiert (relativ, Termin)** | X Minuten / Stunden / Tage vor Terminbeginn |
 | **Zeitbasiert (relativ, Aufgabe)** | X Minuten / Stunden / Tage vor der Deadline bzw. dem geplanten Tag |
-| **Zu Beginn / Bei Fälligkeit** | Genau zum Terminbeginn bzw. zur Fälligkeit (Aufgabe ohne Uhrzeit: 09:00); bei ganztägigen Terminen „Am Tag selbst“ zur Tagesstart-Uhrzeit (`tasks.dayStartTrigger`, standardmäßig 00:00; „Nur beim App-Start“ zählt als 00:00). Gespeichert als relativ mit 0 Minuten, wie jeder Anbieter sie schreibt (RFC 5545 `TRIGGER:PT0S`, Google und Outlook 0 Minuten); die Editoren zeigen sie als eigene Art (Regel `shared/reminderKinds.ts`) |
+| **Zu Beginn / Bei Fälligkeit** | Genau zum Terminbeginn bzw. zur Fälligkeit (Aufgabe ohne Uhrzeit: 09:00); bei ganztägigen Terminen „Am Tag selbst“ zur Tagesstart-Uhrzeit (`tasks.dayStartTrigger`, standardmäßig 00:00; „Nur beim App-Start“ zählt als 00:00). Gespeichert als relativ mit 0 Minuten, wie jeder Anbieter sie schreibt (RFC 5545 `TRIGGER:PT0S`, Google und Outlook 0 Minuten; Aperio selbst schreibt die gleichwertige Dauer `P0D`); die Editoren zeigen sie als eigene Art (Regel `shared/reminderKinds.ts`) |
 | **Zeitbasiert (absolut)** | Fester Zeitpunkt (z.B. "12. Mai, 09:00 Uhr") |
 | **Beim Öffnen der App** | Erinnerung beim nächsten App-Start nach dem Fälligkeitszeitpunkt |
 | **E-Mail** | Erinnerung per E-Mail (wo vom jeweiligen Adapter unterstützt) |
 
 Standardwerte für neue Termine und Aufgaben sind global und unabhängig voneinander konfigurierbar (z.B. "Termine: 15 Minuten vorher", "Aufgaben: am Vorabend um 18:00 Uhr").
+
+#### Erinnerungen nach dem Beginn und ganztägige Uhrzeiten (TODO B7 222)
+
+Eine relative Erinnerung mit negativen Minuten liegt **nach** dem Beginn („10 Minuten nach Beginn“; RFC 5545 ein positiver `TRIGGER`). Entschieden mit Toni am 2026-11-07:
+
+- **Wo sie ankommt**, sagt das Manifest des Adapters (`reminders.after_start`, standardmäßig `false`): CalDAV und iCloud ja, Aperios eigener Speicher ja, Geburtstagskalender immer (ihre Erinnerungen bleiben in Aperio). Google zählt nur 0 bis 40320 Minuten davor, Exchange und Outlook nichts unter 0; deren Adapter lassen eine solche Erinnerung weg und schreiben das ins Protokoll, statt den ganzen Schreibvorgang scheitern zu lassen. Die Kalenderzeile trägt die Fähigkeit (`CalendarRow.reminder_capabilities`), beide Hosts fragen dieselbe Funktion (`host_core::builtin_adapters::reminder_capabilities_for_account`).
+- **Nach dem Terminende** klingelt sie trotzdem, auf beiden Geräten gleich. Das Handy plant sie ohnehin beim System ein; der Desktop holt eine verpasste Erinnerung nach, solange ihr eigener Zeitpunkt (oder das Terminende, wenn es später liegt) höchstens 5 Minuten zurückliegt (`catchup_eligible`).
+- **Serien** klappt der Planer über jedes Vorkommen auf, dessen Erinnerung ins Fenster fällt, nicht nur über die, die darin beginnen: Ein schon laufendes Vorkommen behält seine Erinnerung nach Beginn, auch wenn das Handy während des Termins neu plant.
+- **Ganztägige Termine:** Eine Zahl kann nicht zugleich „1 Stunde vorher“ und „am Vortag um 23:00“ heißen, darum entscheidet die Herkunft (`AllDayReading`, zweite Entscheidung vom 2026-11-07, nachdem die erste „Am Tag selbst um 18:00“ auf den nächsten Tag schob):
+  - **Erinnerungen am Termin selbst** (vom iPhone, von Google, aus einem Editor, auch die nur in Aperio gemerkten) zählen genau ab 00:00 des Tages, wie RFC 5545 und jeder andere Kalender sie lesen: „Am Tag des Ereignisses (9:00)“ (`PT9H`) um 9:00, „1 Tag vorher (9:00)“ (`-PT15H`) am Vortag um 9:00, Googles „Am Vortag um 17:00“ um 17:00, „Am Tag selbst um 18:00“ um 18:00, „1 Stunde vorher“ am Vorabend um 23:00.
+  - **Kalender-Standards**, die der Planer ergänzt (eine Liste für Termine mit Uhrzeit und ganztägige), zählen in ganzen Tagen, gerundet (12 Stunden → 1 Tag), zur Tagesstart-Uhrzeit: „15 Minuten vorher“ klingelt am Tag selbst, nicht am Vorabend um 23:45 (die Regel vom Juli 2026). Ausnahme Geburtstagskalender: Ihre Standards sind die einzigen Erinnerungen ihrer Termine und werden in Ganztags-Form bearbeitet, sie zählen genau.
+  - **Ganze Tage** („1 Tag vorher“, „Am Tag selbst“) klingeln in beiden Fällen zur Tagesstart-Uhrzeit.
+  - Die genaue Uhrzeit ist Wanduhrzeit, auch an einem Tag der Zeitumstellung.
 
 > **Hinweis Aufgaben ohne Datum:** Aufgaben im Backlog ohne Deadline oder geplanten Tag erhalten keine zeitbasierten Erinnerungen. Sie erscheinen ausschließlich in der Aufgaben-Ansicht und im Backlog-Panel.
 

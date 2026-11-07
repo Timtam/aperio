@@ -80,7 +80,7 @@ use host_core::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};
 use host_core::user_prefs::UserPrefsRepo;
 use host_core::wire::{CalendarRow, ContactListRow, TaskListRow};
 use host_core::DbHandle;
-use plugin_core::manifest::{RecurrenceCapabilities, TaskCapabilities};
+use plugin_core::manifest::{RecurrenceCapabilities, ReminderCapabilities, TaskCapabilities};
 use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
 use sync_core::{
@@ -2988,10 +2988,13 @@ impl Host {
             .await
             {
                 self.registry.note_calendar_route(&cal.id, &account_id);
+                // `new` gives a birthday calendar every reminder kind: they
+                // stay in Aperio.
                 birthday_rows.push(CalendarRow::new(
                     cal,
                     account_id,
                     RecurrenceCapabilities::default(),
+                    ReminderCapabilities::default(),
                 ));
             }
             Ok::<_, StoreError>((calendars, accounts, birthday_rows))
@@ -3021,7 +3024,12 @@ impl Host {
             .zip(accounts)
             .map(|(c, account)| {
                 let caps = self.recurrence_caps_for_account(&account, &account_kinds);
-                CalendarRow::new(c, account, caps)
+                let reminders = host_core::builtin_adapters::reminder_capabilities_for_account(
+                    &self.plugin_manager,
+                    &account,
+                    &account_kinds,
+                );
+                CalendarRow::new(c, account, caps, reminders)
             })
             .collect();
         rows.extend(birthday_rows);
@@ -3053,6 +3061,7 @@ impl Host {
             created,
             LOCAL_ID.to_string(),
             RecurrenceCapabilities::default(),
+            host_core::builtin_adapters::local_reminder_capabilities(),
         ))
     }
 
@@ -10062,7 +10071,10 @@ fn reminder_dtos(
     now: chrono::DateTime<chrono::Utc>,
     absorbed: Option<&std::collections::BTreeSet<cal_core::live_activity::LiveTriggerKey>>,
 ) -> Vec<serde_json::Value> {
-    triggers.sort_by_key(|t| t.trigger_at);
+    // Of twins at one moment (a fixed-time reminder on a series rings from every
+    // occurrence), the first that has not ended when it rings comes first —
+    // the occurrence the Live Activity plan gives it too, not one already over.
+    triggers.sort_by_key(|t| (t.trigger_at, t.relevant_until <= t.trigger_at));
     // The list keeps one entry per (item_id, trigger_at), whichever twin came
     // first; the plan may have absorbed the other. So a reminder is absorbed
     // when ANY trigger of its group is — or the kept twin would be scheduled
@@ -13730,6 +13742,42 @@ mod tests {
         assert_eq!(list.len(), 1, "{list:?}");
         assert_eq!(list[0]["container_id"], "first");
         assert_eq!(list[0]["absorbed"], serde_json::json!(true));
+    }
+
+    /// A fixed-time reminder on a series rings from every occurrence; the list
+    /// names the first occurrence still under way or to come when it rings,
+    /// not yesterday's, which the wider expansion of TODO B7 222 also reads.
+    #[test]
+    fn a_fixed_time_twin_names_an_occurrence_that_is_not_over() {
+        use chrono::TimeZone;
+        let fire = chrono::Utc.with_ymd_and_hms(2026, 11, 9, 8, 30, 0).unwrap();
+        let now = chrono::Utc.with_ymd_and_hms(2026, 11, 8, 12, 0, 0).unwrap();
+        let occurrence = |day: u32| {
+            let start = chrono::Utc
+                .with_ymd_and_hms(2026, 11, day, 9, 0, 0)
+                .unwrap();
+            host_core::reminders::Trigger {
+                item_id: "series".into(),
+                item_kind: host_core::reminders::ItemKind::Event,
+                container_id: "cal".into(),
+                title: "Daily".into(),
+                body: String::new(),
+                trigger_at: fire,
+                relevant_until: start + chrono::Duration::minutes(15),
+                start,
+                all_day: false,
+                sound: cal_core::SoundConfig::default(),
+                absolute: true,
+            }
+        };
+        // Scan order: the past occurrence first.
+        let list = reminder_dtos(
+            vec![occurrence(8), occurrence(9), occurrence(10)],
+            now,
+            None,
+        );
+        assert_eq!(list.len(), 1, "{list:?}");
+        assert_eq!(list[0]["start"], "2026-11-09T09:00:00+00:00");
     }
 
     /// The plan and the notification list come from one scan, and a section's

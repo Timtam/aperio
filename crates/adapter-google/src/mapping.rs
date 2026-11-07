@@ -1033,12 +1033,21 @@ fn range_to_write(when: DateTime<Utc>, all_day: bool, tzid: Option<&str>) -> Eve
 fn reminders_to_write(reminders: &[Reminder]) -> EventRemindersWrite {
     let overrides: Vec<ReminderOverride> =
         reminders.iter().filter_map(reminder_to_override).collect();
-    if overrides.is_empty() {
+    if reminders.is_empty() {
         // No per-event reminders — let Google use whatever the
         // calendar defaults are. Setting `useDefault: false` with
         // an empty overrides array would silently strip them.
         EventRemindersWrite {
             use_default: true,
+            overrides,
+        }
+    } else if overrides.is_empty() {
+        // Reminders were given, and Google keeps none of them (a time after
+        // the start, a fixed time). They are left out, and the calendar's own
+        // defaults must not ring instead: that would be a reminder nobody set,
+        // which Aperio does not even show (TODO B7 222).
+        EventRemindersWrite {
+            use_default: false,
             overrides,
         }
     } else {
@@ -1051,6 +1060,20 @@ fn reminders_to_write(reminders: &[Reminder]) -> EventRemindersWrite {
 
 fn reminder_to_override(r: &Reminder) -> Option<ReminderOverride> {
     match r.kind {
+        // Google keeps 0 to 40320 minutes BEFORE the start; a reminder after
+        // it (negative) is out of range and would fail the whole write. It is
+        // left out, as decided 2026-11-07 (TODO B7 222); the editors do not
+        // offer it on a Google calendar, and what reaches one anyway (a copy,
+        // an import, an attached default) is named in the log.
+        ReminderKind::Relative { minutes_before } | ReminderKind::Email { minutes_before }
+            if minutes_before < 0 =>
+        {
+            warn!(
+                minutes_after_start = -minutes_before,
+                "reminder after the start left out: Google keeps only reminders before it"
+            );
+            None
+        }
         ReminderKind::Relative { minutes_before } => Some(ReminderOverride {
             method: "popup".into(),
             minutes: minutes_before,
@@ -1070,6 +1093,41 @@ fn reminder_to_override(r: &Reminder) -> Option<ReminderOverride> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── reminders after the start (TODO B7 222) ───────────────────────────
+    fn after_start_rel(minutes_before: i64) -> Reminder {
+        Reminder {
+            kind: ReminderKind::Relative { minutes_before },
+            sound: None,
+        }
+    }
+
+    #[test]
+    fn a_reminder_after_the_start_is_left_out_not_sent() {
+        // Google keeps 0..40320 minutes BEFORE the start; a negative value
+        // would fail the whole write. It is left out; the rest goes.
+        let write = reminders_to_write(&[after_start_rel(-10), after_start_rel(15)]);
+        assert!(!write.use_default);
+        assert_eq!(write.overrides.len(), 1);
+        assert_eq!(write.overrides[0].minutes, 15);
+        // At the start (0) is in range and goes as it is.
+        let at_start = reminders_to_write(&[after_start_rel(0)]);
+        assert_eq!(
+            at_start
+                .overrides
+                .iter()
+                .map(|o| o.minutes)
+                .collect::<Vec<_>>(),
+            vec![0]
+        );
+        // Left alone it leaves no override, and does not hand the event to the
+        // calendar's own defaults either: those would ring a reminder nobody
+        // set. Only an event given no reminders at all takes them.
+        let only = reminders_to_write(&[after_start_rel(-10)]);
+        assert!(only.overrides.is_empty());
+        assert!(!only.use_default);
+        assert!(reminders_to_write(&[]).use_default);
+    }
 
     #[test]
     fn calendar_with_writer_role_is_writable() {

@@ -90,9 +90,10 @@ pub struct UpcomingReminder {
     pub trigger_at: String,
 }
 
-/// A small grace added to `relevant_until` when deciding whether a past-trigger
-/// reminder is still worth firing — lets a reminder for an event that started a
-/// couple of minutes ago still ring. The desktop scheduler reads this when
+/// A small grace added to the later of `relevant_until` and the reminder's own
+/// moment when deciding whether a past-trigger reminder is still worth firing —
+/// lets a reminder for an event that started a couple of minutes ago still
+/// ring, and one set for after the end ring just as late. The desktop scheduler reads this when
 /// filtering pending triggers; exposed so it and [`catchup_eligible`]'s tests
 /// share one value.
 pub const CATCH_UP_GRACE: ChronoDuration = ChronoDuration::minutes(5);
@@ -184,7 +185,7 @@ pub fn enumerate_local_scan(
                 let description: Option<String> = row.get(11).unwrap_or(None);
                 // The calendar's defaults ride along — the same merge rule
                 // `event_triggers` applies to adapter-backed calendars.
-                let reminders = effective_reminders(
+                let (reminders, added_defaults) = effective_reminders_by_origin(
                     &parse_reminders(reminders_json.as_deref()).unwrap_or_default(),
                     calendar_defaults
                         .get(&calendar_id)
@@ -227,7 +228,7 @@ pub fn enumerate_local_scan(
                         recurrence.as_ref(),
                     );
                 }
-                if reminders.is_empty() {
+                if reminders.is_empty() && added_defaults.is_empty() {
                     continue;
                 }
                 acc.extend(occurrence_triggers(
@@ -237,6 +238,7 @@ pub fn enumerate_local_scan(
                     start,
                     recurrence.as_ref(),
                     &reminders,
+                    &added_defaults,
                     duration,
                     earliest,
                     latest,
@@ -297,6 +299,7 @@ pub fn enumerate_local_scan(
                     due,
                     recurrence.as_ref(),
                     &reminders,
+                    &[],
                     ChronoDuration::zero(),
                     earliest,
                     latest,
@@ -338,8 +341,9 @@ pub async fn enumerate_external_scan(
     let now = Utc::now();
     let from = now - ChronoDuration::days(EXTERNAL_PAST_DAYS);
     let to = now + ChronoDuration::days(EXTERNAL_FUTURE_DAYS);
-    // Recurring masters may sit outside the reminder window yet still have an
-    // occurrence inside it — widen the fetch the same way the expansion does.
+    // Recurring masters and single events may sit outside the reminder window
+    // yet still ring inside it — widen the FETCH. The expansion of each series
+    // is bounded per item, by its own reminders (`occurrence_triggers`).
     let (occ_from, occ_to) = occurrence_window(from, to);
     let range = DateRange::new(occ_from, occ_to);
 
@@ -430,6 +434,7 @@ pub async fn enumerate_external_scan(
                 from,
                 to,
                 day_start,
+                false,
             ));
         }
     }
@@ -496,8 +501,8 @@ pub async fn enumerate_birthday_triggers(
     // key a private reminder to one yet; the map is read anyway so the merge
     // rule stays literally the same call on every path.
     let event_local = event_local_reminder_map(db);
-    // Widen the synthesis window the same way the expansion does (a birthday
-    // occurrence inside the window may sit just outside `[from, to]`).
+    // Widen the synthesis window (a birthday whose reminder rings inside the
+    // window may sit just outside `[from, to]`).
     let (occ_from, occ_to) = occurrence_window(from, to);
     let range = DateRange::new(occ_from, occ_to);
 
@@ -522,6 +527,7 @@ pub async fn enumerate_birthday_triggers(
         else {
             continue;
         };
+        // A birthday calendar's defaults are its events' own reminders.
         acc.extend(event_triggers(
             &events,
             &defaults,
@@ -530,6 +536,7 @@ pub async fn enumerate_birthday_triggers(
             from,
             to,
             day_start,
+            true,
         ));
     }
     acc
@@ -1073,21 +1080,44 @@ pub fn effective_reminders(
     defaults: &[DefaultReminder],
     event_local: &[Reminder],
 ) -> Vec<Reminder> {
-    let mut out: Vec<Reminder> = own.to_vec();
-    for reminder in event_local {
-        if !out.contains(reminder) {
-            out.push(reminder.clone());
-        }
-    }
-    if out.is_empty() {
-        out.extend(attached_defaults(defaults));
-    }
-    for reminder in local_defaults(defaults) {
-        if !out.contains(reminder) {
-            out.push(reminder.clone());
+    let (mut out, added) = effective_reminders_by_origin(own, defaults, event_local);
+    for reminder in added {
+        if !out.contains(&reminder) {
+            out.push(reminder);
         }
     }
     out
+}
+
+/// [`effective_reminders`], split by where each reminder comes from: first the
+/// appointment's own (its reminders and the ones Aperio keeps privately for
+/// it), then the calendar defaults the planner adds. An all-day appointment
+/// reads the two differently ([`AllDayReading`]).
+pub fn effective_reminders_by_origin(
+    own: &[Reminder],
+    defaults: &[DefaultReminder],
+    event_local: &[Reminder],
+) -> (Vec<Reminder>, Vec<Reminder>) {
+    let mut mine: Vec<Reminder> = own.to_vec();
+    for reminder in event_local {
+        if !mine.contains(reminder) {
+            mine.push(reminder.clone());
+        }
+    }
+    let mut added: Vec<Reminder> = Vec::new();
+    if mine.is_empty() {
+        added.extend(attached_defaults(defaults));
+    }
+    // Not checked against `mine`: on an all-day appointment the same value
+    // rings at another moment as a default than as its own ("15 minutes
+    // before" on the day, or at 23:45 the evening before). The planner drops
+    // a default that rings when one of its own does (`occurrence_triggers`).
+    for reminder in local_defaults(defaults) {
+        if !added.contains(reminder) {
+            added.push(reminder.clone());
+        }
+    }
+    (mine, added)
 }
 
 /// Write the calendar's attach-marked default reminders into a new
@@ -1109,9 +1139,20 @@ pub fn apply_default_reminder_policy(
     if !reminders_unset || !event.reminders.is_empty() {
         return false;
     }
-    let attached = attached_defaults(&calendar_default_reminders(db, calendar_id));
+    let mut attached = attached_defaults(&calendar_default_reminders(db, calendar_id));
     if attached.is_empty() {
         return false;
+    }
+    // Written into an all-day appointment a default becomes its own reminder,
+    // read exactly from midnight; rounded to whole days first, it rings where
+    // the planner rings the same default when it only adds it ("15 minutes
+    // before" on the day, not at 23:45 the evening before; TODO B7 222).
+    if event.all_day {
+        for r in &mut attached {
+            if let ReminderKind::Relative { minutes_before } = &mut r.kind {
+                *minutes_before = whole_days_of(*minutes_before) * MINUTES_PER_DAY;
+            }
+        }
     }
     event.reminders = attached;
     true
@@ -1130,6 +1171,7 @@ pub fn apply_default_reminder_policy(
 /// `EventRecurrence.exceptions` are honoured; the rest of the
 /// occurrence list flows back through the same trigger emission
 /// loop a non-recurring event would.
+#[allow(clippy::too_many_arguments)]
 fn event_triggers(
     events: &[Event],
     calendar_defaults: &[DefaultReminder],
@@ -1138,6 +1180,10 @@ fn event_triggers(
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
     day_start: NaiveTime,
+    // A birthday calendar's defaults ARE its events' reminders: nothing else
+    // gives one a reminder, and its editor sets them as all-day reminders
+    // (day and clock time), so they are read exactly ([`AllDayReading`]).
+    defaults_are_their_own: bool,
 ) -> Vec<Trigger> {
     let overridden = override_slots(events.iter().map(|ev| ev.id.as_str()));
     let mut out = Vec::new();
@@ -1155,8 +1201,12 @@ fn event_triggers(
             .get(&(ev.calendar_id.clone(), series_master_id(&ev.id).to_string()))
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        let effective = effective_reminders(&ev.reminders, calendar_defaults, private);
-        if effective.is_empty() {
+        let (mut effective, mut added_defaults) =
+            effective_reminders_by_origin(&ev.reminders, calendar_defaults, private);
+        if defaults_are_their_own {
+            effective.append(&mut added_defaults);
+        }
+        if effective.is_empty() && added_defaults.is_empty() {
             continue;
         }
         // Event-shaped duration: the wall-clock span the event
@@ -1176,6 +1226,7 @@ fn event_triggers(
             ev.start,
             recurrence.as_ref(),
             &effective,
+            &added_defaults,
             duration,
             window_start,
             window_end,
@@ -1241,19 +1292,45 @@ fn occurrence_triggers(
     title: &str,
     master_start: DateTime<Utc>,
     recurrence: Option<&EventRecurrence>,
+    // The item's own reminders, and the calendar defaults the planner adds
+    // (`effective_reminders_by_origin`). Only an all-day item tells them
+    // apart ([`AllDayReading`]); a task or a timed event rings both alike.
     reminders: &[Reminder],
+    added_defaults: &[Reminder],
     duration: ChronoDuration,
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
     sound_prefs: &SoundPrefs,
     container_kind: ContainerKind,
     container_id: &str,
-    // `Some(day_start_local)` for an ALL-DAY item — reminders fire a whole
-    // number of days before the occurrence's date at this time-of-day (see
-    // `all_day_trigger_time`). `None` for a timed item (the relative offset
-    // subtracts from the start as before). Tasks always pass `None`.
+    // `Some(day_start_local)` for an ALL-DAY item — whole days fire at this
+    // time-of-day, anything else as `all_day_trigger_time` reads it. `None`
+    // for a timed item (the relative offset subtracts from the start as
+    // before). Tasks always pass `None`.
     all_day_anchor: Option<NaiveTime>,
 ) -> Vec<Trigger> {
+    let rung = || {
+        reminders
+            .iter()
+            .map(|r| (r, AllDayReading::Exact))
+            .chain(added_defaults.iter().map(|r| (r, AllDayReading::WholeDays)))
+    };
+    // Expand every occurrence whose reminders can ring inside the window, not
+    // only those that START in it: a reminder "30 minutes after the start" of
+    // an occurrence that began before `window_start` rings inside it, and so
+    // does "1 day before" of one that begins after `window_end`. The phone
+    // scans its local store from `now`, so an occurrence under way at a
+    // reschedule lost its reminder after the start (TODO B7 222). One day of
+    // slack covers the whole-day rounding of all-day reminders.
+    let (lead, lag) = rung().fold((0_i64, 0_i64), |(lead, lag), (r, _)| match r.kind {
+        ReminderKind::Relative { minutes_before } => {
+            (lead.max(minutes_before), lag.max(-minutes_before))
+        }
+        _ => (lead, lag),
+    });
+    let slack = ChronoDuration::days(1);
+    let expand_from = window_start - ChronoDuration::minutes(lag) - slack;
+    let expand_to = window_end + ChronoDuration::minutes(lead) + slack;
     let starts: Vec<DateTime<Utc>> = match recurrence {
         Some(rec) => expand_occurrences(
             master_start,
@@ -1265,23 +1342,31 @@ fn occurrence_triggers(
             // another day than the one on screen would be a second reading.
             all_day_anchor.is_some(),
             device_clock(),
-            window_start,
-            window_end,
+            expand_from,
+            expand_to,
         ),
         None => vec![master_start],
     };
 
-    let mut out = Vec::with_capacity(starts.len() * reminders.len());
+    let mut out = Vec::with_capacity(starts.len() * (reminders.len() + added_defaults.len()));
     for occ_start in starts {
         let relevant_until = occ_start + duration;
-        for r in reminders {
+        // The moments the occurrence's own reminders ring: a calendar default
+        // ringing at one of them is the same reminder, once.
+        let mut own_moments: Vec<DateTime<Utc>> = Vec::new();
+        for (r, reading) in rung() {
             let at = match all_day_anchor {
-                Some(day_start) => all_day_trigger_time(occ_start, &r.kind, day_start),
+                Some(day_start) => all_day_trigger_time(occ_start, &r.kind, day_start, reading),
                 None => trigger_time_for(&r.kind, occ_start),
             };
             let Some(at) = at else {
                 continue;
             };
+            match reading {
+                AllDayReading::Exact => own_moments.push(at),
+                AllDayReading::WholeDays if own_moments.contains(&at) => continue,
+                AllDayReading::WholeDays => {}
+            }
             if at < window_start || at > window_end {
                 // Bound the emission to the requested window so a
                 // weekly series doesn't fill `out` with months of
@@ -1329,9 +1414,10 @@ fn device_clock() -> RruleTz {
 /// notes:
 ///
 ///   - `start_bound`/`end_bound` here are the OCCURRENCE-start
-///     bounds, not the reminder-fire bounds. Callers pad the
-///     reminder window outward by `EVENT_EXPANSION_PAD` to cover
-///     the maximum sensible reminder lead time (one week).
+///     bounds, not the reminder-fire bounds. `occurrence_triggers`
+///     widens the reminder window by the item's own longest lead and
+///     lag (plus a day), so an occurrence whose reminder rings in the
+///     window is expanded wherever it starts.
 ///   - A bad / unparseable RRULE degrades to the single master
 ///     start so the user still gets a reminder for the first
 ///     occurrence — same fall-through the JS expansion uses.
@@ -1593,21 +1679,16 @@ fn expand_on(
 /// in practice.
 const RRULESET_LIMIT: u16 = 500;
 
-/// Buffer added around the reminder window when expanding RRULE
-/// occurrences. A reminder fires `δ` BEFORE its event; an event
-/// starting at `window_end + δ` still has its reminder firing
-/// inside the window. The buffer needs to cover the largest
-/// reasonable `δ`. One week is generous — Apple's longest preset
-/// is two weeks, but most relative reminders sit in the
-/// minutes-to-hours range. A tighter bound would silently miss
-/// long-lead reminders; a wider one just costs a few extra
-/// occurrences to iterate.
+/// Buffer added around the reminder window when FETCHING events from an
+/// adapter (and synthesising birthdays): a reminder fires `δ` before or after
+/// its event, so an event starting at `window_end + δ` still rings inside the
+/// window. Fourteen days covers Apple's longest preset (two weeks). The
+/// expansion of a fetched series is bounded per item by its own reminders
+/// (`occurrence_triggers`); this only decides which events are read.
 const EVENT_EXPANSION_PAD: ChronoDuration = ChronoDuration::days(14);
 
-/// Convenience: derive the occurrence-expansion bounds from the
-/// reminder-fire window. Same value used by every collect path so
-/// recurring events stay in sync between local SQL and external
-/// adapter scans.
+/// Convenience: derive the fetch bounds from the reminder-fire window, the
+/// same for the external scan and the birthday synthesis.
 fn occurrence_window(
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
@@ -1662,6 +1743,7 @@ fn task_triggers(
             master_due,
             recurrence.as_ref(),
             &t.reminders,
+            &[],
             // Tasks have no "duration" — they're a point in time,
             // not a span. relevant_until == due time, which means
             // catch-up fires only for not-yet-overdue tasks.
@@ -1802,10 +1884,17 @@ fn weekday_to_byday(d: &cal_core::Weekday) -> &'static str {
 /// just barely started still ring, useful for the "I'm walking
 /// into the meeting" case.
 ///
+/// A reminder set to ring AFTER the event is over ("30 minutes after the
+/// start" on a 15-minute meeting) is measured from its own moment instead, so
+/// it gets the same grace as any other: decided 2026-11-07 (TODO B7 222) that
+/// it rings, on the desktop as on the phone, whose system rings it anyway.
+/// Measured from the end alone, a rescan between its moment and its firing —
+/// or a second reminder at the same instant — dropped it.
+///
 /// Pure helper so the filter is unit-testable without spinning up
 /// a scheduler instance.
 pub fn catchup_eligible(t: &Trigger, now: DateTime<Utc>, grace: ChronoDuration) -> bool {
-    t.trigger_at > now || t.relevant_until + grace > now
+    t.trigger_at > now || t.relevant_until.max(t.trigger_at) + grace > now
 }
 
 fn trigger_time_for(kind: &ReminderKind, reference: DateTime<Utc>) -> Option<DateTime<Utc>> {
@@ -1819,52 +1908,99 @@ fn trigger_time_for(kind: &ReminderKind, reference: DateTime<Utc>) -> Option<Dat
     }
 }
 
+/// How an all-day reminder's offset is read: decided with Toni on 2026-11-07
+/// (TODO B7 222), after the first rule could not ring "on the day at 18:00".
+///
+/// One number cannot mean both "1 hour before" and "the day before at 23:00",
+/// so the reading follows where the reminder comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AllDayReading {
+    /// A reminder of the appointment itself — set on the iPhone, at Google, in
+    /// an editor — counts from local 00:00 of its day, as RFC 5545 and every
+    /// other client read it: the iPhone's "On day of event (9 AM)" (`PT9H`,
+    /// -540) at 09:00, Google's "day before at 17:00" (420) at 17:00 the day
+    /// before, "1 hour before" at 23:00 the evening before.
+    Exact,
+    /// A calendar default the planner adds. Its one list serves timed and
+    /// all-day appointments alike, so its minutes are read as whole days,
+    /// rounded (12 h → 1 day), at the day-start time: "15 minutes before"
+    /// rings on the day itself, not at 23:45 the evening before (the July 2026
+    /// rule, fixed for exactly these defaults).
+    WholeDays,
+}
+
 /// Fire time for a reminder on an ALL-DAY event (incl. synthesised birthdays).
 ///
-/// A relative offset measured in MINUTES makes no sense against a midnight
-/// start — "1 hour before" would ring at 23:00 the night before (the reported
-/// bug). Instead we read the offset as whole DAYS and fire at the day-carryover
-/// time-of-day (`tasks.dayStartTrigger`, passed in as `day_start`): "1 h" and
-/// "on the day" both land on the event's own day at day-start, "1 day before"
-/// the day before, "1 week before" seven days before. An explicit `Absolute`
-/// reminder still wins. Days round to nearest (12 h → 1 day). The event's date
-/// is its LOCAL date — every all-day producer (the editor, CalDAV, and now
-/// birthdays via `birthdays::birthday_start_instant`) stores the start as
+/// Whole days ("1 day before", "on the day") ring at the day-carryover
+/// time-of-day (`tasks.dayStartTrigger`, passed in as `day_start`), whichever
+/// [`AllDayReading`] applies. Anything else is read as `reading` says. An
+/// explicit `Absolute` reminder still wins. The event's date is its LOCAL date
+/// — every all-day producer (the editor, CalDAV, and birthdays via
+/// `birthdays::birthday_start_instant`) stores the start as
 /// local-midnight-as-UTC, so this reads back as the intended day in any zone.
 fn all_day_trigger_time(
     occ_start: DateTime<Utc>,
     kind: &ReminderKind,
     day_start: NaiveTime,
+    reading: AllDayReading,
 ) -> Option<DateTime<Utc>> {
     let minutes_before = match kind {
         ReminderKind::Relative { minutes_before } => *minutes_before,
         ReminderKind::Absolute { at } => return Some(*at),
         ReminderKind::AppStart | ReminderKind::Email { .. } => return None,
     };
-    all_day_fire_instant(occ_start, minutes_before, day_start, &chrono::Local)
+    all_day_fire_instant(
+        occ_start,
+        minutes_before,
+        day_start,
+        reading,
+        &chrono::Local,
+    )
 }
 
-/// Pure, zone-parameterised core of [`all_day_trigger_time`]: read `minutes`
-/// as whole DAYS before the occurrence's LOCAL date and anchor at `day_start`
-/// that day. Generic over the zone only so tests can pin a fixed offset —
-/// production always passes `chrono::Local`. Assumes the start is stored
-/// local-midnight-as-UTC (every all-day producer does).
+const MINUTES_PER_DAY: i64 = 24 * 60;
+
+/// A calendar default's minutes read as whole days, rounded to nearest (12 h →
+/// 1 day, half away from zero): the [`AllDayReading::WholeDays`] day.
+fn whole_days_of(minutes: i64) -> i64 {
+    ((minutes as f64) / MINUTES_PER_DAY as f64).round() as i64
+}
+
+/// Pure, zone-parameterised core of [`all_day_trigger_time`]. Generic over the
+/// zone only so tests can pin a fixed offset — production always passes
+/// `chrono::Local`. Assumes the start is stored local-midnight-as-UTC (every
+/// all-day producer does). An exact reading is wall-clock time: "9 AM" stays
+/// 09:00 on a day the clocks change, as the iPhone shows it.
 ///
 /// DST-robust so a reminder is never silently dropped: on an ambiguous
 /// fall-back hour (the wall clock repeats) it takes the earlier instant; in a
 /// spring-forward gap (the chosen wall time doesn't exist that day) it steps
-/// past the ≤1 h gap. Only reachable at all if the user sets `day_start` to a
-/// clock time inside their DST transition — the `00:00` default never is.
+/// past the ≤1 h gap. Only reachable when `day_start` or the named clock time
+/// falls inside the transition — the `00:00` default never does.
 fn all_day_fire_instant<Tz: TimeZone>(
     occ_start: DateTime<Utc>,
     minutes: i64,
     day_start: NaiveTime,
+    reading: AllDayReading,
     tz: &Tz,
 ) -> Option<DateTime<Utc>> {
     let event_day = occ_start.with_timezone(tz).date_naive();
-    let days = ((minutes as f64) / 1440.0).round() as i64;
-    let target_day = event_day - ChronoDuration::days(days);
-    let naive = NaiveDateTime::new(target_day, day_start);
+    let naive = if minutes % MINUTES_PER_DAY == 0 {
+        NaiveDateTime::new(
+            event_day - ChronoDuration::days(minutes / MINUTES_PER_DAY),
+            day_start,
+        )
+    } else {
+        match reading {
+            AllDayReading::Exact => {
+                NaiveDateTime::new(event_day, NaiveTime::MIN) - ChronoDuration::minutes(minutes)
+            }
+            AllDayReading::WholeDays => NaiveDateTime::new(
+                event_day - ChronoDuration::days(whole_days_of(minutes)),
+                day_start,
+            ),
+        }
+    };
     tz.from_local_datetime(&naive)
         .earliest()
         .or_else(|| {
@@ -2078,6 +2214,29 @@ mod tests {
         let mut event = new_event_without_reminders();
         assert!(apply_default_reminder_policy(&db, "cal", &mut event, true));
         assert_eq!(event.reminders, one_hour_before());
+    }
+
+    /// Written into a new ALL-DAY appointment, a default becomes its own
+    /// reminder and is read exactly from midnight; so it goes in rounded to
+    /// whole days, and rings where the planner rings the same default when it
+    /// only adds it (TODO B7 222): "1 hour before" on the day itself, not at
+    /// 23:00 the evening before. "1 day before" stays as it is.
+    #[test]
+    fn an_attached_default_goes_into_an_all_day_event_as_whole_days() {
+        let db = prefs_db();
+        let rel = |minutes_before| Reminder {
+            kind: ReminderKind::Relative { minutes_before },
+            sound: None,
+        };
+        store_defaults(&db, "cal", &[attached(rel(60)), attached(rel(24 * 60))]);
+        let mut event = new_event_without_reminders();
+        event.all_day = true;
+        assert!(apply_default_reminder_policy(&db, "cal", &mut event, true));
+        assert_eq!(event.reminders, vec![rel(0), rel(24 * 60)]);
+        // A timed appointment takes the minutes as they are.
+        let mut timed = new_event_without_reminders();
+        assert!(apply_default_reminder_policy(&db, "cal", &mut timed, true));
+        assert_eq!(timed.reminders, vec![rel(60), rel(24 * 60)]);
     }
 
     /// Entries that stay in Aperio leave the wire alone — the event is created
@@ -3264,6 +3423,7 @@ mod tests {
             // Day-carryover anchor; only consulted for all-day events, which
             // the all-day test constructs explicitly.
             NaiveTime::from_hms_opt(9, 0, 0).expect("9:00 is valid"),
+            false,
         )
     }
 
@@ -3357,18 +3517,38 @@ mod tests {
 
     #[test]
     fn all_day_reminder_fires_at_day_start_not_the_night_before() {
-        // "1 hour before" on an all-day event: timed this would ring 23:00 the
-        // night before (the reported bug); all-day it must ring at the
-        // day-carryover time (9:00 here, per ev_triggers) on the event's OWN day.
+        // "1 hour before" as a calendar DEFAULT (one list for timed and all-day
+        // appointments): timed this would ring 23:00 the night before (the
+        // July 2026 bug); all-day it rings at the day-carryover time (9:00
+        // here, per ev_triggers) on the event's OWN day.
         let day = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
-        let ev = make_all_day_event(day, vec![rel(60)]);
         let ws = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
         let we = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
-        let triggers = ev_triggers(&[ev], &[], ws, we);
-        assert_eq!(triggers.len(), 1);
-        let local = chrono::Local.from_utc_datetime(&triggers[0].trigger_at.naive_utc());
-        assert_eq!(local.date_naive(), day);
-        assert_eq!(local.time(), NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        let rung_at = |triggers: Vec<Trigger>| {
+            assert_eq!(triggers.len(), 1);
+            let local = chrono::Local.from_utc_datetime(&triggers[0].trigger_at.naive_utc());
+            (local.date_naive(), local.time())
+        };
+        let nine = NaiveTime::from_hms_opt(9, 0, 0).unwrap();
+        let default = ev_triggers(
+            &[make_all_day_event(day, vec![])],
+            &[local(rel(60))],
+            ws,
+            we,
+        );
+        assert_eq!(rung_at(default), (day, nine));
+
+        // The same offset as the appointment's OWN reminder is what the
+        // iPhone and every RFC 5545 client ring: 23:00 the evening before
+        // (decided 2026-11-07, TODO B7 222).
+        let own = ev_triggers(&[make_all_day_event(day, vec![rel(60)])], &[], ws, we);
+        assert_eq!(
+            rung_at(own),
+            (
+                day.pred_opt().unwrap(),
+                NaiveTime::from_hms_opt(23, 0, 0).unwrap()
+            )
+        );
     }
 
     #[test]
@@ -3381,7 +3561,14 @@ mod tests {
         let day_start = NaiveTime::from_hms_opt(9, 0, 0).unwrap();
 
         // "1 week before" → 7 days earlier at day-start, in that same zone.
-        let at = all_day_fire_instant(occ_start, 7 * 24 * 60, day_start, &west).unwrap();
+        let at = all_day_fire_instant(
+            occ_start,
+            7 * 24 * 60,
+            day_start,
+            AllDayReading::Exact,
+            &west,
+        )
+        .unwrap();
         let local = at.with_timezone(&west);
         assert_eq!(
             local.date_naive(),
@@ -3389,13 +3576,117 @@ mod tests {
         );
         assert_eq!(local.time(), day_start);
 
-        // "1 h before" collapses to 0 days → the event's OWN day at day-start,
-        // NOT the day before (the exact west-of-UTC failure mode).
-        let same = all_day_fire_instant(occ_start, 60, day_start, &west).unwrap();
+        // A default's "1 h before" collapses to 0 days → the event's OWN day at
+        // day-start, NOT the day before (the exact west-of-UTC failure mode).
+        let same = all_day_fire_instant(occ_start, 60, day_start, AllDayReading::WholeDays, &west)
+            .unwrap();
         assert_eq!(
             same.with_timezone(&west).date_naive(),
             NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()
         );
+        // Read exactly, it is 23:00 the evening before in THAT zone, not in UTC.
+        let exact = all_day_fire_instant(occ_start, 60, day_start, AllDayReading::Exact, &west)
+            .unwrap()
+            .with_timezone(&west);
+        assert_eq!(
+            exact.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 19).unwrap()
+        );
+        assert_eq!(exact.time(), NaiveTime::from_hms_opt(23, 0, 0).unwrap());
+    }
+
+    /// One value, two moments: on an all-day appointment its own "15 minutes
+    /// before" rings at 23:45 the evening before, the calendar's in-Aperio
+    /// "15 minutes before" on the day itself. Both ring; a value they share is
+    /// not one reminder. On a timed appointment the two are the same moment,
+    /// and it rings once.
+    #[test]
+    fn a_default_rings_beside_an_own_reminder_of_the_same_value_at_its_own_moment() {
+        let day = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        let ws = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let we = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let all_day = ev_triggers(
+            &[make_all_day_event(day, vec![rel(15)])],
+            &[local(rel(15))],
+            ws,
+            we,
+        );
+        let local_times: Vec<_> = all_day
+            .iter()
+            .map(|t| chrono::Local.from_utc_datetime(&t.trigger_at.naive_utc()))
+            .map(|l| (l.date_naive(), l.time()))
+            .collect();
+        assert_eq!(
+            local_times,
+            vec![
+                (
+                    day.pred_opt().unwrap(),
+                    NaiveTime::from_hms_opt(23, 45, 0).unwrap()
+                ),
+                (day, NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
+            ]
+        );
+        let timed = ev_triggers(&[make_event(vec![rel(15)])], &[local(rel(15))], ws, we);
+        assert_eq!(timed.len(), 1, "{timed:?}");
+    }
+
+    /// Decided 2026-11-07 (TODO B7 222): an all-day appointment's OWN reminder
+    /// counts from local 00:00 of its day, as RFC 5545, the iPhone and Google
+    /// read it; a calendar default is read as whole days at the day-start time.
+    #[test]
+    fn all_day_reminders_read_their_own_exactly_and_defaults_as_days() {
+        // West of UTC, so a mix-up of the local and the UTC date shows; 08:00 as
+        // the day-start time, so it cannot be taken for a named 00:00 or 09:00.
+        let west = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
+        let occ_start = Utc.with_ymd_and_hms(2026, 5, 20, 5, 0, 0).unwrap();
+        let day_start = NaiveTime::from_hms_opt(8, 0, 0).unwrap();
+        let fires = |minutes: i64, reading: AllDayReading| {
+            let at = all_day_fire_instant(occ_start, minutes, day_start, reading, &west)
+                .unwrap()
+                .with_timezone(&west);
+            (
+                at.date_naive().format("%m-%d").to_string(),
+                at.time().format("%H:%M").to_string(),
+            )
+        };
+        let on = |md: &str, hm: &str| (md.to_string(), hm.to_string());
+        let own = |minutes| fires(minutes, AllDayReading::Exact);
+        let default = |minutes| fires(minutes, AllDayReading::WholeDays);
+
+        // The iPhone's alerts, at 09:00 as on the iPhone.
+        assert_eq!(
+            own(-540),
+            on("05-20", "09:00"),
+            "On day of event (9 AM), PT9H"
+        );
+        assert_eq!(
+            own(900),
+            on("05-19", "09:00"),
+            "1 day before (9 AM), -PT15H"
+        );
+        assert_eq!(
+            own(2340),
+            on("05-18", "09:00"),
+            "2 days before (9 AM), -P1DT15H"
+        );
+        assert_eq!(own(9540), on("05-13", "09:00"), "1 week before, -P6DT15H");
+        // Google's "day before at 17:00", and any time on the day itself.
+        assert_eq!(own(420), on("05-19", "17:00"));
+        assert_eq!(own(-1080), on("05-20", "18:00"));
+        assert_eq!(own(-1980), on("05-21", "09:00"), "the day after at 09:00");
+        assert_eq!(own(60), on("05-19", "23:00"));
+        // Whole days, Aperio's own "N days before": the day-start time, read
+        // either way.
+        for minutes in [0, 1440, -1440] {
+            assert_eq!(own(minutes), default(minutes), "{minutes}");
+        }
+        assert_eq!(own(0), on("05-20", "08:00"));
+        assert_eq!(own(1440), on("05-19", "08:00"));
+        assert_eq!(own(-1440), on("05-21", "08:00"));
+        // A default rounds to whole days, always at the day-start time.
+        assert_eq!(default(60), on("05-20", "08:00"), "1 hour before");
+        assert_eq!(default(900), on("05-19", "08:00"));
+        assert_eq!(default(-540), on("05-20", "08:00"));
     }
 
     /// Decision 214: a single change takes its slot out of its series, as the
@@ -3429,6 +3720,41 @@ mod tests {
         let mut rung: Vec<DateTime<Utc>> = triggers.iter().map(|t| t.start).collect();
         rung.sort();
         assert_eq!(rung, vec![at(19, 5, 9), at(2, 6, 14), at(9, 6, 9)]);
+    }
+
+    /// TODO B7 222: an occurrence is expanded wherever its reminder rings in
+    /// the window, not only when it STARTS in it. The phone scans from `now`, so
+    /// a meeting under way at a reschedule lost its reminder after the start.
+    #[test]
+    fn a_series_rings_in_the_window_whatever_its_occurrence_started() {
+        let at = |d: u32, h: u32, m: u32| Utc.with_ymd_and_hms(2026, 5, d, h, m, 0).unwrap();
+        let daily = |reminder: Reminder| {
+            let mut ev = make_event(vec![reminder]);
+            ev.start = at(18, 9, 0);
+            ev.end = at(18, 10, 0);
+            ev.recurrence = Some(EventRecurrence {
+                rrule: "FREQ=DAILY".into(),
+                exceptions: Vec::new(),
+                tzid: None,
+            });
+            ev
+        };
+
+        // 30 minutes after the start; the 09:00 meeting began before the window.
+        let after = ev_triggers(&[daily(rel(-30))], &[], at(20, 9, 10), at(20, 12, 0));
+        assert_eq!(
+            after.iter().map(|t| t.trigger_at).collect::<Vec<_>>(),
+            vec![at(20, 9, 30)]
+        );
+        assert_eq!(after[0].start, at(20, 9, 0));
+
+        // One day before; tomorrow's meeting begins after the window ends.
+        let before = ev_triggers(&[daily(rel(24 * 60))], &[], at(20, 8, 0), at(20, 10, 0));
+        assert_eq!(
+            before.iter().map(|t| t.trigger_at).collect::<Vec<_>>(),
+            vec![at(20, 9, 0)]
+        );
+        assert_eq!(before[0].start, at(21, 9, 0));
     }
 
     #[test]
@@ -3557,6 +3883,21 @@ mod tests {
             assert_eq!(anniversary.month(), bday.month());
             assert_eq!(anniversary.day(), bday.day());
         }
+
+        // A clock time: its editor sets all-day reminders, and its defaults
+        // are the birthdays' own, so "the day before at 09:00" (900) rings at
+        // 09:00, not rounded to the day-start time (TODO B7 222).
+        UserPrefsRepo::new(&shared)
+            .set(
+                &format!("calendar.{cal_id}.defaultReminders"),
+                r#"[{"kind":{"type":"relative","minutes_before":900}}]"#,
+            )
+            .expect("set pref");
+        let timed = enumerate_birthday_triggers(&adapter, &registry, &cache, &shared).await;
+        assert_eq!(timed.len(), 1);
+        let local = chrono::Local.from_utc_datetime(&timed[0].trigger_at.naive_utc());
+        assert_eq!(local.time(), NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        assert_eq!(local.date_naive() + ChronoDuration::days(1), target);
     }
 
     fn make_task(
@@ -4055,6 +4396,19 @@ mod tests {
         let t = future_trigger(-15, -3);
         let now = Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0).unwrap();
         assert!(catchup_eligible(&t, now, CATCH_UP_GRACE));
+    }
+
+    #[test]
+    fn catchup_keeps_a_reminder_after_the_end_for_its_own_grace() {
+        // "30 minutes after the start" on a 15-minute meeting: it rang 2 min
+        // ago, the meeting ended 17 min ago. Measured from the end it would be
+        // gone; measured from its own moment it is as fresh as any reminder.
+        let t = future_trigger(-2, -17);
+        let now = Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0).unwrap();
+        assert!(catchup_eligible(&t, now, CATCH_UP_GRACE));
+        // And it, too, is gone once its own grace has passed.
+        let late = future_trigger(-6, -21);
+        assert!(!catchup_eligible(&late, now, CATCH_UP_GRACE));
     }
 
     #[test]

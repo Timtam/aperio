@@ -24,6 +24,7 @@ export type { ColorLabelId } from './generated/ColorLabelId';
 
 // Adapter capabilities, declared in each plugin's manifest
 export type { RecurrenceCapabilities } from './generated/RecurrenceCapabilities';
+export type { ReminderCapabilities } from './generated/ReminderCapabilities';
 export type { RecurrenceFreq } from './generated/RecurrenceFreq';
 export type { TaskCapabilities } from './generated/TaskCapabilities';
 export type { MemberAddMethod } from './generated/MemberAddMethod';

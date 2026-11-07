@@ -4,6 +4,7 @@ import type { ColorLabelId } from "./ColorLabelId";
 import type { ContainerColor } from "./ContainerColor";
 import type { InvitationImport } from "./InvitationImport";
 import type { RecurrenceCapabilities } from "./RecurrenceCapabilities";
+import type { ReminderCapabilities } from "./ReminderCapabilities";
 import type { SoundConfig } from "./SoundConfig";
 
 /**
@@ -17,6 +18,13 @@ import type { SoundConfig } from "./SoundConfig";
  * well support.
  */
 export type CalendarRow = { account_id: string, recurrence_capabilities: RecurrenceCapabilities, 
+/**
+ * What the calendar keeps of an event's reminders beyond those before
+ * the start, from its adapter's manifest
+ * ([`crate::builtin_adapters::reminder_capabilities_for_account`]). A
+ * birthday calendar keeps everything: its reminders never leave Aperio.
+ */
+reminder_capabilities: ReminderCapabilities, 
 /**
  * Set on a synthesised birthday calendar (DESIGN §10.3), and only there:
  * which contact list it shows. The row's `name` is then that list's own

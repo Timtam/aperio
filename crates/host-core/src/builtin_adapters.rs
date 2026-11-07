@@ -263,6 +263,44 @@ fn open_sync_inner(
     )))
 }
 
+/// What the built-in store's calendars keep of an event's reminders, from its
+/// own manifest: everything, since it stores reminders as they are.
+pub fn local_reminder_capabilities() -> plugin_core::ReminderCapabilities {
+    local_manifest().reminders.clone()
+}
+
+/// What the calendars of one account keep of an event's reminders beyond those
+/// before the start ([`PluginManifest::reminders`], TODO B7 222): the
+/// built-in store's own manifest for [`crate::registry::LOCAL_ID`], the
+/// built-in manifests next (the device adapter), then the plugin that serves
+/// the account's kind. One answer for both hosts, so the desktop and the phone
+/// offer the same reminders.
+///
+/// An account whose adapter is not known keeps nothing more — the default,
+/// and the safe answer: a provider that refuses such a reminder fails the
+/// whole write.
+pub fn reminder_capabilities_for_account(
+    manager: &plugin_core::PluginManager,
+    account_id: &str,
+    account_kinds: &std::collections::HashMap<String, crate::accounts::AdapterKind>,
+) -> plugin_core::ReminderCapabilities {
+    if account_id == crate::registry::LOCAL_ID {
+        return local_reminder_capabilities();
+    }
+    let Some(kind) = account_kinds.get(account_id) else {
+        return plugin_core::ReminderCapabilities::default();
+    };
+    for manifest in builtin_manifests() {
+        if manifest.adapter_kind.as_deref() == Some(kind.as_str()) {
+            return manifest.reminders.clone();
+        }
+    }
+    manager
+        .plugin_for_adapter_kind(kind.as_str())
+        .map(|p| p.manifest.reminders.clone())
+        .unwrap_or_default()
+}
+
 /// Whether at most one account of `adapter_kind` may exist in this database
 /// ([`PluginManifest::single_instance`]), asked of whatever declares the kind
 /// as its OWN.
@@ -367,6 +405,36 @@ pub fn all_adapter_kinds(manager: &plugin_core::PluginManager, lang: &str) -> Ve
 mod tests {
     use super::*;
     use crate::accounts::AdapterKind;
+
+    /// TODO B7 222: "after the start" is offered where it is kept. The local
+    /// store keeps it; an account whose adapter declares nothing, or is not
+    /// known, keeps nothing more — a provider that refuses it fails the write.
+    #[test]
+    fn reminders_after_the_start_are_kept_where_the_manifest_says() {
+        let manager = plugin_core::PluginManager::new("0.1.0");
+        let kinds = std::collections::HashMap::from([(
+            "phone".to_string(),
+            AdapterKind::new(AdapterKind::DEVICE_CALENDAR),
+        )]);
+        let after_start = |account: &str| {
+            reminder_capabilities_for_account(&manager, account, &kinds).after_start
+        };
+        assert!(after_start(crate::registry::LOCAL_ID));
+        assert!(local_reminder_capabilities().after_start);
+        assert!(
+            !after_start("phone"),
+            "the device calendar keeps no reminder at all"
+        );
+        assert!(!after_start("unknown"));
+        // The CalDAV adapter (iCloud too) declares it in the manifest it ships.
+        let caldav = PluginManifest::from_bytes(adapter_caldav_plugin::MANIFEST)
+            .expect("the CalDAV manifest parses");
+        assert!(caldav.reminders.after_start);
+        // Google counts only minutes before the start, and says nothing.
+        let google = PluginManifest::from_bytes(adapter_google_plugin::MANIFEST)
+            .expect("the Google manifest parses");
+        assert!(!google.reminders.after_start);
+    }
 
     /// A plugin whose library will not open still names its own accounts.
     ///

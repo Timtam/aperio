@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_RECURRENCE_CAPABILITIES } from '@aperio/shared';
+import { DEFAULT_RECURRENCE_CAPABILITIES, DEFAULT_REMINDER_CAPABILITIES } from '@aperio/shared';
 
 import type { Calendar, CalendarEvent, ColorLabel } from '../api/types';
 import { resolveEventColor } from './eventColor';
@@ -15,6 +15,7 @@ function calendar(id: string, hex: string | null): Calendar {
     default_sound: null,
     account_id: 'acc',
     recurrence_capabilities: DEFAULT_RECURRENCE_CAPABILITIES,
+    reminder_capabilities: DEFAULT_REMINDER_CAPABILITIES,
     supports_scheduling: false,
     supports_event_color: false,
     always_notifies_attendees: false,
