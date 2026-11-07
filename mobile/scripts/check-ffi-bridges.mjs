@@ -613,6 +613,12 @@ const ONLY_ON = new Map([
     'liveActivityUpdate',
     'liveActivityEnd',
   ].map((name) => [name, ['ios', 'ActivityKit; Android shows its live notification natively']]),
+  ...[
+    'liveActivityHandOver',
+    'liveActivityClear',
+    'liveActivityPromotionJson',
+    'openLiveActivityPromotionSettings',
+  ].map((name) => [name, ['android', 'the native ongoing notification; iOS uses ActivityKit']]),
   [
     'takeIncomingFileJson',
     ['android', 'a shared or opened file arrives as an Android intent; iOS hands it to Linking'],

@@ -1565,6 +1565,27 @@ class CalFfiModule : Module() {
         host.liveActivityPlanJson(horizonMinutes.toUInt(), hiddenCalendarsJson)
       }
     }.runOnQueue(remindersScope)
+
+    // The notifier takes the plan over (LiveActivityNotifier.kt). `freshStart`:
+    // Expo rang every reminder up to now, so past signals come back silently.
+    AsyncFunction("liveActivityHandOver") { planJson: String, freshStart: Boolean ->
+      val context = appContext.reactContext?.applicationContext
+        ?: throw CodedException("unavailable", "no context to hand the plan to", null)
+      LiveActivityNotifier.handOver(context, planJson, freshStart)
+    }
+
+    AsyncFunction("liveActivityClear") {
+      appContext.reactContext?.applicationContext?.let { LiveActivityNotifier.clear(it) }
+    }
+
+    AsyncFunction("liveActivityPromotionJson") {
+      appContext.reactContext?.applicationContext?.let { LiveActivityNotifier.promotionJson(it) }
+        ?: "{\"supported\":false,\"allowed\":false}"
+    }
+
+    AsyncFunction("openLiveActivityPromotionSettings") {
+      appContext.reactContext?.applicationContext?.let { LiveActivityNotifier.openPromotionSettings(it) }
+    }
   }
 
   private fun ModuleDefinitionBuilder.soundFunctions() {

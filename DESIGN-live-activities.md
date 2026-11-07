@@ -1,6 +1,6 @@
 # Live-Aktivitäten für Termine — Entwurf
 
-Status: **entschieden; Stufe 1 (Regel im Kern), Stufe 2 (Tür), Stufe 3 (Antippen öffnet den Termin) und Stufe 4 (iOS) gebaut; Android folgt.** Toni hat die Form am 6. November 2026
+Status: **entschieden; alle fünf Stufen gebaut (Kern, Tür, Antippen, iOS, Android).** Toni hat die Form am 6. November 2026
 festgelegt, in zwei Runden: vor der Recherche (Start, Inhalt, Überblenden) und
 danach (iOS-26-Einplanung, ein Signal, iOS-Text, Anschluss, ohne Erinnerung,
 ganztägig, Standardwert). Die Recherche lief als Workflow mit drei Code-Lesern
@@ -380,6 +380,38 @@ Ein `PendingIntent` direkt auf die Aktivität der App (Android 12 verbietet den
 Umweg über einen Empfänger), mit Termin, Kalender und Beginn des Vorkommens.
 Die App liest ihn selbst aus, denn an Expos Benachrichtigungs-Weiterleitung geht
 er vorbei.
+
+### Gebaut (Stufe 5)
+
+- **Übergabe:** `shared/liveActivityAndroid.ts` (`androidHandover`, mit vitest
+  geprüft) macht aus dem Plan eine flache, zeitlich geordnete Liste von
+  Abschnitten, Zeitpunkte als Millisekunden, je Abschnitt der Kanal seiner
+  Erinnerung und, wenn er eine ist, eine feste Signal-Id. JavaScript
+  (`mobile/src/liveActivities/androidActivities.ts`) übergibt sie im
+  Erinnerungs-Durchlauf; erst danach lässt Expo die aufgegangenen Erinnerungen
+  weg. Scheitert die Übergabe, bleiben alle bei Expo.
+- **Benachrichtiger:** `LiveActivityNotifier.kt` legt den Plan ab und stellt
+  genau einen Alarm, für die nächste Grenze. Eigene Dateien für die Signale, die
+  geklingelt haben, für weggewischte Termine und für die angezeigte
+  Benachrichtigung; eine neue Übergabe vergisst davon nichts.
+- **Ein Signal:** Ein Signal-Abschnitt, der noch nicht klingelte, ist eine neue
+  Benachrichtigung auf dem Kanal seiner Erinnerung; höchstens 5 Minuten zu spät
+  noch mit Ton, sonst still. Jeder andere Abschnitt ändert die angezeigte
+  Benachrichtigung still. Die erste Übergabe nach dem Einschalten zählt alle
+  vergangenen Signale als geklingelt (Expo hatte sie).
+- **Text:** Uhrzeiten im Zeitformat des Geräts (`DateFormat.getTimeFormat`),
+  Wörter aus Aperio. Countdown sichtbar daneben, `CATEGORY_EVENT`,
+  `setTimeoutAfter` bis zum Ende der Kette als Netz; ein Wegwischen zur oder
+  nach der geplanten Endzeit zählt nicht.
+- **Hervorhebung:** `setRequestPromotedOngoing` für Abschnitte ab 15 Minuten vor
+  Beginn, nie eingefärbt; `POST_PROMOTED_NOTIFICATIONS` im Manifest des Moduls.
+  Darf Aperio nicht hervorheben (ab Android 16), sagt das eine Zeile unter dem
+  Schalter, mit einem Knopf zur Systemseite.
+- **Alarme:** `AlarmManagerCompat`, genau wo erlaubt, sonst ungenau (Android 12
+  ohne Recht). Ein Empfänger für Neustart, App-Update und Zeit- oder
+  Zonenwechsel zeigt den laufenden Abschnitt neu und stellt den Alarm.
+- **Antippen:** dieselbe Adresse wie auf dem iPhone, `aperio://event?…`, jeder
+  Wert mit `Uri.encode`; gelesen vom `ReminderTapRouter` über Linking.
 
 ## iOS
 

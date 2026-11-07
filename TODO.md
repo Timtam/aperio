@@ -253,10 +253,15 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   iOS-Build. Gegenproben trafen je ihren Test (Kopien verschieden, Feld fehlt,
   wartende nicht abgedeckt, nur erster Schlüssel, kein Wegwischen, stumme
   eingeplant, `+` als Leerzeichen).
-- [ ] **5 · Android:** Plan-Ablage, Signal- und Wegwisch-Datei, Alarm- und
+- [x] **5 · Android:** Plan-Ablage, Signal- und Wegwisch-Datei, Alarm- und
   Neustart-Empfänger, Benachrichtigung (Countdown, Hervorhebung, neu oder
   still), genaue Alarme mit Rückfall, Antippen, ein Signal mit Rückfall auf
   Expo, Hervorhebungs-Hinweis, `POST_PROMOTED_NOTIFICATIONS`, Hilfe-Seite.
+  ↳ `shared/liveActivityAndroid.ts` (Übergabe, vitest),
+  `LiveActivityNotifier.kt` (lokal übersetzt), JS-Weiche
+  `mobile/src/liveActivities/index.ts`. Toni hat Stufe 4 und 5 über Nacht
+  freigegeben (2026-11-07: „baue es für iOS durch … mach sofort mit Android
+  weiter und bringe dies auch zu Ende“).
 - [ ] **Nach Tonis iOS-Test:** Überleben eingeplante Aktivitäten keinen
   Neustart, auf iOS nicht mehr weglassen (zwei Signale)? Tonis Entscheidung.
 - [ ] **Folgepunkt:** Termine aus dem Gerätekalender (ihre Erinnerungen stellt

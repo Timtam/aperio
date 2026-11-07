@@ -522,6 +522,22 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** End an activity at once (a waiting one never starts). */
   liveActivityEnd(id: string): Promise<void>;
 
+  // ── Live Activities, Android only (an ongoing notification; DESIGN-live-
+  //    activities.md, "Android") ──
+  /** Hand the plan (`AndroidHandover` JSON) to the native notifier, which from
+   *  then on shows and arms everything itself. `freshStart`: Expo rang every
+   *  reminder up to now (the switch was just turned on), so past signals come
+   *  back silently. Throws when it cannot be handed over: the reminders then
+   *  stay Expo's. */
+  liveActivityHandOver(planJson: string, freshStart: boolean): Promise<void>;
+  /** Switched off: remove the notification, the alarm and the plan. */
+  liveActivityClear(): Promise<void>;
+  /** JSON `{supported, allowed}`: Android 16 or later can promote the
+   *  notification to a Live Update, and whether it may for Aperio. */
+  liveActivityPromotionJson(): Promise<string>;
+  /** Open the system page that allows the promotion. */
+  openLiveActivityPromotionSettings(): Promise<void>;
+
   // ── Custom reminder sounds (§14.4) ──
   /** Import an audio file (local `path` from the document picker) into the
    *  content-addressed store; returns JSON `{sha256, ext, path}`. Validates

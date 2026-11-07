@@ -27,6 +27,7 @@ import { liveActivityPlan, type PlannedReminder } from '../api/liveActivities';
 import { logLine } from '../api/logs';
 import { upcomingReminders, type UpcomingReminder } from '../api/reminders';
 import { readLiveActivitiesEnabled } from '../state/liveActivitiesPref';
+import { reminderKeyId } from './reminderKey';
 
 const MEMORY_KEY = 'aperio.liveActivities.ios.memory.v1';
 const PLAN_KEY = 'aperio.liveActivities.ios.plan.v1';
@@ -38,15 +39,6 @@ interface Support {
   previews: 'always' | 'whenUnlocked' | 'never';
 }
 
-/** A reminder of the notification list as a trigger key. */
-export function reminderKeyId(r: UpcomingReminder): string {
-  return triggerKeyId({
-    item_id: r.item_id,
-    calendar_id: r.container_id,
-    occurrence_start: r.start,
-    fire_at: r.trigger_at,
-  });
-}
 
 function words(): ActivityWords {
   return {
@@ -175,13 +167,10 @@ function alertFor(
  * any failure the list comes from the plain scan and nothing is covered: then
  * every reminder rings as before.
  */
-export async function remindersAndActivities(
+export async function iosRemindersAndActivities(
   horizonMinutes: number,
   hidden: ReadonlySet<string>,
 ): Promise<{ items: UpcomingReminder[]; covered: Set<string> }> {
-  if (Platform.OS !== 'ios') {
-    return { items: await upcomingReminders(horizonMinutes), covered: new Set() };
-  }
   let answer: Awaited<ReturnType<typeof liveActivityPlan>>;
   try {
     answer = await liveActivityPlan(horizonMinutes, [...hidden]);

@@ -7,7 +7,7 @@ import CalFfi from '../../modules/cal-ffi';
 import i18n from '../../i18n';
 import { logLine } from '../api/logs';
 import { UpcomingReminder } from '../api/reminders';
-import { reminderKeyId, remindersAndActivities, startFromLastPlan } from '../liveActivities/iosActivities';
+import { reminderKeyId, remindersAndActivities, startFromLastPlan } from '../liveActivities';
 import { customSoundPath } from '../api/sounds';
 import { getHiddenCalendars } from '../state/calendarVisibility';
 import { setRemindersRefreshHook, whenPassSettled } from '../state/cacheReloadBus';
@@ -217,10 +217,14 @@ async function rescheduleOnce(): Promise<void> {
     await ensureLaunchSettle();
     await ensureAndroidChannel();
     const hidden = await getHiddenCalendars();
-    // On the iPhone the same scan keeps the Live Activities in step, and says
-    // which reminders a waiting activity stands for (DESIGN-live-activities.md,
-    // one signal): those are not scheduled again here.
-    const { items, covered } = await remindersAndActivities(HORIZON_MINUTES, hidden);
+    // The same scan keeps the Live Activities in step and says which
+    // reminders they stand for (DESIGN-live-activities.md, one signal): those
+    // are not scheduled again here. On Android the ongoing notification IS
+    // the reminder, on the reminder's own channel.
+    const { items, covered } = await remindersAndActivities(HORIZON_MINUTES, hidden, {
+      channelFor: async (r) => (await resolveDelivery(r)).channelId,
+      defaultChannel: CHANNEL_ID,
+    });
     if (!permitted) return;
     // Day-start "today's tasks" notifications, pre-computed for the same
     // horizon — the in-app day-start check only runs while the app is open,
