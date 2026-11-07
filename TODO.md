@@ -114,8 +114,7 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
 - [ ] Handler: snooze (neu planen), mark-done, open-from-notification
 - Einstieg: `src-tauri/src/reminders.rs` (`fire()`), Notification-Builder um `.action()` erweitern.
 - [ ] **Tippen auf eine Erinnerung öffnet den Termin** (Wunsch Toni, 2026-10-05;
-  die Handy-Hälfte ist Stufe 3 von A12, weil die Live-Aktivität dieselbe Route
-  braucht;
+  die Handy-Hälfte ist gebaut, A12 Stufe 3; offen ist der Desktop;
   DESIGN §14.3 „Öffnen“). Heute bringt ein Tipp auf iOS und Android nur die App
   nach vorn, auf dem zuletzt offenen Bildschirm; unter Windows tut ein Klick
   nichts (kein Klick-Handler, Fenster bleibt verborgen). Befund (nur gelesen):
@@ -225,9 +224,25 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   vergleicht. Rückblick ein Tag; Gerätekalender zählen als Anschluss und Kopie.
   Gegenproben trafen je ihren Test; der Gerätekalender-Zweig hat keinen Test,
   weil kein Schein-Adapter für ihn existiert. Noch kein Aufrufer.
-- [ ] **3 · Antippen öffnet den Termin** (Handy-Hälfte von A5): Kalender und
+- [x] **3 · Antippen öffnet den Termin** (Handy-Hälfte von A5): Kalender und
   Beginn des Vorkommens in der Benachrichtigung, Antwort-Hörer auch beim
   Kaltstart.
+  ↳ Toni, 2026-11-07: ein Serientermin öffnet das Vorkommen ohne Vorab-Frage;
+  die Tageswechsel-Benachrichtigung öffnet die Übersicht gleich mit. Schreiben
+  und Lesen der Daten in `shared/reminderTap.ts` (vitest), geöffnet nach dem
+  Entsperren (`ReminderTapRouter`). Die Live-Aktivität hängt sich später an
+  dieselbe Route.
+  ↳ Aus der Prüfrunde (11 Befunde): `navigateNested` mit `initial: false`
+  (ein noch nicht gezeigter Tab hielt sonst nur den Editor, auch beim
+  Datei-Import); Kalender vor dem Termin lesen (Kaltstart fand den externen
+  Termin sonst nicht); eigene Route je Tipp; Sperre auch beim Weggehen (iOS
+  liefert den Tipp vor dem erneuten Sperren); Tageswechsel-Tipp wartet auf die
+  noch fällige Prüfung; fremde Einladung zeigt die Zeiten des Vorkommens.
+- [ ] **Folgepunkt:** Ein Tipp auf die Tageswechsel-Benachrichtigung, während
+  ein Editor-Blatt offen ist: Die Übersicht ist ein Wurzel-Modal und kommt auf
+  iOS vermutlich nicht über das Blatt (wie bei der Tagesprüfung selbst, siehe
+  Gedächtnis „Wurzel-Modal nicht über Blatt“). Erst nach Tonis Gerätetest
+  entscheiden.
 - [ ] **4 · iOS:** Ansichten und `ActivityConfiguration` in der Widget-
   Erweiterung, `NSSupportsLiveActivities`, Attribut-Struktur doppelt mit
   Wächter, Brücke, Abgleich (Vordergrund, Hintergrund, Kaltstart aus dem

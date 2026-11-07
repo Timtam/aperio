@@ -1,6 +1,6 @@
 # Live-Aktivitäten für Termine — Entwurf
 
-Status: **entschieden; Stufe 1 (Regel im Kern) und Stufe 2 (Tür) gebaut.** Toni hat die Form am 6. November 2026
+Status: **entschieden; Stufe 1 (Regel im Kern), Stufe 2 (Tür) und Stufe 3 (Antippen öffnet den Termin) gebaut.** Toni hat die Form am 6. November 2026
 festgelegt, in zwei Runden: vor der Recherche (Start, Inhalt, Überblenden) und
 danach (iOS-26-Einplanung, ein Signal, iOS-Text, Anschluss, ohne Erinnerung,
 ganztägig, Standardwert). Die Recherche lief als Workflow mit drei Code-Lesern

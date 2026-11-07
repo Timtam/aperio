@@ -121,6 +121,14 @@ Reminders are delivered as **local notifications**. On first use the app asks fo
 appear. Reminder sounds, lead times and snooze work as described under
 [Notifications](/guides/tutorial/07-notifications/).
 
+**Tapping a reminder** opens what it is about: an appointment in the event
+editor, a task in the task editor. For a recurring appointment it opens the
+occurrence the reminder was for, without asking first; the editor's **Apply to**
+field still lets you change the whole series instead. Someone else's meeting
+opens read-only, as from the calendar, at the times of that occurrence. Tapping the **Day-start reminders**
+notification opens the **Day-start review**, even if it already ran today. When the app lock is
+on, all of this waits until you have unlocked.
+
 Under **Settings, General, Notification sounds** a line says whether the
 phone allows Aperio's notifications: allowed; not allowed yet; not allowed,
 and only the system settings can allow it; or Aperio could not check. Below

@@ -44,6 +44,12 @@ export function navigateRoot<RouteName extends keyof RootStackParamList>(
  * `CommonActions.navigate` (the container ref's generic is the root stack, which
  * doesn't carry the tab keys, so the action is the type-clean way to express the
  * nested payload). A no-op until the container is ready, like `navigateRoot`.
+ *
+ * `initial: false` is what keeps the tab's own first screen under the one
+ * opened. The tabs mount lazily: a tab not yet shown this session builds its
+ * stack from the nested payload alone, and without the flag that stack held
+ * the editor and nothing else — Cancel and Save had nowhere to go back to, and
+ * the saved navigation state brought the stuck editor back at the next launch.
  */
 export function navigateNested<ScreenName extends keyof RootStackParamList>(
   tab: keyof RootTabParamList,
@@ -51,6 +57,14 @@ export function navigateNested<ScreenName extends keyof RootStackParamList>(
   params: RootStackParamList[ScreenName],
 ): void {
   if (navigationRef.isReady()) {
-    navigationRef.dispatch(CommonActions.navigate(tab, { screen, params }));
+    navigationRef.dispatch(CommonActions.navigate(tab, { screen, params, initial: false }));
+  }
+}
+
+/** Until the navigation can take a screen: at once once it is up, a moment
+ *  when what asks (a shared file, a tapped notification) started the app. */
+export async function whenNavigationReady(): Promise<void> {
+  for (let tries = 0; tries < 100 && !navigationRef.isReady(); tries += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }

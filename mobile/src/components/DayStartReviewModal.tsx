@@ -73,9 +73,16 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 export interface DayStartReviewModalProps {
   visible: boolean;
   onClose: () => void;
+  /** Opened by a tap on the day-start notification. Closing at once because
+   *  nothing is left then says so: otherwise the tap seems to open nothing. */
+  requested?: boolean;
 }
 
-export default function DayStartReviewModal({ visible, onClose }: DayStartReviewModalProps) {
+export default function DayStartReviewModal({
+  visible,
+  onClose,
+  requested = false,
+}: DayStartReviewModalProps) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
@@ -385,6 +392,9 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       // Re-plan the pre-scheduled day-start notifications so none fires into
       // the fresh snooze window (the scheduler reads the snooze end).
       refreshRemindersSoon();
+    } else if (requested) {
+      // Asked for by a tap, and everything was handled earlier today.
+      announce(t('dialogs.dayStartReview.allHandled'));
     }
     onClose();
   }, [
@@ -394,6 +404,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     totalRemaining,
     resolvedIds.size,
     hasReminders,
+    requested,
     announce,
     t,
     onClose,

@@ -134,6 +134,16 @@ damit Erinnerungen (und das App-Symbol-Badge) erscheinen können. Erinnerungstö
 Vorlaufzeiten und Schlummern funktionieren wie unter
 [Benachrichtigungen](/de/guides/tutorial/07-notifications/) beschrieben.
 
+**Ein Tipp auf eine Erinnerung** öffnet, worum es geht: einen Termin im
+Termin-Editor, eine Aufgabe im Aufgaben-Editor. Bei einem Serientermin öffnet er
+das Vorkommen, zu dem die Erinnerung gehört, ohne vorher zu fragen; im Feld
+**Anwenden auf** des Editors lässt sich trotzdem die ganze Serie wählen. Die
+Einladung eines anderen öffnet sich schreibgeschützt, wie aus dem Kalender, mit
+den Zeiten dieses Vorkommens. Ein
+Tipp auf die Benachrichtigung **Tageswechsel-Erinnerungen** öffnet die
+**Tageswechsel-Übersicht**, auch wenn sie heute schon lief. Ist die App-Sperre
+an, wartet all das, bis du entsperrt hast.
+
 Unter **Einstellungen, Allgemein, Benachrichtigungstöne** sagt eine Zeile, ob
 das Telefon die Benachrichtigungen von Aperio erlaubt: erlaubt; noch nicht
 erlaubt; nicht erlaubt, und erlauben lässt es sich nur in den

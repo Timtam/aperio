@@ -26,12 +26,14 @@ export async function notify(
   title: string,
   body: string,
   context = 'notification',
+  /** What a tap opens (`shared/reminderTap`); none opens just the app. */
+  data?: Record<string, string | boolean>,
 ): Promise<void> {
   try {
     if (!(await ensurePermission())) return;
     await ensureAndroidChannel();
     await Notifications.scheduleNotificationAsync({
-      content: { title, body, sound: 'default' },
+      content: { title, body, sound: 'default', ...(data ? { data } : {}) },
       // Channel-aware immediate trigger — fires now, on the default channel.
       trigger: { channelId: CHANNEL_ID },
     });

@@ -12,7 +12,9 @@ import { createContext, useContext } from 'react';
 export const AppLockLockedContext = createContext(false);
 
 /** True while the app lock covers the app (including the pre-pref-read
- *  moment on a cold start, when it is not yet known whether a lock is on). */
+ *  moment on a cold start, when it is not yet known whether a lock is on),
+ *  and, with the lock on, while the cover hides the app on its way out and
+ *  back — the moment a tapped notification can arrive before the relock. */
 export function useAppLockLocked(): boolean {
   return useContext(AppLockLockedContext);
 }

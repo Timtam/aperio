@@ -240,6 +240,7 @@ function EventEditorScreen({
     eventId,
     calendarId,
     occurrence,
+    shownOccurrence,
     anchor,
     initialTitle,
     initialTime,
@@ -693,8 +694,24 @@ function EventEditorScreen({
             // the series lost its recurrence on another device between list-render
             // and edit, a stale occurrence param must degrade to a plain
             // whole-event edit (seed from the master), never move the master.
-            if (occurrence != null && ev.recurrence != null) {
-              const occStart = new Date(occurrence);
+            //
+            // Someone else's meeting, opened from its reminder, shows the
+            // occurrence too (`shownOccurrence`), but only while it IS locked:
+            // then the form is read-only and the save writes the provider's
+            // row with its reminders and nothing else, so the times shown can
+            // move nothing. An editable series seeded this way and saved as
+            // the series would be moved to that occurrence.
+            const seedFrom =
+              occurrence ??
+              (shownOccurrence != null &&
+              invitationLocked(
+                cals.find((c) => c.id === ev.calendar_id),
+                ev,
+              )
+                ? shownOccurrence
+                : null);
+            if (seedFrom != null && ev.recurrence != null) {
+              const occStart = new Date(seedFrom);
               const dur = new Date(ev.end).getTime() - new Date(ev.start).getTime();
               const occEnd = new Date(occStart.getTime() + (Number.isFinite(dur) ? dur : 0));
               const so = isoToLocalParts(occStart.toISOString());
@@ -806,6 +823,7 @@ function EventEditorScreen({
     eventId,
     calendarId,
     occurrence,
+    shownOccurrence,
     anchor,
     initialTitle,
     initialTime,

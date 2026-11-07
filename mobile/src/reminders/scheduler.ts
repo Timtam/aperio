@@ -1,4 +1,4 @@
-import { allDayReminderDays } from '@aperio/shared';
+import { allDayReminderDays, DAY_START_TAP_DATA, reminderTapData } from '@aperio/shared';
 import * as Notifications from 'expo-notifications';
 import { useEffect } from 'react';
 import { AppState, Platform } from 'react-native';
@@ -234,9 +234,9 @@ async function rescheduleOnce(): Promise<void> {
             count: ds.count,
           }),
           sound: 'default',
-          // No itemId: a tap just opens the app, where the live in-app
-          // day-start review (announce + dialog) takes over with fresh data.
-          data: { dayStart: true },
+          // A tap opens the day-start review with fresh data
+          // (`ReminderTapRouter`), not the counts planned here.
+          data: DAY_START_TAP_DATA,
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -263,8 +263,9 @@ async function rescheduleOnce(): Promise<void> {
           title: r.title,
           body: notificationBody(r),
           sound,
-          // Carried so a tap can route to the item (wired in App).
-          data: { itemId: r.item_id, itemKind: r.item_kind },
+          // What a tap opens: the item, for an occurrence that occurrence
+          // (`ReminderTapRouter`). Written and read by `shared/reminderTap`.
+          data: reminderTapData(r),
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,

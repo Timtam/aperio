@@ -25,6 +25,7 @@ import './a11y/gestureHost';
 import { useSyncTriggers } from './api/syncTriggers';
 import { AppLockGate } from './components/AppLockGate';
 import DayStartReviewModal from './components/DayStartReviewModal';
+import { ReminderTapRouter } from './reminders/ReminderTapRouter';
 import { EventScopeDialogHost } from './components/EventScopeDialogHost';
 import { DeviceAccessGate } from './components/DeviceAccessGate';
 import { FirstLaunchWizardGate } from './components/FirstLaunchWizardGate';
@@ -61,7 +62,7 @@ import AgendaScreen from './screens/AgendaScreen';
 import CalendarEditorModal from './screens/CalendarEditorModal';
 import CalendarsScreen from './screens/CalendarsScreen';
 import FileImportScreen from './screens/FileImportScreen';
-import { importRouteId } from './navigation/importRouteId';
+import { importRouteId, taskEditorRouteId } from './navigation/importRouteId';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import GeneralSettingsScreen from './screens/GeneralSettingsScreen';
@@ -260,6 +261,7 @@ function TasksStackNav() {
       <TasksStack.Screen
         name="TaskEditor"
         component={TaskEditorModal}
+        getId={taskEditorRouteId}
         options={{ presentation: 'modal', title: t('mobile.newTaskLabel') }}
       />
       <TasksStack.Screen
@@ -384,6 +386,7 @@ function CalendarStackNav() {
       <CalendarStack.Screen
         name="TaskEditor"
         component={TaskEditorModal}
+        getId={taskEditorRouteId}
         options={{ presentation: 'modal', title: t('mobile.newTaskLabel') }}
       />
     </CalendarStack.Navigator>
@@ -454,6 +457,7 @@ function SettingsStackNav() {
       <SettingsStack.Screen
         name="TaskEditor"
         component={TaskEditorModal}
+        getId={taskEditorRouteId}
         options={{ presentation: 'modal', title: t('mobile.newTaskLabel') }}
       />
       <SettingsStack.Screen
@@ -555,8 +559,10 @@ export default function App() {
  *  TaskStoreProvider) and renders the review modal when the gate opens it. The
  *  modal overlays whatever tab is focused — it's app-global, not per-stack. */
 function DayStartChecks() {
-  const { reviewOpen, closeReview } = useDayStartChecks();
-  return <DayStartReviewModal visible={reviewOpen} onClose={closeReview} />;
+  const { reviewOpen, closeReview, reviewRequested } = useDayStartChecks();
+  return (
+    <DayStartReviewModal visible={reviewOpen} onClose={closeReview} requested={reviewRequested} />
+  );
 }
 
 /** Keeps the app-icon badge (today's open tasks + upcoming events) in sync. It
@@ -749,6 +755,10 @@ function AppContent() {
               store, so they mount inside the provider; the review modal overlays
               the focused tab when the gate opens it. */}
           <DayStartChecks />
+          {/* A tap on a reminder opens its appointment or task, on the
+              day-start notification the review (TODO A5). After the unlock,
+              like the review: both present above the lock cover. */}
+          <ReminderTapRouter />
           {/* §19.11 first-launch wizard gate. On a genuinely fresh instance (no
               account / no sync / empty store) it opens the wizard once;
               otherwise it's a no-op. */}

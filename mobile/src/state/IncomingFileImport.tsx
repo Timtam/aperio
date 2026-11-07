@@ -8,20 +8,12 @@ import CalFfi from '../../modules/cal-ffi';
 import { listCalendars } from '../api/calendar';
 import { readImportFile } from '../api/fileImport';
 import { logLine } from '../api/logs';
-import { navigateNested, navigationRef } from '../navigation/navigationRef';
+import { navigateNested, whenNavigationReady } from '../navigation/navigationRef';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from './calendarVisibility';
 import { importTarget, incomingFileOfUrl, readAndPresent } from './fileImportFlow';
 import { newImportToken } from './importProgress';
 import { readLastUsedCalendar } from './lastUsedCalendar';
-
-/** Until the navigation can take the editor or the list: at once on any
- *  open after the first, a moment when the file started the app. */
-async function whenNavigationReady(): Promise<void> {
-  for (let tries = 0; tries < 100 && !navigationRef.isReady(); tries += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
 
 /** Whether the URL the app was launched with was taken: once per run of the
  *  JavaScript, as `Linking.getInitialURL` answers with it for the whole run. */
