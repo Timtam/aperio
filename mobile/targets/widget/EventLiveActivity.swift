@@ -12,26 +12,28 @@ import WidgetKit
 // are the system's own self-updating text, absolute times stay true by
 // themselves. iOS switches the content by itself exactly once, at the stale
 // date: to the next appointment of the chain, or to "over".
+//
+// Apple caps a Live Activity at 160 points: the place and the follow-up keep
+// to one line each, the two relative times share one, so the follow-up is
+// not the line that gets cut. VoiceOver reads truncated text whole.
 
 struct EventLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: AperioEventAttributes.self) { context in
-            EventActivityLockScreen(state: context.state, isStale: context.isStale)
-                .padding(16)
-                .widgetURL(tapURL(context.state, isStale: context.isStale))
+            EventActivitySentence(
+                view: ActivityView(state: context.state, isStale: context.isStale),
+                titleLines: 2
+            )
+            .padding(14)
+            .widgetURL(tapURL(context.state, isStale: context.isStale))
         } dynamicIsland: { context in
             let view = ActivityView(state: context.state, isStale: context.isStale)
             return DynamicIsland {
-                // Everything that matters in the centre and below: VoiceOver
-                // focus is misplaced in the leading and trailing regions of the
-                // expanded island, a bug Apple has confirmed.
-                DynamicIslandExpandedRegion(.center) {
-                    Text(view.shown.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                }
+                // One region holds it all, so VoiceOver meets one sentence that
+                // names the appointment; the leading and trailing regions are
+                // also where Apple's confirmed focus bug misplaces it.
                 DynamicIslandExpandedRegion(.bottom) {
-                    EventActivityDetails(view: view)
+                    EventActivitySentence(view: view, titleLines: 1)
                 }
             } compactLeading: {
                 Image(systemName: "calendar")
@@ -80,70 +82,84 @@ struct ActivityView {
     }
 }
 
-struct EventActivityLockScreen: View {
-    let state: AperioEventAttributes.ContentState
-    let isStale: Bool
-
-    var body: some View {
-        let view = ActivityView(state: state, isStale: isStale)
-        VStack(alignment: .leading, spacing: 4) {
-            Text(view.shown.title)
-                .font(.headline)
-                .lineLimit(2)
-            EventActivityDetails(view: view)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        // One element that reads as one sentence, the live times included.
-        .accessibilityElement(children: .combine)
-    }
-}
-
-struct EventActivityDetails: View {
+/// The whole activity as one element that reads as one sentence: title,
+/// "10:00 – 11:10", the live times, place, follow-up.
+struct EventActivitySentence: View {
     let view: ActivityView
+    let titleLines: Int
 
     var body: some View {
         let shown = view.shown
+        // Hidden on the locked phone when notification previews are.
+        let hide = view.state.hideOnLockScreen
         VStack(alignment: .leading, spacing: 2) {
-            // "10:00 – 11:10": exact, and true without an update.
+            Text(shown.title)
+                .font(.headline)
+                .lineLimit(titleLines)
+                .privacySensitive(hide)
             Text("\(timeText(shown.start, view.locale)) – \(timeText(shown.end, view.locale))")
+                .font(.subheadline)
             if view.over {
                 Text(view.state.words.over)
+                    .font(.subheadline)
             } else {
-                RelativeLine(word: view.state.words.begins, raw: shown.start, locale: view.locale)
-                RelativeLine(word: view.state.words.ends, raw: shown.end, locale: view.locale)
+                RelativeTimes(
+                    words: view.state.words,
+                    start: shown.start,
+                    end: shown.end,
+                    locale: view.locale
+                )
             }
             if let location = shown.location, !location.isEmpty {
                 Text(location)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .privacySensitive(hide)
             }
             if let followUp = view.followUp {
                 Text(followUp)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .privacySensitive(hide)
             }
         }
-        .font(.subheadline)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 }
 
-/// "Beginn in 10 Minuten" / "Beginn vor 5 Minuten", kept up to date by the
-/// system. Before iOS 18 there is no such text; the exact times above then
-/// stand alone.
-struct RelativeLine: View {
-    let word: String
-    let raw: String
+/// "Beginn in 10 Minuten · Ende in 1 Stunde", kept up to date by the system,
+/// on one line. Before iOS 18 there is no such text; the exact times above
+/// then stand alone.
+struct RelativeTimes: View {
+    let words: AperioEventAttributes.Words
+    let start: String
+    let end: String
     let locale: Locale
 
     var body: some View {
         if #available(iOS 18.0, *) {
-            if let date = parseInstant(raw) {
-                (Text(word) + Text(" ")
-                    + Text(
-                        .currentDate,
-                        format: .reference(to: date, allowedFields: [.day, .hour, .minute])
-                    ))
+            if let from = parseInstant(start), let until = parseInstant(end) {
+                (relative(words.begins, from) + Text(" · ") + relative(words.ends, until))
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .environment(\.locale, locale)
             }
         }
+    }
+
+    /// "Beginn in 10 Minuten": a word and the system's live relative time.
+    /// Built in typed steps: one long `+` chain of `Text` can exhaust the type
+    /// checker, and this file is first compiled on a build machine.
+    @available(iOS 18.0, *)
+    private func relative(_ word: String, _ date: Date) -> Text {
+        let live: Text = Text(
+            .currentDate,
+            format: .reference(to: date, allowedFields: [.day, .hour, .minute])
+        )
+        let label: Text = Text(word) + Text(" ")
+        return label + live
     }
 }
 

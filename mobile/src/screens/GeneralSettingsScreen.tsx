@@ -180,26 +180,47 @@ export default function GeneralSettingsScreen() {
   const [haptics, setHaptics] = useHapticsPref();
   // Device-local app-icon badge (today's open tasks + upcoming events; default on).
   const [appBadge, setAppBadge] = useAppBadgePref();
-  // Live Activities for appointments (iPhone; default on), and whether iOS's
-  // own switch for Aperio allows them — read again on every return, so a
-  // change in the iPhone settings shows on the way back.
+  // Live Activities for appointments (default on), offered only where there
+  // are any: an iPhone on iOS 17 or later — an iPad has none, and a switch
+  // there would send the user looking for a setting that does not exist.
+  // Whether iOS's own switch for Aperio allows them is read again on every
+  // return, and said after a trip through the button below, as the
+  // notification line is.
   const [liveActivities, setLiveActivities] = useLiveActivitiesPref();
-  const [liveActivitiesSystemOn, setLiveActivitiesSystemOn] = useState<boolean | null>(null);
+  const [liveSupport, setLiveSupport] = useState<{ available: boolean; enabled: boolean } | null>(
+    null,
+  );
+  const liveSettingsTrip = useRef(false);
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
     const read = () =>
-      void CalFfi.liveActivitySupportJson()
+      CalFfi.liveActivitySupportJson()
         .then((json) => {
           const support = JSON.parse(json) as { available: boolean; enabled: boolean };
-          setLiveActivitiesSystemOn(support.available ? support.enabled : null);
+          setLiveSupport(support);
+          return support;
         })
-        .catch(() => setLiveActivitiesSystemOn(null));
-    read();
+        .catch(() => {
+          setLiveSupport(null);
+          return null;
+        });
+    void read();
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') read();
+      if (state !== 'active') return;
+      void read().then((support) => {
+        if (!liveSettingsTrip.current || support == null) return;
+        liveSettingsTrip.current = false;
+        void sayAfterUnlock(
+          t(
+            support.enabled
+              ? 'dialogs.settings.general.liveActivitiesSystemOn'
+              : 'dialogs.settings.general.liveActivitiesSystemOff',
+          ),
+        );
+      });
     });
     return () => sub.remove();
-  }, []);
+  }, [sayAfterUnlock, t]);
   // Device-local OS background sync (default on) — wakes the app to sync while
   // it's backgrounded/closed; the OS decides the exact timing.
   const [bgSync, setBgSync] = useBackgroundSyncPref();
@@ -460,7 +481,7 @@ export default function GeneralSettingsScreen() {
           value={appBadge}
           onToggle={() => setAppBadge(!appBadge)}
         />
-        {Platform.OS === 'ios' && (
+        {liveSupport?.available === true && (
           <>
             <SwitchRow
               label={t('dialogs.settings.general.liveActivitiesLabel')}
@@ -470,7 +491,7 @@ export default function GeneralSettingsScreen() {
               // every reminder back as a notification.
               onToggle={() => void setLiveActivities(!liveActivities).then(rescheduleReminders)}
             />
-            {liveActivities && liveActivitiesSystemOn === false && (
+            {liveActivities && !liveSupport.enabled && (
               <>
                 <Text style={styles.hint} accessibilityRole="text">
                   {t('dialogs.settings.general.liveActivitiesSystemOff')}
@@ -478,7 +499,12 @@ export default function GeneralSettingsScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={t('mobile.notificationPermission.openSettings')}
-                  onPress={() => void Linking.openSettings().catch(() => {})}
+                  onPress={() => {
+                    liveSettingsTrip.current = true;
+                    void Linking.openSettings().catch(() => {
+                      liveSettingsTrip.current = false;
+                    });
+                  }}
                   style={({ pressed }) => [styles.button, pressed && styles.pressed]}
                 >
                   <Text style={styles.buttonText} importantForAccessibility="no">

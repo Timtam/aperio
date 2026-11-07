@@ -71,10 +71,12 @@ function input(overrides: Partial<ReconcileInput>): ReconcileInput {
     memory: EMPTY_ACTIVITY_MEMORY,
     foreground: true,
     canSchedule: true,
+    planAhead: true,
     enabled: true,
     isSilent: () => false,
     locale: 'de',
     words: WORDS,
+    hideOnLockScreen: false,
     ...overrides,
   };
 }
@@ -143,12 +145,14 @@ describe('reconcileIosActivities — starting and scheduling', () => {
 });
 
 describe('reconcileIosActivities — what already runs or waits', () => {
+  // What a schedule at 09:50 sent: the content as of the start.
+  const SENT = JSON.stringify(activityContent(CROSSFADE, new Date(at('09:50')), 'de', WORDS));
   const scheduled = (
     memory: Partial<ActivityMemory['activities'][string]> = {},
     id = 'p1',
   ): ActivityMemory => ({
     activities: {
-      [id]: { keys: ['A', 'B'], shownKey: 'A', startsAt: at('09:50'), content: '', ...memory },
+      [id]: { keys: ['A', 'B'], shownKey: 'A', startsAt: at('09:50'), content: SENT, ...memory },
     },
     dismissed: {},
   });
@@ -191,7 +195,82 @@ describe('reconcileIosActivities — what already runs or waits', () => {
       }),
     );
     expect(types(result.actions)).toEqual(['update']);
-    expect(result.memory.activities.a1.keys).toEqual(['A', 'B']);
+    // The chain's keys as they are now, not every key it ever had.
+    expect(result.memory.activities.a1.keys).toEqual(['B']);
+  });
+
+  it('never lets a running activity jump ahead to a chain that has not begun', () => {
+    // B left the chain (moved to the afternoon) while A ran, and nothing
+    // reconciled before A ended.
+    const later: LiveActivityChain = {
+      keys: ['B'],
+      start: at('14:50'),
+      end: at('16:00'),
+      sections: [section('B', '14:50', '16:00', { start: '15:00', signal: true })],
+    };
+    const result = reconcileIosActivities(
+      input({
+        now: new Date(at('11:30')),
+        chains: [later],
+        reported: [{ id: 'a1', chainKey: 'A', state: 'active' }],
+        memory: scheduled({ startsAt: at('09:50') }, 'a1'),
+      }),
+    );
+    expect(types(result.actions)).toEqual(['end', 'schedule']);
+  });
+
+  it('ends a waiting activity whose reminder has become silent', () => {
+    const result = reconcileIosActivities(
+      input({
+        chains: [CROSSFADE],
+        reported: [{ id: 'p1', chainKey: 'A', state: 'pending' }],
+        memory: scheduled(),
+        isSilent: () => true,
+      }),
+    );
+    expect(result.actions).toEqual([{ type: 'end', id: 'p1' }]);
+    expect(result.covered).toEqual([]);
+  });
+
+  it('plans a waiting activity again when what it will show has changed', () => {
+    const args = input({
+      chains: [CROSSFADE],
+      reported: [{ id: 'p1', chainKey: 'A', state: 'pending' }],
+      memory: scheduled({ content: '{"title":"old"}' }),
+    });
+    expect(types(reconcileIosActivities(args).actions)).toEqual(['end', 'schedule']);
+    // From the background it cannot be planned again: it stays, and covers.
+    const background = reconcileIosActivities({ ...args, foreground: false });
+    expect(background.actions).toEqual([]);
+    expect(background.covered.map((k) => k.item_id)).toEqual(['A']);
+  });
+
+  it('keeps the earliest chains waiting when an earlier one appears', () => {
+    const b = single('B', '11:00', '12:00');
+    const c = single('C', '13:00', '14:00');
+    const d = single('D', '15:00', '16:00');
+    const sent = (chain: LiveActivityChain) =>
+      JSON.stringify(activityContent(chain, new Date(chain.start), 'de', WORDS));
+    const result = reconcileIosActivities(
+      input({
+        chains: [b, c, d],
+        reported: [
+          { id: 'pc', chainKey: 'C', state: 'pending' },
+          { id: 'pd', chainKey: 'D', state: 'pending' },
+        ],
+        memory: {
+          activities: {
+            pc: { keys: ['C'], shownKey: 'C', startsAt: c.start, content: sent(c) },
+            pd: { keys: ['D'], shownKey: 'D', startsAt: d.start, content: sent(d) },
+          },
+          dismissed: {},
+        },
+      }),
+    );
+    expect(result.actions.map((a) => (a.type === 'schedule' ? `schedule ${a.chainKey}` : `${a.type} ${'id' in a ? a.id : ''}`))).toEqual([
+      'end pd',
+      'schedule B',
+    ]);
   });
 
   it('sends no update when nothing changed', () => {
@@ -250,6 +329,13 @@ describe('reconcileIosActivities — a swipe, inferred', () => {
       }),
     );
     expect(types(later.actions)).toEqual(['start']);
+  });
+
+  it('is no swipe when Live Activities are off, as iOS then removes them all', () => {
+    const result = reconcileIosActivities(
+      input({ now: new Date(at('10:10')), chains: [CROSSFADE], memory: started, enabled: false }),
+    );
+    expect(result.memory.dismissed).toEqual({});
   });
 
   it("is no swipe when iOS's eight hours ran out", () => {

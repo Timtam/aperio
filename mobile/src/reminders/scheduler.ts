@@ -209,7 +209,11 @@ export const rescheduleReminders: () => Promise<void> = withFollowUp(rescheduleO
 
 async function rescheduleOnce(): Promise<void> {
   try {
-    if (!(await ensurePermission())) return;
+    const permitted = await ensurePermission();
+    // Live Activities need no notification permission, and must still be
+    // kept in step — ended when switched off or when their appointment went —
+    // without it. Android has nothing else to do then.
+    if (!permitted && Platform.OS !== 'ios') return;
     await ensureLaunchSettle();
     await ensureAndroidChannel();
     const hidden = await getHiddenCalendars();
@@ -217,6 +221,7 @@ async function rescheduleOnce(): Promise<void> {
     // which reminders a waiting activity stands for (DESIGN-live-activities.md,
     // one signal): those are not scheduled again here.
     const { items, covered } = await remindersAndActivities(HORIZON_MINUTES, hidden);
+    if (!permitted) return;
     // Day-start "today's tasks" notifications, pre-computed for the same
     // horizon — the in-app day-start check only runs while the app is open,
     // so without these the 9:00 nudge arrived only when the user next opened

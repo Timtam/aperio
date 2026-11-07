@@ -537,7 +537,21 @@ beim nächsten Öffnen.
 - **Antippen:** `aperio://event?eventId=…&calendarId=…&start=…&title=…`, jeder
   Wert bis auf Buchstaben und Ziffern kodiert (`URLQueryItem` ließe `&` und `=`
   stehen); gelesen von `reminderTapOfUrl`, geöffnet vom `ReminderTapRouter`.
-- **Schalter** vorerst nur auf iOS; Android bekommt ihn mit Stufe 5.
+- **Schalter** vorerst nur auf iOS; Android bekommt ihn mit Stufe 5. Nur auf
+  einem iPhone ab iOS 17: Das iPad hat keine Live-Aktivitäten. Nach dem Weg
+  über den Knopf zu den iPhone-Einstellungen sagt Aperio, wie es steht.
+- **Aus der Prüfrunde:** Eine wartende Aktivität bleibt nur, solange sie zu den
+  frühesten zwei Ketten gehört und ihre Erinnerung nicht stumm ist; hat sich ihr
+  Inhalt geändert, wird sie im Vordergrund neu eingeplant. Gemerkt werden die
+  Schlüssel der Kette, wie sie jetzt ist (nicht alle je gesehenen), und eine
+  laufende Aktivität springt nie zu einer Kette, die noch nicht begonnen hat.
+  Sind Live-Aktivitäten aus, gilt nichts als weggewischt. Der Abgleich läuft
+  auch ohne Benachrichtigungs-Berechtigung. Beide Zeitangaben stehen auf einer
+  Zeile, Ort und Anschluss sind einzeilig (Apple begrenzt auf 160 Punkte), und
+  die erweiterte Insel ist ein einziges Element mit Titel.
+- **Sperrbildschirm:** Aperio liest die Vorschau-Einstellung der
+  Mitteilungen; steht sie nicht auf „Immer“, sind Titel, Ort und Anschluss
+  `privacySensitive` (Feld `hideOnLockScreen`).
 
 ## Antippen öffnet den Termin
 

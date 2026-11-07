@@ -1604,8 +1604,8 @@ public class CalFfiModule: Module {
     // `shared/liveActivityIos.ts` decides; these only carry it out
     // (LiveActivityBridge.swift). Start and schedule on the main queue, where
     // ActivityKit's requests are made in Apple's own samples.
-    AsyncFunction("liveActivitySupportJson") { () -> String in
-      LiveActivityBridge.supportJson()
+    AsyncFunction("liveActivitySupportJson") { () async -> String in
+      await LiveActivityBridge.supportJson()
     }
 
     AsyncFunction("liveActivityListJson") { () -> String in

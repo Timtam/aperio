@@ -148,9 +148,9 @@ the line out.
 ## Live Activities (iPhone)
 
 From an appointment's **last reminder** until it ends, the iPhone keeps it on
-the lock screen and in the Dynamic Island: its title, **10:00 – 11:10**, how far
-off the start and the end are ("Begins in 10 minutes, Ends in 1 hour"), the
-place, and what comes next that day ("Next: Review at 11:00").
+the lock screen and in the Dynamic Island: its title, **10:00 – 11:10**, from
+iOS 18 also how far off the start and the end are ("Start in 10 minutes · End in
+1 hour"), the place, and what comes next that day ("Next: Review at 11:00").
 When the next appointment's reminder is due while one is still on, the activity
 moves on to it.
 
@@ -164,9 +164,14 @@ moves on to it.
 - No activity for all-day appointments, for appointments without a reminder,
   for appointments from the iPhone's own calendar, or when the last reminder is
   more than two hours before the start.
-- Swiping an activity away keeps that appointment's away; the next appointment
+- Swiping an activity away keeps that appointment away; the next appointment
   with its own reminder comes again.
 - Tapping it opens the appointment.
+- If the iPhone shows notification previews only when unlocked (or never), the
+  title, place and follow-up are marked private on the lock screen. Whether iOS
+  blanks them there is not yet tried on a device.
+- iPhone only: an iPad has no Live Activities, and the switch is not shown
+  there.
 
 VoiceOver reads each activity as one sentence, the self-updating times
 included. Without Aperio running, the iPhone changes an activity only once by

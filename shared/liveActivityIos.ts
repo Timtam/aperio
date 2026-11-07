@@ -53,6 +53,9 @@ export interface ActivityContent {
   /** Higher wins the Dynamic Island: a later chain over an older one that
    *  only says it is over. */
   relevance: number;
+  /** The phone shows notification previews only when unlocked, or never:
+   *  title, place and follow-up are then marked private on the lock screen. */
+  hideOnLockScreen: boolean;
 }
 
 /** An activity as ActivityKit reports it. */
@@ -105,8 +108,12 @@ export interface ReconcileInput {
   memory: ActivityMemory;
   /** Aperio is in front: only then may an activity start or be scheduled. */
   foreground: boolean;
-  /** iOS 26 or later: an activity can be scheduled ahead. */
+  /** iOS 26 or later: an activity can be scheduled ahead. Decides which
+   *  waiting activities are kept, even where nothing new may be planned. */
   canSchedule: boolean;
+  /** New activities may be scheduled now: in front, with fresh data. The
+   *  quick start from the last plan plans nothing. */
+  planAhead: boolean;
   /** Aperio's switch is on and iOS allows Live Activities. Off ends them all. */
   enabled: boolean;
   /** Whether the reminder a signal stands for is silent: a scheduled start
@@ -114,6 +121,8 @@ export interface ReconcileInput {
   isSilent: (signal: LiveTriggerKey[]) => boolean;
   locale: string;
   words: ActivityWords;
+  /** Notification previews are not shown on the locked phone. */
+  hideOnLockScreen: boolean;
 }
 
 export interface ReconcileResult {
@@ -126,8 +135,8 @@ export interface ReconcileResult {
   memory: ActivityMemory;
 }
 
-/** At most this many activities wait to start: scheduled ones count against
- *  the per-app limit (reported as five). */
+/** At most this many activities wait to start, the earliest ones: scheduled
+ *  ones count against the per-app limit (reported as five). */
 export const MAX_PENDING = 2;
 
 /** iOS ends an activity after eight hours; one gone before is a swipe. */
@@ -168,6 +177,7 @@ export function activityContent(
   now: Date,
   locale: string,
   words: ActivityWords,
+  hideOnLockScreen = false,
 ): ActivityContent {
   const i = currentIndex(chain, now.getTime());
   const current = chain.sections[i];
@@ -179,6 +189,7 @@ export function activityContent(
     next: later ? shown(later) : null,
     staleAt: later ? later.from : chain.end,
     relevance: Math.floor(ms(chain.start) / 1000),
+    hideOnLockScreen,
   };
 }
 
@@ -221,19 +232,37 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
   const chains = input.chains.filter((chain) => ms(chain.end) > now);
   const reported = new Map(input.reported.map((a) => [a.id, a]));
 
-  // Gone without Aperio ending it: a swipe, unless iOS's limit ran out.
-  for (const [id, remembered] of Object.entries(input.memory.activities)) {
-    const report = reported.get(id);
-    const gone = report == null || report.state === 'dismissed' || report.state === 'ended';
-    if (!gone) continue;
-    const started = ms(remembered.startsAt);
-    if (started <= now && now - started < SYSTEM_END_MS) {
-      dismissed[remembered.shownKey] = input.now.toISOString();
+  // Gone without Aperio ending it: a swipe, unless iOS's limit ran out — or
+  // Live Activities are off, when iOS removes them all itself.
+  if (input.enabled) {
+    for (const [id, remembered] of Object.entries(input.memory.activities)) {
+      const report = reported.get(id);
+      const gone = report == null || report.state === 'dismissed' || report.state === 'ended';
+      if (!gone) continue;
+      const started = ms(remembered.startsAt);
+      if (started <= now && now - started < SYSTEM_END_MS) {
+        dismissed[remembered.shownKey] = input.now.toISOString();
+      }
     }
   }
 
+  // The chains that should wait to start: the EARLIEST few, never a silent
+  // reminder's (a scheduled start always alerts).
+  const toSchedule = new Set(
+    input.canSchedule
+      ? chains
+          .filter((chain) => ms(chain.start) > now)
+          .filter((chain) => {
+            const signal = firstSignal(chain);
+            return signal.length > 0 && !input.isSilent(signal);
+          })
+          .slice(0, MAX_PENDING)
+      : [],
+  );
+  const contentAtStart = (chain: LiveActivityChain) =>
+    activityContent(chain, new Date(ms(chain.start)), input.locale, input.words, input.hideOnLockScreen);
+
   const served = new Set<LiveActivityChain>();
-  let pending = 0;
   for (const report of input.reported) {
     if (report.state === 'ended' || report.state === 'dismissed') continue;
     // Aperio ends these itself, so they are no swipes next time: they leave
@@ -249,28 +278,40 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
       continue;
     }
     if (report.state === 'pending') {
-      // A start cannot be moved: one planned for another time, or for another
-      // first appointment, is ended and planned again.
+      // A start cannot be moved: one planned for another time, for another
+      // first appointment, for a reminder now silent, or beyond the earliest
+      // few, is ended — and planned again in front.
+      const sent = JSON.stringify(contentAtStart(chain));
       const stillRight =
         remembered != null &&
         ms(remembered.startsAt) === ms(chain.start) &&
         report.chainKey === chainKeyOf(chain) &&
-        pending < MAX_PENDING;
-      if (!stillRight) {
+        toSchedule.has(chain);
+      // What it will show has changed (a new title, room, follow-up): planned
+      // again where that is possible; from the background it stays as it is.
+      const stale = remembered != null && remembered.content !== sent;
+      if (!stillRight || (stale && input.foreground && input.planAhead)) {
         actions.push({ type: 'end', id: report.id });
         continue;
       }
       served.add(chain);
-      pending += 1;
       covered.push(...firstSignal(chain));
       activities[report.id] = { ...remembered, keys: [...chain.keys] };
       continue;
     }
+    // A running activity never jumps ahead to a chain that has not begun: an
+    // appointment that has left its chain must not pull the activity along.
+    if (ms(chain.start) > now && !(remembered != null && chain.keys.includes(remembered.shownKey))) {
+      actions.push({ type: 'end', id: report.id });
+      continue;
+    }
     served.add(chain);
-    const content = activityContent(chain, input.now, input.locale, input.words);
+    const content = activityContent(chain, input.now, input.locale, input.words, input.hideOnLockScreen);
     const sent = JSON.stringify(content);
     activities[report.id] = {
-      keys: [...new Set([...(remembered?.keys ?? []), ...chain.keys])],
+      // The chain's keys as they are now: they hold the next appointment
+      // already, which is what finds the activity once the first is over.
+      keys: [...chain.keys],
       shownKey: content.current.key,
       startsAt: remembered?.startsAt ?? chain.start,
       content: sent,
@@ -283,23 +324,20 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
       if (served.has(chain)) continue;
       if (ms(chain.start) <= now) {
         // Running: started now, without an alert — the reminder rang already.
-        const content = activityContent(chain, input.now, input.locale, input.words);
+        const content = activityContent(chain, input.now, input.locale, input.words, input.hideOnLockScreen);
         if (dismissed[content.current.key] != null) continue;
         actions.push({ type: 'start', chainKey: chainKeyOf(chain), content, keys: [...chain.keys] });
         continue;
       }
-      if (!input.canSchedule || pending >= MAX_PENDING) continue;
-      const signal = firstSignal(chain);
-      if (signal.length === 0 || input.isSilent(signal)) continue;
-      pending += 1;
+      if (!input.planAhead || !toSchedule.has(chain)) continue;
       actions.push({
         type: 'schedule',
         chainKey: chainKeyOf(chain),
         // As of its start: what the alert opens onto.
-        content: activityContent(chain, new Date(ms(chain.start)), input.locale, input.words),
+        content: contentAtStart(chain),
         keys: [...chain.keys],
         at: chain.start,
-        signal,
+        signal: firstSignal(chain),
       });
     }
   }

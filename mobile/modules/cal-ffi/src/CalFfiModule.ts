@@ -496,9 +496,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
 
   // ── Live Activities, iOS only (ActivityKit; DESIGN-live-activities.md) ──
   // The rules are in `shared/liveActivityIos.ts`; these only carry them out.
-  /** JSON `{available, enabled, canSchedule}`: iOS 17 or later (the widget
-   *  extension that draws an activity needs it), iOS's per-app switch, and
-   *  iOS 26 or later (an activity can be scheduled ahead). */
+  /** JSON `{available, enabled, canSchedule, previews}`: an iPhone on iOS 17
+   *  or later (the widget extension that draws an activity needs it; an iPad
+   *  has none), iOS's per-app switch, iOS 26 or later (an activity can be
+   *  scheduled ahead), and the notification preview setting (`always`,
+   *  `whenUnlocked`, `never`) the activity follows on the lock screen. */
   liveActivitySupportJson(): Promise<string>;
   /** JSON `[{id, chainKey, state}]` of Aperio's activities, `state` one of
    *  `pending`, `active`, `stale`, `ended`, `dismissed`. */

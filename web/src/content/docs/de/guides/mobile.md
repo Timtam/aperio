@@ -166,8 +166,9 @@ Aperio die Zeile an.
 
 Von der **letzten Erinnerung** eines Termins bis zu seinem Ende hält das iPhone
 ihn auf dem Sperrbildschirm und in der Dynamic Island: Titel, **10:00 – 11:10**,
-wie weit Beginn und Ende entfernt sind („Beginn in 10 Minuten, Ende in 1
-Stunde“), Ort und was an dem Tag danach kommt („Danach: Review um 11:00“).
+ab iOS 18 auch, wie weit Beginn und Ende entfernt sind („Beginn in 10 Minuten ·
+Ende in 1 Stunde“), Ort und was an dem Tag danach kommt („Danach: Review um
+11:00“).
 Ist die Erinnerung des nächsten Termins fällig, während noch einer läuft,
 wechselt die Aktivität zu ihm.
 
@@ -184,6 +185,10 @@ wechselt die Aktivität zu ihm.
 - Wischst du eine Aktivität weg, bleibt dieser Termin weg; der nächste Termin
   mit eigener Erinnerung kommt wieder.
 - Ein Tipp öffnet den Termin.
+- Zeigt das iPhone Vorschauen von Mitteilungen nur entsperrt (oder nie), sind
+  Titel, Ort und Anschluss auf dem Sperrbildschirm als privat markiert. Ob iOS
+  sie dort ausblendet, ist am Gerät noch nicht ausprobiert.
+- Nur iPhone: Das iPad hat keine Live-Aktivitäten, und der Schalter fehlt dort.
 
 VoiceOver liest jede Aktivität als einen Satz, die mitlaufenden Zeiten
 eingeschlossen. Ohne laufendes Aperio ändert das iPhone eine Aktivität nur

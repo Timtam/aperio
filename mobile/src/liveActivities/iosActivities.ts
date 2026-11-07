@@ -35,6 +35,7 @@ interface Support {
   available: boolean;
   enabled: boolean;
   canSchedule: boolean;
+  previews: 'always' | 'whenUnlocked' | 'never';
 }
 
 /** A reminder of the notification list as a trigger key. */
@@ -102,11 +103,13 @@ function syncIosActivities(
       reported,
       memory: await readMemory(),
       foreground: opts.foreground,
-      canSchedule: support.canSchedule && opts.mayPlan,
+      canSchedule: support.canSchedule,
+      planAhead: opts.mayPlan,
       enabled,
       isSilent: (signal) => signal.some((k) => silent.has(triggerKeyId(k))),
       locale: i18n.language,
       words: words(),
+      hideOnLockScreen: support.previews !== 'always',
     });
     for (const key of result.covered) covered.add(triggerKeyId(key));
     let memory = result.memory;

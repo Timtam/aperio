@@ -1,5 +1,7 @@
 import ActivityKit
 import Foundation
+import UIKit
+import UserNotifications
 
 // Carries out what `shared/liveActivityIos.ts` decides (DESIGN-live-activities
 // .md, "iOS"): list, start, schedule, change and end Aperio's Live Activities.
@@ -40,19 +42,38 @@ enum LiveActivityBridge {
         return plain.date(from: raw)
     }
 
-    /// `{available, enabled, canSchedule}`.
-    static func supportJson() -> String {
+    /// `{available, enabled, canSchedule, previews}`.
+    ///
+    /// Not available on an iPad, which has no Live Activities: a switch there
+    /// would send the user to look for a setting that does not exist.
+    /// `previews` is the notification preview setting (`always`,
+    /// `whenUnlocked`, `never`), which the activity follows on the lock screen.
+    static func supportJson() async -> String {
+        let idiom = await MainActor.run { UIDevice.current.userInterfaceIdiom }
         var available = false
         var enabled = false
         var canSchedule = false
-        if #available(iOS 17.0, *) {
+        if #available(iOS 17.0, *), idiom == .phone {
             available = true
             enabled = ActivityAuthorizationInfo().areActivitiesEnabled
+            if #available(iOS 26.0, *) {
+                canSchedule = true
+            }
         }
-        if #available(iOS 26.0, *) {
-            canSchedule = true
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let previews: String
+        switch settings.showPreviewsSetting {
+        case .always: previews = "always"
+        case .whenAuthenticated: previews = "whenUnlocked"
+        case .never: previews = "never"
+        @unknown default: previews = "always"
         }
-        return json(["available": available, "enabled": enabled, "canSchedule": canSchedule])
+        return json([
+            "available": available,
+            "enabled": enabled,
+            "canSchedule": canSchedule,
+            "previews": previews,
+        ])
     }
 
     /// `[{id, chainKey, state}]`. The state is read by its name: `.pending`

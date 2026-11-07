@@ -43,6 +43,9 @@ struct AperioEventAttributes: ActivityAttributes {
         var next: Shown?
         var staleAt: String
         var relevance: Double
+        /// The phone shows notification previews only when unlocked (or
+        /// never): title, place and follow-up are then marked private.
+        var hideOnLockScreen: Bool
     }
 
     /// The chain's first appointment: what Aperio finds the activity by.
