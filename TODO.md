@@ -225,6 +225,17 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   und Lesen der Daten in `shared/reminderTap.ts` (vitest), geöffnet nach dem
   Entsperren (`ReminderTapRouter`). Die Live-Aktivität hängt sich später an
   dieselbe Route.
+  ↳ Aus der Prüfrunde (11 Befunde): `navigateNested` mit `initial: false`
+  (ein noch nicht gezeigter Tab hielt sonst nur den Editor, auch beim
+  Datei-Import); Kalender vor dem Termin lesen (Kaltstart fand den externen
+  Termin sonst nicht); eigene Route je Tipp; Sperre auch beim Weggehen (iOS
+  liefert den Tipp vor dem erneuten Sperren); Tageswechsel-Tipp wartet auf die
+  noch fällige Prüfung; fremde Einladung zeigt die Zeiten des Vorkommens.
+- [ ] **Folgepunkt:** Ein Tipp auf die Tageswechsel-Benachrichtigung, während
+  ein Editor-Blatt offen ist: Die Übersicht ist ein Wurzel-Modal und kommt auf
+  iOS vermutlich nicht über das Blatt (wie bei der Tagesprüfung selbst, siehe
+  Gedächtnis „Wurzel-Modal nicht über Blatt“). Erst nach Tonis Gerätetest
+  entscheiden.
 - [ ] **4 · iOS:** Ansichten und `ActivityConfiguration` in der Widget-
   Erweiterung, `NSSupportsLiveActivities`, Attribut-Struktur doppelt mit
   Wächter, Brücke, Abgleich (Vordergrund, Hintergrund, Kaltstart aus dem

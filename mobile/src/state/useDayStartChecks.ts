@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState } from 'react-native';
 
 import {
+  DAY_START_TAP_DATA,
   filterDeadlinePinTargets,
   planDayStart,
   reminderCount,
@@ -19,7 +20,7 @@ import { settleExternalCaches } from './cacheSettle';
 import { notify } from './notify';
 import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
-import { onDayStartReviewRequested } from './dayStartRequest';
+import { onDayStartReviewRequests } from './dayStartRequest';
 import { isDayStartReviewSnoozed } from './dayStartSnooze';
 import { whenDeviceAccessSettled } from './deviceAccessGate';
 import { whenStartupSettled } from './startupGate';
@@ -300,6 +301,8 @@ async function runDayStartReview(
       i18n.t('dialogs.dayStartReview.reminders.notificationTitle'),
       i18n.t('dialogs.dayStartReview.reminders.notificationBody', { count: surfaced }),
       'day-start reminders notification',
+      // A tap opens the review, as on the pre-scheduled one.
+      DAY_START_TAP_DATA,
     );
   }
 
@@ -343,7 +346,12 @@ let inFlight = false;
  * and the checker lives above the navigator, so a navigation screen would be the
  * wrong tool; an app-level modal driven by this flag is the fit.
  */
-export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => void } {
+export function useDayStartChecks(): {
+  reviewOpen: boolean;
+  closeReview: () => void;
+  /** The review was opened by a tap on its notification. */
+  reviewRequested: boolean;
+} {
   const { invalidateData, selectedTaskListIds, taskListsLoading, refreshTaskLists } =
     useTaskStore();
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -364,20 +372,21 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
   appLockedRef.current = appLocked;
 
   const openReview = useCallback(() => setReviewOpen(true), []);
-  const closeReview = useCallback(() => setReviewOpen(false), []);
+  const [reviewRequested, setReviewRequested] = useState(false);
+  const closeReview = useCallback(() => {
+    setReviewOpen(false);
+    setReviewRequested(false);
+  }, []);
 
-  // A tap on the day-start notification (`ReminderTapRouter`) opens the review
-  // now — also when today's pass has run or a snooze holds, because the user
-  // asked. The review reads its own rows and closes itself when nothing is
-  // left. Held, like every pass here, while the lock covers the app.
+  // A tap on the day-start notification (`ReminderTapRouter`) asks for the
+  // review; `openAfterPass` makes today's pass open it when it ends.
   const [requested, setRequested] = useState(false);
-  useEffect(() => onDayStartReviewRequested(() => setRequested(true)), []);
-  useEffect(() => {
-    if (!requested || appLocked) return;
-    setRequested(false);
+  const openAfterPass = useRef(false);
+  const openRequested = useCallback(() => {
     invalidateData();
+    setReviewRequested(true);
     setReviewOpen(true);
-  }, [requested, appLocked, invalidateData]);
+  }, [invalidateData]);
 
   const runInner = useCallback(() => {
     void (async () => {
@@ -468,9 +477,16 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
         );
       } finally {
         inFlight = false;
+        // A tap asked for the review while this pass was due or running:
+        // it opens now, after the pass has settled, carried and spoken.
+        if (openAfterPass.current) {
+          openAfterPass.current = false;
+          if (appLockedRef.current) setRequested(true);
+          else openRequested();
+        }
       }
     })();
-  }, [invalidateData, openReview, refreshTaskLists]);
+  }, [invalidateData, openReview, openRequested, refreshTaskLists]);
 
   const run = useCallback(() => {
     // Startup-gated: the deadline-pin + review passes fan out over every
@@ -482,6 +498,40 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
     // precheck, so it costs a warm kick only while a day-start slot is due.
     whenStartupSettled('dayStart', runInner);
   }, [runInner]);
+
+  // The tap opens the review — also when today's pass has run or a snooze
+  // holds, because the user asked. But while today's pass is still due, or
+  // running, it waits for the pass: the pass settles the caches, carries the
+  // slipped rows silently and speaks first, and a review opened before it
+  // would show rows about to move under the focus and hear the pass talk over
+  // it. Held, like every pass here, while the lock covers the app.
+  useEffect(
+    () =>
+      onDayStartReviewRequests({
+        open: () => setRequested(true),
+        close: closeReview,
+      }),
+    [closeReview],
+  );
+  useEffect(() => {
+    if (!requested || appLocked) return;
+    setRequested(false);
+    void (async () => {
+      const behaviour = await readTaskBehaviour();
+      const due =
+        shouldFireToday(
+          behaviour.dayStartTrigger,
+          await readFiredDayKey('dayStartReview'),
+          todayIsoKey(),
+        ) && !(await isDayStartReviewSnoozed());
+      if (inFlight || due) {
+        openAfterPass.current = true;
+        run();
+        return;
+      }
+      openRequested();
+    })().catch(() => openRequested());
+  }, [requested, appLocked, openRequested, run]);
 
   // Launch + catalog-ready: fire once the task-list catalog + selection have
   // hydrated (taskListsLoading flips false). Re-firing here is harmless — the
@@ -505,5 +555,5 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
     if (!appLocked) run();
   }, [appLocked, run]);
 
-  return { reviewOpen, closeReview };
+  return { reviewOpen, closeReview, reviewRequested };
 }

@@ -262,7 +262,12 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
     [runUnlock],
   );
 
-  const contextLocked = enabled !== false && locked;
+  // Also while the cover hides the app on its way out and back: on iOS a
+  // tapped notification arrives before the app is active again, which is
+  // before the relock below has run, and a flow acting then would open its
+  // editor or modal over a lock about to engage. The 'active' branch clears
+  // `covered` and engages the lock in one handler, so there is no gap.
+  const contextLocked = enabled !== false && (locked || (enabled === true && covered));
   const coverShown = enabled !== false && (locked || covered);
   const showUnlock = enabled === true && locked;
 

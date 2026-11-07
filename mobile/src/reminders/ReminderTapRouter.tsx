@@ -1,38 +1,64 @@
 import { eventTapParams, isBirthdayEventId, reminderTapOf, type ReminderTap } from '@aperio/shared';
 import * as Notifications from 'expo-notifications';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { getEventById, listCalendars } from '../api/calendar';
 import { logLine } from '../api/logs';
 import { navigateNested, whenNavigationReady } from '../navigation/navigationRef';
 import { useAppLockLocked } from '../state/appLockContext';
-import { requestDayStartReview } from '../state/dayStartRequest';
+import { closeDayStartReview, requestDayStartReview } from '../state/dayStartRequest';
 
-/** Open what a tapped notification is about. */
-async function openTap(tap: ReminderTap): Promise<void> {
+let tapCount = 0;
+
+/** A route of its own for every tap: navigating to an editor of the same name
+ *  otherwise reuses the one that is up and replaces its params under state
+ *  seeded from the old ones — unsaved edits gone, the old scope kept. */
+function newTapToken(): string {
+  tapCount += 1;
+  return `tap:${Date.now()}:${tapCount}`;
+}
+
+/**
+ * Open what a tapped notification is about. `'locked'` when the lock came up
+ * while the event was being read: nothing was opened, and the tap waits for
+ * the unlock again.
+ */
+async function openTap(tap: ReminderTap, isLocked: () => boolean): Promise<'opened' | 'locked'> {
   await whenNavigationReady();
-  switch (tap.kind) {
-    case 'task':
-      navigateNested('TasksTab', 'TaskEditor', { taskId: tap.taskId, listId: tap.listId });
-      return;
-    case 'dayStart':
-      requestDayStartReview();
-      return;
-    case 'event': {
-      // The row decides how the occurrence opens: a series, a single change
-      // of one, someone else's meeting. Read from the cache, so it costs no
-      // network; a failed read opens the event as it is.
-      const [row, calendars] = await Promise.all([
-        isBirthdayEventId(tap.eventId)
-          ? Promise.resolve(null)
-          : getEventById(tap.eventId, tap.calendarId).catch(() => null),
-        listCalendars().catch(() => []),
-      ]);
-      const calendar = calendars.find((c) => c.id === tap.calendarId) ?? null;
-      navigateNested('CalendarTab', 'EventEditor', eventTapParams(tap, row, calendar));
-      return;
-    }
+  if (tap.kind === 'dayStart') {
+    requestDayStartReview();
+    return 'opened';
   }
+  let open: () => void;
+  if (tap.kind === 'task') {
+    open = () =>
+      navigateNested('TasksTab', 'TaskEditor', {
+        taskId: tap.taskId,
+        listId: tap.listId,
+        tapToken: newTapToken(),
+      });
+  } else {
+    // The row decides how the occurrence opens: a series, a single change of
+    // one, someone else's meeting. Read from the cache, so it costs no
+    // network; a failed read opens the event as it is. The calendars FIRST:
+    // an external event resolves through the route their listing fills, and
+    // on a cold start nothing else has filled it yet.
+    const calendars = await listCalendars().catch(() => []);
+    const row = isBirthdayEventId(tap.eventId)
+      ? null
+      : await getEventById(tap.eventId, tap.calendarId).catch(() => null);
+    const calendar = calendars.find((c) => c.id === tap.calendarId) ?? null;
+    const params = eventTapParams(tap, row, calendar);
+    open = () =>
+      navigateNested('CalendarTab', 'EventEditor', { ...params, tapToken: newTapToken() });
+  }
+  // The reads take a moment, and the app can be covered again by then.
+  if (isLocked()) return 'locked';
+  // The day-start review is a native modal: an editor opened under it would
+  // be out of sight and out of reach.
+  closeDayStartReview();
+  open();
+  return 'opened';
 }
 
 /**
@@ -40,34 +66,48 @@ async function openTap(tap: ReminderTap): Promise<void> {
  * notification opens the day-start review (TODO A5, DESIGN §14.3).
  *
  * The response is the LAST one the OS handed over, which also covers the tap
- * that started the app. It is acted on only once the app lock is open: the
- * editor and the review present above everything, the lock cover included.
- * After that it is cleared, so a remount does not open it a second time.
+ * that started the app. It is cleared once taken, so a remount does not open
+ * it again, and acted on only while the app lock is open — the editor and the
+ * review present above everything, the lock cover included.
  */
 export function ReminderTapRouter() {
   const response = Notifications.useLastNotificationResponse();
   const locked = useAppLockLocked();
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
   const handled = useRef<string | null>(null);
+  const [waiting, setWaiting] = useState<ReminderTap | null>(null);
 
   useEffect(() => {
-    if (response == null || locked) return;
+    if (response == null) return;
     // A tap on the notification itself; an action button would mean something
     // else (TODO A5: snooze, done).
     if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
-    const { identifier } = response.notification.request;
-    const seen = `${identifier}@${response.notification.date}`;
+    const seen = `${response.notification.request.identifier}@${response.notification.date}`;
     if (handled.current === seen) return;
     handled.current = seen;
     Notifications.clearLastNotificationResponse();
     const tap = reminderTapOf(response.notification.request.content.data);
-    if (tap == null) return;
-    openTap(tap).catch((err: unknown) => {
-      void logLine(
-        'warn',
-        `opening a tapped ${tap.kind} notification failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    });
-  }, [response, locked]);
+    if (tap != null) setWaiting(tap);
+  }, [response]);
+
+  useEffect(() => {
+    if (waiting == null || locked) return;
+    const tap = waiting;
+    setWaiting(null);
+    openTap(tap, () => lockedRef.current)
+      .then((outcome) => {
+        // Covered again while reading: wait for the next unlock. A newer tap
+        // that came in meanwhile wins.
+        if (outcome === 'locked') setWaiting((newer) => newer ?? tap);
+      })
+      .catch((err: unknown) => {
+        void logLine(
+          'warn',
+          `opening a tapped ${tap.kind} notification failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+  }, [waiting, locked]);
 
   return null;
 }

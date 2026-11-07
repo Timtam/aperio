@@ -125,7 +125,7 @@ appear. Reminder sounds, lead times and snooze work as described under
 editor, a task in the task editor. For a recurring appointment it opens the
 occurrence the reminder was for, without asking first; the editor's **Apply to**
 field still lets you change the whole series instead. Someone else's meeting
-opens read-only, as from the calendar. Tapping the **Day-start reminders**
+opens read-only, as from the calendar, at the times of that occurrence. Tapping the **Day-start reminders**
 notification opens the **Day-start review**, even if it already ran today. When the app lock is
 on, all of this waits until you have unlocked.
 

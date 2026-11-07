@@ -138,7 +138,8 @@ Vorlaufzeiten und Schlummern funktionieren wie unter
 Termin-Editor, eine Aufgabe im Aufgaben-Editor. Bei einem Serientermin öffnet er
 das Vorkommen, zu dem die Erinnerung gehört, ohne vorher zu fragen; im Feld
 **Anwenden auf** des Editors lässt sich trotzdem die ganze Serie wählen. Die
-Einladung eines anderen öffnet sich schreibgeschützt, wie aus dem Kalender. Ein
+Einladung eines anderen öffnet sich schreibgeschützt, wie aus dem Kalender, mit
+den Zeiten dieses Vorkommens. Ein
 Tipp auf die Benachrichtigung **Tageswechsel-Erinnerungen** öffnet die
 **Tageswechsel-Übersicht**, auch wenn sie heute schon lief. Ist die App-Sperre
 an, wartet all das, bis du entsperrt hast.

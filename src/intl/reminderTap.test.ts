@@ -82,12 +82,13 @@ describe('eventTapParams — a tap opens the occurrence, without asking', () => 
     });
   });
 
-  it("opens someone else's meeting as the series, as the calendar does", () => {
+  it("opens someone else's meeting as the series, showing the occurrence's times", () => {
     const locked = { invitations_reply_only: true };
     expect(eventTapParams(tap, { ...series, organized_elsewhere: true }, locked)).toEqual({
       eventId: 'ev-1',
       calendarId: 'work',
       initialScope: 'series',
+      shownOccurrence: '2026-11-09T09:00:00.000Z',
     });
   });
 

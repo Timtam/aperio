@@ -32,6 +32,9 @@ export type RootStackParamList = {
   TaskEditor: {
     taskId: string | null;
     listId: string;
+    // Set when a tapped reminder opened the editor: a route of its own, so the
+    // tap never lands in an editor that is already up (`taskEditorRouteId`).
+    tapToken?: string;
     parentId?: string | null;
     initialTitle?: string;
     initialScheduledDate?: string;
@@ -109,6 +112,14 @@ export type RootStackParamList = {
     eventId: string | null;
     calendarId: string;
     occurrence?: string | null;
+    // The occurrence a reminder was for, SHOWN but not edited: only for
+    // someone else's meeting, whose form is read-only and whose save writes
+    // nothing but its reminders. The editor seeds its times from it there,
+    // while delete and scope stay on the series (77a).
+    shownOccurrence?: string;
+    // Set when a tapped reminder opened the editor: a route of its own, so the
+    // tap never lands in an editor that is already up (`importRouteId`).
+    tapToken?: string;
     // `anchor` (YYYY-MM-DD) seeds a NEW event's date from the tapped calendar
     // day instead of today (the per-day "+ new event" affordance).
     anchor?: string;

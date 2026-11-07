@@ -90,6 +90,9 @@ export interface EventTapParams {
   eventId: string;
   calendarId: string;
   occurrence?: string;
+  /** Shown, not edited: someone else's meeting opens as the series, at the
+   *  times of the occurrence the reminder was for. */
+  shownOccurrence?: string;
   initialScope?: 'occurrence' | 'series';
   initialTitle?: string;
 }
@@ -127,11 +130,16 @@ export function eventTapParams(
   });
   if (slot != null) return { ...base, occurrence: slot, initialScope: 'occurrence' };
   if (row?.recurrence == null) return base;
-  // Someone else's meeting is read-only apart from the answer and the
-  // reminders: there is nothing to scope, so it opens as the series, as from
-  // the calendar (77a).
-  if (invitationLocked(calendar, row)) return { ...base, initialScope: 'series' };
   // One spelling of the instant for every caller: the one the calendar's own
   // expansion writes.
-  return { ...base, occurrence: new Date(tap.start).toISOString() };
+  const at = new Date(tap.start).toISOString();
+  // Someone else's meeting is read-only apart from the answer and the
+  // reminders: there is nothing to scope, so it opens as the series, as from
+  // the calendar (77a) — and never on a silent skip of one occurrence. But it
+  // SHOWS the occurrence's times: after a reminder the date is what one reads,
+  // and the series' first one may be months back.
+  if (invitationLocked(calendar, row)) {
+    return { ...base, initialScope: 'series', shownOccurrence: at };
+  }
+  return { ...base, occurrence: at };
 }
