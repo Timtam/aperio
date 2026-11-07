@@ -313,5 +313,7 @@ struct AperioWidgetBundle: WidgetBundle {
     var body: some Widget {
         UpcomingWidget()
         NextUpWidget()
+        // The Live Activity of an appointment (EventLiveActivity.swift).
+        EventLiveActivity()
     }
 }

@@ -1600,6 +1600,41 @@ public class CalFfiModule: Module {
       WidgetActionStore.clear(id)
     }
 
+    // ── Live Activities (DESIGN-live-activities.md) ──
+    // `shared/liveActivityIos.ts` decides; these only carry it out
+    // (LiveActivityBridge.swift). Start and schedule on the main queue, where
+    // ActivityKit's requests are made in Apple's own samples.
+    AsyncFunction("liveActivitySupportJson") { () async -> String in
+      await LiveActivityBridge.supportJson()
+    }
+
+    AsyncFunction("liveActivityListJson") { () -> String in
+      LiveActivityBridge.listJson()
+    }
+
+    AsyncFunction("liveActivityStart") { (chainKey: String, contentJson: String) throws -> String in
+      try LiveActivityBridge.start(chainKey: chainKey, contentJson: contentJson)
+    }.runOnQueue(.main)
+
+    AsyncFunction("liveActivitySchedule") {
+      (chainKey: String, contentJson: String, startAt: String, alertTitle: String, alertBody: String) throws -> String in
+      try LiveActivityBridge.schedule(
+        chainKey: chainKey,
+        contentJson: contentJson,
+        startAt: startAt,
+        alertTitle: alertTitle,
+        alertBody: alertBody
+      )
+    }.runOnQueue(.main)
+
+    AsyncFunction("liveActivityUpdate") { (id: String, contentJson: String) async throws in
+      try await LiveActivityBridge.update(id: id, contentJson: contentJson)
+    }
+
+    AsyncFunction("liveActivityEnd") { (id: String) async in
+      await LiveActivityBridge.end(id: id)
+    }
+
     // One line into the app's own rolling log — the file the Logs screen shows.
     // The background round is the one path a user cannot watch happen, so it has
     // to be able to say what it did.

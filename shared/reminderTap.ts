@@ -85,6 +85,36 @@ export function reminderTapOf(data: unknown): ReminderTap | null {
   };
 }
 
+/**
+ * Read a tapped Live Activity's address: `aperio://event?eventId=…&calendarId=…
+ * &start=…&title=…`, every value percent-encoded down to letters and digits
+ * (`tapURL` in mobile/targets/widget/EventLiveActivity.swift). `null` for any
+ * other address — a shared file comes this way too.
+ */
+export function reminderTapOfUrl(url: string): ReminderTap | null {
+  const match = /^aperio:\/\/event\?(.*)$/.exec(url);
+  if (match == null) return null;
+  const params: Record<string, string> = {};
+  for (const pair of match[1].split('&')) {
+    const at = pair.indexOf('=');
+    if (at < 0) continue;
+    try {
+      // No `+` to space: the activity encodes a space as %20, and an
+      // instant's offset may hold a literal `+`.
+      params[decodeURIComponent(pair.slice(0, at))] = decodeURIComponent(pair.slice(at + 1));
+    } catch {
+      return null;
+    }
+  }
+  return reminderTapOf({
+    itemId: params.eventId,
+    itemKind: 'event',
+    containerId: params.calendarId,
+    start: params.start,
+    title: params.title ?? '',
+  });
+}
+
 /** The event editor's parameters, as far as a tap sets them. */
 export interface EventTapParams {
   eventId: string;

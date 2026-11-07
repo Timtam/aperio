@@ -243,11 +243,16 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   iOS vermutlich nicht über das Blatt (wie bei der Tagesprüfung selbst, siehe
   Gedächtnis „Wurzel-Modal nicht über Blatt“). Erst nach Tonis Gerätetest
   entscheiden.
-- [ ] **4 · iOS:** Ansichten und `ActivityConfiguration` in der Widget-
+- [x] **4 · iOS:** Ansichten und `ActivityConfiguration` in der Widget-
   Erweiterung, `NSSupportsLiveActivities`, Attribut-Struktur doppelt mit
   Wächter, Brücke, Abgleich (Vordergrund, Hintergrund, Kaltstart aus dem
   gemerkten Plan), iOS-26-Einplanung mit einem Signal, Wegwischen, Schalter
   und iOS-Hinweis, Texte en/de, Hilfe-Seite.
+  ↳ Abgleich-Regeln als reine Funktion `shared/liveActivityIos.ts` (17 Tests),
+  Swift nur ausführend. Swift lokal nicht übersetzbar: Fehler zeigt erst ein
+  iOS-Build. Gegenproben trafen je ihren Test (Kopien verschieden, Feld fehlt,
+  wartende nicht abgedeckt, nur erster Schlüssel, kein Wegwischen, stumme
+  eingeplant, `+` als Leerzeichen).
 - [ ] **5 · Android:** Plan-Ablage, Signal- und Wegwisch-Datei, Alarm- und
   Neustart-Empfänger, Benachrichtigung (Countdown, Hervorhebung, neu oder
   still), genaue Alarme mit Rückfall, Antippen, ein Signal mit Rückfall auf

@@ -5,6 +5,7 @@ import {
   eventTapParams,
   reminderTapData,
   reminderTapOf,
+  reminderTapOfUrl,
 } from '../../shared/reminderTap';
 
 const EVENT = {
@@ -103,5 +104,38 @@ describe('eventTapParams — a tap opens the occurrence, without asking', () => 
 
   it('opens the event as it is when its row could not be read', () => {
     expect(eventTapParams(tap, null, null)).toEqual({ eventId: 'ev-1', calendarId: 'work' });
+  });
+});
+
+describe('reminderTapOfUrl — a tapped Live Activity', () => {
+  // As the activity writes it: every value encoded down to letters and digits.
+  const enc = (s: string) =>
+    Array.from(new TextEncoder().encode(s))
+      .map((b) =>
+        /[A-Za-z0-9]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, '0')}`,
+      )
+      .join('');
+  const url = (fields: Record<string, string>) =>
+    `aperio://event?${Object.entries(fields)
+      .map(([k, v]) => `${k}=${enc(v)}`)
+      .join('&')}`;
+
+  it('reads the appointment back, with a title that holds & and = and an offset with +', () => {
+    const tap = reminderTapOfUrl(
+      url({ eventId: 'ev-1', calendarId: 'acc::work', start: '2026-11-09T10:00:00+01:00', title: 'Q&A = Fragen' }),
+    );
+    expect(tap).toEqual({
+      kind: 'event',
+      eventId: 'ev-1',
+      calendarId: 'acc::work',
+      start: '2026-11-09T10:00:00+01:00',
+      title: 'Q&A = Fragen',
+    });
+  });
+
+  it('ignores any other address', () => {
+    expect(reminderTapOfUrl('file:///tmp/invite.ics')).toBeNull();
+    expect(reminderTapOfUrl('aperio://other?eventId=1')).toBeNull();
+    expect(reminderTapOfUrl('aperio://event?eventId=ev-1')).toBeNull();
   });
 });

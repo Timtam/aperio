@@ -709,7 +709,11 @@
         "timeStepOption": "{{count}} Minuten",
         "timeStepOption_one": "1 Minute",
         "timeStepHint": "Wie weit ein Druck der Pfeiltasten ein Uhrzeitfeld bewegt. Eine Uhrzeit, die nicht auf diesem Raster liegt, springt weiter im Minutentakt — so wird nichts unspeicherbar, was du schon gespeichert hast.",
-        "timeStepHintMobile": "Welche Minuten der Minuten-Knopf in den Editoren anbietet. Das Rad des Pickers selbst bewegt sich immer minutenweise — eine Schrittweite bietet die Plattform dort nicht."
+        "timeStepHintMobile": "Welche Minuten der Minuten-Knopf in den Editoren anbietet. Das Rad des Pickers selbst bewegt sich immer minutenweise — eine Schrittweite bietet die Plattform dort nicht.",
+        "liveActivitiesLabel": "Live-Aktivitäten für Termine",
+        "liveActivitiesHint": "Von der letzten Erinnerung eines Termins bis zu seinem Ende: Zeit, Ort und was danach kommt, auf dem Sperrbildschirm und in der Dynamic Island. Nicht, wenn die letzte Erinnerung mehr als zwei Stunden vorher liegt. Nur auf diesem Gerät gespeichert.",
+        "liveActivitiesSystemOff": "Live-Aktivitäten sind für Aperio in den iPhone-Einstellungen ausgeschaltet.",
+        "liveActivitiesSystemOn": "Live-Aktivitäten sind für Aperio eingeschaltet."
       },
       "calendars": {
         "dayViewMode": {
@@ -2631,6 +2635,12 @@
       "kindTask": "Aufgabe",
       "statusOpen": "Offen",
       "statusInProgress": "In Arbeit"
+    },
+    "liveActivity": {
+      "begins": "Beginn",
+      "ends": "Ende",
+      "followUp": "Danach: {title} um {time}",
+      "over": "Vorbei"
     }
   },
   "suggestions": {

@@ -1,6 +1,6 @@
 # Live-Aktivitäten für Termine — Entwurf
 
-Status: **entschieden; Stufe 1 (Regel im Kern), Stufe 2 (Tür) und Stufe 3 (Antippen öffnet den Termin) gebaut.** Toni hat die Form am 6. November 2026
+Status: **entschieden; Stufe 1 (Regel im Kern), Stufe 2 (Tür), Stufe 3 (Antippen öffnet den Termin) und Stufe 4 (iOS) gebaut; Android folgt.** Toni hat die Form am 6. November 2026
 festgelegt, in zwei Runden: vor der Recherche (Start, Inhalt, Überblenden) und
 danach (iOS-26-Einplanung, ein Signal, iOS-Text, Anschluss, ohne Erinnerung,
 ganztägig, Standardwert). Die Recherche lief als Workflow mit drei Code-Lesern
@@ -387,7 +387,7 @@ er vorbei.
 
 - **iOS 16:** keine Aktivität. Die Widget-Erweiterung, die sie zeichnet, braucht
   iOS 17. Alle ActivityKit-Aufrufe hinter `#available(iOS 17, *)`.
-- **iOS 17:** Start beim Öffnen; Zeiten als Uhrzeiten und Countdown.
+- **iOS 17:** Start beim Öffnen; Zeiten als Uhrzeiten (ein Countdown stünde nach dem Beginn bei null).
 - **iOS 18:** dazu die mitlaufenden Angaben („in 10 Minuten“).
 - **iOS 26:** dazu das Einplanen.
 
@@ -502,6 +502,56 @@ beim nächsten Öffnen.
 - Start, Einplanen, Ändern, Beenden und Auflisten als Funktionen in
   `CalFfiModule.swift`; Android bekommt die Gegenstücke für seinen Plan, das
   Brücken-Skript (`mobile/scripts/check-ffi-bridges.mjs`) wacht darüber.
+
+**Gebaut (Stufe 4):**
+
+- **Die Regeln des Abgleichs** liegen als reine Funktion in
+  `shared/liveActivityIos.ts` (`reconcileIosActivities`, mit vitest geprüft):
+  Was ActivityKit meldet und was Aperio sich merkt, geht hinein; Aktionen
+  (starten, einplanen, ändern, beenden) und das neue Gedächtnis kommen heraus.
+  Swift führt nur aus (`LiveActivityBridge.swift`; JS-Seite
+  `mobile/src/liveActivities/iosActivities.ts`, eingehängt in den
+  Erinnerungs-Durchlauf).
+- **Ein Signal:** Weggelassen werden nur die Erinnerungen einer eingeplanten
+  Aktivität, die ActivityKit gerade meldet und die noch passt, oder einer, die
+  in diesem Durchlauf erfolgreich eingeplant wurde. Scheitert irgendetwas,
+  kommt die Liste aus dem gewöhnlichen Lesevorgang, und alles klingelt.
+- **Gedächtnis** (gerätelokal): je Aktivität ihre Schlüssel, der zuletzt
+  gezeigte Termin, der Start und der zuletzt gesendete Inhalt. Unveränderter
+  Inhalt wird nicht noch einmal gesendet; jedes Update zählt bei der Apple
+  Watch gegen ein Budget.
+- **Kaltstart:** Der letzte Plan bleibt gespeichert; bei jeder Rückkehr startet
+  er die laufende Kette sofort, plant aber nichts ein. Der volle Durchlauf
+  gleicht danach ab.
+- **Attribute** zweimal byte-gleich (`LiveActivityAttributes.swift` im Pod und
+  in der Erweiterung), bewacht von `src/intl/liveActivityWire.test.ts`, das
+  auch die Felder gegen die geschriebenen JSON-Schlüssel prüft. Zeitpunkte
+  reisen als Text.
+- **Einplanen** mit `startDate:` statt `start:`: Apple hat das Etikett nach dem
+  ersten iOS-26-SDK umbenannt und beide auf 26.0 zurückdatiert; das alte baut
+  auf jedem iOS-26-SDK. Der Zustand wird über seinen Namen gelesen, denn
+  `.pending` gibt es erst ab iOS 26.
+- **Mitlaufende Zeit** ab iOS 18: `Text(.currentDate, format: .reference(to:
+  allowedFields: [.day, .hour, .minute]))`, laut Dokumentation bis zu zwei
+  Einheiten.
+- **Antippen:** `aperio://event?eventId=…&calendarId=…&start=…&title=…`, jeder
+  Wert bis auf Buchstaben und Ziffern kodiert (`URLQueryItem` ließe `&` und `=`
+  stehen); gelesen von `reminderTapOfUrl`, geöffnet vom `ReminderTapRouter`.
+- **Schalter** vorerst nur auf iOS; Android bekommt ihn mit Stufe 5. Nur auf
+  einem iPhone ab iOS 17: Das iPad hat keine Live-Aktivitäten. Nach dem Weg
+  über den Knopf zu den iPhone-Einstellungen sagt Aperio, wie es steht.
+- **Aus der Prüfrunde:** Eine wartende Aktivität bleibt nur, solange sie zu den
+  frühesten zwei Ketten gehört und ihre Erinnerung nicht stumm ist; hat sich ihr
+  Inhalt geändert, wird sie im Vordergrund neu eingeplant. Gemerkt werden die
+  Schlüssel der Kette, wie sie jetzt ist (nicht alle je gesehenen), und eine
+  laufende Aktivität springt nie zu einer Kette, die noch nicht begonnen hat.
+  Sind Live-Aktivitäten aus, gilt nichts als weggewischt. Der Abgleich läuft
+  auch ohne Benachrichtigungs-Berechtigung. Beide Zeitangaben stehen auf einer
+  Zeile, Ort und Anschluss sind einzeilig (Apple begrenzt auf 160 Punkte), und
+  die erweiterte Insel ist ein einziges Element mit Titel.
+- **Sperrbildschirm:** Aperio liest die Vorschau-Einstellung der
+  Mitteilungen; steht sie nicht auf „Immer“, sind Titel, Ort und Anschluss
+  `privacySensitive` (Feld `hideOnLockScreen`).
 
 ## Antippen öffnet den Termin
 

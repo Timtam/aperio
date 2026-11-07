@@ -145,6 +145,43 @@ the app, so a change made in the system settings shows on the way back.
 When you return from the system settings through this button, Aperio reads
 the line out.
 
+## Live Activities (iPhone)
+
+From an appointment's **last reminder** until it ends, the iPhone keeps it on
+the lock screen and in the Dynamic Island: its title, **10:00 – 11:10**, from
+iOS 18 also how far off the start and the end are ("Start in 10 minutes · End in
+1 hour"), the place, and what comes next that day ("Next: Review at 11:00").
+When the next appointment's reminder is due while one is still on, the activity
+moves on to it.
+
+- **iOS 26 and later:** Aperio plans the next two activities each time you open
+  it, and the iPhone starts them by itself at the reminder. The activity then
+  is the reminder: it alerts instead of the notification. A silent reminder
+  stays a notification.
+- **iOS 17 to 25:** the activity starts when you open Aperio during an
+  appointment's window, for example by tapping its reminder. The reminder stays
+  a notification.
+- No activity for all-day appointments, for appointments without a reminder,
+  for appointments from the iPhone's own calendar, or when the last reminder is
+  more than two hours before the start.
+- Swiping an activity away keeps that appointment away; the next appointment
+  with its own reminder comes again.
+- Tapping it opens the appointment.
+- If the iPhone shows notification previews only when unlocked (or never), the
+  title, place and follow-up are marked private on the lock screen. Whether iOS
+  blanks them there is not yet tried on a device.
+- iPhone only: an iPad has no Live Activities, and the switch is not shown
+  there.
+
+VoiceOver reads each activity as one sentence, the self-updating times
+included. Without Aperio running, the iPhone changes an activity only once by
+itself: to the next appointment, or to **Over** when nothing follows. Ending it
+and anything later wait until you open Aperio again.
+
+Switch it under **Settings, General, Live Activities for appointments**
+(default on, this device only). If the iPhone settings turn Live Activities off
+for Aperio, a line below the switch says so, with a button to those settings.
+
 ## Home-screen widget (iOS)
 
 **Up Next** shows your next events and due tasks on the home screen. Add it the

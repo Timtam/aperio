@@ -6,7 +6,8 @@ import { AppState, Platform } from 'react-native';
 import CalFfi from '../../modules/cal-ffi';
 import i18n from '../../i18n';
 import { logLine } from '../api/logs';
-import { UpcomingReminder, upcomingReminders } from '../api/reminders';
+import { UpcomingReminder } from '../api/reminders';
+import { reminderKeyId, remindersAndActivities, startFromLastPlan } from '../liveActivities/iosActivities';
 import { customSoundPath } from '../api/sounds';
 import { getHiddenCalendars } from '../state/calendarVisibility';
 import { setRemindersRefreshHook, whenPassSettled } from '../state/cacheReloadBus';
@@ -208,11 +209,19 @@ export const rescheduleReminders: () => Promise<void> = withFollowUp(rescheduleO
 
 async function rescheduleOnce(): Promise<void> {
   try {
-    if (!(await ensurePermission())) return;
+    const permitted = await ensurePermission();
+    // Live Activities need no notification permission, and must still be
+    // kept in step — ended when switched off or when their appointment went —
+    // without it. Android has nothing else to do then.
+    if (!permitted && Platform.OS !== 'ios') return;
     await ensureLaunchSettle();
     await ensureAndroidChannel();
-    const items = await upcomingReminders(HORIZON_MINUTES);
     const hidden = await getHiddenCalendars();
+    // On the iPhone the same scan keeps the Live Activities in step, and says
+    // which reminders a waiting activity stands for (DESIGN-live-activities.md,
+    // one signal): those are not scheduled again here.
+    const { items, covered } = await remindersAndActivities(HORIZON_MINUTES, hidden);
+    if (!permitted) return;
     // Day-start "today's tasks" notifications, pre-computed for the same
     // horizon — the in-app day-start check only runs while the app is open,
     // so without these the 9:00 nudge arrived only when the user next opened
@@ -250,6 +259,7 @@ async function rescheduleOnce(): Promise<void> {
       // Hidden calendars (the Calendars-screen toggles) silence their event
       // reminders; tasks are unaffected (visibility is calendar-only).
       .filter((r) => !(r.item_kind === 'event' && hidden.has(r.container_id)))
+      .filter((r) => !covered.has(reminderKeyId(r)))
       .slice(0, Math.max(0, MAX_SCHEDULED - dayStarts.length));
     for (const r of due) {
       // §14.4: the channel carries the sound on Android (silent / custom / default);
@@ -328,6 +338,9 @@ setRemindersRefreshHook(() => whenStartupSettled('reminders', refreshRemindersSo
  *  gate is open by then). */
 export function useReminderTriggers(): void {
   useEffect(() => {
+    // A running Live Activity starts at once from the last plan; the full
+    // pass below reconciles it with fresh data (iPhone only, a no-op else).
+    startFromLastPlan();
     whenStartupSettled('reminders', () => void rescheduleReminders());
     const sub = AppState.addEventListener('change', (state) => {
       // Also through the gate: the listener registers before the gate is
@@ -335,6 +348,7 @@ export function useReminderTriggers(): void {
       // (notification shade, app-switcher peek) would otherwise run the
       // heavy enumeration un-gated. Post-open this is a pass-through.
       if (state === 'active') {
+        startFromLastPlan();
         whenStartupSettled('reminders', () => void rescheduleReminders());
       }
     });

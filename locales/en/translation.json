@@ -712,7 +712,11 @@
         "timeStepOption": "{{count}} minutes",
         "timeStepOption_one": "1 minute",
         "timeStepHint": "How far one press of the arrow keys moves a time field. A time that does not sit on this grid keeps stepping minute by minute, so nothing you already saved becomes unsavable.",
-        "timeStepHintMobile": "Which minutes the quick-minute button offers in the editors. The picker wheel itself always moves a minute at a time — the platform does not offer a step."
+        "timeStepHintMobile": "Which minutes the quick-minute button offers in the editors. The picker wheel itself always moves a minute at a time — the platform does not offer a step.",
+        "liveActivitiesLabel": "Live Activities for appointments",
+        "liveActivitiesHint": "From an appointment's last reminder until it ends: time, place and what comes next, on the lock screen and in the Dynamic Island. Not when the last reminder is more than two hours before the start. Stored on this device only.",
+        "liveActivitiesSystemOff": "Live Activities are turned off for Aperio in the iPhone settings.",
+        "liveActivitiesSystemOn": "Live Activities are on for Aperio."
       },
       "calendars": {
         "dayViewMode": {
@@ -2631,6 +2635,12 @@
       "kindTask": "Task",
       "statusOpen": "Open",
       "statusInProgress": "In progress"
+    },
+    "liveActivity": {
+      "begins": "Start",
+      "ends": "End",
+      "followUp": "Next: {title} at {time}",
+      "over": "Over"
     }
   },
   "suggestions": {
