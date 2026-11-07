@@ -525,11 +525,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   // ── Live Activities, Android only (an ongoing notification; DESIGN-live-
   //    activities.md, "Android") ──
   /** Hand the plan (`AndroidHandover` JSON) to the native notifier, which from
-   *  then on shows and arms everything itself. `freshStart`: Expo rang every
-   *  reminder up to now (the switch was just turned on), so past signals come
-   *  back silently. Throws when it cannot be handed over: the reminders then
-   *  stay Expo's. */
-  liveActivityHandOver(planJson: string, freshStart: boolean): Promise<void>;
+   *  then on shows and arms everything itself. `rangJson` is a JSON array of
+   *  the past reminders Expo still held, and so rang (`rangByExpo`): they
+   *  count as rung. Throws when it cannot be handed over; the notifier then
+   *  holds nothing, and the reminders stay Expo's. */
+  liveActivityHandOver(planJson: string, rangJson: string): Promise<void>;
   /** Switched off: remove the notification, the alarm and the plan. */
   liveActivityClear(): Promise<void>;
   /** JSON `{supported, allowed}`: Android 16 or later can promote the

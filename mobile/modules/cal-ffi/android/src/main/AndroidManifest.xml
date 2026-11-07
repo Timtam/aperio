@@ -7,6 +7,13 @@
     declared again here so the receiver below does not depend on Expo.
   -->
   <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+  <!--
+    Android 12 only: USE_EXACT_ALARM exists from 13, and without an exact-alarm
+    right an alarm may come an hour late. Granted at install there.
+  -->
+  <uses-permission
+      android:name="android.permission.SCHEDULE_EXACT_ALARM"
+      android:maxSdkVersion="32" />
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <application>
     <!--

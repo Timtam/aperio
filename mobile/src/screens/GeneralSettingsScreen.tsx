@@ -534,7 +534,7 @@ export default function GeneralSettingsScreen() {
                 </Text>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={t('mobile.notificationPermission.openSettings')}
+                  accessibilityLabel={t('dialogs.settings.general.liveActivitiesOpenSettings')}
                   onPress={() => {
                     liveSettingsTrip.current = true;
                     void Linking.openSettings().catch(() => {
@@ -544,7 +544,7 @@ export default function GeneralSettingsScreen() {
                   style={({ pressed }) => [styles.button, pressed && styles.pressed]}
                 >
                   <Text style={styles.buttonText} importantForAccessibility="no">
-                    {t('mobile.notificationPermission.openSettings')}
+                    {t('dialogs.settings.general.liveActivitiesOpenSettings')}
                   </Text>
                 </Pressable>
               </>
@@ -568,7 +568,7 @@ export default function GeneralSettingsScreen() {
                 </Text>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={t('mobile.notificationPermission.openSettings')}
+                  accessibilityLabel={t('dialogs.settings.general.liveActivitiesPromotionOpen')}
                   onPress={() => {
                     promotionTrip.current = true;
                     void CalFfi.openLiveActivityPromotionSettings().catch(() => {
@@ -578,7 +578,7 @@ export default function GeneralSettingsScreen() {
                   style={({ pressed }) => [styles.button, pressed && styles.pressed]}
                 >
                   <Text style={styles.buttonText} importantForAccessibility="no">
-                    {t('mobile.notificationPermission.openSettings')}
+                    {t('dialogs.settings.general.liveActivitiesPromotionOpen')}
                   </Text>
                 </Pressable>
               </>

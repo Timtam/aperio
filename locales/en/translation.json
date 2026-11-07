@@ -715,11 +715,13 @@
         "timeStepHintMobile": "Which minutes the quick-minute button offers in the editors. The picker wheel itself always moves a minute at a time — the platform does not offer a step.",
         "liveActivitiesLabel": "Live Activities for appointments",
         "liveActivitiesHint": "From an appointment's last reminder until it ends: time, place and what comes next, on the lock screen and in the Dynamic Island. Not when the last reminder is more than two hours before the start. Stored on this device only.",
-        "liveActivitiesHintAndroid": "From an appointment's last reminder until it ends, an ongoing notification with its time, place and what comes next; from Android 16, shortly before the start, also in the status bar. That reminder becomes this notification. Not when the last reminder is more than two hours before the start. Stored on this device only.",
+        "liveActivitiesHintAndroid": "From an appointment's last reminder until it ends, an ongoing notification with its time, place and what comes next; on newer Android versions (16 QPR1 and later), shortly before the start, also in the status bar. That reminder becomes this notification. Not when the last reminder is more than two hours before the start. Stored on this device only.",
         "liveActivitiesSystemOff": "Live Activities are turned off for Aperio in the iPhone settings.",
         "liveActivitiesSystemOn": "Live Activities are on for Aperio.",
+        "liveActivitiesOpenSettings": "Live Activities settings",
         "liveActivitiesPromotionOff": "Aperio may not promote its ongoing notification, so it does not show in the status bar. It still appears in the notification shade.",
-        "liveActivitiesPromotionOn": "Aperio may now promote its ongoing notification."
+        "liveActivitiesPromotionOn": "Aperio may now promote its ongoing notification.",
+        "liveActivitiesPromotionOpen": "Promotion setting"
       },
       "calendars": {
         "dayViewMode": {

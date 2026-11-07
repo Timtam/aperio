@@ -11,13 +11,17 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.format.DateFormat
+import android.util.Log
 import androidx.core.app.AlarmManagerCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 // The Android Live Activity of an appointment (DESIGN-live-activities.md,
 // "Android"): from its last reminder until it ends, an ongoing notification
@@ -31,17 +35,23 @@ import java.util.Date
 // refused for exactly such entry points (TODO A7) —, it reads only its files.
 //
 // Three files besides the plan, so a new hand-over never forgets what happened:
-// the signals that rang (a reminder rings once), the appointments swiped away
-// (they stay away), and which notification is up.
+// the reminders that rang (each rings once), the swipes (the appointment stays
+// away until a reminder of its own), and which notification is up.
+//
+// Every entry point is synchronized: the hand-over runs on Expo's module queue,
+// the receivers on the main thread, and both rewrite the same files.
 
 private const val TAG = "aperio-live"
-private const val CATCH_UP_GRACE_MS = 5 * 60 * 1000L
+private const val LOG_TAG = "AperioLive"
 private const val ALARM_REQUEST = 0x4c41
+private const val SILENT_CHANNEL = "reminders-silent"
+private const val DEFAULT_CHANNEL = "reminders"
 
 // The extra behind `Notification.Builder.setRequestPromotedOngoing` (API 36.1,
 // newer than the SDK this builds against) — the one androidx writes too. An
 // older Android ignores it.
 private const val EXTRA_REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing"
+
 const val LIVE_ACTION_TICK = "expo.modules.calffi.LIVE_ACTIVITY_TICK"
 const val LIVE_ACTION_DISMISSED = "expo.modules.calffi.LIVE_ACTIVITY_DISMISSED"
 
@@ -60,7 +70,8 @@ private data class LiveSection(
   val started: Boolean,
   val promoted: Boolean,
   val channelId: String,
-  val signal: String?,
+  /** The reminders this section IS, or null. */
+  val signal: List<String>?,
   val chainEnd: Long,
 )
 
@@ -72,17 +83,24 @@ private data class LiveTexts(
 )
 
 private fun JSONObject.optText(name: String): String? =
-  if (isNull(name)) null else optString(name).takeIf { it.isNotEmpty() }
+  if (!has(name) || isNull(name)) null else optString(name).takeIf { it.isNotEmpty() }
 
-private fun JSONObject.optMillis(name: String): Long? = if (isNull(name)) null else optLong(name)
+private fun JSONObject.optMillis(name: String): Long? =
+  if (!has(name) || isNull(name)) null else optLong(name)
+
+private fun JSONObject.optStrings(name: String): List<String>? {
+  if (!has(name) || isNull(name)) return null
+  val array = optJSONArray(name) ?: return null
+  return (0 until array.length()).map { array.optString(it) }.filter { it.isNotEmpty() }.ifEmpty { null }
+}
 
 object LiveActivityNotifier {
   private fun dir(context: Context): File = File(context.filesDir, "live-activities")
 
   private fun file(context: Context, name: String): File = File(dir(context), name)
 
-  /** Replace a file through a neighbour and a rename, as WidgetStore does: the
-   *  receiver can run at any moment and must never read half a document. */
+  /** Replace a file through a neighbour and a rename, as WidgetStore does: a
+   *  reader must never see half a document. */
   private fun write(context: Context, name: String, text: String) {
     val target = file(context, name)
     target.parentFile?.mkdirs()
@@ -132,8 +150,8 @@ object LiveActivityNotifier {
           followUpStart = s.optMillis("followUpStart"),
           started = s.optBoolean("started"),
           promoted = s.optBoolean("promoted"),
-          channelId = s.optString("channelId", "reminders"),
-          signal = s.optText("signal"),
+          channelId = s.optText("channelId") ?: DEFAULT_CHANNEL,
+          signal = s.optStrings("signal"),
           chainEnd = s.optLong("chainEnd"),
         ),
       )
@@ -141,8 +159,7 @@ object LiveActivityNotifier {
     return out
   }
 
-  /** The signals that rang, and the swiped appointments, each with the time
-   *  until which they matter. */
+  /** Keys with the time until which they matter, pruned on read. */
   private fun readTimed(context: Context, name: String, now: Long): MutableMap<String, Long> {
     val obj = readObject(context, name) ?: return mutableMapOf()
     val out = mutableMapOf<String, Long>()
@@ -160,110 +177,193 @@ object LiveActivityNotifier {
   }
 
   /**
-   * Take over a new plan. `freshStart` says Expo still rang every reminder up
-   * to now (the switch was just turned on, or this is the first hand-over):
-   * then every signal already past counts as rung, and comes back silently.
+   * Take over a new plan. `rangJson` lists the reminders Expo rang (the past
+   * ones it still held): they count as rung. A section whose channel is not
+   * known now keeps the one the previous plan had.
    */
-  fun handOver(context: Context, planJson: String, freshStart: Boolean) {
+  @Synchronized
+  fun handOver(context: Context, planJson: String, rangJson: String) {
     val plan = JSONObject(planJson)
-    write(context, "plan.json", plan.toString())
-    if (freshStart) {
+    val sections = plan.optJSONArray("sections") ?: JSONArray()
+    // What the previous plan knew about the channels.
+    val known = mutableMapOf<String, String>()
+    readObject(context, "plan.json")?.let { previous ->
+      for (s in readSections(previous)) {
+        s.signal?.forEach { known["signal:$it"] = s.channelId }
+        known.putIfAbsent("key:${s.key}", s.channelId)
+      }
+    }
+    for (i in 0 until sections.length()) {
+      val s = sections.optJSONObject(i) ?: continue
+      if (s.optText("channelId") == null) {
+        val inherited =
+          s.optStrings("signal")?.firstNotNullOfOrNull { known["signal:$it"] }
+            ?: known["key:${s.optString("key")}"]
+        if (inherited != null) s.put("channelId", inherited)
+      }
+    }
+    try {
+      write(context, "plan.json", plan.toString())
       val now = System.currentTimeMillis()
       val rang = readTimed(context, "rang.json", now)
-      for (section in readSections(plan)) {
-        if (section.signal != null && section.from <= now) rang[section.signal] = section.chainEnd
-      }
+      val horizon = readSections(plan).maxOfOrNull { it.chainEnd } ?: now
+      val expo = JSONArray(rangJson)
+      for (i in 0 until expo.length()) rang[expo.optString(i)] = maxOf(horizon, now + 60_000L)
       writeTimed(context, "rang.json", rang)
+      refreshLocked(context)
+    } catch (e: Exception) {
+      // Not taken over: JavaScript gives every reminder back to Expo, so
+      // nothing of this plan may ring.
+      clearLocked(context)
+      throw e
     }
-    refresh(context)
   }
 
   /** Switched off: nothing shows, nothing is armed, nothing is kept. */
-  fun clear(context: Context) {
+  @Synchronized
+  fun clear(context: Context) = clearLocked(context)
+
+  private fun clearLocked(context: Context) {
     cancelAlarm(context)
-    val state = readObject(context, "state.json")
-    if (state != null) NotificationManagerCompat.from(context).cancel(TAG, state.optInt("id"))
+    readObject(context, "state.json")?.let {
+      NotificationManagerCompat.from(context).cancel(TAG, it.optInt("id"))
+    }
     for (name in listOf("plan.json", "state.json", "rang.json")) file(context, name).delete()
   }
 
-  /** A swipe on the notification: that appointment stays away. A timeout or
-   *  the end of the chain is no swipe. */
+  /**
+   * A swipe on the notification: that appointment, and the rest of its chain,
+   * stay away until a reminder of its own. A timeout or the end of the chain
+   * is no swipe.
+   */
+  @Synchronized
   fun dismissed(context: Context, key: String, plannedEnd: Long) {
     val now = System.currentTimeMillis()
-    if (key.isEmpty() || now >= plannedEnd - 1000) return
+    if (now >= plannedEnd - 1000) return
     val swiped = readTimed(context, "dismissed.json", now)
-    swiped[key] = plannedEnd
+    if (key.isNotEmpty()) swiped[key] = plannedEnd
+    swiped["chain:$plannedEnd"] = plannedEnd
     writeTimed(context, "dismissed.json", swiped)
     file(context, "state.json").delete()
+    refreshLocked(context)
   }
 
-  /**
-   * Show what runs now, and arm the alarm for the next boundary. Called by the
-   * hand-over, by the alarm, and after a reboot, an update or a clock change.
-   */
-  fun refresh(context: Context) {
+  /** Show what runs now, and arm the alarm for the next boundary. */
+  @Synchronized
+  fun refresh(context: Context) = refreshLocked(context)
+
+  private fun refreshLocked(context: Context) {
     val now = System.currentTimeMillis()
     val plan = readObject(context, "plan.json")
     if (plan == null) {
       cancelAlarm(context)
+      readObject(context, "state.json")?.let {
+        NotificationManagerCompat.from(context).cancel(TAG, it.optInt("id"))
+      }
+      file(context, "state.json").delete()
       return
     }
     val sections = readSections(plan)
-    val texts = readTexts(plan)
-    val rang = readTimed(context, "rang.json", now)
-    val swiped = readTimed(context, "dismissed.json", now)
-    writeTimed(context, "rang.json", rang)
-    writeTimed(context, "dismissed.json", swiped)
-    val manager = NotificationManagerCompat.from(context)
-    val state = readObject(context, "state.json")
-    val shownId = state?.optInt("id")
-
     val current = sections.firstOrNull { it.from <= now && now < it.until }
-    if (current == null || swiped.containsKey(current.key)) {
-      if (shownId != null) manager.cancel(TAG, shownId)
-      file(context, "state.json").delete()
-    } else {
-      val signal = current.signal
-      val rings = signal != null && !rang.containsKey(signal)
-      val id: Int
-      if (rings) {
-        // The reminder itself: a NEW notification, so it rings with the
-        // reminder's sound and is announced — unless it is too late for that.
-        id = notificationId(signal!!)
-        if (shownId != null && shownId != id) manager.cancel(TAG, shownId)
-        rang[signal] = current.chainEnd
-        writeTimed(context, "rang.json", rang)
-      } else {
-        id = shownId ?: notificationId(current.key)
-      }
-      val loud = rings && now - current.from <= CATCH_UP_GRACE_MS
-      post(context, manager, id, current, texts, loud, now)
-      val next = JSONObject().put("id", id).put("key", current.key)
-      write(context, "state.json", next.toString())
-    }
-
+    // The next boundary is armed FIRST, so a failure below cannot break the
+    // chain of alarms that every later reminder hangs on.
     val boundary =
       sequenceOf(current?.until, sections.map { it.from }.filter { it > now }.minOrNull())
         .filterNotNull()
         .minOrNull()
     if (boundary != null) armAlarm(context, boundary) else cancelAlarm(context)
+    show(context, plan, sections, current, now)
+  }
+
+  private fun show(
+    context: Context,
+    plan: JSONObject,
+    sections: List<LiveSection>,
+    current: LiveSection?,
+    now: Long,
+  ) {
+    val manager = NotificationManagerCompat.from(context)
+    val state = readObject(context, "state.json")
+    val shownId = state?.optInt("id")
+    val rang = readTimed(context, "rang.json", now)
+    val swiped = readTimed(context, "dismissed.json", now)
+
+    if (current == null) {
+      if (shownId != null) manager.cancel(TAG, shownId)
+      file(context, "state.json").delete()
+      writeTimed(context, "dismissed.json", swiped)
+      return
+    }
+    // Every reminder of this chain that is due and has not rung — also one
+    // whose section an alarm came too late for. Late, but never lost: it rings
+    // now, once, for all of them.
+    val due =
+      sections.filter { s ->
+        s.chainEnd == current.chainEnd &&
+          s.from <= now &&
+          s.signal != null &&
+          s.signal.none { rang.containsKey(it) }
+      }
+    val rings = due.isNotEmpty()
+    if (rings) {
+      // A reminder the user has not seen comes even after a swipe.
+      swiped.remove(current.key)
+      swiped.remove("chain:${current.chainEnd}")
+      for (s in due) s.signal?.forEach { rang[it] = maxOf(current.chainEnd, now + 60_000L) }
+      writeTimed(context, "rang.json", rang)
+    }
+    writeTimed(context, "dismissed.json", swiped)
+    if (!rings && (swiped.containsKey(current.key) || swiped.containsKey("chain:${current.chainEnd}"))) {
+      if (shownId != null) manager.cancel(TAG, shownId)
+      file(context, "state.json").delete()
+      return
+    }
+
+    val id: Int
+    if (rings) {
+      // The reminder itself: a NEW notification, so it rings with the
+      // reminder's sound and is announced.
+      id = notificationId(due.last().signal!!.joinToString("|"))
+      if (shownId != null && shownId != id) manager.cancel(TAG, shownId)
+    } else {
+      id = shownId ?: notificationId(current.key)
+    }
+    val texts = readTexts(plan)
+    val locale = WidgetStore.localeFor(plan.optText("language"))
+    val text = sentence(context, current, texts, locale)
+    // Nothing changed since the last post: posting again would cost a redraw
+    // and, after a lost notification, an announcement.
+    val fingerprint = listOf(id, current.title, text, current.channelId, current.promoted, current.started).hashCode()
+    if (!rings && state != null && state.optInt("fingerprint") == fingerprint && state.optInt("id") == id) {
+      return
+    }
+    post(context, manager, id, current, text, rings, now)
+    write(
+      context,
+      "state.json",
+      JSONObject().put("id", id).put("key", current.key).put("fingerprint", fingerprint).toString(),
+    )
   }
 
   private fun notificationId(text: String): Int = text.hashCode() and 0x7fffffff
 
-  private fun time(context: Context, millis: Long): String =
-    DateFormat.getTimeFormat(context).format(Date(millis))
+  /** A clock time in Aperio's language, on the phone's 12- or 24-hour clock. */
+  private fun time(context: Context, millis: Long, locale: Locale): String {
+    val skeleton = if (DateFormat.is24HourFormat(context)) "Hm" else "hm"
+    val pattern = DateFormat.getBestDateTimePattern(locale, skeleton)
+    return SimpleDateFormat(pattern, locale).format(Date(millis))
+  }
 
   /** "Beginnt um 10:00 · Raum 2.14 · Danach: Review um 11:00" — clock times,
    *  not "in 10 minutes": TalkBack does not read the countdown, and this text
    *  changes only at a boundary. */
-  private fun sentence(context: Context, s: LiveSection, texts: LiveTexts): String {
+  private fun sentence(context: Context, s: LiveSection, texts: LiveTexts, locale: Locale): String {
     val parts = ArrayList<String>()
     parts.add(
       if (s.started) {
-        texts.runsUntil.replace("{time}", time(context, s.end))
+        texts.runsUntil.replace("{time}", time(context, s.end, locale))
       } else {
-        texts.beginsAt.replace("{time}", time(context, s.start))
+        texts.beginsAt.replace("{time}", time(context, s.start, locale))
       },
     )
     s.location?.let { parts.add(it) }
@@ -271,7 +371,7 @@ object LiveActivityNotifier {
       parts.add(
         texts.followUp
           .replace("{title}", s.followUpTitle)
-          .replace("{time}", time(context, s.followUpStart)),
+          .replace("{time}", time(context, s.followUpStart, locale)),
       )
     }
     return parts.joinToString(texts.separator)
@@ -287,25 +387,23 @@ object LiveActivityNotifier {
     manager: NotificationManagerCompat,
     id: Int,
     s: LiveSection,
-    texts: LiveTexts,
+    text: String,
     loud: Boolean,
     now: Long,
   ) {
     if (!manager.areNotificationsEnabled()) return
-    val text = sentence(context, s, texts)
     val builder =
       NotificationCompat.Builder(context, s.channelId)
         .setSmallIcon(smallIcon(context))
         .setContentTitle(s.title)
         .setContentText(text)
         .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-        .setTicker("${s.title}${texts.separator}$text")
         .setCategory(NotificationCompat.CATEGORY_EVENT)
         .setOngoing(true)
         .setOnlyAlertOnce(!loud)
         .setSilent(!loud)
         // The countdown runs to the start, then to the end. Seen, not read:
-        // the sentence above says the same in words.
+        // the sentence says the same in words.
         .setShowWhen(true)
         .setWhen(if (s.started) s.end else s.start)
         .setUsesChronometer(true)
@@ -317,11 +415,22 @@ object LiveActivityNotifier {
         // Asked for only shortly before the start (Google: an event "about to
         // start", not an upcoming one); never colorized, which blocks it.
         .addExtras(Bundle().apply { putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, s.promoted) })
+    // Before Android 8 there are no channels: the notification itself has to
+    // say whether it rings, as Expo's reminders do there.
+    if (Build.VERSION.SDK_INT < 26) {
+      if (loud && s.channelId != SILENT_CHANNEL) {
+        builder.setDefaults(NotificationCompat.DEFAULT_ALL)
+        builder.setPriority(NotificationCompat.PRIORITY_HIGH)
+      } else {
+        builder.setPriority(NotificationCompat.PRIORITY_LOW)
+      }
+    }
     try {
       manager.notify(TAG, id, builder.build())
-    } catch (_: SecurityException) {
-      // Notifications not allowed: nothing to show, nothing lost — the
-      // reminders it would carry are Expo's again once permission is back.
+    } catch (e: SecurityException) {
+      // Notifications not allowed: nothing to show. The pass gives the
+      // reminders back to Expo once the permission is missing.
+      Log.w(LOG_TAG, "live activity not posted", e)
     }
   }
 
@@ -364,8 +473,8 @@ object LiveActivityNotifier {
 
   /** RFC 3339 in UTC, the way the router reads an occurrence start. */
   private fun isoOf(millis: Long): String {
-    val format = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
-    format.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+    format.timeZone = TimeZone.getTimeZone("UTC")
     return format.format(Date(millis))
   }
 
@@ -377,8 +486,8 @@ object LiveActivityNotifier {
       PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-  /** Exact where allowed: on Android 12 without the exact-alarm right, as
-   *  Expo does, an inexact one — later, but never lost. */
+  /** Exact where allowed (USE_EXACT_ALARM from Android 13, SCHEDULE_EXACT_ALARM
+   *  on 12); otherwise inexact, and a late tick still rings what is due. */
   private fun armAlarm(context: Context, at: Long) {
     val alarms = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     val pending = alarmIntent(context)
@@ -395,10 +504,22 @@ object LiveActivityNotifier {
     alarms.cancel(alarmIntent(context))
   }
 
-  /** `{supported, allowed}`: Android 16 or later can promote, and whether it
-   *  may for Aperio. */
+  /** Android 16 QPR1 (36.1) or later: the version that promotes on request.
+   *  Read without the newer SDK's constants, which this does not build with. */
+  private fun canRequestPromotion(): Boolean {
+    if (Build.VERSION.SDK_INT > 36) return true
+    if (Build.VERSION.SDK_INT < 36) return false
+    return try {
+      Build.VERSION::class.java.getField("SDK_INT_FULL").getInt(null) >= 3_600_001
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  /** `{supported, allowed}`: whether Android can promote the notification,
+   *  and whether it may for Aperio. */
   fun promotionJson(context: Context): String {
-    val supported = Build.VERSION.SDK_INT >= 36
+    val supported = canRequestPromotion()
     val allowed =
       supported &&
         context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
@@ -426,19 +547,22 @@ object LiveActivityNotifier {
   }
 }
 
-/** The alarm, and a swipe on the notification. */
+/** The alarm, and a swipe on the notification. A failure is logged, never
+ *  thrown: a crash here would stop nothing else, but would hide the reason. */
 class LiveActivityReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
-    when (intent.action) {
-      LIVE_ACTION_TICK -> LiveActivityNotifier.refresh(context)
-      LIVE_ACTION_DISMISSED -> {
-        LiveActivityNotifier.dismissed(
-          context,
-          intent.getStringExtra("key") ?: "",
-          intent.getLongExtra("plannedEnd", 0L),
-        )
-        LiveActivityNotifier.refresh(context)
+    try {
+      when (intent.action) {
+        LIVE_ACTION_TICK -> LiveActivityNotifier.refresh(context)
+        LIVE_ACTION_DISMISSED ->
+          LiveActivityNotifier.dismissed(
+            context,
+            intent.getStringExtra("key") ?: "",
+            intent.getLongExtra("plannedEnd", 0L),
+          )
       }
+    } catch (e: Exception) {
+      Log.w(LOG_TAG, "live activity receiver failed", e)
     }
   }
 }
@@ -447,12 +571,16 @@ class LiveActivityReceiver : BroadcastReceiver() {
  *  current section is shown again and the next boundary armed. */
 class LiveActivityRestartReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
-    when (intent.action) {
-      Intent.ACTION_BOOT_COMPLETED,
-      Intent.ACTION_MY_PACKAGE_REPLACED,
-      Intent.ACTION_TIME_CHANGED,
-      Intent.ACTION_TIMEZONE_CHANGED,
-      -> LiveActivityNotifier.refresh(context)
+    try {
+      when (intent.action) {
+        Intent.ACTION_BOOT_COMPLETED,
+        Intent.ACTION_MY_PACKAGE_REPLACED,
+        Intent.ACTION_TIME_CHANGED,
+        Intent.ACTION_TIMEZONE_CHANGED,
+        -> LiveActivityNotifier.refresh(context)
+      }
+    } catch (e: Exception) {
+      Log.w(LOG_TAG, "live activity restart failed", e)
     }
   }
 }

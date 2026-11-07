@@ -712,11 +712,13 @@
         "timeStepHintMobile": "Welche Minuten der Minuten-Knopf in den Editoren anbietet. Das Rad des Pickers selbst bewegt sich immer minutenweise — eine Schrittweite bietet die Plattform dort nicht.",
         "liveActivitiesLabel": "Live-Aktivitäten für Termine",
         "liveActivitiesHint": "Von der letzten Erinnerung eines Termins bis zu seinem Ende: Zeit, Ort und was danach kommt, auf dem Sperrbildschirm und in der Dynamic Island. Nicht, wenn die letzte Erinnerung mehr als zwei Stunden vorher liegt. Nur auf diesem Gerät gespeichert.",
-        "liveActivitiesHintAndroid": "Von der letzten Erinnerung eines Termins bis zu seinem Ende eine laufende Benachrichtigung mit Zeit, Ort und was danach kommt; ab Android 16 kurz vor Beginn auch in der Statusleiste. Diese Erinnerung wird zu der Benachrichtigung. Nicht, wenn die letzte Erinnerung mehr als zwei Stunden vor Beginn liegt. Nur auf diesem Gerät gespeichert.",
+        "liveActivitiesHintAndroid": "Von der letzten Erinnerung eines Termins bis zu seinem Ende eine laufende Benachrichtigung mit Zeit, Ort und was danach kommt; auf neueren Android-Versionen (ab 16 QPR1) kurz vor Beginn auch in der Statusleiste. Diese Erinnerung wird zu der Benachrichtigung. Nicht, wenn die letzte Erinnerung mehr als zwei Stunden vor Beginn liegt. Nur auf diesem Gerät gespeichert.",
         "liveActivitiesSystemOff": "Live-Aktivitäten sind für Aperio in den iPhone-Einstellungen ausgeschaltet.",
         "liveActivitiesSystemOn": "Live-Aktivitäten sind für Aperio eingeschaltet.",
+        "liveActivitiesOpenSettings": "Live-Aktivitäten einstellen",
         "liveActivitiesPromotionOff": "Aperio darf seine laufende Benachrichtigung nicht hervorheben; sie erscheint deshalb nicht in der Statusleiste, aber weiter in der Benachrichtigungsleiste.",
-        "liveActivitiesPromotionOn": "Aperio darf seine laufende Benachrichtigung jetzt hervorheben."
+        "liveActivitiesPromotionOn": "Aperio darf seine laufende Benachrichtigung jetzt hervorheben.",
+        "liveActivitiesPromotionOpen": "Hervorhebung einstellen"
       },
       "calendars": {
         "dayViewMode": {

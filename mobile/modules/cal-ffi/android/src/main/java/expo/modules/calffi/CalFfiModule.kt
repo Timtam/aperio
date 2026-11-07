@@ -1566,12 +1566,12 @@ class CalFfiModule : Module() {
       }
     }.runOnQueue(remindersScope)
 
-    // The notifier takes the plan over (LiveActivityNotifier.kt). `freshStart`:
-    // Expo rang every reminder up to now, so past signals come back silently.
-    AsyncFunction("liveActivityHandOver") { planJson: String, freshStart: Boolean ->
+    // The notifier takes the plan over (LiveActivityNotifier.kt). `rangJson`:
+    // the past reminders Expo still held, and rang, so they count as rung.
+    AsyncFunction("liveActivityHandOver") { planJson: String, rangJson: String ->
       val context = appContext.reactContext?.applicationContext
         ?: throw CodedException("unavailable", "no context to hand the plan to", null)
-      LiveActivityNotifier.handOver(context, planJson, freshStart)
+      LiveActivityNotifier.handOver(context, planJson, rangJson)
     }
 
     AsyncFunction("liveActivityClear") {

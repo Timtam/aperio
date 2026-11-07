@@ -211,18 +211,21 @@ TalkBack liest sie einmal vor; alle Änderungen danach kommen still. Ist die
 Erinnerung des nächsten Termins fällig, übernimmt eine neue Benachrichtigung
 und meldet sich, wie es diese Erinnerung täte.
 
-- **Ab Android 16** erscheint sie auch in der Statusleiste als Live Update, aber
-  erst 15 Minuten vor Beginn: Google erlaubt das für einen Termin, der gleich
+- **Auf neueren Android-Versionen (ab 16 QPR1)** erscheint sie auch in der
+  Statusleiste als Live Update, aber erst 15 Minuten vor Beginn: Google erlaubt das für einen Termin, der gleich
   beginnt, nicht für einen, der noch bevorsteht. Lässt Android Aperio nicht
   hervorheben, sagt das eine Zeile unter dem Schalter, mit einem Knopf zu dieser
   Einstellung; die Benachrichtigung selbst erscheint trotzdem.
 - Dieselben Ausnahmen wie auf dem iPhone: keine ganztägigen Termine, keine ohne
   Erinnerung, keine aus dem Gerätekalender, keine, deren letzte Erinnerung mehr
   als zwei Stunden vor Beginn liegt.
-- Wischst du sie weg, bleibt dieser Termin weg; der nächste Termin mit eigener
-  Erinnerung kommt wieder. Ein Tipp öffnet den Termin.
+- Wischst du sie weg, bleibt sie weg, bis eine eigene Erinnerung kommt: die des
+  nächsten Termins oder eine neue für denselben Termin. Ein Tipp öffnet den
+  Termin.
 - Sie braucht keine geöffnete App: Sie ist vorausgeplant und kommt nach einem
-  Neustart oder einem App-Update wieder.
+  Neustart oder einem App-Update wieder. Eine Erinnerung, deren Zeitpunkt das
+  Telefon verpasst hat (ausgeschaltet oder im Tiefschlaf), meldet sich, sobald
+  es geht, solange ihr Termin läuft.
 
 Ein- und ausschalten unter **Einstellungen, Allgemein, Live-Aktivitäten für
 Termine** (standardmäßig an, nur dieses Gerät). Ausgeschaltet ist jede
