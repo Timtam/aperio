@@ -147,37 +147,35 @@ Local Android dev builds (cargo-ndk `.so` + `expo-dev-client` + emulator) cost
 **no EAS quota** — iterate freely here; reserve EAS/TestFlight for the iOS
 VoiceOver pass.
 
-**After any change to `crates/cal-ffi` you must re-sync the Android bridge:**
+**After any change to `crates/cal-ffi`, rebuild the native `.so`** (gitignored)
+for the emulator's ABI (`x86_64`) and the device ABI (`arm64-v8a`) with
+cargo-ndk, then rebuild the dev client. The Kotlin bindings take care of
+themselves: they are generated, not committed (TODO 89a), into
+`modules/cal-ffi/android/src/main/java/uniffi/` (gitignored), by
+`npm run bindings:android`, by `npm run check:bindings` and therefore by
+`npm run android`, which runs the check first. Each builds `crates/cal-ffi` for
+the host and reads the interface out of it, so the bindings come from the same
+source as a `.so` built from the same tree; JNA fails to resolve symbols at
+call time when they do not. The Android workflow generates them next to the
+release `.so` it ships.
 
-1. Regenerate the Kotlin bindings (committed at
-   `modules/cal-ffi/android/.../uniffi/cal_ffi/cal_ffi.kt`):
-   ```powershell
-   cargo build -p cal-ffi
-   cargo run -p cal-ffi --features cli --bin uniffi-bindgen -- `
-     generate --library target/debug/cal_ffi.dll --language kotlin --out-dir <tmp>
-   # copy <tmp>/uniffi/cal_ffi/cal_ffi.kt over the committed one
-   ```
-2. Rebuild the native `.so` (gitignored) for the emulator's ABI (`x86_64`) and
-   the device ABI (`arm64-v8a`) with cargo-ndk, then rebuild the dev client.
-
-The committed `cal_ffi.kt` and the local `.so` must come from the same
-`cal-ffi` source, or JNA fails to resolve symbols at call time.
-
-iOS needs none of this by hand. `mobile-ios-testflight.yml` builds the
+iOS needs none of this by hand either. `mobile-ios-testflight.yml` builds the
 XCFramework and generates the Swift bindings fresh on every dispatch, and
 neither is committed: `modules/cal-ffi/ios/CalFfi.xcframework/` and
 `modules/cal-ffi/ios/cal_ffi.swift` are gitignored. A committed copy could only
-ever be stale — the last one lagged the Rust by some forty symbols for months,
-and nothing noticed, because no build ever read it.
+ever be stale — the last Swift one lagged the Rust by some forty symbols for
+months, and nothing noticed, because no build ever read it; the committed Kotlin
+one let the whole event-group API and the whole day-marker API sit unbuildable
+on Android for weeks, because the vendoring step refreshed the `.so` and left
+the bindings behind.
 
-**`npm run check:bindings` catches step 1 being skipped**, and `npm run android`
-runs it first. Nothing else does: `tsc` and ESLint never look at Kotlin or
-Swift, so a stale binding file surfaces only as `:cal-ffi:compileReleaseKotlin`
-failing minutes into an EAS build. That is how the whole event-group API and the
-whole day-marker API sat unbuildable on Android for weeks — the vendoring step
-refreshed the `.so` and left the bindings behind.
+**`npm run check:bindings`** holds the Rust, the bindings and both bridges to
+each other before anything expensive. Nothing else does: `tsc` and ESLint never
+look at Kotlin or Swift. It generates the Kotlin bindings first (a `cargo build`
+of cal-ffi; `--use-existing` reads the ones already in place, as the Android
+workflow does).
 
-It compares ARITY, not just names, in three directions — Rust ↔ committed
+It compares ARITY, not just names, in three directions — Rust ↔ generated
 bindings, bindings ↔ Kotlin bridge, Rust ↔ Swift bridge. The name-only version
 missed a change where three methods gained a parameter, the Kotlin bridge was
 updated to pass it, and the regeneration silently did not run: every name still
@@ -206,6 +204,5 @@ holds it. Without it, the cap showed up as "Method too large" at
 registrations, and at 130 after the first split, because new ones kept landing
 in `definition()`.
 
-So a new free function in `crates/cal-ffi` takes four steps: export it,
-regenerate the Kotlin bindings, declare it in `CalFfiModule.ts`, and register it
-in both native modules.
+So a new free function in `crates/cal-ffi` takes three steps: export it,
+declare it in `CalFfiModule.ts`, and register it in both native modules.

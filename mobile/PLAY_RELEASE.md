@@ -558,8 +558,9 @@ Nicht nötig: der Kontolösch-Pfad. Der gilt nur für Apps, in denen man ein Kon
 Der GitHub-Workflow existiert bereits:
 `.github/workflows/mobile-android-play.yml` (Commit `4666cf73`), auf `main` und
 auf dem Branch. Er baut die Rust-`.so` mit `cargo-ndk`, erzeugt die
-UniFFI-Kotlin-Bindings neu, macht einen kurzlebigen lokalen Commit, damit EAS
-die Bibliotheken mitbekommt, und kann anschließend einreichen. Der Schalter
+UniFFI-Kotlin-Bindings (seit TODO 89a nicht mehr im Repo), macht einen
+kurzlebigen lokalen Commit, damit EAS Bibliotheken und Bindings mitbekommt, und
+kann anschließend einreichen. Der Schalter
 `submit` steuert das. Im Kopfkommentar steht der erste Lauf schon beschrieben:
 `submit = false`.
 
