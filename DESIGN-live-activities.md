@@ -519,6 +519,15 @@ Aperio eine fertige Kette, dann `.immediate`.
 - **Sprache aus Aperio, Region vom Gerät** (`localeFor` in `Formatting.swift`),
   damit 24-Stunden-Uhr und Datumsreihenfolge dem Gerät folgen. Wörter übersetzt
   aus der App, wie beim Widget.
+- **Ausnahme: die mitlaufenden Angaben** („in 59 Minuten“). Sie zeichnet iOS
+  selbst, in der Sprache der Erweiterung; die Sprache, die die Ansicht ihnen
+  mitgibt, erreicht sie nicht, und `SystemFormatStyle.DateReference` nimmt
+  keine. Eine Erweiterung ohne erklärte Sprachen spricht dabei die
+  Entwicklersprache: Am 2026-11-08 stand auf Tonis deutschem iPhone „Beginn in
+  59 minutes“. Darum erklärt `mobile/targets/widget/Info.plist` dieselben
+  Sprachen wie die App (`CFBundleLocalizations` en, de); die mitlaufenden
+  Angaben folgen damit der Sprache des Geräts. Läuft Aperio in einer anderen
+  Sprache als das Gerät, sprechen nur sie die des Geräts.
 - Antippen öffnet den Termin (`widgetURL`).
 
 ### VoiceOver

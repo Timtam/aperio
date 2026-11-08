@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	The languages this extension speaks, as the app declares them
+	(expo-localization supportedLocales in app.json). Without this list the
+	extension declares none, and iOS draws what it formats by itself in the
+	development language: the Live Activity's self-updating "in 59 minutes"
+	stayed English on a German phone (Toni, 2026-11-08), whatever locale the
+	view put into its environment.
+	-->
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>de</string>
+	</array>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.widgetkit-extension</string>
+	</dict>
+</dict>
+</plist>
