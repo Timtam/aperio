@@ -6,7 +6,7 @@ import { AppState, Platform } from 'react-native';
 import CalFfi from '../../modules/cal-ffi';
 import i18n from '../../i18n';
 import { logLine } from '../api/logs';
-import { UpcomingReminder } from '../api/reminders';
+import { appStartReminders, markAppStartRung, UpcomingReminder } from '../api/reminders';
 import { reminderKeyId, remindersAndActivities, startFromLastPlan } from '../liveActivities';
 import { customSoundPath } from '../api/sounds';
 import { getHiddenCalendars } from '../state/calendarVisibility';
@@ -14,6 +14,7 @@ import { setRemindersRefreshHook, whenPassSettled } from '../state/cacheReloadBu
 import { settleExternalCaches } from '../state/cacheSettle';
 import { withFollowUp } from '../state/followUpRun';
 import { whenStartupSettled } from '../state/startupGate';
+import { ringAppStartReminders } from './appStart';
 import { upcomingDayStartNotifications } from './dayStartSchedule';
 
 const DAY_MS = 86_400_000;
@@ -329,6 +330,57 @@ export function refreshRemindersSoon(): void {
 // competing with the first paint. Post-open: plain pass-through.
 setRemindersRefreshHook(() => whenStartupSettled('reminders', refreshRemindersSoon));
 
+/** One run of the "on next app start" reminders at a time: the launch and the
+ *  first foreground flip can come together, and two runs would both see what
+ *  neither had remembered yet. */
+let appStartRun: Promise<void> = Promise.resolve();
+
+/**
+ * Ring the "on next app start" reminders due at this opening of the app — at
+ * launch and at every return to the foreground (Toni, 2026-11-08: "at every
+ * opening"). The rule is the desktop's, in the core: once per device and
+ * moment, a series once after each occurrence, nothing for a done or
+ * cancelled task. Each rings now, the way a scheduled reminder would have
+ * (same body, sound, channel and tap), and what was shown is remembered so no
+ * later opening rings it again. Until now the phone offered this kind and
+ * never fired it.
+ */
+export function fireAppStartReminders(): Promise<void> {
+  appStartRun = appStartRun.then(fireAppStartRemindersOnce, fireAppStartRemindersOnce);
+  return appStartRun;
+}
+
+async function fireAppStartRemindersOnce(): Promise<void> {
+  try {
+    await ringAppStartReminders({
+      permitted: ensurePermission,
+      due: async () => {
+        await ensureAndroidChannel();
+        return appStartReminders(await getHiddenCalendars());
+      },
+      show: async (r) => {
+        const { channelId, sound } = await resolveDelivery(r);
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: r.title,
+            body: notificationBody(r),
+            sound,
+            data: reminderTapData(r),
+          },
+          // Channel-aware immediate trigger: rings now, on the reminder's channel.
+          trigger: { channelId },
+        });
+      },
+      mark: markAppStartRung,
+    });
+  } catch (err) {
+    void logLine(
+      'warn',
+      `app-start reminders failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 /** Mount once near the app root: reschedule on launch + every foreground-resume
  *  (the latter catches reminders synced in from a peer while we were away).
  *  The LAUNCH run is startup-gated: `upcomingRemindersJson` is a heavy
@@ -346,6 +398,8 @@ export function useReminderTriggers(): void {
     // pass below reconciles it with fresh data (iPhone only, a no-op else).
     startFromLastPlan();
     whenStartupSettled('reminders', () => void rescheduleReminders());
+    // Its own key: the gate keeps one parked run per key.
+    whenStartupSettled('appStartReminders', () => void fireAppStartReminders());
     const sub = AppState.addEventListener('change', (state) => {
       // Also through the gate: the listener registers before the gate is
       // even armed, so an inactive→active flip DURING the launch window
@@ -354,6 +408,7 @@ export function useReminderTriggers(): void {
       if (state === 'active') {
         startFromLastPlan();
         whenStartupSettled('reminders', () => void rescheduleReminders());
+        whenStartupSettled('appStartReminders', () => void fireAppStartReminders());
       }
     });
     return () => sub.remove();

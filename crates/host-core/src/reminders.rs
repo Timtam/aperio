@@ -73,7 +73,7 @@ pub struct Trigger {
     pub absolute: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ItemKind {
     Event,
@@ -992,6 +992,33 @@ fn app_start_rung(conn: &rusqlite::Connection) -> HashSet<(String, String, Strin
 /// out. Rows rung before the lookback go: their moments lie further back
 /// still, where no start looks.
 pub fn mark_app_start_rung(db: &SharedConn, rung: &[Trigger]) {
+    let moments: Vec<AppStartRung> = rung
+        .iter()
+        .map(|t| AppStartRung {
+            item_kind: t.item_kind,
+            item_id: t.item_id.clone(),
+            all_day: t.all_day,
+            start: t.start,
+        })
+        .collect();
+    mark_app_start_moments(db, &moments);
+}
+
+/// One app-start reminder a device showed, as much of it as its memory
+/// needs: what the phone hands back of an entry `enumerate_app_start_triggers`
+/// gave it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct AppStartRung {
+    pub item_kind: ItemKind,
+    pub item_id: String,
+    #[serde(default)]
+    pub all_day: bool,
+    /// The moment it rang for: the trigger's `start`.
+    pub start: DateTime<Utc>,
+}
+
+/// [`mark_app_start_rung`] for moments rather than whole triggers.
+pub fn mark_app_start_moments(db: &SharedConn, rung: &[AppStartRung]) {
     let now = Utc::now();
     let conn = match db.lock() {
         Ok(c) => c,

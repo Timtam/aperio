@@ -981,6 +981,20 @@ public class CalFfiModule: Module {
       }
     }.runOnQueue(remindersQueue)
 
+    // "On next app start" reminders: what is due at this opening (a local read,
+    // so not behind the slow reminder scan), and what the phone showed.
+    AsyncFunction("appStartRemindersJson") { (hiddenCalendarsJson: String) -> String in
+      try self.hostCoded {
+        try self.host.appStartRemindersJson(hiddenCalendarsJson: hiddenCalendarsJson)
+      }
+    }.runOnQueue(readQueue)
+
+    AsyncFunction("markAppStartRung") { (rungJson: String) in
+      try self.hostCoded {
+        try self.host.markAppStartRung(rungJson: rungJson)
+      }
+    }.runOnQueue(writeQueue)
+
     // ─── Custom reminder sounds (§14.4 / §19.2.2) ─────────────────────────────
     // iOS can't use a runtime file as a notification sound, so here these drive
     // import + in-app preview + sync only; the notification falls back to default.
