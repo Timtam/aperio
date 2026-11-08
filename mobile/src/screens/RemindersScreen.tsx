@@ -102,9 +102,13 @@ export default function RemindersScreen({
       const tap = reminderTapOf(reminderTapData(r));
       if (tap?.kind !== 'event') return;
       const params = await eventEditorParams(tap, { listCalendars, getEventById });
+      if (params == null) {
+        AccessibilityInfo.announceForAccessibility(t('dialogs.reminders.tapNotFound'));
+        return;
+      }
       navigation.navigate('EventEditor', params);
     },
-    [navigation],
+    [navigation, t],
   );
 
   return (

@@ -2220,6 +2220,7 @@
       "allDayRange": "Ganztägig · {{from}} bis {{to}}",
       "dayMonth": "{{day}}. {{month}}",
       "tapWaits": "Die Erinnerung öffnet sich, sobald der offene Dialog geschlossen ist.",
+      "tapWaitsField": "Die Erinnerung öffnet sich, sobald du das Eingabefeld verlässt.",
       "tapNotFound": "Der Termin oder die Aufgabe dieser Erinnerung wurde nicht gefunden. Vielleicht wurde sie gelöscht."
     },
     "search": {

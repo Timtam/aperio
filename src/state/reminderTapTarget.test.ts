@@ -54,6 +54,25 @@ describe('resolveReminderTap — events', () => {
     expect(target.shownOccurrence).toBeUndefined();
   });
 
+  it('says not found for an occurrence deleted since the reminder was planned', async () => {
+    // Opened, and saved as "this occurrence", it would come back.
+    const deleted = {
+      ...series,
+      recurrence: { rrule: 'FREQ=WEEKLY', exceptions: [AT] },
+    } as unknown as CalendarEvent;
+    const r = reads({ getEventById: vi.fn(() => Promise.resolve(deleted)) });
+    expect(await resolveReminderTap(tapOf('series-1'), r)).toEqual({ kind: 'notFound' });
+  });
+
+  it('says not found for an occurrence the series no longer reaches', async () => {
+    const ended = {
+      ...series,
+      recurrence: { rrule: 'FREQ=WEEKLY;UNTIL=20261110T000000Z', exceptions: [] },
+    } as unknown as CalendarEvent;
+    const r = reads({ getEventById: vi.fn(() => Promise.resolve(ended)) });
+    expect(await resolveReminderTap(tapOf('series-1'), r)).toEqual({ kind: 'notFound' });
+  });
+
   it('opens a single change by its own id, as that occurrence', async () => {
     const override = {
       ...series,

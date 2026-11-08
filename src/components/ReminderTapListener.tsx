@@ -15,7 +15,7 @@ import {
 } from '../api/client';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
-import { pageBusy } from '../state/pageBusy';
+import { fieldInUse, modalOpen } from '../state/pageBusy';
 import { resolveReminderTap } from '../state/reminderTapTarget';
 
 /**
@@ -32,9 +32,13 @@ import { resolveReminderTap } from '../state/reminderTapTarget';
  *    its calendar, and the listing routes an external event's read.
  *  - Nothing holds the user. Only the top dialog is shown, so one pushed onto
  *    an editor would unmount it and lose its input: the tap waits, says so
- *    once, and opens when the dialog closes. Two dialogs only show what is
- *    there and give way: the reminders overview stays under the tap, and the
- *    day-start review is replaced by it, as the phone closes it.
+ *    once, and opens when the dialog closes. A text field in use (the
+ *    sidebar's rename saves on blur) holds it the same way, and the
+ *    announcement names the field, not a dialog that is not there. Two
+ *    dialogs only show what is there, and the tap opens on top of them: the
+ *    reminders overview and the day-start review. Closing the item comes
+ *    back to them; the review is never replaced, since it may have opened
+ *    in the hidden window, or while the tap waited, unheard.
  *
  * A tap is taken once, so a remount or a reload does not open it again. The
  * event may have gone out before this listened (a click while the page
@@ -50,8 +54,8 @@ export function ReminderTapListener() {
   // Bumped on every focus move, so a tap held back by `pageBusy` is tried
   // again once the user is done (a rename ends, a view's dialog closes).
   const [focusTick, setFocusTick] = useState(0);
-  // The pending tap the wait was announced for: once each.
-  const waitAnnounced = useRef<ReminderTap | null>(null);
+  // The pending tap the wait was announced for, and why it waited: once each.
+  const waitAnnounced = useRef<{ tap: ReminderTap; why: string } | null>(null);
 
   useEffect(() => {
     const bump = () => setFocusTick((n) => n + 1);
@@ -125,10 +129,13 @@ export function ReminderTapListener() {
       setPending(null);
       return;
     }
-    if (!overReview && !overList && (mode.kind !== 'none' || pageBusy())) {
-      if (waitAnnounced.current !== pending) {
-        waitAnnounced.current = pending;
-        announce(t('dialogs.reminders.tapWaits'), 'polite');
+    const dialogOpen = mode.kind !== 'none' || modalOpen();
+    if (!overReview && !overList && (dialogOpen || fieldInUse())) {
+      const why = dialogOpen ? 'dialogs.reminders.tapWaits' : 'dialogs.reminders.tapWaitsField';
+      const said = waitAnnounced.current;
+      if (said?.tap !== pending || said.why !== why) {
+        waitAnnounced.current = { tap: pending, why };
+        announce(t(why), 'polite');
       }
       return;
     }
@@ -150,11 +157,10 @@ export function ReminderTapListener() {
           openTappedEvent(target.event, {
             initialScope: target.initialScope,
             shownOccurrence: target.shownOccurrence,
-            replace: overReview,
           });
           return;
         case 'task':
-          openTaskDialog(target.task, { replace: overReview });
+          openTaskDialog(target.task);
           return;
         case 'dayStart':
           openDayStartReview();

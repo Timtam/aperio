@@ -105,25 +105,37 @@ Zur fälligen Zeit zeigt Aperio eine Mitteilung deines Betriebssystems an.
 Unter Windows braucht das den oben beschriebenen Startmenü-Eintrag. Optional
 wird ein **Ton** abgespielt.
 
-Ein Klick auf die Benachrichtigung öffnet, worum es geht:
+Unter Windows und auf dem Handy öffnet ein Klick auf die Benachrichtigung,
+worum es geht:
 
 - Die Erinnerung an einen Termin öffnet diesen Termin. Bei einem
   wiederkehrenden öffnet sie das Vorkommen, für das die Erinnerung war, ohne
   vorher zu fragen; im Editor wählst du weiterhin, ob eine Änderung für dieses
-  Vorkommen oder die ganze Serie gilt. Eine Besprechung, die jemand anderes
-  organisiert, öffnet als Serie und zeigt Datum und Zeiten des Vorkommens.
+  Vorkommen oder die ganze Serie gilt. Bei iCloud und anderen
+  Kalenderservern, die Termine für dich planen, ist eine Besprechung, die
+  jemand anderes organisiert, schreibgeschützt; sie öffnet als Serie und zeigt
+  Datum und Zeiten des Vorkommens.
 - Die Erinnerung an eine Aufgabe öffnet die Aufgabe.
 - Die Tagesstart-Benachrichtigung öffnet die Tagesstart-Übersicht.
 
-Ist beim Klick ein Dialog in Aperio offen, sagt Aperio, dass die Erinnerung
-sich öffnet, sobald der Dialog geschlossen ist, und öffnet sie dann. Deine
-Eingaben im offenen Dialog bleiben erhalten. **Eingabe** in der
-Erinnerungs-Übersicht (`Strg+Umschalt+R`) öffnet eine Erinnerung genauso.
+Wurde der Termin, das Vorkommen oder die Aufgabe inzwischen gelöscht, sagt
+Aperio, dass nichts gefunden wurde, und öffnet nichts.
+
+Ist am Desktop beim Klick ein Editor oder ein anderer Dialog offen, sagt
+Aperio, dass die Erinnerung sich öffnet, sobald der Dialog geschlossen ist,
+und öffnet sie dann. Schreibst du gerade in einem Feld, sagt es, dass sie sich
+öffnet, sobald du das Feld verlässt. Deine Eingaben bleiben in beiden Fällen
+erhalten. Über der Erinnerungs-Übersicht und über der Tagesstart-Übersicht
+öffnet die Erinnerung sofort, darüber; schließt du sie, bist du wieder dort.
+Am Handy öffnet ein Tipp einen neuen Editor über einem offenen, und der
+darunter behält deine Eingaben. **Eingabe** in der Erinnerungs-Übersicht
+(`Strg+Umschalt+R`) öffnet eine Erinnerung genauso wie ein Klick.
 
 Unter Windows wirkt ein Klick, solange das Banner zu sehen ist und Aperio
 läuft, auch verborgen im Infobereich. Ein Klick auf einen Aperio-Eintrag im
 Benachrichtigungscenter (`Win+N`) und jeder Klick, nachdem du Aperio beendet
-hast, tut noch nichts.
+hast, tut noch nichts. Unter macOS und Linux öffnet ein Klick auf die
+Benachrichtigung noch nichts; **Eingabe** in der Erinnerungs-Übersicht schon.
 
 Schließen der Benachrichtigung schließt sie nur. „Später erinnern“ aus der
 Benachrichtigung gibt es noch nicht.

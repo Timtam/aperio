@@ -7,7 +7,7 @@ import {
 
 import type { EventRangeRequest } from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
-import { occurrenceOfSeries } from '../intl/recurrence';
+import { occurrenceOfSeries, seriesHasOccurrence } from '../intl/recurrence';
 import type { EventEditScope } from './DialogState';
 
 /** What a reminder opens on the desktop. */
@@ -85,8 +85,11 @@ export async function resolveReminderTap(tap: ReminderTap, reads: TapReads): Pro
       shownOccurrence: params.shownOccurrence,
     };
   }
-  // An occurrence of an own series: the editor offers the scope itself.
+  // An occurrence of an own series: the editor offers the scope itself. One
+  // deleted since the reminder was planned is not there to open: shown, and
+  // saved as "this occurrence", it would come back.
   if (params.occurrence != null) {
+    if (!seriesHasOccurrence(row, params.occurrence)) return { kind: 'notFound' };
     return { kind: 'event', event: occurrenceOfSeries(row, params.occurrence) };
   }
   return { kind: 'event', event: row };

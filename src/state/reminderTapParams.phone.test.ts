@@ -16,16 +16,26 @@ interface Reads {
   listCalendars: () => Promise<{ id: string; invitations_reply_only?: boolean }[]>;
   getEventById: (id: string, calendarId: string) => Promise<unknown>;
 }
-async function params(tap: Record<string, string>, reads: Reads): Promise<Record<string, unknown>> {
+async function params(
+  tap: Record<string, string>,
+  reads: Reads,
+): Promise<Record<string, unknown> | null> {
   const phone = (await import(/* @vite-ignore */ PHONE_TAP_PARAMS)) as {
-    eventEditorParams: (tap: unknown, reads: Reads) => Promise<Record<string, unknown>>;
+    eventEditorParams: (tap: unknown, reads: Reads) => Promise<Record<string, unknown> | null>;
   };
   return phone.eventEditorParams({ kind: 'event', ...tap }, reads);
 }
 
 const AT = '2026-11-16T09:00:00.000Z';
 const TAP = { eventId: 'series-1', calendarId: 'work', start: AT, title: 'Standup' };
-const SERIES = { id: 'series-1', calendar_id: 'work', recurrence: { rrule: 'FREQ=WEEKLY' } };
+const SERIES = {
+  id: 'series-1',
+  calendar_id: 'work',
+  start: '2026-11-02T09:00:00.000Z',
+  end: '2026-11-02T09:15:00.000Z',
+  all_day: false,
+  recurrence: { rrule: 'FREQ=WEEKLY', exceptions: [] as string[] },
+};
 
 describe('the phone opens a reminder', () => {
   it('as THAT occurrence of a series, the calendars listed before the row is read', async () => {
@@ -51,7 +61,15 @@ describe('the phone opens a reminder', () => {
       { listCalendars: async () => [], getEventById },
     );
     expect(getEventById).not.toHaveBeenCalled();
-    expect(result.initialTitle).toBe('Kim');
+    expect(result?.initialTitle).toBe('Kim');
+  });
+
+  it('nothing, for an occurrence deleted since the reminder was planned', async () => {
+    const result = await params(TAP, {
+      listCalendars: async () => [{ id: 'work' }],
+      getEventById: async () => ({ ...SERIES, recurrence: { rrule: 'FREQ=WEEKLY', exceptions: [AT] } }),
+    });
+    expect(result).toBeNull();
   });
 
   it('as it is when nothing can be read', async () => {

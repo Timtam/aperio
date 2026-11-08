@@ -115,7 +115,6 @@ describe('a click on a reminder', () => {
     expect(h.dialog.openTappedEvent).toHaveBeenCalledWith(ROW, {
       initialScope: undefined,
       shownOccurrence: undefined,
-      replace: false,
     });
     view.rerender(<ReminderTapListener />);
     await settle();
@@ -179,7 +178,7 @@ describe('a click on a reminder', () => {
     expect(opened()).toBe(1);
   });
 
-  it('waits while a text field is in use', async () => {
+  it('waits while a text field is in use, and says it is the field', async () => {
     const field = document.createElement('input');
     const button = document.createElement('button');
     document.body.append(field, button);
@@ -187,6 +186,7 @@ describe('a click on a reminder', () => {
     await mount();
     await click();
     expect(opened()).toBe(0);
+    expect(announced()).toEqual(['dialogs.reminders.tapWaitsField']);
     await act(async () => button.focus());
     await settle();
     expect(opened()).toBe(1);
@@ -194,18 +194,32 @@ describe('a click on a reminder', () => {
     button.remove();
   });
 
-  it('opens on top of the reminders overview', async () => {
+  it('opens on top of the reminders overview, without waiting', async () => {
     h.dialog.mode = { kind: 'reminders' };
     await mount();
     await click();
-    expect(h.dialog.openTappedEvent.mock.calls[0][1]).toMatchObject({ replace: false });
+    expect(opened()).toBe(1);
+    expect(announced()).toEqual([]);
   });
 
-  it('replaces the day-start review', async () => {
+  it('opens on top of the day-start review, never in its place', async () => {
     h.dialog.mode = { kind: 'dayStartReview' };
     await mount();
     await click();
-    expect(h.dialog.openTappedEvent.mock.calls[0][1]).toMatchObject({ replace: true });
+    expect(opened()).toBe(1);
+    expect(h.dialog.openTappedEvent.mock.calls[0][1]).not.toHaveProperty('replace');
+  });
+
+  it('a review that opened while the tap waited stays under it', async () => {
+    h.dialog.mode = { kind: 'event' };
+    const view = await mount();
+    await click();
+    expect(opened()).toBe(0);
+    h.dialog.mode = { kind: 'dayStartReview' };
+    view.rerender(<ReminderTapListener />);
+    await settle();
+    expect(opened()).toBe(1);
+    expect(h.dialog.openTappedEvent.mock.calls[0][1]).not.toHaveProperty('replace');
   });
 
   it('a day-start click opens the review, but not a second one', async () => {
@@ -223,7 +237,7 @@ describe('a click on a reminder', () => {
     h.resolve.mockResolvedValue({ kind: 'task', task });
     await mount();
     await click({ itemId: 't-1', itemKind: 'task', containerId: 'l', start: EVENT_TAP.start, title: 'x' });
-    expect(h.dialog.openTaskDialog).toHaveBeenCalledWith(task, { replace: false });
+    expect(h.dialog.openTaskDialog).toHaveBeenCalledWith(task);
   });
 
   it('says so when the item is gone, and opens nothing', async () => {

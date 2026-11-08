@@ -118,11 +118,11 @@ function Probe() {
       >
         tap-shown
       </button>
-      <button type="button" onClick={() => d.openTappedEvent(single, { replace: true })}>
-        tap-replace
-      </button>
       <button type="button" onClick={() => d.openDayStartReview()}>
         open-review
+      </button>
+      <button type="button" onClick={() => d.openTappedEvent(single)}>
+        tap-single
       </button>
       <button type="button" onClick={() => d.chooseEventEditScope('occurrence')}>
         choose-occ
@@ -401,13 +401,12 @@ describe('DialogState and a reminder that was clicked (TODO A5)', () => {
     expect(screen.getByTestId('shown').textContent).toBe('2026-07-20T08:30:00.000Z');
   });
 
-  it('replaces the day-start review, so closing the editor closes both', async () => {
+  it('opens on top of the day-start review, which comes back when the editor closes', async () => {
     renderProbe();
     await click('open-review');
-    expect(screen.getByTestId('kind').textContent).toBe('dayStartReview');
-    await click('tap-replace');
+    await click('tap-single');
     expect(screen.getByTestId('kind').textContent).toBe('event');
     await click('cancel');
-    expect(screen.getByTestId('kind').textContent).toBe('none');
+    expect(screen.getByTestId('kind').textContent).toBe('dayStartReview');
   });
 });

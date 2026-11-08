@@ -55,8 +55,8 @@ pub fn run() {
     // writes the crash file synchronously).
     logging::install_panic_hook(log_state.logs_dir.clone());
 
-    // The Tauri context, built once here: its identifier is the id the
-    // notification plugin sends toasts under, and the platform setup below
+    // The Tauri context, built once here: its identifier is the id Aperio's
+    // toasts go out under (`toast`), and the platform setup below
     // needs it before the first window (the process pin; see `platform`).
     let context = tauri::generate_context!();
     platform::setup(&context.config().identifier);

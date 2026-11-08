@@ -113,6 +113,32 @@ describe('the review after a silent carry-over', () => {
     view.rerender(<DayStartReviewChecker />);
     expect(dialog.openDayStartReview).toHaveBeenCalledTimes(1);
   });
+
+  it('opens none of its own when a click on its notification opened it meanwhile', async () => {
+    const view = render(<DayStartReviewChecker />);
+    // The day-start notification is clicked while the batch writes (TODO A5);
+    // the user reads the review and closes it before the batch is done.
+    dialog.mode = { kind: 'dayStartReview' };
+    view.rerender(<DayStartReviewChecker />);
+    dialog.mode = { kind: 'none' };
+    view.rerender(<DayStartReviewChecker />);
+    await act(async () => {
+      gate.release();
+    });
+    expect(dialog.openDayStartReview).not.toHaveBeenCalled();
+  });
+
+  it('nor a second one after the review it ends under is closed', async () => {
+    const view = render(<DayStartReviewChecker />);
+    dialog.mode = { kind: 'dayStartReview' };
+    view.rerender(<DayStartReviewChecker />);
+    await act(async () => {
+      gate.release();
+    });
+    dialog.mode = { kind: 'none' };
+    view.rerender(<DayStartReviewChecker />);
+    expect(dialog.openDayStartReview).not.toHaveBeenCalled();
+  });
 });
 
 /**

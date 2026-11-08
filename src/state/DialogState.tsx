@@ -256,7 +256,6 @@ export interface OpenEventOptions {
 export interface OpenTappedEventOptions {
   initialScope?: EventEditScope;
   shownOccurrence?: string;
-  replace?: boolean;
 }
 
 export interface OpenTaskOptions {
@@ -309,8 +308,7 @@ export interface DialogStateValue {
   /** Open an event a reminder named (TODO A5, `resolveReminderTap`), as the
    *  tap rule decided: no scope prompt — an occurrence opens with the scope
    *  as a field of the editor, someone else's meeting as the series showing
-   *  `shownOccurrence`'s times. `replace` swaps the top frame (the day-start
-   *  review a tap supersedes). */
+   *  `shownOccurrence`'s times. Pushed on top of whatever is open. */
   openTappedEvent: (event: CalendarEvent, options?: OpenTappedEventOptions) => void;
   openTaskDialog: (task?: Task | null, options?: OpenTaskOptions) => void;
   /** Quick-add EVENT. `defaultDate` (YYYY-MM-DD) anchors it to a chosen day
@@ -574,16 +572,14 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
   );
   const openTappedEvent = useCallback(
     (event: CalendarEvent, options?: OpenTappedEventOptions) => {
-      const next: DialogMode = {
+      push({
         kind: 'event',
         event,
         initialScope: options?.initialScope,
         shownOccurrence: options?.shownOccurrence,
-      };
-      if (options?.replace) replaceTop(next);
-      else push(next);
+      });
     },
-    [push, replaceTop],
+    [push],
   );
   // The prompt frame `chooseEventEditScope` answers, read before its update.
   const stackRef = useRef(stack);

@@ -96,24 +96,35 @@ At the due time, Aperio shows a notification of your operating system. On
 Windows this needs the Start menu entry described above. Optionally a
 **sound** is played.
 
-A click on the notification opens what it is about:
+On Windows and on the phone, a click on the notification opens what it is
+about:
 
 - A reminder of an appointment opens that appointment. For a repeating one it
   opens the occurrence the reminder was for, without asking first; the editor
   still lets you choose whether a change applies to this occurrence or the
-  whole series. A meeting someone else organizes opens as the series, showing
+  whole series. On iCloud and other calendar servers that schedule for you, a
+  meeting someone else organizes is read-only; it opens as the series, showing
   the date and times of the occurrence.
 - A reminder of a task opens the task.
 - The day-start notification opens the day-start review.
 
-If a dialog is open in Aperio when you click, Aperio says that the reminder
-opens once the dialog is closed, and opens it then. Your input in the open
-dialog stays. **Enter** in the reminders overview (`Ctrl+Shift+R`) opens a
-reminder the same way.
+If the appointment, the occurrence or the task was deleted since, Aperio says
+it was not found and opens nothing.
+
+On the desktop, if an editor or another dialog is open when you click, Aperio
+says that the reminder opens once the dialog is closed, and opens it then. If
+you are typing in a field, it says the reminder opens once you leave the
+field. Your input stays either way. Over the reminders overview and over the
+day-start review the reminder opens at once, on top of them; closing it takes
+you back. On the phone a tap opens a new editor on top of an open one, and the
+one beneath keeps your input. **Enter** in the reminders overview
+(`Ctrl+Shift+R`) opens a reminder the same way as a click.
 
 On Windows a click works while the banner is on screen and Aperio runs, also
 when it is hidden in the tray. A click on an Aperio entry in the notification
-center (`Win+N`), and any click after you quit Aperio, does nothing yet.
+center (`Win+N`), and any click after you quit Aperio, does nothing yet. On
+macOS and Linux a click on the notification does not open anything yet;
+**Enter** in the reminders overview does.
 
 Dismissing the notification only closes it. Snoozing from the notification is
 not available yet.

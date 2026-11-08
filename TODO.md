@@ -120,11 +120,24 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
   ein Klick auf das Banner zeigt das Fenster und öffnet das Vorkommen, die
   Aufgabe oder die Tagesstart-Übersicht (`ReminderTapListener.tsx`,
   `resolveReminderTap`), mit denselben Daten wie das Handy
-  (`shared/contracts/reminderTap.json`). Ist ein Dialog offen, wartet der
-  Klick und sagt das an. Die Erinnerungs-Übersicht (`Strg+Umschalt+R`) öffnet
-  auf demselben Weg: das Vorkommen statt der Serie, externe Termine und
-  Aufgaben über Kalender und Liste, und nie mehr den Editor für einen neuen
-  Eintrag, wenn nichts gefunden wird.
+  (`shared/contracts/reminderTap.json`). Ist ein Editor oder anderer Dialog
+  offen (oder ein Eingabefeld in Benutzung), wartet der Klick und sagt das an;
+  über der Erinnerungs-Übersicht und der Tagesstart-Übersicht öffnet er
+  sofort, darüber. Die Erinnerungs-Übersicht (`Strg+Umschalt+R`) öffnet auf
+  demselben Weg: das Vorkommen statt der Serie, externe Termine und Aufgaben
+  über Kalender und Liste, und nie mehr den Editor für einen neuen Eintrag,
+  wenn nichts gefunden wird; ein gelöschtes Vorkommen gilt als nicht gefunden.
+- [ ] **macOS/Linux: Klick auf die Benachrichtigung öffnet nichts** (dort
+  bleibt das Plugin ohne Klick-Haken; `tauri-plugin-notification` ab 2.6 hat
+  `on_action`, bringt aber notify-rust 4.18 und tauri-winrt-notification 0.8
+  mit, deren 0.8.0 die Töne brach; Plan
+  `C:/scripts/aperio-livetest/a5-plan-2026-11-08.md`, Option A2).
+- [ ] **Gelöschtes Vorkommen einer externen Serie klingelt bis zu 5 Minuten
+  weiter** (Prüfrunde A5, 2026-11-09): `add_event_exdate` und die externen
+  Lösch-/Änderungsbefehle rufen `scheduler.invalidate()`, aber nicht den
+  TTL-Cache der externen Auslöser (`EXTERNAL_TRIGGERS_TTL`), sodass der alte
+  Auslöser noch feuert und in der Übersicht steht. Ein Klick darauf sagt
+  jetzt „nicht gefunden“; die Ursache ist offen.
 - [ ] **Stufe 2: Klicks aus dem Benachrichtigungscenter und nach dem Beenden**
   (Win+N, Eingabe auf einem Aperio-Eintrag; Stufe 1 erreicht nur das Banner,
   solange Aperio läuft). Ohne COM-Aktivator stellt Windows diese Klicks nicht

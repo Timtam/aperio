@@ -48,7 +48,9 @@ pub struct ReminderTapState(Mutex<Option<Value>>);
 
 impl ReminderTapState {
     /// Keep a click's tap. A later click replaces an earlier one the page has
-    /// not taken: it is the one the user just asked for.
+    /// not taken: it is the one the user just asked for. Off Windows nothing
+    /// clicks yet (see the module note), so only the tests call it there.
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn store(&self, tap: Value) {
         *self.0.lock().expect("reminder tap poisoned") = Some(tap);
     }
@@ -76,7 +78,9 @@ pub fn show_toast<R: Runtime>(app: &AppHandle<R>, request: ToastRequest) {
 
 /// A click on a toast: bring Aperio forward and tell the page. Runs on a
 /// WinRT thread, not the main one; window calls and `emit` post to the event
-/// loop from there. No store work here.
+/// loop from there. No store work here. Only Windows' toast has a click to
+/// report; the plugin's on macOS and Linux has none.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn on_click<R: Runtime>(app: &AppHandle<R>, tap: Option<Value>) {
     crate::tray::show_main_window(app);
     let Some(tap) = tap else {
@@ -92,6 +96,7 @@ fn on_click<R: Runtime>(app: &AppHandle<R>, tap: Option<Value>) {
 }
 
 /// What a tap is for, for the log.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn tap_kind(tap: &Value) -> &'static str {
     if tap.get("dayStart") == Some(&Value::Bool(true)) {
         return "dayStart";

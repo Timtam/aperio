@@ -1176,6 +1176,30 @@ export function occurrenceOfSeries<E extends RecurringEventLike>(
 }
 
 /**
+ * Whether `master` still has an occurrence at `slotIso`, as the views expand
+ * it: not deleted (an exception), not cut off (UNTIL, COUNT), not moved away
+ * by a changed rule. A reminder can outlive its occurrence — the scan that
+ * planned it ran before the delete, or the click waited behind an editor —
+ * and an occurrence opened that is no longer there would come back when
+ * saved (TODO A5). Compared as {@link sameSlot} compares, so a series of days
+ * by its day. A master without a rule has no occurrences: `false`.
+ */
+export function seriesHasOccurrence<E extends RecurringEventLike>(
+  master: E,
+  slotIso: string,
+): boolean {
+  const at = new Date(slotIso).getTime();
+  if (!Number.isFinite(at) || !master.recurrence?.rrule) return false;
+  const same = slotMatcher(master);
+  return expandEvent(master, {
+    start: new Date(at - 2 * SAME_DAY_MS),
+    end: new Date(at + 2 * SAME_DAY_MS),
+  }).some(
+    (occ) => isExpandedOccurrence(occ) && same(at, new Date(occ.occurrence_start).getTime()),
+  );
+}
+
+/**
  * The day the last occurrence of a bounded series falls on, `YYYY-MM-DD` on
  * the series' own clock, or `null`.
  *

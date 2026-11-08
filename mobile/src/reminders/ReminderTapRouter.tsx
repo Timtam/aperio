@@ -7,6 +7,8 @@ import { getEventById, listCalendars } from '../api/calendar';
 import { logLine } from '../api/logs';
 import { navigateNested, whenNavigationReady } from '../navigation/navigationRef';
 import { useAppLockLocked } from '../state/appLockContext';
+import i18n from '../../i18n';
+import { announceAround } from '../a11y/speechHold';
 import { closeDayStartReview, requestDayStartReview } from '../state/dayStartRequest';
 import { eventEditorParams } from './tapParams';
 
@@ -46,6 +48,10 @@ async function openTap(tap: ReminderTap, isLocked: () => boolean): Promise<'open
       });
   } else {
     const params = await eventEditorParams(tap, { listCalendars, getEventById });
+    if (params == null) {
+      announceAround(i18n.t('dialogs.reminders.tapNotFound'));
+      return 'opened';
+    }
     open = () =>
       navigateNested('CalendarTab', 'EventEditor', { ...params, tapToken: newTapToken() });
   }

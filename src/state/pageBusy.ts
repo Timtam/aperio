@@ -5,7 +5,17 @@
  * for it.
  */
 export function pageBusy(): boolean {
-  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return true;
+  return modalOpen() || fieldInUse();
+}
+
+/** A modal dialog is on the page: the stack's own, or a view's. */
+export function modalOpen(): boolean {
+  return document.querySelector('[role="dialog"][aria-modal="true"]') != null;
+}
+
+/** A text field, select or editable element has focus, such as the
+ *  sidebar's rename, which saves on blur. */
+export function fieldInUse(): boolean {
   const el = document.activeElement;
   return (
     el instanceof HTMLElement &&
