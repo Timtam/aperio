@@ -40,7 +40,7 @@ use crate::registry::AdapterRegistry;
 // `get_upcoming_reminders` command) keep resolving.
 use host_core::reminders::{
     catchup_eligible, enumerate_app_start_triggers, enumerate_birthday_triggers,
-    enumerate_external_triggers, enumerate_local_triggers, CATCH_UP_GRACE,
+    enumerate_external_triggers, enumerate_local_triggers, mark_app_start_rung, CATCH_UP_GRACE,
 };
 pub use host_core::reminders::{ItemKind, Trigger, UpcomingReminder};
 
@@ -500,20 +500,25 @@ impl ReminderScheduler {
         });
     }
 
-    /// Look for `app_start` reminders whose due time has already passed and fire
-    /// them at startup. The local-only scan lives in [`host_core::reminders`];
-    /// this just dispatches each.
+    /// Fire the `app_start` reminders due at this start, and remember them so
+    /// the next start does not ring them again. The scan and the memory live in
+    /// [`host_core::reminders`]; this dispatches each.
     fn fire_app_start_reminders<R: Runtime>(&self, app: &AppHandle<R>) {
         // Empty until the frontend's first push, so a hidden calendar's
         // (local-only) app_start reminder may still fire once on a cold launch
         // before the push lands; the periodic loop suppresses it thereafter.
+        // A suppressed one is not remembered: it rings at the first start
+        // after its calendar is shown again.
         let hidden = self.hidden_calendars_snapshot();
+        let mut rung = Vec::new();
         for t in enumerate_app_start_triggers(&self.db) {
             if Self::suppressed_by_visibility(&t, &hidden) {
                 continue;
             }
             self.fire(app, &t);
+            rung.push(t);
         }
+        mark_app_start_rung(&self.db, &rung);
     }
 }
 

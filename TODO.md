@@ -606,18 +606,6 @@ Siehe DESIGN §4.2.
 ### B7 · Erinnerungs-Feinheiten (§14) `[~]`
 - [~] E-Mail-Reminder: UI-Option + (Adapter-)Versand — lokaler Scheduler überspringt sie derzeit bewusst.  
   ↳ Adapter-Hälfte für Google + CalDAV FERTIG (round-trippt als providereigener E-Mail-Alarm — Aperio verschickt selbst nie Mail, genau wie §14 es verlangt). Die UI-Option fehlt auf beiden Oberflächen.
-- [ ] **„Beim nächsten App-Start“ klingelt bei jedem Start.** Gefunden in der
-  Prüfrunde zu 221 (2026-11-07, aus dem Code gelesen, nicht ausprobiert).
-  `fire_app_start_reminders` (`src-tauri/src/reminders.rs`) löst beim Start
-  jede Erinnerung dieser Art aus, deren Zeitpunkt vorbei ist
-  (`enumerate_app_start_triggers` in `crates/host-core/src/reminders.rs`),
-  und merkt sich nirgends, dass sie schon kam: Die Menge der ausgelösten
-  Erinnerungen lebt nur im Speicher. `TASK_QUERY` liest auch keinen Status,
-  fragt also nicht, ob eine Aufgabe erledigt ist. Eine gestern fällige, längst
-  abgehakte Aufgabe meldet sich so bei jedem Desktop-Start wieder, solange es
-  sie gibt. Gemeint ist laut DESIGN §14.1 und Beschriftung der nächste Start
-  nach Fälligkeit. Zu tun: Ausgelöstes dauerhaft merken und erledigte
-  Aufgaben auslassen.
 - [ ] **CalDAV liest Hinweise „zum Ende“ falsch, und „1 Woche vorher“ gar
   nicht.** Gefunden in der Recherche zu 222 (2026-11-07, aus dem Code
   gelesen, nicht ausprobiert). `parse_valarms`
@@ -4372,6 +4360,15 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 
 #### B7 · Erinnerungs-Feinheiten (§14) `[~]` — erledigte Punkte
 
+- [x] **„Beim nächsten App-Start“ klingelte bei jedem Start** (2026-11-08).
+  Nichts merkte sich, was schon geklungen hatte, kein Durchlauf fragte nach
+  dem Status, und eine Serie klingelte für ihr allererstes Vorkommen. Jetzt
+  merkt sich jedes Gerät, wofür es geklungen hat (Migration 0051
+  `app_start_rung`, nicht synchronisiert, `mark_app_start_rung`); bei einer
+  Serie zählt das letzte vergangene Vorkommen. Dabei gefunden und mit
+  behoben: Auch der normale Durchlauf, lokal wie extern, ließ erledigte und
+  abgebrochene Aufgaben klingeln (`task_is_finished`). Entscheidungen Toni:
+  einmal je Gerät, bei Serien nach jedem Vorkommen.
 - [x] **Apples stummer Hinweis: das iPhone legt keinen Standard mehr dazu**
   (2026-11-08). Live gemessen (iOS 27.2, `icloud-reminders marker`): Das
   iPhone legt seinen Standardhinweis zu jedem Termin, dem ein VALARM

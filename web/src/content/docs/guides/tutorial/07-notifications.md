@@ -25,9 +25,11 @@ react to them.
      shows it there but does not offer it anew.
    - **At fixed time**: on a date at a time.
    - **On next app start after due**: Aperio on the desktop tells you the
-     next time it starts once the moment has passed. This only works for
-     entries in Aperio's own calendars and lists, since no provider stores
-     this kind; the phone does not fire it.
+     next time it starts once the moment has passed, once on each computer.
+     For a repeating event that is once after each occurrence; several missed
+     occurrences give one reminder. A done or cancelled task stays quiet. This
+     only works for entries in Aperio's own calendars and lists, since no
+     provider stores this kind; the phone does not fire it.
 4. You can add several reminders per entry.
 5. **Save**.
 
