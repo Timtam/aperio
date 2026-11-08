@@ -386,6 +386,8 @@ class CalFfiModule : Module() {
 
     liveActivityFunctions()
 
+    appStartReminderFunctions()
+
     soundFunctions()
 
     preferenceFunctions()
@@ -1586,6 +1588,23 @@ class CalFfiModule : Module() {
     AsyncFunction("openLiveActivityPromotionSettings") {
       appContext.reactContext?.applicationContext?.let { LiveActivityNotifier.openPromotionSettings(it) }
     }
+  }
+
+  /** Lifted out of `definition()` — see the note there. */
+  // "On next app start" reminders: what is due at this opening (a local read,
+  // so not behind the slow reminder scan), and what the phone showed.
+  private fun ModuleDefinitionBuilder.appStartReminderFunctions() {
+    AsyncFunction("appStartRemindersJson") { hiddenCalendarsJson: String ->
+      hostCoded {
+        host.appStartRemindersJson(hiddenCalendarsJson)
+      }
+    }.runOnQueue(readScope)
+
+    AsyncFunction("markAppStartRung") { rungJson: String ->
+      hostCoded {
+        host.markAppStartRung(rungJson)
+      }
+    }.runOnQueue(writeScope)
   }
 
   private fun ModuleDefinitionBuilder.soundFunctions() {

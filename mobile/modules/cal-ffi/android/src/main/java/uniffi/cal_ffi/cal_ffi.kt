@@ -966,6 +966,8 @@ external fun uniffi_cal_ffi_checksum_method_host_adopt_meeting_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_app_start_reminders_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_attach_meeting_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json(
@@ -1135,6 +1137,8 @@ external fun uniffi_cal_ffi_checksum_method_host_live_activity_plan_json(
 external fun uniffi_cal_ffi_checksum_method_host_log_line(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_logs_dir_path(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_mark_app_start_rung(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key(
 ): Short
@@ -1380,6 +1384,8 @@ external fun uniffi_cal_ffi_fn_method_host_adopt_meeting_json(`ptr`: Long,`reque
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_app_start_reminders_json(`ptr`: Long,`hiddenCalendarsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_attach_meeting_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_begin_account_oauth_json(`ptr`: Long,`adapterKind`: RustBuffer.ByValue,`valuesJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1550,6 +1556,8 @@ external fun uniffi_cal_ffi_fn_method_host_log_line(`ptr`: Long,`level`: RustBuf
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_logs_dir_path(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_mark_app_start_rung(`ptr`: Long,`rungJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(`ptr`: Long,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -2136,6 +2144,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_app_start_reminders_json() != 27023.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_attach_meeting_json() != 5554.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2389,6 +2400,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_logs_dir_path() != 51122.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_mark_app_start_rung() != 36501.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107.toShort()) {
@@ -4682,6 +4696,19 @@ public interface HostInterface {
     fun `adoptRemoteEncryptionJson`(`passphrase`: kotlin.String)
     
     /**
+     * The "on next app start" reminders due at this opening of the app, as a
+     * JSON array of the entries [`Self::upcoming_reminders_json`] gives
+     * (`trigger_at` is now): the phone shows each at once and hands the ones
+     * it showed to [`Self::mark_app_start_rung`]. The rule is the desktop's
+     * (`host_core::reminders::enumerate_app_start_triggers`): once per device
+     * and moment, a series once after each occurrence, nothing for a done or
+     * cancelled task. An event in a calendar hidden on this device
+     * (`hidden_calendars_json`, a JSON array of ids) is left out and not
+     * remembered, so it rings once its calendar shows again.
+     */
+    fun `appStartRemindersJson`(`hiddenCalendarsJson`: kotlin.String): kotlin.String
+    
+    /**
      * Create a meeting for an event, write its link into the event, and record
      * which meeting that was. Returns `{event, meeting}` as JSON.
      */
@@ -5417,6 +5444,14 @@ public interface HostInterface {
      * The on-disk logs directory, for display.
      */
     fun `logsDirPath`(): kotlin.String
+    
+    /**
+     * Remember that the phone showed these app-start reminders, so no later
+     * opening rings them again: `rung_json` is a JSON array of entries from
+     * [`Self::app_start_reminders_json`] (their `item_kind`, `item_id`,
+     * `all_day` and `start` are read).
+     */
+    fun `markAppStartRung`(`rungJson`: kotlin.String)
     
     /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
@@ -6431,6 +6466,31 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * The "on next app start" reminders due at this opening of the app, as a
+     * JSON array of the entries [`Self::upcoming_reminders_json`] gives
+     * (`trigger_at` is now): the phone shows each at once and hands the ones
+     * it showed to [`Self::mark_app_start_rung`]. The rule is the desktop's
+     * (`host_core::reminders::enumerate_app_start_triggers`): once per device
+     * and moment, a series once after each occurrence, nothing for a done or
+     * cancelled task. An event in a calendar hidden on this device
+     * (`hidden_calendars_json`, a JSON array of ids) is left out and not
+     * remembered, so it rings once its calendar shows again.
+     */
+    @Throws(StoreException::class)override fun `appStartRemindersJson`(`hiddenCalendarsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_app_start_reminders_json(
+        it,
+        FfiConverterString.lower(`hiddenCalendarsJson`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -8162,6 +8222,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Remember that the phone showed these app-start reminders, so no later
+     * opening rings them again: `rung_json` is a JSON array of entries from
+     * [`Self::app_start_reminders_json`] (their `item_kind`, `item_id`,
+     * `all_day` and `start` are read).
+     */
+    @Throws(StoreException::class)override fun `markAppStartRung`(`rungJson`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_mark_app_start_rung(
+        it,
+        FfiConverterString.lower(`rungJson`),_status)
+}
+    }
+    
     
 
     

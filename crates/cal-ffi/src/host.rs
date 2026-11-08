@@ -6862,6 +6862,42 @@ impl Host {
         to_json(&reminder_dtos(triggers, now, None))
     }
 
+    /// The "on next app start" reminders due at this opening of the app, as a
+    /// JSON array of the entries [`Self::upcoming_reminders_json`] gives
+    /// (`trigger_at` is now): the phone shows each at once and hands the ones
+    /// it showed to [`Self::mark_app_start_rung`]. The rule is the desktop's
+    /// (`host_core::reminders::enumerate_app_start_triggers`): once per device
+    /// and moment, a series once after each occurrence, nothing for a done or
+    /// cancelled task. An event in a calendar hidden on this device
+    /// (`hidden_calendars_json`, a JSON array of ids) is left out and not
+    /// remembered, so it rings once its calendar shows again.
+    pub fn app_start_reminders_json(
+        &self,
+        hidden_calendars_json: String,
+    ) -> Result<String, StoreError> {
+        let hidden: Vec<String> = from_json("hidden calendars", &hidden_calendars_json)?;
+        let shared = self.db.shared();
+        let triggers: Vec<_> = host_core::reminders::enumerate_app_start_triggers(&shared)
+            .into_iter()
+            .filter(|t| {
+                !(t.item_kind == host_core::reminders::ItemKind::Event
+                    && hidden.contains(&t.container_id))
+            })
+            .collect();
+        to_json(&app_start_dtos(&triggers))
+    }
+
+    /// Remember that the phone showed these app-start reminders, so no later
+    /// opening rings them again: `rung_json` is a JSON array of entries from
+    /// [`Self::app_start_reminders_json`] (their `item_kind`, `item_id`,
+    /// `all_day` and `start` are read).
+    pub fn mark_app_start_rung(&self, rung_json: String) -> Result<(), StoreError> {
+        let rung: Vec<host_core::reminders::AppStartRung> =
+            from_json("app-start reminders", &rung_json)?;
+        host_core::reminders::mark_app_start_moments(&self.db.shared(), &rung);
+        Ok(())
+    }
+
     /// The notifications to schedule AND the Live Activity plan, from ONE
     /// reminder scan (DESIGN-live-activities.md).
     ///
@@ -10066,6 +10102,28 @@ const LIVE_ACTIVITY_LOOKBACK_HOURS: i64 = 24;
 /// this reminder (`"absorbed": true`). The comparison happens here, on
 /// instants: the plan and the list spell the same moment differently, and a
 /// frontend matching them as text would match nothing.
+/// App-start triggers as the phone reads a reminder ([`reminder_dtos`]'s
+/// keys), without its future-only filter: these ring now.
+fn app_start_dtos(triggers: &[host_core::reminders::Trigger]) -> Vec<serde_json::Value> {
+    triggers
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "item_id": t.item_id,
+                "item_kind": t.item_kind,
+                "container_id": t.container_id,
+                "title": t.title,
+                "body": t.body,
+                "trigger_at": t.trigger_at.to_rfc3339(),
+                "start": t.start.to_rfc3339(),
+                "end": t.relevant_until.to_rfc3339(),
+                "all_day": t.all_day,
+                "sound": t.sound,
+            })
+        })
+        .collect()
+}
+
 fn reminder_dtos(
     mut triggers: Vec<host_core::reminders::Trigger>,
     now: chrono::DateTime<chrono::Utc>,
@@ -13898,6 +13956,47 @@ mod tests {
             .iter()
             .all(|r| r["absorbed"] == serde_json::json!(false)));
         assert_eq!(keys(&hidden["reminders"]), keys(&plain));
+    }
+
+    #[test]
+    fn an_app_start_reminder_rings_once_on_the_phone() {
+        // The phone offered "on next app start" and never fired it. Now it
+        // asks at every opening, shows what is due and hands it back.
+        let (_dir, host, _kc) = open_host();
+        let list = host.create_task_list_json("R".to_string()).unwrap();
+        let list_id = serde_json::from_str::<serde_json::Value>(&list).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let yesterday = (chrono::Local::now() - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        let new_task = format!(
+            r#"{{"title":"Ring at the start","description":null,"status":"open","priority":"medium","scheduled_date":"{yesterday}","scheduled_time":"12:00:00","deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[{{"kind":{{"type":"app_start"}},"sound":null}}],"sound":null}}"#
+        );
+        let created = host.create_task_json(list_id, new_task).unwrap();
+        let task_id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let due: serde_json::Value =
+            serde_json::from_str(&host.app_start_reminders_json("[]".into()).unwrap()).unwrap();
+        let due = due.as_array().unwrap();
+        assert_eq!(due.len(), 1, "{due:?}");
+        assert_eq!(due[0]["item_id"], serde_json::json!(task_id));
+        assert_eq!(due[0]["item_kind"], serde_json::json!("task"));
+        assert!(due[0]["start"].is_string() && due[0]["body"].is_string());
+
+        host.mark_app_start_rung(serde_json::to_string(due).unwrap())
+            .unwrap();
+        let again: serde_json::Value =
+            serde_json::from_str(&host.app_start_reminders_json("[]".into()).unwrap()).unwrap();
+        assert_eq!(
+            again,
+            serde_json::json!([]),
+            "rang again at the next opening"
+        );
     }
 
     #[test]

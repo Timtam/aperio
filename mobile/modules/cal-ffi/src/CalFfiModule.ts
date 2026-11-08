@@ -493,6 +493,15 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  a platform may drop it from the notifications only once it has taken the
    *  plan over (DESIGN-live-activities.md). */
   liveActivityPlanJson(horizonMinutes: number, hiddenCalendarsJson: string): Promise<string>;
+  /** The "on next app start" reminders due at this opening: a JSON array of
+   *  `upcomingRemindersJson`'s entries (`trigger_at` is now), events of the
+   *  calendars in `hiddenCalendarsJson` left out. Shown at once, then handed to
+   *  `markAppStartRung`: once per device and moment, a series once after each
+   *  occurrence, nothing for a done or cancelled task. */
+  appStartRemindersJson(hiddenCalendarsJson: string): Promise<string>;
+  /** Remember that these entries of `appStartRemindersJson` were shown, so no
+   *  later opening rings them again. */
+  markAppStartRung(rungJson: string): Promise<void>;
 
   // ── Live Activities, iOS only (ActivityKit; DESIGN-live-activities.md) ──
   // The rules are in `shared/liveActivityIos.ts`; these only carry them out.
