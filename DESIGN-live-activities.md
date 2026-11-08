@@ -548,6 +548,16 @@ fehlt. Gemerkt wird der damals angezeigte **Vorkommens-Schlüssel**, wie auf
 Android: Dieses Vorkommen kommt nicht wieder; der nächste Termin der Kette kommt
 beim nächsten Öffnen.
 
+**Kein Wegwischen nach einem Update der App.** Am 2026-11-08 verschwand auf
+Tonis iPhone beim Update auf Build 67 die laufende Aktivität; der nächste
+Durchlauf las das als Wegwischen, und sie kam nicht wieder. Ob iOS Aktivitäten
+beim Update beendet, sagt Apple nirgends; ein Bericht im Entwicklerforum
+nennt nach einem TestFlight-Update außerdem leer gezeichnete Aktivitäten bis
+zum Neustart. Darum merkt sich Aperio, welcher Build (`CFBundleVersion`) das
+Gedächtnis schrieb (`supportJson` meldet ihn). Ist es ein anderer, gilt keine
+fehlende Aktivität als weggewischt, und ein laufender Termin startet beim
+Öffnen neu.
+
 ### Technik
 
 - `NSSupportsLiveActivities` in `mobile/app.json` (`ios.infoPlist`).

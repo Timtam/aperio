@@ -37,6 +37,8 @@ interface Support {
   enabled: boolean;
   canSchedule: boolean;
   previews: 'always' | 'whenUnlocked' | 'never';
+  /** The app's build (`CFBundleVersion`); absent from a module before it. */
+  build?: string;
 }
 
 
@@ -102,6 +104,7 @@ function syncIosActivities(
       locale: i18n.language,
       words: words(),
       hideOnLockScreen: support.previews !== 'always',
+      build: support.build ?? '',
     });
     for (const key of result.covered) covered.add(triggerKeyId(key));
     let memory = result.memory;

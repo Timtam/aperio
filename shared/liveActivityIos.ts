@@ -83,6 +83,9 @@ export interface ActivityMemory {
   activities: Record<string, RememberedActivity>;
   /** Appointment keys the user swiped away, with when, so they stay away. */
   dismissed: Record<string, string>;
+  /** The app build (`CFBundleVersion`) that wrote this memory. Absent in a
+   *  memory written before it was kept, which then reads as another build. */
+  build?: string;
 }
 
 export const EMPTY_ACTIVITY_MEMORY: ActivityMemory = { activities: {}, dismissed: {} };
@@ -123,6 +126,10 @@ export interface ReconcileInput {
   words: ActivityWords;
   /** Notification previews are not shown on the locked phone. */
   hideOnLockScreen: boolean;
+  /** The running app's build (`CFBundleVersion`). Another one than the
+   *  memory's means the app was updated since: an activity gone then is no
+   *  swipe. */
+  build: string;
 }
 
 export interface ReconcileResult {
@@ -218,7 +225,9 @@ function firstSignal(chain: LiveActivityChain): LiveTriggerKey[] {
  * activity must still be found. A swipe can only be inferred — ActivityKit
  * tells no reason, and only while Aperio runs —, so an activity Aperio
  * started, did not end, and that is gone before iOS's eight hours counts as
- * swiped, and its appointment stays away (DESIGN, "Wegwischen").
+ * swiped, and its appointment stays away (DESIGN, "Wegwischen"). Not after an
+ * update of the app: the running activity vanished then, read as a swipe,
+ * and stayed away (Toni's iPhone, build 67, 2026-11-08).
  */
 export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
   const now = input.now.getTime();
@@ -233,8 +242,10 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
   const reported = new Map(input.reported.map((a) => [a.id, a]));
 
   // Gone without Aperio ending it: a swipe, unless iOS's limit ran out — or
-  // Live Activities are off, when iOS removes them all itself.
-  if (input.enabled) {
+  // Live Activities are off, when iOS removes them all itself, or the app was
+  // updated since the memory was written.
+  const updated = (input.memory.build ?? '') !== input.build;
+  if (input.enabled && !updated) {
     for (const [id, remembered] of Object.entries(input.memory.activities)) {
       const report = reported.get(id);
       const gone = report == null || report.state === 'dismissed' || report.state === 'ended';
@@ -342,7 +353,7 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
     }
   }
 
-  return { actions, covered, memory: { activities, dismissed } };
+  return { actions, covered, memory: { activities, dismissed, build: input.build } };
 }
 
 /** The memory once a start or a schedule has given the activity its id. */

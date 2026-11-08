@@ -42,7 +42,7 @@ enum LiveActivityBridge {
         return plain.date(from: raw)
     }
 
-    /// `{available, enabled, canSchedule, previews}`.
+    /// `{available, enabled, canSchedule, previews, build}`.
     ///
     /// Not available on an iPad, which has no Live Activities: a switch there
     /// would send the user to look for a setting that does not exist.
@@ -68,11 +68,15 @@ enum LiveActivityBridge {
         case .never: previews = "never"
         @unknown default: previews = "always"
         }
+        // The app's build, so a change since the last pass reads as an update
+        // of the app and not as a swipe (`reconcileIosActivities`).
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         return json([
             "available": available,
             "enabled": enabled,
             "canSchedule": canSchedule,
             "previews": previews,
+            "build": build,
         ])
     }
 
