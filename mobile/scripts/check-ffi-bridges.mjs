@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 /**
- * The Rust host, the committed UniFFI bindings, and the two native bridges all
- * have to agree about every method — that it EXISTS and how many arguments it
- * takes.
+ * The Rust host, the UniFFI bindings generated from it, and the two native
+ * bridges all have to agree about every method — that it EXISTS and how many
+ * arguments it takes.
  *
- * The bindings are generated from `crates/cal-ffi` and checked in, and the
- * vendoring step that refreshes the native `.so` does not refresh them. Nothing
- * else on this side of the fence looks: `tsc` and ESLint never read Kotlin or
- * Swift. Sixteen Host methods were missing when the first version of this
- * script was written — the whole event-group API and the whole day-marker API,
- * two features that looked finished and could never have run on Android.
+ * The Kotlin bindings used to be checked in, and the vendoring step that
+ * refreshes the native `.so` did not refresh them. Nothing else on this side
+ * of the fence looks: `tsc` and ESLint never read Kotlin or Swift. Sixteen Host
+ * methods were missing when the first version of this script was written — the
+ * whole event-group API and the whole day-marker API, two features that looked
+ * finished and could never have run on Android. Since TODO 89a they are not in
+ * the repository any more: this script generates them first
+ * (`kotlin-bindings.mjs`, a `cargo build` of cal-ffi), into the place the
+ * Android module compiles them from, and reads those. `--use-existing` reads
+ * the ones already there instead: the Android workflow generates them next to
+ * the release `.so` just before.
  *
  * That version compared NAMES only, and a later change slipped straight past
  * it: three Rust methods gained a `lang` parameter, the Kotlin bridge was
@@ -21,7 +26,8 @@
  *
  * So it now checks arity, from three directions:
  *
- *   Rust  ↔ bindings  — the bindings are stale (or were generated elsewhere).
+ *   Rust  ↔ bindings  — the bindings came from another source, or this
+ *                       script reads either side differently from UniFFI.
  *   bindings ↔ Kotlin — the Android bridge calls a shape that does not exist.
  *   Rust  ↔ Swift     — ditto for iOS, where nothing local ever compiles it.
  *
@@ -46,18 +52,18 @@
  * Run: node mobile/scripts/check-ffi-bridges.mjs
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+
+import { BINDINGS_FILE, generateKotlinBindings } from './kotlin-bindings.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
 
 const RUST = join(root, 'crates/cal-ffi/src/host.rs');
-const BINDINGS = join(
-  root,
-  'mobile/modules/cal-ffi/android/src/main/java/uniffi/cal_ffi/cal_ffi.kt',
-);
+/** Generated, not checked in (TODO 89a) — see the header. */
+const BINDINGS = BINDINGS_FILE;
 const KOTLIN = join(
   root,
   'mobile/modules/cal-ffi/android/src/main/java/expo/modules/calffi/CalFfiModule.kt',
@@ -152,7 +158,7 @@ function rustArity(rust) {
 
 /**
  * camelCase name → declared argument count, from `HostInterface` in the
- * committed bindings.
+ * generated bindings.
  *
  * Scoped to that one interface on purpose. The file also declares the callback
  * interfaces the host calls back INTO — `DeviceCalendarProviderInterface` among
@@ -218,10 +224,12 @@ function callArity(source, pattern) {
  * synchronous collation functions the frontends now sort with cross the same
  * way — which is precisely the boundary this file exists to watch.
  *
- * What this half checks is Rust ↔ committed bindings. That is the failure that
- * actually happens: the vendoring step refreshes the native library and NOT
- * the checked-in bindings, so Rust grows a function, Kotlin calls it, and
- * `:cal-ffi:compileReleaseKotlin` dies minutes into an EAS build.
+ * What this half checks is Rust ↔ bindings. It caught the failure that
+ * happened while the bindings were checked in: the vendoring step refreshed
+ * the native library and NOT them, so Rust grew a function, Kotlin called it,
+ * and `:cal-ffi:compileReleaseKotlin` died minutes into an EAS build. With the
+ * bindings generated here it holds this script's reading of the exports to
+ * UniFFI's.
  *
  * It does not try to find free-function CALLS in Swift. A bare call there is
  * indistinguishable from any other function call, and a pattern loose enough
@@ -263,6 +271,18 @@ function bindingFreeArity(bindings, name) {
   return [...found][0];
 }
 
+if (!process.argv.includes('--use-existing')) {
+  generateKotlinBindings();
+} else if (!existsSync(BINDINGS)) {
+  console.error(
+    `--use-existing, but there are no Kotlin bindings at
+  ${BINDINGS}
+` +
+      'Generate them first (node mobile/scripts/kotlin-bindings.mjs), or run without the flag.',
+  );
+  process.exit(1);
+}
+
 const rust = rustArity(readFileSync(RUST, 'utf8'));
 const bindingsText = readFileSync(BINDINGS, 'utf8');
 const declared = bindingArity(bindingsText);
@@ -282,23 +302,23 @@ for (const [name, count] of rustFree) {
   const declaredFree = bindingFreeArity(bindingsText, name);
   if (declaredFree === null) {
     problems.push(
-      `crates/cal-ffi exports the free function ${name}(), which the committed ` +
-        'bindings do not declare — the bindings are stale, and the Android ' +
-        'build will fail on it',
+      `crates/cal-ffi exports the free function ${name}(), which the generated ` +
+        'bindings do not declare — they came from another source, or this check ' +
+        'reads the export differently from UniFFI',
     );
     continue;
   }
   if (declaredFree === 'ambiguous') {
     problems.push(
-      `the committed bindings declare ${name}() more than once with different ` +
+      `the generated bindings declare ${name}() more than once with different ` +
         'shapes, so this check cannot say which one a bridge would reach',
     );
     continue;
   }
   if (declaredFree !== count) {
     problems.push(
-      `the committed bindings declare ${name}() with ${declaredFree} argument(s), ` +
-        `but crates/cal-ffi declares ${count} — the bindings are stale`,
+      `the generated bindings declare ${name}() with ${declaredFree} argument(s), ` +
+        `but crates/cal-ffi declares ${count} — the bindings came from another source`,
     );
   }
 }
@@ -306,14 +326,14 @@ for (const [name, count] of rustFree) {
 for (const [name, count] of kotlin) {
   if (!declared.has(name)) {
     problems.push(
-      `the Android bridge calls host.${name}(), which the committed bindings do not declare`,
+      `the Android bridge calls host.${name}(), which the generated bindings do not declare`,
     );
     continue;
   }
   if (declared.get(name) !== count) {
     problems.push(
       `the Android bridge passes ${count} argument(s) to host.${name}(), ` +
-        `but the committed bindings declare ${declared.get(name)}`,
+        `but the generated bindings declare ${declared.get(name)}`,
     );
   }
 }
@@ -339,8 +359,8 @@ for (const [name, count] of declared) {
   if (!rust.has(name)) continue;
   if (rust.get(name) !== count) {
     problems.push(
-      `the committed bindings declare host.${name}() with ${count} argument(s), ` +
-        `but crates/cal-ffi declares ${rust.get(name)} — the bindings are stale`,
+      `the generated bindings declare host.${name}() with ${count} argument(s), ` +
+        `but crates/cal-ffi declares ${rust.get(name)} — the bindings came from another source`,
     );
   }
 }
@@ -1203,18 +1223,16 @@ for (const [what, found, floor] of floors) {
 
 if (problems.length > 0) {
   console.error(
-    `The Rust host, the committed UniFFI bindings and the native bridges ` +
+    `The Rust host, the generated UniFFI bindings and the native bridges ` +
       `disagree in ${problems.length} place(s):\n`,
   );
   for (const p of [...new Set(problems)].sort()) console.error(`  ${p}`);
   console.error(
-    '\nIf the bindings are stale, regenerate them (see mobile/README.md):\n' +
-      '  cargo build -p cal-ffi\n' +
-      '  cargo run -p cal-ffi --features cli --bin uniffi-bindgen -- \\\n' +
-      '    generate --library target/debug/cal_ffi.dll --language kotlin --out-dir <tmp>\n' +
-      '  copy <tmp>/uniffi/cal_ffi/cal_ffi.kt over the committed one\n\n' +
-      'The committed bindings and the vendored .so must come from the SAME\n' +
-      'cal-ffi source, or JNA fails to resolve symbols at call time.',
+    '\nA bridge that calls what the Rust does not export is fixed in the bridge.\n' +
+      'Rust and the bindings disagreeing means the bindings came from another\n' +
+      'source (with --use-existing), or this script reads one side differently\n' +
+      'from UniFFI. The bindings and the .so that ships with them must come from\n' +
+      'the SAME cal-ffi source, or JNA fails to resolve symbols at call time.',
   );
 }
 
@@ -1294,7 +1312,7 @@ console.log(
     `parameter count (${onlyOn}), each async one on the same queue ` +
     `(${QUEUE_DIFFERS.size} listed exception), ` +
     `${kotlin.size} Android and ${swift.size} iOS calls agree ` +
-    `with the committed bindings and with crates/cal-ffi, and its ` +
+    `with the generated bindings and with crates/cal-ffi, and its ` +
     `${rustFree.size} exported free functions ` +
     `(${[...rustFree.keys()].sort().join(', ')}) are all declared there; ` +
     `the ${traits.size} interfaces Rust calls into (${traitMethods} methods) are ` +

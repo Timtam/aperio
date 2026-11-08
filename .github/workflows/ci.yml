@@ -79,11 +79,11 @@ jobs:
               - '.cargo/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/build-artifacts.yml'
-            # The four sides of the UniFFI seam. Any of them moving can put the
-            # committed bindings out of step with the Rust, or a bridge out of
-            # step with the bindings — and nothing else in CI reads Kotlin or
-            # Swift. The check is a plain node script with no dependencies, so
-            # it costs seconds and needs no install.
+            # The four sides of the UniFFI seam. Any of them moving can put a
+            # bridge out of step with the Rust or with the bindings generated
+            # from it — and nothing else in CI reads Kotlin or Swift. The check
+            # is a node script with no npm dependencies; it builds cal-ffi to
+            # generate the Kotlin bindings (TODO 89a).
             # The React Native app. Nothing in CI compiled it: ~45k lines of
             # TypeScript with a `mobile/tsconfig.json` sitting right there,
             # and a mobile-only commit reported three green checks having run
@@ -100,6 +100,7 @@ jobs:
               - 'crates/cal-ffi/**'
               - 'mobile/modules/cal-ffi/**'
               - 'mobile/scripts/check-ffi-bridges.mjs'
+              - 'mobile/scripts/kotlin-bindings.mjs'
               # The access status both bridges write; the check holds them to it.
               - 'shared/contracts/deviceAccessStatus.json'
               - '.github/workflows/ci.yml'
@@ -302,17 +303,27 @@ jobs:
           fi
           echo "$out" | grep -q "did not match any packages"
 
-  # The Rust host, the committed UniFFI bindings, and the Kotlin + Swift bridges
-  # agree about every method and its arity. Deliberately its own job rather than
-  # a step in `frontend`: it needs no npm install and no toolchain, so it can
-  # report in seconds on a commit that touches nothing else — and it is the only
-  # thing anywhere that reads the Swift bridge, which no machine here compiles.
+  # The Rust host, the UniFFI bindings generated from it, and the Kotlin + Swift
+  # bridges agree about every method and its arity. Deliberately its own job
+  # rather than a step in `frontend`: it needs no npm install, and it is the
+  # only thing anywhere that reads the Swift bridge, which no machine here
+  # compiles. Since TODO 89a the Kotlin bindings are not committed, so the
+  # check generates them first: a `cargo build` of cal-ffi, cached under its
+  # own key (one crate's dependency tree, not the workspace the `rust` job
+  # builds).
   ffi-bridges:
     name: FFI bridges
     needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.ffi == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: needs.changes.outputs.ffi == 'true'
+        with:
+          key: ffi
+          cache-on-failure: true
       - name: Rust, bindings and bridges agree
         if: needs.changes.outputs.ffi == 'true'
         run: node mobile/scripts/check-ffi-bridges.mjs

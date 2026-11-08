@@ -499,14 +499,15 @@ Siehe DESIGN §4.2.
     Pickers.
   - iOS-Volltastatur erreicht die schreibgeschützten Zeilen des Handys nicht;
     VoiceOver und TalkBack erreichen sie.
-  🚩 **Eigener PR nach dem Stapel (89a):** Die erzeugten Kotlin-Bindings
-  (`mobile/modules/cal-ffi/android/src/main/java/uniffi/cal_ffi/cal_ffi.kt`)
-  nicht mehr einchecken. Die Android-CI erzeugt sie ohnehin vor jedem Bau neu,
-  und die Swift-Bindings liegen auch nicht im Repo. Umzustellen sind: Datei
-  loeschen und ignorieren, der lokale Android-Lauf erzeugt sie neben dem
-  frischen `.so`, und `mobile/scripts/check-ffi-bridges.mjs` erzeugt sie selbst,
-  statt die eingecheckte Fassung zu vergleichen. Anlass: Eine veraltete Datei
-  faellt sonst erst beim Checksum-Fehler auf dem Geraet auf.
+  ✓ **89a erledigt (2026-11-08):** Die Kotlin-Bindings
+  (`mobile/modules/cal-ffi/android/src/main/java/uniffi/`) liegen nicht mehr im
+  Repo und sind ignoriert, wie die Swift-Bindings. `mobile/scripts/kotlin-bindings.mjs`
+  erzeugt sie aus `crates/cal-ffi` (`npm run bindings:android`);
+  `check-ffi-bridges.mjs` erzeugt sie vor jeder Prüfung selbst (Entscheidung
+  Toni; der CI-Job „FFI bridges“ baut dafür cal-ffi mit eigenem Cache),
+  `--use-existing` liest die schon erzeugten. Der Android-Lauf erzeugt sie
+  neben der Release-`.so`, nimmt sie am Ignore-Filter vorbei ins EAS-Archiv
+  und prüft dort, dass sie drin sind.
   🚩 **Offen nach 79b** („nur dieser Termin" bleibt in seiner Serie):
   - **Exchange kann es, darf aber noch nicht.** `UpdateItem` gegen eine
     `OccurrenceItemId` macht aus jedem Vorkommen eine Ausnahme, aber

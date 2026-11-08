@@ -46,6 +46,14 @@ yarn-error.*
 # cal-ffi native libs are built by cargo-ndk (regenerable; not committed)
 /modules/cal-ffi/android/src/main/jniLibs/
 
+# cal-ffi Android: the UniFFI Kotlin bindings, generated from crates/cal-ffi by
+# scripts/kotlin-bindings.mjs (also run by check:bindings and npm run android)
+# and by the mobile-android-play workflow next to the release .so (TODO 89a).
+# Like the Swift bindings, a committed copy can only be stale. The workflow
+# strips this rule before eas-cli archives the working tree, so keep it
+# spelled exactly like this.
+/modules/cal-ffi/android/src/main/java/uniffi/
+
 # cal-ffi iOS: the XCFramework and the UniFFI Swift bindings are built fresh by
 # the mobile-ios-testflight workflow on a macOS runner (regenerable; not
 # committed — a committed copy can only be stale). The two header files are

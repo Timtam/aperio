@@ -47,6 +47,7 @@
   },
   "scripts": {
     "start": "expo start",
+    "bindings:android": "node scripts/kotlin-bindings.mjs",
     "check:bindings": "node scripts/check-ffi-bridges.mjs",
     "android": "npm run check:bindings && expo run:android",
     "ios": "expo run:ios",

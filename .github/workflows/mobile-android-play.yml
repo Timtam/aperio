@@ -80,7 +80,9 @@ jobs:
             -o mobile/modules/cal-ffi/android/src/main/jniLibs \
             build -p cal-ffi --release
 
-      - name: Regenerate UniFFI Kotlin bindings (match the fresh .so)
+      # Generated here, never committed (TODO 89a): from the same source and
+      # build as the .so above, so their per-method checksums match it.
+      - name: Generate UniFFI Kotlin bindings (match the fresh .so)
         run: |
           cargo build -p cal-ffi --release
           cargo run -p cal-ffi --features cli --bin uniffi-bindgen -- \
@@ -118,10 +120,19 @@ jobs:
           # A fixed-string filter, not a regex: the rule contains slashes, and
           # a sed address holding `$#` is a shell variable before sed ever sees
           # it — which is how the first draft of this line silently did nothing.
-          grep -vFx '/modules/cal-ffi/android/src/main/jniLibs/' mobile/.gitignore > mobile/.gitignore.new
+          # The Kotlin bindings are gitignored the same way since TODO 89a,
+          # and would be dropped from the upload the same way.
+          grep -vFx \
+            -e '/modules/cal-ffi/android/src/main/jniLibs/' \
+            -e '/modules/cal-ffi/android/src/main/java/uniffi/' \
+            mobile/.gitignore > mobile/.gitignore.new
           mv mobile/.gitignore.new mobile/.gitignore
           if grep -q jniLibs mobile/.gitignore; then
             echo "the jniLibs rule survived; the archive would ship without the native library" >&2
+            exit 1
+          fi
+          if grep -q 'java/uniffi' mobile/.gitignore; then
+            echo "the bindings rule survived; the archive would ship without the Kotlin bindings" >&2
             exit 1
           fi
 
@@ -136,9 +147,9 @@ jobs:
           # first UniFFI call, so it must fail loudly here instead.
           git config user.email "ci@aperio.local"
           git config user.name "Aperio CI"
-          # -f past the .gitignore on jniLibs; the Kotlin bindings are tracked.
+          # -f past the .gitignore on jniLibs and on the Kotlin bindings.
           git add -f mobile/modules/cal-ffi/android/src/main/jniLibs
-          git add mobile/modules/cal-ffi/android/src/main/java/uniffi
+          git add -f mobile/modules/cal-ffi/android/src/main/java/uniffi
           git commit -m "ci: vendor fresh cal-ffi .so [not pushed]" || echo "nothing to commit"
           # This used to be the proof that the native library would ship, and
           # it proved nothing: it interrogates the git INDEX, which eas-cli
@@ -174,7 +185,8 @@ jobs:
       # Swift compile failure, with the build already paid for.
       - name: FFI bridges agree with the Rust host
         working-directory: mobile
-        run: node scripts/check-ffi-bridges.mjs
+        # The bindings generated above, next to the .so that ships with them.
+        run: node scripts/check-ffi-bridges.mjs --use-existing
 
       - name: Install eas-cli
         run: npm i -g eas-cli
@@ -217,5 +229,13 @@ jobs:
             fi
             echo "archive carries $abi: $(stat -c%s "$lib") bytes"
           done
+          # And the Kotlin bindings, gitignored since TODO 89a: without them
+          # :cal-ffi:compileReleaseKotlin fails minutes into the build.
+          kt="$RUNNER_TEMP/eas-archive/mobile/modules/cal-ffi/android/src/main/java/uniffi/cal_ffi/cal_ffi.kt"
+          if [ ! -s "$kt" ]; then
+            echo "cal_ffi.kt is missing from the archive EAS would upload" >&2
+            exit 1
+          fi
+          echo "archive carries the Kotlin bindings: $(stat -c%s "$kt") bytes"
           echo "eas build --platform android --profile $PROFILE $SUBMIT --non-interactive"
           eas build --platform android --profile "$PROFILE" $SUBMIT --non-interactive
