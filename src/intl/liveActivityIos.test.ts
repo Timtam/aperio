@@ -77,6 +77,7 @@ function input(overrides: Partial<ReconcileInput>): ReconcileInput {
     locale: 'de',
     words: WORDS,
     hideOnLockScreen: false,
+    build: '68',
     ...overrides,
   };
 }
@@ -310,6 +311,7 @@ describe('reconcileIosActivities — a swipe, inferred', () => {
   const started: ActivityMemory = {
     activities: { a1: { keys: ['A', 'B'], shownKey: 'A', startsAt: at('09:50'), content: '' } },
     dismissed: {},
+    build: '68',
   };
 
   it('remembers the appointment swiped away and does not start it again', () => {
@@ -336,6 +338,19 @@ describe('reconcileIosActivities — a swipe, inferred', () => {
       input({ now: new Date(at('10:10')), chains: [CROSSFADE], memory: started, enabled: false }),
     );
     expect(result.memory.dismissed).toEqual({});
+  });
+
+  it('is no swipe after an update of the app, and the appointment starts again', () => {
+    // Toni's iPhone, 2026-11-08: the update to build 67 took the running
+    // activity away, the next pass read that as a swipe, and it stayed away.
+    for (const memory of [{ ...started, build: '67' }, { ...started, build: undefined }]) {
+      const result = reconcileIosActivities(
+        input({ now: new Date(at('10:10')), chains: [CROSSFADE], memory }),
+      );
+      expect(result.memory.dismissed).toEqual({});
+      expect(types(result.actions)).toEqual(['start']);
+      expect(result.memory.build).toBe('68');
+    }
   });
 
   it("is no swipe when iOS's eight hours ran out", () => {
