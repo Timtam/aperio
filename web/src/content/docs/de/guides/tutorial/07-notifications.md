@@ -150,35 +150,43 @@ Uhrzeit. „Beim nächsten App-Start" fehlt hier mit Absicht: Diese Art wird nur
 ausgelöst, wenn sie am Eintrag selbst gesetzt ist – als Kalender-Standard wäre
 sie eine Einstellung, die sich speichern lässt und dann stumm bleibt.
 
-### Apple Kalender zeigt zwei Hinweise
+### Apple Kalender und sein Standardhinweis
 
 Ein iCloud-Konto hat einen eigenen Standardhinweis (iPhone: **Einstellungen →
-Apps → Kalender → Standardhinweise**). Apple schreibt ihn als Alarm in den
-Termin und markiert diesen Alarm als seinen eigenen Standard – daran erkennt
-die Kalender-App ihn später wieder und unterscheidet ihn von einem, den jemand
-bewusst gesetzt hat.
+Apps → Kalender → Standardhinweise**). Das iPhone legt ihn zu jedem Termin
+dazu, der nichts anderes sagt. Termine, die es selbst anlegt, sagen es mit
+einem stummen Hinweis, der nie klingelt; ein Termin, der ohne ihn von woanders
+kommt, bekommt den Standard zusätzlich zu seinen eigenen Hinweisen.
 
-Aperio erhält diese Markierung. Bearbeitest du einen am iPhone angelegten
-Termin – Titel, Uhrzeit, was auch immer –, bleibt der Hinweis selbst unangetastet,
-Markierung inklusive: Er bleibt Apples Standard und wird nicht zu einem Hinweis,
-den du scheinbar selbst gesetzt hast. Änderst du die Erinnerung hier, legst eine
-daneben oder nimmst sie weg, verschwindet die Markierung: Dann ist es deine
-Entscheidung – und ein Konto, das den Hinweis weiter für seinen hielte, könnte
-seine Version wieder hineinschreiben.
+Aperio schreibt diesen stummen Hinweis in jeden Termin, den es bei iCloud
+speichert: in einen neuen und in jeden, den du speicherst. Das iPhone zeigt
+dann genau die Erinnerungen, die der Termin in Aperio hat, und legt keine
+eigene dazu; ein Termin ohne Erinnerung hat also auch am iPhone keinen Hinweis.
+Soll dich das iPhone oder ein Sprachassistent, der den Kalender vorliest,
+erinnern, gib dem Termin eine Erinnerung oder stell eine Standard-Erinnerung
+des Kalenders auf **Neuen Terminen angehängt**. Ein Eintrag **Nur in Aperio**
+bleibt in Aperio.
 
-Wo Aperio einen Hinweis nicht exakt so zurückschreiben kann, wie er vorlag –
-weil die App ihn gar nicht lesen kann oder ihn anders schreiben müsste –, lässt
-sie ihn dem Server und verzichtet auf die Markierung, statt zu raten. Solche
-Termine verhalten sich wie bisher.
+Ein Termin, der vor dieser Version gespeichert wurde, zeigt am iPhone vielleicht
+noch den Standard neben seinem eigenen Hinweis, und ein am iPhone angelegter
+und in Aperio bearbeiteter Termin vielleicht einen zusätzlichen Hinweis „Zum
+Ereigniszeitpunkt". Einmal in Aperio speichern behebt das. Aperio schreibt den
+stummen Hinweis nur bei iCloud: Ein iPhone an einem anderen CalDAV-Server legt
+seinen Standard zu Terminen aus Aperio dazu, stell dort **Standardhinweise** auf
+*Ohne*.
 
-Ein Termin, den Aperio mit einer **angehängten** Erinnerung anlegt, hat deshalb
-beide: Apples Standardhinweis und den von Aperio. Apple Kalender listet sie als
-„1. Hinweis: Standard" und „2. Hinweis", und ein Sprachassistent, der den
-Kalender vorliest, sagt den Termin womöglich zweimal an. Aperio kann Apples
-Standard von außen nicht abschalten – stell **Standardhinweise** am iPhone auf
-*Ohne*, wenn du nur die Erinnerung von Aperio willst, oder lass den
-Aperio-Eintrag auf **Nur in Aperio**, dann wird gar nichts in den Termin
-geschrieben.
+Hat Apple seinen Standard als Hinweis in einen Termin geschrieben, markiert es
+diesen Hinweis als seinen eigenen. Aperio erhält diese Markierung: Bearbeitest
+du einen am iPhone angelegten Termin – Titel, Uhrzeit, was auch immer –, bleibt
+der Hinweis unangetastet, Markierung inklusive. Er bleibt Apples Standard und
+wird nicht zu einem Hinweis, den du scheinbar selbst gesetzt hast. Änderst du
+die Erinnerung hier, legst eine daneben oder nimmst sie weg, verschwindet die
+Markierung: Dann ist es deine Entscheidung.
+
+Einen Hinweis, den Aperio nicht lesen kann – Apples „1 Woche vorher" etwa –,
+zeigt Aperio nicht an, und beim Speichern geht er unverändert an den Server
+zurück. Einen, den die App anders schreiben müsste, überlässt sie ebenfalls dem
+Server und verzichtet auf die Markierung, statt zu raten.
 
 ### Ganztägige Termine und Geburtstage
 

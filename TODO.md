@@ -618,20 +618,35 @@ Siehe DESIGN §4.2.
   sie gibt. Gemeint ist laut DESIGN §14.1 und Beschriftung der nächste Start
   nach Fälligkeit. Zu tun: Ausgelöstes dauerhaft merken und erledigte
   Aufgaben auslassen.
-- [ ] **CalDAV liest Hinweise „zum Ende“ und Apples Platzhalter falsch.**
-  Gefunden in der Recherche zu 222 (2026-11-07, aus dem Code gelesen, nicht
-  ausprobiert). `parse_valarms` (`crates/ical-mapping/src/mapping.rs`) prüft
-  weder `RELATED` noch `ACTION`. Ein `TRIGGER;RELATED=END:-PT5M` (5 Minuten vor
-  dem Ende) wird als 5 Minuten vor dem BEGINN gelesen und klingelt dann; beim
-  Umschreiben eines eigenen Termins geht er als solcher hinaus (bei
-  Einladungen bleibt er Byte für Byte). Apples Platzhalter für „kein Hinweis“
-  (`ACTION:NONE`, `TRIGGER;VALUE=DATE-TIME:19760401T005545Z`,
-  `X-APPLE-DEFAULT-ALARM:TRUE`, laut einem SOGo-Bericht von 2014) würde als
-  feste Erinnerung am 1. April 1976 gelesen und im Editor als „Zu festem
-  Zeitpunkt“ gezeigt. Zu tun: `ACTION:NONE` überspringen; `RELATED=END`
-  entweder modellieren oder ganz unangetastet lassen (fremde iCal-Teile
-  ganz oder gar nicht). Wochen (`-P1W`) liest der Parser
-  auch nicht, ein solcher Hinweis fällt weg.
+- [ ] **CalDAV liest Hinweise „zum Ende“ falsch, und „1 Woche vorher“ gar
+  nicht.** Gefunden in der Recherche zu 222 (2026-11-07, aus dem Code
+  gelesen, nicht ausprobiert). `parse_valarms`
+  (`crates/ical-mapping/src/mapping.rs`) prüft `RELATED` nicht. Ein
+  `TRIGGER;RELATED=END:-PT5M` (5 Minuten vor dem Ende) wird als 5 Minuten
+  vor dem BEGINN gelesen und klingelt dann; beim Umschreiben eines eigenen
+  Termins geht er als solcher hinaus (bei Einladungen bleibt er Byte für
+  Byte). Zu tun: `RELATED=END` entweder modellieren oder ganz unangetastet
+  lassen (fremde iCal-Teile ganz oder gar nicht). Wochen (`-P1W`, Apples
+  „1 Woche vorher“) liest der Parser nicht: Aperio zeigt einen solchen
+  Hinweis nicht an, ein Speichern gibt ihn seit dem Fix für Apples stummen
+  Hinweis aber unverändert zurück (vorher fiel er weg).
+- [ ] **Aus Dateien eingelesene iPhone-Termine tragen eine Erinnerung von
+  1976.** Aus dem Code gelesen (2026-11-08), nicht ausprobiert. Bis zum Fix
+  für Apples stummen Hinweis las der Datei-Import (I4)
+  Apples `ACTION:NONE`-Hinweis als feste Erinnerung am 1. April 1976 und
+  legte sie im Zielkalender an: in einem lokalen Kalender als Erinnerung
+  der Zeile (kein Zwischenspeicher, Migration 0050 erreicht sie nicht), bei
+  iCloud als echten Hinweis, den das iPhone „Zum Ereigniszeitpunkt“ zeigt
+  (Letzteres heilt beim nächsten Speichern). Klingeln kann die Erinnerung in
+  Aperio nicht, der Editor zeigt sie aber. Zu tun, falls es solche Termine
+  gibt: lokale Erinnerungen genau zu diesem Zeitpunkt einmal entfernen.
+- [ ] **Apples stummer Hinweis: was offen blieb** (Live-Test 2026-11-08,
+  Entscheidungen Toni). Aperio schreibt ihn nur bei iCloud; ein iPhone an
+  einem anderen CalDAV-Server legt seinen Standard weiter dazu. Ein
+  gelöschter Einzeltermin und die Antwort auf eine Einladung schreiben ihn
+  nicht dazu (sie ändern weder Hinweise noch Inhalt). Bestehende Termine
+  heilen erst beim nächsten Speichern, eine einmalige Reparatur im
+  Hintergrund gibt es nicht.
 - [ ] **Exchange-Aufgaben: Speichern schaltet die Erinnerung aus.** Hat eine
   Exchange-Aufgabe eine Erinnerung ohne eigenen Zeitpunkt (`ReminderIsSet`
   ohne `ReminderDueBy`), liest Aperio sie als „0 Minuten vor Fälligkeit“
@@ -4357,6 +4372,24 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 
 #### B7 · Erinnerungs-Feinheiten (§14) `[~]` — erledigte Punkte
 
+- [x] **Apples stummer Hinweis: das iPhone legt keinen Standard mehr dazu**
+  (2026-11-08). Live gemessen (iOS 27.2, `icloud-reminders marker`): Das
+  iPhone legt seinen Standardhinweis zu jedem Termin, dem ein VALARM
+  `ACTION:NONE` mit `TRIGGER;VALUE=DATE-TIME:19760401T005545Z` fehlt, egal
+  wie viele Hinweise er hat; in eigene Termine schreibt es ihn immer. Jeder
+  Termin aus Aperio bekam so am iPhone einen zweiten Hinweis. Aperio las den
+  stummen Hinweis außerdem als Erinnerung von 1976 und schrieb ihn beim
+  Speichern als sichtbaren Hinweis zurück, den das iPhone „Zum
+  Ereigniszeitpunkt“ zeigt. Jetzt: Lesen überspringt unbekannte `ACTION`s
+  (RFC 5545 §3.8.6.1) und jeden Hinweis an diesem Zeitpunkt; ein Speichern
+  gibt jeden nicht gezeigten Hinweis als Servertext zurück und den
+  beschädigten wieder als stummen (`PriorAlarms`, `apple_alarm::restored`);
+  bei iCloud bekommt jedes VEVENT jedes Schreibens den stummen Hinweis, außer
+  neben Apples markiertem Standard (`apple_alarm::with_silent_alarm`).
+  Entscheidungen Toni: nur iCloud, auch ohne Erinnerung (iPhone zeigt dann
+  keinen Hinweis), bei jedem Speichern, Reparatur beim nächsten Speichern;
+  ein iPhone-Termin „Ohne“ gilt als Termin ohne Erinnerung (Kalender-Standard
+  greift). Migration 0050 lädt die zwischengespeicherten Termine einmal neu.
 - [x] **Erinnerung nach dem Beginn (222).** CalDAV und iCloud kennen sie (ein
   positiver `TRIGGER`, den Aperio als negatives `minutes_before` liest),
   Vikunja auch (Aperio liest Vikunja-Erinnerungen aber noch gar nicht); der

@@ -68,6 +68,37 @@ pub fn component_lines(block: &str) -> Vec<ContentLine> {
     out
 }
 
+/// The byte ranges of the top-level `BEGIN:<name>` … `END:<name>` components
+/// of a raw VCALENDAR body, each with its own line endings, in document order.
+/// Sub-components (a VEVENT's VALARM, a VTIMEZONE's STANDARD) stay inside their
+/// parent's range, because they have other names; asked of one VEVENT's text
+/// for `VALARM`, it gives that event's alarms.
+pub fn component_ranges(body: &str, name: &str) -> Vec<Range<usize>> {
+    let begin = format!("BEGIN:{name}");
+    let end = format!("END:{name}");
+    let mut ranges = Vec::new();
+    let mut start: Option<usize> = None;
+    let mut offset = 0;
+    for line in body.split_inclusive('\n') {
+        // Match the PHYSICAL line, stripping only the trailing CR/LF — NOT leading
+        // whitespace. RFC-5545 folds long values onto continuation lines prefixed
+        // with a space/tab, so a real component boundary never has leading
+        // whitespace; `line.trim()` would misread a folded "…\r\n BEGIN:VEVENT"
+        // inside a DESCRIPTION as a boundary and corrupt the block.
+        let marker = line.trim_end_matches(['\r', '\n']);
+        if marker == begin {
+            start = Some(offset);
+        }
+        offset += line.len();
+        if marker == end {
+            if let Some(from) = start.take() {
+                ranges.push(from..offset);
+            }
+        }
+    }
+    ranges
+}
+
 /// Every logical line of `text`: the byte range of its physical lines and
 /// its unfolded content without the line ending. A continuation line starts
 /// with a space or a tab (RFC 5545 §3.1).

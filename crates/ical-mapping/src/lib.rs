@@ -9,6 +9,7 @@
 //! name, Windows name or the file's own definition, `SCHEDULE-AGENT`, and
 //! foreign parts kept whole.
 
+pub mod apple_alarm;
 pub mod error;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod fixtures;

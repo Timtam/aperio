@@ -903,6 +903,7 @@ impl CaldavAdapter {
                         schedules: false,
                         organizer_address: None,
                         writes_color: self.supports_event_color(),
+                        apple_silent_alarm: self.is_icloud(),
                     })
                 }
             }
@@ -917,6 +918,7 @@ impl CaldavAdapter {
             schedules: discovery.supports_scheduling,
             organizer_address: discovery.calendar_user_address.clone(),
             writes_color: self.supports_event_color(),
+            apple_silent_alarm: self.is_icloud(),
         })
     }
 

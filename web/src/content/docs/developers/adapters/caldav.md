@@ -151,6 +151,22 @@ Apple's well-known endpoints.
   (`event_in_window` returns true for `recurrence.is_some()`).
 - **iCloud date sentinels / colours.** Colours arrive as `#RRGGBBAA`; the
   alpha is dropped to a plain hex.
+- **Apple's silent alarm.** An iPhone adds the account's default alert to
+  every appointment that lacks a VALARM with `ACTION:NONE` and
+  `TRIGGER;VALUE=DATE-TIME:19760401T005545Z`, however many alarms it has; it
+  writes that alarm into every appointment it makes itself (measured on iOS
+  27.2, 2026-11-08). The read shows no reminder for it, nor for any alarm with
+  an ACTION other than DISPLAY, AUDIO or EMAIL or at that trigger (RFC 5545
+  §3.8.6.1, RFC 9074 §8), and a rebuilt VEVENT carries every alarm the read
+  did not show back as the server's text (`mapping::PriorAlarms`), turning a
+  DISPLAY alarm at that trigger without a location back into the silent alarm
+  (Aperio's saves wrote it that way before). On iCloud every write that sends
+  an appointment's content adds the silent alarm to each VEVENT that has
+  neither it nor an alarm flagged `X-APPLE-DEFAULT-ALARM:TRUE`
+  (`apple_alarm::with_silent_alarm`, `WriteCtx::apple_silent_alarm`), so the
+  iPhone shows exactly the appointment's alerts — none for one without
+  reminders. Other servers get none: Nextcloud's web client shows it as a
+  reminder in 1976 and DAVx5 rewrites it.
 - **A `TZID` resolves three ways.** A tzdata name as it is; a Windows id
   (`W. Europe Standard Time`, what Outlook, Teams and Exchange write) through
   the core's CLDR table (`cal_core::windows_zone`), and then the series'

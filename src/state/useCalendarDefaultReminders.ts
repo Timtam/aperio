@@ -12,9 +12,10 @@ import { calendarDefaultRemindersKey, type DefaultReminder } from '@aperio/share
  * Per-calendar default reminders.
  *
  * Mirrors iOS's "Default Alert Times" (Settings → Calendar →
- * Standardhinweise) at calendar granularity. iOS never writes those
- * defaults into the VEVENT body — the alert is applied locally at
- * notification time. CalDAV adapters therefore have nothing to parse,
+ * Standardhinweise) at calendar granularity. iOS adds those defaults on
+ * the phone, to every event without Apple's silent alarm, and writes one
+ * into the VEVENT body only when the iPhone itself saves the event. CalDAV
+ * adapters therefore often have nothing to parse,
  * and an iCloud event created without an explicit per-event alarm
  * comes back from `get_events` with `reminders: []` even when the
  * user "set a default" on the iPhone. The EventDialog then renders

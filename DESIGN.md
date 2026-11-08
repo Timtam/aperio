@@ -2619,6 +2619,12 @@ Wo die Kalender-API eigene Erinnerungsdaten mitliefert, werden diese direkt übe
 | **CalDAV (generisch)** | ✅ Ja – `VALARM` per RFC 5545 | Bidirektional |
 | **iCal (.ics)** | ✅ Ja – `VALARM` (lesend) | Nur lesend |
 
+**Apples stummer Hinweis (iCloud, gemessen 2026-11-08 mit iOS 27.2):** Ein iPhone legt den Standardhinweis des Kontos („Standardhinweise“) zu jedem Termin dazu, dem ein VALARM mit `ACTION:NONE` und `TRIGGER;VALUE=DATE-TIME:19760401T005545Z` fehlt, egal wie viele Hinweise er schon hat; der zusätzliche Hinweis lebt nur auf dem Gerät. In eigene Termine schreibt das iPhone diesen stummen Hinweis immer. Daraus folgt:
+
+- **Lesen:** Ein Hinweis mit einer anderen `ACTION` als DISPLAY, AUDIO oder EMAIL (RFC 5545 §3.8.6.1) und jeder an diesem Zeitpunkt (RFC 9074 §8: „zu ignorieren“) ist keine Erinnerung.
+- **Speichern:** Ein neu gebautes VEVENT gibt jeden Hinweis, den das Lesen nicht zeigte, als Text des Servers zurück, wie es Einladungen schon taten. Einen sichtbaren Hinweis an diesem Zeitpunkt ohne Ort (so schrieb Aperio den stummen bis 2026-11 zurück, das iPhone zeigte ihn „Zum Ereigniszeitpunkt“) schreibt es wieder als stummen.
+- **iCloud:** Jedes Schreiben, das den Inhalt eines Termins sendet, setzt den stummen Hinweis in jedes VEVENT, das weder ihn noch einen von Apple als Standard markierten Hinweis trägt. Das iPhone zeigt dann genau die Erinnerungen aus Aperio, bei einem Termin ohne Erinnerung keine (Entscheidung Toni, 2026-11-08: nur iCloud, auch ohne Erinnerung, bei jedem Speichern; bestehende Termine heilen beim nächsten Speichern). Andere CalDAV-Server bekommen ihn nicht.
+
 Analog dazu werden Aufgaben-Erinnerungen mit den jeweiligen Aufgaben-APIs synchronisiert, wo sie unterstützt werden (Google Tasks, Microsoft To Do, VTODO mit `VALARM`, Vikunja `reminders`, Todoist `due.datetime` – siehe Abschnitt 9.7 für Adapter-Details).
 
 > **Hinweis:** API-seitige Erinnerungen steuern in der Regel den Versand von E-Mail-Benachrichtigungen durch den Anbieter (z.B. Google sendet eine E-Mail). Die lokalen Push-Benachrichtigungen (Abschnitt 14.3) werden davon unabhängig durch die App selbst ausgelöst.

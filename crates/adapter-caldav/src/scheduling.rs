@@ -51,6 +51,12 @@ pub struct WriteCtx {
     /// invitation a colour it sent must not read as a change the account made
     /// (77a).
     pub writes_color: bool,
+    /// The server is iCloud: every VEVENT a write sends carries Apple's
+    /// silent alarm, so an iPhone shows exactly the appointment's alerts and
+    /// adds no default of its own (`ical_mapping::apple_alarm`; Toni,
+    /// 2026-11-08: iCloud only, also on an appointment without reminders,
+    /// added on every save).
+    pub apple_silent_alarm: bool,
 }
 
 /// What a write does to a meeting's people, to be applied to the other
@@ -422,6 +428,7 @@ mod tests {
             schedules: true,
             organizer_address: Some("mailto:toni@example.org".into()),
             writes_color: false,
+            apple_silent_alarm: false,
         }
     }
 
