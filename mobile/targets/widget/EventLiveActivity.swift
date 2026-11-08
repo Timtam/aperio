@@ -131,6 +131,13 @@ struct EventActivitySentence: View {
 /// "Beginn in 10 Minuten · Ende in 1 Stunde", kept up to date by the system,
 /// on one line. Before iOS 18 there is no such text; the exact times above
 /// then stand alone.
+///
+/// The live half is drawn by iOS, in the extension's own language: the
+/// environment locale set below does not reach it, and its format style takes
+/// none. The extension declares English and German in its Info.plist for that
+/// reason — without them it spoke English on a German phone ("Beginn in 59
+/// minutes", 2026-11-08). So it follows the phone's language; only when Aperio
+/// runs in another language than the phone does it differ from the words.
 struct RelativeTimes: View {
     let words: AperioEventAttributes.Words
     let start: String

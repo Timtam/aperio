@@ -54,9 +54,10 @@ var fallbackStrings: WidgetStrings {
 /// fixes the words by breaking the numbers.
 ///
 /// Why the tag has to be shipped at all: `Locale.current` inside an extension is
-/// intersected with the localizations its BUNDLE declares, and a widget
-/// extension with no `.lproj` folders declares none — so it falls back to the
-/// development language and reads "in 17 hours" on a German phone.
+/// intersected with the localizations its BUNDLE declares. This extension
+/// declared none at first and read "in 17 hours" on a German phone; its
+/// Info.plist now declares the app's two, but that only gives the PHONE's
+/// language, and Aperio's own setting may differ from it.
 func localeFor(_ tag: String) -> Locale {
     let language = tag.replacingOccurrences(of: "_", with: "-")
         .split(separator: "-").first.map(String.init) ?? tag
