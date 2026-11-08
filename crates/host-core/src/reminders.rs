@@ -95,9 +95,44 @@ impl ItemKind {
 pub struct UpcomingReminder {
     pub item_id: String,
     pub item_kind: ItemKind,
+    /// The calendar of an event, the list of a task: an external item is read
+    /// through its container, so a row without it opens nothing.
+    pub container_id: String,
     pub title: String,
     /// Trigger timestamp in RFC 3339 / ISO 8601 UTC.
     pub trigger_at: String,
+    /// The occurrence's own start in RFC 3339, so the overview opens THAT
+    /// occurrence of a series, as a click on its notification does.
+    pub start: String,
+}
+
+/// What a click on a reminder's notification opens (DESIGN §14.3): the keys
+/// `reminderTapData` in `shared/reminderTap.ts` writes on the phone, so one
+/// reader (`reminderTapOf`) reads both apps. Pinned for both languages by
+/// `shared/contracts/reminderTap.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TapData {
+    pub item_id: String,
+    pub item_kind: ItemKind,
+    pub container_id: String,
+    /// The occurrence's start in RFC 3339, the way the phone's scheduler
+    /// payload spells it.
+    pub start: String,
+    pub title: String,
+}
+
+impl Trigger {
+    /// The data a click on this reminder's notification carries.
+    pub fn tap_data(&self) -> TapData {
+        TapData {
+            item_id: self.item_id.clone(),
+            item_kind: self.item_kind,
+            container_id: self.container_id.clone(),
+            start: self.start.to_rfc3339(),
+            title: self.title.clone(),
+        }
+    }
 }
 
 /// A small grace added to the later of `relevant_until` and the reminder's own
@@ -3149,6 +3184,50 @@ mod tests {
                 "a cleared list must not read as 'never configured'"
             );
             assert!(calendar_default_reminders(&db, "cal").is_empty());
+        }
+    }
+
+    /// The Rust half of the reminder-click contract. Its TypeScript twin is
+    /// `src/intl/reminderTap.contract.test.ts`; both read the SAME file. The
+    /// phone writes a notification's data in TypeScript, the desktop writes a
+    /// toast's in Rust, and one TypeScript reader reads both: a key spelt
+    /// differently here would make every desktop click open nothing.
+    mod tap_contract {
+        use super::*;
+
+        /// `include_str!` on purpose — see the note on the wire contract above.
+        const CONTRACT: &str = include_str!("../../../shared/contracts/reminderTap.json");
+
+        fn trigger_of(source: &serde_json::Value) -> Trigger {
+            let text = |key: &str| source[key].as_str().unwrap().to_string();
+            let start = DateTime::parse_from_rfc3339(&text("start"))
+                .unwrap()
+                .with_timezone(&Utc);
+            Trigger {
+                item_id: text("item_id"),
+                item_kind: serde_json::from_value(source["item_kind"].clone()).unwrap(),
+                container_id: text("container_id"),
+                title: text("title"),
+                body: "09:00".into(),
+                trigger_at: start - ChronoDuration::minutes(15),
+                relevant_until: start + ChronoDuration::hours(1),
+                start,
+                all_day: false,
+                sound: SoundConfig::default(),
+                absolute: false,
+            }
+        }
+
+        #[test]
+        fn a_toast_carries_the_data_the_phone_writes() {
+            let contract: serde_json::Value = serde_json::from_str(CONTRACT).unwrap();
+            let cases = contract["cases"].as_array().unwrap();
+            assert!(!cases.is_empty());
+            for case in cases {
+                let name = case["name"].as_str().unwrap();
+                let data = serde_json::to_value(trigger_of(&case["source"]).tap_data()).unwrap();
+                assert_eq!(data, case["data"], "{name}");
+            }
         }
     }
 

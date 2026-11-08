@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { planDayStart, writeAll } from '@aperio/shared';
+import { DAY_START_TAP_DATA, planDayStart, writeAll } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
@@ -203,6 +203,8 @@ export function DayStartReviewChecker() {
           count: surfaced,
         }),
         'day-start reminders notification',
+        // A click brings the review up again (TODO A5).
+        DAY_START_TAP_DATA,
       );
     }
 

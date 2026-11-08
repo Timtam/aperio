@@ -9,6 +9,7 @@ import {
   localizeBirthdayCalendarName,
   type SeriesRows,
   type SeriesRowsRequest,
+  type TapData,
   type ZoneOffsets,
   type ZoneOffsetsQuestion,
 } from '@aperio/shared';
@@ -518,9 +519,13 @@ export const search = (query: string, filters?: SearchFilters) =>
 export interface UpcomingReminder {
   item_id: string;
   item_kind: 'event' | 'task';
+  /** The calendar of an event, the list of a task. */
+  container_id: string;
   title: string;
   /** ISO 8601 UTC. */
   trigger_at: string;
+  /** The occurrence's own start, RFC 3339. */
+  start: string;
 }
 
 export const listUpcomingReminders = () =>
@@ -1213,9 +1218,19 @@ export const autostartSet = (enabled: boolean) =>
 // ── OS notifications ───────────────────────────────────────────────────
 
 /** Show an OS notification with the system sound (the day-start review,
- *  sync conflicts; reminders are sent by the backend itself). */
-export const notifySystem = (title: string, body: string) =>
-  invoke<void>('notify_system', { title, body });
+ *  sync conflicts; reminders are sent by the backend itself). `tap` is what a
+ *  click on it opens (`DAY_START_TAP_DATA`); without one a click only shows
+ *  the window. */
+export const notifySystem = (title: string, body: string, tap?: TapData) =>
+  invoke<void>('notify_system', { title, body, tap: tap ?? null });
+
+/** Raised by the backend when a reminder's notification was clicked
+ *  (TODO A5, backend `toast`); the page then takes the tap. */
+export const REMINDER_TAP_EVENT = 'reminder-tap';
+
+/** What the last click on a reminder's notification asked to open, once:
+ *  `reminderTapOf` reads it. A reload of the page gets nothing again. */
+export const takeReminderTap = () => invoke<unknown>('take_reminder_tap');
 
 /** Where the Start menu shortcut stands that Windows needs before it shows
  *  Aperio's notifications (backend `notification_shortcut`). `needs_set_up`

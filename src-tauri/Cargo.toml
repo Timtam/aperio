@@ -117,6 +117,11 @@ windows = { version = "0.61", features = [
   "Win32_Storage_EnhancedStorage",
 ] }
 winreg = "0.55"
+# Aperio's own toast (toast.rs): the crate tauri-plugin-notification uses
+# underneath, whose toast takes a click handler the plugin does not offer.
+# Already in the tree through the plugin, so nothing new is downloaded; keep
+# it on the plugin's version.
+tauri-winrt-notification = "0.7"
 
 [dev-dependencies]
 tempfile = "3"
@@ -128,12 +133,6 @@ adapter-local = { workspace = true, features = ["test-support"] }
 # they run against the real DesktopSyncStore but must not touch the OS
 # keychain. test-support only activates for the test build.
 sync-engine = { workspace = true, features = ["test-support"] }
-
-[target.'cfg(windows)'.dev-dependencies]
-# Only for a test that the sound name `os_notification` sends is one the
-# toast crate reads as Windows' default sound (already in the tree through
-# tauri-plugin-notification, so nothing new is downloaded).
-tauri-winrt-notification = "0.7"
 
 [lints]
 workspace = true

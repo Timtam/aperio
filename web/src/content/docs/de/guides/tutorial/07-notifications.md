@@ -105,12 +105,28 @@ Zur fälligen Zeit zeigt Aperio eine Mitteilung deines Betriebssystems an.
 Unter Windows braucht das den oben beschriebenen Startmenü-Eintrag. Optional
 wird ein **Ton** abgespielt.
 
-In der Benachrichtigung kannst du:
+Ein Klick auf die Benachrichtigung öffnet, worum es geht:
 
-- den Eintrag **öffnen**,
-- die Erinnerung **schließen** (bestätigen),
-- oder **später erinnern** (Snooze) – die Erinnerung kommt nach der
-  gewählten Zeit erneut.
+- Die Erinnerung an einen Termin öffnet diesen Termin. Bei einem
+  wiederkehrenden öffnet sie das Vorkommen, für das die Erinnerung war, ohne
+  vorher zu fragen; im Editor wählst du weiterhin, ob eine Änderung für dieses
+  Vorkommen oder die ganze Serie gilt. Eine Besprechung, die jemand anderes
+  organisiert, öffnet als Serie und zeigt Datum und Zeiten des Vorkommens.
+- Die Erinnerung an eine Aufgabe öffnet die Aufgabe.
+- Die Tagesstart-Benachrichtigung öffnet die Tagesstart-Übersicht.
+
+Ist beim Klick ein Dialog in Aperio offen, sagt Aperio, dass die Erinnerung
+sich öffnet, sobald der Dialog geschlossen ist, und öffnet sie dann. Deine
+Eingaben im offenen Dialog bleiben erhalten. **Eingabe** in der
+Erinnerungs-Übersicht (`Strg+Umschalt+R`) öffnet eine Erinnerung genauso.
+
+Unter Windows wirkt ein Klick, solange das Banner zu sehen ist und Aperio
+läuft, auch verborgen im Infobereich. Ein Klick auf einen Aperio-Eintrag im
+Benachrichtigungscenter (`Win+N`) und jeder Klick, nachdem du Aperio beendet
+hast, tut noch nichts.
+
+Schließen der Benachrichtigung schließt sie nur. „Später erinnern“ aus der
+Benachrichtigung gibt es noch nicht.
 
 ## Standard-Erinnerungen pro Kalender
 

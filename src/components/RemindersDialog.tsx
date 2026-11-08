@@ -7,16 +7,21 @@ import {
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { readErrorMessage } from '@aperio/shared';
+import { readErrorMessage, reminderTapData, reminderTapOf } from '@aperio/shared';
 
+import { useAnnouncer } from '../a11y/announcerContext';
 import {
   getEventById,
+  getEvents,
   getTaskById,
+  getTasks,
   listUpcomingReminders,
   type UpcomingReminder,
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
+import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
+import { resolveReminderTap } from '../state/reminderTapTarget';
 import { Modal } from './Modal';
 
 /**
@@ -40,7 +45,9 @@ export interface RemindersDialogProps {
 export function RemindersDialog({ isOpen, onClose }: RemindersDialogProps) {
   const { t } = useTranslation();
   const fmt = useDateFormat();
-  const { openEventDialog, openTaskDialog } = useDialogState();
+  const announce = useAnnouncer();
+  const { openTappedEvent, openTaskDialog } = useDialogState();
+  const { calendars } = useCalendarStore();
 
   const [items, setItems] = useState<UpcomingReminder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,25 +124,41 @@ export function RemindersDialog({ isOpen, onClose }: RemindersDialogProps) {
 
   const openRow = useCallback(
     async (r: UpcomingReminder) => {
-      // Fetch the full row by id then push the matching edit dialog
-      // on top of this one. Closing the edit dialog will pop us back
-      // to the overview, where the user can keep working through the
-      // list. We deliberately do NOT call `onClose` first — that
-      // would empty the stack and the user would land in the shell.
-      try {
-        if (r.item_kind === 'event') {
-          const ev = await getEventById(r.item_id);
-          openEventDialog(ev ?? null);
-        } else {
-          const task = await getTaskById(r.item_id);
-          openTaskDialog(task ?? null);
-        }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('failed to load reminder target', err);
+      // The row opens what a click on its notification opens (TODO A5): THAT
+      // occurrence of a series, an external item through its calendar or
+      // list, a birthday as its summary. Pushed on top of this list, so
+      // closing the editor comes back here; `onClose` first would empty the
+      // stack and land the user in the shell.
+      const tap = reminderTapOf(reminderTapData(r));
+      const target =
+        tap == null
+          ? ({ kind: 'notFound' } as const)
+          : await resolveReminderTap(tap, {
+              calendars,
+              getEventById,
+              getEvents,
+              getTaskById,
+              getTasks,
+            });
+      switch (target.kind) {
+        case 'event':
+          openTappedEvent(target.event, {
+            initialScope: target.initialScope,
+            shownOccurrence: target.shownOccurrence,
+          });
+          return;
+        case 'task':
+          openTaskDialog(target.task);
+          return;
+        case 'dayStart':
+          return;
+        case 'notFound':
+          // Never the create editor in its place, as the list once opened.
+          announce(t('dialogs.reminders.tapNotFound'), 'assertive');
+          return;
       }
     },
-    [openEventDialog, openTaskDialog],
+    [calendars, openTappedEvent, openTaskDialog, announce, t],
   );
 
   const handleKey = (e: React.KeyboardEvent<HTMLUListElement>) => {

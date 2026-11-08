@@ -2218,7 +2218,9 @@
       "openHint": "Öffnet das zugehörige Element",
       "allDay": "Ganztägig",
       "allDayRange": "Ganztägig · {{from}} bis {{to}}",
-      "dayMonth": "{{day}}. {{month}}"
+      "dayMonth": "{{day}}. {{month}}",
+      "tapWaits": "Die Erinnerung öffnet sich, sobald der offene Dialog geschlossen ist.",
+      "tapNotFound": "Der Termin oder die Aufgabe dieser Erinnerung wurde nicht gefunden. Vielleicht wurde sie gelöscht."
     },
     "search": {
       "title": "Suche",

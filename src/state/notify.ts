@@ -1,4 +1,5 @@
 import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
+import type { TapData } from '@aperio/shared';
 
 import { notifySystem } from '../api/client';
 
@@ -17,6 +18,9 @@ import { notifySystem } from '../api/client';
  * `context` is only used to tag the warning logged on failure so a
  * given call site is identifiable; it never reaches the OS.
  *
+ * `tap` is what a click on the notification opens (`DAY_START_TAP_DATA`);
+ * without one a click only brings Aperio forward.
+ *
  * Sent through the backend (`notify_system`) rather than the plugin's own
  * JavaScript call, so it asks for the system sound by the same rule as a
  * reminder: on Windows a notification without a sound name is silent.
@@ -25,6 +29,7 @@ export async function notify(
   title: string,
   body: string,
   context = 'notification',
+  tap?: TapData,
 ): Promise<void> {
   try {
     let granted = await isPermissionGranted();
@@ -33,7 +38,7 @@ export async function notify(
       granted = result === 'granted';
     }
     if (!granted) return;
-    await notifySystem(title, body);
+    await notifySystem(title, body, tap);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn(`${context} failed`, err);

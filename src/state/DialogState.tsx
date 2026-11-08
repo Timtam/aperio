@@ -75,6 +75,9 @@ export type DialogMode =
        *  resolved to — the editor opens locked to it. Absent ⇒ the editor's
        *  own default ('occurrence'). */
       initialScope?: EventEditScope;
+      /** Someone else's meeting opened from a reminder: the series, showing
+       *  this occurrence's times (`EventDialog`). */
+      shownOccurrence?: string;
       /** An earlier item to fill the editor from — the quick-add hands one in
        *  when the user picks one of its offers. Create only. */
       prefillFrom?: CalendarEvent | null;
@@ -249,6 +252,13 @@ export interface OpenEventOptions {
   replace?: boolean;
 }
 
+/** How a reminder's event opens (`openTappedEvent`). */
+export interface OpenTappedEventOptions {
+  initialScope?: EventEditScope;
+  shownOccurrence?: string;
+  replace?: boolean;
+}
+
 export interface OpenTaskOptions {
   listId?: string;
   defaultDate?: string;
@@ -296,6 +306,12 @@ export interface DialogStateValue {
    *  `seriesLoadFailed` for the choice that failed. No-op if the top frame
    *  isn't the scope prompt. */
   chooseEventEditScope: (scope: EventEditScope) => void;
+  /** Open an event a reminder named (TODO A5, `resolveReminderTap`), as the
+   *  tap rule decided: no scope prompt — an occurrence opens with the scope
+   *  as a field of the editor, someone else's meeting as the series showing
+   *  `shownOccurrence`'s times. `replace` swaps the top frame (the day-start
+   *  review a tap supersedes). */
+  openTappedEvent: (event: CalendarEvent, options?: OpenTappedEventOptions) => void;
   openTaskDialog: (task?: Task | null, options?: OpenTaskOptions) => void;
   /** Quick-add EVENT. `defaultDate` (YYYY-MM-DD) anchors it to a chosen day
    *  (the day-activation chooser / a calendar day); omit to use the view's
@@ -555,6 +571,19 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       else push(next);
     },
     [push, replaceTop, calendars],
+  );
+  const openTappedEvent = useCallback(
+    (event: CalendarEvent, options?: OpenTappedEventOptions) => {
+      const next: DialogMode = {
+        kind: 'event',
+        event,
+        initialScope: options?.initialScope,
+        shownOccurrence: options?.shownOccurrence,
+      };
+      if (options?.replace) replaceTop(next);
+      else push(next);
+    },
+    [push, replaceTop],
   );
   // The prompt frame `chooseEventEditScope` answers, read before its update.
   const stackRef = useRef(stack);
@@ -882,6 +911,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     () => ({
       mode,
       openEventDialog,
+      openTappedEvent,
       chooseEventEditScope,
       openTaskDialog,
       openQuickAdd,
@@ -916,6 +946,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [
       mode,
       openEventDialog,
+      openTappedEvent,
       chooseEventEditScope,
       openTaskDialog,
       openQuickAdd,

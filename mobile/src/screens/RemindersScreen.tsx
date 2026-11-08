@@ -11,9 +11,11 @@ import {
   View,
 } from 'react-native';
 
-import { isBirthdayEventId, readErrorMessage } from '@aperio/shared';
+import { readErrorMessage, reminderTapData, reminderTapOf } from '@aperio/shared';
 
+import { getEventById, listCalendars } from '../api/calendar';
 import { upcomingReminders, UpcomingReminder } from '../api/reminders';
+import { eventEditorParams } from '../reminders/tapParams';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -86,21 +88,21 @@ export default function RemindersScreen({
     [t, whenLabel],
   );
 
-  // Open the underlying task / event editor. container_id is the owning list
+  // Open the underlying task / event editor the way a tap on the row's
+  // notification opens it (TODO A5): THAT occurrence of a series, a single
+  // change by its own id, someone else's meeting as the series showing the
+  // occurrence, a birthday by the row's title. container_id is the owning list
   // (task) or calendar (event), so the editor can route + load the item.
   const openReminder = useCallback(
-    (r: UpcomingReminder) => {
+    async (r: UpcomingReminder) => {
       if (r.item_kind === 'task') {
         navigation.navigate('TaskEditor', { taskId: r.item_id, listId: r.container_id });
-      } else {
-        navigation.navigate('EventEditor', {
-          eventId: r.item_id,
-          calendarId: r.container_id,
-          // A synthetic birthday reminder opens a read-only summary that can't
-          // re-fetch its own name — hand it over from the reminder row.
-          initialTitle: isBirthdayEventId(r.item_id) ? r.title : undefined,
-        });
+        return;
       }
+      const tap = reminderTapOf(reminderTapData(r));
+      if (tap?.kind !== 'event') return;
+      const params = await eventEditorParams(tap, { listCalendars, getEventById });
+      navigation.navigate('EventEditor', params);
     },
     [navigation],
   );
@@ -139,7 +141,7 @@ export default function RemindersScreen({
               accessibilityRole="button"
               accessibilityLabel={rowLabel(r)}
               accessibilityHint={t('dialogs.reminders.openHint')}
-              onPress={() => openReminder(r)}
+              onPress={() => void openReminder(r)}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
             >
               <Text style={styles.rowTitle}>{r.title}</Text>

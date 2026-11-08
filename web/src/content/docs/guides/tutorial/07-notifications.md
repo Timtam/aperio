@@ -96,11 +96,27 @@ At the due time, Aperio shows a notification of your operating system. On
 Windows this needs the Start menu entry described above. Optionally a
 **sound** is played.
 
-In the notification you can:
+A click on the notification opens what it is about:
 
-- **open** the entry,
-- **dismiss** the reminder (acknowledge it),
-- or **snooze** it – the reminder returns after the chosen time.
+- A reminder of an appointment opens that appointment. For a repeating one it
+  opens the occurrence the reminder was for, without asking first; the editor
+  still lets you choose whether a change applies to this occurrence or the
+  whole series. A meeting someone else organizes opens as the series, showing
+  the date and times of the occurrence.
+- A reminder of a task opens the task.
+- The day-start notification opens the day-start review.
+
+If a dialog is open in Aperio when you click, Aperio says that the reminder
+opens once the dialog is closed, and opens it then. Your input in the open
+dialog stays. **Enter** in the reminders overview (`Ctrl+Shift+R`) opens a
+reminder the same way.
+
+On Windows a click works while the banner is on screen and Aperio runs, also
+when it is hidden in the tray. A click on an Aperio entry in the notification
+center (`Win+N`), and any click after you quit Aperio, does nothing yet.
+
+Dismissing the notification only closes it. Snoozing from the notification is
+not available yet.
 
 ## Per-calendar default reminders
 

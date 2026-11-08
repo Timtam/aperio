@@ -1,10 +1,4 @@
-import {
-  eventTapParams,
-  isBirthdayEventId,
-  reminderTapOf,
-  reminderTapOfUrl,
-  type ReminderTap,
-} from '@aperio/shared';
+import { reminderTapOf, reminderTapOfUrl, type ReminderTap } from '@aperio/shared';
 import * as Linking from 'expo-linking';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
@@ -14,6 +8,7 @@ import { logLine } from '../api/logs';
 import { navigateNested, whenNavigationReady } from '../navigation/navigationRef';
 import { useAppLockLocked } from '../state/appLockContext';
 import { closeDayStartReview, requestDayStartReview } from '../state/dayStartRequest';
+import { eventEditorParams } from './tapParams';
 
 let tapCount = 0;
 
@@ -50,17 +45,7 @@ async function openTap(tap: ReminderTap, isLocked: () => boolean): Promise<'open
         tapToken: newTapToken(),
       });
   } else {
-    // The row decides how the occurrence opens: a series, a single change of
-    // one, someone else's meeting. Read from the cache, so it costs no
-    // network; a failed read opens the event as it is. The calendars FIRST:
-    // an external event resolves through the route their listing fills, and
-    // on a cold start nothing else has filled it yet.
-    const calendars = await listCalendars().catch(() => []);
-    const row = isBirthdayEventId(tap.eventId)
-      ? null
-      : await getEventById(tap.eventId, tap.calendarId).catch(() => null);
-    const calendar = calendars.find((c) => c.id === tap.calendarId) ?? null;
-    const params = eventTapParams(tap, row, calendar);
+    const params = await eventEditorParams(tap, { listCalendars, getEventById });
     open = () =>
       navigateNested('CalendarTab', 'EventEditor', { ...params, tapToken: newTapToken() });
   }

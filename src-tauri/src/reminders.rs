@@ -4,7 +4,8 @@
 //! [`host_core::reminders`], shared with the mobile cal-ffi reminder surface.
 //! This module keeps the desktop-only delivery:
 //!   1. a single background tokio task that sleeps until the next trigger;
-//!   2. dispatch via `tauri-plugin-notification` (+ custom-sound playback);
+//!   2. dispatch through [`crate::toast`] (+ custom-sound playback), whose
+//!      toast opens the reminder's item on a click;
 //!   3. an in-process "already fired" set so a restart within the same minute
 //!      doesn't double-notify.
 //!
@@ -26,7 +27,6 @@ use adapter_local::{LocalAdapter, SharedConn};
 use cal_core::SoundSource;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
-use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Notify;
 use tracing::{info, warn};
 
@@ -35,6 +35,7 @@ use crate::cache::CacheStore;
 use crate::notification_shortcut::{NotificationShortcutState, HINT_EVENT};
 use crate::os_notification::reminder_sound_name;
 use crate::registry::AdapterRegistry;
+use crate::toast::{show_toast, ToastRequest};
 // Trigger enumeration + the shared types it produces. Re-exported so existing
 // `crate::reminders::{Trigger, ItemKind, UpcomingReminder}` references (and the
 // `get_upcoming_reminders` command) keep resolving.
@@ -309,8 +310,10 @@ impl ReminderScheduler {
             .map(|t| UpcomingReminder {
                 item_id: t.item_id,
                 item_kind: t.item_kind,
+                container_id: t.container_id,
                 title: t.title,
                 trigger_at: t.trigger_at.to_rfc3339(),
+                start: t.start.to_rfc3339(),
             })
             .collect()
     }
@@ -449,17 +452,12 @@ impl ReminderScheduler {
             item_id = %t.item_id,
             "firing reminder"
         );
-        let builder = app.notification().builder().title(&t.title);
-        let builder = match self.notification_body(t) {
-            Some(body) => builder.body(body),
-            None => builder,
-        };
-        // §14.4 playback dispatch: a custom sound Aperio plays itself (the
-        // notification plugin can't), and the toast then asks for no sound,
-        // so nothing plays twice. What the toast asks for is
+        // §14.4 playback dispatch: a custom sound Aperio plays itself (a
+        // toast can't), and the toast then asks for no sound, so nothing
+        // plays twice. What the toast asks for is
         // `os_notification::reminder_sound_name`: the system sound for
         // System and for a custom sound whose file is missing, none for
-        // Silent. The plugin's `.silent()` is not used: it only acts on iOS.
+        // Silent.
         let custom_file_found = match &t.sound.source {
             SoundSource::Custom { sha256 } => {
                 match crate::sound_assets::local_sound_path(&self.sounds_dir, sha256) {
@@ -478,13 +476,17 @@ impl ReminderScheduler {
             }
             SoundSource::System | SoundSource::Silent => false,
         };
-        let builder = match reminder_sound_name(&t.sound.source, custom_file_found) {
-            Some(name) => builder.sound(name),
-            None => builder,
-        };
-        if let Err(err) = builder.show() {
-            warn!(?err, "failed to dispatch notification");
-        }
+        // A click opens what the reminder was for (TODO A5, `toast`).
+        let tap = serde_json::to_value(t.tap_data()).ok();
+        show_toast(
+            app,
+            ToastRequest {
+                title: t.title.clone(),
+                body: self.notification_body(t),
+                sound: reminder_sound_name(&t.sound.source, custom_file_found),
+                tap,
+            },
+        );
         // Windows stores this toast and shows nothing while Aperio has no
         // Start menu shortcut for notifications: the first such reminder of
         // an app start asks the page to offer one (`notification_shortcut`).

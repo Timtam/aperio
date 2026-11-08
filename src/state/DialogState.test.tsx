@@ -82,6 +82,7 @@ function Probe() {
         {m.kind === 'event' ? (m.initialScope ?? 'none') : ''}
       </span>
       <span data-testid="event">{m.kind === 'event' ? (m.event?.id ?? '') : ''}</span>
+      <span data-testid="shown">{m.kind === 'event' ? (m.shownOccurrence ?? '') : ''}</span>
       <span data-testid="failed">
         {m.kind === 'eventEditScope' && m.seriesLoadFailed ? String(m.seriesLoadFailed) : ''}
       </span>
@@ -102,6 +103,26 @@ function Probe() {
         onClick={() => d.openEventDialog(invitationOccurrence)}
       >
         open-invitation
+      </button>
+      <button type="button" onClick={() => d.openTappedEvent(occurrence)}>
+        tap-occ
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          d.openTappedEvent(series, {
+            initialScope: 'series',
+            shownOccurrence: '2026-07-20T08:30:00.000Z',
+          })
+        }
+      >
+        tap-shown
+      </button>
+      <button type="button" onClick={() => d.openTappedEvent(single, { replace: true })}>
+        tap-replace
+      </button>
+      <button type="button" onClick={() => d.openDayStartReview()}>
+        open-review
       </button>
       <button type="button" onClick={() => d.chooseEventEditScope('occurrence')}>
         choose-occ
@@ -359,5 +380,34 @@ describe('DialogState and an invitation somebody else organizes', () => {
     expect(screen.getByTestId('kind').textContent).toBe('event');
     expect(screen.getByTestId('scope').textContent).toBe('series');
     expect(screen.getByTestId('event').textContent).toBe('evt-3');
+  });
+});
+
+describe('DialogState and a reminder that was clicked (TODO A5)', () => {
+  it('opens an occurrence with no scope prompt, the scope left to the editor', async () => {
+    renderProbe();
+    await click('tap-occ');
+    expect(screen.getByTestId('kind').textContent).toBe('event');
+    expect(screen.getByTestId('event').textContent).toBe(occurrence.id);
+    expect(screen.getByTestId('scope').textContent).toBe('none');
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("carries the occurrence someone else's meeting shows", async () => {
+    renderProbe();
+    await click('tap-shown');
+    expect(screen.getByTestId('event').textContent).toBe('evt-1');
+    expect(screen.getByTestId('scope').textContent).toBe('series');
+    expect(screen.getByTestId('shown').textContent).toBe('2026-07-20T08:30:00.000Z');
+  });
+
+  it('replaces the day-start review, so closing the editor closes both', async () => {
+    renderProbe();
+    await click('open-review');
+    expect(screen.getByTestId('kind').textContent).toBe('dayStartReview');
+    await click('tap-replace');
+    expect(screen.getByTestId('kind').textContent).toBe('event');
+    await click('cancel');
+    expect(screen.getByTestId('kind').textContent).toBe('none');
   });
 });

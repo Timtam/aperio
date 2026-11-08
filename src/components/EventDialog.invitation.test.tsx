@@ -248,3 +248,54 @@ describe('EventDialog → an invitation somebody else organizes', () => {
     );
   });
 });
+
+describe('EventDialog → an invitation opened from the reminder of one occurrence (TODO A5)', () => {
+  const THIRD = '2026-11-23T15:00:00.000Z';
+
+  async function openShown(event: CalendarEvent, waitFor: RegExp) {
+    const { EventDialog } = await import('./EventDialog');
+    render(
+      <StrictMode>
+        <EventDialog
+          isOpen
+          onClose={() => {}}
+          event={event}
+          initialScope="series"
+          shownOccurrence={THIRD}
+        />
+      </StrictMode>,
+    );
+    await screen.findAllByText(waitFor, undefined, { timeout: 8000 });
+  }
+
+  it("shows that occurrence's day, not the series' first", async () => {
+    await openShown(INVITATION, /organisiert jemand anderes|organizes this meeting/i);
+    const start = field(/^beginnt am$|^start date$|^startdatum$/i);
+    expect(start.value).toMatch(/23/);
+    expect(start.value).not.toMatch(/\b9\./);
+  });
+
+  it('still saves the row the provider has, its times included', async () => {
+    onFile.loaded = INVITATION;
+    await openShown(INVITATION, /organisiert jemand anderes|organizes this meeting/i);
+    fireEvent.click(
+      screen.getByRole('button', { name: /erinnerung hinzufügen|add reminder/i }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.some((call) => call[0] === 'update_event')).toBe(true),
+    );
+    const update = invokeMock.mock.calls.filter((call) => call[0] === 'update_event').pop();
+    const sent = (update?.[1] as { event: CalendarEvent }).event;
+    expect(sent.start).toBe(INVITATION.start);
+    expect(sent.end).toBe(INVITATION.end);
+  });
+
+  it('ignores it for a series one may edit: saved, it would move the series', async () => {
+    const own = { ...INVITATION, organized_elsewhere: false, attendees: [] } as CalendarEvent;
+    await openShown(own, /^beginnt am$|^start date$|^startdatum$/i);
+    const start = field(/^beginnt am$|^start date$|^startdatum$/i);
+    expect(start.readOnly).toBe(false);
+    expect(start.value).toBe('2026-11-09');
+  });
+});

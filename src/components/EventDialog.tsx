@@ -68,6 +68,7 @@ import {
   movedTailRule,
   TailShiftRefusedError,
   cutoffDay,
+  occurrenceOfSeries,
 } from '../intl/recurrence';
 import {
   asNewSeries,
@@ -227,6 +228,10 @@ export interface EventDialogProps {
   /** When editing a recurring occurrence, the scope the up-front prompt
    *  resolved to. Seeds the editScope radios; absent ⇒ 'occurrence'. */
   initialScope?: EditScope;
+  /** Someone else's meeting opened from a reminder of one occurrence (TODO
+   *  A5): the series, showing that occurrence's times. Only while the meeting
+   *  is locked; otherwise ignored. */
+  shownOccurrence?: string;
   /** An earlier appointment to fill this one from — the quick-add's hand-off
    *  when the user picked one of its offers. Everything but the day travels;
    *  see `eventPrefillFrom`. Create only. */
@@ -329,6 +334,7 @@ export function EventDialog({
   defaultTime,
   defaultTitle,
   initialScope,
+  shownOccurrence,
   prefillFrom,
   targetPinned,
   importFrom,
@@ -348,6 +354,18 @@ export function EventDialog({
   // the one the form points at: a locked invitation has no calendar picker.
   const readCalendar = calendars.find((c) => c.id === event?.calendar_id);
   const locked = isEdit && invitationLocked(readCalendar, event);
+  // Someone else's meeting opened from the reminder of one occurrence shows
+  // that occurrence's times, as on the phone (EventEditorModal). Only while it
+  // is locked: the form is read-only then, and the save writes the provider's
+  // row with its reminders and nothing else, so the times shown move nothing.
+  // An editable series seeded this way and saved would move to that day.
+  const formSource = useMemo(
+    () =>
+      locked && event?.recurrence != null && shownOccurrence != null
+        ? occurrenceOfSeries(event, shownOccurrence)
+        : event,
+    [locked, event, shownOccurrence],
+  );
   // A day of a locked invitation, written out. The editable form shows a
   // date control; there is none here, so the value says the date in words.
   const readOnlyDay = (dayKey: string): string => {
@@ -414,7 +432,7 @@ export function EventDialog({
   const imported = !isEdit ? (importFrom ?? null) : null;
   const initialState = useMemo<FormState>(() => {
     const fresh = buildInitialState(
-      event,
+      formSource,
       defaultCalendarId,
       defaultDate,
       defaultTime,
@@ -450,6 +468,7 @@ export function EventDialog({
     return { ...base, reminders: [...base.reminders, ...privateRows] };
   }, [
     event,
+    formSource,
     imported,
     defaultCalendarId,
     defaultDate,
