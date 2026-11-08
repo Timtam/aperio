@@ -266,6 +266,16 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   Neustart, auf iOS nicht mehr weglassen (zwei Signale)? Tonis Entscheidung.
 - [ ] **Folgepunkt:** Termine aus dem Gerätekalender (ihre Erinnerungen stellt
   das Betriebssystem, Aperio zählt sie nicht auf).
+- [x] **iOS: mitlaufende Zeiten englisch** (Gerätetest 2026-11-08, #154):
+  „Beginn in 59 minutes“ auf deutschem iPhone. iOS zeichnet die mitlaufenden
+  Zeiten selbst, in der Sprache der Erweiterung, und die erklärte keine.
+  `mobile/targets/widget/Info.plist` erklärt jetzt en und de wie die App.
+- [ ] 🚩 **Mitlaufende Zeiten in der Sprache des Geräts.** Seit #154 sprechen
+  sie die Sprache des iPhones; läuft Aperio in einer anderen, stehen
+  deutsche Wörter neben englischen Zeiten oder umgekehrt.
+  `SystemFormatStyle.DateReference` nimmt keine Sprache, und die Sprache der
+  Ansicht erreicht sie nicht. Ein Ausweg bräuchte eigene Zeittexte, die iOS
+  ohne die App nicht mitlaufen lässt; erst entscheiden, ob es das wert ist.
 
 ### A6 · Offline-Queue für externe APIs (§18.2)
 - [ ] SQLite-Queue, die Mutationen an externe Kalender/Aufgaben (create/update/delete event+task) offline puffert
@@ -606,18 +616,6 @@ Siehe DESIGN §4.2.
 ### B7 · Erinnerungs-Feinheiten (§14) `[~]`
 - [~] E-Mail-Reminder: UI-Option + (Adapter-)Versand — lokaler Scheduler überspringt sie derzeit bewusst.  
   ↳ Adapter-Hälfte für Google + CalDAV FERTIG (round-trippt als providereigener E-Mail-Alarm — Aperio verschickt selbst nie Mail, genau wie §14 es verlangt). Die UI-Option fehlt auf beiden Oberflächen.
-- [ ] **„Beim nächsten App-Start“ klingelt bei jedem Start.** Gefunden in der
-  Prüfrunde zu 221 (2026-11-07, aus dem Code gelesen, nicht ausprobiert).
-  `fire_app_start_reminders` (`src-tauri/src/reminders.rs`) löst beim Start
-  jede Erinnerung dieser Art aus, deren Zeitpunkt vorbei ist
-  (`enumerate_app_start_triggers` in `crates/host-core/src/reminders.rs`),
-  und merkt sich nirgends, dass sie schon kam: Die Menge der ausgelösten
-  Erinnerungen lebt nur im Speicher. `TASK_QUERY` liest auch keinen Status,
-  fragt also nicht, ob eine Aufgabe erledigt ist. Eine gestern fällige, längst
-  abgehakte Aufgabe meldet sich so bei jedem Desktop-Start wieder, solange es
-  sie gibt. Gemeint ist laut DESIGN §14.1 und Beschriftung der nächste Start
-  nach Fälligkeit. Zu tun: Ausgelöstes dauerhaft merken und erledigte
-  Aufgaben auslassen.
 - [ ] **CalDAV liest Hinweise „zum Ende“ falsch, und „1 Woche vorher“ gar
   nicht.** Gefunden in der Recherche zu 222 (2026-11-07, aus dem Code
   gelesen, nicht ausprobiert). `parse_valarms`
@@ -4359,6 +4357,21 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 
 #### B7 · Erinnerungs-Feinheiten (§14) `[~]` — erledigte Punkte
 
+- [x] **„Beim nächsten App-Start“ klingelte bei jedem Start** (2026-11-08).
+  Nichts merkte sich, was schon geklungen hatte, kein Durchlauf fragte nach
+  dem Status, und eine Serie klingelte für ihr allererstes Vorkommen. Jetzt
+  merkt sich jedes Gerät, wofür es geklungen hat (Migration 0051
+  `app_start_rung`, nicht synchronisiert, `mark_app_start_rung`); bei einer
+  Serie zählt das letzte vergangene Vorkommen. Dabei gefunden und mit
+  behoben: Auch der normale Durchlauf, lokal wie extern, ließ erledigte und
+  abgebrochene Aufgaben klingeln (`task_is_finished`). Entscheidungen Toni:
+  einmal je Gerät, bei Serien nach jedem Vorkommen. Prüfrunde (eine Runde,
+  4 bestätigt, 5 widerlegt), alle behoben: gleiche 400-Tage-Grenze für jede
+  Art, sonst hätte das Aufräumen alte Einträge alle 400 Tage wieder klingeln
+  lassen; Aufgaben-Serien zählen ihr letztes Vorkommen; das letzte Vorkommen
+  wird in wachsenden Fenstern gesucht, weil eine Aufklappung nach 500
+  Vorkommen abbricht; Aufgaben und ganztägige Termine werden nach der
+  Wanduhr gemerkt (Zonenwechsel).
 - [x] **Exchange-Aufgaben: Speichern schaltete die Erinnerung aus**
   (2026-11-08). Live gemessen (`ews-tasks probe`, Exchange 2019 der
   Hochschule): Exchange nimmt und behält eine Erinnerung ohne eigenen

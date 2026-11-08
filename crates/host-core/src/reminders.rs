@@ -13,14 +13,14 @@
 //! triggers as ahead-of-time OS-delivered local notifications). One source of
 //! truth for *what* fires *when*; each platform owns *how* it's delivered.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cal_core::live_activity::LiveOccurrence;
 use cal_core::{
     is_mine_or_unassigned, series_master_id, ContactsFeature, DateRange, Event, EventRecurrence,
     NewEvent, RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind, SoundConfig, Task,
-    TaskRecurrence,
+    TaskRecurrence, TaskStatus,
 };
 use chrono::{
     DateTime, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc,
@@ -80,6 +80,16 @@ pub enum ItemKind {
     Task,
 }
 
+impl ItemKind {
+    /// The kind as its serde name says it, for the store.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ItemKind::Event => "event",
+            ItemKind::Task => "task",
+        }
+    }
+}
+
 /// Public DTO for a reminders overview / the mobile scheduler payload.
 #[derive(Debug, Clone, Serialize)]
 pub struct UpcomingReminder {
@@ -116,13 +126,27 @@ const EVENT_QUERY: &str = "SELECT id, title, start_utc, end_utc, reminders, \
     description FROM events";
 
 /// `SELECT id, title, scheduled_date, scheduled_time, deadline_date,
-/// deadline_time, reminders, recurrence, list_id FROM tasks` — `recurrence` is
-/// the JSON `TaskRecurrence`; `scheduled_time` pairs each date with its own
-/// time-of-day; `list_id` resolves the §14.4 container sound.
+/// deadline_time, reminders, recurrence, list_id, status FROM tasks` —
+/// `recurrence` is the JSON `TaskRecurrence`; `scheduled_time` pairs each date
+/// with its own time-of-day; `list_id` resolves the §14.4 container sound;
+/// `status` leaves a finished task out ([`stored_status_is_finished`]).
 const TASK_QUERY: &str = "SELECT id, title, \
     scheduled_date, scheduled_time, \
     deadline_date, deadline_time, \
-    reminders, recurrence, list_id FROM tasks";
+    reminders, recurrence, list_id, status FROM tasks";
+
+/// A done or cancelled task reminds of nothing. Its reminders stay on it (a
+/// task reopened rings again), but no scan turns them into triggers. Until
+/// 2026-11 no scan asked, so a task ticked off before its reminder still
+/// rang, and an "on next app start" one rang at every start.
+fn task_is_finished(status: TaskStatus) -> bool {
+    matches!(status, TaskStatus::Completed | TaskStatus::Cancelled)
+}
+
+/// [`task_is_finished`] for the `status` column of the local store.
+fn stored_status_is_finished(status: Option<&str>) -> bool {
+    matches!(status, Some("completed") | Some("cancelled"))
+}
 
 /// Local-only collector: every event + task reminder trigger from the local
 /// SQLite store whose absolute trigger time falls inside `[earliest, latest]`.
@@ -264,6 +288,10 @@ pub fn enumerate_local_scan(
                 let reminders_json: Option<String> = row.get(6).unwrap_or(None);
                 let recurrence_json: Option<String> = row.get(7).unwrap_or(None);
                 let list_id: String = row.get(8).unwrap_or_default();
+                let status: Option<String> = row.get(9).unwrap_or(None);
+                if stored_status_is_finished(status.as_deref()) {
+                    continue;
+                }
 
                 let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                     continue;
@@ -693,13 +721,33 @@ impl OccurrenceSink {
     }
 }
 
-/// `app_start` reminders (whose due time has already passed) from the LOCAL
-/// store. Local-only by design — no wire format carries `ReminderKind::AppStart`
-/// (CalDAV/Graph/EWS round-trips drop it). The caller fires these at startup;
-/// recurrence is irrelevant (the kind means "as soon as the user opens the app
-/// after the reference time").
+/// How far back a start looks for a moment it has not rung for: a year and a
+/// bit, so a yearly series still has one. The same bound for every kind, so a
+/// remembered row whose `rung_at` lies further back is one no start can ask for
+/// again (a moment never lies after the start that rang it), and pruning it
+/// cannot bring a reminder back. An entry whose moment is older reminds of
+/// nothing at a start.
+const APP_START_LOOKBACK_DAYS: i64 = 400;
+
+/// `app_start` reminders from the LOCAL store that are due at this start: the
+/// entry's moment has passed, lies within [`APP_START_LOOKBACK_DAYS`], and this
+/// device has not rung for it yet ([`mark_app_start_rung`]). Local-only by
+/// design — no wire format carries `ReminderKind::AppStart` (CalDAV/Graph/EWS
+/// round-trips drop it).
+///
+/// The moment is an event's start or a task's due time; for a series of
+/// either, its LATEST past occurrence, so each occurrence that passes rings
+/// once at the next start, and several missed ones ring once (Toni,
+/// 2026-11-08). A done or cancelled task rings for nothing
+/// ([`task_is_finished`]).
+///
+/// Until 2026-11 nothing remembered what had rung and no status was asked: a
+/// task due yesterday rang at every start for as long as it existed, ticked
+/// off or not, and a series rang for its very first occurrence forever.
 pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
     let now = Utc::now();
+    let horizon = now - ChronoDuration::days(APP_START_LOOKBACK_DAYS);
+    let within = |moment: DateTime<Utc>| moment <= now && moment >= horizon;
     let sound_prefs = SoundPrefs::load(db);
     let conn = match db.lock() {
         Ok(c) => c,
@@ -707,6 +755,14 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
             warn!(?err, "reminder DB mutex poisoned");
             return Vec::new();
         }
+    };
+    let rung = app_start_rung(&conn);
+    let already = |kind: ItemKind, id: &str, all_day: bool, moment: DateTime<Utc>| {
+        rung.contains(&(
+            kind.as_str().to_string(),
+            id.to_string(),
+            app_start_key(kind, all_day, moment, &Local),
+        ))
     };
     let mut acc: Vec<Trigger> = Vec::new();
 
@@ -717,25 +773,47 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
                 let title: String = row.get(1).unwrap_or_default();
                 let start_str: String = row.get(2).unwrap_or_default();
                 let reminders_json: Option<String> = row.get(4).unwrap_or(None);
+                let rrule: Option<String> = row.get(5).unwrap_or(None);
+                let exceptions_json: Option<String> = row.get(6).unwrap_or(None);
                 let calendar_id: String = row.get(7).unwrap_or_default();
                 let all_day: bool = row.get(8).unwrap_or(false);
+                let rrule_tzid: Option<String> = row.get(9).unwrap_or(None);
                 let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                     continue;
                 };
+                if !reminders
+                    .iter()
+                    .any(|r| matches!(r.kind, ReminderKind::AppStart))
+                {
+                    continue;
+                }
                 let Ok(start) = start_str.parse::<DateTime<Utc>>() else {
                     continue;
                 };
+                let recurrence = rrule.map(|rule| EventRecurrence {
+                    rrule: rule,
+                    exceptions: parse_rrule_exceptions(exceptions_json.as_deref()),
+                    tzid: rrule_tzid,
+                });
+                let Some(moment) = latest_past_moment(start, recurrence.as_ref(), all_day, now)
+                    .filter(|m| within(*m))
+                else {
+                    continue;
+                };
+                if already(ItemKind::Event, &id, all_day, moment) {
+                    continue;
+                }
                 for r in &reminders {
-                    if matches!(r.kind, ReminderKind::AppStart) && start <= now {
+                    if matches!(r.kind, ReminderKind::AppStart) {
                         acc.push(Trigger {
                             item_id: id.clone(),
                             item_kind: ItemKind::Event,
                             container_id: calendar_id.clone(),
                             title: title.clone(),
-                            body: format_event_body(&start),
+                            body: format_event_body(&moment),
                             trigger_at: now,
-                            relevant_until: start,
-                            start,
+                            relevant_until: moment,
+                            start: moment,
                             all_day,
                             sound: sound_prefs.resolve(
                                 r.sound.as_ref(),
@@ -761,10 +839,21 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
                 let deadline_date: Option<String> = row.get(4).unwrap_or(None);
                 let deadline_time: Option<String> = row.get(5).unwrap_or(None);
                 let reminders_json: Option<String> = row.get(6).unwrap_or(None);
+                let recurrence_json: Option<String> = row.get(7).unwrap_or(None);
                 let list_id: String = row.get(8).unwrap_or_default();
+                let status: Option<String> = row.get(9).unwrap_or(None);
+                if stored_status_is_finished(status.as_deref()) {
+                    continue;
+                }
                 let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                     continue;
                 };
+                if !reminders
+                    .iter()
+                    .any(|r| matches!(r.kind, ReminderKind::AppStart))
+                {
+                    continue;
+                }
                 let date = scheduled_date.as_deref().or(deadline_date.as_deref());
                 let time = if scheduled_date.is_some() {
                     scheduled_time.as_deref()
@@ -774,17 +863,37 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
                 let Some(due) = task_due_time(date, None, time) else {
                     continue;
                 };
+                // A series of tasks repeats the way the regular scan and the
+                // views read it: from its due time, on the rule its recurrence
+                // spells.
+                let recurrence = recurrence_json
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<TaskRecurrence>(s).ok())
+                    .and_then(|rec| task_recurrence_to_rrule_body(&rec))
+                    .map(|rrule| EventRecurrence {
+                        rrule,
+                        exceptions: Vec::new(),
+                        tzid: None,
+                    });
+                let Some(moment) =
+                    latest_past_moment(due, recurrence.as_ref(), false, now).filter(|m| within(*m))
+                else {
+                    continue;
+                };
+                if already(ItemKind::Task, &id, false, moment) {
+                    continue;
+                }
                 for r in &reminders {
-                    if matches!(r.kind, ReminderKind::AppStart) && due <= now {
+                    if matches!(r.kind, ReminderKind::AppStart) {
                         acc.push(Trigger {
                             item_id: id.clone(),
                             item_kind: ItemKind::Task,
                             container_id: list_id.clone(),
                             title: title.clone(),
-                            body: format_task_body(&due),
+                            body: format_task_body(&moment),
                             trigger_at: now,
-                            relevant_until: due,
-                            start: due,
+                            relevant_until: moment,
+                            start: moment,
                             all_day: false,
                             sound: sound_prefs.resolve(
                                 r.sound.as_ref(),
@@ -800,6 +909,118 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
         }
     }
     acc
+}
+
+/// The entry's latest moment at or before `now`: `first` itself without a
+/// recurrence, else its latest occurrence. The occurrences are looked for in
+/// windows that grow back from `now`, because one expansion stops at
+/// `RRULESET_LIMIT` occurrences counted from its OLD end: over 400 days an
+/// hourly series would end a year ago, at a different stale instant at every
+/// start. The first window that holds one holds the latest.
+fn latest_past_moment(
+    first: DateTime<Utc>,
+    recurrence: Option<&EventRecurrence>,
+    all_day: bool,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    let Some(rec) = recurrence else {
+        return (first <= now).then_some(first);
+    };
+    for days in [2, 31, APP_START_LOOKBACK_DAYS] {
+        let latest = expand_occurrences(
+            first,
+            &rec.rrule,
+            &rec.exceptions,
+            rec.tzid.as_deref(),
+            all_day,
+            device_clock(),
+            now - ChronoDuration::days(days),
+            now + ChronoDuration::seconds(1),
+        )
+        .into_iter()
+        .filter(|occurrence| *occurrence <= now)
+        .max();
+        if latest.is_some() {
+            return latest;
+        }
+    }
+    None
+}
+
+/// What a device remembers an app-start moment as. A timed event's start is
+/// an instant. A task's due time ("09:00" when it has none) and an all-day
+/// event's day are wall-clock values: in another zone the same moment is
+/// another instant, so they are remembered as the wall clock reads them in
+/// `zone` (the device's), and a trip does not ring them again.
+fn app_start_key<Tz: TimeZone>(
+    kind: ItemKind,
+    all_day: bool,
+    moment: DateTime<Utc>,
+    zone: &Tz,
+) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let local = moment.with_timezone(zone);
+    match (kind, all_day) {
+        (ItemKind::Event, false) => moment.to_rfc3339(),
+        (ItemKind::Event, true) => local.format("%Y-%m-%d").to_string(),
+        (ItemKind::Task, _) => local.format("%Y-%m-%dT%H:%M:%S").to_string(),
+    }
+}
+
+/// The moments this device has rung "on next app start" reminders for:
+/// (kind, item id, [`app_start_key`]). Empty when the table cannot be read,
+/// which costs one more ring, never a lost one.
+fn app_start_rung(conn: &rusqlite::Connection) -> HashSet<(String, String, String)> {
+    let Ok(mut stmt) = conn.prepare("SELECT item_kind, item_id, moment FROM app_start_rung") else {
+        return HashSet::new();
+    };
+    stmt.query_map(params![], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })
+    .map(|rows| rows.flatten().collect())
+    .unwrap_or_default()
+}
+
+/// Remember that `rung` — triggers [`enumerate_app_start_triggers`] gave and
+/// the caller showed — rang on this device, so the next start leaves them
+/// out. Rows rung before the lookback go: their moments lie further back
+/// still, where no start looks.
+pub fn mark_app_start_rung(db: &SharedConn, rung: &[Trigger]) {
+    let now = Utc::now();
+    let conn = match db.lock() {
+        Ok(c) => c,
+        Err(err) => {
+            warn!(?err, "reminder DB mutex poisoned");
+            return;
+        }
+    };
+    for t in rung {
+        if let Err(err) = conn.execute(
+            "INSERT OR IGNORE INTO app_start_rung (item_kind, item_id, moment, rung_at)
+             VALUES (?, ?, ?, ?)",
+            params![
+                t.item_kind.as_str(),
+                t.item_id,
+                app_start_key(t.item_kind, t.all_day, t.start, &Local),
+                now.to_rfc3339()
+            ],
+        ) {
+            warn!(?err, item_id = %t.item_id, "could not remember an app-start reminder");
+        }
+    }
+    let horizon = now - ChronoDuration::days(APP_START_LOOKBACK_DAYS);
+    if let Err(err) = conn.execute(
+        "DELETE FROM app_start_rung WHERE rung_at < ?",
+        params![horizon.to_rfc3339()],
+    ) {
+        warn!(?err, "could not prune remembered app-start reminders");
+    }
 }
 
 /// Look up the user's "Settings → Kalender" default reminders for `calendar_id`
@@ -1719,7 +1940,7 @@ fn task_triggers(
 ) -> Vec<Trigger> {
     let mut out = Vec::new();
     for t in tasks {
-        if t.reminders.is_empty() {
+        if t.reminders.is_empty() || task_is_finished(t.status) {
             continue;
         }
         let Some(master_due) = task_master_due(t) else {
@@ -3024,6 +3245,261 @@ mod tests {
         .unwrap();
     }
 
+    /// A local task due on `deadline` (a day, no time) in list "list".
+    fn insert_local_task(
+        db: &SharedConn,
+        id: &str,
+        status: &str,
+        deadline: NaiveDate,
+        reminders_json: &str,
+    ) {
+        let conn = db.lock().unwrap();
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR IGNORE INTO task_lists (id, source, name, created_at, updated_at)
+             VALUES ('list', 'local', 'list', ?, ?)",
+            params![now, now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (
+                id, list_id, title, status, priority, deadline_date,
+                reminders, created_at, updated_at
+             ) VALUES (?, 'list', ?, ?, 'medium', ?, ?, ?, ?)",
+            params![
+                id,
+                id,
+                status,
+                deadline.format("%Y-%m-%d").to_string(),
+                reminders_json,
+                now,
+                now
+            ],
+        )
+        .unwrap();
+    }
+
+    fn app_start_json() -> String {
+        serde_json::to_string(&[Reminder {
+            kind: ReminderKind::AppStart,
+            sound: None,
+        }])
+        .unwrap()
+    }
+
+    fn app_start_ids(db: &SharedConn) -> Vec<String> {
+        let mut ids: Vec<String> = enumerate_app_start_triggers(db)
+            .into_iter()
+            .map(|t| t.item_id)
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// "On next app start" rang at EVERY start: nothing remembered that it had.
+    #[test]
+    fn an_app_start_reminder_rings_once_per_moment() {
+        let db = prefs_db();
+        let yesterday = Utc::now().date_naive() - ChronoDuration::days(1);
+        insert_local_task(&db, "task-due", "open", yesterday, &app_start_json());
+        let due = enumerate_app_start_triggers(&db);
+        assert_eq!(due.len(), 1);
+        mark_app_start_rung(&db, &due);
+        assert!(
+            app_start_ids(&db).is_empty(),
+            "rang again at the next start"
+        );
+
+        // Moved to another day that has passed too: a new moment, once more.
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET deadline_date = ? WHERE id = 'task-due'",
+                params![(yesterday - ChronoDuration::days(1))
+                    .format("%Y-%m-%d")
+                    .to_string()],
+            )
+            .unwrap();
+        assert_eq!(app_start_ids(&db), ["task-due"]);
+    }
+
+    #[test]
+    fn a_finished_task_rings_at_no_start_and_in_no_scan() {
+        let db = prefs_db();
+        let yesterday = Utc::now().date_naive() - ChronoDuration::days(1);
+        let tomorrow = Utc::now().date_naive() + ChronoDuration::days(1);
+        for (id, status) in [
+            ("open", "open"),
+            ("going", "in_progress"),
+            ("done", "completed"),
+            ("dropped", "cancelled"),
+        ] {
+            insert_local_task(&db, id, status, yesterday, &app_start_json());
+            let later = format!("{id}-later");
+            let reminders = serde_json::to_string(&one_hour_before()).unwrap();
+            insert_local_task(&db, &later, status, tomorrow, &reminders);
+        }
+        assert_eq!(app_start_ids(&db), ["going", "open"]);
+        for (id, rings) in [
+            ("open-later", true),
+            ("going-later", true),
+            ("done-later", false),
+            ("dropped-later", false),
+        ] {
+            assert_eq!(!local_triggers_for(&db, id).is_empty(), rings, "{id}");
+        }
+    }
+
+    /// A series rang for its very first occurrence at every start. Now it is
+    /// its latest past occurrence, once.
+    #[test]
+    fn a_series_rings_once_for_its_latest_past_occurrence() {
+        let db = prefs_db();
+        let now = Utc::now();
+        // Whole seconds, as a stored start has: the rule engine drops the rest.
+        let first = (now - ChronoDuration::days(10) - ChronoDuration::hours(1))
+            .with_nanosecond(0)
+            .unwrap();
+        insert_local_event(&db, "daily", "cal", &app_start_json(), first);
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE events SET rrule = 'FREQ=DAILY' WHERE id = 'daily'",
+                params![],
+            )
+            .unwrap();
+        let due = enumerate_app_start_triggers(&db);
+        assert_eq!(due.len(), 1);
+        let moment = due[0].start;
+        assert!(moment <= now, "{moment}");
+        assert!(
+            now - moment < ChronoDuration::days(1),
+            "not the latest: {moment}"
+        );
+        assert_eq!(
+            (moment - first).num_hours() % 24,
+            0,
+            "not an occurrence: {moment}"
+        );
+        mark_app_start_rung(&db, &due);
+        assert!(app_start_ids(&db).is_empty());
+    }
+
+    /// Review of #156: only series had a lookback, and the prune by `rung_at`
+    /// would have dropped the memory of an old single entry that the scan
+    /// still asked for, so it rang again about every 400 days. Now every kind
+    /// has the same bound, and what lies beyond it rings at no start.
+    #[test]
+    fn a_moment_beyond_the_lookback_rings_at_no_start() {
+        let db = prefs_db();
+        let old = Utc::now() - ChronoDuration::days(APP_START_LOOKBACK_DAYS + 1);
+        insert_local_event(&db, "old-event", "cal", &app_start_json(), old);
+        insert_local_task(&db, "old-task", "open", old.date_naive(), &app_start_json());
+        let recent = Utc::now() - ChronoDuration::days(3);
+        insert_local_event(&db, "recent-event", "cal", &app_start_json(), recent);
+        assert_eq!(app_start_ids(&db), ["recent-event"]);
+    }
+
+    /// Review of #156: a task series left open rang for its first due time
+    /// only; every later occurrence stayed silent.
+    #[test]
+    fn a_task_series_rings_once_for_its_latest_past_occurrence() {
+        let db = prefs_db();
+        let ten_days_ago = Utc::now().date_naive() - ChronoDuration::days(10);
+        insert_local_task(&db, "daily-task", "open", ten_days_ago, &app_start_json());
+        let rec = TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
+        };
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET recurrence = ? WHERE id = 'daily-task'",
+                params![serde_json::to_string(&rec).unwrap()],
+            )
+            .unwrap();
+        let due = enumerate_app_start_triggers(&db);
+        assert_eq!(due.len(), 1);
+        let moment = due[0].start;
+        assert!(moment <= Utc::now(), "{moment}");
+        assert!(
+            Utc::now() - moment <= ChronoDuration::days(1),
+            "not the latest occurrence: {moment}"
+        );
+        mark_app_start_rung(&db, &due);
+        assert!(app_start_ids(&db).is_empty());
+    }
+
+    /// Review of #156: one 400-day expansion stops at `RRULESET_LIMIT`
+    /// occurrences counted from its old end, so an hourly series picked a
+    /// stale "latest" occurrence, a different one at every start.
+    #[test]
+    fn a_dense_series_finds_its_true_latest_occurrence() {
+        let db = prefs_db();
+        let now = Utc::now();
+        let first = (now - ChronoDuration::days(300))
+            .with_nanosecond(0)
+            .unwrap();
+        insert_local_event(&db, "hourly", "cal", &app_start_json(), first);
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE events SET rrule = 'FREQ=HOURLY' WHERE id = 'hourly'",
+                params![],
+            )
+            .unwrap();
+        let due = enumerate_app_start_triggers(&db);
+        assert_eq!(due.len(), 1);
+        let moment = due[0].start;
+        assert!(
+            moment <= now && now - moment < ChronoDuration::hours(1),
+            "{moment}"
+        );
+        mark_app_start_rung(&db, &due);
+        assert!(
+            app_start_ids(&db).is_empty(),
+            "rang again without a new occurrence"
+        );
+    }
+
+    /// Review of #156: a task's due time is a wall-clock value; remembered as
+    /// an instant, a trip to another zone rang it again.
+    #[test]
+    fn a_wall_clock_moment_is_remembered_as_the_wall_clock_reads() {
+        use chrono_tz::Europe::{Berlin, London};
+        let nine = |zone: chrono_tz::Tz| {
+            zone.with_ymd_and_hms(2026, 11, 7, 9, 0, 0)
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        let (in_berlin, in_london) = (nine(Berlin), nine(London));
+        assert_ne!(in_berlin, in_london);
+        assert_eq!(
+            app_start_key(ItemKind::Task, false, in_berlin, &Berlin),
+            app_start_key(ItemKind::Task, false, in_london, &London),
+        );
+        let midnight = |zone: chrono_tz::Tz| {
+            zone.with_ymd_and_hms(2026, 11, 7, 0, 0, 0)
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        assert_eq!(
+            app_start_key(ItemKind::Event, true, midnight(Berlin), &Berlin),
+            app_start_key(ItemKind::Event, true, midnight(London), &London),
+        );
+        // A timed event is an instant wherever the device is.
+        assert_eq!(
+            app_start_key(ItemKind::Event, false, in_berlin, &London),
+            in_berlin.to_rfc3339()
+        );
+    }
+
     fn local_triggers_for(db: &SharedConn, item_id: &str) -> Vec<DateTime<Utc>> {
         let now = Utc::now();
         let mut at: Vec<DateTime<Utc>> =
@@ -4116,6 +4592,33 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
             Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap(),
         )
+    }
+
+    #[test]
+    fn a_finished_external_task_reminds_of_nothing() {
+        // A task ticked off before its reminder rang anyway: no scan asked
+        // for its state.
+        let open = make_task(
+            None,
+            None,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
+            Some(NaiveTime::from_hms_opt(18, 0, 0).unwrap()),
+            vec![rel(30)],
+        );
+        let (ws, we) = task_window();
+        assert_eq!(tk_triggers(std::slice::from_ref(&open), ws, we).len(), 1);
+        for status in [TaskStatus::Completed, TaskStatus::Cancelled] {
+            let finished = Task {
+                status,
+                ..open.clone()
+            };
+            assert!(tk_triggers(&[finished], ws, we).is_empty(), "{status:?}");
+        }
+        let started = Task {
+            status: TaskStatus::InProgress,
+            ..open.clone()
+        };
+        assert_eq!(tk_triggers(&[started], ws, we).len(), 1);
     }
 
     #[test]
