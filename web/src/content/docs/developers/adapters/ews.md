@@ -124,6 +124,14 @@ The endpoint is discovered or user-supplied.
   does, failed with "could not compute the InstanceIndex"; it reads a fresh
   GetItem, so the parse side alone mends it. EWS tasks
   share the reader, but their cached rows are not re-emitted (see TODO).
+- **A task carries one reminder.** `ReminderIsSet` with `ReminderDueBy` is a
+  fixed time. `ReminderIsSet` without `ReminderDueBy`, a reminder with no time
+  of its own, is a shape Exchange takes and keeps (live, 2026-11-08); it reads
+  as "at the due date" (relative 0) and is written back in that shape. Until
+  then every save sent `ReminderIsSet=false` for it, so ticking such a task
+  off switched its reminder off, and a new task with "at the due date"
+  arrived without one. Any other relative reminder has no place in the single
+  field and is not sent.
 - **A series' end date is a whole day on its own clock.** Exchange keeps
   every occurrence on `EndDate`, counted on the clock the series repeats on:
   a daily 00:30 Berlin series ending on 3.11. keeps the 3.11. and not the
