@@ -270,6 +270,10 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   „Beginn in 59 minutes“ auf deutschem iPhone. iOS zeichnet die mitlaufenden
   Zeiten selbst, in der Sprache der Erweiterung, und die erklärte keine.
   `mobile/targets/widget/Info.plist` erklärt jetzt en und de wie die App.
+- [x] **iOS: nach einem Update der App blieb die laufende Aktivität weg**
+  (Gerätetest 2026-11-08, #157). Der nächste Abgleich las die verschwundene
+  Aktivität als Wegwischen. Jetzt merkt sich Aperio den Build, der das
+  Gedächtnis schrieb; ein anderer heißt Update, kein Wegwischen.
 - [ ] 🚩 **Mitlaufende Zeiten in der Sprache des Geräts.** Seit #154 sprechen
   sie die Sprache des iPhones; läuft Aperio in einer anderen, stehen
   deutsche Wörter neben englischen Zeiten oder umgekehrt.
@@ -658,10 +662,8 @@ Siehe DESIGN §4.2.
   App-Start nach Fälligkeit“ (`allowAppStart` gilt dort, weil nicht gesetzt).
   Der Termin-Editor folgt der Regel „nichts anbieten, was still bleibt“ bisher
   nur für diese Art (`allowAppStart={targetIsLocal}`), und auch das nur am
-  Desktop: Das Handy löst „Beim nächsten App-Start“ nie aus, bietet es aber
-  für lokale Kalender und für jede Aufgabenliste an. Bei einem lokalen
-  Kalender oder einer lokalen Liste klingelt eine dort gesetzte Erinnerung
-  erst, wenn ein Desktop den Eintrag per Sync bekommt und neu startet. In
+  Desktop: Das Handy bietet „Beim nächsten App-Start“ für jede Aufgabenliste
+  an (seit 2026-11-08 löst es sie beim Öffnen auch aus). In
   einer externen Aufgabenliste klingelt sie nirgends: Kein Adapter schreibt
   diese Art, und der Desktop sammelt sie nur aus Aperios lokalem Speicher. Bei Google kommt eine feste Uhrzeit „An diesem Termin“ nicht an:
   Der Adapter verwirft sie, und bleibt keine Erinnerung übrig, hat der Termin
@@ -4357,6 +4359,13 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 
 #### B7 · Erinnerungs-Feinheiten (§14) `[~]` — erledigte Punkte
 
+- [x] **Handy: „Beim nächsten App-Start“ löst jetzt aus** (2026-11-08). Das
+  Handy bot die Art an und löste sie nie aus. Jetzt fragt es bei jedem Öffnen
+  (Start und Rückkehr in den Vordergrund, Entscheidung Toni) den Kern
+  (`app_start_reminders_json`, dieselbe Regel wie am Desktop), zeigt das
+  Fällige sofort wie eine geplante Erinnerung und merkt sich, was es zeigte
+  (`mark_app_start_rung`): einmal je Gerät. Ohne Erlaubnis für
+  Mitteilungen wird nichts gemerkt.
 - [x] **„Beim nächsten App-Start“ klingelte bei jedem Start** (2026-11-08).
   Nichts merkte sich, was schon geklungen hatte, kein Durchlauf fragte nach
   dem Status, und eine Serie klingelte für ihr allererstes Vorkommen. Jetzt

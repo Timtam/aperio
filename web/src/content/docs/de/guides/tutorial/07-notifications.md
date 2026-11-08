@@ -26,14 +26,14 @@ lernst, wie du auf sie reagierst.
      Aufgaben heißt sie **Nach Fälligkeit**; Aperio zeigt sie dort, bietet sie
      aber nicht neu an.
    - **Zu festem Zeitpunkt**: an einem Datum zu einer Uhrzeit.
-   - **Beim nächsten App-Start nach Fälligkeit**: Aperio am Desktop meldet
-     sich beim nächsten Start, wenn der Zeitpunkt verstrichen ist, einmal je
-     Computer. Bei einem wiederkehrenden Termin oder einer wiederkehrenden
-     Aufgabe einmal nach jedem Vorkommen;
-     mehrere verpasste Vorkommen ergeben eine Erinnerung. Eine erledigte oder
+   - **Beim nächsten App-Start nach Fälligkeit**: Aperio meldet sich, wenn
+     der Zeitpunkt verstrichen ist: am Desktop beim nächsten Start, am Handy
+     beim nächsten Öffnen, einmal je Gerät. Bei einem wiederkehrenden Termin
+     oder einer wiederkehrenden Aufgabe einmal nach jedem Vorkommen; mehrere
+     verpasste Vorkommen ergeben eine Erinnerung. Eine erledigte oder
      abgebrochene Aufgabe bleibt still. Das klappt nur bei Einträgen in
      Aperios eigenen Kalendern und Listen, denn kein Anbieter speichert diese
-     Art; das Handy löst sie nicht aus.
+     Art.
 4. Du kannst mehrere Erinnerungen pro Eintrag hinzufügen.
 5. **Speichern**.
 

@@ -50,3 +50,15 @@ export const upcomingReminders = async (
   horizonMinutes: number,
 ): Promise<UpcomingReminder[]> =>
   JSON.parse(await CalFfi.upcomingRemindersJson(horizonMinutes)) as UpcomingReminder[];
+
+/** The "on next app start" reminders due at this opening of the app, events
+ *  of the hidden calendars left out. They ring now (`trigger_at` is now). */
+export const appStartReminders = async (
+  hidden: ReadonlySet<string>,
+): Promise<UpcomingReminder[]> =>
+  JSON.parse(await CalFfi.appStartRemindersJson(JSON.stringify([...hidden]))) as UpcomingReminder[];
+
+/** Remember that these app-start reminders were shown on this device, so no
+ *  later opening rings them again. */
+export const markAppStartRung = (shown: UpcomingReminder[]): Promise<void> =>
+  CalFfi.markAppStartRung(JSON.stringify(shown));
