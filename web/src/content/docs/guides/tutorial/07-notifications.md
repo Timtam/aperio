@@ -139,32 +139,40 @@ time, like an all-day event.
 reminder set on an entry itself, so as a calendar default it would be a setting
 that saves and then stays silent.
 
-### Apple Calendar shows two alerts
+### Apple Calendar and its default alert
 
 An iCloud account has a default alert of its own (iPhone: **Settings → Apps →
-Calendar → Default Alert Times**). Apple writes it into the appointment as an
-alarm and marks that alarm as its own default, which is how the Calendar app
-can tell it apart from one somebody set deliberately.
+Calendar → Default Alert Times**). The iPhone adds it to every appointment
+that does not say otherwise. Appointments it makes itself say so with a silent
+alarm that never rings; an appointment that came from elsewhere without one
+gets the default on top of its own alerts.
 
-Aperio keeps that mark. Editing an appointment made on an iPhone — its title,
-its time, anything — leaves the alert itself alone, mark and all, so it stays
-Apple's default instead of turning into an alert you appear to have set by
-hand. Change the reminder here, add one beside it or take it away, and the mark
-goes: it is your choice then, and an account that still believed the alert was
-its own could put its version back.
+Aperio writes that silent alarm into every appointment it saves to iCloud: a
+new one, and every one you save. The iPhone then shows exactly the reminders
+the appointment has in Aperio and adds none of its own, so an appointment
+without a reminder has no alert on the iPhone either. If you want the iPhone,
+or a voice assistant reading the calendar, to alert you, give the appointment a
+reminder, or set one of the calendar's default reminders to **Attached to new
+events**. An entry **Only in Aperio** stays in Aperio.
 
-Where Aperio cannot put an alert back exactly as it found it — one it cannot
-read in the first place, or one written in a way this app would have to respell
-— it leaves the alert to the server and drops the mark rather than guess. Those
-appointments behave as they did before.
+An appointment saved before this version may still show the default beside its
+own alert, and one made on an iPhone and edited in Aperio may show an extra
+alert "at time of event". Saving it once in Aperio puts that right. Aperio
+writes the silent alarm only to iCloud: an iPhone on another CalDAV server adds
+its default to appointments from Aperio, so set **Default Alert Times** to
+*None* there.
 
-So an appointment Aperio creates with an **attached** reminder ends up with
-both: Apple's default alert and Aperio's. Apple Calendar lists them as "1st
-alert: default" and "2nd alert", and a voice assistant reading the calendar
-may announce the appointment twice. Aperio cannot switch Apple's default off
-from the outside — set **Default Alert Times** to *None* on the iPhone if you
-want only the reminder Aperio attaches, or leave the Aperio entry **only in
-Aperio** so nothing is written into the appointment at all.
+When Apple has written its default into an appointment as an alert, it marks
+that alert as its own. Aperio keeps the mark: editing an appointment made on an
+iPhone — its title, its time, anything — leaves the alert alone, mark and all,
+so it stays Apple's default instead of turning into an alert you appear to
+have set by hand. Change the reminder here, add one beside it or take it away,
+and the mark goes: it is your choice then.
+
+An alert Aperio cannot read — Apple's "1 week before", say — does not show up
+in Aperio, and a save hands it back to the server exactly as it was. One that
+this app would have to respell is left to the server too, and the mark is
+dropped rather than guessed.
 
 ### All-day events and birthdays
 

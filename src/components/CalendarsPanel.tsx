@@ -56,11 +56,14 @@ function placementFor(cal: { id: string; read_only: boolean }): boolean {
  *
  * Lives in Settings → Kalender (see `SettingsDialog`'s `TAB_ORDER`). The
  * motivating use case is iOS Default Alert Times for CalDAV calendars: iOS
- * applies them locally at notification time and never writes a VALARM into
- * the VEVENT, so iCloud events without an explicit per-event alarm come
- * back from the wire with an empty `reminders` array and the user sees a
- * mismatch (iPhone alarm rings, Aperio shows nothing). The per-calendar
- * default closes the gap on the Aperio side. Local calendars work too.
+ * adds them on the phone to every event that lacks Apple's silent alarm and
+ * writes one into the VEVENT only when the iPhone itself saves the event, so
+ * iCloud events without an explicit per-event alarm come back from the wire
+ * with an empty `reminders` array and the user sees a mismatch (iPhone alarm
+ * rings, Aperio shows nothing). The per-calendar default closes the gap on
+ * the Aperio side. Local calendars work too. Events Aperio saves to iCloud
+ * carry the silent alarm, so the iPhone adds nothing to those
+ * (`ical_mapping::apple_alarm`).
  *
  * Accessibility — master/detail (DESIGN.md §6.5 keyboard-first idiom),
  * factored into the shared `SettingsSelectorDetail`: an earlier version

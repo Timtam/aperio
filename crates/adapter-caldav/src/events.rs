@@ -26,8 +26,8 @@ use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
 use crate::http::SendRetrying;
 use crate::ical_raw::{
-    component_lines, fold, insert_after_head, insert_before_end, line_ending, unfold,
-    without_ranges,
+    component_lines, component_ranges, fold, insert_after_head, insert_before_end, line_ending,
+    unfold, without_ranges,
 };
 use crate::identity::OwnIdentity;
 use crate::mapping::{
@@ -293,7 +293,7 @@ struct NewBody {
 /// tells nobody — iCloud told nobody even without them (live run 100518).
 /// One whose organizer is the account itself is the account's own meeting.
 fn new_event_body(uid: &str, event: &NewEvent, ctx: &WriteCtx) -> NewBody {
-    let vcal = new_event_to_ical(uid, event);
+    let vcal = with_apples_silent_alarm(new_event_to_ical(uid, event), ctx);
     let own = ctx.identity.clone().unwrap_or_default();
     if event.keeps_invitation {
         let organizer = event
@@ -524,6 +524,7 @@ async fn update_master(
             "its resource cannot be read block by block",
         )
     })?;
+    let new_body = with_apples_silent_alarm(new_body, ctx);
     let if_match = event.etag.as_deref().or(server_etag.as_deref());
     let new_etag = put_resource(client, &resource, new_body, if_match, credentials).await?;
 
@@ -593,6 +594,9 @@ async fn write_attendee_copy(
             ..edit
         });
     };
+    // The alarms are the account's own here too, so the iPhone gets the same
+    // word as for any appointment — on the block this write changes only.
+    let new_block = with_apples_silent_alarm(new_block, ctx);
     // If-Match is the CALLER's version, as on every other write: the alarms
     // are spliced into the copy just read, but the reminders being written
     // are the ones the caller saw, so writing them over a copy somebody else
@@ -802,11 +806,14 @@ async fn update_override(
         &recurrence_id,
         PriorAlarms::read_occurrence(&body, slot),
     );
-    let new_body = format!(
-        "{}{}{}",
-        &body[..block.range.start],
-        insert_after_head(&rendered, &plan.lines),
-        &body[block.range.end..]
+    let new_body = with_apples_silent_alarm(
+        format!(
+            "{}{}{}",
+            &body[..block.range.start],
+            insert_after_head(&rendered, &plan.lines),
+            &body[block.range.end..]
+        ),
+        ctx,
     );
     let if_match = event.etag.as_deref().or(server_etag.as_deref());
     let new_etag = put_resource(client, &resource, new_body, if_match, credentials).await?;
@@ -893,7 +900,10 @@ async fn mint_override(
     // A new block carries no alarms of its own yet: the reminders the edit
     // holds are rendered fresh, and the master's VALARMs stay the master's.
     let rendered = override_to_vevent(&event, series_id, &recurrence_id, PriorAlarms::default());
-    let new_body = insert_before_end(body, &insert_after_head(&rendered, &plan.lines));
+    let new_body = with_apples_silent_alarm(
+        insert_before_end(body, &insert_after_head(&rendered, &plan.lines)),
+        ctx,
+    );
     let if_match = event.etag.as_deref().or(server_etag.as_deref());
     let new_etag = put_resource(client, resource, new_body, if_match, credentials).await?;
     Ok(Event {
@@ -909,6 +919,22 @@ async fn mint_override(
         recurrence: None,
         ..event
     })
+}
+
+/// `body` with Apple's silent alarm in every VEVENT, on iCloud
+/// ([`WriteCtx::apple_silent_alarm`]); unchanged on any other server.
+///
+/// Every write that sends an appointment's own content goes through here:
+/// the create, a save of a series or a single appointment, of one occurrence,
+/// a new exception, and an invitation's own alarms. A deleted occurrence and
+/// an answer to an invitation change neither the alarms nor what the user
+/// set, and keep the body they had.
+fn with_apples_silent_alarm(body: String, ctx: &WriteCtx) -> String {
+    if ctx.apple_silent_alarm {
+        ical_mapping::apple_alarm::with_silent_alarm(&body)
+    } else {
+        body
+    }
 }
 
 /// PUT `body` over `resource`, guarded by `if_match` when given. Returns the
@@ -1063,36 +1089,6 @@ fn merge_with_overrides(
     let refs: Vec<&str> = kept.iter().map(String::as_str).collect();
     let merged = splice_overrides_before_end(master_vcal, &refs);
     Some(with_missing_vtimezones(merged, body))
-}
-
-/// The byte ranges of the top-level `BEGIN:<name>` … `END:<name>` components
-/// of a raw VCALENDAR body, each with its own line endings, in document order.
-/// Sub-components (a VEVENT's VALARM, a VTIMEZONE's STANDARD) stay inside their
-/// parent's range, because they have other names.
-fn component_ranges(body: &str, name: &str) -> Vec<Range<usize>> {
-    let begin = format!("BEGIN:{name}");
-    let end = format!("END:{name}");
-    let mut ranges = Vec::new();
-    let mut start: Option<usize> = None;
-    let mut offset = 0;
-    for line in body.split_inclusive('\n') {
-        // Match the PHYSICAL line, stripping only the trailing CR/LF — NOT leading
-        // whitespace. RFC-5545 folds long values onto continuation lines prefixed
-        // with a space/tab, so a real component boundary never has leading
-        // whitespace; `line.trim()` would misread a folded "…\r\n BEGIN:VEVENT"
-        // inside a DESCRIPTION as a boundary and corrupt the block.
-        let marker = line.trim_end_matches(['\r', '\n']);
-        if marker == begin {
-            start = Some(offset);
-        }
-        offset += line.len();
-        if marker == end {
-            if let Some(from) = start.take() {
-                ranges.push(from..offset);
-            }
-        }
-    }
-    ranges
 }
 
 /// Split a raw VCALENDAR body into its top-level `VEVENT` blocks (each retaining
@@ -2076,6 +2072,7 @@ END:VCALENDAR</c:calendar-data>
             schedules: true,
             organizer_address: Some("mailto:toni@example.org".into()),
             writes_color: false,
+            apple_silent_alarm: false,
         }
     }
 
@@ -2875,6 +2872,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
             schedules: true,
             organizer_address: Some("mailto:toni@example.org".into()),
             writes_color: false,
+            apple_silent_alarm: false,
         }
     }
 
@@ -3140,6 +3138,164 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
             sent.matches("ATTENDEE;CN=Boss").count(),
             1,
             "the people are not rewritten: {sent}"
+        );
+    }
+
+    /// Apple's silent alarm, exactly as the iPhone writes it.
+    const SILENT: &str =
+        "BEGIN:VALARM\r\nACTION:NONE\r\nTRIGGER;VALUE=DATE-TIME:19760401T005545Z\r\nEND:VALARM\r\n";
+
+    fn apple_ctx() -> WriteCtx {
+        WriteCtx {
+            apple_silent_alarm: true,
+            ..icloud_ctx()
+        }
+    }
+
+    /// Live test E1 (2026-11-08): without the silent alarm, the iPhone added
+    /// its own default alert to every appointment Aperio made. With it, the
+    /// iPhone shows the appointment's alerts and nothing else — "None" for one
+    /// without reminders (E4). Never on another server.
+    #[test]
+    fn an_icloud_create_carries_apples_silent_alarm() {
+        let reminded = NewEvent {
+            reminders: vec![cal_core::Reminder {
+                kind: cal_core::ReminderKind::Relative { minutes_before: 7 },
+                sound: None,
+            }],
+            ..sample_new_event()
+        };
+        let made = new_event_body("uid-1", &reminded, &apple_ctx());
+        assert_eq!(made.body.matches(SILENT).count(), 1, "{}", made.body);
+        assert_eq!(
+            made.body.matches("BEGIN:VALARM").count(),
+            2,
+            "{}",
+            made.body
+        );
+
+        let bare = new_event_body("uid-1", &sample_new_event(), &apple_ctx());
+        assert_eq!(
+            bare.body.matches("BEGIN:VALARM").count(),
+            1,
+            "{}",
+            bare.body
+        );
+        assert!(bare.body.contains(SILENT), "{}", bare.body);
+
+        let elsewhere = new_event_body("uid-1", &reminded, &icloud_ctx());
+        assert!(
+            !elsewhere.body.contains("ACTION:NONE"),
+            "{}",
+            elsewhere.body
+        );
+    }
+
+    /// An appointment made on the iPhone that an earlier Aperio save damaged:
+    /// its silent alarm came back as a DISPLAY alarm at 1976, which the iPhone
+    /// shows as an alert "at time of event" beside its own default (live test
+    /// E6). The next save puts the silent alarm back, once.
+    const IPHONE_DAMAGED: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+PRODID:-//Apple Inc.//iPhone OS 27.2//EN\r\nBEGIN:VEVENT\r\nUID:iphone-1\r\n\
+DTSTAMP:20261108T143002Z\r\nDTSTART:20261214T140000Z\r\nDTEND:20261214T150000Z\r\n\
+SUMMARY:Probe\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Erinnerung\r\n\
+TRIGGER:PT0S\r\nUID:alarm-1\r\nX-WR-ALARMUID:alarm-1\r\nEND:VALARM\r\n\
+BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Probe\r\n\
+TRIGGER;VALUE=DATE-TIME:19760401T005545Z\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    #[tokio::test]
+    async fn an_icloud_save_puts_apples_silent_alarm_back_once() {
+        for ctx in [apple_ctx(), WriteCtx::default()] {
+            let mut server = Server::new_async().await;
+            let (seen, _get, put) =
+                serve_series(&mut server, IPHONE_DAMAGED, "\"server-etag\"", 1).await;
+            let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+            let mut edit = crate::mapping::parse_calendar_data_with_href(
+                IPHONE_DAMAGED,
+                cal_url.as_str(),
+                Some("/calendars/alice/work/series.ics"),
+            )
+            .unwrap()
+            .remove(0);
+            assert_eq!(edit.reminders.len(), 1, "the 1976 alarm is no reminder");
+            edit.title = "Probe umbenannt".into();
+            edit.etag = Some("\"server-etag\"".into());
+            update_event(&client(), edit, &creds(&server.url()), &ctx)
+                .await
+                .unwrap();
+            put.assert_async().await;
+            let sent = seen.lock().unwrap()[0].clone();
+            // Restored on any server: the damage was Aperio's own.
+            assert_eq!(sent.matches(SILENT).count(), 1, "{sent}");
+            assert_eq!(sent.matches("19760401T005545Z").count(), 1, "{sent}");
+            assert!(sent.contains("UID:alarm-1"), "{sent}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_new_icloud_exception_carries_the_silent_alarm_too() {
+        // The iPhone decides per VEVENT, so a series with an exception needs
+        // the silent alarm in both.
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nDTSTART:20260608T070000Z\r\nDTEND:20260608T073000Z\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) = serve_series(&mut server, body, "\"res-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        update_event(
+            &client(),
+            moved_override(&cal_url),
+            &creds(&server.url()),
+            &apple_ctx(),
+        )
+        .await
+        .unwrap();
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+        assert_eq!(sent.matches("BEGIN:VEVENT").count(), 2, "{sent}");
+        assert_eq!(sent.matches(SILENT).count(), 2, "{sent}");
+    }
+
+    #[tokio::test]
+    async fn an_invitation_gets_the_silent_alarm_only_once_apples_default_is_gone() {
+        use ical_mapping::fixtures::ICLOUD_INVITATION;
+        // Kept: Apple's flagged default stays the default, and the silent
+        // alarm would tell the iPhone it was removed.
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        edit.reminders.push(cal_core::Reminder {
+            kind: cal_core::ReminderKind::Relative { minutes_before: 60 },
+            sound: None,
+        });
+        update_event(&client(), edit, &creds(&server.url()), &apple_ctx())
+            .await
+            .unwrap();
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+        assert!(!sent.contains("ACTION:NONE"), "{sent}");
+
+        // Removed: the iPhone must not bring its default back, and only the
+        // block this write changes is touched.
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) =
+            serve_series(&mut server, ICLOUD_INVITATION, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut edit = invitation_master(&cal_url, ICLOUD_INVITATION);
+        edit.reminders.clear();
+        update_event(&client(), edit, &creds(&server.url()), &apple_ctx())
+            .await
+            .unwrap();
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+        let master_end = sent.find("END:VEVENT").unwrap();
+        assert!(sent[..master_end].contains(SILENT), "{sent}");
+        assert_eq!(sent.matches(SILENT).count(), 1, "{sent}");
+        assert!(
+            sent.contains("TRIGGER:-P1W"),
+            "an unshown alarm stays: {sent}"
         );
     }
 

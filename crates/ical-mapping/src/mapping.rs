@@ -21,7 +21,10 @@
 //!                    relative TRIGGER (-PT1H, -P1D, …) → Relative,
 //!                    absolute TRIGGER;VALUE=DATE-TIME    → Absolute,
 //!                    ACTION:EMAIL                       → Email,
-//!                    ACTION:DISPLAY / AUDIO             → Relative or Absolute
+//!                    ACTION:DISPLAY / AUDIO             → Relative or Absolute;
+//!                    any other ACTION is not read (Apple's silent
+//!                    `ACTION:NONE` above all), and a rewrite carries every
+//!                    alarm the read did not show back as the server's text
 //!
 //! On WRITE, a zoned recurring master emits `DTSTART;TZID=<zone>` together with
 //! a derived `VTIMEZONE` (see [`vtimezone`](crate::vtimezone)) so RFC 5545 §3.6.5
@@ -472,30 +475,50 @@ fn caldav_partstat(s: &str) -> AttendeeStatus {
 }
 
 /// Walk every child component on a VEVENT, pick out the VALARMs, and
-/// translate each into a `cal_core::Reminder`. Unknown actions
-/// (PROCEDURE, X-…) are skipped because the local Reminder engine
-/// has no place to land them; the server keeps them on the row
-/// untouched the next time we read the same VEVENT.
+/// translate each into a `cal_core::Reminder`.
+///
+/// An alarm whose ACTION Aperio does not know is not read: RFC 5545 §3.8.6.1
+/// says an application MUST ignore it. That is above all Apple's silent alarm,
+/// which the iPhone writes into every appointment it makes — `ACTION:NONE` with
+/// a trigger at 1976-04-01 00:55:45 UTC, its way of saying "no default alert
+/// here". Read as a reminder it turned up in the editor as a fixed time in
+/// 1976, and the next save wrote it back as an alarm that shows. Also skipped:
+/// a missing TRIGGER, and one the duration parser cannot read. A rewrite puts
+/// all of these back as the server wrote them (see [`PriorAlarms`]).
 fn parse_valarms(ev: &icalendar::Event) -> Vec<Reminder> {
-    let mut out = Vec::new();
-    for child in ev.components() {
-        if child.component_kind() != "VALARM" {
-            continue;
-        }
-        let action = child
-            .property_value("ACTION")
-            .map(|s| s.to_ascii_uppercase())
-            .unwrap_or_default();
-        let Some(trigger_prop) = child.properties().get("TRIGGER") else {
-            continue;
-        };
-        let kind = match resolve_trigger(trigger_prop, &action) {
-            Some(k) => k,
-            None => continue,
-        };
-        out.push(Reminder { kind, sound: None });
+    ev.components()
+        .iter()
+        .filter(|child| child.component_kind() == "VALARM")
+        .filter_map(shown_reminder)
+        .collect()
+}
+
+/// The reminder one VALARM shows, or `None` when the read leaves it out
+/// ([`parse_valarms`]).
+fn shown_reminder(alarm: &impl Component) -> Option<Reminder> {
+    let action = alarm
+        .property_value("ACTION")
+        .map(|s| s.to_ascii_uppercase())
+        .unwrap_or_default();
+    if !action_is_read(&action) {
+        return None;
     }
-    out
+    let trigger = alarm.properties().get("TRIGGER")?;
+    // The trigger RFC 9074 §8 sets aside for "ignore me": Apple's silent
+    // alarm rewritten as one that shows, or an alarm that fires on a place
+    // rather than at a time. Neither is a reminder at that time.
+    if crate::apple_alarm::is_ignored_trigger(trigger.value()) {
+        return None;
+    }
+    let kind = resolve_trigger(trigger, &action)?;
+    Some(Reminder { kind, sound: None })
+}
+
+/// The ACTIONs the read turns into reminders: the three RFC 5545 defines.
+/// An alarm without an ACTION is malformed, and is read as the pop-up it
+/// most likely means, as it always was.
+fn action_is_read(action: &str) -> bool {
+    matches!(action, "DISPLAY" | "AUDIO" | "EMAIL" | "")
 }
 
 /// The reminder one raw VALARM block shows, read by the rule the READ uses
@@ -545,12 +568,26 @@ END:VCALENDAR\r\n",
 /// same marker. One the user moved or removed keeps nothing: it is not the
 /// account's default any more, and claiming otherwise would be a worse lie
 /// than losing the mark.
+///
+/// An alarm the read never showed ([`parse_valarms`]) is nobody's to move or
+/// remove here, so it goes back exactly as the server wrote it: Apple's silent
+/// `ACTION:NONE` alarm, an ACTION Aperio does not know, a trigger it cannot
+/// read (Apple's "1 week before", `-P1W`). The silent alarm matters most. The
+/// iPhone adds the account's default alert to every appointment that lacks it,
+/// so dropping it — or rewriting it as an alarm that shows, which is what a
+/// save did before — gave an appointment made on the iPhone a second alert
+/// after any edit in Aperio. The same rule already held for an invitation's
+/// alarms (`adapter-caldav::replace_alarms`).
 #[derive(Debug, Clone, Default)]
 pub struct PriorAlarms {
+    /// The alarms the read showed, each as the reminder it means.
     alarms: Vec<PriorAlarm>,
     /// The marker as it sat on the VEVENT itself (iCloud writes it in both
     /// places). Only re-emitted for an alarm set that came through untouched.
     event_marker: Option<Property>,
+    /// The alarms the read did not show, as the server's own text in CRLF:
+    /// carried into the rewritten VEVENT unchanged, after Aperio's own.
+    hidden: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -602,16 +639,33 @@ impl PriorAlarms {
         let Ok(parsed) = body.parse::<ICalendar>() else {
             return Self::default();
         };
-        for comp in &parsed.components {
-            let icalendar::CalendarComponent::Event(ev) = comp else {
-                continue;
-            };
+        let events: Vec<&icalendar::Event> = parsed
+            .components
+            .iter()
+            .filter_map(|comp| match comp {
+                icalendar::CalendarComponent::Event(ev) => Some(ev),
+                _ => None,
+            })
+            .collect();
+        // The same VEVENT as text, for the alarms carried as the server wrote
+        // them. Only when the parse and the text agree on how many VEVENTs
+        // there are: otherwise the n-th of one is not known to be the n-th of
+        // the other, and those alarms are lost as before rather than placed
+        // into the wrong occurrence.
+        let blocks = crate::ical_raw::component_ranges(body, "VEVENT");
+        for (index, ev) in events.iter().enumerate() {
             if !wanted(ev) {
                 continue;
             }
+            let hidden = if blocks.len() == events.len() {
+                hidden_alarms(&body[blocks[index].clone()])
+            } else {
+                Vec::new()
+            };
             return Self {
                 alarms: prior_alarms_of(ev),
                 event_marker: ev.properties().get(APPLE_DEFAULT_ALARM).cloned(),
+                hidden,
             };
         }
         Self::default()
@@ -636,12 +690,40 @@ impl PriorAlarms {
     }
 }
 
-/// Split every VALARM on `ev` into the reminder it means and the properties
-/// Aperio does not write itself.
+/// The VALARMs of one VEVENT's text that the read does not show, each as the
+/// server's own text, in CRLF like everything the rewrite emits — except
+/// Apple's silent alarm rewritten as one that shows, which goes back as the
+/// iPhone wrote it, and only once ([`crate::apple_alarm::restored`]).
+fn hidden_alarms(vevent: &str) -> Vec<String> {
+    let silent = crate::apple_alarm::silent_alarm("\r\n");
+    let mut out: Vec<String> = Vec::new();
+    for range in crate::ical_raw::component_ranges(vevent, "VALARM") {
+        let text = &vevent[range];
+        if raw_alarm_reminder(text).is_some() {
+            continue;
+        }
+        let text = if crate::ical_raw::line_ending(text) == "\n" {
+            text.replace('\n', "\r\n")
+        } else {
+            text.to_string()
+        };
+        let text = crate::apple_alarm::restored(&text);
+        if text == silent && out.contains(&silent) {
+            continue;
+        }
+        out.push(text);
+    }
+    out
+}
+
+/// Split every VALARM on `ev` that the read shows into the reminder it means
+/// and the properties Aperio does not write itself. The others are carried as
+/// text ([`hidden_alarms`]) and take no part in "did the set survive": they
+/// survive by construction.
 fn prior_alarms_of(ev: &icalendar::Event) -> Vec<PriorAlarm> {
     let mut out = Vec::new();
     for child in ev.components() {
-        if child.component_kind() != "VALARM" {
+        if child.component_kind() != "VALARM" || shown_reminder(child).is_none() {
             continue;
         }
         let action = child
@@ -683,12 +765,12 @@ fn prior_alarms_of(ev: &icalendar::Event) -> Vec<PriorAlarm> {
 /// below is a way the write would otherwise hand the server an alarm that says
 /// something the server did not say:
 ///
-/// * A TRIGGER Aperio cannot read is an alarm Aperio also cannot SHOW — the
-///   reminder never reaches the editor, and the rebuild drops the VALARM
-///   entirely. Apple's "1 week before" default (`TRIGGER:-P1W`) is exactly
-///   this. Counting it as unchanged would stamp "still the account's default"
-///   on a set the write is about to shrink, and an account that believes that
-///   may put its missing alarm back — resurrecting a reminder nobody has.
+/// An alarm the read does not show never gets here: a trigger Aperio cannot
+/// read (Apple's "1 week before", `TRIGGER:-P1W`), an ACTION it does not know,
+/// Apple's silent alarm. Those go back as the server's text
+/// ([`hidden_alarms`]), so the set the PUT carries is never smaller than the
+/// server's for their sake.
+///
 /// * `RELATED=END` means "before the END", which Aperio reads as "before the
 ///   start" and would keep writing as such. Inheriting the trigger text
 ///   freezes a meaning the editor never showed; writing our own silently moves
@@ -1079,7 +1161,9 @@ pub fn new_event_to_ical(uid: &str, event: &NewEvent) -> String {
     let mut ical_ev = icalendar::Event::new();
     // A brand-new appointment has no previous copy, so there is nothing to
     // preserve — and Apple's default-alert marker is Apple's to apply, never
-    // ours to forge.
+    // ours to forge. (Apple's SILENT alarm, which keeps an iPhone from adding
+    // that default, is the CalDAV adapter's to add, on iCloud only:
+    // `apple_alarm::with_silent_alarm`.)
     apply_common(&mut ical_ev, uid, event, &mut PriorAlarms::default());
     let mut cal = ICalendar::new();
     cal.push(ical_ev.done());
@@ -1201,7 +1285,21 @@ pub fn event_to_ical_preserving(event: &Event, mut prior: PriorAlarms) -> String
     apply_common(&mut ical_ev, uid, &new, &mut prior);
     let mut cal = ICalendar::new();
     cal.push(ical_ev.done());
-    with_vtimezone(cal.to_string(), &new)
+    with_vtimezone(with_hidden_alarms(cal.to_string(), &prior.hidden), &new)
+}
+
+/// `vcal` (one VEVENT, as this crate writes it) with `hidden` — the alarms the
+/// read did not show — after its own alarms, as the server wrote them.
+fn with_hidden_alarms(mut vcal: String, hidden: &[String]) -> String {
+    if hidden.is_empty() {
+        return vcal;
+    }
+    // The LAST `END:VEVENT` line is the one VEVENT's end: a text value cannot
+    // hold a line break (this crate escapes it), so no earlier line reads so.
+    if let Some(at) = vcal.rfind("\r\nEND:VEVENT\r\n") {
+        vcal.insert_str(at + 2, &hidden.concat());
+    }
+    vcal
 }
 
 /// Render `event`, one changed occurrence, as the VEVENT that stands in for it
@@ -2874,12 +2972,19 @@ END:VALARM\r
 END:VEVENT\r
 END:VCALENDAR\r
 ";
-        // We treat PROCEDURE the same as any other DISPLAY-shaped
-        // reminder (relative trigger, local pop-up) because dropping
-        // it would lose information. EMAIL is the only action
-        // category we treat specially.
+        // RFC 5545 §3.8.6.1: an application MUST ignore an alarm whose
+        // action it does not recognise, and PROCEDURE is RFC 2445's, gone
+        // from RFC 5545. It used to read as a pop-up and came back from the
+        // next save as one; now it is left out and a save carries it back
+        // as written (`hidden_alarms`), so nothing is lost.
         let events = parse_calendar_data(body, "cal-1").unwrap();
-        assert_eq!(events[0].reminders.len(), 2);
+        assert_eq!(
+            events[0].reminders,
+            [Reminder {
+                kind: ReminderKind::Relative { minutes_before: 10 },
+                sound: None,
+            }]
+        );
     }
 
     #[test]
@@ -3241,30 +3346,237 @@ END:VCALENDAR\r
     }
 
     #[test]
-    fn an_alarm_aperio_cannot_read_still_counts_as_part_of_the_set() {
+    fn an_alarm_aperio_cannot_read_goes_back_as_the_server_wrote_it() {
         // Apple's default-alert menu offers "1 week before", and iCloud stores
         // that as TRIGGER:-P1W — which this crate's duration parser cannot
-        // read. The reminder never reaches the editor and the rebuild drops
-        // the VALARM, so the set the PUT carries is SMALLER than the server's.
-        // Calling that untouched would tell the account its default is intact
-        // and invite it to put the missing alarm back.
-        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(
-            "BEGIN:VALARM\r
+        // read. The reminder never reaches the editor. The rebuild used to
+        // drop the VALARM, so a title edit deleted an alert nobody could see.
+        // Now it goes back verbatim, mark and identity included, and the set
+        // the PUT carries is the server's: still the account's default.
+        let week = "BEGIN:VALARM\r
 ACTION:DISPLAY\r
 DESCRIPTION:Event reminder\r
 TRIGGER:-P1W\r
 UID:alarm-week\r
 X-APPLE-DEFAULT-ALARM:TRUE\r
 END:VALARM\r
-",
-        ));
+";
+        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(week));
         let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
         let out = event_to_ical_preserving(&event, prior);
 
         assert!(
-            !out.contains("X-APPLE-DEFAULT-ALARM"),
-            "an alarm went missing from the set, so it is not the account default any more:\n{out}"
+            out.contains(week),
+            "the unreadable alarm was not carried:\n{out}"
         );
+        let (event_part, _) = out.split_once("BEGIN:VALARM").unwrap();
+        assert!(
+            event_part.contains("X-APPLE-DEFAULT-ALARM:TRUE"),
+            "nothing left the set, so it is still the account default:\n{out}"
+        );
+        assert_eq!(out.matches("X-APPLE-DEFAULT-ALARM").count(), 3, "{out}");
+    }
+
+    /// Apple's silent alarm, exactly as the iPhone writes it.
+    const SILENT: &str = "BEGIN:VALARM\r
+ACTION:NONE\r
+TRIGGER;VALUE=DATE-TIME:19760401T005545Z\r
+END:VALARM\r
+";
+
+    /// What iCloud stores for an appointment made on an iPhone (iOS 27.2,
+    /// captured 2026-11-08, UIDs replaced): the alert chosen, then the silent
+    /// alarm.
+    fn iphone_body(start: &str, end: &str, trigger: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r
+CALSCALE:GREGORIAN\r
+PRODID:-//Apple Inc.//iPhone OS 27.2//EN\r
+VERSION:2.0\r
+BEGIN:VEVENT\r
+CREATED:20261108T143002Z\r
+{end}\r
+DTSTAMP:20261108T143002Z\r
+{start}\r
+LAST-MODIFIED:20261108T143002Z\r
+SEQUENCE:0\r
+SUMMARY:Probe\r
+UID:5E1D0C8A-0000-4000-8000-000000000001\r
+TRANSP:OPAQUE\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Erinnerung\r
+TRIGGER:{trigger}\r
+UID:5E1D0C8A-0000-4000-8000-0000000000A1\r
+X-WR-ALARMUID:5E1D0C8A-0000-4000-8000-0000000000A1\r
+END:VALARM\r
+{SILENT}END:VEVENT\r
+END:VCALENDAR\r
+"
+        )
+    }
+
+    fn reminders_of(body: &str) -> Vec<ReminderKind> {
+        parse_calendar_data(body, "cal-1").unwrap()[0]
+            .reminders
+            .iter()
+            .map(|r| r.kind.clone())
+            .collect()
+    }
+
+    #[test]
+    fn apples_silent_alarm_is_no_reminder() {
+        // "At time of event" on a timed appointment, "On day of event (9 AM)"
+        // on an all-day one: one reminder each, never a second one in 1976.
+        let timed = iphone_body("DTSTART:20261214T140000Z", "DTEND:20261214T150000Z", "PT0S");
+        assert_eq!(
+            reminders_of(&timed),
+            [ReminderKind::Relative { minutes_before: 0 }]
+        );
+        let all_day = iphone_body(
+            "DTSTART;VALUE=DATE:20261214",
+            "DTEND;VALUE=DATE:20261215",
+            "PT9H",
+        );
+        assert_eq!(
+            reminders_of(&all_day),
+            [ReminderKind::Relative {
+                minutes_before: -540
+            }]
+        );
+        // "None" on the iPhone is the silent alarm alone.
+        let none = timed.replace(
+            &timed[timed.find("BEGIN:VALARM").unwrap()..timed.find(SILENT).unwrap()],
+            "",
+        );
+        assert!(none.contains(SILENT) && none.matches("BEGIN:VALARM").count() == 1);
+        assert!(reminders_of(&none).is_empty());
+        assert!(raw_alarm_reminder(SILENT).is_none());
+    }
+
+    #[test]
+    fn the_ignored_trigger_is_no_reminder_whatever_the_action() {
+        // A silent alarm Aperio's saves rewrote as one that shows, and RFC
+        // 9074's alarm on leaving a place: neither rings at that instant.
+        for alarm in [
+            "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Probe\r\nTRIGGER;VALUE=DATE-TIME:19760401T005545Z\r\nEND:VALARM\r\n",
+            "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER;VALUE=DATE-TIME:19760401T005545Z\r\nPROXIMITY:DEPART\r\nEND:VALARM\r\n",
+        ] {
+            assert!(raw_alarm_reminder(alarm).is_none(), "{alarm}");
+        }
+    }
+
+    /// The iPhone appointment as Aperio holds it after the read, with the
+    /// reminders the user left.
+    fn iphone_edit(kinds: Vec<ReminderKind>) -> (String, Event) {
+        let body = iphone_body("DTSTART:20261214T140000Z", "DTEND:20261214T150000Z", "PT0S");
+        let mut event = parse_calendar_data(&body, "cal-1").unwrap().remove(0);
+        event.title = "Probe umbenannt".into();
+        event.reminders = kinds
+            .into_iter()
+            .map(|kind| Reminder { kind, sound: None })
+            .collect();
+        (body, event)
+    }
+
+    #[test]
+    fn a_save_carries_apples_silent_alarm_back_unchanged() {
+        // Before: a title edit wrote the silent alarm back as a DISPLAY alarm
+        // at 1976 — the iPhone then showed an alert "at time of event" and
+        // added its default beside it (live test E6, 2026-11-08).
+        for kinds in [
+            vec![ReminderKind::Relative { minutes_before: 0 }],
+            vec![ReminderKind::Relative { minutes_before: 15 }],
+            Vec::new(),
+        ] {
+            let (body, event) = iphone_edit(kinds.clone());
+            let out = event_to_ical_preserving(&event, PriorAlarms::read(&body));
+            assert_eq!(out.matches(SILENT).count(), 1, "{kinds:?}:\n{out}");
+            assert_eq!(
+                out.matches("19760401T005545Z").count(),
+                1,
+                "{kinds:?}:\n{out}"
+            );
+            // After Aperio's own alarms, inside the VEVENT.
+            let silent_at = out.find(SILENT).unwrap();
+            assert!(
+                out[silent_at..].starts_with(&format!("{SILENT}END:VEVENT\r\n")),
+                "{out}"
+            );
+            assert_eq!(
+                reminders_of(&out),
+                kinds,
+                "the read shows exactly the user's reminders:\n{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_save_puts_a_rewritten_silent_alarm_back_as_the_iphone_wrote_it() {
+        // An iPhone appointment that an earlier Aperio save damaged.
+        let (body, event) = iphone_edit(vec![ReminderKind::Relative { minutes_before: 0 }]);
+        let damaged = body.replace(
+            SILENT,
+            "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Probe\r\nTRIGGER;VALUE=DATE-TIME:19760401T005545Z\r\nEND:VALARM\r\n",
+        );
+        let out = event_to_ical_preserving(&event, PriorAlarms::read(&damaged));
+        assert_eq!(out.matches(SILENT).count(), 1, "{out}");
+        assert_eq!(out.matches("19760401T005545Z").count(), 1, "{out}");
+
+        // Damaged AND the real one beside it: one silent alarm, not two.
+        let both = damaged.replace("END:VEVENT", &format!("{SILENT}END:VEVENT"));
+        let out = event_to_ical_preserving(&event, PriorAlarms::read(&both));
+        assert_eq!(out.matches("19760401T005545Z").count(), 1, "{out}");
+    }
+
+    #[test]
+    fn an_occurrence_keeps_its_own_hidden_alarms_not_the_masters() {
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+BEGIN:VEVENT\r
+UID:evt-1\r
+DTSTAMP:20260520T060000Z\r
+SUMMARY:Serie\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+RRULE:FREQ=WEEKLY\r
+BEGIN:VALARM\r
+ACTION:X-MASTER\r
+TRIGGER:-PT1H\r
+END:VALARM\r
+END:VEVENT\r
+BEGIN:VEVENT\r
+UID:evt-1\r
+RECURRENCE-ID:20260527T080000Z\r
+DTSTAMP:20260520T060000Z\r
+SUMMARY:Serie\r
+DTSTART:20260527T090000Z\r
+DTEND:20260527T100000Z\r
+BEGIN:VALARM\r
+ACTION:NONE\r
+TRIGGER;VALUE=DATE-TIME:19760401T005545Z\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let slot = Utc.with_ymd_and_hms(2026, 5, 27, 8, 0, 0).unwrap();
+        let occurrence = PriorAlarms::read_occurrence(body, slot);
+        let event = event_with_reminders(Vec::new());
+        let out = event_to_ical_preserving(&event, occurrence);
+        assert!(out.contains(SILENT), "{out}");
+        assert!(!out.contains("X-MASTER"), "{out}");
+
+        let master = event_to_ical_preserving(&event, PriorAlarms::read(body));
+        assert!(master.contains("ACTION:X-MASTER"), "{master}");
+        assert!(!master.contains("ACTION:NONE"), "{master}");
+    }
+
+    #[test]
+    fn a_bare_lf_copy_hands_its_hidden_alarm_back_in_crlf() {
+        let (body, event) = iphone_edit(Vec::new());
+        let lf = body.replace("\r\n", "\n");
+        let out = event_to_ical_preserving(&event, PriorAlarms::read(&lf));
+        assert_eq!(out.matches(SILENT).count(), 1, "{out:?}");
     }
 
     #[test]
@@ -3478,7 +3790,9 @@ END:VCALENDAR\r
             // The other half of the promise: a calendar whose defaults all
             // stay in Aperio must not put anything on the wire, or every
             // client of that calendar would ring for a setting the user
-            // deliberately kept local.
+            // deliberately kept local. (On iCloud the CalDAV adapter adds
+            // Apple's silent alarm, which rings nowhere: it only stops an
+            // iPhone adding its own default, `apple_alarm::with_silent_alarm`.)
             let out = new_event_to_ical("evt-1", &new_appointment(Vec::new()));
             assert!(!out.contains("BEGIN:VALARM"), "{out}");
         }
