@@ -14,7 +14,8 @@
 //!     per DESIGN.md §9.7.
 //!   - `Importance` (Low / Normal / High) instead of priority on
 //!     CalendarItem.
-//!   - Single reminder via `ReminderIsSet` + `ReminderDueBy`.
+//!   - Single reminder via `ReminderIsSet` + `ReminderDueBy`: a fixed time,
+//!     or none of its own (read and written as "at the due date").
 //!   - No occurrence/exception split; recurring tasks are a master
 //!     row that EWS auto-rolls forward on completion. Aperio sees
 //!     each row as a distinct task — there's no occurrence id we'd
@@ -812,12 +813,11 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
                 sound: None,
             }]
         } else {
-            // `ReminderIsSet=true` without a `ReminderDueBy` happens
-            // when the server-side reminder fires "at the due date"
-            // without a separate timestamp. Synthesise a
-            // 0-minute-before relative reminder so the row still
-            // shows a reminder in the UI rather than silently
-            // dropping it.
+            // `ReminderIsSet=true` without a `ReminderDueBy`: a reminder
+            // with no time of its own, which Exchange takes and keeps
+            // (live, 2026-11-08). Read as "at the due date" (relative 0),
+            // and written back in this same shape (`task_reminder`), so a
+            // save never switches it off.
             vec![cal_core::Reminder {
                 kind: cal_core::ReminderKind::Relative { minutes_before: 0 },
                 sound: None,
@@ -910,18 +910,22 @@ pub fn new_task_to_task_item_xml(task: &NewTask) -> String {
     ));
 
     // Reminders: EWS supports a single reminder via `ReminderIsSet`
-    // + `ReminderDueBy`. We pull the first Absolute reminder (the
-    // shape `to_task` emits on read so the round-trip stays
-    // lossless); a Relative reminder is left for the update path to
-    // resolve against the task's due date.
-    if let Some(at) = first_absolute_reminder(&task.reminders) {
-        out.push_str("          <t:ReminderIsSet>true</t:ReminderIsSet>\n");
-        out.push_str(&format!(
-            "          <t:ReminderDueBy>{}</t:ReminderDueBy>\n",
-            format_ews_datetime(at),
-        ));
-    } else {
-        out.push_str("          <t:ReminderIsSet>false</t:ReminderIsSet>\n");
+    // + `ReminderDueBy`, written in the shape `to_task` reads back
+    // ([`task_reminder`]).
+    match task_reminder(&task.reminders) {
+        TaskReminder::At(at) => {
+            out.push_str("          <t:ReminderIsSet>true</t:ReminderIsSet>\n");
+            out.push_str(&format!(
+                "          <t:ReminderDueBy>{}</t:ReminderDueBy>\n",
+                format_ews_datetime(at),
+            ));
+        }
+        TaskReminder::AtDue => {
+            out.push_str("          <t:ReminderIsSet>true</t:ReminderIsSet>\n");
+        }
+        TaskReminder::Off => {
+            out.push_str("          <t:ReminderIsSet>false</t:ReminderIsSet>\n");
+        }
     }
 
     // DESIGN §9.12: the Aperio-Extras blob rides an invisible extended
@@ -1052,12 +1056,16 @@ pub fn task_to_update_field_xml(task: &Task) -> (String, String) {
         None => del.push_str(&delete_field_xml("task:DueDate")),
     }
 
-    match first_absolute_reminder(&task.reminders) {
-        Some(at) => {
+    match task_reminder(&task.reminders) {
+        TaskReminder::At(at) => {
             push_set_task_raw(&mut set, "item:ReminderIsSet", "ReminderIsSet", "true");
             push_set_task_datetime(&mut set, "item:ReminderDueBy", "ReminderDueBy", at);
         }
-        None => {
+        TaskReminder::AtDue => {
+            push_set_task_raw(&mut set, "item:ReminderIsSet", "ReminderIsSet", "true");
+            del.push_str(&delete_field_xml("item:ReminderDueBy"));
+        }
+        TaskReminder::Off => {
             push_set_task_raw(&mut set, "item:ReminderIsSet", "ReminderIsSet", "false");
             del.push_str(&delete_field_xml("item:ReminderDueBy"));
         }
@@ -1217,6 +1225,41 @@ fn first_absolute_reminder(reminders: &[cal_core::Reminder]) -> Option<DateTime<
         cal_core::ReminderKind::Absolute { at } => Some(*at),
         _ => None,
     })
+}
+
+/// The one reminder an Exchange task carries, as the write sends it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskReminder {
+    /// `ReminderIsSet` with `ReminderDueBy`: a fixed time.
+    At(DateTime<Utc>),
+    /// `ReminderIsSet` without `ReminderDueBy`: what `to_task` reads as "at
+    /// the due date" (relative 0). Live on 2026-11-08 (Toni's Exchange 2019,
+    /// `ews-tasks probe`): Exchange takes and keeps that shape. Writing it
+    /// back is what keeps the reminder; this write used to send
+    /// `ReminderIsSet=false` for it, so every save — ticking off, a priority,
+    /// a drag, the silent deadline pin — switched the reminder off, and a new
+    /// task with "at due" arrived without one.
+    AtDue,
+    Off,
+}
+
+/// The first fixed time wins, else "at the due date"; any other relative
+/// reminder has no place in Exchange's single field and is not sent.
+fn task_reminder(reminders: &[cal_core::Reminder]) -> TaskReminder {
+    if let Some(at) = first_absolute_reminder(reminders) {
+        return TaskReminder::At(at);
+    }
+    let at_due = reminders.iter().any(|r| {
+        matches!(
+            r.kind,
+            cal_core::ReminderKind::Relative { minutes_before: 0 }
+        )
+    });
+    if at_due {
+        TaskReminder::AtDue
+    } else {
+        TaskReminder::Off
+    }
 }
 
 fn push_set_task_string(out: &mut String, field_uri: &str, tag: &str, value: &str) {
@@ -1813,6 +1856,77 @@ mod tests {
         // ReminderIsSet is set to false (not deleted, because it's a
         // mandatory bool field)
         assert!(set.contains("<t:ReminderIsSet>false</t:ReminderIsSet>"));
+    }
+
+    /// A task whose reminder has no time of its own, as Exchange stores it
+    /// (live, 2026-11-08: `ReminderIsSet` true, no `ReminderDueBy`).
+    fn parsed_task_reminded_at_due() -> ParsedTask {
+        ParsedTask {
+            reminder_due_by: None,
+            ..parsed_task_with_reminder()
+        }
+    }
+
+    #[test]
+    fn a_save_keeps_a_reminder_without_its_own_time() {
+        // Before: every save of such a task — ticking it off, a priority, a
+        // drag — sent ReminderIsSet=false (live test P1, 2026-11-08).
+        let mut task = to_task(parsed_task_reminded_at_due(), "LIST|LCK").unwrap();
+        assert_eq!(
+            task.reminders
+                .iter()
+                .map(|r| r.kind.clone())
+                .collect::<Vec<_>>(),
+            [ReminderKind::Relative { minutes_before: 0 }]
+        );
+        task.priority = TaskPriority::High;
+        let (set, del) = task_to_update_field_xml(&task);
+        assert!(
+            set.contains("<t:ReminderIsSet>true</t:ReminderIsSet>"),
+            "the reminder was switched off:\n{set}"
+        );
+        assert!(!set.contains("ReminderDueBy"), "{set}");
+        assert!(del.contains("item:ReminderDueBy"), "{del}");
+    }
+
+    #[test]
+    fn a_new_task_with_a_reminder_at_due_arrives_with_one() {
+        // Before: "at due" (relative 0) went out as ReminderIsSet=false
+        // (live test P3, 2026-11-08).
+        let task = NewTask {
+            reminders: vec![cal_core::Reminder {
+                kind: ReminderKind::Relative { minutes_before: 0 },
+                sound: None,
+            }],
+            ..sample_new_task()
+        };
+        let xml = new_task_to_task_item_xml(&task);
+        assert!(
+            xml.contains("<t:ReminderIsSet>true</t:ReminderIsSet>"),
+            "{xml}"
+        );
+        assert!(!xml.contains("ReminderDueBy"), "{xml}");
+    }
+
+    #[test]
+    fn a_fixed_time_wins_and_other_relative_reminders_stay_out() {
+        let at = DateTime::parse_from_rfc3339("2026-12-17T07:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let reminder = |kind| cal_core::Reminder { kind, sound: None };
+        assert_eq!(
+            task_reminder(&[
+                reminder(ReminderKind::Relative { minutes_before: 0 }),
+                reminder(ReminderKind::Absolute { at }),
+            ]),
+            TaskReminder::At(at)
+        );
+        // Exchange's one field cannot hold "30 minutes before due".
+        assert_eq!(
+            task_reminder(&[reminder(ReminderKind::Relative { minutes_before: 30 })]),
+            TaskReminder::Off
+        );
+        assert_eq!(task_reminder(&[]), TaskReminder::Off);
     }
 
     // ── End-to-end api flows via mockito ────────────────────────────
