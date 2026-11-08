@@ -266,6 +266,16 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   Neustart, auf iOS nicht mehr weglassen (zwei Signale)? Tonis Entscheidung.
 - [ ] **Folgepunkt:** Termine aus dem Gerätekalender (ihre Erinnerungen stellt
   das Betriebssystem, Aperio zählt sie nicht auf).
+- [x] **iOS: mitlaufende Zeiten englisch** (Gerätetest 2026-11-08, #154):
+  „Beginn in 59 minutes“ auf deutschem iPhone. iOS zeichnet die mitlaufenden
+  Zeiten selbst, in der Sprache der Erweiterung, und die erklärte keine.
+  `mobile/targets/widget/Info.plist` erklärt jetzt en und de wie die App.
+- [ ] 🚩 **Mitlaufende Zeiten in der Sprache des Geräts.** Seit #154 sprechen
+  sie die Sprache des iPhones; läuft Aperio in einer anderen, stehen
+  deutsche Wörter neben englischen Zeiten oder umgekehrt.
+  `SystemFormatStyle.DateReference` nimmt keine Sprache, und die Sprache der
+  Ansicht erreicht sie nicht. Ein Ausweg bräuchte eigene Zeittexte, die iOS
+  ohne die App nicht mitlaufen lässt; erst entscheiden, ob es das wert ist.
 
 ### A6 · Offline-Queue für externe APIs (§18.2)
 - [ ] SQLite-Queue, die Mutationen an externe Kalender/Aufgaben (create/update/delete event+task) offline puffert
@@ -4355,7 +4365,13 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   Serie zählt das letzte vergangene Vorkommen. Dabei gefunden und mit
   behoben: Auch der normale Durchlauf, lokal wie extern, ließ erledigte und
   abgebrochene Aufgaben klingeln (`task_is_finished`). Entscheidungen Toni:
-  einmal je Gerät, bei Serien nach jedem Vorkommen.
+  einmal je Gerät, bei Serien nach jedem Vorkommen. Prüfrunde (eine Runde,
+  4 bestätigt, 5 widerlegt), alle behoben: gleiche 400-Tage-Grenze für jede
+  Art, sonst hätte das Aufräumen alte Einträge alle 400 Tage wieder klingeln
+  lassen; Aufgaben-Serien zählen ihr letztes Vorkommen; das letzte Vorkommen
+  wird in wachsenden Fenstern gesucht, weil eine Aufklappung nach 500
+  Vorkommen abbricht; Aufgaben und ganztägige Termine werden nach der
+  Wanduhr gemerkt (Zonenwechsel).
 - [x] **Exchange-Aufgaben: Speichern schaltete die Erinnerung aus**
   (2026-11-08). Live gemessen (`ews-tasks probe`, Exchange 2019 der
   Hochschule): Exchange nimmt und behält eine Erinnerung ohne eigenen
