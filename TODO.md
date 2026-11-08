@@ -635,26 +635,13 @@ Siehe DESIGN §4.2.
   nicht dazu (sie ändern weder Hinweise noch Inhalt). Bestehende Termine
   heilen erst beim nächsten Speichern, eine einmalige Reparatur im
   Hintergrund gibt es nicht.
-- [ ] **Exchange-Aufgaben: Speichern schaltet die Erinnerung aus.** Hat eine
-  Exchange-Aufgabe eine Erinnerung ohne eigenen Zeitpunkt (`ReminderIsSet`
-  ohne `ReminderDueBy`), liest Aperio sie als „0 Minuten vor Fälligkeit“
-  (`adapter-ews/src/tasks.rs`). Schreiben kann der Adapter aber nur die erste
-  feste Erinnerung; alles andere geht als `ReminderIsSet=false` hinaus, und
-  das Ändern löscht dazu `ReminderDueBy`. Jedes Speichern der Aufgabe aus
-  Aperio schaltet die Erinnerung auf dem Server also aus: am Handy auch ohne
-  die Zeile zu berühren, am Desktop bei jedem Weg ohne den Editor, etwa
-  Abhaken, Priorität, Ziehen auf einen Tag oder eine Uhrzeit, die
-  Tagesstart-Planung und der stille Deadline-Pin, der eine heute fällige
-  Aufgabe ohne Zutun speichert, also genau am Fälligkeitstag. Auch das
-  Verschieben in eine andere Exchange-Liste legt sie dort mit
-  `ReminderIsSet=false` neu an. Beide Editoren zeigen sie seit 221 als „Bei
-  Fälligkeit“ und lassen sie stehen; ausgeschaltet wird sie im Adapter.
 - [ ] **Editoren bieten an, was verloren geht.** Relative
-  Aufgaben-Erinnerungen überleben nur bei lokalen Listen: Exchange und To Do
-  schreiben nur die erste feste Erinnerung, CalDAV-Aufgaben, Google Tasks,
-  Vikunja, Todoist und die iPhone-Erinnerungen (Gerätekonto) gar keine. Das
-  gilt auch für „Bei Fälligkeit“ (221), das als relative Erinnerung mit 0
-  gespeichert wird. „Nach Fälligkeit“ (222) zeigen beide Editoren, bieten es
+  Aufgaben-Erinnerungen überleben nur bei lokalen Listen: Exchange schreibt
+  nur die erste feste Erinnerung oder „Bei Fälligkeit“ (221, relativ 0; seit
+  2026-11-08 als Erinnerung ohne eigenen Zeitpunkt), To Do nur die erste
+  feste, CalDAV-Aufgaben, Google Tasks, Vikunja, Todoist und die
+  iPhone-Erinnerungen (Gerätekonto) gar keine. Bei To Do gilt das auch für
+  „Bei Fälligkeit“. „Nach Fälligkeit“ (222) zeigen beide Editoren, bieten es
   aber nicht neu an, weil eine Aufgabenliste keine Fähigkeit dafür nennt; die
   lokale Liste könnte es speichern. Beide
   Aufgaben-Editoren bieten trotzdem jede Art an, auch „Beim nächsten
@@ -4369,6 +4356,16 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
   behoben: Auch der normale Durchlauf, lokal wie extern, ließ erledigte und
   abgebrochene Aufgaben klingeln (`task_is_finished`). Entscheidungen Toni:
   einmal je Gerät, bei Serien nach jedem Vorkommen.
+- [x] **Exchange-Aufgaben: Speichern schaltete die Erinnerung aus**
+  (2026-11-08). Live gemessen (`ews-tasks probe`, Exchange 2019 der
+  Hochschule): Exchange nimmt und behält eine Erinnerung ohne eigenen
+  Zeitpunkt (`ReminderIsSet` ohne `ReminderDueBy`); Aperio las sie als „Bei
+  Fälligkeit“ und schrieb bei jedem Speichern `ReminderIsSet=false`, auch beim
+  Abhaken, bei der Priorität oder beim stillen Deadline-Pin. Eine neue Aufgabe
+  mit „Bei Fälligkeit“ kam ohne Erinnerung an. Jetzt schreibt der Adapter
+  „Bei Fälligkeit“ genau in dieser Form (`task_reminder` in
+  `adapter-ews/src/tasks.rs`), Anlegen wie Ändern; eine feste Uhrzeit geht vor.
+  Tonis Konto hatte beim Zählen keine einzige Exchange-Aufgabe.
 - [x] **Apples stummer Hinweis: das iPhone legt keinen Standard mehr dazu**
   (2026-11-08). Live gemessen (iOS 27.2, `icloud-reminders marker`): Das
   iPhone legt seinen Standardhinweis zu jedem Termin, dem ein VALARM
