@@ -355,6 +355,24 @@ keinen, dort ist die Wahl Tonis Sache.
   einen Schnitt. Alle sechs Wege setzen es schon: die Editoren, das
   Übertragen und das Löschen ab einem Termin, je auf dem Desktop und auf dem
   Handy.
+- **279 — eine eigene Zone ist die Zone mit derselben Uhr.** *(gebaut,
+  2026-11-09)* Eine Exchange-Serie, deren Zone Exchange vollständig definiert
+  („Customized Time Zone“, 232), wiederholte sich in Aperio auf UTC, im
+  Sommer eine Stunde daneben, und ein Schnitt (254) zählte auf zwei Uhren.
+  Jetzt liest der Adapter sie als die tzdata-Zone, die in den fünf Jahren ab
+  dem ersten Beginn der Serie dieselbe Uhr hat (`cal_core::zone_with_clock`,
+  verglichen wie die Uhrenwache der Tabelle: täglich, an Umstelltagen
+  stündlich). Unter mehreren gleichen gilt (Toni): +00:00 durchgehend ist
+  keine Zone; dann die Zone des Geräts; dann die Standardzone jeder
+  Windows-Kennung in der Reihenfolge der Tabelle (für Mitteleuropa Budapest);
+  dann die Weltliste. Passt keine, bleibt es bei UTC. Beim Speichern behält
+  die Serie ihre Definition, solange die geschriebene Zone dieselbe Uhr hat
+  (Toni): Exchange bekommt dann keine Zone, nichts verschiebt sich, und ob ein
+  Tausch der Definition gegen eine Kennung die Ausnahmen behält, ist nicht
+  gemessen (245). Eine Zone mit anderer Uhr ist ein Zonenwechsel wie sonst.
+  `READ_RULE` 6 übersetzt den Zwischenspeicher neu; die Gerätezone steht
+  schon im Token. Der Datei-Import (eine Zone, die nur die Datei kennt) kann
+  dieselbe Regel nutzen und tut es noch nicht.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:

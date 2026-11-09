@@ -31,13 +31,15 @@
 //! July 2026 (DESIGN-series-time-zone.md, stage 4); Exchange's own tables are
 //! not measured. Offsets are compared at the start of every UTC day, and every
 //! hour of a day on which either clock changes, so a difference that starts
-//! and ends between two whole hours goes unseen.
+//! and ends between two whole hours goes unseen. The comparison is the core's
+//! (`cal_core::first_clock_difference`), the one the EWS adapter matches a
+//! zone Exchange defines in full by (decision 279).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
-use chrono::{DateTime, Duration, Months, NaiveDate, Offset, TimeZone, Utc};
+use chrono::{DateTime, Months, NaiveDate, TimeZone, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 use sha2::{Digest, Sha256};
@@ -561,11 +563,13 @@ fn build_tables(
 }
 
 /// The first instant in `window` at which `zone` and `windows_default` read
-/// different offsets, with both offsets in seconds.
+/// different offsets, with both offsets in seconds. The comparison is the
+/// core's (`cal_core::first_clock_difference`), the one a provider's own zone
+/// definition is matched to a zone with.
 fn first_difference(
     zone: &str,
     windows_default: &str,
-    (from, until): (DateTime<Utc>, DateTime<Utc>),
+    window: (DateTime<Utc>, DateTime<Utc>),
 ) -> Option<(DateTime<Utc>, i32, i32)> {
     if zone == windows_default {
         return None;
@@ -574,32 +578,17 @@ fn first_difference(
         name.parse::<chrono_tz::Tz>()
             .unwrap_or_else(|_| panic!("{name} is a zone cal-core resolved, so chrono-tz knows it"))
     };
-    let (zone, windows) = (parse(zone), parse(windows_default));
-    let offset = |tz: chrono_tz::Tz, at: DateTime<Utc>| {
-        tz.offset_from_utc_datetime(&at.naive_utc())
-            .fix()
-            .local_minus_utc()
-    };
-    let mut day = from;
-    while day < until {
-        let next = (day + Duration::days(1)).min(until);
-        let (z, w) = (offset(zone, day), offset(windows, day));
-        if z != w {
-            return Some((day, z, w));
-        }
-        if offset(zone, next) != z || offset(windows, next) != w {
-            let mut hour = day + Duration::hours(1);
-            while hour < next {
-                let (z, w) = (offset(zone, hour), offset(windows, hour));
-                if z != w {
-                    return Some((hour, z, w));
-                }
-                hour += Duration::hours(1);
-            }
-        }
-        day = next;
-    }
-    None
+    let (zone, windows) = (
+        cal_core::TzClock(parse(zone)),
+        cal_core::TzClock(parse(windows_default)),
+    );
+    cal_core::first_clock_difference(&zone, &windows, window).map(|d| {
+        (
+            d.at,
+            d.a.expect("a tzdata zone reads an offset at every instant"),
+            d.b.expect("a tzdata zone reads an offset at every instant"),
+        )
+    })
 }
 
 fn holds_must_have(tables: &WindowsTables) -> Result<(), String> {

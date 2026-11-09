@@ -987,7 +987,10 @@ Vorschläge sind nicht aufgenommen.
       (Entscheidungen 202-213, 263-269). Messen; beachtet Google sie nicht, die
       Löschungen der importierten Serie danach absagen wie `series_create`.
       Aus dem Merge von main in PR 7 (#128, Prüfrunde 15, 2026-10-31).
-- [ ] **Eine Zone, die nur die Datei kennt, wiederholt sich in UTC.** Der
+- [ ] **Eine Zone, die nur die Datei kennt, wiederholt sich in UTC.** Die
+      Regel dafür liegt seit 2026-11-09 im Kern (`cal_core::zone_with_clock`,
+      Entscheidung 279; der EWS-Adapter nutzt sie); der iCal-Leser bräuchte
+      nur noch die `VTIMEZONE` als `cal_core::Clock`. Der
       iCal-Leser löst eine `TZID`, die weder tzdata noch die Windows-Tabelle
       kennt (Outlooks „Customized Time Zone“), über die `VTIMEZONE` der Datei
       auf: Die Zeiten stimmen. Die Serie behält aber den eigenen Namen, den
@@ -1238,8 +1241,14 @@ Vorschläge sind nicht aufgenommen.
       (#126: dort bleibt jede Löschung, wo sie ist). Gefunden in der dritten
       Prüfrunde von #126 (2026-10-18), älter als #126.
 
-- [ ] **Exchange-Serien mit Zonen-Id „Europe/Berlin“ oder eigener Zone laufen
-      in Aperio auf UTC.** Kennt die Windows-Zonentabelle die
+- [x] **Exchange-Serien mit Zonen-Id „Europe/Berlin“ oder eigener Zone laufen
+      in Aperio auf UTC.** Erledigt: „Europe/Berlin“ mit `READ_RULE` 5 (236,
+      I6e); eine eigene Zone mit Definition seit 2026-11-09 als die Zone mit
+      derselben Uhr, die Gerätezone zuerst, und beim Speichern bleibt die
+      Definition, solange die Uhr gleich bleibt (Entscheidung 279,
+      `cal_core::zone_with_clock`, `READ_RULE` 6). Eine Kennung ohne
+      Definition, die nur die Registry eines Servers kennt, bleibt auf UTC.
+      Ursprünglich: Kennt die Windows-Zonentabelle die
       StartTimeZone-Id nicht (eine tzdata-Id wie „Europe/Berlin“, 236, oder
       „Customized Time Zone“ mit Definition, 232), liest Aperio die Serie ohne
       Zone (`recurrence.tzid = None`, mapping.rs, `WindowsZoneRead::Unknown`)

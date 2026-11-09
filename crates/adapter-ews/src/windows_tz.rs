@@ -18,9 +18,14 @@
 //! group of cities on one clock, so a Vienna series reads back as Berlin. The
 //! id `UTC` and a UTC name of tzdata mean no zone. An id the table does not
 //! know that is tzdata's own name (236) — the TZID Exchange keeps for an
-//! imported file's series (I6) — reads as that zone. Any other unknown id (a
-//! custom definition, an id only a server's registry has) means no zone: the
-//! series repeats in UTC.
+//! imported file's series (I6) — reads as that zone. A zone Exchange defines
+//! in full (`Customized Time Zone`, decision 232) reads as the tzdata zone that
+//! runs its clock through the five years from the series' start
+//! ([`read_series_definition`], `cal_core::zone_with_clock`): the device's own
+//! zone where it does, else the first Windows id's default zone, else the
+//! first listed zone (Toni, 2026-11-09). Any other unknown id (one only a
+//! server's registry has, a definition no zone runs or none at all) means no
+//! zone: the series repeats in UTC.
 //!
 //! ## Writing a zone
 //!
@@ -49,7 +54,12 @@
 
 pub use cal_core::windows_zone::{CLDR_RELEASE, TZDATA_VERSION};
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Mutex, OnceLock};
+
+use chrono::{DateTime, Utc};
+
+use crate::zone_definition::{ZoneDefinition, ZoneRules};
 
 use cal_core::windows_zone::{
     folded, lookup, OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS,
@@ -72,7 +82,10 @@ use cal_core::windows_zone::{
 /// 5: a series' start zone whose id is tzdata's own name (236) reads as that
 /// zone, as Exchange keeps an imported file's TZID (I6, live run 130307).
 /// Before, such a series repeated in UTC.
-pub const READ_RULE: u32 = 5;
+/// 6: a series' start zone Exchange defines in full (232) reads as the zone
+/// that runs its clock ([`read_series_definition`]). Before, such a series
+/// repeated in UTC, an hour off in summer.
+pub const READ_RULE: u32 = 6;
 
 /// The end zone Exchange stores for a series created without a zone.
 const NO_ZONE_END: &str = "tzone://Microsoft/Utc";
@@ -92,8 +105,10 @@ pub enum WindowsZoneRead {
     /// Exchange marks as created without a zone.
     Utc,
     /// An id the table does not know and that is not tzdata's own name either:
-    /// empty, a custom definition, an id only a server's registry has
-    /// (`Kamchatka Standard Time`), or an invented one. No zone either.
+    /// empty, a custom definition's (`Customized Time Zone`), an id only a
+    /// server's registry has (`Kamchatka Standard Time`), or an invented one.
+    /// No zone either, unless Exchange sends the definition beside it
+    /// ([`read_series_definition`]).
     Unknown,
 }
 
@@ -189,6 +204,49 @@ fn read_tzdata_name(id: &str) -> WindowsZoneRead {
         Some(zone) => WindowsZoneRead::Zone(zone),
         None => WindowsZoneRead::Unknown,
     }
+}
+
+/// A series' zone from the definition Exchange sends of it (decision 232): the
+/// tzdata zone that runs the definition's clock through the five years from
+/// `from`, the series' first start. `device` is the device's own zone, which
+/// comes first where it runs that clock. A definition that reads +00:00
+/// throughout is no zone; one that cannot be read, or that no zone runs, is
+/// [`WindowsZoneRead::Unknown`].
+///
+/// Remembered per definition, start and device zone: the reminder scan reads
+/// every cached item again every few minutes, and the comparison walks five
+/// years of days per candidate zone.
+pub fn read_series_definition(
+    definition: &ZoneDefinition,
+    from: DateTime<Utc>,
+    device: Option<&str>,
+) -> WindowsZoneRead {
+    type Key = (ZoneDefinition, DateTime<Utc>, Option<String>);
+    static READ: OnceLock<Mutex<HashMap<Key, WindowsZoneRead>>> = OnceLock::new();
+    let key = (definition.clone(), from, device.map(str::to_string));
+    let read = READ.get_or_init(Default::default);
+    if let Some(known) = read.lock().ok().and_then(|known| known.get(&key).copied()) {
+        return known;
+    }
+    let answer = match ZoneRules::try_from(definition) {
+        Ok(rules) => match cal_core::zone_with_clock(&rules, from, device) {
+            cal_core::ClockMatch::Zone(zone) => WindowsZoneRead::Zone(zone),
+            cal_core::ClockMatch::Utc => WindowsZoneRead::Utc,
+            cal_core::ClockMatch::NoZone => WindowsZoneRead::Unknown,
+        },
+        Err(error) => {
+            tracing::warn!(
+                target: "adapter_ews::zones",
+                %error,
+                "an Exchange zone definition cannot be read; the series repeats in UTC",
+            );
+            WindowsZoneRead::Unknown
+        }
+    };
+    if let Ok(mut known) = read.lock() {
+        known.insert(key, answer);
+    }
+    answer
 }
 
 /// The Windows id Exchange gets for a series' stored zone. `server` is the

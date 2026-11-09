@@ -37,7 +37,7 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, Utc, Weekda
 use serde::{Deserialize, Serialize};
 
 /// A zone definition as Exchange sent it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ZoneDefinition {
     #[serde(default)]
     pub periods: Vec<PeriodDef>,
@@ -54,13 +54,13 @@ impl ZoneDefinition {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PeriodDef {
     pub id: String,
     pub bias: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GroupDef {
     pub id: String,
     #[serde(default)]
@@ -68,7 +68,7 @@ pub struct GroupDef {
 }
 
 /// One transition element, its fields as text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TransitionDef {
     Plain {
         to_kind: String,
@@ -682,6 +682,16 @@ impl ZoneRules {
         let midnight = day.and_hms_opt(0, 0, 0)?;
         self.instant_of(midnight)
             .or_else(|| self.instant_of(midnight + Duration::hours(1)))
+    }
+}
+
+/// The clock a definition runs, for matching it to the tzdata zone that runs
+/// the same one (`cal_core::zone_with_clock`): the offset is local minus UTC,
+/// the bias with its sign turned.
+impl cal_core::Clock for ZoneRules {
+    fn offset_at(&self, at: DateTime<Utc>) -> Option<i32> {
+        let bias = self.bias_at_utc(at.naive_utc())?;
+        i32::try_from(-bias.num_seconds()).ok()
     }
 }
 

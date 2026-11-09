@@ -1887,29 +1887,8 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         EventRecurrence {
             rrule: r.to_rrule(),
             exceptions,
-            // EWS reports the master's zone as Windows ids, read by `windows_tz`:
-            // the end zone `tzone://Microsoft/Utc` marks a series created
-            // without a zone (43b), and otherwise the start zone becomes
-            // tzdata's zone. The id `UTC`, an id the table does not know, or none
-            // at all: no zone, so the series repeats in UTC.
-            tzid: match crate::windows_tz::read_series_zone(
-                item.start_time_zone.as_deref(),
-                item.end_time_zone.as_deref(),
-            ) {
-                Some(crate::windows_tz::WindowsZoneRead::Zone(zone)) => Some(zone.to_string()),
-                Some(crate::windows_tz::WindowsZoneRead::Utc) | None => None,
-                Some(crate::windows_tz::WindowsZoneRead::Unknown) => {
-                    // Debug, not warn: this runs for every cached item on
-                    // every reminder scan.
-                    tracing::debug!(
-                        target: "adapter_ews::zones",
-                        item_id = %item.item_id,
-                        windows_zone = ?item.start_time_zone,
-                        "not a CLDR Windows zone id; the series repeats in UTC",
-                    );
-                    None
-                }
-            },
+            tzid: series_zone(&item, start, || iana_time_zone::get_timezone().ok())
+                .map(str::to_string),
         }
     });
 
@@ -2550,8 +2529,16 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // one the server keeps after this update (`landed`): a kept all-day flag
     // stays, and an all-day item never gets a zone (46a).
     let written = series_windows_zone(landed.all_day, rule_of.recurrence.as_ref(), server_zones);
-    let zone_written =
-        written.is_some() && (rule_changed || touches(EventField::AllDay) || slot_changed);
+    // A series Exchange stores on a zone it defines in full (232) reads as the
+    // zone that runs that clock, and keeps its definition while the zone
+    // written would run the same clock (Toni, 2026-11-09): the clock does not
+    // change, and to Exchange an id in place of the definition is a new zone,
+    // which may drop the series' exceptions (unmeasured for this case, 245).
+    let keeps_definition =
+        written.is_some_and(|windows| keeps_its_definition(stored, windows, landed.start));
+    let zone_written = !keeps_definition
+        && written.is_some()
+        && (rule_changed || touches(EventField::AllDay) || slot_changed);
     // An update that writes a NEW zone keeps the item's stored wall clock and
     // relabels it in that zone, so the item moves by the offset (live round 1,
     // B2; the 8a live test, step 9). The zone therefore goes first, and when
@@ -2956,6 +2943,49 @@ fn finish_zone(
     *slot = definition.filter(|_| !id_names_a_clock(id.as_deref()));
 }
 
+/// The zone a series repeats on, from the zones Exchange names its master with
+/// (`windows_tz`): the end zone `tzone://Microsoft/Utc` marks a series created
+/// without a zone (43b); otherwise the start zone's Windows id, or an id that
+/// is tzdata's own name (236). Where neither names a clock and Exchange sends
+/// the zone's definition (232), the zone that runs that clock from the series'
+/// first start, the device's zone first (`windows_tz::read_series_definition`;
+/// `device` is asked only then). The id `UTC`, an id nothing reads, or none at
+/// all: no zone, so the series repeats in UTC.
+fn series_zone(
+    item: &ParsedItem,
+    first_start: DateTime<Utc>,
+    device: impl FnOnce() -> Option<String>,
+) -> Option<&'static str> {
+    use crate::windows_tz::{read_series_definition, read_series_zone, WindowsZoneRead};
+    let named = read_series_zone(
+        item.start_time_zone.as_deref(),
+        item.end_time_zone.as_deref(),
+    );
+    let read =
+        match (named, item.start_zone_definition.as_ref()) {
+            (Some(WindowsZoneRead::Unknown) | None, Some(definition)) => Some(
+                read_series_definition(definition, first_start, device().as_deref()),
+            ),
+            (named, _) => named,
+        };
+    match read {
+        Some(WindowsZoneRead::Zone(zone)) => Some(zone),
+        Some(WindowsZoneRead::Utc) | None => None,
+        Some(WindowsZoneRead::Unknown) => {
+            // Debug, not warn: this runs for every cached item on every
+            // reminder scan.
+            tracing::debug!(
+                target: "adapter_ews::zones",
+                item_id = %item.item_id,
+                windows_zone = ?item.start_time_zone,
+                defined = item.start_zone_definition.is_some(),
+                "no zone runs this series' clock; it repeats in UTC",
+            );
+            None
+        }
+    }
+}
+
 /// Whether a zone id names a clock by itself — through the CLDR table, as the
 /// end zone Exchange marks an item made without a zone with (43b), or as
 /// tzdata's own name (236) — so a definition beside it is never read.
@@ -3185,6 +3215,25 @@ fn boundary_zone(
             None
         }
     }
+}
+
+/// Whether an item Exchange stores on a zone it defines in full (232), at both
+/// boundaries, runs the clock of the zone behind `windows` through the five
+/// years from `from` (`cal_core::first_clock_difference`): then writing
+/// `windows` would change no time, and the definition stays.
+fn keeps_its_definition(stored: &StoredZones, windows: &str, from: DateTime<Utc>) -> bool {
+    let Some(DayZone::Tz(zone)) = boundary_zone(Some(windows), None) else {
+        return false;
+    };
+    let window = cal_core::clock_window(from);
+    let runs = |boundary: Option<&DayZone>| match boundary {
+        Some(DayZone::Rules(rules)) => {
+            cal_core::first_clock_difference(rules.as_ref(), &cal_core::TzClock(zone), window)
+                .is_none()
+        }
+        _ => false,
+    };
+    runs(stored.start.as_ref()) && runs(stored.end.as_ref())
 }
 
 /// Whether Exchange marks an item as made without a zone: the end zone
@@ -8863,6 +8912,114 @@ mod tests {
         );
     }
 
+    /// A series Exchange stores on a zone it defines in full (232) repeats on
+    /// the zone that runs that clock: the device's own where it does, else the
+    /// Windows table's first (Toni, 2026-11-09). Before, it repeated in UTC.
+    #[test]
+    fn a_series_in_a_custom_zone_repeats_on_the_zone_that_runs_its_clock() {
+        use crate::zone_definition::{PeriodDef, TransitionDef, ZoneDefinition};
+        let start = utc("2026-05-20T08:00:00Z");
+        let master = |definition: Option<ZoneDefinition>, end: &str| ParsedItem {
+            item_id: "M".into(),
+            change_key: Some("CK".into()),
+            subject: "Weekly".into(),
+            start: Some(start),
+            end: Some(start + chrono::Duration::hours(1)),
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            start_time_zone: Some("Customized Time Zone".into()),
+            end_time_zone: Some(end.into()),
+            start_zone_definition: definition,
+            recurrence: Some(EwsRecurrence {
+                pattern: EwsRecurrencePattern::Daily { interval: 7 },
+                range: EwsRecurrenceRange::NoEnd,
+            }),
+            ..ParsedItem::default()
+        };
+        let fixed = |bias: &str| ZoneDefinition {
+            periods: vec![PeriodDef {
+                id: "only".into(),
+                bias: bias.into(),
+            }],
+            groups: vec![],
+            transitions: vec![TransitionDef::Plain {
+                to_kind: "Period".into(),
+                to: "only".into(),
+            }],
+        };
+        let zone = |definition: Option<ZoneDefinition>, device: Option<&str>| {
+            series_zone(&master(definition, "Customized Time Zone"), start, || {
+                device.map(str::to_string)
+            })
+        };
+        let runs_the_clock_of = |zone: &str, other: chrono_tz::Tz| {
+            cal_core::first_clock_difference(
+                &cal_core::TzClock(zone.parse().unwrap()),
+                &cal_core::TzClock(other),
+                cal_core::clock_window(start),
+            )
+            .is_none()
+        };
+
+        // W. Europe's rules under a name of their own.
+        let w_europe = crate::zone_definition::tests::w_europe();
+        assert_eq!(
+            zone(Some(w_europe.clone()), Some("Europe/Berlin")),
+            Some("Europe/Berlin")
+        );
+        assert_eq!(
+            zone(Some(w_europe.clone()), Some("Europe/Paris")),
+            Some("Europe/Paris")
+        );
+        // A device on another clock, or one that names none: the Windows
+        // table's first zone on it, Central Europe Standard Time's.
+        assert_eq!(
+            zone(Some(w_europe.clone()), Some("America/New_York")),
+            Some("Europe/Budapest")
+        );
+        assert_eq!(zone(Some(w_europe.clone()), None), Some("Europe/Budapest"));
+
+        // The custom zone measured on Exchange 2019: UTC+03:00 all year.
+        let plus_three = zone(Some(fixed("-PT3H")), None).expect("+03:00 is a zone's clock");
+        assert!(
+            runs_the_clock_of(plus_three, chrono_tz::Europe::Moscow),
+            "{plus_three}"
+        );
+        assert_eq!(
+            zone(Some(fixed("-PT14H")), None),
+            Some("Pacific/Kiritimati")
+        );
+
+        // +00:00 throughout is no zone, whatever the device runs.
+        assert_eq!(zone(Some(fixed("PT0S")), Some("Africa/Abidjan")), None);
+        // A clock no zone runs, and an id without a definition: no zone, as
+        // before.
+        assert_eq!(zone(Some(fixed("-PT3H17M")), Some("Europe/Berlin")), None);
+        assert_eq!(zone(None, Some("Europe/Berlin")), None);
+        // Made without a zone (43b) whatever the definition says.
+        assert_eq!(
+            series_zone(
+                &master(Some(w_europe.clone()), "tzone://Microsoft/Utc"),
+                start,
+                || { Some("Europe/Berlin".into()) }
+            ),
+            None
+        );
+
+        // to_event asks this device's own zone; whichever it is, the series'
+        // zone runs Berlin's clock.
+        let tzid = to_event(master(Some(w_europe), "Customized Time Zone"), "FID|CK")
+            .unwrap()
+            .recurrence
+            .expect("a master keeps its recurrence")
+            .tzid
+            .expect("a zone runs the definition's clock");
+        assert!(
+            runs_the_clock_of(&tzid, chrono_tz::Europe::Berlin),
+            "{tzid}"
+        );
+    }
+
     #[test]
     fn parse_sync_response_captures_modified_occurrences() {
         // A master with one moved instance. Critical regression
@@ -10322,6 +10479,19 @@ mod tests {
         }
     }
 
+    /// An item stored on W. Europe's rules under a name of their own
+    /// (`Customized Time Zone`, decision 232), at both boundaries.
+    fn defined_w_europe_zones() -> StoredZones {
+        let rules = std::sync::Arc::new(
+            crate::zone_definition::ZoneRules::try_from(&crate::zone_definition::tests::w_europe())
+                .unwrap(),
+        );
+        StoredZones {
+            start: Some(DayZone::Rules(rules.clone())),
+            end: Some(DayZone::Rules(rules)),
+        }
+    }
+
     fn all_day_master(device: &chrono_tz::Tz, rrule: &str) -> Event {
         let mut ev = zoned_master(None);
         ev.all_day = true;
@@ -10794,6 +10964,73 @@ mod tests {
         }
         assert_eq!(element(&set, "StartDate"), "2026-11-02", "{set}");
         assert_eq!(element(&set, "NumberOfOccurrences"), "3", "{set}");
+    }
+
+    /// A series Exchange stores on a zone it defines in full reads as the zone
+    /// that runs that clock, and keeps its definition while what is written
+    /// runs the same clock (Toni, 2026-11-09): no zone goes out, so nothing
+    /// moves and Exchange is not asked to swap its definition for an id. A
+    /// zone on another clock is a zone change as from any stored zone.
+    #[test]
+    fn a_series_on_a_defined_zone_keeps_it_while_the_clock_stays() {
+        let before = timed_series(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;BYDAY=MO;COUNT=4",
+            "Europe/Berlin",
+        );
+        let defined = defined_w_europe_zones();
+        let zone_fields = |set: &str| {
+            field_uris(set)
+                .iter()
+                .filter(|uri| ZONE.contains(&uri.as_str()))
+                .count()
+        };
+
+        // A longer rule: the rule alone, nothing rewritten.
+        let mut longer = before.clone();
+        longer.recurrence.as_mut().unwrap().rrule = "FREQ=WEEKLY;BYDAY=MO;COUNT=6".into();
+        let plan = planned(&longer, &before, &defined, EventIdKind::RecurringMaster);
+        assert_eq!(
+            field_uris(&plan.set),
+            ["calendar:Recurrence"],
+            "{}",
+            plan.set
+        );
+        assert_eq!(plan.rewrite, None);
+        // The same edit on a series stored under W. Europe's id writes the
+        // zone again, as it always has (N3).
+        let plan = planned(
+            &longer,
+            &before,
+            &w_europe_zones(),
+            EventIdKind::RecurringMaster,
+        );
+        assert_eq!(zone_fields(&plan.set), 2, "{}", plan.set);
+
+        // A move writes the slot, without a zone.
+        let mut moved = before.clone();
+        moved.start += chrono::Duration::hours(1);
+        moved.end += chrono::Duration::hours(1);
+        let plan = planned(&moved, &before, &defined, EventIdKind::RecurringMaster);
+        assert_eq!(zone_fields(&plan.set), 0, "{}", plan.set);
+        assert_eq!(plan.rewrite, Some(cal_core::SeriesRewrite::Slot));
+
+        // Paris runs the same clock: still no zone.
+        let mut paris = longer.clone();
+        paris.recurrence.as_mut().unwrap().tzid = Some("Europe/Paris".into());
+        let plan = planned(&paris, &before, &defined, EventIdKind::RecurringMaster);
+        assert_eq!(zone_fields(&plan.set), 0, "{}", plan.set);
+
+        // Tokyo does not: the zone goes first, and the series is written again
+        // on it.
+        let mut tokyo = before.clone();
+        tokyo.recurrence.as_mut().unwrap().tzid = Some("Asia/Tokyo".into());
+        let plan = planned(&tokyo, &before, &defined, EventIdKind::RecurringMaster);
+        assert_eq!(field_uris(&plan.set)[..2], ZONE, "{}", plan.set);
+        assert!(plan
+            .set
+            .contains(r#"<t:StartTimeZone Id="Tokyo Standard Time"/>"#));
+        assert_eq!(plan.rewrite, Some(cal_core::SeriesRewrite::Zone));
     }
 
     /// Exchange drops a series' changed and deleted occurrences when its slot

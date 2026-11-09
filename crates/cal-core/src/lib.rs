@@ -75,7 +75,11 @@ pub mod task_status;
 pub mod types;
 pub mod windows_zone;
 pub mod write_leftover;
+// Which tzdata zone runs a clock a provider defines by its rules; it reads
+// offsets, so it is behind the `zones` feature with chrono-tz.
 pub mod write_refusal;
+#[cfg(feature = "zones")]
+pub mod zone_clock;
 // The names and the search are in every build; the offsets are behind the
 // `zones` feature, which pulls in chrono-tz.
 pub mod zone_list;
@@ -224,6 +228,11 @@ pub use types::{
 };
 pub use write_leftover::WriteLeftover;
 pub use write_refusal::{BusyDetail, SeriesRewrite, WriteRefusal};
+#[cfg(feature = "zones")]
+pub use zone_clock::{
+    clock_window, first_clock_difference, zone_with_clock, Clock, ClockDifference, ClockMatch,
+    TzClock, CLOCK_WINDOW_MONTHS,
+};
 pub use zone_list::{
     listed_zone_labels, zone_choice, zone_choice_json, zone_labels_json, zone_search,
     zone_search_json, ListedOffset, ListedZone, MatchField, OffsetSign, RegionName, ZoneAlias,
