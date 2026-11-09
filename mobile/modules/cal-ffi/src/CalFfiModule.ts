@@ -433,12 +433,17 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  every account whose latest container refresh recorded an error (the
    *  silent-staleness warning, e.g. a revoked provider password). */
   refreshErrorsJson(): Promise<string>;
-  /** Warm the external cache on app-foreground (the mobile stand-in for the
-   *  desktop periodic warm loop). Fire-and-forget. */
+  /** Warm the external cache at launch (the read-only contact directories
+   *  included). Fire-and-forget. */
   warmCacheOnForeground(): Promise<void>;
-  /** Run one contact-sync pass (§10.5) — warms every external book's cache.
-   *  `includeReadOnly`: `null`/`undefined` reads the pref, `true`/`false`
-   *  overrides. Resolves `false` if a pass was already in flight. */
+  /** Warm the external cache on the refresh interval's schedule (the timer, a
+   *  return to the foreground): the read-only contact directories only when
+   *  `contacts.includeReadOnlyOnSync` is on. Fire-and-forget. */
+  warmCacheOnInterval(): Promise<void>;
+  /** "Sync now" for contacts (§10.5): a contacts-only pass of the cache
+   *  refresher. `includeReadOnly`: `null`/`undefined` reads the pref,
+   *  `true`/`false` overrides. Resolves `false` when the pass waits behind a
+   *  running one (its `contactsSynced` follows). */
   syncContactsNow(includeReadOnly: boolean | null): Promise<boolean>;
   /** Contact-sync status as JSON `{last_synced_at, in_flight,
    *  include_read_only_on_sync}`. */

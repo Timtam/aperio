@@ -116,8 +116,9 @@ export function useContactSync() {
     try {
       const ran = await syncContactsNow(includeReadOnly);
       if (!ran) {
-        // Another pass beat us to the in-flight guard. Pull the
-        // status so the spinner reflects the real state.
+        // The pass waits behind a running one; its
+        // `contacts-synced` follows. Pull the status so the
+        // spinner reflects the real state meanwhile.
         const fresh = await getContactsSyncStatus();
         setStatus(fresh);
       }

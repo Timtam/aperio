@@ -177,14 +177,13 @@ export const deleteContactPhoto = (
 
 // ── Contact sync (§10.5) ──────────────────────────────────────────────────────
 //
-// The contact-sync core lives in host-core (shared with the desktop). It warms
-// every external book's listing + per-list caches; the desktop wraps it in a
-// tokio worker loop, mobile drives it from the manual button / foreground (no
-// background loop while suspended). A finished pass fires the native
+// The contact sync is the refresh of external data (host-core, shared with the
+// desktop): every warm pass reads the external books with the calendars and
+// task lists, on the one refresh interval (Allgemein, `sync.intervalMinutes`).
+// "Sync now" is a contacts-only pass. Every pass ends with the native
 // `onContactsSynced` event; the screen seeds its footer from
-// `getContactsSyncStatus` and reconciles on that event. How often contacts
-// refresh is the one refresh interval (Allgemein, `sync.intervalMinutes`); the
-// include-read-only pref is device-local.
+// `getContactsSyncStatus` and reconciles on that event. The include-read-only
+// pref is device-local.
 
 /** Contact-sync status (the `ContactsSyncStatus` wire shape) — the Settings
  *  footer + the seed for the include-read-only toggle. */
@@ -202,10 +201,10 @@ export interface ContactsSyncedPayload {
   failed_accounts: string[];
 }
 
-/** Run one contact-sync pass now (warms every external book's cache).
+/** "Sync now": a contacts-only pass (warms every external book's cache).
  *  `includeReadOnly`: `null` reads the persisted pref (matches the desktop
- *  manual button); `true`/`false` overrides it. Resolves `false` when a pass
- *  was already in flight. */
+ *  manual button); `true`/`false` overrides it. Resolves `false` when the pass
+ *  waits behind a running one; `onContactsSynced` follows either way. */
 export const syncContactsNow = (
   includeReadOnly: boolean | null = null,
 ): Promise<boolean> => CalFfi.syncContactsNow(includeReadOnly);
@@ -213,6 +212,13 @@ export const syncContactsNow = (
 /** The current contact-sync status. */
 export const getContactsSyncStatus = async (): Promise<ContactsSyncStatus> =>
   JSON.parse(await CalFfi.getContactsSyncStatusJson()) as ContactsSyncStatus;
+
+/** Listen for the end of every pass that read the contacts (each refresh of
+ *  external data, and "Sync now"). Returns the unsubscribe. */
+export function onContactsSynced(listener: () => void): () => void {
+  const sub = CalFfi.addListener('onContactsSynced', () => listener());
+  return () => sub.remove();
+}
 
 /** Persist the "also pull read-only directories" toggle. Device-local. */
 export const setContactsIncludeReadOnlyOnSync = (

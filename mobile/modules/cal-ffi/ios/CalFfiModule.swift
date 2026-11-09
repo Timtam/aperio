@@ -877,6 +877,12 @@ public class CalFfiModule: Module {
       }
     }
 
+    AsyncFunction("warmCacheOnInterval") {
+      try self.hostCoded {
+        self.host.warmCacheOnInterval()
+      }
+    }
+
     // Contact sync (§10.5). The pass is driven from JS (manual button /
     // foreground); the interval + include-read-only prefs are device-local.
     AsyncFunction("syncContactsNow") { (includeReadOnly: Bool?) -> Bool in

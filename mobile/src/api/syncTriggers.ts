@@ -35,7 +35,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { followBackgroundInterval, initBackgroundSync } from '../state/backgroundSync';
 import { createRoundLoop, runRound } from './periodicRound';
-import { pushNow, syncNow, syncStatus, warmCacheOnForeground } from './sync';
+import { pushNow, syncNow, syncStatus, warmCacheOnForeground, warmCacheOnInterval } from './sync';
 
 /** Debounce window for the post-mutation push (matches the desktop scheduler's
  *  debounce: coalesce a rapid burst of edits into a single push). */
@@ -107,8 +107,9 @@ function flushPendingPush(): void {
  *  a target is set up. */
 const roundLoop = createRoundLoop({
   // Fire-and-forget on the Host worker; per-container `cache_updated`
-  // re-renders any open view.
-  refresh: () => warmCacheOnForeground(),
+  // re-renders any open view. On the interval's schedule: the read-only
+  // contact directories only when the user asked for them.
+  refresh: () => warmCacheOnInterval(),
   syncIfConfigured: () => autoSyncIfConfigured('periodic'),
   intervalMinutes: refreshIntervalMinutes,
   isActive: () => AppState.currentState === 'active',
@@ -155,8 +156,10 @@ export function useSyncTriggers(): void {
         // Back in the foreground: a round, and the timer again once it has
         // settled, at the interval it brought (it may have changed on another
         // device meanwhile).
+        // The read-only contact directories wait for the switch, as on the
+        // timer: only the launch round reads them always.
         void runRound({
-          refresh: () => warmCacheOnForeground(),
+          refresh: () => warmCacheOnInterval(),
           syncIfConfigured: () => autoSyncIfConfigured('periodic'),
         }).finally(afterForegroundRound);
       } else {

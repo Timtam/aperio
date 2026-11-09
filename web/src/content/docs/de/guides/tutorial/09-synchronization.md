@@ -87,7 +87,9 @@ Eine Einstellung bestimmt, wie oft Aperio, solange es geöffnet ist, all das
 tut: **Einstellungen → Allgemein → Aktualisierungs-Intervall** (1, 5, 15, 30,
 60 oder 240 Minuten; Standard 5). In diesem Abstand
 
-- holt Aperio Kalender, Aufgabenlisten und Kontakte aus deinen Konten neu,
+- holt Aperio Kalender, Aufgabenlisten und Kontakte aus deinen Konten neu
+  (große Nur-Lese-Verzeichnisse wie ein Firmen-Adressbuch nur, wenn du sie
+  unter **Einstellungen → Kontakte** einschaltest),
 - gleicht es sich mit deinen anderen Geräten ab, wenn die Synchronisation
   eingerichtet ist,
 - und richten sich die Erinnerungen nach dem, was es dabei findet: Ein Termin,

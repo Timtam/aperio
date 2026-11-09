@@ -2425,13 +2425,16 @@ Teilnehmer hinzufügen: [max_________]
 
 ### 10.5 Kontakt-Sync
 
-Kontakte werden bei folgenden Ereignissen synchronisiert:
+Der Kontakt-Abgleich ist die Aktualisierung externer Daten (Toni, 2026-11-09, „gleich zusammenlegen“): Jeder Durchlauf des `CacheRefresher` liest neben Kalendern und Aufgabenlisten auch die Kontaktbücher; einen eigenen Kontakt-Durchlauf gibt es nicht mehr. Am Ende jedes Durchlaufs schreibt `ContactSyncCore` „zuletzt abgeglichen“ (`contacts.lastSyncedAt`) und meldet `contacts-synced` mit den Konten, deren Bücher durchkamen, und denen, wo das Auflisten oder ein Buch scheiterte.
 
 | Auslöser | Verhalten |
 |---|---|
-| App-Start | Vollständiger Abgleich aller Kontaktbücher |
-| Aktualisierungs-Intervall | Das eine Intervall unter `Einstellungen → Allgemein` (`sync.intervalMinutes`, synchronisiert, Standard 5 Minuten); keine eigene Kontakt-Einstellung mehr (Toni, 2026-11-09) |
-| Manuell | Per Button in `Einstellungen → Kontakte` |
+| App-Start | Erster Durchlauf: alle Kontaktbücher, schreibgeschützte Verzeichnisse eingeschlossen |
+| Aktualisierungs-Intervall | Das eine Intervall unter `Einstellungen → Allgemein` (`sync.intervalMinutes`, synchronisiert, Standard 5 Minuten); keine eigene Kontakt-Einstellung. Schreibgeschützte Verzeichnisse (GAL, Google-Verzeichnis und „Weitere Kontakte“, Vorgeschlagene Personen) liest ein Durchlauf im Takt nur, wenn der Schalter „Schreibgeschützte Verzeichnisse einschließen“ an ist (`contacts.includeReadOnlyOnSync`, gerätelokal). Am Handy zählen Zeitgeber, Rückkehr in den Vordergrund und die Hintergrund-Runde als Durchläufe im Takt |
+| Manuelles Aktualisieren, Kontoänderung | Alles, Verzeichnisse eingeschlossen |
+| „Jetzt synchronisieren“ (`Einstellungen → Kontakte`) | Ein Durchlauf nur für Kontakte, Verzeichnisse nach Schalter; läuft ein Durchlauf, wartet er dahinter |
+
+Ein Wunsch, der während eines laufenden Durchlaufs eintrifft, entfällt nur, wenn der laufende alles liest, was er verlangt (`PassScope::covers`); ein Takt während eines Kontakt-Durchlaufs folgt ihm also. Ein Durchlauf nur für Kontakte setzt „zuletzt aktualisiert“ der externen Daten nicht.
 
 Kontaktdaten werden **nicht** über das Event Log zwischen Geräten synchronisiert – sie kommen auf jedem Gerät direkt vom jeweiligen Anbieter, analog zur externen Kalender- und Aufgaben-Synchronisation (Abschnitt 18.2).
 

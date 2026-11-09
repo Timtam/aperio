@@ -1,60 +1,70 @@
-//! Contact-sync core (DESIGN.md §10.5) — the platform-agnostic half.
+//! Contact-sync status (DESIGN.md §10.5) — the platform-agnostic half.
 //!
-//! Walks every external `ContactsFeature` adapter and warms its listing +
-//! per-list caches by calling `list_contact_lists` followed by `get_contacts`
-//! on every (writable) list. A pass does **not** persist data into our own
-//! SQLite — each adapter owns its own cache (5-minute TTL); the frontend
-//! re-reads via `get_contacts` after the [`ContactSyncObserver`] fires.
+//! The contacts sync IS the refresh of external data (Toni, 2026-11-09):
+//! every warm pass of [`crate::cache::CacheRefresher`] reads the contact lists
+//! of every external `ContactsFeature` adapter alongside the calendars and task
+//! lists, on the one refresh interval (`sync.intervalMinutes`). "Sync contacts
+//! now" is a contacts-only pass of the same refresher
+//! ([`crate::cache::CacheRefresher::warm_contacts`]). A pass does **not**
+//! persist contacts into our own SQLite — each adapter owns its own cache; the
+//! frontend re-reads via `get_contacts` after the [`ContactSyncObserver`]
+//! fires.
 //!
-//! This is the shared core: the pure sync work + status + the `user_prefs`
-//! readers. The *driving* lives in the platform layer, mirroring the
-//! [`crate::sync`] `SyncOrchestrator`(core) / desktop `SyncScheduler`(loop)
-//! split and the [`crate::cache`] `CacheObserver` seam:
-//!   - **Desktop** wraps this in a tokio worker loop (app-start + periodic
-//!     ticks) and an observer that emits the Tauri `contacts-synced` event.
-//!   - **Mobile** (cal-ffi) drives [`ContactSyncCore::run_sync`] from JS
-//!     foreground triggers and forwards the payload over a UniFFI callback.
+//! This module keeps what is the contacts' own: the "last synced" time, the
+//! in-flight flag the contacts view shows, the read-only-directories pref, and
+//! the done signal. The refresher calls [`ContactSyncCore::begin_pass`] and
+//! [`ContactSyncCore::finish_pass`] around each pass once a host installed the
+//! core ([`crate::cache::CacheRefresher::set_contact_sync`]):
+//!   - **Desktop** — an observer that emits the Tauri `contacts-synced` event.
+//!   - **Mobile** (cal-ffi) — one that forwards the payload over a UniFFI
+//!     callback.
 //!
-//! ## What gets pulled per pass
+//! ## The read-only directories
 //!
-//! Only **writable** lists are pulled by default. Read-only sentinels (the EWS
-//! GAL, Google Other Contacts / Directory, the Graph Suggested People stream)
-//! carry thousands of rows and are paid for only on explicit user action —
-//! unless `include_read_only` is set (the "force-pull everything" path).
-//!
-//! ## In-flight dedupe
-//!
-//! A `Mutex<bool>` guards against overlapping passes — ten rapid triggers run
-//! exactly one walk; subsequent calls return `false`.
+//! Read-only lists (the EWS GAL, Google Other Contacts / Directory, the Graph
+//! Suggested People stream) carry thousands of rows. A periodic pass reads
+//! them only when [`PREF_INCLUDE_READ_ONLY_ON_SYNC`] is on; the app-start
+//! pass, a manual refresh and a change of an account read them as ever, and so
+//! does opening one.
 
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use tokio::sync::Notify;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::db::SharedConn;
-use crate::registry::AdapterRegistry;
 use crate::user_prefs::UserPrefsRepo;
 
-/// `user_prefs` key for the timestamp of the most recent successful
-/// sync pass, persisted as RFC 3339. Used by the contacts view's
-/// "Last synced at …" footer so the value survives restarts.
+/// `user_prefs` key for the timestamp of the most recent sync pass, persisted
+/// as RFC 3339. Used by the contacts view's "Last synced at …" footer so the
+/// value survives restarts.
 pub const PREF_LAST_SYNCED_AT: &str = "contacts.lastSyncedAt";
 
-/// `user_prefs` key for the "also pull read-only directories"
-/// toggle (Settings → Kontakte). When `true`, every sync pass walks
-/// the expensive read-only sentinels (EWS GAL, Google Other
-/// Contacts / Workspace Directory, MS Graph Suggested People).
-/// Defaults to `false` so a quiet account doesn't pay the
-/// multi-minute scan cost without the user opting in.
+/// `user_prefs` key for the "also pull read-only directories" toggle
+/// (Settings → Kontakte). When `true`, every periodic pass reads the expensive
+/// read-only sentinels (EWS GAL, Google Other Contacts / Workspace Directory,
+/// MS Graph Suggested People). Defaults to `false` so a quiet account doesn't
+/// pay the multi-minute scan cost on every interval without the user opting
+/// in.
 ///
-/// Stored as the literal strings `"true"` / `"false"` so the keychain
-/// debug view stays readable. The manual sync path keeps an explicit
-/// override parameter that beats this pref — used for a one-shot
-/// directory pull without flipping the user-visible setting.
+/// Stored as the literal strings `"true"` / `"false"` so the keychain debug
+/// view stays readable. The manual sync path keeps an explicit override
+/// parameter that beats this pref — used for a one-shot directory pull without
+/// flipping the user-visible setting.
 pub const PREF_INCLUDE_READ_ONLY_ON_SYNC: &str = "contacts.includeReadOnlyOnSync";
+
+/// Read [`PREF_INCLUDE_READ_ONLY_ON_SYNC`]. Anything other than the literal
+/// `"true"` (case-sensitive) reads as `false` — same lenient parse the sync
+/// flag uses.
+pub fn include_read_only_on_sync(db: &SharedConn) -> bool {
+    UserPrefsRepo::new(db)
+        .get(PREF_INCLUDE_READ_ONLY_ON_SYNC)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true")
+}
 
 /// Host-supplied sink for the "a contact-sync pass finished" broadcast. The
 /// core calls this at the end of every pass instead of touching any UI layer:
@@ -97,33 +107,25 @@ pub struct ContactsSyncStatus {
     pub include_read_only_on_sync: bool,
 }
 
-/// The platform-agnostic contact-sync core: the pure sync work + status + the
-/// `user_prefs` readers. Construct with [`ContactSyncCore::new`]; drive
-/// [`ContactSyncCore::run_sync`] from a platform worker loop (desktop) or
-/// foreground triggers (mobile).
+/// The contacts' own share of a refresh pass: the "last synced" time, the
+/// in-flight flag and the done signal. Construct with [`ContactSyncCore::new`]
+/// and hand it to the refresher with
+/// [`crate::cache::CacheRefresher::set_contact_sync`].
 pub struct ContactSyncCore {
-    registry: Arc<AdapterRegistry>,
     db: SharedConn,
-    /// Last successful sync time, kept in memory so the periodic
-    /// loop can read it without touching SQLite. Persisted to
-    /// `user_prefs` in the same atomic step so the value survives
-    /// restarts.
+    /// Last sync time, kept in memory so a status read doesn't touch
+    /// SQLite. Persisted to `user_prefs` in the same step so the value
+    /// survives restarts.
     last_synced_at: Arc<Mutex<Option<DateTime<Utc>>>>,
-    /// In-flight guard. `true` while a pass is running; further
-    /// `run_sync` calls return early.
+    /// `true` while a refresh pass reads the contact lists.
     in_flight: Arc<Mutex<bool>>,
-    /// Lets a manual trigger wake the desktop periodic loop out of its
-    /// sleep so the next interval starts counting from the manual kick
-    /// rather than the previous tick. `notify_one()` fires inside
-    /// `run_sync`; the desktop loop awaits `notify_handle().notified()`.
-    notify: Arc<Notify>,
 }
 
 impl ContactSyncCore {
     /// Build the core, hydrating the in-memory `last_synced_at` from prefs so
     /// the first `status()` after restart reflects the persisted value without
     /// waiting for the first pass to complete.
-    pub fn new(registry: Arc<AdapterRegistry>, db: SharedConn) -> Arc<Self> {
+    pub fn new(db: SharedConn) -> Arc<Self> {
         let initial_last = {
             let repo = UserPrefsRepo::new(&db);
             repo.get(PREF_LAST_SYNCED_AT)
@@ -133,41 +135,15 @@ impl ContactSyncCore {
                 .map(|d| d.with_timezone(&Utc))
         };
         Arc::new(Self {
-            registry,
             db,
             last_synced_at: Arc::new(Mutex::new(initial_last)),
             in_flight: Arc::new(Mutex::new(false)),
-            notify: Arc::new(Notify::new()),
         })
     }
 
-    /// The wake handle for the desktop periodic loop: its `select!` races
-    /// `notify_handle().notified()` against the interval sleep so a manual
-    /// trigger resets the interval clock. The `notify_one()` reset lives
-    /// inside [`ContactSyncCore::run_sync`].
-    pub fn notify_handle(&self) -> Arc<Notify> {
-        Arc::clone(&self.notify)
-    }
-
-    /// The one refresh interval (`sync_engine::PREF_SYNC_INTERVAL_MINUTES`),
-    /// resolved by `sync_engine::resolve_sync_interval_minutes`: 1..=1440
-    /// minutes, default 5.
-    pub fn read_interval_minutes(&self) -> u32 {
-        // The one refresh interval (Einstellungen → Allgemein): contacts
-        // have no interval of their own any more (Toni, 2026-11-09).
-        crate::user_prefs::sync_interval_minutes(&self.db)
-    }
-
     /// Read the current value of [`PREF_INCLUDE_READ_ONLY_ON_SYNC`].
-    /// Anything other than the literal `"true"` (case-sensitive)
-    /// reads as `false` — same lenient parse the sync flag uses.
     pub fn read_include_read_only_on_sync(&self) -> bool {
-        let repo = UserPrefsRepo::new(&self.db);
-        repo.get(PREF_INCLUDE_READ_ONLY_ON_SYNC)
-            .ok()
-            .flatten()
-            .as_deref()
-            == Some("true")
+        include_read_only_on_sync(&self.db)
     }
 
     /// Snapshot the current sync status.
@@ -181,105 +157,32 @@ impl ContactSyncCore {
         }
     }
 
-    /// Run one sync pass. `include_read_only` opts into pulling the
-    /// expensive read-only sentinel lists (GAL etc.) — `false` on the
-    /// auto-triggered paths, `true` only on a manual "force everything".
-    /// `observer` receives the [`ContactsSyncedPayload`] when the pass
-    /// completes.
-    ///
-    /// Returns `true` when this call actually ran the pass, `false`
-    /// when another pass was already in flight and this invocation
-    /// was deduped.
-    pub async fn run_sync(
+    /// A refresh pass starts reading the contact lists.
+    pub fn begin_pass(&self) {
+        *self.in_flight.lock().expect("sync in-flight poisoned") = true;
+    }
+
+    /// A refresh pass has read the contact lists: `succeeded` are the
+    /// accounts all of whose lists came through, `failed` the ones where
+    /// listing or a list threw. Persists "last synced", clears the in-flight
+    /// flag and tells `observer`.
+    pub fn finish_pass(
         &self,
+        succeeded: Vec<String>,
+        failed: Vec<String>,
         observer: &dyn ContactSyncObserver,
-        include_read_only: bool,
-    ) -> bool {
-        // Acquire the in-flight guard. Release-on-drop would be
-        // cleaner but the lock is sync, the closure body is async,
-        // and the guard would have to cross await points — so we
-        // toggle the bool manually and clear it before every exit.
-        {
-            let mut guard = self.in_flight.lock().expect("sync in-flight poisoned");
-            if *guard {
-                debug!("contact sync skipped — another pass is already in flight");
-                return false;
-            }
-            *guard = true;
-        }
-
-        let mut succeeded: Vec<String> = Vec::new();
-        let mut failed: Vec<String> = Vec::new();
-
-        for (account_id, adapter) in self.registry.snapshot_contact_adapters() {
-            let lists = match adapter.list_contact_lists().await {
-                Ok(lists) => lists,
-                Err(err) => {
-                    warn!(
-                        account_id = %account_id,
-                        ?err,
-                        "list_contact_lists failed during sync pass",
-                    );
-                    failed.push(account_id);
-                    continue;
-                }
-            };
-            let mut account_failed = false;
-            for list in lists {
-                if list.read_only && !include_read_only {
-                    // Skip the GAL / Suggested People / Other
-                    // Contacts / Workspace Directory on auto
-                    // passes — they're expensive to walk and the
-                    // user opts in by selecting them in the
-                    // sidebar.
-                    continue;
-                }
-                if let Err(err) = adapter.get_contacts(&list.id).await {
-                    warn!(
-                        account_id = %account_id,
-                        list_id = %list.id,
-                        ?err,
-                        "get_contacts failed during sync pass",
-                    );
-                    account_failed = true;
-                }
-            }
-            if account_failed {
-                failed.push(account_id);
-            } else {
-                succeeded.push(account_id);
-            }
-        }
-
-        // Persist + broadcast.
+    ) {
         let now = Utc::now();
-        {
-            let mut guard = self.last_synced_at.lock().expect("sync mutex poisoned");
-            *guard = Some(now);
-        }
-        let repo = UserPrefsRepo::new(&self.db);
-        if let Err(err) = repo.set(PREF_LAST_SYNCED_AT, &now.to_rfc3339()) {
+        *self.last_synced_at.lock().expect("sync mutex poisoned") = Some(now);
+        if let Err(err) = UserPrefsRepo::new(&self.db).set(PREF_LAST_SYNCED_AT, &now.to_rfc3339()) {
             warn!(?err, "failed to persist contacts.lastSyncedAt");
         }
-
-        let payload = ContactsSyncedPayload {
+        *self.in_flight.lock().expect("sync in-flight poisoned") = false;
+        observer.contacts_synced(&ContactsSyncedPayload {
             last_synced_at: now.to_rfc3339(),
             succeeded_accounts: succeeded,
             failed_accounts: failed,
-        };
-        observer.contacts_synced(&payload);
-
-        // Release the in-flight guard before returning.
-        {
-            let mut guard = self.in_flight.lock().expect("sync in-flight poisoned");
-            *guard = false;
-        }
-
-        // Reset the interval clock so the next periodic tick is
-        // measured from this manual / app-start pass, not from the
-        // previous one.
-        self.notify.notify_one();
-        true
+        });
     }
 }
 
@@ -296,42 +199,17 @@ mod tests {
         (dir, db)
     }
 
-    /// Empty registry for the contact-sync core tests. None of these
-    /// tests exercise the per-account adapter routing, so an empty
-    /// plugin manager is sufficient — the registry just needs to be
-    /// constructible.
-    fn empty_registry() -> Arc<AdapterRegistry> {
-        let mgr = Arc::new(plugin_core::PluginManager::new("0.1.0"));
-        let secrets = Arc::new(sync_engine::test_support::FakeSecrets::default());
-        Arc::new(AdapterRegistry::new(mgr, secrets))
+    fn core_with(db: &DbHandle) -> Arc<ContactSyncCore> {
+        ContactSyncCore::new(db.shared())
     }
 
-    fn core_with(db: &DbHandle) -> ContactSyncCore {
-        ContactSyncCore {
-            registry: empty_registry(),
-            db: db.shared(),
-            last_synced_at: Arc::new(Mutex::new(None)),
-            in_flight: Arc::new(Mutex::new(false)),
-            notify: Arc::new(Notify::new()),
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<ContactsSyncedPayload>>);
+
+    impl ContactSyncObserver for Recorder {
+        fn contacts_synced(&self, payload: &ContactsSyncedPayload) {
+            self.0.lock().unwrap().push(payload.clone());
         }
-    }
-
-    /// Contacts follow the one refresh interval, not a key of their own.
-    #[test]
-    fn contacts_follow_the_one_refresh_interval() {
-        let (_tmp, db) = fresh_db();
-        let shared = db.shared();
-        assert_eq!(
-            core_with(&db).read_interval_minutes(),
-            sync_engine::DEFAULT_SYNC_INTERVAL_MINUTES
-        );
-        let prefs = UserPrefsRepo::new(&shared);
-        // The old key of their own, set on an older build: no longer read.
-        prefs.set("contacts.syncIntervalMinutes", "60").unwrap();
-        prefs
-            .set(sync_engine::PREF_SYNC_INTERVAL_MINUTES, "15")
-            .unwrap();
-        assert_eq!(core_with(&db).read_interval_minutes(), 15);
     }
 
     #[test]
@@ -343,6 +221,28 @@ mod tests {
         // Pref defaults to false — fresh installs don't pay the
         // GAL-pull cost without opt-in.
         assert!(!s.include_read_only_on_sync);
+    }
+
+    /// A pass shows as running from `begin_pass` to `finish_pass`, which
+    /// persists "last synced" (a restart reads it back) and hands the
+    /// accounts to the observer.
+    #[test]
+    fn a_pass_runs_from_begin_to_finish_and_is_remembered() {
+        let (_tmp, db) = fresh_db();
+        let core = core_with(&db);
+        core.begin_pass();
+        assert!(core.status().in_flight);
+        let recorder = Recorder::default();
+        core.finish_pass(vec!["a".into()], vec!["b".into()], &recorder);
+        let status = core.status();
+        assert!(!status.in_flight);
+        let last = status.last_synced_at.expect("last synced is set");
+        let seen = recorder.0.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].last_synced_at, last);
+        assert_eq!(seen[0].succeeded_accounts, vec!["a".to_string()]);
+        assert_eq!(seen[0].failed_accounts, vec!["b".to_string()]);
+        assert_eq!(core_with(&db).status().last_synced_at, Some(last));
     }
 
     #[test]

@@ -23,6 +23,7 @@ import {
 import {
   clearContactsCache,
   getContactsSyncStatus,
+  onContactsSynced,
   setContactsIncludeReadOnlyOnSync,
   syncContactsNow,
   type ContactsSyncStatus,
@@ -114,6 +115,11 @@ export default function ContactsSettingsScreen() {
       // Best-effort; the footer keeps its last value.
     }
   }, []);
+
+  // Every refresh of external data reads the contacts, so "syncing" shows
+  // while one runs; its end — or the end of a "Sync now" that waited behind
+  // it — brings the footer and the button back while the screen is open.
+  useFocusEffect(useCallback(() => onContactsSynced(() => void reload()), [reload]));
 
   const onSyncNow = useCallback(async () => {
     // Guard on the backend in-flight state too (a foreground pass may already be

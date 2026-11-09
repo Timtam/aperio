@@ -23,7 +23,7 @@
 //!
 //! The orchestrator is `async`-friendly but doesn't own a timer.
 //! Putting the periodic / debounce logic into a dedicated scheduler
-//! mirrors the [`ContactSyncScheduler`] pattern and keeps each
+//! mirrors the cache refresher's driver and keeps each
 //! component testable in isolation: the orchestrator can be exercised
 //! against fake adapters without spinning a real-time clock, and the
 //! scheduler's policy decisions (when to sync) live in one place.
@@ -844,8 +844,8 @@ fn interval_arrived(keys: &[String]) -> bool {
 
 /// The one refresh interval changed, here or on another device: every loop
 /// it paces measures its wait again from now — the sync loop
-/// ([`SyncScheduler::retime`]), the refresh of external data and the
-/// contacts pass, none of them with an extra pass. The reminder planner
+/// ([`SyncScheduler::retime`]) and the refresh of external data, which reads
+/// the contacts too, neither with an extra pass. The reminder planner
 /// plans again at once: a snapshot older than a shortened interval is read
 /// again then, and its empty-horizon retry follows the new value.
 pub fn interval_changed<R: Runtime>(app: &AppHandle<R>) {
@@ -854,9 +854,6 @@ pub fn interval_changed<R: Runtime>(app: &AppHandle<R>) {
     }
     if let Some(refresher) = app.try_state::<Arc<CacheRefresher>>() {
         refresher.interval_changed();
-    }
-    if let Some(contacts) = app.try_state::<Arc<crate::contact_sync::ContactSyncScheduler>>() {
-        contacts.interval_changed();
     }
     if let Some(reminders) = app.try_state::<crate::reminders::SchedulerHandle>() {
         reminders.invalidate();

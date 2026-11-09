@@ -675,9 +675,9 @@ pub struct Host {
     /// Drives manual + on-foreground warm passes (the mobile stand-in for the
     /// desktop periodic loop — constructed without `start_periodic`).
     cache_refresher: Arc<host_core::cache::CacheRefresher>,
-    /// The contact-sync core (the same one the desktop wraps in a tokio loop).
-    /// Mobile drives `run_sync` from foreground triggers / the manual button —
-    /// no app-start loop. Shares the bootstrapped `registry`.
+    /// The contacts' status ("last synced", in flight), installed into the
+    /// cache refresher, whose passes read the contact lists (as on the
+    /// desktop). "Sync now" is a contacts-only pass of that refresher.
     contact_sync: Arc<ContactSyncCore>,
     /// Where a finished contact-sync pass reports so the UI can re-read + update
     /// the "last synced" footer. A no-op until the JS layer registers its bridge
@@ -2304,12 +2304,15 @@ impl Host {
             Arc::clone(&cache_observer) as Arc<dyn CacheObserver>,
         );
 
-        // The contact-sync core, sharing the bootstrapped registry. No worker
-        // loop is started — mobile drives `run_sync` from the manual button /
-        // foreground triggers (the desktop's tokio loop has no mobile twin). The
-        // observer is a no-op until the JS layer registers its bridge.
+        // The contacts' status, installed into the refresher: every pass reads
+        // the contact lists and reports here. The observer is a no-op until
+        // the JS layer registers its bridge.
         let contact_sync_observer = Arc::new(BridgeContactSyncObserver::new());
-        let contact_sync = ContactSyncCore::new(Arc::clone(&registry), db.shared());
+        let contact_sync = ContactSyncCore::new(db.shared());
+        cache_refresher.set_contact_sync(
+            Arc::clone(&contact_sync),
+            Arc::clone(&contact_sync_observer) as Arc<dyn ContactSyncObserver>,
+        );
 
         Ok(Arc::new(Self {
             db,
@@ -6364,11 +6367,13 @@ impl Host {
     /// automatic, so UN-forced — a busy provider or a blip needs a second
     /// round before it shows, as on the desktop (decision 271) — but queued
     /// like [`Self::refresh_external_cache`], because the round was woken for
-    /// data a running pass may already have read past.
+    /// data a running pass may already have read past. A round on the
+    /// interval's schedule: the read-only directories only when
+    /// `contacts.includeReadOnlyOnSync` is on.
     pub fn refresh_external_cache_in_background(&self) {
         let refresher = Arc::clone(&self.cache_refresher);
         self.runtime.handle().spawn(async move {
-            refresher.warm_all_queued(false).await;
+            refresher.warm_periodic_queued().await;
         });
     }
 
@@ -6440,6 +6445,18 @@ impl Host {
         let refresher = Arc::clone(&self.cache_refresher);
         self.runtime.handle().spawn(async move {
             refresher.warm_all(false).await;
+        });
+    }
+
+    /// [`Self::warm_cache_on_foreground`] on the refresh interval's schedule:
+    /// the foreground timer and the return to the foreground. UN-forced like
+    /// it, and the read-only directories (a GAL, Google's directory) only
+    /// when `contacts.includeReadOnlyOnSync` is on — the launch pass reads
+    /// them always.
+    pub fn warm_cache_on_interval(&self) {
+        let refresher = Arc::clone(&self.cache_refresher);
+        self.runtime.handle().spawn(async move {
+            refresher.warm_periodic().await;
         });
     }
 
@@ -6602,9 +6619,10 @@ impl Host {
 
     // ─── Contact sync (§10.5) ────────────────────────────────────────────────────
     //
-    // The contact-sync core lives in host-core; mobile drives `run_sync` from the
-    // manual button / foreground (the desktop wraps it in a tokio loop). The
-    // observer delivers the "a pass finished" broadcast to JS; the
+    // The contact sync is the cache refresher's passes, as on the desktop: the
+    // contact lists ride along on every pass, and "sync now" is a
+    // contacts-only one. The observer delivers the "a pass finished"
+    // broadcast to JS; the
     // include-read-only pref is written DEVICE-LOCAL (as the desktop command
     // is). How often a pass runs is the one synced refresh interval
     // (`sync.intervalMinutes`, Settings → General), not a contacts pref.
@@ -6617,18 +6635,19 @@ impl Host {
         self.contact_sync_observer.set(observer);
     }
 
-    /// Run one contact-sync pass now — the mobile stand-in for the desktop tokio
-    /// loop, driven from a foreground trigger / the manual "Sync now" button.
-    /// `include_read_only`: `None` reads the persisted pref (matches the desktop
-    /// manual button); `Some(_)` overrides it. Returns `false` when a pass was
-    /// already in flight (the core dedupes).
+    /// "Sync now" (Settings → Kontakte): a contacts-only pass of the cache
+    /// refresher, forced like any user action, queued behind a running pass.
+    /// `include_read_only`: `None` reads the persisted pref (matches the
+    /// desktop manual button); `Some(_)` overrides it. `true` when the pass ran
+    /// within this call, `false` when it waits behind the running one; the
+    /// `contacts_synced` push follows either way.
     pub fn sync_contacts_now(&self, include_read_only: Option<bool>) -> Result<bool, StoreError> {
         let effective =
             include_read_only.unwrap_or_else(|| self.contact_sync.read_include_read_only_on_sync());
-        let observer = Arc::clone(&self.contact_sync_observer);
+        let refresher = Arc::clone(&self.cache_refresher);
         Ok(self
             .runtime
-            .block_on(async { self.contact_sync.run_sync(&*observer, effective).await }))
+            .block_on(async move { refresher.warm_contacts(effective).await }))
     }
 
     /// The contact-sync status (`{last_synced_at, in_flight,

@@ -1499,13 +1499,15 @@ export interface ContactsSyncedPayload {
   failed_accounts: string[];
 }
 
-/** Trigger a manual sync pass. `includeReadOnly` is an explicit
- *  per-call override: `true` always pulls the heavy read-only
- *  sentinel lists (GAL, Suggested People, Other Contacts,
- *  Workspace Directory), `false` always skips them, `undefined`
- *  (the default) reads the user's persisted
+/** "Sync now": a contacts-only pass of the external-data refresh.
+ *  `includeReadOnly` is an explicit per-call override: `true`
+ *  always pulls the heavy read-only sentinel lists (GAL, Suggested
+ *  People, Other Contacts, Workspace Directory), `false` always
+ *  skips them, `undefined` (the default) reads the user's persisted
  *  `contacts.includeReadOnlyOnSync` pref so manual and periodic
- *  syncs share the same behaviour. */
+ *  passes share the same behaviour. Resolves `false` when the pass
+ *  waits behind a running one; `contacts-synced` follows either
+ *  way. */
 export const syncContactsNow = (includeReadOnly?: boolean) =>
   invoke<boolean>('sync_contacts_now', {
     includeReadOnly: includeReadOnly ?? null,

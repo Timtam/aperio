@@ -43,6 +43,7 @@ use super::{
     swr, Attempt, CacheObserver, CacheRefreshStatus, CacheStore, CacheUpdatedPayload,
     FailingAccount, PassOutcome, RefreshCoordinator, SyncScope,
 };
+use crate::contact_sync::{ContactSyncCore, ContactSyncObserver};
 use crate::db::SharedConn;
 use crate::registry::AdapterRegistry;
 use crate::user_prefs::UserPrefsRepo;
@@ -83,7 +84,8 @@ pub struct CacheRefresher {
     /// the interval changed ([`Self::interval_changed`]).
     reschedule: Arc<Notify>,
     /// `true` while a pass runs, and across the queued follow-ups after it.
-    /// A plain [`Self::warm_all`] while it is set does nothing; a
+    /// A plain [`Self::warm_all`] while it is set does nothing when the
+    /// running pass reads all it asks for ([`PassScope::covers`]); a
     /// [`Self::warm_all_queued`] records one follow-up instead.
     in_flight: Arc<Mutex<bool>>,
     /// Sticky "a USER asked for the next pass" latch. `Notify` holds at
@@ -117,7 +119,18 @@ pub struct CacheRefresher {
     /// `Some(forcing)` runs once more when the running pass ends. Bounded to
     /// one: any number of requests during a pass collapse into a single
     /// follow-up, forced for every account any of them forced.
-    follow_up: Arc<Mutex<Option<Forcing>>>,
+    follow_up: Arc<Mutex<Option<(Forcing, PassScope)>>>,
+    /// What the running pass reads. Set under `in_flight`'s lock whenever a
+    /// pass is about to start, so a request that finds a pass running can
+    /// tell whether that pass stands in for it ([`PassScope::covers`]).
+    running_scope: Arc<Mutex<PassScope>>,
+    /// Where a pass reports the contacts it read: "last synced" and the
+    /// done signal of the contacts sync, which IS this refresh (Toni,
+    /// 2026-11-09). Installed by the host ([`Self::set_contact_sync`]).
+    contact_sync: Arc<Mutex<Option<ContactSync>>>,
+    /// The contact accounts the current pass read, and whether all of each
+    /// one's lists came through.
+    contact_accounts: Arc<Mutex<std::collections::BTreeMap<String, bool>>>,
     /// Last successful pass, kept in memory + mirrored to prefs.
     last_refreshed: Arc<Mutex<Option<DateTime<Utc>>>>,
 }
@@ -180,6 +193,43 @@ enum Wake {
     Trigger,
     Retime,
 }
+
+/// What a pass reads. Every pass reads the contact lists; a contacts-only
+/// one ("sync contacts now") reads nothing else. The read-only directories
+/// (a GAL, Google's directory, Suggested People) are large and often have no
+/// delta: a periodic pass reads them only when the user asked for it
+/// (`contacts.includeReadOnlyOnSync`); the app-start pass, a manual refresh
+/// and a change of an account read them as ever, and so does opening one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PassScope {
+    pub only_contacts: bool,
+    pub read_only_directories: bool,
+}
+
+impl PassScope {
+    /// Everything, directories included.
+    pub const FULL: Self = Self {
+        only_contacts: false,
+        read_only_directories: true,
+    };
+
+    /// Two requests collapsed into one pass: it reads what either asked for.
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            only_contacts: self.only_contacts && other.only_contacts,
+            read_only_directories: self.read_only_directories || other.read_only_directories,
+        }
+    }
+
+    /// Whether a pass of this scope reads everything `wanted` asks for.
+    pub fn covers(self, wanted: Self) -> bool {
+        (!self.only_contacts || wanted.only_contacts)
+            && (self.read_only_directories || !wanted.read_only_directories)
+    }
+}
+
+/// A host's contacts-sync status holder and its done-signal sink.
+type ContactSync = (Arc<ContactSyncCore>, Arc<dyn ContactSyncObserver>);
 
 /// One container queued for an items refresh in a warm pass. Collected during a
 /// cheap enumeration pass so the TOTAL is known up front (for "fetched X of N"
@@ -245,6 +295,9 @@ impl CacheRefresher {
             busy_families: Arc::new(Mutex::new(std::collections::HashSet::new())),
             pass_succeeded: Arc::new(AtomicBool::new(false)),
             follow_up: Arc::new(Mutex::new(None)),
+            running_scope: Arc::new(Mutex::new(PassScope::FULL)),
+            contact_sync: Arc::new(Mutex::new(None)),
+            contact_accounts: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
             // Unset until a user `trigger` latches it.
             next_trigger: Arc::new(Mutex::new(Forcing::None)),
             last_refreshed: Arc::new(Mutex::new(initial_last)),
@@ -284,7 +337,7 @@ impl CacheRefresher {
                 match worker.next_wake().await {
                     Wake::Tick => {
                         debug!(target: "aperio::cache", "periodic cache warm tick");
-                        worker.warm_all(false).await;
+                        worker.warm_periodic().await;
                     }
                     // The interval changed: measure the wait again.
                     Wake::Retime => continue,
@@ -393,17 +446,81 @@ impl CacheRefresher {
     /// instead of waiting for a confirming second attempt; every other
     /// account counts as an automatic round (see `CacheStore::mark_failure`).
     pub async fn warm_all(self: &Arc<Self>, forcing: impl Into<Forcing>) {
-        let forcing = forcing.into();
-        // Single-flight: a periodic tick that lands while a manual pass
-        // is still running just bails.
+        self.warm_scoped(forcing.into(), PassScope::FULL).await;
+    }
+
+    /// A pass on the refresh interval's schedule (the desktop's tick, the
+    /// phone's timer and return to the foreground): everything but the
+    /// read-only directories, unless the user asked for those too.
+    pub async fn warm_periodic(self: &Arc<Self>) {
+        self.warm_scoped(Forcing::None, self.periodic_scope()).await;
+    }
+
+    /// [`Self::warm_periodic`] for the phone's OS background round, which
+    /// must not be lost (see [`Self::warm_all_queued`]).
+    pub async fn warm_periodic_queued(self: &Arc<Self>) {
+        self.queued(Forcing::None, self.periodic_scope()).await;
+    }
+
+    fn periodic_scope(&self) -> PassScope {
+        PassScope {
+            only_contacts: false,
+            read_only_directories: crate::contact_sync::include_read_only_on_sync(&self.db),
+        }
+    }
+
+    /// "Sync contacts now": the contact lists alone, the read-only
+    /// directories with them when `include_read_only` says so. Forced, as a
+    /// user action is, and queued behind a running pass, never dropped — the
+    /// user pressed a button. `true` when the pass ran within this call,
+    /// `false` when it waits behind the running one; its `contacts-synced`
+    /// follows either way.
+    pub async fn warm_contacts(self: &Arc<Self>, include_read_only: bool) -> bool {
+        let scope = PassScope {
+            only_contacts: true,
+            read_only_directories: include_read_only,
+        };
+        self.queued(Forcing::All, scope).await
+    }
+
+    /// Single-flight: a request that lands while a pass is still running
+    /// bails when that pass reads everything it asks for; otherwise (the
+    /// running one reads only contacts, or leaves out the directories) the
+    /// rest follows it as the queued pass.
+    async fn warm_scoped(self: &Arc<Self>, forcing: Forcing, scope: PassScope) {
         {
             let mut guard = self.in_flight.lock().expect("cache refresher poisoned");
             if *guard {
+                let running = *self.running_scope.lock().expect("cache refresher poisoned");
+                if !running.covers(scope) {
+                    self.queue_follow_up(forcing, scope);
+                }
                 return;
             }
             *guard = true;
+            *self.running_scope.lock().expect("cache refresher poisoned") = scope;
         }
-        self.run_passes(forcing).await;
+        self.run_passes(forcing, scope).await;
+    }
+
+    /// Record a pass to run once the running one ends, merged into one
+    /// already waiting. The caller holds `in_flight`'s lock.
+    fn queue_follow_up(&self, forcing: Forcing, scope: PassScope) {
+        let mut follow_up = self.follow_up.lock().expect("cache refresher poisoned");
+        *follow_up = Some(match follow_up.take() {
+            Some((f, sc)) => (f.merge(forcing), sc.merge(scope)),
+            None => (forcing, scope),
+        });
+    }
+
+    /// Install where a pass reports the contacts it read (see
+    /// [`ContactSyncCore`]): each host does, once, after construction.
+    pub fn set_contact_sync(
+        &self,
+        core: Arc<ContactSyncCore>,
+        observer: Arc<dyn ContactSyncObserver>,
+    ) {
+        *self.contact_sync.lock().expect("cache refresher poisoned") = Some((core, observer));
     }
 
     /// [`Self::warm_all`] for a request that must not be lost.
@@ -416,27 +533,34 @@ impl CacheRefresher {
     /// that landed during the launch pass simply never happened. Here the
     /// request waits, and the running pass runs once more when it ends.
     pub async fn warm_all_queued(self: &Arc<Self>, forcing: impl Into<Forcing>) {
-        let forcing = forcing.into();
+        self.queued(forcing.into(), PassScope::FULL).await;
+    }
+
+    /// [`Self::warm_all_queued`] for any scope: queued requests collapse
+    /// into one follow-up that reads what any of them asked for. `true` when
+    /// the pass ran within this call, `false` when it was queued.
+    async fn queued(self: &Arc<Self>, forcing: Forcing, scope: PassScope) -> bool {
         {
             let mut guard = self.in_flight.lock().expect("cache refresher poisoned");
             if *guard {
-                let mut follow_up = self.follow_up.lock().expect("cache refresher poisoned");
-                *follow_up = Some(follow_up.take().unwrap_or_default().merge(forcing));
-                return;
+                self.queue_follow_up(forcing, scope);
+                return false;
             }
             *guard = true;
+            *self.running_scope.lock().expect("cache refresher poisoned") = scope;
         }
-        self.run_passes(forcing).await;
+        self.run_passes(forcing, scope).await;
+        true
     }
 
     /// Run passes while one is queued behind the current one. `in_flight`
     /// stays set across them, and the indicator hears "finished" once.
-    async fn run_passes(self: &Arc<Self>, mut forcing: Forcing) {
+    async fn run_passes(self: &Arc<Self>, mut forcing: Forcing, mut scope: PassScope) {
         loop {
-            let (completed, total) = self.pass(forcing).await;
+            let total = self.pass(forcing, scope).await;
             // Before the lock below: a read here must not widen the gap
             // between clearing `in_flight` and saying "finished".
-            let outcome = self.pass_outcome();
+            let outcome = self.pass_outcome(scope);
             // Under the same lock that queues a follow-up, so a request is
             // either taken here or finds the flag cleared and runs itself.
             let next = {
@@ -446,24 +570,24 @@ impl CacheRefresher {
                     .lock()
                     .expect("cache refresher poisoned")
                     .take();
-                if next.is_none() {
-                    *in_flight = false;
+                match &next {
+                    Some((_, next_scope)) => {
+                        *self.running_scope.lock().expect("cache refresher poisoned") = *next_scope;
+                    }
+                    None => *in_flight = false,
                 }
                 next
             };
             match next {
-                Some(queued) => {
-                    debug!(target: "aperio::cache", forcing = ?queued, "a queued cache warm pass follows");
+                Some((queued, queued_scope)) => {
+                    debug!(target: "aperio::cache", forcing = ?queued, scope = ?queued_scope, "a queued cache warm pass follows");
                     forcing = queued;
+                    scope = queued_scope;
                 }
                 None => {
-                    self.emit_status(
-                        false,
-                        Some(completed.to_rfc3339()),
-                        Some(total),
-                        Some(total),
-                        outcome,
-                    );
+                    // A contacts-only pass leaves "last updated" as it was.
+                    let last = self.status().last_refreshed_at;
+                    self.emit_status(false, last, Some(total), Some(total), outcome);
                     debug!(target: "aperio::cache", "cache warm pass complete");
                     return;
                 }
@@ -472,7 +596,19 @@ impl CacheRefresher {
     }
 
     /// One pass; the caller holds `in_flight`.
-    async fn pass(self: &Arc<Self>, forcing: Forcing) -> (DateTime<Utc>, u32) {
+    async fn pass(self: &Arc<Self>, forcing: Forcing, scope: PassScope) -> u32 {
+        self.contact_accounts
+            .lock()
+            .expect("cache refresher poisoned")
+            .clear();
+        let contact_sync = self
+            .contact_sync
+            .lock()
+            .expect("cache refresher poisoned")
+            .clone();
+        if let Some((core, _)) = &contact_sync {
+            core.begin_pass();
+        }
         // Record the pass's forced-ness for the failure paths. Safe under
         // single-flight: only this pass writes it, and the concurrent SWR
         // path records its own failures through `mark_failure` with
@@ -503,9 +639,12 @@ impl CacheRefresher {
         // container lists, collecting the per-container items targets. The total
         // is known up front so the indicator can report "fetched X of N".
         let mut targets = Vec::new();
-        self.enumerate_calendars(&mut targets).await;
-        self.enumerate_task_lists(&mut targets).await;
-        self.enumerate_contact_lists(&mut targets).await;
+        if !scope.only_contacts {
+            self.enumerate_calendars(&mut targets).await;
+            self.enumerate_task_lists(&mut targets).await;
+        }
+        self.enumerate_contact_lists(&mut targets, scope.read_only_directories)
+            .await;
         let total = targets.len() as u32;
         self.emit_status(true, last.clone(), Some(total), Some(0), None);
 
@@ -534,15 +673,34 @@ impl CacheRefresher {
         while set.join_next().await.is_some() {}
 
         // Stamp completion (in memory + prefs so the indicator survives a
-        // restart with a meaningful "last updated").
-        let completed = Utc::now();
-        *self
-            .last_refreshed
-            .lock()
-            .expect("cache refresher poisoned") = Some(completed);
-        let repo = UserPrefsRepo::new(&self.db);
-        let _ = repo.set(PREF_CACHE_LAST_REFRESHED_AT, &completed.to_rfc3339());
-        (completed, total)
+        // restart with a meaningful "last updated"). Not after a
+        // contacts-only pass: the calendars and task lists were not read.
+        if !scope.only_contacts {
+            let completed = Utc::now();
+            *self
+                .last_refreshed
+                .lock()
+                .expect("cache refresher poisoned") = Some(completed);
+            let repo = UserPrefsRepo::new(&self.db);
+            let _ = repo.set(PREF_CACHE_LAST_REFRESHED_AT, &completed.to_rfc3339());
+        }
+        // The contacts sync is this pass: say so where its status lives.
+        if let Some((core, observer)) = contact_sync {
+            let accounts = std::mem::take(
+                &mut *self
+                    .contact_accounts
+                    .lock()
+                    .expect("cache refresher poisoned"),
+            );
+            let (succeeded, failed): (Vec<_>, Vec<_>) =
+                accounts.into_iter().partition(|(_, ok)| *ok);
+            core.finish_pass(
+                succeeded.into_iter().map(|(id, _)| id).collect(),
+                failed.into_iter().map(|(id, _)| id).collect(),
+                &*observer,
+            );
+        }
+        total
     }
 
     async fn enumerate_calendars(&self, out: &mut Vec<RefreshTarget>) {
@@ -625,7 +783,21 @@ impl CacheRefresher {
         }
     }
 
-    async fn enumerate_contact_lists(&self, out: &mut Vec<RefreshTarget>) {
+    /// A contact account's lists came through (`true`), or one did not.
+    fn contact_account(&self, account: &str, ok: bool) {
+        let mut accounts = self
+            .contact_accounts
+            .lock()
+            .expect("cache refresher poisoned");
+        let entry = accounts.entry(account.to_string()).or_insert(true);
+        *entry = *entry && ok;
+    }
+
+    async fn enumerate_contact_lists(
+        &self,
+        out: &mut Vec<RefreshTarget>,
+        read_only_directories: bool,
+    ) {
         for (account, adapter) in self.registry.snapshot_contact_adapters() {
             // Taken before the fetch: a write landing while it runs must not
             // be paused by its busy answer (decision 271).
@@ -645,7 +817,13 @@ impl CacheRefresher {
                     {
                         self.emit_updated(SyncScope::ContactLists, &account, "");
                     }
+                    self.contact_account(&account, true);
                     for list in lists {
+                        // A read-only directory is listed, but its contents
+                        // are read only when this pass asks for them.
+                        if list.read_only && !read_only_directories {
+                            continue;
+                        }
                         out.push(RefreshTarget::Contacts {
                             account: account.clone(),
                             adapter: adapter.clone(),
@@ -654,6 +832,7 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
+                    self.contact_account(&account, false);
                     self.failed(&account, SyncScope::ContactLists, "", &err, generation);
                 }
             }
@@ -792,6 +971,7 @@ impl CacheRefresher {
                         }
                     }
                     Err(err) => {
+                        self.contact_account(&account, false);
                         self.failed(&account, SyncScope::Contacts, &list_id, &err, generation);
                     }
                 }
@@ -892,7 +1072,7 @@ impl CacheRefresher {
     /// is confirmed), and whether the pass, trying at least one account,
     /// read nothing at all. `None` when either could not be read; the
     /// surfaces then say a sentence that claims neither.
-    fn pass_outcome(&self) -> Option<PassOutcome> {
+    fn pass_outcome(&self, scope: PassScope) -> Option<PassOutcome> {
         let errors = self
             .cache
             .refresh_errors()
@@ -915,17 +1095,20 @@ impl CacheRefresher {
                 })
             })
             .collect();
-        let attempted: std::collections::HashSet<String> = self
-            .registry
-            .snapshot_calendar_adapters()
+        // What this pass asked: a contacts-only one asked no calendar or
+        // task account, so their accounts must not make it "all failed".
+        let (calendars, task_lists) = if scope.only_contacts {
+            (Vec::new(), Vec::new())
+        } else {
+            (
+                self.registry.snapshot_calendar_adapters(),
+                self.registry.snapshot_task_adapters(),
+            )
+        };
+        let attempted: std::collections::HashSet<String> = calendars
             .into_iter()
             .map(|(account, _)| account)
-            .chain(
-                self.registry
-                    .snapshot_task_adapters()
-                    .into_iter()
-                    .map(|(a, _)| a),
-            )
+            .chain(task_lists.into_iter().map(|(a, _)| a))
             .chain(
                 self.registry
                     .snapshot_contact_adapters()
@@ -1786,5 +1969,290 @@ mod tests {
         refresher.warm_all_queued(false).await;
         assert_eq!(gated.listings.load(Ordering::SeqCst), 1);
         assert!(!refresher.status().refreshing);
+    }
+
+    /// An address book account: a writable book and a read-only directory.
+    /// Records which lists a pass read; `fail` makes the book's read throw,
+    /// `hold` holds the first read until the test lets it go.
+    #[derive(Default)]
+    struct Book {
+        reads: Mutex<Vec<String>>,
+        fail: std::sync::atomic::AtomicBool,
+        hold: std::sync::atomic::AtomicBool,
+        entered: Notify,
+        release: Notify,
+    }
+
+    impl Book {
+        fn reads(&self) -> Vec<String> {
+            let mut reads = self.reads.lock().unwrap().clone();
+            reads.sort();
+            reads
+        }
+    }
+
+    #[async_trait]
+    impl Adapter for Book {
+        async fn authenticate(&self, _: Credentials) -> cal_core::Result<AuthToken> {
+            unreachable!()
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &[]
+        }
+    }
+
+    #[async_trait]
+    impl ContactsFeature for Book {
+        async fn list_contact_lists(&self) -> cal_core::Result<Vec<cal_core::ContactList>> {
+            let list = |id: &str, read_only| cal_core::ContactList {
+                id: id.into(),
+                name: id.into(),
+                color: None,
+                color_label: None,
+                read_only,
+            };
+            Ok(vec![list("book", false), list("directory", true)])
+        }
+        async fn get_contacts(&self, list_id: &str) -> cal_core::Result<Vec<cal_core::Contact>> {
+            if self.hold.swap(false, Ordering::SeqCst) {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
+            self.reads.lock().unwrap().push(list_id.to_string());
+            if list_id == "book" && self.fail.load(Ordering::SeqCst) {
+                return Err(cal_core::Error::Network("down".into()));
+            }
+            Ok(Vec::new())
+        }
+        async fn search_contacts(&self, _: &str) -> cal_core::Result<Vec<cal_core::Contact>> {
+            Ok(Vec::new())
+        }
+        async fn create_contact(
+            &self,
+            _: &str,
+            _: cal_core::NewContact,
+        ) -> cal_core::Result<cal_core::Contact> {
+            unreachable!()
+        }
+        async fn update_contact(
+            &self,
+            _: cal_core::Contact,
+        ) -> cal_core::Result<cal_core::Contact> {
+            unreachable!()
+        }
+        async fn delete_contact(&self, _: &str) -> cal_core::Result<()> {
+            unreachable!()
+        }
+    }
+
+    /// Every contacts-synced signal, in order.
+    #[derive(Default)]
+    struct Synced(Mutex<Vec<crate::contact_sync::ContactsSyncedPayload>>);
+
+    impl ContactSyncObserver for Synced {
+        fn contacts_synced(&self, payload: &crate::contact_sync::ContactsSyncedPayload) {
+            self.0.lock().unwrap().push(payload.clone());
+        }
+    }
+
+    struct BookSetUp {
+        refresher: Arc<CacheRefresher>,
+        calendars: Arc<Withheld>,
+        book: Arc<Book>,
+        contacts: Arc<ContactSyncCore>,
+        synced: Arc<Synced>,
+        statuses: Arc<Statuses>,
+    }
+
+    /// One account with a calendar (counted, never held) and an address book,
+    /// and the contacts' status installed.
+    fn book_refresher() -> BookSetUp {
+        let db = DbHandle::open_in_memory().unwrap();
+        db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-1', 'caldav', 'Work', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+        })
+        .unwrap();
+        let registry = Arc::new(AdapterRegistry::new(
+            Arc::new(plugin_core::PluginManager::new("0.1.0")),
+            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+        ));
+        let calendars = Arc::new(Withheld {
+            listings: AtomicU32::new(0),
+            granted: std::sync::atomic::AtomicBool::new(true),
+        });
+        registry.register_host_adapter(
+            "acc-1",
+            Some(Arc::clone(&calendars) as Arc<dyn CalendarFeature>),
+            None,
+        );
+        let book = Arc::new(Book::default());
+        registry.register_host_contacts("acc-1", Arc::clone(&book) as Arc<dyn ContactsFeature>);
+        let statuses = Arc::new(Statuses::default());
+        let refresher = CacheRefresher::new(
+            registry,
+            Arc::new(CacheStore::new(db.clone())),
+            Arc::new(RefreshCoordinator::new()),
+            db.shared(),
+            Arc::clone(&statuses) as Arc<dyn CacheObserver>,
+        );
+        let contacts = ContactSyncCore::new(db.shared());
+        let synced = Arc::new(Synced::default());
+        refresher.set_contact_sync(
+            Arc::clone(&contacts),
+            Arc::clone(&synced) as Arc<dyn ContactSyncObserver>,
+        );
+        BookSetUp {
+            refresher,
+            calendars,
+            book,
+            contacts,
+            synced,
+            statuses,
+        }
+    }
+
+    #[test]
+    fn pass_scopes_merge_and_cover() {
+        let contacts = |read_only_directories| PassScope {
+            only_contacts: true,
+            read_only_directories,
+        };
+        let periodic = PassScope {
+            only_contacts: false,
+            read_only_directories: false,
+        };
+        assert_eq!(contacts(true).merge(periodic), PassScope::FULL);
+        assert_eq!(contacts(false).merge(contacts(false)), contacts(false));
+        assert!(PassScope::FULL.covers(periodic));
+        assert!(PassScope::FULL.covers(contacts(true)));
+        assert!(periodic.covers(contacts(false)));
+        assert!(
+            !periodic.covers(contacts(true)),
+            "the directories were left out"
+        );
+        assert!(
+            !contacts(true).covers(periodic),
+            "the calendars were not read"
+        );
+    }
+
+    /// A pass on the interval's schedule reads the read-only directory only
+    /// when the switch is on; the app-start and a manual pass read it always.
+    #[tokio::test]
+    async fn a_periodic_pass_leaves_out_the_directories_unless_asked() {
+        let set_up = book_refresher();
+        set_up.refresher.warm_periodic().await;
+        assert_eq!(set_up.book.reads(), vec!["book"]);
+
+        set_up.book.reads.lock().unwrap().clear();
+        set_up.refresher.warm_all(false).await;
+        assert_eq!(set_up.book.reads(), vec!["book", "directory"]);
+
+        set_up.book.reads.lock().unwrap().clear();
+        crate::user_prefs::UserPrefsRepo::new(&set_up.refresher.db)
+            .set(crate::contact_sync::PREF_INCLUDE_READ_ONLY_ON_SYNC, "true")
+            .unwrap();
+        set_up.refresher.warm_periodic().await;
+        assert_eq!(set_up.book.reads(), vec!["book", "directory"]);
+        assert_eq!(set_up.calendars.listings.load(Ordering::SeqCst), 3);
+    }
+
+    /// "Sync contacts now" reads the address books and nothing else, leaves
+    /// "last updated" of the external data alone, and is the contacts sync:
+    /// "last synced", and the done signal with the account.
+    #[tokio::test]
+    async fn sync_contacts_now_reads_only_contacts_and_reports_them() {
+        let set_up = book_refresher();
+        assert!(
+            set_up.refresher.warm_contacts(false).await,
+            "it ran at once"
+        );
+        assert_eq!(set_up.calendars.listings.load(Ordering::SeqCst), 0);
+        assert_eq!(set_up.book.reads(), vec!["book"]);
+        assert_eq!(set_up.refresher.status().last_refreshed_at, None);
+        let status = set_up.contacts.status();
+        assert!(!status.in_flight);
+        let synced = set_up.synced.0.lock().unwrap();
+        assert_eq!(synced.len(), 1);
+        assert_eq!(
+            Some(synced[0].last_synced_at.clone()),
+            status.last_synced_at
+        );
+        assert_eq!(synced[0].succeeded_accounts, vec!["acc-1".to_string()]);
+        assert!(synced[0].failed_accounts.is_empty());
+        assert!(!set_up.statuses.last_outcome().all_failed);
+    }
+
+    /// A book that could not be read marks its account failed; a full pass
+    /// says "synced" too.
+    #[tokio::test]
+    async fn an_unreadable_book_reports_its_account_failed() {
+        let set_up = book_refresher();
+        set_up.book.fail.store(true, Ordering::SeqCst);
+        set_up.refresher.warm_all(false).await;
+        let synced = set_up.synced.0.lock().unwrap();
+        assert_eq!(synced.len(), 1);
+        assert!(synced[0].succeeded_accounts.is_empty());
+        assert_eq!(synced[0].failed_accounts, vec!["acc-1".to_string()]);
+    }
+
+    /// A contacts-only pass with calendar accounts and no address book asked
+    /// nothing of those accounts: it is not "nothing could be updated".
+    #[tokio::test]
+    async fn a_contacts_pass_without_books_is_not_all_failed() {
+        let (refresher, gated, statuses) = refresher();
+        refresher.warm_contacts(false).await;
+        assert_eq!(gated.listings.load(Ordering::SeqCst), 0);
+        assert!(!statuses.last_outcome().all_failed);
+    }
+
+    /// A tick that lands during a contacts-only pass is not dropped: that pass
+    /// reads no calendars, so the tick's pass follows it.
+    #[tokio::test]
+    async fn a_tick_during_a_contacts_pass_follows_it() {
+        let set_up = book_refresher();
+        set_up.book.hold.store(true, Ordering::SeqCst);
+        let running = tokio::spawn({
+            let refresher = Arc::clone(&set_up.refresher);
+            async move { refresher.warm_contacts(false).await }
+        });
+        set_up.book.entered.notified().await;
+        set_up.refresher.warm_periodic().await;
+        set_up.book.release.notify_one();
+        assert!(running.await.unwrap());
+        assert_eq!(
+            set_up.calendars.listings.load(Ordering::SeqCst),
+            1,
+            "the tick's pass followed"
+        );
+        assert!(set_up.refresher.status().last_refreshed_at.is_some());
+        assert_eq!(set_up.synced.0.lock().unwrap().len(), 2);
+    }
+
+    /// "Sync contacts now" during a running pass waits for it and runs after.
+    #[tokio::test]
+    async fn sync_contacts_now_during_a_pass_follows_it() {
+        let set_up = book_refresher();
+        set_up.book.hold.store(true, Ordering::SeqCst);
+        let running = tokio::spawn({
+            let refresher = Arc::clone(&set_up.refresher);
+            async move { refresher.warm_periodic().await }
+        });
+        set_up.book.entered.notified().await;
+        assert!(
+            set_up.contacts.status().in_flight,
+            "the pass reads the books"
+        );
+        assert!(!set_up.refresher.warm_contacts(false).await, "queued");
+        set_up.book.release.notify_one();
+        running.await.unwrap();
+        assert_eq!(set_up.book.reads(), vec!["book", "book"]);
+        assert_eq!(set_up.calendars.listings.load(Ordering::SeqCst), 1);
+        assert_eq!(set_up.synced.0.lock().unwrap().len(), 2);
+        assert!(!set_up.contacts.status().in_flight);
     }
 }

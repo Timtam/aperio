@@ -146,15 +146,17 @@ ein paar Tage vorher gewarnt zu werden statt erst am Morgen selbst.
 
 Unter **Einstellungen → Kontakte** steuerst du:
 
-- einen Knopf **Jetzt synchronisieren**. Wie oft Kontakte von selbst
-  aktualisiert werden, legt das **Aktualisierungs-Intervall** unter
-  **Einstellungen → Allgemein** fest (siehe
-  [Kapitel 09](/de/guides/tutorial/09-synchronization/)); der Abschnitt hat
-  einen Knopf, der dorthin führt;
+- einen Knopf **Jetzt synchronisieren**, der deine Adressbücher sofort liest.
+  Von selbst werden Kontakte zusammen mit Kalendern und Aufgabenlisten
+  aktualisiert, im **Aktualisierungs-Intervall** unter **Einstellungen →
+  Allgemein** (siehe [Kapitel 09](/de/guides/tutorial/09-synchronization/));
+  der Abschnitt hat einen Knopf, der dorthin führt;
 - ob **Nur-Lese-Verzeichnisse** (Globale Adressliste, Vorgeschlagene Personen,
-  Weitere Kontakte, Workspace-Verzeichnis) bei jedem Sync mitgezogen werden.
-  Standardmäßig bleiben sie außen vor, weil sie sehr groß sein können – die
-  Suche erreicht sie ohnehin, bei Bedarf;
+  Weitere Kontakte, Workspace-Verzeichnis) bei jeder Aktualisierung in diesem
+  Takt und bei „Jetzt synchronisieren“ mitgelesen werden. Standardmäßig
+  bleiben sie dort außen vor, weil sie sehr groß sein können; Aperio liest sie
+  trotzdem beim Start, wenn du von Hand aktualisierst und wenn du ein Konto
+  hinzufügst oder änderst, und die Suche erreicht sie ohnehin, bei Bedarf;
 - **Cache leeren**, was die Momentaufnahmen der externen Adressbücher im
   Arbeitsspeicher verwirft. Deine eigenen lokalen Kontakte bleiben unberührt;
   der nächste Sync holt den Rest wieder.
