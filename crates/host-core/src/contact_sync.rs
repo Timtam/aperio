@@ -38,11 +38,6 @@ use crate::db::SharedConn;
 use crate::registry::AdapterRegistry;
 use crate::user_prefs::UserPrefsRepo;
 
-/// `user_prefs` key for the configurable polling interval, in
-/// minutes. Defaults to 60 — matches the value DESIGN.md §10.5
-/// names as the standard cadence.
-pub const PREF_SYNC_INTERVAL_MINUTES: &str = "contacts.syncIntervalMinutes";
-
 /// `user_prefs` key for the timestamp of the most recent successful
 /// sync pass, persisted as RFC 3339. Used by the contacts view's
 /// "Last synced at …" footer so the value survives restarts.
@@ -60,10 +55,6 @@ pub const PREF_LAST_SYNCED_AT: &str = "contacts.lastSyncedAt";
 /// override parameter that beats this pref — used for a one-shot
 /// directory pull without flipping the user-visible setting.
 pub const PREF_INCLUDE_READ_ONLY_ON_SYNC: &str = "contacts.includeReadOnlyOnSync";
-
-/// Default interval if `PREF_SYNC_INTERVAL_MINUTES` is unset or
-/// nonsense. 60 minutes per the design doc.
-pub const DEFAULT_SYNC_INTERVAL_MINUTES: u32 = 60;
 
 /// Host-supplied sink for the "a contact-sync pass finished" broadcast. The
 /// core calls this at the end of every pass instead of touching any UI layer:
@@ -99,7 +90,6 @@ pub struct ContactsSyncedPayload {
 #[derive(Debug, Clone, Serialize)]
 pub struct ContactsSyncStatus {
     pub last_synced_at: Option<String>,
-    pub interval_minutes: u32,
     pub in_flight: bool,
     /// Current value of [`PREF_INCLUDE_READ_ONLY_ON_SYNC`]. The
     /// Settings → Kontakte checkbox seeds itself from this so the
@@ -159,18 +149,13 @@ impl ContactSyncCore {
         Arc::clone(&self.notify)
     }
 
-    /// Read the configured interval from `user_prefs`. Defaults to
-    /// `DEFAULT_SYNC_INTERVAL_MINUTES` when missing or unparseable.
-    /// Values below 1 minute clamp to 1 so a typo (`0`) doesn't pin
-    /// the worker into a hot loop.
+    /// The one refresh interval (`sync_engine::PREF_SYNC_INTERVAL_MINUTES`),
+    /// resolved by `sync_engine::resolve_sync_interval_minutes`: 1..=1440
+    /// minutes, default 5.
     pub fn read_interval_minutes(&self) -> u32 {
-        let repo = UserPrefsRepo::new(&self.db);
-        repo.get(PREF_SYNC_INTERVAL_MINUTES)
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<u32>().ok())
-            .map(|m| m.max(1))
-            .unwrap_or(DEFAULT_SYNC_INTERVAL_MINUTES)
+        // The one refresh interval (Einstellungen → Allgemein): contacts
+        // have no interval of their own any more (Toni, 2026-11-09).
+        crate::user_prefs::sync_interval_minutes(&self.db)
     }
 
     /// Read the current value of [`PREF_INCLUDE_READ_ONLY_ON_SYNC`].
@@ -191,7 +176,6 @@ impl ContactSyncCore {
         let in_flight = *self.in_flight.lock().expect("sync in-flight poisoned");
         ContactsSyncStatus {
             last_synced_at: last.map(|d| d.to_rfc3339()),
-            interval_minutes: self.read_interval_minutes(),
             in_flight,
             include_read_only_on_sync: self.read_include_read_only_on_sync(),
         }
@@ -332,33 +316,22 @@ mod tests {
         }
     }
 
+    /// Contacts follow the one refresh interval, not a key of their own.
     #[test]
-    fn read_interval_minutes_defaults_to_sixty() {
-        let (_tmp, db) = fresh_db();
-        assert_eq!(core_with(&db).read_interval_minutes(), 60);
-    }
-
-    #[test]
-    fn read_interval_minutes_honours_user_pref() {
+    fn contacts_follow_the_one_refresh_interval() {
         let (_tmp, db) = fresh_db();
         let shared = db.shared();
-        UserPrefsRepo::new(&shared)
-            .set(PREF_SYNC_INTERVAL_MINUTES, "15")
+        assert_eq!(
+            core_with(&db).read_interval_minutes(),
+            sync_engine::DEFAULT_SYNC_INTERVAL_MINUTES
+        );
+        let prefs = UserPrefsRepo::new(&shared);
+        // The old key of their own, set on an older build: no longer read.
+        prefs.set("contacts.syncIntervalMinutes", "60").unwrap();
+        prefs
+            .set(sync_engine::PREF_SYNC_INTERVAL_MINUTES, "15")
             .unwrap();
         assert_eq!(core_with(&db).read_interval_minutes(), 15);
-    }
-
-    #[test]
-    fn read_interval_minutes_clamps_zero_to_one() {
-        // Defensive guard: a typo of `0` mustn't pin the worker
-        // into a hot loop. We promote it to 1 so the pass still
-        // runs once a minute at worst.
-        let (_tmp, db) = fresh_db();
-        let shared = db.shared();
-        UserPrefsRepo::new(&shared)
-            .set(PREF_SYNC_INTERVAL_MINUTES, "0")
-            .unwrap();
-        assert_eq!(core_with(&db).read_interval_minutes(), 1);
     }
 
     #[test]
@@ -366,7 +339,6 @@ mod tests {
         let (_tmp, db) = fresh_db();
         let s = core_with(&db).status();
         assert!(s.last_synced_at.is_none());
-        assert_eq!(s.interval_minutes, 60);
         assert!(!s.in_flight);
         // Pref defaults to false — fresh installs don't pay the
         // GAL-pull cost without opt-in.

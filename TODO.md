@@ -144,16 +144,28 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
   Aktualisierung externer Daten eine Änderung beim Anbieter, liest der
   Planer genau diesen Kalender oder diese Liste neu (Tonis Vorschlag,
   2026-11-09: an die regelmäßige Aktualisierung hängen).
-- [ ] **Ein Intervall für alles** (Toni, 2026-11-09): Das Sync-Intervall
-  (Einstellungen, Sync; `sync.intervalMinutes`, Standard 5 Minuten) steuert
-  auch die Aktualisierung externer Daten am Desktop (heute fest 30 Minuten,
-  `cache.refreshIntervalMinutes`, ohne Einstellung) und die
-  Kontakt-Synchronisierung (heute eigene Auswahl unter Kontakte,
-  `contacts.syncIntervalMinutes`; die Auswahl entfällt, ein Hinweis verweist
-  auf Sync). Der Planer hängt seit dem Punkt oben an dieser Aktualisierung.
-  Handy prüfen: Es aktualisiert externe Daten nach jedem Sync-Durchlauf im
-  Vordergrund, aber nur mit eingerichtetem Sync-Ziel. Kosten: externe Server
-  am Desktop alle 5 statt alle 30 Minuten.
+- [x] **Ein Intervall für alles** (Toni, 2026-11-09; DESIGN §19.8): das
+  **Aktualisierungs-Intervall** unter Einstellungen → Allgemein (Desktop und
+  Handy; Schlüssel `sync.intervalMinutes`, synchronisiert, 1 bis 1440
+  Minuten, Standard 5) steuert Synchronisation, die Aktualisierung externer
+  Daten (Desktop vorher fest 30 Minuten), Kontakte (vorher eigene Auswahl,
+  60 Minuten) und wie lange der Desktop-Planer seinen Stand hält. Einstellbar
+  und wirksam auch ohne Sync-Ziel; das Handy aktualisiert jetzt auch ohne
+  Sync-Ziel im Takt (vorher nur beim Start und beim Zurückkehren). Sync und
+  Kontakte zeigen einen Satz mit Knopf nach Allgemein.
+- [ ] **Kontakt-Abgleich in die Aktualisierung falten** (Toni, 2026-11-09,
+  „gleich zusammenlegen“; PR B nach dem einen Intervall): Der eigene
+  Kontakt-Durchlauf (`ContactSyncCore::run_sync`, Desktop-Schleife
+  `ContactSyncScheduler`) liest dieselben Bücher wie die Aktualisierung
+  externer Daten. Die Aktualisierung übernimmt „zuletzt abgeglichen“, die
+  Fertig-Meldung `contacts-synced` und „Jetzt abgleichen“ (ein Durchlauf nur
+  für Kontakte); regelmäßige Durchläufe lassen schreibgeschützte
+  Verzeichnisse aus, außer der Schalter „auch schreibgeschützte Verzeichnisse
+  abgleichen“ ist an. Plan: `C:/scripts/aperio-livetest/one-interval-plan-2026-11-09.md`.
+- [ ] **Beschäftigten Anbieter über Durchläufe hinweg pausieren** (bei 1
+  Minute Intervall fragt Aperio einen Anbieter, der „zu viele Anfragen“
+  meldet, jede Minute; heute pausiert nur innerhalb eines Durchlaufs). Erst
+  angehen, wenn das wirklich auftritt.
 - [ ] **Erinnerungen eines gelöschten Kontos oder abgeschalteten Adapters
   klingeln weiter** (Prüfrunde #162, gab es vorher schon): `delete_account`
   und das Abschalten oder Entfernen eines Plugins (`commands/plugins.rs`)

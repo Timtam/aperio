@@ -103,9 +103,10 @@ nicht synchronisiert):
 - **Hintergrund-Synchronisation.** Lässt das System die App wecken, um zu
   synchronisieren, während sie im Hintergrund oder geschlossen ist – so kommen
   Änderungen anderer Geräte und neue Erinnerungen an, ohne dass du die App
-  öffnest. Den genauen Zeitpunkt bestimmt das Betriebssystem (nicht sofort; unter
-  Android mindestens alle 15 Minuten, unter iOS in vom System gewählten Fenstern),
-  es ist also ein „best effort". Beim Öffnen synchronisiert die App immer
+  öffnest. Aperio wünscht sich das **Aktualisierungs-Intervall** (ebenfalls unter
+  Allgemein), mindestens 15 Minuten; den genauen Zeitpunkt bestimmt das
+  Betriebssystem (nicht sofort; unter iOS in vom System gewählten Fenstern), es
+  ist also ein „best effort". Beim Öffnen synchronisiert die App immer
   vollständig, es geht also nie etwas verloren. Hintergrund-Runden siehst du im
   Sync-Protokoll mit der Kennzeichnung **Hintergrund**. Standard: an.
 - **App-Symbol-Badge.** Zeigt auf dem App-Symbol eine Zahl für die heute noch

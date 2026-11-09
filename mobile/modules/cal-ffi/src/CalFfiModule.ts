@@ -440,12 +440,9 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  `includeReadOnly`: `null`/`undefined` reads the pref, `true`/`false`
    *  overrides. Resolves `false` if a pass was already in flight. */
   syncContactsNow(includeReadOnly: boolean | null): Promise<boolean>;
-  /** Contact-sync status as JSON `{last_synced_at, interval_minutes, in_flight,
+  /** Contact-sync status as JSON `{last_synced_at, in_flight,
    *  include_read_only_on_sync}`. */
   getContactsSyncStatusJson(): Promise<string>;
-  /** Persist the periodic contact-sync interval (minutes, clamped [1,1440]);
-   *  resolves to the clamped value. Device-local. */
-  setContactsSyncInterval(minutes: number): Promise<number>;
   /** Persist the "also pull read-only directories" toggle. Device-local. */
   setContactsIncludeReadOnlyOnSync(enabled: boolean): Promise<void>;
   /** Drop every external book's contact cache + reset "last synced"; resolves

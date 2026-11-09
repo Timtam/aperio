@@ -70,7 +70,8 @@ selben Netz auf denselben Datensatz zugreifen.
 
 ## Abgleich und Konflikte
 
-- Der Abgleich passiert automatisch im Hintergrund und bei Programmstart.
+- Der Abgleich passiert automatisch im Hintergrund und bei Programmstart, im
+  Aktualisierungs-Intervall (siehe unten).
 - Du kannst einen Abgleich auch **manuell** anstoßen.
 - Bearbeiten zwei Geräte denselben Eintrag, erkennt Aperio den **Konflikt**
   und löst ihn nachvollziehbar auf bzw. fragt nach, welche Fassung gelten
@@ -79,6 +80,32 @@ selben Netz auf denselben Datensatz zugreifen.
   Änderst du eine Aufgaben-Einstellung am Handy, übernimmt das offene
   Desktop-Fenster sie beim nächsten Abgleich, ohne Neustart. Steht die
   Einstellungsseite gerade offen, wird die Änderung angesagt.
+
+## Wie oft Aperio aktualisiert
+
+Eine Einstellung bestimmt, wie oft Aperio, solange es geöffnet ist, all das
+tut: **Einstellungen → Allgemein → Aktualisierungs-Intervall** (1, 5, 15, 30,
+60 oder 240 Minuten; Standard 5). In diesem Abstand
+
+- holt Aperio Kalender, Aufgabenlisten und Kontakte aus deinen Konten neu,
+- gleicht es sich mit deinen anderen Geräten ab, wenn die Synchronisation
+  eingerichtet ist,
+- und richten sich die Erinnerungen nach dem, was es dabei findet: Ein Termin,
+  den ein Kollege eingetragen hat, erinnert rechtzeitig, ohne dass du den
+  Kalender öffnest.
+
+Das gilt mit und ohne Synchronisation, und du kannst es in beiden Fällen
+einstellen. Der Wert reist mit: Stellst du ihn auf einem Gerät ein, nutzen ihn
+auch die anderen. Die Bereiche **Synchronisation** und **Kontakte** sagen je,
+wo er steht, und haben einen Knopf, der dorthin führt.
+
+Am Handy geschieht das, solange Aperio geöffnet ist. Ist die
+Hintergrund-Synchronisation an, weckt das Handy Aperio auch bei geschlossener
+App ab und zu; es wünscht sich das Aktualisierungs-Intervall, mindestens 15
+Minuten, und das System entscheidet, wann.
+
+Ein kurzes Intervall hält alles aktuell und fragt deine Anbieter öfter. Nutzt
+du Aperio auf vielen Geräten, sind 10 bis 15 Minuten eine gute Wahl.
 
 ## Ein neues Gerät, und Nachholen
 

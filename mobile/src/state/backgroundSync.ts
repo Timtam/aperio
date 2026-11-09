@@ -34,6 +34,11 @@ import { refreshWidgetSnapshot } from './widgetSnapshot';
 export const BACKGROUND_SYNC_TASK = 'aperio.background-sync';
 
 const KEY = 'aperio.backgroundSync.enabled';
+// The cadence last handed to the OS, so a changed refresh interval — here or
+// from another device — registers the task again. A plain register of a task
+// that exists keeps the cadence it was first given (WorkManager keeps an
+// enqueued worker; iOS keeps its request).
+const MINUTES_KEY = 'aperio.backgroundSync.minutes';
 const DEFAULT_ENABLED = true;
 // The synced foreground interval doubles as the requested background cadence,
 // clamped to the WorkManager floor (iOS ignores fine-grained values anyway).
@@ -187,6 +192,7 @@ export async function registerBackgroundSync(): Promise<void> {
     await BackgroundTask.registerTaskAsync(BACKGROUND_SYNC_TASK, {
       minimumInterval: minutes,
     });
+    await AsyncStorage.setItem(MINUTES_KEY, String(minutes)).catch(() => undefined);
     // iOS only, and the reason it exists is worth stating where it is called:
     // expo-background-task asks for a PROCESSING task, the class iOS runs when
     // the device is idle and preferably charging — overnight, in practice. This
@@ -214,6 +220,24 @@ export async function unregisterBackgroundSync(): Promise<void> {
   if (Platform.OS === 'ios') {
     await CalFfi.disableBackgroundRefresh().catch(() => undefined);
   }
+  await AsyncStorage.removeItem(MINUTES_KEY).catch(() => undefined);
+}
+
+/** Keep the OS task at the cadence the refresh interval asks for (at least 15
+ *  minutes): registered again when that changed since it was last handed over,
+ *  else registered as it is (idempotent, and it puts back a task the OS lost).
+ *  Nothing when background sync is off. */
+export async function followBackgroundInterval(): Promise<void> {
+  if (!cached) return;
+  let had: string | null = null;
+  try {
+    had = await AsyncStorage.getItem(MINUTES_KEY);
+  } catch {
+    // Unknown: register again, which is never wrong.
+  }
+  const want = await backgroundIntervalMinutes();
+  if (had !== String(want)) await unregisterBackgroundSync();
+  await registerBackgroundSync();
 }
 
 /** Load the stored pref and reconcile the OS registration to match. Call once on
@@ -225,7 +249,7 @@ export async function initBackgroundSync(): Promise<void> {
   } catch {
     // Keep the default.
   }
-  if (cached) await registerBackgroundSync();
+  if (cached) await followBackgroundInterval();
   else await unregisterBackgroundSync();
 }
 

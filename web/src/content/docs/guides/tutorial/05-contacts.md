@@ -136,7 +136,10 @@ warned a few days ahead rather than on the morning itself.
 
 Under **Settings → Contacts** you control:
 
-- the **sync interval**, and a **Sync now** button;
+- a **Sync now** button. How often contacts refresh on their own is the
+  **Refresh interval** under **Settings → General** (see
+  [Chapter 09](/guides/tutorial/09-synchronization/)); the section has a button
+  that takes you there;
 - whether **read-only directories** (Global Address List, Suggested People,
   Other Contacts, Workspace Directory) are pulled on every sync. They are
   skipped by default because they can be very large — search reaches them

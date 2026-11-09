@@ -9,8 +9,11 @@
 //!     account's containers + a WIDE event window (−3…+12 months) into
 //!     the cache, so the *next* app start paints instantly and in-window
 //!     month/week/day navigation is a cache hit instead of a cold fetch.
-//!   - **Periodic refresh** — repeat on a prefs-driven interval so an
-//!     open app stays current without the user touching anything.
+//!   - **Periodic refresh** — repeat on the one refresh interval
+//!     (`sync.intervalMinutes`, Einstellungen → Allgemein; Toni,
+//!     2026-11-09) so an open app stays current without the user touching
+//!     anything. A change of the interval re-times the wait at once
+//!     ([`CacheRefresher::interval_changed`]), without an extra pass.
 //!   - **Manual refresh** — `trigger` kicks an immediate pass.
 //!
 //! Every container write notifies the host via
@@ -58,15 +61,12 @@ pub(crate) const WINDOW_FUTURE_DAYS: i64 = 366; // ~12 months ahead
 /// restore burst keeps the user's first interactions on a clear runway.
 const APP_START_DELAY: StdDuration = StdDuration::from_secs(8);
 
-const DEFAULT_INTERVAL_MINUTES: u32 = 30;
-
 /// Max container refreshes in flight during a warm pass — overlaps a slow account
 /// with the rest without hammering any single provider (≈ a browser's per-host
 /// connection budget).
 const REFRESH_CONCURRENCY: usize = 6;
 
-/// `user_prefs` keys.
-pub const PREF_CACHE_REFRESH_INTERVAL_MINUTES: &str = "cache.refreshIntervalMinutes";
+/// `user_prefs` key: when the last pass finished.
 pub const PREF_CACHE_LAST_REFRESHED_AT: &str = "cache.lastRefreshedAt";
 
 pub struct CacheRefresher {
@@ -79,6 +79,9 @@ pub struct CacheRefresher {
     observer: Arc<dyn CacheObserver>,
     /// Wakes the periodic loop for a manual / settings-driven pass.
     notify: Arc<Notify>,
+    /// Wakes the periodic loop to measure its wait again, without a pass:
+    /// the interval changed ([`Self::interval_changed`]).
+    reschedule: Arc<Notify>,
     /// `true` while a pass runs, and across the queued follow-ups after it.
     /// A plain [`Self::warm_all`] while it is set does nothing; a
     /// [`Self::warm_all_queued`] records one follow-up instead.
@@ -170,6 +173,14 @@ impl From<bool> for Forcing {
     }
 }
 
+/// What ended the periodic loop's wait ([`CacheRefresher::next_wake`]).
+#[derive(Debug, PartialEq, Eq)]
+enum Wake {
+    Tick,
+    Trigger,
+    Retime,
+}
+
 /// One container queued for an items refresh in a warm pass. Collected during a
 /// cheap enumeration pass so the TOTAL is known up front (for "fetched X of N"
 /// progress) and the set can be refreshed concurrently.
@@ -228,6 +239,7 @@ impl CacheRefresher {
             db,
             observer,
             notify: Arc::new(Notify::new()),
+            reschedule: Arc::new(Notify::new()),
             in_flight: Arc::new(Mutex::new(false)),
             pass_forcing: Arc::new(Mutex::new(Forcing::None)),
             busy_families: Arc::new(Mutex::new(std::collections::HashSet::new())),
@@ -269,14 +281,14 @@ impl CacheRefresher {
             worker.warm_all(forcing).await;
 
             loop {
-                let minutes = worker.read_interval_minutes();
-                let dur = StdDuration::from_secs(u64::from(minutes) * 60);
-                tokio::select! {
-                    _ = tokio::time::sleep(dur) => {
-                        debug!(target: "aperio::cache", ?dur, "periodic cache warm tick");
+                match worker.next_wake().await {
+                    Wake::Tick => {
+                        debug!(target: "aperio::cache", "periodic cache warm tick");
                         worker.warm_all(false).await;
                     }
-                    _ = worker.notify.notified() => {
+                    // The interval changed: measure the wait again.
+                    Wake::Retime => continue,
+                    Wake::Trigger => {
                         // Forced only when the wake came from a USER action
                         // (`trigger`); an automatic wake (`trigger_background`,
                         // e.g. accounts that just arrived over sync) still
@@ -291,6 +303,23 @@ impl CacheRefresher {
                 }
             }
         });
+    }
+
+    /// What ends the periodic loop's wait: the interval ran out, a pass was
+    /// asked for, or the interval changed and the wait is measured again.
+    async fn next_wake(&self) -> Wake {
+        let interval = crate::user_prefs::sync_interval(&self.db);
+        tokio::select! {
+            _ = tokio::time::sleep(interval) => Wake::Tick,
+            _ = self.notify.notified() => Wake::Trigger,
+            _ = self.reschedule.notified() => Wake::Retime,
+        }
+    }
+
+    /// The refresh interval changed (here, or on another device): the
+    /// periodic loop measures its wait again from now, without a pass.
+    pub fn interval_changed(&self) {
+        self.reschedule.notify_one();
     }
 
     /// Wake the worker for an immediate pass on the user's manual refresh.
@@ -351,16 +380,6 @@ impl CacheRefresher {
             fetched_targets: None,
             outcome: None,
         }
-    }
-
-    fn read_interval_minutes(&self) -> u32 {
-        let repo = UserPrefsRepo::new(&self.db);
-        repo.get(PREF_CACHE_REFRESH_INTERVAL_MINUTES)
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<u32>().ok())
-            .map(|m| m.max(1))
-            .unwrap_or(DEFAULT_INTERVAL_MINUTES)
     }
 
     /// One full warm pass over every external account: enumerate the containers,
@@ -1001,6 +1020,58 @@ mod tests {
             assert!(!last.refreshing, "the passes ended");
             last.outcome.clone().expect("the end carries an outcome")
         }
+    }
+
+    /// A change of the refresh interval ends the wait at once, so it is
+    /// measured again.
+    #[tokio::test]
+    async fn a_changed_interval_ends_the_wait_at_once() {
+        let (refresher, _gated, _) = refresher();
+        crate::user_prefs::UserPrefsRepo::new(&refresher.db)
+            .set(sync_engine::PREF_SYNC_INTERVAL_MINUTES, "240")
+            .unwrap();
+        let waiting = {
+            let refresher = Arc::clone(&refresher);
+            tokio::spawn(async move { refresher.next_wake().await })
+        };
+        tokio::task::yield_now().await;
+        refresher.interval_changed();
+        let wake = tokio::time::timeout(StdDuration::from_secs(2), waiting)
+            .await
+            .expect("the wait ends at once, not after 240 minutes")
+            .unwrap();
+        assert_eq!(wake, Wake::Retime);
+    }
+
+    /// In the running loop, the re-timed wait runs no pass of its own: only
+    /// the interval's own tick or a request does.
+    #[tokio::test]
+    async fn a_changed_interval_runs_no_pass_in_the_loop() {
+        let (refresher, gated, statuses) = refresher();
+        crate::user_prefs::UserPrefsRepo::new(&refresher.db)
+            .set(sync_engine::PREF_SYNC_INTERVAL_MINUTES, "240")
+            .unwrap();
+        refresher.start_periodic(&tokio::runtime::Handle::current());
+        // Cut the start delay short, and let the first pass through.
+        refresher.trigger_background();
+        gated.entered.notified().await;
+        gated.release.notify_one();
+        let ended = |statuses: &Statuses| {
+            statuses
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|s| !s.refreshing)
+                .count()
+        };
+        while ended(&statuses) == 0 {
+            tokio::time::sleep(StdDuration::from_millis(10)).await;
+        }
+        refresher.interval_changed();
+        tokio::time::sleep(StdDuration::from_millis(200)).await;
+        assert_eq!(gated.listings.load(Ordering::SeqCst), 1, "no second pass");
+        assert_eq!(ended(&statuses), 1);
     }
 
     fn refresher() -> (Arc<CacheRefresher>, Arc<Gated>, Arc<Statuses>) {

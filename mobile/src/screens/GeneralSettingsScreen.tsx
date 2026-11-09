@@ -53,7 +53,10 @@ import {
   useNotificationPermission,
   type NotificationPermission,
 } from '../state/notificationPermission';
-import { useBackgroundSyncPref } from '../state/backgroundSync';
+import { followBackgroundInterval, useBackgroundSyncPref } from '../state/backgroundSync';
+import { setUserPref } from '../api/prefs';
+import { syncStatus } from '../api/sync';
+import { rearmPeriodicRound } from '../api/syncTriggers';
 import { useHapticsPref } from '../state/haptics';
 import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
 import { useSoundPref } from '../state/useSoundPref';
@@ -77,6 +80,11 @@ const PERMISSION_STATUS_KEY = {
 // and the global default reminder sound; each section title is an accessibility
 // heading (so screen-reader heading navigation reaches them). The desktop's
 // system-tray section is Tauri-only and intentionally absent on mobile.
+
+/** The one refresh interval's key and its choices, in minutes (the same as on
+ *  the desktop). */
+const REFRESH_INTERVAL_PREF = 'sync.intervalMinutes';
+const REFRESH_INTERVAL_PRESETS: readonly number[] = [1, 5, 15, 30, 60, 240];
 
 export default function GeneralSettingsScreen() {
   const { t, i18n } = useTranslation();
@@ -260,6 +268,51 @@ export default function GeneralSettingsScreen() {
   // Device-local OS background sync (default on) — wakes the app to sync while
   // it's backgrounded/closed; the OS decides the exact timing.
   const [bgSync, setBgSync] = useBackgroundSyncPref();
+  // The one refresh interval (synced `sync.intervalMinutes`; Toni, 2026-11-09):
+  // how often the open app refreshes its accounts and syncs, with or without a
+  // sync target. Read as the host resolves it, again whenever the screen shows.
+  const [refreshInterval, setRefreshInterval] = useState<number | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      void syncStatus().then(
+        (status) => {
+          if (alive) setRefreshInterval(status.interval_minutes);
+        },
+        () => undefined,
+      );
+      return () => {
+        alive = false;
+      };
+    }, []),
+  );
+  const onRefreshIntervalChange = useCallback(
+    async (minutes: number) => {
+      try {
+        await setUserPref(REFRESH_INTERVAL_PREF, String(minutes));
+        setRefreshInterval((await syncStatus()).interval_minutes);
+        rearmPeriodicRound();
+        void followBackgroundInterval();
+        AccessibilityInfo.announceForAccessibility(
+          t('dialogs.settings.general.refreshIntervalChanged', { count: minutes }),
+        );
+      } catch (err) {
+        AccessibilityInfo.announceForAccessibility(
+          t('mobile.error', { message: err instanceof Error ? err.message : String(err) }),
+        );
+      }
+    },
+    [t],
+  );
+  const refreshIntervalOptions = useMemo(() => {
+    const presets = REFRESH_INTERVAL_PRESETS.includes(refreshInterval ?? 5)
+      ? REFRESH_INTERVAL_PRESETS
+      : [...REFRESH_INTERVAL_PRESETS, refreshInterval ?? 5].sort((a, b) => a - b);
+    return presets.map((min) => ({
+      value: min,
+      label: t('dialogs.settings.general.refreshIntervalOption', { count: min }),
+    }));
+  }, [refreshInterval, t]);
   // Device-local app lock (default off) — biometrics / device code on start.
   // Both toggle directions demand one successful OS authentication. Every
   // outcome of the ASYNC flip is ANNOUNCED: the switch's own state change
@@ -584,6 +637,23 @@ export default function GeneralSettingsScreen() {
               </>
             )}
           </>
+        )}
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t('dialogs.settings.general.refreshHeading')}
+        </Text>
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.general.refreshIntervalHint')}
+        </Text>
+        {refreshInterval != null && (
+          <RadioGroup<number>
+            label={t('dialogs.settings.general.refreshIntervalLabel')}
+            value={refreshInterval}
+            options={refreshIntervalOptions}
+            onChange={(min) => void onRefreshIntervalChange(min)}
+          />
         )}
       </View>
 

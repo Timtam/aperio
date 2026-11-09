@@ -710,7 +710,7 @@
         "appBadgeHint": "Show a number on the app icon for today's open tasks plus events still ahead today. Stored on this device only; needs notification permission.",
         "backgroundSyncHeading": "Background sync",
         "backgroundSyncLabel": "Sync in the background",
-        "backgroundSyncHint": "Periodically sync calendars, tasks and contacts even when the app isn't open, so a peer's changes and new reminders arrive on time. The system decides the exact timing (battery and network permitting), so it is not immediate. Stored on this device only.",
+        "backgroundSyncHint": "Periodically sync calendars, tasks and contacts even when the app isn't open, so a peer's changes and new reminders arrive on time. Aperio asks for the refresh interval, at least 15 minutes; the system decides the exact timing (battery and network permitting), so it is not immediate. Stored on this device only.",
         "startupHeading": "Startup",
         "autostartLabel": "Launch Aperio when I sign in",
         "autostartHint": "Aperio launches automatically when you sign in to this computer, so reminders keep firing without opening it by hand. Applies to this device only.",
@@ -737,7 +737,14 @@
         "liveActivitiesOpenSettings": "Live Activities settings",
         "liveActivitiesPromotionOff": "Aperio may not promote its ongoing notification, so it does not show in the status bar. It still appears in the notification shade.",
         "liveActivitiesPromotionOn": "Aperio may now promote its ongoing notification.",
-        "liveActivitiesPromotionOpen": "Promotion setting"
+        "liveActivitiesPromotionOpen": "Promotion setting",
+        "refreshHeading": "Refreshing",
+        "refreshIntervalLabel": "Refresh interval",
+        "refreshIntervalHint": "How often Aperio, while it is open, fetches calendars, task lists and contacts from your accounts again and, if set up, syncs with your other devices. Reminders follow what it finds. This also applies without sync, and your other devices take the value over.",
+        "refreshIntervalOption_one": "{{count}} minute",
+        "refreshIntervalOption_other": "{{count}} minutes",
+        "refreshIntervalChanged_one": "Refresh interval set to {{count}} minute.",
+        "refreshIntervalChanged_other": "Refresh interval set to {{count}} minutes."
       },
       "calendars": {
         "dayViewMode": {
@@ -887,10 +894,7 @@
         "providerPolicyOthers": "For CardDAV, iCloud, and Exchange accounts the privacy policy of your server applies.",
         "providerPolicyAria": "Open {{provider}} privacy policy",
         "syncTitle": "Sync",
-        "syncBody": "All writable address books sync at app start and at the configured interval. Heavy read-only directories (GAL / Suggested People / Other Contacts / Workspace Directory) only pull on demand.",
-        "intervalLabel": "Sync interval",
-        "intervalOption_one": "{{minutes}} minute",
-        "intervalOption_other": "{{minutes}} minutes",
+        "syncBody": "All writable address books sync at app start and at the refresh interval. Heavy read-only directories (GAL / Suggested People / Other Contacts / Workspace Directory) only pull on demand.",
         "syncNow": "Sync now",
         "syncing": "Syncing …",
         "includeDirectoriesLabel": "Include read-only directories",
@@ -899,7 +903,6 @@
         "includeDirectoriesDisabled": "Read-only directories will be skipped on the next sync.",
         "lastSynced": "Last successful sync: {{time}}",
         "neverSynced": "No sync run yet.",
-        "intervalChanged": "Sync interval set to {{minutes}} minutes.",
         "syncStarted": "Sync started.",
         "syncStartedFull": "Full sync (including directories) started.",
         "cacheTitle": "Clear cache",
@@ -909,7 +912,8 @@
         "cacheCleared_zero": "Cache cleared — no connected accounts to notify.",
         "cacheCleared_one": "Cleared cache for 1 account.",
         "cacheCleared_other": "Cleared cache for {{count}} accounts.",
-        "cacheClearFailed": "Couldn't fully clear the cache. See log for details."
+        "cacheClearFailed": "Couldn't fully clear the cache. See log for details.",
+        "intervalMoved": "How often contacts refresh is set by the refresh interval under General. It also covers calendars, tasks and sync."
       },
       "sync": {
         "stateTitle": "State",
@@ -927,10 +931,6 @@
         "compacting": "Compacting …",
         "compactDone": "Snapshot taken, {{deleted}} old log files deleted.",
         "compactWaiting": "Snapshot taken. Old log files stay until these devices have caught up: {{devices}}.",
-        "intervalLabel": "Sync interval",
-        "intervalOption_one": "{{minutes}} minute",
-        "intervalOption_other": "{{minutes}} minutes",
-        "intervalChanged": "Sync interval set to {{minutes}} minutes.",
         "adapterTitle": "Sync adapter",
         "targetTitle": "Sync target",
         "targetIntro": "Pick the account that holds the sync dataset. Its address and credentials live with the account under Settings, Accounts; here you only decide which one this device uses.",
@@ -1094,7 +1094,8 @@
         "adoptRemoteE2ePassphraseLabel": "Dataset passphrase",
         "adoptRemoteE2eAction": "Unlock and continue",
         "adoptRemoteE2eRunning": "Unlocking …",
-        "adoptRemoteE2eOk": "Encryption unlocked. Resuming sync."
+        "adoptRemoteE2eOk": "Encryption unlocked. Resuming sync.",
+        "intervalMoved": "How often this device syncs is set by the refresh interval under General. It also covers calendars, tasks and contacts, with or without sync."
       },
       "dayMarkers": {
         "heading": "Check-in",
@@ -1149,7 +1150,8 @@
         "editHeading": "Edit signature {{name}}",
         "updated": "Signature {{name}} saved.",
         "bindingNone": "None"
-      }
+      },
+      "openGeneral": "Open General settings"
     },
     "syncConflicts": {
       "title": "Sync conflicts",

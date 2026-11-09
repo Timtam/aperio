@@ -146,7 +146,11 @@ ein paar Tage vorher gewarnt zu werden statt erst am Morgen selbst.
 
 Unter **Einstellungen → Kontakte** steuerst du:
 
-- das **Sync-Intervall** und einen Knopf **Jetzt synchronisieren**;
+- einen Knopf **Jetzt synchronisieren**. Wie oft Kontakte von selbst
+  aktualisiert werden, legt das **Aktualisierungs-Intervall** unter
+  **Einstellungen → Allgemein** fest (siehe
+  [Kapitel 09](/de/guides/tutorial/09-synchronization/)); der Abschnitt hat
+  einen Knopf, der dorthin führt;
 - ob **Nur-Lese-Verzeichnisse** (Globale Adressliste, Vorgeschlagene Personen,
   Weitere Kontakte, Workspace-Verzeichnis) bei jedem Sync mitgezogen werden.
   Standardmäßig bleiben sie außen vor, weil sie sehr groß sein können – die

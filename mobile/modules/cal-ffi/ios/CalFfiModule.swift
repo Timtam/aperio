@@ -889,12 +889,6 @@ public class CalFfiModule: Module {
       }
     }.runOnQueue(readQueue)
 
-    AsyncFunction("setContactsSyncInterval") { (minutes: Int) -> Int in
-      try self.hostCoded {
-        Int(try self.host.setContactsSyncInterval(minutes: UInt32(minutes)))
-      }
-    }
-
     AsyncFunction("setContactsIncludeReadOnlyOnSync") { (enabled: Bool) in
       try self.hostCoded {
         try self.host.setContactsIncludeReadOnlyOnSync(enabled: enabled)

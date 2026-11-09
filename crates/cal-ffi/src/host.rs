@@ -6604,9 +6604,10 @@ impl Host {
     //
     // The contact-sync core lives in host-core; mobile drives `run_sync` from the
     // manual button / foreground (the desktop wraps it in a tokio loop). The
-    // observer delivers the "a pass finished" broadcast to JS; the interval +
-    // include-read-only prefs are written DEVICE-LOCAL (the desktop commands do
-    // too — they're a per-device cadence, not synced settings).
+    // observer delivers the "a pass finished" broadcast to JS; the
+    // include-read-only pref is written DEVICE-LOCAL (as the desktop command
+    // is). How often a pass runs is the one synced refresh interval
+    // (`sync.intervalMinutes`, Settings → General), not a contacts pref.
 
     /// Register the JS-side contact-sync observer. A finished pass then pushes
     /// `contacts_synced` (the RN layer updates the footer + re-reads contacts)
@@ -6630,25 +6631,10 @@ impl Host {
             .block_on(async { self.contact_sync.run_sync(&*observer, effective).await }))
     }
 
-    /// The contact-sync status (`{last_synced_at, interval_minutes, in_flight,
+    /// The contact-sync status (`{last_synced_at, in_flight,
     /// include_read_only_on_sync}`) as JSON — the footer + Settings seed.
     pub fn get_contacts_sync_status_json(&self) -> Result<String, StoreError> {
         to_json(&self.contact_sync.status())
-    }
-
-    /// Persist the periodic-sync interval (minutes), clamped to [1, 1440] like
-    /// the desktop command. Device-local; returns the clamped value the UI
-    /// echoes back.
-    pub fn set_contacts_sync_interval(&self, minutes: u32) -> Result<u32, StoreError> {
-        let clamped = minutes.clamp(1, 24 * 60);
-        let shared = self.db.shared();
-        UserPrefsRepo::new(&shared)
-            .set(
-                host_core::contact_sync::PREF_SYNC_INTERVAL_MINUTES,
-                &clamped.to_string(),
-            )
-            .map_err(storage_err)?;
-        Ok(clamped)
     }
 
     /// Persist the "also pull read-only directories" toggle (the literal

@@ -71,10 +71,7 @@ export function useContactSync() {
       const payload = event.payload;
       setStatus((prev) => ({
         last_synced_at: payload.last_synced_at,
-        // Preserve the configured interval (the event payload
-        // doesn't carry it) and assume the pass is done by the
-        // time we receive the event.
-        interval_minutes: prev?.interval_minutes ?? 60,
+        // The pass is done by the time we receive the event.
         in_flight: false,
         // Same preserve-or-default pattern for the new pref —
         // the event doesn't carry it either; ContactsPanel

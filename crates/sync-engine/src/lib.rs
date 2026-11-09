@@ -73,14 +73,58 @@ pub mod test_support;
 /// module, which owns the UI that sets it.
 pub const PREF_DEVICE_NAME: &str = "sync.deviceName";
 
-/// `user_prefs` key holding the configured periodic sync interval, in
-/// minutes. The orchestrator reads it for `SyncStatus`; the desktop
-/// scheduler reads it to time its loop. Canonical definition here,
-/// re-exported by the desktop scheduler.
+/// `user_prefs` key holding the ONE refresh interval, in minutes (Toni,
+/// 2026-11-09). Shown as "Aktualisierungs-Intervall" under Einstellungen →
+/// Allgemein, synced across devices, and read whether or not a sync target
+/// is set up. It paces the device sync round, the refresh of external
+/// calendars, task lists and contacts, and the desktop reminder planner's own
+/// safety read. The key keeps its old name: it always was this setting's.
 pub const PREF_SYNC_INTERVAL_MINUTES: &str = "sync.intervalMinutes";
 
-/// Default periodic sync interval (minutes) when the pref is unset.
+/// The interval (minutes) when the pref is unset or unreadable.
 pub const DEFAULT_SYNC_INTERVAL_MINUTES: u32 = 5;
+
+/// The shortest interval: a stray "0" must not busy-loop.
+pub const MIN_SYNC_INTERVAL_MINUTES: u32 = 1;
+
+/// The longest interval, a day: beyond it nothing would ever refresh while
+/// the app is open.
+pub const MAX_SYNC_INTERVAL_MINUTES: u32 = 1440;
+
+/// The interval a stored value means, for every reader: parsed as minutes,
+/// held to [`MIN_SYNC_INTERVAL_MINUTES`]..=[`MAX_SYNC_INTERVAL_MINUTES`], the
+/// default when absent or not a number.
+pub fn resolve_sync_interval_minutes(raw: Option<&str>) -> u32 {
+    raw.and_then(|s| s.trim().parse::<u32>().ok())
+        .map(|m| m.clamp(MIN_SYNC_INTERVAL_MINUTES, MAX_SYNC_INTERVAL_MINUTES))
+        .unwrap_or(DEFAULT_SYNC_INTERVAL_MINUTES)
+}
+
+#[cfg(test)]
+mod interval_tests {
+    use super::*;
+
+    #[test]
+    fn a_stored_interval_reads_as_minutes_within_bounds() {
+        assert_eq!(
+            resolve_sync_interval_minutes(None),
+            DEFAULT_SYNC_INTERVAL_MINUTES
+        );
+        assert_eq!(resolve_sync_interval_minutes(Some("30")), 30);
+        assert_eq!(resolve_sync_interval_minutes(Some("0")), 1);
+        assert_eq!(
+            resolve_sync_interval_minutes(Some("abc")),
+            DEFAULT_SYNC_INTERVAL_MINUTES
+        );
+        assert_eq!(resolve_sync_interval_minutes(Some("1440")), 1440);
+        assert_eq!(resolve_sync_interval_minutes(Some("100000")), 1440);
+    }
+
+    #[test]
+    fn the_default_is_five_minutes() {
+        assert_eq!(DEFAULT_SYNC_INTERVAL_MINUTES, 5);
+    }
+}
 
 // ─────────────────────────── round report / status ─────────────────────────
 // Moved verbatim from src-tauri/src/event_log/orchestrator.rs so both the

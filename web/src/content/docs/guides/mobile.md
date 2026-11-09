@@ -94,9 +94,10 @@ are stored **on this device only** (they are not synchronized):
 
 - **Background sync.** Lets the system wake the app to synchronize while it is in
   the background or closed, so a change made on another device – and any new
-  reminders – arrive without you reopening the app. The operating system decides
-  the exact timing (it is not immediate; on Android at least every 15 minutes, on
-  iOS in system-chosen windows), so it is a best-effort catch-up. The app always
+  reminders – arrive without you reopening the app. Aperio asks for the
+  **Refresh interval** (also under General), at least 15 minutes; the operating
+  system decides the exact timing (it is not immediate; on iOS in system-chosen
+  windows), so it is a best-effort catch-up. The app always
   does a full synchronization when you open it, so nothing is ever lost. You can
   see background rounds in the sync log, labelled **Background**. Default: on.
 - **App icon badge.** Shows a number on the app icon for today's open tasks plus

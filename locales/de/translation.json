@@ -707,7 +707,7 @@
         "appBadgeHint": "Zeigt auf dem App-Symbol eine Zahl für die heute noch offenen Aufgaben plus die heute noch anstehenden Termine. Wird nur auf diesem Gerät gespeichert; benötigt die Benachrichtigungsberechtigung.",
         "backgroundSyncHeading": "Hintergrund-Synchronisation",
         "backgroundSyncLabel": "Im Hintergrund synchronisieren",
-        "backgroundSyncHint": "Synchronisiert Kalender, Aufgaben und Kontakte regelmäßig auch bei geschlossener App, damit Änderungen anderer Geräte und neue Erinnerungen rechtzeitig ankommen. Den genauen Zeitpunkt bestimmt das System (abhängig von Akku und Netzwerk), daher nicht sofort. Wird nur auf diesem Gerät gespeichert.",
+        "backgroundSyncHint": "Synchronisiert Kalender, Aufgaben und Kontakte regelmäßig auch bei geschlossener App, damit Änderungen anderer Geräte und neue Erinnerungen rechtzeitig ankommen. Aperio wünscht sich das Aktualisierungs-Intervall, mindestens 15 Minuten; den genauen Zeitpunkt bestimmt das System (abhängig von Akku und Netzwerk), daher nicht sofort. Wird nur auf diesem Gerät gespeichert.",
         "startupHeading": "Systemstart",
         "autostartLabel": "Aperio bei der Anmeldung starten",
         "autostartHint": "Aperio startet automatisch, sobald du dich an diesem Computer anmeldest, damit Erinnerungen weiter ausgelöst werden, ohne die App von Hand zu öffnen. Gilt nur für dieses Gerät.",
@@ -734,7 +734,14 @@
         "liveActivitiesOpenSettings": "Live-Aktivitäten einstellen",
         "liveActivitiesPromotionOff": "Aperio darf seine laufende Benachrichtigung nicht hervorheben; sie erscheint deshalb nicht in der Statusleiste, aber weiter in der Benachrichtigungsleiste.",
         "liveActivitiesPromotionOn": "Aperio darf seine laufende Benachrichtigung jetzt hervorheben.",
-        "liveActivitiesPromotionOpen": "Hervorhebung einstellen"
+        "liveActivitiesPromotionOpen": "Hervorhebung einstellen",
+        "refreshHeading": "Aktualisierung",
+        "refreshIntervalLabel": "Aktualisierungs-Intervall",
+        "refreshIntervalHint": "Wie oft Aperio, solange es geöffnet ist, Kalender, Aufgabenlisten und Kontakte aus deinen Konten neu holt und, wenn eingerichtet, mit deinen anderen Geräten synchronisiert. Erinnerungen richten sich nach dem, was es dabei findet. Gilt auch ohne Synchronisation, und deine anderen Geräte übernehmen den Wert.",
+        "refreshIntervalOption_one": "{{count}} Minute",
+        "refreshIntervalOption_other": "{{count}} Minuten",
+        "refreshIntervalChanged_one": "Aktualisierungs-Intervall auf {{count}} Minute gesetzt.",
+        "refreshIntervalChanged_other": "Aktualisierungs-Intervall auf {{count}} Minuten gesetzt."
       },
       "calendars": {
         "dayViewMode": {
@@ -884,10 +891,7 @@
         "providerPolicyOthers": "Bei CardDAV-, iCloud- und Exchange-Konten gilt die Datenschutzrichtlinie deines jeweiligen Servers.",
         "providerPolicyAria": "Datenschutzerklärung von {{provider}} öffnen",
         "syncTitle": "Synchronisation",
-        "syncBody": "Beim App-Start und in regelmäßigen Abständen werden alle beschreibbaren Kontaktbücher abgeglichen. Globale Adresslisten (GAL, Vorgeschlagene Personen, Andere Kontakte, Verzeichnis) werden nur auf Wunsch komplett gezogen.",
-        "intervalLabel": "Sync-Intervall",
-        "intervalOption_one": "{{minutes}} Minute",
-        "intervalOption_other": "{{minutes}} Minuten",
+        "syncBody": "Beim App-Start und im Aktualisierungs-Intervall werden alle beschreibbaren Kontaktbücher abgeglichen. Globale Adresslisten (GAL, Vorgeschlagene Personen, Andere Kontakte, Verzeichnis) werden nur auf Wunsch komplett gezogen.",
         "syncNow": "Jetzt synchronisieren",
         "syncing": "Wird synchronisiert …",
         "includeDirectoriesLabel": "Schreibgeschützte Verzeichnisse einschließen",
@@ -896,7 +900,6 @@
         "includeDirectoriesDisabled": "Schreibgeschützte Verzeichnisse werden bei der nächsten Synchronisation übersprungen.",
         "lastSynced": "Letzter erfolgreicher Abgleich: {{time}}",
         "neverSynced": "Noch kein Abgleich durchgeführt.",
-        "intervalChanged": "Sync-Intervall auf {{minutes}} Minuten gesetzt.",
         "syncStarted": "Synchronisation gestartet.",
         "syncStartedFull": "Vollständige Synchronisation (inkl. Verzeichnisse) gestartet.",
         "cacheTitle": "Cache leeren",
@@ -906,7 +909,8 @@
         "cacheCleared_zero": "Cache geleert — kein verbundenes Konto musste benachrichtigt werden.",
         "cacheCleared_one": "Cache von 1 Konto geleert.",
         "cacheCleared_other": "Cache von {{count}} Konten geleert.",
-        "cacheClearFailed": "Cache konnte nicht vollständig geleert werden. Details im Log."
+        "cacheClearFailed": "Cache konnte nicht vollständig geleert werden. Details im Log.",
+        "intervalMoved": "Wie oft Kontakte aktualisiert werden, legt das Aktualisierungs-Intervall unter Allgemein fest. Es gilt auch für Kalender, Aufgaben und die Synchronisation."
       },
       "sync": {
         "stateTitle": "Status",
@@ -924,10 +928,6 @@
         "compacting": "Wird kompaktiert …",
         "compactDone": "Snapshot erstellt, {{deleted}} alte Log-Dateien gelöscht.",
         "compactWaiting": "Snapshot erstellt. Alte Log-Dateien bleiben, bis diese Geräte nachgeholt haben: {{devices}}.",
-        "intervalLabel": "Sync-Intervall",
-        "intervalOption_one": "{{minutes}} Minute",
-        "intervalOption_other": "{{minutes}} Minuten",
-        "intervalChanged": "Sync-Intervall auf {{minutes}} Minuten gesetzt.",
         "adapterTitle": "Sync-Adapter",
         "targetTitle": "Synchronisationsziel",
         "targetIntro": "Wähle das Konto, das den Sync-Datensatz hält. Adresse und Zugangsdaten stehen beim Konto unter Einstellungen, Konten; hier entscheidest du nur, welches davon dieses Gerät verwendet.",
@@ -1091,7 +1091,8 @@
         "adoptRemoteE2ePassphraseLabel": "Passphrase des Datensatzes",
         "adoptRemoteE2eAction": "Entsperren und fortfahren",
         "adoptRemoteE2eRunning": "Wird entsperrt …",
-        "adoptRemoteE2eOk": "Verschlüsselung entsperrt. Synchronisation wird fortgesetzt."
+        "adoptRemoteE2eOk": "Verschlüsselung entsperrt. Synchronisation wird fortgesetzt.",
+        "intervalMoved": "Wie oft dieses Gerät synchronisiert, legt das Aktualisierungs-Intervall unter Allgemein fest. Es gilt auch für Kalender, Aufgaben und Kontakte, mit und ohne Synchronisation."
       },
       "dayMarkers": {
         "heading": "Check-in",
@@ -1146,7 +1147,8 @@
         "editHeading": "Signatur {{name}} bearbeiten",
         "updated": "Signatur {{name}} gespeichert.",
         "bindingNone": "Keine"
-      }
+      },
+      "openGeneral": "Allgemeine Einstellungen öffnen"
     },
     "syncConflicts": {
       "title": "Sync-Konflikte",

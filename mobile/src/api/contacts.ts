@@ -182,15 +182,15 @@ export const deleteContactPhoto = (
 // tokio worker loop, mobile drives it from the manual button / foreground (no
 // background loop while suspended). A finished pass fires the native
 // `onContactsSynced` event; the screen seeds its footer from
-// `getContactsSyncStatus` and reconciles on that event. The interval +
-// include-read-only prefs are device-local (a per-device cadence, not synced).
+// `getContactsSyncStatus` and reconciles on that event. How often contacts
+// refresh is the one refresh interval (Allgemein, `sync.intervalMinutes`); the
+// include-read-only pref is device-local.
 
 /** Contact-sync status (the `ContactsSyncStatus` wire shape) — the Settings
- *  footer + the seed for the interval picker / include-read-only toggle. */
+ *  footer + the seed for the include-read-only toggle. */
 export interface ContactsSyncStatus {
   /** RFC-3339 of the last successful pass, or null when never synced. */
   last_synced_at: string | null;
-  interval_minutes: number;
   in_flight: boolean;
   include_read_only_on_sync: boolean;
 }
@@ -213,11 +213,6 @@ export const syncContactsNow = (
 /** The current contact-sync status. */
 export const getContactsSyncStatus = async (): Promise<ContactsSyncStatus> =>
   JSON.parse(await CalFfi.getContactsSyncStatusJson()) as ContactsSyncStatus;
-
-/** Persist the periodic-sync interval (minutes); the Host clamps to [1, 1440]
- *  and returns the clamped value. Device-local. */
-export const setContactsSyncInterval = (minutes: number): Promise<number> =>
-  CalFfi.setContactsSyncInterval(minutes);
 
 /** Persist the "also pull read-only directories" toggle. Device-local. */
 export const setContactsIncludeReadOnlyOnSync = (

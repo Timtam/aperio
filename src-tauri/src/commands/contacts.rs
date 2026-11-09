@@ -30,7 +30,6 @@ use super::{CommandError, CommandResult};
 use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SyncScope};
 use crate::contact_sync::{
     ContactSyncScheduler, ContactsSyncStatus, PREF_INCLUDE_READ_ONLY_ON_SYNC, PREF_LAST_SYNCED_AT,
-    PREF_SYNC_INTERVAL_MINUTES,
 };
 use crate::db::DbHandle;
 // The row shape is declared once, in host-core, so the desktop and the mobile
@@ -541,34 +540,6 @@ pub async fn clear_contacts_cache(
         warn!(?err, "failed to delete contacts.lastSyncedAt");
     }
     Ok(succeeded)
-}
-
-/// Configure the periodic-sync interval. `minutes` is clamped to
-/// at least 1 and at most 24 * 60 = 1440 so a typo doesn't pin
-/// the scheduler into a hot loop or wedge it for a calendar day.
-/// Writes the value to `user_prefs.contacts.syncIntervalMinutes`
-/// — the scheduler re-reads on every tick, so the new interval
-/// applies on the next periodic pass.
-#[tauri::command]
-pub async fn set_contacts_sync_interval(
-    db: State<'_, DbHandle>,
-    minutes: u32,
-) -> CommandResult<u32> {
-    // Clamp aggressively: 1-minute floor avoids the hot-loop
-    // edge case (scheduler also clamps in-memory, but pinning it
-    // at the persistence boundary too means a typo never makes
-    // it into the DB), 24-hour ceiling keeps the value visibly
-    // sensible — the UI's `interval` dropdown offers presets up
-    // to 240 anyway, so the ceiling is just a defensive net.
-    let clamped = minutes.clamp(1, 24 * 60);
-    let shared = db.shared();
-    let repo = UserPrefsRepo::new(&shared);
-    repo.set(PREF_SYNC_INTERVAL_MINUTES, &clamped.to_string())
-        .map_err(|err| CommandError {
-            code: "internal",
-            message: err.to_string(),
-        })?;
-    Ok(clamped)
 }
 
 /// Persist the "also pull read-only directories" toggle from

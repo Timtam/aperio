@@ -80,9 +80,11 @@ pub const SYNC_WHITELIST: &[&str] = &[
     // `window.` prefix, so any future device-local window state stays local.
     "window.closeToTray",
     "window.minimizeToTray",
-    // How often to sync. The only sync key that crosses devices — which
-    // adapter a device uses, and where it points, is that device's own
-    // business and must stay off this list. See the module doc.
+    // The one refresh interval: how often to sync, and to fetch external
+    // calendars, task lists and contacts (Einstellungen → Allgemein). The
+    // only sync key that crosses devices — which adapter a device uses, and
+    // where it points, is that device's own business and must stay off this
+    // list. See the module doc.
     "sync.intervalMinutes",
 ];
 

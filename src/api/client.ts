@@ -1480,7 +1480,6 @@ export const deleteContactPhoto = (id: string, listId?: string) =>
  *  formats it via the user's locale for the panel footer. */
 export interface ContactsSyncStatus {
   last_synced_at: string | null;
-  interval_minutes: number;
   in_flight: boolean;
   /** Current value of the `contacts.includeReadOnlyOnSync` pref.
    *  The Settings → Kontakte checkbox seeds itself from this so
@@ -1532,12 +1531,6 @@ export const getContactsSyncStatus = () =>
  *  the SQLite `contacts` table. */
 export const clearContactsCache = () =>
   invoke<number>('clear_contacts_cache');
-
-/** Update the periodic-sync interval (in minutes). The backend
- *  clamps to [1, 1440] and returns the value actually persisted,
- *  so a typo gets corrected rather than crashing the scheduler. */
-export const setContactsSyncInterval = (minutes: number) =>
-  invoke<number>('set_contacts_sync_interval', { minutes });
 
 // ── External snapshot cache (CACHE-3) ─────────────────────────────────
 
@@ -1929,8 +1922,10 @@ export const configureSyncAdapter = (config: SyncAdapterConfig) =>
 export const selectSyncAccount = (accountId: string, passphrase?: string) =>
   invoke<void>('select_sync_account', { accountId, passphrase: passphrase ?? null });
 
-/** Update the periodic interval (in minutes). Clamps to ≥1 on the
- *  backend; returns the value actually persisted. */
+/** Set the one refresh interval (in minutes; "Aktualisierungs-Intervall",
+ *  Einstellungen → Allgemein): sync, external data, contacts and reminders,
+ *  with or without a sync target. The backend clamps to 1..=1440 and returns
+ *  the value actually persisted. */
 export const setSyncInterval = (minutes: number) =>
   invoke<number>('set_sync_interval', { minutes });
 

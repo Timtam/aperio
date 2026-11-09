@@ -70,7 +70,8 @@ it over a share on the local network.
 
 ## Reconciliation and conflicts
 
-- Reconciliation happens automatically in the background and on startup.
+- Reconciliation happens automatically in the background and on startup, at
+  the refresh interval (see below).
 - You can also trigger a reconciliation **manually**.
 - If two devices edit the same entry, Aperio detects the **conflict** and
   resolves it in a comprehensible way, or asks which version should win.
@@ -78,6 +79,29 @@ it over a share on the local network.
   task setting on your phone and the open desktop window picks it up with the
   next reconciliation, no restart. If the settings page happens to be open, the
   change is announced.
+
+## How often Aperio refreshes
+
+One setting decides how often Aperio, while it is open, does all of this:
+**Settings → General → Refresh interval** (1, 5, 15, 30, 60 or 240 minutes;
+5 by default). At that interval Aperio
+
+- fetches calendars, task lists and contacts from your accounts again,
+- reconciles with your other devices, if synchronization is set up,
+- and lets reminders follow what it found: an appointment a colleague added
+  rings on time, without you opening the calendar.
+
+It works with or without synchronization, and you can set it either way. The
+value travels: set it on one device, and your others use it too. The sections
+**Sync** and **Contacts** each say where it lives and have a button
+that takes you there.
+
+On the phone this happens while Aperio is open. With background sync on, the
+phone also wakes Aperio now and then while it is closed; it asks for the
+refresh interval, at least 15 minutes, and the system decides when.
+
+A short interval keeps everything current and asks your providers more
+often. If you use Aperio on many devices, 10 to 15 minutes is a good choice.
 
 ## A new device, and catching up
 
