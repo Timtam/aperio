@@ -2592,7 +2592,7 @@ Erinnerungen können sowohl für **Termine** als auch für **Aufgaben** konfigur
 | **Beim Öffnen der App** | Erinnerung beim nächsten App-Start nach dem Fälligkeitszeitpunkt, am Handy bei jedem Öffnen (Start und Rückkehr in den Vordergrund; Toni, 2026-11-08), einmal je Gerät (gemerkt in `app_start_rung`, nicht synchronisiert; Aufgaben und ganztägige Termine nach der Wanduhr, damit ein Zonenwechsel nicht noch einmal klingelt). Bei einer Serie, auch einer Aufgaben-Serie, zählt das letzte vergangene Vorkommen: einmal nach jedem, mehrere verpasste ergeben eine. Was länger als 400 Tage zurückliegt, klingelt bei keinem Start mehr. Erledigte und abgebrochene Aufgaben klingeln nicht, auch bei keiner anderen Art (Entscheidungen Toni, 2026-11-08) |
 | **E-Mail** | Erinnerung per E-Mail (wo vom jeweiligen Adapter unterstützt) |
 
-Standardwerte für neue Termine und Aufgaben sind global und unabhängig voneinander konfigurierbar (z.B. "Termine: 15 Minuten vorher", "Aufgaben: am Vorabend um 18:00 Uhr").
+Standardwerte für neue Termine und Aufgaben sind global und unabhängig voneinander konfigurierbar (z.B. "Termine: 15 Minuten vorher", "Aufgaben: am Vorabend um 18:00 Uhr"). **Nicht gebaut (Stand 2026-11-09):** Standard-Erinnerungen gibt es nur je Kalender (Einstellungen → Kalender, „Nur in Aperio“ oder „Neuen Terminen angehängt“). Für Aufgaben gibt es keine Standard-Erinnerung am Eintrag, weder global noch je Liste, nur die globalen Tagesstart-Erinnerungen an Fristen (Einstellungen → Aufgaben, je Aufgabe überschreibbar als „Frühe Erinnerung“).
 
 #### Erinnerungen ab dem Ende (2026-11-09)
 
@@ -2724,7 +2724,7 @@ Stufe 1 erreicht nur Klicks auf das Banner, solange Aperio läuft. Ein Klick im 
 
 - **Titel:** Termin- oder Aufgabenname
 - **Untertitel:** Bei Terminen Zeitangabe + Ort; bei Aufgaben Fälligkeitsangabe (z.B. "Fällig morgen, 17:00 Uhr" oder "Geplant für heute")
-- **Aktionen:** "Öffnen" (springt zum Termin/zur Aufgabe in der App), "Snooze" (konfigurierbare Snooze-Dauer); bei Aufgaben zusätzlich "Erledigt" (markiert die Aufgabe direkt als abgeschlossen)
+- **Aktionen:** "Öffnen" (springt zum Termin/zur Aufgabe in der App), "Snooze" (konfigurierbare Snooze-Dauer); bei Aufgaben zusätzlich "Erledigt" (markiert die Aufgabe direkt als abgeschlossen). **Geplant, nicht gebaut** (TODO A5): Die Mitteilungen haben noch keine Knöpfe. Gebaut ist der Klick auf die Mitteilung selbst (oben; Windows-Banner und Handy), der öffnet, worum es geht.
 - Screen Reader lesen den Benachrichtigungsinhalt vollständig vor (plattformseitig gewährleistet)
 
 #### Ganztägige Termine sagen keine Uhrzeit — und wie der Host an Wörter kommt
@@ -2841,6 +2841,8 @@ Fehlt eine referenzierte Custom-Datei lokal, fällt die Wiedergabe auf den Syste
 
 ### 14.5 Snooze-Funktion
 
+**Geplant, nicht gebaut** (TODO A5): Eine ausgelöste Erinnerung lässt sich noch nicht schlummern. Gebaut ist nur „Später erinnern“ der Tagesstart-Übersicht, das sie für vier Stunden zurückstellt.
+
 - Snooze-Optionen: 5 Min, 10 Min, 15 Min, 30 Min, 1 Std (konfigurierbar)
 - Snooze ist ausschließlich lokal – es wird kein neuer API-seitiger Alarm gesetzt
 - Maximale Snooze-Anzahl pro Erinnerung konfigurierbar (Standard: unbegrenzt)
@@ -2849,7 +2851,7 @@ Fehlt eine referenzierte Custom-Datei lokal, fällt die Wiedergabe auf den Syste
 
 - Alle Benachrichtigungen werden von Screen Readern plattformseitig vorgelesen, unter Windows aber erst, wenn Windows den Toast auch zeigt: Ohne Startmenü-Eintrag (§14.3) liest NVDA nichts, weil nichts erscheint
 - Der Hinweis „Erinnerungen werden nicht angezeigt“ (§14.3) öffnet mit dem Fokus auf seiner Erklärung, damit NVDA den Grund vor den Knöpfen liest; `Tab` führt zu „Benachrichtigungen einrichten“, dann zu „Nicht jetzt“. Er öffnet nur im fokussierten Fenster und auf leerem Dialog-Stapel. Erfolg und Entfernen in den Einstellungen werden einmal angesagt, ein Fehler steht als eine Alert-Zeile da
-- Die Snooze- und Öffnen-Aktionen sind per Tastatur erreichbar (plattformseitig)
+- Die Snooze- und Öffnen-Aktionen sind per Tastatur erreichbar (plattformseitig), sobald es sie gibt (§14.5, TODO A5). In Aperios Fenster wird eine ausgelöste Erinnerung nicht noch einmal angesagt; sie kommt nur als Mitteilung des Betriebssystems
 - In der App selbst gibt es eine **Erinnerungs-Übersicht** (zugänglich per `Ctrl+Shift+R`): eine chronologische Liste aller anstehenden und vergangenen Erinnerungen, vollständig tastaturnavigierbar
 
 ### 14.7 Live-Aktivitäten (Handy, gebaut)

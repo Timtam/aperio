@@ -131,8 +131,8 @@ nicht synchronisiert):
 
 Erinnerungen werden als **lokale Benachrichtigungen** zugestellt. Bei der ersten
 Nutzung fragt die App nach der **Benachrichtigungsberechtigung** – erteile sie,
-damit Erinnerungen (und das App-Symbol-Badge) erscheinen können. Erinnerungstöne,
-Vorlaufzeiten und Schlummern funktionieren wie unter
+damit Erinnerungen (und das App-Symbol-Badge) erscheinen können. Erinnerungstöne
+und Vorlaufzeiten funktionieren wie unter
 [Benachrichtigungen](/de/guides/tutorial/07-notifications/) beschrieben.
 
 **Ein Tipp auf eine Erinnerung** öffnet, worum es geht: einen Termin im
