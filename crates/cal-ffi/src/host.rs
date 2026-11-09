@@ -6604,9 +6604,10 @@ impl Host {
     //
     // The contact-sync core lives in host-core; mobile drives `run_sync` from the
     // manual button / foreground (the desktop wraps it in a tokio loop). The
-    // observer delivers the "a pass finished" broadcast to JS; the interval +
-    // include-read-only prefs are written DEVICE-LOCAL (the desktop commands do
-    // too — they're a per-device cadence, not synced settings).
+    // observer delivers the "a pass finished" broadcast to JS; the
+    // include-read-only pref is written DEVICE-LOCAL (as the desktop command
+    // is). How often a pass runs is the one synced refresh interval
+    // (`sync.intervalMinutes`, Settings → General), not a contacts pref.
 
     /// Register the JS-side contact-sync observer. A finished pass then pushes
     /// `contacts_synced` (the RN layer updates the footer + re-reads contacts)

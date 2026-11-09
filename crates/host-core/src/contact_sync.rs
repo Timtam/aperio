@@ -149,10 +149,9 @@ impl ContactSyncCore {
         Arc::clone(&self.notify)
     }
 
-    /// Read the configured interval from `user_prefs`. Defaults to
-    /// `DEFAULT_SYNC_INTERVAL_MINUTES` when missing or unparseable.
-    /// Values below 1 minute clamp to 1 so a typo (`0`) doesn't pin
-    /// the worker into a hot loop.
+    /// The one refresh interval (`sync_engine::PREF_SYNC_INTERVAL_MINUTES`),
+    /// resolved by `sync_engine::resolve_sync_interval_minutes`: 1..=1440
+    /// minutes, default 5.
     pub fn read_interval_minutes(&self) -> u32 {
         // The one refresh interval (Einstellungen → Allgemein): contacts
         // have no interval of their own any more (Toni, 2026-11-09).

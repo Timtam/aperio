@@ -843,9 +843,10 @@ pub fn run() {
             // external adapter on user demand.
             commands::sync_contacts_now,
             commands::get_contacts_sync_status,
-            // Phase 10k: Settings → Kontakte. Cache management +
-            // configurable sync interval; the privacy notice is
-            // a frontend-only concern routed through user_prefs.
+            // Phase 10k: Settings → Kontakte. Cache management; how often
+            // contacts refresh is the one refresh interval
+            // (`set_sync_interval`, Settings → General). The privacy notice
+            // is a frontend-only concern routed through user_prefs.
             commands::clear_contacts_cache,
             commands::set_contacts_include_read_only_on_sync,
             // Phase Sd (DESIGN.md §19): cross-device sync. The
@@ -1006,8 +1007,9 @@ pub fn run() {
             app.manage(scheduler);
 
             // Phase 10j: contact sync scheduler. Boots its own
-            // periodic worker (default 60 min, configurable via
-            // user_prefs) plus runs a one-shot pass shortly after
+            // periodic worker (paced by the one refresh interval,
+            // `sync.intervalMinutes`, default 5 min; re-timed by
+            // `interval_changed`) plus runs a one-shot pass shortly after
             // app start. Stored in State so the
             // `sync_contacts_now` command can drive a manual pass
             // through the same in-flight guard.

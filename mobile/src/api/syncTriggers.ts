@@ -33,7 +33,7 @@ import { useEffect } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { refreshRemindersSoon } from '../reminders/scheduler';
-import { initBackgroundSync } from '../state/backgroundSync';
+import { followBackgroundInterval, initBackgroundSync } from '../state/backgroundSync';
 import { createRoundLoop, runRound } from './periodicRound';
 import { pushNow, syncNow, syncStatus, warmCacheOnForeground } from './sync';
 
@@ -116,6 +116,13 @@ const roundLoop = createRoundLoop({
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
 });
 
+/** After a launch or foreground round: the timer, and the OS background task
+ *  at the cadence the round may have brought from another device. */
+function afterForegroundRound(): void {
+  roundLoop.start();
+  void followBackgroundInterval();
+}
+
 /** The refresh interval changed here (Einstellungen → Allgemein): measure the
  *  wait for the next round again from now. */
 export function rearmPeriodicRound(): void {
@@ -131,12 +138,13 @@ export function rearmPeriodicRound(): void {
 export function useSyncTriggers(): void {
   useEffect(() => {
     // The launch round (the Host opens lazily on the first bridge call), then
-    // the timer (the app starts active).
+    // the timer (the app starts active). Armed once the round has settled, so
+    // its wait is read after the round's pull: an interval set on another
+    // device meanwhile paces the very next wait.
     void runRound({
       refresh: () => warmCacheOnForeground(),
       syncIfConfigured: () => autoSyncIfConfigured('app_start'),
-    });
-    roundLoop.start();
+    }).finally(afterForegroundRound);
     // Reconcile the OS background-sync registration to the device-local pref —
     // registers (or removes) the BGTaskScheduler/WorkManager task that wakes us
     // to sync while backgrounded/closed.
@@ -144,13 +152,13 @@ export function useSyncTriggers(): void {
 
     const onChange = (state: AppStateStatus) => {
       if (state === 'active') {
-        // Back in the foreground: a round, and the timer again, at the current
-        // interval (it may have changed on another device meanwhile).
+        // Back in the foreground: a round, and the timer again once it has
+        // settled, at the interval it brought (it may have changed on another
+        // device meanwhile).
         void runRound({
           refresh: () => warmCacheOnForeground(),
           syncIfConfigured: () => autoSyncIfConfigured('periodic'),
-        });
-        roundLoop.start();
+        }).finally(afterForegroundRound);
       } else {
         // Off-foreground: pause the timer (no JS runs reliably anyway, and it
         // saves battery); flush a final push when going to background.

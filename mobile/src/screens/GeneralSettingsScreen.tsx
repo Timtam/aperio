@@ -53,7 +53,7 @@ import {
   useNotificationPermission,
   type NotificationPermission,
 } from '../state/notificationPermission';
-import { reapplyBackgroundSync, useBackgroundSyncPref } from '../state/backgroundSync';
+import { followBackgroundInterval, useBackgroundSyncPref } from '../state/backgroundSync';
 import { setUserPref } from '../api/prefs';
 import { syncStatus } from '../api/sync';
 import { rearmPeriodicRound } from '../api/syncTriggers';
@@ -292,7 +292,7 @@ export default function GeneralSettingsScreen() {
         await setUserPref(REFRESH_INTERVAL_PREF, String(minutes));
         setRefreshInterval((await syncStatus()).interval_minutes);
         rearmPeriodicRound();
-        void reapplyBackgroundSync();
+        void followBackgroundInterval();
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.settings.general.refreshIntervalChanged', { count: minutes }),
         );

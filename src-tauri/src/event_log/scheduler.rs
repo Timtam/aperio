@@ -163,6 +163,9 @@ pub struct SyncScheduler {
     /// Same lifecycle as `consecutive_failures` — the manual
     /// `sync_now` path clears it via `reset_failures` on success.
     last_error_code: Arc<Mutex<Option<String>>>,
+    /// Ends the loop's wait so it is measured again, without a round: the
+    /// refresh interval changed ([`interval_changed`]).
+    retime: Arc<Notify>,
 }
 
 impl SyncScheduler {
@@ -190,6 +193,7 @@ impl SyncScheduler {
             started: Arc::new(Mutex::new(false)),
             consecutive_failures: Arc::new(Mutex::new(0)),
             last_error_code: Arc::new(Mutex::new(None)),
+            retime: Arc::new(Notify::new()),
         });
 
         let worker = scheduler.clone();
@@ -230,6 +234,12 @@ impl SyncScheduler {
                         debug!(?interval, "periodic sync tick");
                         worker.run_round(&app, SyncTrigger::Periodic).await;
                     }
+                    _ = worker.retime.notified() => {
+                        // The refresh interval changed: measure the
+                        // wait again from now, without a round.
+                        debug!("sync interval re-timed");
+                        continue;
+                    }
                     _ = worker.kick.notified() => {
                         // Debounce. Sleep a short window, draining
                         // any further kicks that come in via
@@ -269,6 +279,7 @@ impl SyncScheduler {
     async fn run_round<R: Runtime>(&self, app: &AppHandle<R>, trigger: SyncTrigger) {
         self.emit_status(app, None, None);
         let started = Instant::now();
+        let interval_before = self.read_interval_minutes();
         let result = self.orchestrator.sync_now().await;
         let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         match &result {
@@ -295,6 +306,7 @@ impl SyncScheduler {
                     }
                 }
                 Self::emit_settings_changed(app, report);
+                self.follow_interval(app, interval_before, report);
                 Self::emit_day_markers_changed(app, report);
                 // The round may have created external ACCOUNTS (a restore
                 // into a fresh install, or an account added on another
@@ -480,7 +492,8 @@ impl SyncScheduler {
     /// Make an arrived preference reach the REMINDER worker, not just the UI.
     ///
     /// The worker sleeps until its next known trigger and answers external
-    /// events from a five-minute snapshot, so a default reminder set on the
+    /// events from a snapshot that lives one refresh interval (up to a day),
+    /// so a default reminder set on the
     /// other device would otherwise sit in SQLite until that snapshot aged out
     /// AND something happened to wake the worker — and a trigger that should
     /// fire before its next wake-up would be missed outright. Every LOCAL
@@ -776,13 +789,31 @@ impl SyncScheduler {
         UserPrefsRepo::new(&self.db)
             .set(PREF_SYNC_INTERVAL_MINUTES, &clamped.to_string())
             .map_err(|err| err.to_string())?;
-        // Reset the interval clock by faking a kick. The loop will
-        // wake, hit the kick branch, debounce, and (since nothing
-        // mutated) push an empty pending dir — almost free. The
-        // alternative would be a second notify just for the
-        // interval, which complicates the loop for little gain.
-        self.kick.notify_one();
+        // No kick here: the caller (`set_sync_interval`) appends the
+        // SettingsUpdated event, whose kick wakes the loop once to push it,
+        // and `interval_changed` re-times the wait. A kick of its own here
+        // stored a permit and ran a second, empty round.
         Ok(clamped)
+    }
+
+    /// The refresh interval changed while it was being measured.
+    pub fn retime(&self) {
+        self.retime.notify_one();
+    }
+
+    /// After a round: a refresh interval that arrived WITHOUT naming its key
+    /// — a snapshot the round resumed from writes preferences but reports
+    /// none — re-times the loops too. One named in the report already did,
+    /// through `emit_settings_changed`.
+    pub fn follow_interval<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        before: u32,
+        report: &SyncRoundReport,
+    ) {
+        if self.read_interval_minutes() != before && !interval_arrived(&report.settings_keys) {
+            interval_changed(app);
+        }
     }
 }
 
@@ -812,11 +843,15 @@ fn interval_arrived(keys: &[String]) -> bool {
 }
 
 /// The one refresh interval changed, here or on another device: every loop
-/// it paces measures its wait again from now, without an extra pass. The
-/// sync loop itself re-reads it after its round; this reaches the others —
-/// the refresh of external data, the contacts pass and the reminder
-/// planner, whose safety read and empty-horizon retry follow it.
+/// it paces measures its wait again from now — the sync loop
+/// ([`SyncScheduler::retime`]), the refresh of external data and the
+/// contacts pass, none of them with an extra pass. The reminder planner
+/// plans again at once: a snapshot older than a shortened interval is read
+/// again then, and its empty-horizon retry follows the new value.
 pub fn interval_changed<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(sync) = app.try_state::<Arc<SyncScheduler>>() {
+        sync.retime();
+    }
     if let Some(refresher) = app.try_state::<Arc<CacheRefresher>>() {
         refresher.interval_changed();
     }

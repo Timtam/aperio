@@ -45,9 +45,9 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 import CalFfi from '../../modules/cal-ffi';
 
 // Cross-device sync — a full desktop peer (same engine, statically-embedded
-// adapters). This screen keeps the status display, periodic-interval +
-// compaction controls, E2E management, the stale-resume + adopt-encryption
-// banners, and the protocol.
+// adapters). This screen keeps the status display, a pointer to the one
+// refresh interval under Settings → General, the compaction control, E2E
+// management, the stale-resume + adopt-encryption banners, and the protocol.
 //
 // ## Why there is no connect form here any more
 //
@@ -61,8 +61,6 @@ import CalFfi from '../../modules/cal-ffi';
 // The form itself is unchanged and still rendered by the first-launch wizard,
 // which is the one place that legitimately has no accounts yet AND has to decide
 // between joining an existing dataset and starting a new one.
-
-
 
 export default function SyncScreen() {
   const { t, i18n } = useTranslation();

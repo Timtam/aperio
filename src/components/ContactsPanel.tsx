@@ -21,11 +21,10 @@ import { useGoToSettingsTab } from '../state/useGoToSettingsTab';
  *      modal on first-connect (`PrivacyNoticeModal`) is a separate
  *      surface for the same content.
  *
- *   2. **Sync interval.** Dropdown over a small preset list
- *      (15 / 30 / 60 / 120 / 240 min). The backend clamps
- *      and persists; the scheduler re-reads on every tick, so a
- *      change here applies on the next periodic pass without an
- *      app restart.
+ *   2. **Refresh interval.** None of its own: a sentence and a
+ *      button to Settings → General, where the one refresh
+ *      interval (`sync.intervalMinutes`) lives
+ *      (`useGoToSettingsTab('general')`).
  *
  *   3. **Cache management.** "Cache leeren" wipes every external
  *      adapter's in-memory contact snapshot + resets the persisted

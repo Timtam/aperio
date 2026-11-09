@@ -1022,11 +1022,11 @@ mod tests {
         }
     }
 
-    /// A change of the refresh interval ends the wait at once so it is
-    /// measured again, and runs no pass of its own.
+    /// A change of the refresh interval ends the wait at once, so it is
+    /// measured again.
     #[tokio::test]
-    async fn a_changed_interval_retimes_the_wait_without_a_pass() {
-        let (refresher, gated, _) = refresher();
+    async fn a_changed_interval_ends_the_wait_at_once() {
+        let (refresher, _gated, _) = refresher();
         crate::user_prefs::UserPrefsRepo::new(&refresher.db)
             .set(sync_engine::PREF_SYNC_INTERVAL_MINUTES, "240")
             .unwrap();
@@ -1041,7 +1041,37 @@ mod tests {
             .expect("the wait ends at once, not after 240 minutes")
             .unwrap();
         assert_eq!(wake, Wake::Retime);
-        assert_eq!(gated.listings.load(Ordering::SeqCst), 0, "no pass ran");
+    }
+
+    /// In the running loop, the re-timed wait runs no pass of its own: only
+    /// the interval's own tick or a request does.
+    #[tokio::test]
+    async fn a_changed_interval_runs_no_pass_in_the_loop() {
+        let (refresher, gated, statuses) = refresher();
+        crate::user_prefs::UserPrefsRepo::new(&refresher.db)
+            .set(sync_engine::PREF_SYNC_INTERVAL_MINUTES, "240")
+            .unwrap();
+        refresher.start_periodic(&tokio::runtime::Handle::current());
+        // Cut the start delay short, and let the first pass through.
+        refresher.trigger_background();
+        gated.entered.notified().await;
+        gated.release.notify_one();
+        let ended = |statuses: &Statuses| {
+            statuses
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|s| !s.refreshing)
+                .count()
+        };
+        while ended(&statuses) == 0 {
+            tokio::time::sleep(StdDuration::from_millis(10)).await;
+        }
+        refresher.interval_changed();
+        tokio::time::sleep(StdDuration::from_millis(200)).await;
+        assert_eq!(gated.listings.load(Ordering::SeqCst), 1, "no second pass");
+        assert_eq!(ended(&statuses), 1);
     }
 
     fn refresher() -> (Arc<CacheRefresher>, Arc<Gated>, Arc<Statuses>) {

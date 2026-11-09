@@ -30,7 +30,8 @@ import { useSyncErrorMessage } from './sync/syncErrorMessage';
  *
  *   1. **State** — connection state + last successful sync + manual
  *      `Sync now` / `Compact now`.
- *   2. **Interval** — periodic-sync preset.
+ *   2. **Interval** — a sentence that the refresh interval lives under
+ *      Settings → General, and a button that opens that tab.
  *   3. **Target** — WHICH of the user's accounts holds the dataset
  *      ([`SyncTargetAccountPicker`](./sync/SyncTargetAccountPicker.tsx)),
  *      plus the summary of the current one and Disconnect.
@@ -90,7 +91,8 @@ export function SyncPanel() {
   // The target CONFIGURATION form (kind picker, per-kind fields, OAuth, the
   // device name, preview→join/init) lives in `SyncTargetConfigForm` and is now
   // rendered only by the first-launch wizard. This panel picks between
-  // accounts and keeps the periodic-interval, compaction and E2E controls.
+  // accounts and keeps the compaction and E2E controls; the refresh interval
+  // moved to Settings → General.
   const [busyCompact, setBusyCompact] = useState(false);
   const [busyDisconnect, setBusyDisconnect] = useState(false);
   // Disconnecting is the one irreversible thing on this screen — it drops the

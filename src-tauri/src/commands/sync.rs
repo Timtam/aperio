@@ -1253,6 +1253,7 @@ pub async fn sync_now(
     scheduler: State<'_, Arc<SyncScheduler>>,
 ) -> CommandResult<SyncRoundReport> {
     let started = std::time::Instant::now();
+    let interval_before = scheduler.read_interval_minutes();
     let result = orchestrator.sync_now().await;
     let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     scheduler.record_manual_outcome(
@@ -1272,6 +1273,8 @@ pub async fn sync_now(
         }
     };
     scheduler.note_success();
+    // A refresh interval that arrived through a snapshot names no key.
+    scheduler.follow_interval(&app, interval_before, &report);
     // A manual round applies foreign events (and can auto-resume a stale
     // device from a snapshot) exactly like the scheduled one, so it can
     // bring in ACCOUNTS whose adapters nobody has built yet. This command
@@ -1586,6 +1589,7 @@ fn register_onboarded_accounts(
 /// post-onboarding heartbeat.
 #[tauri::command]
 pub async fn accept_remote_dataset(
+    app: tauri::AppHandle,
     db: State<'_, DbHandle>,
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     scheduler: State<'_, Arc<SyncScheduler>>,
@@ -1681,6 +1685,9 @@ pub async fn accept_remote_dataset(
     }
     scheduler.kick();
     register_onboarded_accounts(&shared, &registry, &refresher);
+    // The joined dataset's refresh interval came in with its snapshot,
+    // which names no key: re-time every loop to it.
+    crate::event_log::scheduler::interval_changed(&app);
     Ok(report)
 }
 
@@ -1699,6 +1706,7 @@ pub async fn accept_remote_dataset(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn accept_remote_dataset_values(
+    app: tauri::AppHandle,
     db: State<'_, DbHandle>,
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     scheduler: State<'_, Arc<SyncScheduler>>,
@@ -1789,6 +1797,9 @@ pub async fn accept_remote_dataset_values(
     }
     scheduler.kick();
     register_onboarded_accounts(&shared, &registry, &refresher);
+    // The joined dataset's refresh interval came in with its snapshot,
+    // which names no key: re-time every loop to it.
+    crate::event_log::scheduler::interval_changed(&app);
     Ok(report)
 }
 

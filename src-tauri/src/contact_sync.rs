@@ -13,8 +13,9 @@
 //! ## Triggers
 //!   1. **App start** — once, after [`APP_START_DELAY`], so the registry has
 //!      materialised every account and the UI has painted.
-//!   2. **Periodic** — every `contacts.syncIntervalMinutes` minutes (re-read on
-//!      every tick so a settings change applies on the next pass).
+//!   2. **Periodic** — every refresh interval (`sync.intervalMinutes`,
+//!      Settings → General, default 5); a change re-times the wait at once
+//!      through [`ContactSyncScheduler::interval_changed`], without a pass.
 //!   3. **Manual** — the `sync_contacts_now` command (which also wakes this
 //!      loop so the interval clock resets from the manual kick).
 
