@@ -132,12 +132,34 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
   `on_action`, bringt aber notify-rust 4.18 und tauri-winrt-notification 0.8
   mit, deren 0.8.0 die Töne brach; Plan
   `C:/scripts/aperio-livetest/a5-plan-2026-11-08.md`, Option A2).
-- [ ] **Gelöschtes Vorkommen einer externen Serie klingelt bis zu 5 Minuten
-  weiter** (Prüfrunde A5, 2026-11-09): `add_event_exdate` und die externen
-  Lösch-/Änderungsbefehle rufen `scheduler.invalidate()`, aber nicht den
-  TTL-Cache der externen Auslöser (`EXTERNAL_TRIGGERS_TTL`), sodass der alte
-  Auslöser noch feuert und in der Übersicht steht. Ein Klick darauf sagt
-  jetzt „nicht gefunden“; die Ursache ist offen.
+- [x] **Gelöschtes Vorkommen einer externen Serie klingelte bis zu 5 Minuten
+  weiter** (Prüfrunde A5, 2026-11-09; DESIGN §14.1 „Externe Termine und
+  Aufgaben“). Ebenso konnte eine eben gesetzte externe Erinnerung zu spät
+  kommen. Jetzt liest der Desktop-Planer nach einem Schreiben in einen
+  externen Kalender oder eine externe Liste nur diesen einen neu
+  (`external_calendar_written` / `external_task_list_written`), eine
+  gelöschte Liste verliert ihre Erinnerungen ohne Abfrage. Das Löschen
+  eines Kalenders oder einer Liste weckt den Planer jetzt auch, lokal wie
+  extern; eine Antwort auf eine Einladung liest den Kalender neu. Meldet die
+  Aktualisierung externer Daten eine Änderung beim Anbieter, liest der
+  Planer genau diesen Kalender oder diese Liste neu (Tonis Vorschlag,
+  2026-11-09: an die regelmäßige Aktualisierung hängen).
+- [ ] **Ein Intervall für alles** (Toni, 2026-11-09): Das Sync-Intervall
+  (Einstellungen, Sync; `sync.intervalMinutes`, Standard 5 Minuten) steuert
+  auch die Aktualisierung externer Daten am Desktop (heute fest 30 Minuten,
+  `cache.refreshIntervalMinutes`, ohne Einstellung) und die
+  Kontakt-Synchronisierung (heute eigene Auswahl unter Kontakte,
+  `contacts.syncIntervalMinutes`; die Auswahl entfällt, ein Hinweis verweist
+  auf Sync). Der Planer hängt seit dem Punkt oben an dieser Aktualisierung.
+  Handy prüfen: Es aktualisiert externe Daten nach jedem Sync-Durchlauf im
+  Vordergrund, aber nur mit eingerichtetem Sync-Ziel. Kosten: externe Server
+  am Desktop alle 5 statt alle 30 Minuten.
+- [ ] **Erinnerungen eines gelöschten Kontos oder abgeschalteten Adapters
+  klingeln weiter** (Prüfrunde #162, gab es vorher schon): `delete_account`
+  und das Abschalten oder Entfernen eines Plugins (`commands/plugins.rs`)
+  wecken den Planer nicht und leeren seinen Speicher nicht. Ebenso machen
+  lokale Kontakt-Änderungen die Geburtstags-Erinnerungen erst beim nächsten
+  vollen Durchlauf neu.
 - [ ] **Stufe 2: Klicks aus dem Benachrichtigungscenter und nach dem Beenden**
   (Win+N, Eingabe auf einem Aperio-Eintrag; Stufe 1 erreicht nur das Banner,
   solange Aperio läuft). Ohne COM-Aktivator stellt Windows diese Klicks nicht

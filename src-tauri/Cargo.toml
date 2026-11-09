@@ -133,6 +133,8 @@ adapter-local = { workspace = true, features = ["test-support"] }
 # they run against the real DesktopSyncStore but must not touch the OS
 # keychain. test-support only activates for the test build.
 sync-engine = { workspace = true, features = ["test-support"] }
+# The scheduler tests' adapter double (`reminders.rs`, written_containers).
+async-trait.workspace = true
 
 [lints]
 workspace = true

@@ -284,9 +284,13 @@ pub async fn delete_calendar(
     adapter: State<'_, LocalAdapter>,
     event_log: State<'_, Arc<EventLogWriter>>,
     db: State<'_, DbHandle>,
+    scheduler: State<'_, SchedulerHandle>,
     id: String,
 ) -> CommandResult<()> {
     adapter.delete_calendar(&id)?;
+    // The worker sleeps until the next reminder it planned; one of this
+    // calendar's would still ring. Wake it to plan again.
+    scheduler.invalidate();
     event_log.append(SyncEvent::CalendarDeleted(IdPayload { id: id.clone() }));
     // The calendar's events went with it, so no group can go on counting them.
     super::forget_calendar_groupings(&db, &event_log, &id);
@@ -618,6 +622,7 @@ pub async fn create_event(
             // read must show what the provider holds, and a refresh that read
             // it halfway must not land.
             let _ = cache.invalidate_after_create(&account, &request.calendar_id);
+            scheduler.external_calendar_written(&request.calendar_id);
             scheduler.invalidate();
         }
         created?
@@ -639,6 +644,9 @@ pub async fn create_event(
         // them stands (decision 106), or the truncate that follows a split's
         // create would write back every field it carries.
         let _ = cache.invalidate_after_create(&account, &request.calendar_id);
+        // Its reminders ring from the next scan, not when the reminder cache
+        // runs out.
+        scheduler.external_calendar_written(&request.calendar_id);
     }
     scheduler.invalidate();
     Ok(event)
@@ -805,6 +813,7 @@ pub async fn update_event(
                 // The create may still have written at the target (decisions
                 // 203, 210); the source is untouched.
                 let _ = cache.invalidate_after_create(&target_account, &event.calendar_id);
+                scheduler.external_calendar_written(&event.calendar_id);
                 scheduler.invalidate();
             }
             created?
@@ -892,9 +901,11 @@ pub async fn update_event(
         // Write-through: re-fetch both ends of an external move.
         if target_account != LOCAL_ID {
             let _ = cache.invalidate(&target_account, SyncScope::Events, &event.calendar_id);
+            scheduler.external_calendar_written(&event.calendar_id);
         }
         if source_account != LOCAL_ID {
             let _ = cache.invalidate(&source_account, SyncScope::Events, &previous);
+            scheduler.external_calendar_written(&previous);
         }
 
         scheduler.invalidate();
@@ -931,6 +942,7 @@ pub async fn update_event(
                 // detached into a single whose old exception stayed (decision
                 // 277): the next read shows what the provider holds.
                 let _ = cache.invalidate(&target_account, SyncScope::Events, &calendar_id);
+                scheduler.external_calendar_written(&calendar_id);
                 scheduler.invalidate();
                 return Err(err.into());
             }
@@ -956,6 +968,7 @@ pub async fn update_event(
         }
     } else {
         let _ = cache.invalidate(&target_account, SyncScope::Events, &updated.calendar_id);
+        scheduler.external_calendar_written(&updated.calendar_id);
     }
     scheduler.invalidate();
     Ok(updated)
@@ -1002,6 +1015,7 @@ pub async fn delete_event(
             // DELETE failed (decision 277) — so the next read asks the provider
             // what it holds.
             let _ = cache.invalidate(&account, SyncScope::Events, cid);
+            scheduler.external_calendar_written(cid);
         }
         if let Err(err) = deleted {
             scheduler.invalidate();
@@ -1092,6 +1106,7 @@ pub async fn calendar_current_user_email(
 pub async fn respond_to_event(
     registry: State<'_, Arc<AdapterRegistry>>,
     cache: State<'_, Arc<CacheStore>>,
+    scheduler: State<'_, SchedulerHandle>,
     calendar_id: String,
     event_id: String,
     status: AttendeeStatus,
@@ -1112,9 +1127,14 @@ pub async fn respond_to_event(
             message: format!("account '{account}' is not routable"),
         });
     };
-    ext.respond_to_event(&event_id, status, send_response)
-        .await?;
+    let responded = ext.respond_to_event(&event_id, status, send_response).await;
+    // A decline takes an Exchange meeting out of the calendar, and with it
+    // its reminder. Failed or not (decision 277: an answer that was lost may
+    // have landed), the next read and the next scan ask the provider.
     let _ = cache.invalidate(&account, SyncScope::Events, &calendar_id);
+    scheduler.external_calendar_written(&calendar_id);
+    scheduler.invalidate();
+    responded?;
     Ok(())
 }
 
@@ -1247,6 +1267,7 @@ pub async fn add_event_exdate(
             // A skip whose answer was lost may have landed (decision 277):
             // failed or not, the next read asks the provider.
             let _ = cache.invalidate(&account, SyncScope::Events, cid);
+            scheduler.external_calendar_written(cid);
         }
         if let Err(err) = skipped {
             scheduler.invalidate();

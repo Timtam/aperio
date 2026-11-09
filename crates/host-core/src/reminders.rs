@@ -20,7 +20,7 @@ use cal_core::live_activity::LiveOccurrence;
 use cal_core::{
     is_mine_or_unassigned, series_master_id, ContactsFeature, DateRange, Event, EventRecurrence,
     NewEvent, RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind, SoundConfig, Task,
-    TaskRecurrence, TaskStatus,
+    TaskRecurrence, TaskStatus, TaskUser,
 };
 use chrono::{
     DateTime, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc,
@@ -401,53 +401,8 @@ pub async fn enumerate_external_scan(
     db: &SharedConn,
     mut sink: Option<&mut OccurrenceSink>,
 ) -> Vec<Trigger> {
-    let now = Utc::now();
-    let from = now - ChronoDuration::days(EXTERNAL_PAST_DAYS);
-    let to = now + ChronoDuration::days(EXTERNAL_FUTURE_DAYS);
-    // Recurring masters and single events may sit outside the reminder window
-    // yet still ring inside it — widen the FETCH. The expansion of each series
-    // is bounded per item, by its own reminders (`occurrence_triggers`).
-    let (occ_from, occ_to) = occurrence_window(from, to);
-    let range = DateRange::new(occ_from, occ_to);
-
-    // §14.4 sound snapshot. No connection lock is held on this async path, so
-    // loading it here is deadlock-free.
-    let sound_prefs = SoundPrefs::load(db);
-    // Day-carryover anchor for all-day events (below).
-    let day_start = day_start_time(db);
-    // The reminders Aperio keeps for single events of these calendars — read
-    // once for the whole fan-out rather than per event.
-    let mut event_local = event_local_reminder_map(db);
-
-    // Device-local accounts (iOS EventKit / Android CalendarProvider) are
-    // EXCLUDED from Aperio's reminder scheduling: the OS itself fires the alarms
-    // on the device's own calendar + reminders, so scheduling Aperio
-    // notifications for them — including via the calendar-default-reminder
-    // fallback below — would double-notify. Every other external provider
-    // (CalDAV / Graph / EWS / Google / Vikunja / Todoist) doesn't self-notify,
-    // so it stays in.
-    //
-    // An unreadable account list leaves the set EMPTY, i.e. nothing suppressed.
-    // That is the deliberate choice, not an oversight: the two directions trade
-    // a duplicate alert against a missing one, and a missing appointment
-    // reminder is the worse of the two. The scan re-runs on its own cadence, so
-    // the duplicates last at most one pass. Logged so it isn't silent.
-    let device_accounts: std::collections::HashSet<String> = match AccountsRepo::new(db).list() {
-        Ok(accounts) => accounts
-            .into_iter()
-            .filter(|account| account.adapter_kind == AdapterKind::DEVICE_CALENDAR)
-            .map(|account| account.id)
-            .collect(),
-        Err(err) => {
-            warn!(
-                ?err,
-                "reminder scan: couldn't list accounts; device-local calendars may \
-                 double-notify for this pass",
-            );
-            std::collections::HashSet::new()
-        }
-    };
-
+    let mut pass = ExternalPass::load(db);
+    let device_accounts = device_local_accounts(db);
     let mut acc: Vec<Trigger> = Vec::new();
 
     // ── Calendars → events ────────────────────────────────────────────────
@@ -464,8 +419,7 @@ pub async fn enumerate_external_scan(
             }
         };
         for cal in calendars {
-            let defaults = calendar_default_reminders(db, &cal.id);
-            let events = match adapter.get_events(&cal.id, range).await {
+            let events = match adapter.get_events(&cal.id, pass.range).await {
                 Ok(e) => e,
                 Err(err) => {
                     warn!(account_id = %account_id, calendar_id = %cal.id, ?err, "get_events failed during reminder scan");
@@ -478,27 +432,7 @@ pub async fn enumerate_external_scan(
             if device_local {
                 continue;
             }
-            // The events of this calendar are in hand and the window is the
-            // one a reminder could fire in — the moment to find rows whose
-            // event the provider reminted. Whatever moved follows in the map
-            // too, so a repaired reminder fires in this pass.
-            for (old_id, new_id) in
-                heal_local_reminders_for_calendar(db, &cal.id, &events, (range.start, range.end))
-            {
-                if let Some(reminders) = event_local.remove(&(cal.id.clone(), old_id)) {
-                    event_local.insert((cal.id.clone(), new_id), reminders);
-                }
-            }
-            acc.extend(event_triggers(
-                &events,
-                &defaults,
-                &event_local,
-                &sound_prefs,
-                from,
-                to,
-                day_start,
-                false,
-            ));
+            acc.extend(pass.calendar_triggers(db, &cal.id, &events));
         }
     }
 
@@ -527,15 +461,237 @@ pub async fn enumerate_external_scan(
                     continue;
                 }
             };
-            let mine: Vec<Task> = tasks
-                .into_iter()
-                .filter(|t| is_mine_or_unassigned(&t.assignees, me.as_ref()))
-                .collect();
-            acc.extend(task_triggers(&mine, &sound_prefs, from, to));
+            acc.extend(pass.task_list_triggers(tasks, me.as_ref()));
         }
     }
 
     acc
+}
+
+/// What reading ONE external calendar or list again came to
+/// ([`external_calendar_triggers`], [`external_task_list_triggers`]).
+#[derive(Debug)]
+pub enum ContainerTriggers {
+    /// Read: these replace what a cache holds for the container.
+    Read(Vec<Trigger>),
+    /// Not read: no route to an adapter, or the read failed. Keep what the
+    /// cache holds; the next full scan settles it. An empty answer here would
+    /// silence the container until then.
+    Unread,
+    /// More than one account lists this container: a calendar shared into
+    /// two accounts has the same id in both, and each account reads its own
+    /// reminders on it. A route names one of them, so only the full scan
+    /// computes this container.
+    Shared,
+}
+
+/// The reminder triggers of ONE external calendar, computed as the full scan
+/// ([`enumerate_external_triggers`]) computes them.
+///
+/// For a host that keeps the full scan in a cache (the desktop scheduler):
+/// that scan reads every calendar of every account from its server, so it
+/// runs every few minutes, not after each write. After a write to one
+/// calendar, or when the external refresh reports it changed, the host reads
+/// just that one again; else a reminder set or moved a moment ago would ring
+/// late, and one of an occurrence deleted a moment ago would still ring.
+/// A device-local calendar rings nothing here, as in the full scan.
+pub async fn external_calendar_triggers(
+    registry: &Arc<AdapterRegistry>,
+    db: &SharedConn,
+    calendar_id: &str,
+) -> ContainerTriggers {
+    if listed_by_several_accounts(db, ContainerTable::Calendars, calendar_id) {
+        return ContainerTriggers::Shared;
+    }
+    let Some(account_id) = registry.account_for_calendar(calendar_id) else {
+        return ContainerTriggers::Unread;
+    };
+    if device_local_accounts(db).contains(&account_id) {
+        return ContainerTriggers::Read(Vec::new());
+    }
+    let Some(adapter) = registry.calendar_adapter(&account_id) else {
+        return ContainerTriggers::Unread;
+    };
+    let mut pass = ExternalPass::load(db);
+    match adapter.get_events(calendar_id, pass.range).await {
+        Ok(events) => ContainerTriggers::Read(pass.calendar_triggers(db, calendar_id, &events)),
+        Err(err) => {
+            warn!(account_id = %account_id, ?err, "get_events failed while refreshing one calendar's reminders");
+            ContainerTriggers::Unread
+        }
+    }
+}
+
+/// [`external_calendar_triggers`] for ONE external task list: its tasks that
+/// are mine or nobody's, as the full scan reads them.
+pub async fn external_task_list_triggers(
+    registry: &Arc<AdapterRegistry>,
+    db: &SharedConn,
+    list_id: &str,
+) -> ContainerTriggers {
+    if listed_by_several_accounts(db, ContainerTable::TaskLists, list_id) {
+        return ContainerTriggers::Shared;
+    }
+    let Some(account_id) = registry.account_for_task_list(list_id) else {
+        return ContainerTriggers::Unread;
+    };
+    if device_local_accounts(db).contains(&account_id) {
+        return ContainerTriggers::Read(Vec::new());
+    }
+    let Some(adapter) = registry.task_adapter(&account_id) else {
+        return ContainerTriggers::Unread;
+    };
+    let pass = ExternalPass::load(db);
+    let me = adapter.current_user().await.ok().flatten();
+    match adapter.get_tasks(list_id).await {
+        Ok(tasks) => ContainerTriggers::Read(pass.task_list_triggers(tasks, me.as_ref())),
+        Err(err) => {
+            warn!(account_id = %account_id, ?err, "get_tasks failed while refreshing one list's reminders");
+            ContainerTriggers::Unread
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ContainerTable {
+    Calendars,
+    TaskLists,
+}
+
+/// Whether the external listing cache has this container under more than
+/// one account. The route map keeps one account per id, the listing cache
+/// one row per account and id. Unreadable counts as no: the container is
+/// then read through its route, as if only one account had it.
+fn listed_by_several_accounts(db: &SharedConn, table: ContainerTable, id: &str) -> bool {
+    let sql = match table {
+        ContainerTable::Calendars => {
+            "SELECT COUNT(DISTINCT account_id) FROM cache_calendars WHERE id = ?1"
+        }
+        ContainerTable::TaskLists => {
+            "SELECT COUNT(DISTINCT account_id) FROM cache_task_lists WHERE id = ?1"
+        }
+    };
+    let Ok(conn) = db.lock() else {
+        return false;
+    };
+    conn.query_row(sql, params![id], |row| row.get::<_, i64>(0))
+        .map(|accounts| accounts > 1)
+        .unwrap_or(false)
+}
+
+/// What every external collector reads once per pass: the window, the §14.4
+/// sound snapshot, the day-carryover anchor and the reminders Aperio keeps
+/// for single events. The full scan reads it once for all accounts; a
+/// refresh of one calendar or list reads it for itself. Both then turn rows
+/// into triggers through the same two methods, so a refreshed calendar rings
+/// as the full scan would have it ring.
+struct ExternalPass {
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    /// The FETCH window: wider than `[from, to]`, because recurring masters
+    /// and single events may sit outside the reminder window yet still ring
+    /// inside it. The expansion of each series is bounded per item, by its
+    /// own reminders (`occurrence_triggers`).
+    range: DateRange,
+    sound_prefs: SoundPrefs,
+    /// Day-carryover anchor for all-day events.
+    day_start: NaiveTime,
+    /// The reminders Aperio keeps for single events of these calendars.
+    event_local: EventLocalReminderMap,
+}
+
+impl ExternalPass {
+    /// No connection lock is held on this async path, so loading the
+    /// snapshots here is deadlock-free.
+    fn load(db: &SharedConn) -> Self {
+        let now = Utc::now();
+        let from = now - ChronoDuration::days(EXTERNAL_PAST_DAYS);
+        let to = now + ChronoDuration::days(EXTERNAL_FUTURE_DAYS);
+        let (occ_from, occ_to) = occurrence_window(from, to);
+        Self {
+            from,
+            to,
+            range: DateRange::new(occ_from, occ_to),
+            sound_prefs: SoundPrefs::load(db),
+            day_start: day_start_time(db),
+            event_local: event_local_reminder_map(db),
+        }
+    }
+
+    /// The triggers of one calendar's events, read in this pass.
+    fn calendar_triggers(
+        &mut self,
+        db: &SharedConn,
+        calendar_id: &str,
+        events: &[Event],
+    ) -> Vec<Trigger> {
+        let defaults = calendar_default_reminders(db, calendar_id);
+        // The events of this calendar are in hand and the window is the one a
+        // reminder could fire in — the moment to find rows whose event the
+        // provider reminted. Whatever moved follows in the map too, so a
+        // repaired reminder fires in this pass.
+        for (old_id, new_id) in heal_local_reminders_for_calendar(
+            db,
+            calendar_id,
+            events,
+            (self.range.start, self.range.end),
+        ) {
+            if let Some(reminders) = self.event_local.remove(&(calendar_id.to_string(), old_id)) {
+                self.event_local
+                    .insert((calendar_id.to_string(), new_id), reminders);
+            }
+        }
+        event_triggers(
+            events,
+            &defaults,
+            &self.event_local,
+            &self.sound_prefs,
+            self.from,
+            self.to,
+            self.day_start,
+            false,
+        )
+    }
+
+    /// The triggers of one list's tasks: only those that are mine or nobody's.
+    fn task_list_triggers(&self, tasks: Vec<Task>, me: Option<&TaskUser>) -> Vec<Trigger> {
+        let mine: Vec<Task> = tasks
+            .into_iter()
+            .filter(|t| is_mine_or_unassigned(&t.assignees, me))
+            .collect();
+        task_triggers(&mine, &self.sound_prefs, self.from, self.to)
+    }
+}
+
+/// The device-local accounts (iOS EventKit / Android CalendarProvider). They
+/// are EXCLUDED from Aperio's reminder scheduling: the OS itself fires the
+/// alarms on the device's own calendar + reminders, so scheduling Aperio
+/// notifications for them — including via the calendar-default-reminder
+/// fallback — would double-notify. Every other external provider (CalDAV /
+/// Graph / EWS / Google / Vikunja / Todoist) doesn't self-notify, so it stays
+/// in.
+///
+/// An unreadable account list leaves the set EMPTY, i.e. nothing suppressed.
+/// That is the deliberate choice, not an oversight: the two directions trade
+/// a duplicate alert against a missing one, and a missing appointment
+/// reminder is the worse of the two. The scan re-runs on its own cadence, so
+/// the duplicates last at most one pass. Logged so it isn't silent.
+fn device_local_accounts(db: &SharedConn) -> HashSet<String> {
+    match AccountsRepo::new(db).list() {
+        Ok(accounts) => accounts
+            .into_iter()
+            .filter(|account| account.adapter_kind == AdapterKind::DEVICE_CALENDAR)
+            .map(|account| account.id)
+            .collect(),
+        Err(err) => {
+            warn!(
+                ?err,
+                "reminder scan: couldn't list accounts; device-local calendars may \
+                 double-notify for this pass",
+            );
+            HashSet::new()
+        }
+    }
 }
 
 /// Birthday-calendar reminder triggers. The synthetic birthday calendars
@@ -5465,5 +5621,362 @@ mod tests {
                 (Utc.with_ymd_and_hms(2026, 5, 20, 7, 45, 0).unwrap(), false)
             ]
         );
+    }
+
+    /// After a write to one external calendar or list, the desktop reads that
+    /// one again rather than every account (`external_calendar_triggers`,
+    /// `external_task_list_triggers`). These pin that the refresh reads only
+    /// it, and computes what the full scan computes for it.
+    mod external_refresh {
+        use super::*;
+        use crate::db::DbHandle;
+        use async_trait::async_trait;
+        use cal_core::{
+            Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor, Credentials,
+            FreeBusy, NewEvent, NewTask, TaskList, TasksFeature,
+        };
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Mutex as StdMutex;
+
+        /// One account with calendar `cal-1` holding `events`, and list
+        /// `list-1` holding `tasks`; counts what it is asked.
+        struct Account {
+            events: Vec<Event>,
+            tasks: Vec<Task>,
+            me: Option<TaskUser>,
+            fail: bool,
+            calendar_listings: AtomicU32,
+            list_listings: AtomicU32,
+            reads: StdMutex<Vec<String>>,
+        }
+
+        impl Account {
+            fn new(events: Vec<Event>, tasks: Vec<Task>, me: Option<TaskUser>) -> Self {
+                Self {
+                    events,
+                    tasks,
+                    me,
+                    fail: false,
+                    calendar_listings: AtomicU32::new(0),
+                    list_listings: AtomicU32::new(0),
+                    reads: StdMutex::new(Vec::new()),
+                }
+            }
+        }
+
+        #[async_trait]
+        impl Adapter for Account {
+            async fn authenticate(&self, _: Credentials) -> cal_core::Result<AuthToken> {
+                unreachable!()
+            }
+            fn capabilities(&self) -> &[Capability] {
+                &[]
+            }
+        }
+
+        #[async_trait]
+        impl CalendarFeature for Account {
+            async fn list_calendars(&self) -> cal_core::Result<Vec<Calendar>> {
+                self.calendar_listings.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![Calendar {
+                    color_label: None,
+                    supports_scheduling: false,
+                    supports_event_color: false,
+                    always_notifies_attendees: false,
+                    invitations_reply_only: false,
+                    stores_occurrence_exceptions: false,
+                    notifier_name: None,
+                    id: "cal-1".into(),
+                    name: "Work".into(),
+                    color: None,
+                    read_only: false,
+                    default_sound: None,
+                    invitation_import: Default::default(),
+                    keeps_uid: false,
+                }])
+            }
+            async fn get_events(
+                &self,
+                calendar_id: &str,
+                _: DateRange,
+            ) -> cal_core::Result<Vec<Event>> {
+                self.reads
+                    .lock()
+                    .unwrap()
+                    .push(format!("events {calendar_id}"));
+                if self.fail {
+                    return Err(cal_core::Error::Network("offline".into()));
+                }
+                Ok(self.events.clone())
+            }
+            async fn create_event(&self, _: &str, _: NewEvent) -> cal_core::Result<Event> {
+                unreachable!()
+            }
+            async fn update_event(&self, _: Event) -> cal_core::Result<Event> {
+                unreachable!()
+            }
+            async fn delete_event(&self, _: &str, _: bool) -> cal_core::Result<()> {
+                unreachable!()
+            }
+            async fn get_free_busy(
+                &self,
+                _: &[&str],
+                _: DateRange,
+            ) -> cal_core::Result<Vec<FreeBusy>> {
+                unreachable!()
+            }
+            fn calendar_color(&self, _: &str) -> Option<ContainerColor> {
+                None
+            }
+        }
+
+        #[async_trait]
+        impl TasksFeature for Account {
+            async fn list_task_lists(&self) -> cal_core::Result<Vec<TaskList>> {
+                self.list_listings.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![TaskList {
+                    id: "list-1".into(),
+                    name: "Inbox".into(),
+                    color: None,
+                    read_only: false,
+                    parent_id: None,
+                    color_label: None,
+                    default_sound: None,
+                    embedded_in_calendar: None,
+                }])
+            }
+            async fn get_tasks(&self, list_id: &str) -> cal_core::Result<Vec<Task>> {
+                self.reads.lock().unwrap().push(format!("tasks {list_id}"));
+                if self.fail {
+                    return Err(cal_core::Error::Network("offline".into()));
+                }
+                Ok(self.tasks.clone())
+            }
+            async fn create_task(&self, _: &str, _: NewTask) -> cal_core::Result<Task> {
+                unreachable!()
+            }
+            async fn update_task(&self, _: Task) -> cal_core::Result<Task> {
+                unreachable!()
+            }
+            async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
+                unreachable!()
+            }
+            async fn current_user(&self) -> cal_core::Result<Option<TaskUser>> {
+                Ok(self.me.clone())
+            }
+        }
+
+        fn registry_with(account: Arc<Account>) -> Arc<AdapterRegistry> {
+            let registry = Arc::new(AdapterRegistry::new(
+                Arc::new(plugin_core::PluginManager::new("0.1.0")),
+                Arc::new(sync_engine::test_support::FakeSecrets::default()),
+            ));
+            registry.register_host_adapter(
+                "acc-1",
+                Some(account.clone() as Arc<dyn CalendarFeature>),
+                Some(account as Arc<dyn TasksFeature>),
+            );
+            // A write routed to the container, so its route is known.
+            registry.note_calendar_route("cal-1", "acc-1");
+            registry.note_task_list_route("list-1", "acc-1");
+            registry
+        }
+
+        /// A meeting two hours from now with a reminder 15 minutes before.
+        fn soon() -> Event {
+            let start = Utc::now().with_nanosecond(0).unwrap() + ChronoDuration::hours(2);
+            Event {
+                start,
+                end: start + ChronoDuration::hours(1),
+                ..make_event(vec![rel(15)])
+            }
+        }
+
+        fn user(id: &str) -> TaskUser {
+            TaskUser {
+                id: id.into(),
+                name: id.into(),
+                email: None,
+            }
+        }
+
+        /// A task due tomorrow at 10:00 with a reminder 15 minutes before,
+        /// assigned to `assignees`.
+        fn due_tomorrow(id: &str, assignees: Vec<TaskUser>) -> Task {
+            let tomorrow = Local::now().date_naive() + ChronoDuration::days(1);
+            Task {
+                id: id.into(),
+                assignees,
+                ..make_task(
+                    None,
+                    None,
+                    Some(tomorrow),
+                    Some(NaiveTime::from_hms_opt(10, 0, 0).unwrap()),
+                    vec![rel(15)],
+                )
+            }
+        }
+
+        fn moments(triggers: &[Trigger]) -> Vec<(String, DateTime<Utc>)> {
+            let mut out: Vec<_> = triggers
+                .iter()
+                .map(|t| (t.item_id.clone(), t.trigger_at))
+                .collect();
+            out.sort();
+            out
+        }
+
+        #[tokio::test]
+        async fn one_calendar_is_read_again_alone_and_rings_as_the_full_scan_has_it() {
+            let db = DbHandle::open_in_memory().expect("in-memory db");
+            let shared = db.shared();
+            let event = soon();
+            let account = Arc::new(Account::new(vec![event.clone()], Vec::new(), None));
+            let registry = registry_with(account.clone());
+
+            let ContainerTriggers::Read(refreshed) =
+                external_calendar_triggers(&registry, &shared, "cal-1").await
+            else {
+                panic!("a routed calendar is read");
+            };
+            assert_eq!(
+                moments(&refreshed),
+                vec![(
+                    "ev-1".to_string(),
+                    event.start - ChronoDuration::minutes(15)
+                )]
+            );
+            assert_eq!(refreshed[0].container_id, "cal-1");
+            // That calendar alone: no listing of the account, one read of it.
+            assert_eq!(account.calendar_listings.load(Ordering::SeqCst), 0);
+            assert_eq!(
+                *account.reads.lock().unwrap(),
+                vec!["events cal-1".to_string()]
+            );
+
+            // The same as the full scan has for it.
+            let full = enumerate_external_triggers(&registry, &shared).await;
+            let of_calendar: Vec<_> = full
+                .into_iter()
+                .filter(|t| t.item_kind == ItemKind::Event)
+                .collect();
+            assert_eq!(moments(&of_calendar), moments(&refreshed));
+        }
+
+        #[tokio::test]
+        async fn one_list_is_read_again_alone_with_only_my_tasks() {
+            let db = DbHandle::open_in_memory().expect("in-memory db");
+            let shared = db.shared();
+            let mine = due_tomorrow("mine", vec![user("me")]);
+            let theirs = due_tomorrow("theirs", vec![user("someone-else")]);
+            let nobodys = due_tomorrow("nobodys", Vec::new());
+            let account = Arc::new(Account::new(
+                Vec::new(),
+                vec![mine, theirs, nobodys],
+                Some(user("me")),
+            ));
+            let registry = registry_with(account.clone());
+
+            let ContainerTriggers::Read(refreshed) =
+                external_task_list_triggers(&registry, &shared, "list-1").await
+            else {
+                panic!("a routed list is read");
+            };
+            let ids: Vec<_> = moments(&refreshed).into_iter().map(|(id, _)| id).collect();
+            assert_eq!(ids, vec!["mine".to_string(), "nobodys".to_string()]);
+            assert!(refreshed.iter().all(|t| t.container_id == "list-1"));
+            assert_eq!(account.list_listings.load(Ordering::SeqCst), 0);
+            assert_eq!(
+                *account.reads.lock().unwrap(),
+                vec!["tasks list-1".to_string()]
+            );
+
+            let full = enumerate_external_triggers(&registry, &shared).await;
+            let of_list: Vec<_> = full
+                .into_iter()
+                .filter(|t| t.item_kind == ItemKind::Task)
+                .collect();
+            assert_eq!(moments(&of_list), moments(&refreshed));
+        }
+
+        #[tokio::test]
+        async fn nothing_is_claimed_for_a_container_without_a_route_or_a_failed_read() {
+            let db = DbHandle::open_in_memory().expect("in-memory db");
+            let shared = db.shared();
+            let mut account = Account::new(vec![soon()], vec![due_tomorrow("t", Vec::new())], None);
+            let registry = registry_with(Arc::new(Account::new(Vec::new(), Vec::new(), None)));
+            // No route: nothing to read, and the caller keeps what it had.
+            assert!(matches!(
+                external_calendar_triggers(&registry, &shared, "elsewhere").await,
+                ContainerTriggers::Unread
+            ));
+            assert!(matches!(
+                external_task_list_triggers(&registry, &shared, "elsewhere").await,
+                ContainerTriggers::Unread
+            ));
+
+            // A read that fails is not "no reminders": an empty answer would
+            // silence the calendar until the next full scan.
+            account.fail = true;
+            let failing = registry_with(Arc::new(account));
+            assert!(matches!(
+                external_calendar_triggers(&failing, &shared, "cal-1").await,
+                ContainerTriggers::Unread
+            ));
+            assert!(matches!(
+                external_task_list_triggers(&failing, &shared, "list-1").await,
+                ContainerTriggers::Unread
+            ));
+        }
+
+        /// A calendar shared into two accounts carries each account's own
+        /// reminders; one route reads one account. Only the full scan can
+        /// compute it, so the refresh says so instead of answering for both.
+        #[tokio::test]
+        async fn a_container_two_accounts_list_is_left_to_the_full_scan() {
+            let db = DbHandle::open_in_memory().expect("in-memory db");
+            let shared = db.shared();
+            {
+                let conn = shared.lock().unwrap();
+                for account in ["acc-1", "acc-2"] {
+                    conn.execute(
+                        "INSERT INTO accounts (id, display_name, adapter_kind, config_json, created_at, updated_at) \
+                         VALUES (?1, ?1, 'google', '{}', '2026-11-09T00:00:00Z', '2026-11-09T00:00:00Z')",
+                        params![account],
+                    )
+                    .unwrap();
+                    for (table, id) in
+                        [("cache_calendars", "cal-1"), ("cache_task_lists", "list-1")]
+                    {
+                        conn.execute(
+                            &format!(
+                                "INSERT INTO {table} (account_id, id, payload, cached_at) \
+                                 VALUES (?1, ?2, '{{}}', '2026-11-09T00:00:00Z')"
+                            ),
+                            params![account, id],
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+            let account = Arc::new(Account::new(
+                vec![soon()],
+                vec![due_tomorrow("t", Vec::new())],
+                None,
+            ));
+            let registry = registry_with(account.clone());
+            assert!(matches!(
+                external_calendar_triggers(&registry, &shared, "cal-1").await,
+                ContainerTriggers::Shared
+            ));
+            assert!(matches!(
+                external_task_list_triggers(&registry, &shared, "list-1").await,
+                ContainerTriggers::Shared
+            ));
+            assert!(
+                account.reads.lock().unwrap().is_empty(),
+                "nothing read for one account"
+            );
+        }
     }
 }

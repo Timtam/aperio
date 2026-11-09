@@ -41,7 +41,8 @@ use crate::toast::{show_toast, ToastRequest};
 // `get_upcoming_reminders` command) keep resolving.
 use host_core::reminders::{
     catchup_eligible, enumerate_app_start_triggers, enumerate_birthday_triggers,
-    enumerate_external_triggers, enumerate_local_triggers, mark_app_start_rung, CATCH_UP_GRACE,
+    enumerate_external_triggers, enumerate_local_triggers, external_calendar_triggers,
+    external_task_list_triggers, mark_app_start_rung, ContainerTriggers, CATCH_UP_GRACE,
 };
 pub use host_core::reminders::{ItemKind, Trigger, UpcomingReminder};
 
@@ -55,11 +56,92 @@ struct FiredKey {
 
 /// Cache slot for the external-adapter scan. The TTL keeps the scheduler from
 /// refetching iCloud / Graph / EWS on every local `invalidate()` call — most
-/// mutations don't change external state, and the small `EXTERNAL_TRIGGERS_TTL`
-/// window means a real remote change shows up within a few minutes either way.
+/// mutations don't change external state. It is read again only when the
+/// worker wakes: the worker sleeps until its next reminder, so the TTL alone
+/// does not bring a remote change in. What does is [`WrittenContainers`]:
+/// Aperio's own writes, and the external refresh's reports of what changed at
+/// the provider (`external_container_changed`), each read again alone.
 struct ExternalTriggerCache {
     fetched_at: Instant,
     triggers: Vec<Trigger>,
+}
+
+impl ExternalTriggerCache {
+    /// Put what was read again for one container in place of what the cache
+    /// holds for it. A calendar and a task list may share an id (a CalDAV
+    /// collection that holds both), so the kind decides with it. `None` (the
+    /// read failed) keeps what the cache holds: the next full scan settles it.
+    fn replace(&mut self, kind: ItemKind, container_id: &str, fresh: Option<Vec<Trigger>>) {
+        let Some(fresh) = fresh else {
+            return;
+        };
+        self.triggers
+            .retain(|t| !(t.item_kind == kind && t.container_id == container_id));
+        self.triggers.extend(fresh);
+    }
+
+    /// Put the birthday calendars' reminders, read again, in place of the
+    /// ones the cache holds. They are made from the contacts, never read from
+    /// a server, so they are read whole and cheaply.
+    fn replace_birthdays(&mut self, fresh: Vec<Trigger>) {
+        self.triggers
+            .retain(|t| !host_core::birthdays::is_birthday_calendar_id(&t.container_id));
+        self.triggers.extend(fresh);
+    }
+}
+
+/// External containers that changed since the cache was read: Aperio wrote
+/// to them, or the external refresh reported them changed at the provider.
+/// The next scan reads them again, alone, instead of waiting for the cache to
+/// run out: a reminder set or moved a moment ago would otherwise ring late,
+/// and one of an occurrence deleted a moment ago would still ring. A removed
+/// container is not read at all; its reminders simply go.
+#[derive(Debug, Default, Clone)]
+struct WrittenContainers {
+    calendars: HashSet<String>,
+    task_lists: HashSet<String>,
+    removed_calendars: HashSet<String>,
+    removed_task_lists: HashSet<String>,
+    /// Contacts changed: the birthday calendars' reminders are made again.
+    birthdays: bool,
+    /// What a container-by-container read cannot answer (an account's list
+    /// of calendars changed): the next scan reads everything.
+    everything: bool,
+}
+
+impl WrittenContainers {
+    fn is_empty(&self) -> bool {
+        self.calendars.is_empty()
+            && self.task_lists.is_empty()
+            && self.removed_calendars.is_empty()
+            && self.removed_task_lists.is_empty()
+            && !self.birthdays
+            && !self.everything
+    }
+}
+
+/// What a report of the external refresh (`cache-updated`, one per container
+/// whose content changed at the provider) means for the reminders.
+#[derive(Debug, PartialEq, Eq)]
+enum ExternalChange {
+    Calendar,
+    TaskList,
+    Birthdays,
+    Everything,
+    Nothing,
+}
+
+/// [`ExternalChange`] by the report's scope (`SyncScope::as_str`).
+fn external_change(scope: &str) -> ExternalChange {
+    match scope {
+        "events" => ExternalChange::Calendar,
+        "tasks" => ExternalChange::TaskList,
+        // A birthday calendar is made from a contact list's birthdays.
+        "contacts" | "contact_lists" => ExternalChange::Birthdays,
+        // A calendar or list came or went at the provider.
+        "calendars" | "task_lists" => ExternalChange::Everything,
+        _ => ExternalChange::Nothing,
+    }
 }
 
 /// The words a notification body needs, pushed down from the frontend.
@@ -104,6 +186,9 @@ pub struct ReminderScheduler {
     invalidate: Arc<Notify>,
     fired: Arc<Mutex<HashSet<FiredKey>>>,
     external_cache: Arc<Mutex<Option<ExternalTriggerCache>>>,
+    /// What was written since `external_cache` was read (see
+    /// [`WrittenContainers`]).
+    external_written: Arc<Mutex<WrittenContainers>>,
     /// Calendar ids the user UNCHECKED in the sidebar (device-local
     /// localStorage, pushed from the frontend via `set_hidden_calendars`). Event
     /// reminders on these calendars are suppressed — hiding a calendar silences
@@ -207,6 +292,7 @@ impl ReminderScheduler {
             invalidate: Arc::new(Notify::new()),
             fired: Arc::new(Mutex::new(HashSet::new())),
             external_cache: Arc::new(Mutex::new(None)),
+            external_written: Arc::new(Mutex::new(WrittenContainers::default())),
             hidden_calendars: Arc::new(Mutex::new(HashSet::new())),
             labels: Arc::new(Mutex::new(None)),
             sounds_dir,
@@ -242,6 +328,63 @@ impl ReminderScheduler {
     pub fn invalidate_external_cache(&self) {
         let mut guard = self.external_cache.lock().expect("external cache poison");
         *guard = None;
+    }
+
+    /// An external calendar was written to (an event created, changed, moved
+    /// in or out, deleted, or one occurrence skipped). The next scan reads its
+    /// reminders again, that calendar alone, rather than when the cache runs
+    /// out. Pairs with `invalidate()`, which starts that scan.
+    pub fn external_calendar_written(&self, calendar_id: &str) {
+        self.written().calendars.insert(calendar_id.to_string());
+    }
+
+    /// [`Self::external_calendar_written`] for an external task list.
+    pub fn external_task_list_written(&self, list_id: &str) {
+        self.written().task_lists.insert(list_id.to_string());
+    }
+
+    /// An external task list was deleted: its reminders go at the next scan,
+    /// without a read of a list that is no longer there.
+    pub fn external_task_list_removed(&self, list_id: &str) {
+        self.written()
+            .removed_task_lists
+            .insert(list_id.to_string());
+    }
+
+    /// [`Self::external_task_list_removed`] for a calendar: a CalDAV
+    /// collection deleted as a list was a calendar too.
+    pub fn external_calendar_removed(&self, calendar_id: &str) {
+        self.written()
+            .removed_calendars
+            .insert(calendar_id.to_string());
+    }
+
+    /// The external refresh found a container changed at the provider (an
+    /// appointment a colleague added, a task done on the phone): its reminders
+    /// are read again at once, rather than only when the cache runs out while
+    /// the worker happens to be awake. Wakes the worker.
+    pub fn external_container_changed(&self, scope: &str, container_id: &str) {
+        {
+            let mut written = self.written();
+            match external_change(scope) {
+                ExternalChange::Calendar => {
+                    written.calendars.insert(container_id.to_string());
+                }
+                ExternalChange::TaskList => {
+                    written.task_lists.insert(container_id.to_string());
+                }
+                ExternalChange::Birthdays => written.birthdays = true,
+                ExternalChange::Everything => written.everything = true,
+                ExternalChange::Nothing => return,
+            }
+        }
+        self.invalidate();
+    }
+
+    fn written(&self) -> std::sync::MutexGuard<'_, WrittenContainers> {
+        self.external_written
+            .lock()
+            .expect("external written poison")
     }
 
     /// Replace the set of hidden (sidebar-unchecked) calendars and wake the
@@ -300,7 +443,10 @@ impl ReminderScheduler {
         let now = Utc::now();
         let earliest = now - ChronoDuration::days(OVERVIEW_PAST_DAYS);
         let latest = now + ChronoDuration::days(OVERVIEW_FUTURE_DAYS);
-        let mut triggers = self.collect_triggers_in_window(earliest, latest).await;
+        // The overview reads; only the worker takes what changed.
+        let mut triggers = self
+            .collect_triggers_in_window(earliest, latest, false)
+            .await;
         let hidden = self.hidden_calendars_snapshot();
         triggers.retain(|t| !Self::suppressed_by_visibility(t, &hidden));
         triggers.sort_by_key(|t| t.trigger_at);
@@ -363,9 +509,10 @@ impl ReminderScheduler {
         &self,
         earliest: DateTime<Utc>,
         latest: DateTime<Utc>,
+        take_changes: bool,
     ) -> Vec<Trigger> {
         let mut acc = enumerate_local_triggers(&self.db, earliest, latest);
-        let external = self.external_triggers_cached_or_fetch().await;
+        let external = self.external_triggers_cached_or_fetch(take_changes).await;
         for t in external {
             if t.trigger_at >= earliest && t.trigger_at <= latest {
                 acc.push(t);
@@ -378,15 +525,90 @@ impl ReminderScheduler {
     /// [`enumerate_external_triggers`]) if absent / stale. The cache holds the
     /// *full* fan-out horizon so the caller can slice any sub-window without
     /// triggering another fetch.
-    async fn external_triggers_cached_or_fetch(&self) -> Vec<Trigger> {
-        {
+    ///
+    /// Only the worker TAKES what changed (`take_changes`); the overview
+    /// (`upcoming`) reads it again for itself and leaves it, else the worker
+    /// could plan from a cache the overview's read has not landed in yet, and
+    /// nothing would wake it again.
+    async fn external_triggers_cached_or_fetch(&self, take_changes: bool) -> Vec<Trigger> {
+        // Taken before the cache is read: a write after this point is marked
+        // again and read at the next scan, which its `invalidate()` starts.
+        let written = if take_changes {
+            std::mem::take(&mut *self.written())
+        } else {
+            self.written().clone()
+        };
+        let cache_fresh = {
             let guard = self.external_cache.lock().expect("external cache poison");
-            if let Some(cached) = guard.as_ref() {
-                if cached.fetched_at.elapsed() < EXTERNAL_TRIGGERS_TTL {
-                    return cached.triggers.clone();
+            match guard.as_ref() {
+                Some(cached) if cached.fetched_at.elapsed() < EXTERNAL_TRIGGERS_TTL => {
+                    if written.is_empty() {
+                        return cached.triggers.clone();
+                    }
+                    true
                 }
+                _ => false,
+            }
+        };
+        if cache_fresh {
+            if let Some(triggers) = self.refresh_written(written).await {
+                return triggers;
             }
         }
+        self.fetch_all_external_triggers().await
+    }
+
+    /// Read again only the containers that changed since the cache was read,
+    /// and put them into it. `None` when only a full scan can answer: the
+    /// cache went meanwhile (a settings change dropped it), an account's list
+    /// of calendars changed, or a container is shared by two accounts.
+    async fn refresh_written(&self, written: WrittenContainers) -> Option<Vec<Trigger>> {
+        if written.everything {
+            return None;
+        }
+        let mut read = Vec::new();
+        for id in written.calendars {
+            let fresh = match external_calendar_triggers(&self.registry, &self.db, &id).await {
+                ContainerTriggers::Read(triggers) => Some(triggers),
+                ContainerTriggers::Unread => None,
+                ContainerTriggers::Shared => return None,
+            };
+            read.push((ItemKind::Event, id, fresh));
+        }
+        for id in written.task_lists {
+            let fresh = match external_task_list_triggers(&self.registry, &self.db, &id).await {
+                ContainerTriggers::Read(triggers) => Some(triggers),
+                ContainerTriggers::Unread => None,
+                ContainerTriggers::Shared => return None,
+            };
+            read.push((ItemKind::Task, id, fresh));
+        }
+        for id in written.removed_calendars {
+            read.push((ItemKind::Event, id, Some(Vec::new())));
+        }
+        for id in written.removed_task_lists {
+            read.push((ItemKind::Task, id, Some(Vec::new())));
+        }
+        let birthdays = if written.birthdays {
+            let local = LocalAdapter::new(self.db.clone());
+            Some(enumerate_birthday_triggers(&local, &self.registry, &self.cache, &self.db).await)
+        } else {
+            None
+        };
+        let mut guard = self.external_cache.lock().expect("external cache poison");
+        let cached = guard.as_mut()?;
+        for (kind, id, fresh) in read {
+            cached.replace(kind, &id, fresh);
+        }
+        if let Some(fresh) = birthdays {
+            cached.replace_birthdays(fresh);
+        }
+        Some(cached.triggers.clone())
+    }
+
+    /// The full external scan, every account, every calendar and list, into
+    /// the cache.
+    async fn fetch_all_external_triggers(&self) -> Vec<Trigger> {
         let mut fresh = enumerate_external_triggers(&self.registry, &self.db).await;
         // Synthetic birthday calendars aren't adapters, so the external fan-out
         // above skips them. Fold their configured default reminders in here so
@@ -414,7 +636,9 @@ impl ReminderScheduler {
         let now = Utc::now();
         let earliest = now - ChronoDuration::days(CATCH_UP_HORIZON);
         let latest = now + ChronoDuration::days(MAX_HORIZON_DAYS);
-        let mut out = self.collect_triggers_in_window(earliest, latest).await;
+        let mut out = self
+            .collect_triggers_in_window(earliest, latest, true)
+            .await;
 
         // De-duplicate (same item_id + same trigger time appearing from both
         // local SQLite and an external adapter — keep the first occurrence).
@@ -732,5 +956,456 @@ mod tests {
             notification_body(&t, Some(&english)).as_deref(),
             Some("All day · June 24 to June 26"),
         );
+    }
+
+    /// What was read again for one container replaces what the cache held
+    /// for it, and nothing else.
+    mod written_containers {
+        use super::*;
+
+        fn of(id: &str, kind: ItemKind, container: &str) -> Trigger {
+            Trigger {
+                item_id: id.into(),
+                item_kind: kind,
+                container_id: container.into(),
+                ..trigger(
+                    false,
+                    "2026-11-09T09:00:00Z",
+                    "2026-11-09T10:00:00Z",
+                    "09:00",
+                )
+            }
+        }
+
+        fn ids(cache: &ExternalTriggerCache) -> Vec<String> {
+            let mut ids: Vec<_> = cache.triggers.iter().map(|t| t.item_id.clone()).collect();
+            ids.sort();
+            ids
+        }
+
+        fn cache() -> ExternalTriggerCache {
+            ExternalTriggerCache {
+                fetched_at: Instant::now(),
+                triggers: vec![
+                    of("old-event", ItemKind::Event, "shared-id"),
+                    of("old-task", ItemKind::Task, "shared-id"),
+                    of("other", ItemKind::Event, "cal-2"),
+                ],
+            }
+        }
+
+        #[test]
+        fn a_calendar_read_again_replaces_its_own_reminders_only() {
+            let mut cache = cache();
+            cache.replace(
+                ItemKind::Event,
+                "shared-id",
+                Some(vec![of("new-event", ItemKind::Event, "shared-id")]),
+            );
+            // A task list with the same id (a CalDAV collection holding both)
+            // keeps its reminders; another calendar keeps its own.
+            assert_eq!(ids(&cache), vec!["new-event", "old-task", "other"]);
+        }
+
+        #[test]
+        fn a_list_read_again_as_empty_loses_its_reminders() {
+            let mut cache = cache();
+            cache.replace(ItemKind::Task, "shared-id", Some(Vec::new()));
+            assert_eq!(ids(&cache), vec!["old-event", "other"]);
+        }
+
+        #[test]
+        fn a_failed_read_keeps_what_the_cache_holds() {
+            let mut cache = cache();
+            cache.replace(ItemKind::Event, "shared-id", None);
+            assert_eq!(ids(&cache), vec!["old-event", "old-task", "other"]);
+        }
+
+        /// One account with calendar `cal-1` and list `list-1`, both empty,
+        /// counting what it is asked.
+        #[derive(Default)]
+        struct Counting {
+            calendar_listings: std::sync::atomic::AtomicU32,
+            list_listings: std::sync::atomic::AtomicU32,
+            reads: Mutex<Vec<String>>,
+        }
+
+        impl Counting {
+            fn listings(&self) -> u32 {
+                use std::sync::atomic::Ordering::SeqCst;
+                self.calendar_listings.load(SeqCst) + self.list_listings.load(SeqCst)
+            }
+            fn reads(&self) -> Vec<String> {
+                self.reads.lock().unwrap().clone()
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl cal_core::Adapter for Counting {
+            async fn authenticate(
+                &self,
+                _: cal_core::Credentials,
+            ) -> cal_core::Result<cal_core::AuthToken> {
+                unreachable!()
+            }
+            fn capabilities(&self) -> &[cal_core::Capability] {
+                &[]
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl cal_core::CalendarFeature for Counting {
+            async fn list_calendars(&self) -> cal_core::Result<Vec<cal_core::Calendar>> {
+                self.calendar_listings
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Vec::new())
+            }
+            async fn get_events(
+                &self,
+                calendar_id: &str,
+                _: cal_core::DateRange,
+            ) -> cal_core::Result<Vec<cal_core::Event>> {
+                self.reads
+                    .lock()
+                    .unwrap()
+                    .push(format!("events {calendar_id}"));
+                Ok(Vec::new())
+            }
+            async fn create_event(
+                &self,
+                _: &str,
+                _: cal_core::NewEvent,
+            ) -> cal_core::Result<cal_core::Event> {
+                unreachable!()
+            }
+            async fn update_event(&self, _: cal_core::Event) -> cal_core::Result<cal_core::Event> {
+                unreachable!()
+            }
+            async fn delete_event(&self, _: &str, _: bool) -> cal_core::Result<()> {
+                unreachable!()
+            }
+            async fn get_free_busy(
+                &self,
+                _: &[&str],
+                _: cal_core::DateRange,
+            ) -> cal_core::Result<Vec<cal_core::FreeBusy>> {
+                unreachable!()
+            }
+            fn calendar_color(&self, _: &str) -> Option<cal_core::ContainerColor> {
+                None
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl cal_core::TasksFeature for Counting {
+            async fn list_task_lists(&self) -> cal_core::Result<Vec<cal_core::TaskList>> {
+                self.list_listings
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Vec::new())
+            }
+            async fn get_tasks(&self, list_id: &str) -> cal_core::Result<Vec<cal_core::Task>> {
+                self.reads.lock().unwrap().push(format!("tasks {list_id}"));
+                Ok(Vec::new())
+            }
+            async fn create_task(
+                &self,
+                _: &str,
+                _: cal_core::NewTask,
+            ) -> cal_core::Result<cal_core::Task> {
+                unreachable!()
+            }
+            async fn update_task(&self, _: cal_core::Task) -> cal_core::Result<cal_core::Task> {
+                unreachable!()
+            }
+            async fn delete_task(&self, _: &str) -> cal_core::Result<()> {
+                unreachable!()
+            }
+        }
+
+        /// A scheduler whose external cache holds `cached`, read `age` ago,
+        /// over an account that answers through `account`.
+        fn scheduler(
+            account: Arc<Counting>,
+            cached: Vec<Trigger>,
+            age: Duration,
+        ) -> ReminderScheduler {
+            let db = host_core::db::DbHandle::open_in_memory().expect("in-memory db");
+            let registry = Arc::new(AdapterRegistry::new(
+                Arc::new(plugin_core::PluginManager::new("0.1.0")),
+                Arc::new(sync_engine::test_support::FakeSecrets::default()),
+            ));
+            registry.register_host_adapter(
+                "acc-1",
+                Some(account.clone() as Arc<dyn cal_core::CalendarFeature>),
+                Some(account as Arc<dyn cal_core::TasksFeature>),
+            );
+            registry.note_calendar_route("cal-1", "acc-1");
+            registry.note_task_list_route("list-1", "acc-1");
+            let fetched_at = Instant::now()
+                .checked_sub(age)
+                .expect("the clock reaches back that far");
+            ReminderScheduler {
+                db: db.shared(),
+                registry,
+                cache: Arc::new(CacheStore::new(db)),
+                invalidate: Arc::new(Notify::new()),
+                fired: Arc::new(Mutex::new(HashSet::new())),
+                external_cache: Arc::new(Mutex::new(Some(ExternalTriggerCache {
+                    fetched_at,
+                    triggers: cached,
+                }))),
+                external_written: Arc::new(Mutex::new(WrittenContainers::default())),
+                hidden_calendars: Arc::new(Mutex::new(HashSet::new())),
+                labels: Arc::new(Mutex::new(None)),
+                sounds_dir: PathBuf::new(),
+                audio: crate::audio::AudioPlayer::silent(),
+            }
+        }
+
+        fn sorted(triggers: Vec<Trigger>) -> Vec<String> {
+            let mut ids: Vec<_> = triggers.into_iter().map(|t| t.item_id).collect();
+            ids.sort();
+            ids
+        }
+
+        #[tokio::test]
+        async fn a_written_calendar_is_read_again_alone_and_the_rest_stays() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![
+                    // An occurrence deleted a moment ago, still in the cache.
+                    of("deleted", ItemKind::Event, "cal-1"),
+                    of("other", ItemKind::Event, "cal-2"),
+                    of("task", ItemKind::Task, "list-1"),
+                ],
+                Duration::from_secs(10),
+            );
+            // Untouched, the cache answers and nothing is read.
+            assert_eq!(
+                sorted(s.external_triggers_cached_or_fetch(true).await),
+                vec!["deleted", "other", "task"]
+            );
+            assert!(account.reads().is_empty());
+
+            s.external_calendar_written("cal-1");
+            assert_eq!(
+                sorted(s.external_triggers_cached_or_fetch(true).await),
+                vec!["other", "task"]
+            );
+            assert_eq!(account.reads(), vec!["events cal-1".to_string()]);
+            assert_eq!(account.listings(), 0, "no scan of every account");
+
+            // Read once: the next scan answers from the cache again.
+            assert_eq!(
+                sorted(s.external_triggers_cached_or_fetch(true).await),
+                vec!["other", "task"]
+            );
+            assert_eq!(account.reads().len(), 1);
+        }
+
+        #[tokio::test]
+        async fn a_written_list_is_read_again_and_a_removed_one_is_not_read() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![
+                    of("t1", ItemKind::Task, "list-1"),
+                    of("t2", ItemKind::Task, "list-2"),
+                    of("e", ItemKind::Event, "cal-1"),
+                ],
+                Duration::from_secs(10),
+            );
+            s.external_task_list_written("list-1");
+            s.external_task_list_removed("list-2");
+            assert_eq!(
+                sorted(s.external_triggers_cached_or_fetch(true).await),
+                vec!["e"]
+            );
+            assert_eq!(account.reads(), vec!["tasks list-1".to_string()]);
+            assert_eq!(account.listings(), 0);
+        }
+
+        #[tokio::test]
+        async fn a_cache_that_ran_out_is_read_whole_as_before() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![of("old", ItemKind::Event, "cal-9")],
+                EXTERNAL_TRIGGERS_TTL + Duration::from_secs(1),
+            );
+            s.external_calendar_written("cal-1");
+            assert!(s.external_triggers_cached_or_fetch(true).await.is_empty());
+            // The full scan lists every account's calendars and lists.
+            assert_eq!(account.listings(), 2);
+        }
+
+        #[tokio::test]
+        async fn the_overview_reads_what_changed_and_leaves_it_to_the_worker() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![of("deleted", ItemKind::Event, "cal-1")],
+                Duration::from_secs(10),
+            );
+            s.external_calendar_written("cal-1");
+            // Ctrl+Shift+R reads the calendar again for itself...
+            assert!(s.external_triggers_cached_or_fetch(false).await.is_empty());
+            assert_eq!(account.reads().len(), 1);
+            // ...and the worker still finds it marked, so it plans from a read
+            // of its own, not from one that may not have landed yet.
+            assert!(s.external_triggers_cached_or_fetch(true).await.is_empty());
+            assert_eq!(account.reads().len(), 2);
+            assert!(s.external_triggers_cached_or_fetch(true).await.is_empty());
+            assert_eq!(account.reads().len(), 2, "taken once");
+        }
+
+        #[tokio::test]
+        async fn a_container_two_accounts_list_is_left_to_the_full_scan() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![of("old", ItemKind::Event, "cal-1")],
+                Duration::from_secs(10),
+            );
+            {
+                let conn = s.db.lock().unwrap();
+                for id in ["acc-1", "acc-2"] {
+                    conn.execute(
+                        "INSERT INTO accounts (id, display_name, adapter_kind, config_json, created_at, updated_at) \
+                         VALUES (?1, ?1, 'google', '{}', '2026-11-09T00:00:00Z', '2026-11-09T00:00:00Z')",
+                        [id],
+                    )
+                    .unwrap();
+                    conn.execute(
+                        "INSERT INTO cache_calendars (account_id, id, payload, cached_at) \
+                         VALUES (?1, 'cal-1', '{}', '2026-11-09T00:00:00Z')",
+                        [id],
+                    )
+                    .unwrap();
+                }
+            }
+            s.external_calendar_written("cal-1");
+            assert!(s.external_triggers_cached_or_fetch(true).await.is_empty());
+            // Each account has its own reminders on it: read whole.
+            assert_eq!(account.listings(), 2);
+        }
+
+        #[tokio::test]
+        async fn a_change_at_the_provider_reads_its_container_again_and_wakes_the_worker() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![
+                    of("gone", ItemKind::Event, "cal-1"),
+                    of("other", ItemKind::Event, "cal-2"),
+                ],
+                Duration::from_secs(10),
+            );
+            s.external_container_changed("events", "cal-1");
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), s.invalidate.notified())
+                    .await
+                    .is_ok(),
+                "the worker is woken"
+            );
+            assert_eq!(
+                sorted(s.external_triggers_cached_or_fetch(true).await),
+                vec!["other"]
+            );
+            assert_eq!(account.reads(), vec!["events cal-1".to_string()]);
+            assert_eq!(account.listings(), 0);
+        }
+
+        #[tokio::test]
+        async fn changed_contacts_make_the_birthdays_again_without_a_server() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![
+                    of("birthday", ItemKind::Event, "aperio-birthdays:list-1"),
+                    of("other", ItemKind::Event, "cal-2"),
+                ],
+                Duration::from_secs(10),
+            );
+            s.external_container_changed("contacts", "list-1");
+            // No contact has a birthday in this store: the old one goes.
+            assert_eq!(
+                sorted(s.external_triggers_cached_or_fetch(true).await),
+                vec!["other"]
+            );
+            assert!(account.reads().is_empty());
+            assert_eq!(account.listings(), 0);
+        }
+
+        #[tokio::test]
+        async fn a_changed_list_of_calendars_reads_everything() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(account.clone(), Vec::new(), Duration::from_secs(10));
+            s.external_container_changed("calendars", "");
+            s.external_triggers_cached_or_fetch(true).await;
+            assert_eq!(account.listings(), 2);
+        }
+
+        #[tokio::test]
+        async fn a_removed_calendar_loses_its_reminders_without_a_read() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![
+                    of("e", ItemKind::Event, "both"),
+                    of("t", ItemKind::Task, "both"),
+                ],
+                Duration::from_secs(10),
+            );
+            s.external_calendar_removed("both");
+            s.external_task_list_removed("both");
+            assert!(s.external_triggers_cached_or_fetch(true).await.is_empty());
+            assert!(account.reads().is_empty());
+        }
+
+        #[test]
+        fn a_report_names_what_it_means_for_the_reminders() {
+            assert_eq!(external_change("events"), ExternalChange::Calendar);
+            assert_eq!(external_change("tasks"), ExternalChange::TaskList);
+            assert_eq!(external_change("contacts"), ExternalChange::Birthdays);
+            assert_eq!(external_change("contact_lists"), ExternalChange::Birthdays);
+            assert_eq!(external_change("calendars"), ExternalChange::Everything);
+            assert_eq!(external_change("task_lists"), ExternalChange::Everything);
+            assert_eq!(external_change("sections"), ExternalChange::Nothing);
+        }
+
+        #[test]
+        fn nothing_written_is_empty_and_anything_written_is_not() {
+            assert!(WrittenContainers::default().is_empty());
+            for written in [
+                WrittenContainers {
+                    calendars: HashSet::from(["c".to_string()]),
+                    ..Default::default()
+                },
+                WrittenContainers {
+                    task_lists: HashSet::from(["l".to_string()]),
+                    ..Default::default()
+                },
+                WrittenContainers {
+                    removed_task_lists: HashSet::from(["l".to_string()]),
+                    ..Default::default()
+                },
+                WrittenContainers {
+                    removed_calendars: HashSet::from(["c".to_string()]),
+                    ..Default::default()
+                },
+                WrittenContainers {
+                    birthdays: true,
+                    ..Default::default()
+                },
+                WrittenContainers {
+                    everything: true,
+                    ..Default::default()
+                },
+            ] {
+                assert!(!written.is_empty(), "{written:?}");
+            }
+        }
     }
 }

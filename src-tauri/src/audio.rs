@@ -39,6 +39,14 @@ pub struct AudioPlayer {
 }
 
 impl AudioPlayer {
+    /// A player without its thread, for tests: what it is handed goes
+    /// nowhere.
+    #[cfg(test)]
+    pub(crate) fn silent() -> Self {
+        let (tx, _rx) = sync_channel::<PathBuf>(QUEUE_DEPTH);
+        Self { tx }
+    }
+
     /// Spawn the dedicated audio thread. The `OutputStream` is created
     /// inside the thread and lives as long as it does (the whole
     /// process), so sinks made from it never outlive their stream.

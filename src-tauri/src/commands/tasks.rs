@@ -436,6 +436,7 @@ pub async fn delete_task_list(
     registry: State<'_, Arc<AdapterRegistry>>,
     cache: State<'_, Arc<CacheStore>>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    scheduler: State<'_, SchedulerHandle>,
     id: String,
 ) -> CommandResult<()> {
     let account = registry
@@ -445,6 +446,9 @@ pub async fn delete_task_list(
     if account == LOCAL_ID {
         adapter.delete_task_list(&id)?;
         event_log.append(SyncEvent::TaskListDeleted(IdPayload { id: id.clone() }));
+        // The worker sleeps until the next reminder it planned; one of this
+        // list's would still ring. Wake it to plan again.
+        scheduler.invalidate();
         return Ok(());
     }
 
@@ -459,6 +463,16 @@ pub async fn delete_task_list(
     // listing re-fetches without it, plus its cached task rows.
     let _ = cache.invalidate(&account, SyncScope::TaskLists, "");
     let _ = cache.invalidate(&account, SyncScope::Tasks, &id);
+    // Its tasks' reminders go at once, without a read of a list that is gone.
+    scheduler.external_task_list_removed(&id);
+    // A CalDAV collection can be a calendar as well: the DELETE took its
+    // events with it, and their reminders go too.
+    if registry.account_for_calendar(&id).as_deref() == Some(account.as_str()) {
+        let _ = cache.invalidate(&account, SyncScope::Calendars, "");
+        let _ = cache.invalidate(&account, SyncScope::Events, &id);
+        scheduler.external_calendar_removed(&id);
+    }
+    scheduler.invalidate();
     Ok(())
 }
 
@@ -835,6 +849,7 @@ pub async fn create_task(
             // without one of its follow-up steps (decision 273). The next read
             // must show what the provider holds.
             let _ = cache.invalidate(&account, SyncScope::Tasks, &request.list_id);
+            scheduler.external_task_list_written(&request.list_id);
             scheduler.invalidate();
         }
         created?
@@ -854,6 +869,9 @@ pub async fn create_task(
         // brings the composite-id row. The new task surfaces on the next
         // refresh instead (the pre-write-through behaviour).
         let _ = cache.invalidate(&account, SyncScope::Tasks, &request.list_id);
+        // Its reminders ring from the next scan, not when the reminder cache
+        // runs out.
+        scheduler.external_task_list_written(&request.list_id);
     }
     scheduler.invalidate();
     Ok(task)
@@ -969,6 +987,7 @@ pub async fn update_task(
                 // The copy at the target may stand without one of its steps
                 // (decision 273): the next read shows what the provider holds.
                 let _ = cache.invalidate(&target_account, SyncScope::Tasks, &task.list_id);
+                scheduler.external_task_list_written(&task.list_id);
                 scheduler.invalidate();
             }
             created?
@@ -1023,8 +1042,10 @@ pub async fn update_task(
         // write-through so the retained snapshot can't resurrect it.
         if target_account != LOCAL_ID {
             let _ = cache.invalidate(&target_account, SyncScope::Tasks, &task.list_id);
+            scheduler.external_task_list_written(&task.list_id);
         }
         if source_account != LOCAL_ID {
+            scheduler.external_task_list_written(&previous);
             if kept {
                 // The original still stands: read the list again, never
                 // remove a row the provider still has.
@@ -1093,6 +1114,7 @@ pub async fn update_task(
                 // A save that failed may have landed in part (decision 273):
                 // the next read shows what the provider holds.
                 let _ = cache.invalidate(&target_account, SyncScope::Tasks, &list_id);
+                scheduler.external_task_list_written(&list_id);
                 scheduler.invalidate();
                 return Err(err.into());
             }
@@ -1112,6 +1134,7 @@ pub async fn update_task(
         // until the background refresh landed. Marks stale too, so a
         // refresh reconciles provider-side effects beyond the returned row.
         let _ = cache.write_through_task(&target_account, &updated.list_id, &updated);
+        scheduler.external_task_list_written(&updated.list_id);
         scheduler.invalidate();
         Ok(updated)
     }
@@ -1146,6 +1169,7 @@ pub async fn delete_task(
             // the next read asks the provider what it holds.
             if let Some(lid) = &list_id {
                 let _ = cache.invalidate(&account, SyncScope::Tasks, lid);
+                scheduler.external_task_list_written(lid);
             }
             scheduler.invalidate();
             return Err(err.into());
@@ -1157,6 +1181,7 @@ pub async fn delete_task(
         // Write-through removal: the retained snapshot would otherwise
         // resurrect the deleted row on the next read.
         let _ = cache.write_through_task_removal(&account, lid, &id);
+        scheduler.external_task_list_written(lid);
     }
     scheduler.invalidate();
     Ok(())

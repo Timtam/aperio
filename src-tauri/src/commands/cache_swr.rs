@@ -7,7 +7,7 @@
 //! notifications to the existing Tauri events — and re-exports the host
 //! helpers so the command call sites keep their `cache_swr::` paths.
 
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::cache::{CacheObserver, CacheRefreshStatus, CacheUpdatedPayload};
 
@@ -54,6 +54,12 @@ impl<R: Runtime> CacheObserver for TauriCacheObserver<R> {
     fn cache_updated(&self, payload: &CacheUpdatedPayload) {
         if let Err(err) = self.app.emit("cache-updated", payload) {
             tracing::warn!(target: "aperio::cache", ?err, "failed to emit cache-updated");
+        }
+        // What changed at the provider rings as it now stands: the reminder
+        // scheduler reads that container again, rather than only when its own
+        // cache runs out while it happens to be awake.
+        if let Some(scheduler) = self.app.try_state::<crate::reminders::SchedulerHandle>() {
+            scheduler.external_container_changed(&payload.scope, &payload.container_id);
         }
     }
 
