@@ -18,6 +18,13 @@
  * --features cli`) and reads the interface out of it; the `.so` cargo-ndk
  * builds from the same source has the same checksums.
  *
+ * A DEBUG build, on purpose: the release profile strips the library
+ * (`strip = true`, LTO), and on Linux that takes the UniFFI metadata with it.
+ * The generator then writes nothing and still exits 0, which is why this
+ * checks for `cal_ffi.kt` and throws. The Android workflow ran it on the
+ * release library until 2026-11-09 and got nothing; its first build without
+ * a committed copy failed on that.
+ *
  * Run: node mobile/scripts/kotlin-bindings.mjs
  */
 
