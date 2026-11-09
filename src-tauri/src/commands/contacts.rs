@@ -37,6 +37,7 @@ use crate::db::DbHandle;
 use host_core::wire::ContactListRow;
 
 use crate::registry::{AdapterRegistry, LOCAL_ID};
+use crate::reminders::SchedulerHandle;
 use crate::user_prefs::UserPrefsRepo;
 
 #[tauri::command]
@@ -240,20 +241,56 @@ pub struct CreateContactRequest {
     pub contact: NewContact,
 }
 
+/// Read an external address book again right after a write, in the
+/// background: its birthdays reach the reminder planner once the fresh rows
+/// are in (`cache-updated` for it marks them, through `TauriCacheObserver`).
+/// Reading the cache at once would find the rows from before the write — the
+/// write only marks them stale — and nothing else may read this book soon,
+/// say when it is not shown in the sidebar.
+fn refresh_written_book(
+    app: &AppHandle,
+    ext: Arc<dyn ContactsFeature>,
+    cache: &Arc<CacheStore>,
+    coord: &Arc<RefreshCoordinator>,
+    account: &str,
+    list_id: &str,
+) {
+    let cache_bg = Arc::clone(cache);
+    let acc = account.to_string();
+    let list = list_id.to_string();
+    let rt = tauri::async_runtime::handle();
+    cache_swr::spawn_item_refresh(
+        rt.inner(),
+        Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
+        Arc::clone(cache),
+        Arc::clone(coord),
+        SyncScope::Contacts,
+        account.to_string(),
+        list_id.to_string(),
+        move || async move { cache_swr::refresh_contacts(&cache_bg, ext.as_ref(), &acc, &list).await },
+    );
+}
+
 #[tauri::command]
 pub async fn create_contact(
+    app: AppHandle,
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     cache: State<'_, Arc<CacheStore>>,
+    coord: State<'_, Arc<RefreshCoordinator>>,
+    scheduler: State<'_, SchedulerHandle>,
     request: CreateContactRequest,
 ) -> CommandResult<Contact> {
     let account = registry
         .account_for_contact_list(&request.list_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
     if account == LOCAL_ID {
-        return Ok(adapter
+        let created = adapter
             .create_contact(&request.list_id, request.contact)
-            .await?);
+            .await?;
+        // A birthday may have come with it.
+        scheduler.contacts_changed();
+        return Ok(created);
     }
     let Some(ext) = registry.contact_adapter(&account) else {
         return Err(CommandError {
@@ -265,21 +302,28 @@ pub async fn create_contact(
     // After a failure too: a contact or group may stand without one of its
     // steps (decision 273), and the next read shows what the provider holds.
     let _ = cache.invalidate(&account, SyncScope::Contacts, &request.list_id);
+    refresh_written_book(&app, ext, &cache, &coord, &account, &request.list_id);
     Ok(created?)
 }
 
 #[tauri::command]
 pub async fn update_contact(
+    app: AppHandle,
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     cache: State<'_, Arc<CacheStore>>,
+    coord: State<'_, Arc<RefreshCoordinator>>,
+    scheduler: State<'_, SchedulerHandle>,
     contact: Contact,
 ) -> CommandResult<Contact> {
     let account = registry
         .account_for_contact_list(&contact.list_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
     if account == LOCAL_ID {
-        return Ok(adapter.update_contact(contact).await?);
+        let updated = adapter.update_contact(contact).await?;
+        // The birthday, or the name it is announced with, may have changed.
+        scheduler.contacts_changed();
+        return Ok(updated);
     }
     let Some(ext) = registry.contact_adapter(&account) else {
         return Err(CommandError {
@@ -291,6 +335,7 @@ pub async fn update_contact(
     let updated = ext.update_contact(contact).await;
     // After a failure too: a save may have landed in part (decision 273).
     let _ = cache.invalidate(&account, SyncScope::Contacts, &list_id);
+    refresh_written_book(&app, ext, &cache, &coord, &account, &list_id);
     Ok(updated?)
 }
 
@@ -306,7 +351,10 @@ pub async fn update_contact(
 pub async fn delete_contact(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    app: AppHandle,
     cache: State<'_, Arc<CacheStore>>,
+    coord: State<'_, Arc<RefreshCoordinator>>,
+    scheduler: State<'_, SchedulerHandle>,
     id: String,
     list_id: Option<String>,
 ) -> CommandResult<()> {
@@ -316,6 +364,7 @@ pub async fn delete_contact(
         .unwrap_or_else(|| LOCAL_ID.to_string());
     if account == LOCAL_ID {
         adapter.delete_contact(&id).await?;
+        scheduler.contacts_changed();
     } else {
         let Some(ext) = registry.contact_adapter(&account) else {
             return Err(CommandError {
@@ -328,6 +377,7 @@ pub async fn delete_contact(
             // Failed or not: a delete whose answer was lost may have landed
             // (decision 277), so the next read asks the provider.
             let _ = cache.invalidate(&account, SyncScope::Contacts, lid);
+            refresh_written_book(&app, Arc::clone(&ext), &cache, &coord, &account, lid);
         }
         deleted?;
     }
@@ -359,9 +409,12 @@ pub async fn create_contact_list(
 #[tauri::command]
 pub async fn delete_contact_list(
     adapter: State<'_, LocalAdapter>,
+    scheduler: State<'_, SchedulerHandle>,
     id: String,
 ) -> CommandResult<()> {
     adapter.delete_contact_list(&id)?;
+    // Its birthday calendar, and the reminders on it, go with it.
+    scheduler.contacts_changed();
     Ok(())
 }
 

@@ -2009,33 +2009,53 @@ impl Host {
     /// Nothing new ⇒ nothing else happens: this runs after every applying
     /// round, so an unconditional warm pass would be constant background
     /// noise.
+    ///
+    /// The mirror case too: an account deleted on another device loses its
+    /// adapter here (`unregister_removed`), else its calendars stayed readable
+    /// and its reminders kept ringing until the next app start.
     fn register_synced_accounts(&self) {
-        let registered = {
+        let (registered, removed) = {
             let shared = self.db.shared();
             let repo = AccountsRepo::new(&shared);
-            self.registry.register_missing(&repo)
+            (
+                self.registry.register_missing(&repo),
+                self.registry.unregister_removed(&repo),
+            )
         };
-        if registered == 0 {
+        if registered == 0 && removed == 0 {
             return;
         }
-        tracing::info!(
-            target: "aperio::registry",
-            registered,
-            "registered adapters for accounts that arrived through sync",
-        );
-        // Fresh adapters have nothing cached, so warm them: the pass
-        // enumerates the new accounts' containers and fills their items.
-        // AUTOMATIC, so it runs UN-forced (like warm_cache_on_foreground) —
-        // a cold-start network blip must be confirmed by a second attempt
-        // before it surfaces as a per-account error.
-        //
-        // Queued: the launch pass may already have taken its snapshot of
-        // the registry, and a plain warm_all would bail while it runs and
-        // never warm these accounts (the desktop's worker keeps that wake).
-        let refresher = Arc::clone(&self.cache_refresher);
-        self.runtime.handle().spawn(async move {
-            refresher.warm_all_queued(false).await;
-        });
+        if removed > 0 {
+            // Deleted on another device: its calendars stop being readable
+            // here and its reminders stop ringing — the listing broadcast
+            // below makes the UI re-read and re-plan them.
+            tracing::info!(
+                target: "aperio::registry",
+                removed,
+                "unregistered adapters for accounts deleted through sync",
+            );
+        }
+        if registered > 0 {
+            tracing::info!(
+                target: "aperio::registry",
+                registered,
+                "registered adapters for accounts that arrived through sync",
+            );
+            // Fresh adapters have nothing cached, so warm them: the pass
+            // enumerates the new accounts' containers and fills their items.
+            // AUTOMATIC, so it runs UN-forced (like warm_cache_on_foreground)
+            // — a cold-start network blip must be confirmed by a second
+            // attempt before it surfaces as a per-account error.
+            //
+            // Queued: the launch pass may already have taken its snapshot of
+            // the registry, and a plain warm_all would bail while it runs and
+            // never warm these accounts (the desktop's worker keeps that
+            // wake).
+            let refresher = Arc::clone(&self.cache_refresher);
+            self.runtime.handle().spawn(async move {
+                refresher.warm_all_queued(false).await;
+            });
+        }
         // …and tell the UI to re-read its catalogs NOW instead of waiting out
         // the pass. The listing scopes are the channel the app already uses
         // for "the container lists changed" (cacheObserver.ts maps them to
@@ -2676,8 +2696,6 @@ impl Host {
     /// remove the row. The local account cannot be deleted
     /// ([`StoreError::InvalidField`]).
     pub fn delete_account(&self, account_id: String) -> Result<(), StoreError> {
-        self.registry.unregister(&account_id);
-        let _ = self.secret_store.delete_all(&account_id);
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
         // Whether the deletion travels is a question about the adapter, and the
@@ -2690,17 +2708,26 @@ impl Host {
             .ok_or(StoreError::NotFound)?;
         // See the desktop twin: deleting the row this device syncs through
         // strands the pointer and leaves the orchestrator pushing to a target
-        // the user thinks is gone.
+        // the user thinks is gone. Asked before anything is removed: the
+        // adapter and the credentials used to go first, so a refused deletion
+        // still left the sync target without its password.
         if host_core::sync_target::selected_account_id(&UserPrefsRepo::new(&shared)).as_deref()
             == Some(account_id.as_str())
         {
             return Err(StoreError::InvalidField {
                 field: "account_id".to_string(),
-                detail: "this account is the sync target for this device; disconnect it in                          the sync settings before deleting it"
-                    .to_string(),
+                detail: concat!(
+                    "this account is the sync target for this device; ",
+                    "disconnect it in the sync settings before deleting it"
+                )
+                .to_string(),
             });
         }
+        // The row first: a refusal there (the implicit local account) leaves
+        // the adapter and the credentials as they were.
         repo.delete(&account_id).map_err(acc_err)?;
+        self.registry.unregister(&account_id);
+        let _ = self.secret_store.delete_all(&account_id);
         // This device's half goes with it. The row's removal syncs and this
         // does not — another device deleting the account cannot tell this one
         // where its key file was, so nothing else would ever clean these up.
@@ -10751,6 +10778,59 @@ mod tests {
                 .unwrap_err(),
             StoreError::InvalidField { ref field, .. } if field == "occurrence"
         ));
+    }
+
+    #[test]
+    fn deleting_the_sync_target_is_refused_and_keeps_its_password() {
+        let (_dir, host, kc) = open_host();
+        let req = r#"{
+            "adapter_kind": "vikunja",
+            "display_name": "Tasks",
+            "config_json": "{\"server_url\":\"https://vikunja.example.invalid/\"}",
+            "secret": "tok_123"
+        }"#;
+        let created = host.create_account_json(req.to_string()).unwrap();
+        let id: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let account_id = id["id"].as_str().unwrap().to_string();
+        host_core::sync_target::select_account(
+            &UserPrefsRepo::new(&host.db.shared()),
+            Some(&account_id),
+        )
+        .unwrap();
+
+        let err = host.delete_account(account_id.clone()).unwrap_err();
+        assert!(matches!(err, StoreError::InvalidField { .. }));
+        assert!(host.accounts_json(None).unwrap().contains("Tasks"));
+        assert!(
+            kc.map
+                .lock()
+                .unwrap()
+                .keys()
+                .any(|(acc, _)| acc == &account_id),
+            "a refused deletion keeps the password",
+        );
+        assert!(host.registry.has_adapter(&account_id), "and the adapter");
+    }
+
+    #[test]
+    fn an_account_deleted_through_sync_loses_its_adapter() {
+        let (_dir, host, _kc) = open_host();
+        let req = r#"{
+            "adapter_kind": "vikunja",
+            "display_name": "Tasks",
+            "config_json": "{\"server_url\":\"https://vikunja.example.invalid/\"}",
+            "secret": "tok_123"
+        }"#;
+        let created = host.create_account_json(req.to_string()).unwrap();
+        let id: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let account_id = id["id"].as_str().unwrap().to_string();
+        assert!(host.registry.has_adapter(&account_id));
+        // The applier removed the row: deleted on another device.
+        AccountsRepo::new(&host.db.shared())
+            .delete(&account_id)
+            .unwrap();
+        host.register_synced_accounts();
+        assert!(!host.registry.has_adapter(&account_id));
     }
 
     #[test]

@@ -5,12 +5,26 @@
 //
 // Contacts are NOT on the sync event log (local contacts are device-local;
 // external ones self-sync via their provider), so — unlike tasks/events — the
-// mutations here do NOT kick a background sync push. The composite types are
+// mutations here do NOT kick a background sync push. They do re-plan the
+// reminders: a birthday that came, changed or went is a birthday reminder that
+// did (`refreshRemindersSoon`, debounced). The composite types are
 // defined here for now (like Calendar in ./calendar), reusing leaf types from
 // @aperio/shared; they hoist to @aperio/shared in a later consolidation.
 
 import CalFfi from '../../modules/cal-ffi';
 import type { ContainerColor, WireContactValue } from '@aperio/shared';
+
+import { refreshRemindersSoon } from '../reminders/scheduler';
+
+/** Run a contact write, then re-plan the reminders — after a failure too, as a
+ *  write whose answer was lost may have landed. */
+async function replanningBirthdays<T>(write: Promise<T>): Promise<T> {
+  try {
+    return await write;
+  } finally {
+    refreshRemindersSoon();
+  }
+}
 
 /** An address book enriched with its owning account (the `ContactListRow`
  *  wire shape). `account_id === 'local'` marks the device-local book. */
@@ -112,7 +126,7 @@ export const createContactList = async (name: string): Promise<ContactList> =>
   JSON.parse(await CalFfi.createContactListJson(name)) as ContactList;
 
 export const deleteContactList = (id: string): Promise<void> =>
-  CalFfi.deleteContactList(id);
+  replanningBirthdays(CalFfi.deleteContactList(id));
 
 // ── Contacts ─────────────────────────────────────────────────────────────────
 
@@ -128,18 +142,22 @@ export const createContact = async (
   listId: string,
   contact: NewContact,
 ): Promise<Contact> =>
-  JSON.parse(await CalFfi.createContactJson(listId, JSON.stringify(contact))) as Contact;
+  JSON.parse(
+    await replanningBirthdays(CalFfi.createContactJson(listId, JSON.stringify(contact))),
+  ) as Contact;
 
 /** Full-overwrite update; the contact's `list_id` selects the route. */
 export const updateContact = async (contact: Contact): Promise<Contact> =>
-  JSON.parse(await CalFfi.updateContactJson(JSON.stringify(contact))) as Contact;
+  JSON.parse(
+    await replanningBirthdays(CalFfi.updateContactJson(JSON.stringify(contact))),
+  ) as Contact;
 
 /** Delete a contact. Pass the owning `listId` so the delete routes to the right
  *  account (external contacts need it; local ones ignore it). */
 export const deleteContact = (
   id: string,
   listId: string | null = null,
-): Promise<void> => CalFfi.deleteContact(id, listId);
+): Promise<void> => replanningBirthdays(CalFfi.deleteContact(id, listId));
 
 // ── Contact photos ───────────────────────────────────────────────────────────
 

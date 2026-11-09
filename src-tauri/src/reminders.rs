@@ -20,6 +20,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -189,6 +190,12 @@ pub struct ReminderScheduler {
     /// What was written since `external_cache` was read (see
     /// [`WrittenContainers`]).
     external_written: Arc<Mutex<WrittenContainers>>,
+    /// Counts the changes no read that began before them may answer for: the
+    /// accounts with an adapter changed, or the cache was dropped. A read
+    /// that saw another count when it began returns what it read but does
+    /// not store it — the overview's scan, begun before an account was
+    /// deleted, would otherwise put that account's reminders back.
+    external_generation: Arc<AtomicU64>,
     /// Calendar ids the user UNCHECKED in the sidebar (device-local
     /// localStorage, pushed from the frontend via `set_hidden_calendars`). Event
     /// reminders on these calendars are suppressed — hiding a calendar silences
@@ -293,6 +300,7 @@ impl ReminderScheduler {
             fired: Arc::new(Mutex::new(HashSet::new())),
             external_cache: Arc::new(Mutex::new(None)),
             external_written: Arc::new(Mutex::new(WrittenContainers::default())),
+            external_generation: Arc::new(AtomicU64::new(0)),
             hidden_calendars: Arc::new(Mutex::new(HashSet::new())),
             labels: Arc::new(Mutex::new(None)),
             sounds_dir,
@@ -334,6 +342,7 @@ impl ReminderScheduler {
     /// cache, then wake the worker so it picks up the change immediately.
     pub fn invalidate_external_cache(&self) {
         let mut guard = self.external_cache.lock().expect("external cache poison");
+        self.external_generation.fetch_add(1, Ordering::SeqCst);
         *guard = None;
     }
 
@@ -385,6 +394,27 @@ impl ReminderScheduler {
                 ExternalChange::Nothing => return,
             }
         }
+        self.invalidate();
+    }
+
+    /// The set of accounts with an adapter changed: one deleted (here or on
+    /// another device), a plugin switched off, on, removed or replaced. The
+    /// next scan reads every account again, without the ones that are gone,
+    /// rather than ringing what was planned for them. Wakes the worker, which
+    /// otherwise sleeps until the next planned reminder — possibly one of
+    /// the deleted account's.
+    pub fn accounts_changed(&self) {
+        self.external_generation.fetch_add(1, Ordering::SeqCst);
+        self.written().everything = true;
+        self.invalidate();
+    }
+
+    /// A contact was created, changed or deleted, or an address book was
+    /// deleted: the birthday reminders are read again at the next scan, which
+    /// this starts. Local contacts change no cache the refresh would report,
+    /// so nothing else would tell the planner.
+    pub fn contacts_changed(&self) {
+        self.written().birthdays = true;
         self.invalidate();
     }
 
@@ -575,6 +605,7 @@ impl ReminderScheduler {
         if written.everything {
             return None;
         }
+        let generation = self.external_generation.load(Ordering::SeqCst);
         let mut read = Vec::new();
         for id in written.calendars {
             let fresh = match external_calendar_triggers(&self.registry, &self.db, &id).await {
@@ -605,6 +636,10 @@ impl ReminderScheduler {
             None
         };
         let mut guard = self.external_cache.lock().expect("external cache poison");
+        if self.external_generation.load(Ordering::SeqCst) != generation {
+            // The accounts changed while this read: only a full read answers.
+            return None;
+        }
         let cached = guard.as_mut()?;
         for (kind, id, fresh) in read {
             cached.replace(kind, &id, fresh);
@@ -618,6 +653,7 @@ impl ReminderScheduler {
     /// The full external scan, every account, every calendar and list, into
     /// the cache.
     async fn fetch_all_external_triggers(&self) -> Vec<Trigger> {
+        let generation = self.external_generation.load(Ordering::SeqCst);
         let mut fresh = enumerate_external_triggers(&self.registry, &self.db).await;
         // Synthetic birthday calendars aren't adapters, so the external fan-out
         // above skips them. Fold their configured default reminders in here so
@@ -627,12 +663,24 @@ impl ReminderScheduler {
         fresh.extend(
             enumerate_birthday_triggers(&local, &self.registry, &self.cache, &self.db).await,
         );
+        self.store_full_read(generation, &fresh);
+        fresh
+    }
+
+    /// Keep a full read as the cache, unless the accounts changed (or the
+    /// cache was dropped) since it began: then it may hold an account that
+    /// is gone, and the read their change asked for is the one to keep.
+    /// Returns whether it was kept.
+    fn store_full_read(&self, began_at: u64, fresh: &[Trigger]) -> bool {
         let mut guard = self.external_cache.lock().expect("external cache poison");
+        if self.external_generation.load(Ordering::SeqCst) != began_at {
+            return false;
+        }
         *guard = Some(ExternalTriggerCache {
             fetched_at: Instant::now(),
-            triggers: fresh.clone(),
+            triggers: fresh.to_vec(),
         });
-        fresh
+        true
     }
 
     /// Build the list of pending (not-yet-fired, in-the-future or catch-up-
@@ -1155,6 +1203,7 @@ mod tests {
                     triggers: cached,
                 }))),
                 external_written: Arc::new(Mutex::new(WrittenContainers::default())),
+                external_generation: Arc::new(AtomicU64::new(0)),
                 hidden_calendars: Arc::new(Mutex::new(HashSet::new())),
                 labels: Arc::new(Mutex::new(None)),
                 sounds_dir: PathBuf::new(),
@@ -1383,6 +1432,76 @@ mod tests {
             s.external_calendar_removed("both");
             s.external_task_list_removed("both");
             assert!(s.external_triggers_cached_or_fetch(true).await.is_empty());
+            assert!(account.reads().is_empty());
+        }
+
+        /// A deleted account's reminders go at the next scan, and the worker
+        /// is woken for it instead of sleeping until one of them.
+        #[tokio::test]
+        async fn a_deleted_account_takes_its_reminders_along() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![of("gone", ItemKind::Event, "cal-1")],
+                Duration::from_secs(10),
+            );
+            s.registry.unregister("acc-1");
+            s.accounts_changed();
+            tokio::time::timeout(Duration::from_secs(1), s.invalidate.notified())
+                .await
+                .expect("the worker is woken");
+            assert!(s.external_triggers_cached_or_fetch(true).await.is_empty());
+            assert_eq!(account.listings(), 0, "the deleted account is not asked");
+        }
+
+        /// A full read that began before the accounts changed is returned
+        /// but not kept: it may hold the account that went.
+        #[tokio::test]
+        async fn a_read_begun_before_an_account_change_is_not_kept() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![of("kept", ItemKind::Event, "cal-2")],
+                Duration::from_secs(10),
+            );
+            let began = s.external_generation.load(Ordering::SeqCst);
+            s.accounts_changed();
+            assert!(!s.store_full_read(began, &[of("gone", ItemKind::Event, "cal-1")]));
+            let cached = s.external_cache.lock().unwrap();
+            let ids: Vec<_> = cached
+                .as_ref()
+                .expect("the cache stays")
+                .triggers
+                .iter()
+                .map(|t| t.item_id.clone())
+                .collect();
+            assert_eq!(ids, vec!["kept".to_string()]);
+            drop(cached);
+            let now = s.external_generation.load(Ordering::SeqCst);
+            assert!(s.store_full_read(now, &[of("fresh", ItemKind::Event, "cal-1")]));
+        }
+
+        /// A contact change reads the birthdays again at once (no refresh
+        /// reports a local contact), and wakes the worker for it.
+        #[tokio::test]
+        async fn a_contact_change_reads_the_birthdays_again() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![
+                    of("birthday", ItemKind::Event, "aperio-birthdays:list-1"),
+                    of("other", ItemKind::Event, "cal-2"),
+                ],
+                Duration::from_secs(10),
+            );
+            s.contacts_changed();
+            tokio::time::timeout(Duration::from_secs(1), s.invalidate.notified())
+                .await
+                .expect("the worker is woken");
+            assert_eq!(
+                sorted(s.external_triggers_cached_or_fetch(true).await),
+                vec!["other"]
+            );
             assert!(account.reads().is_empty());
         }
 

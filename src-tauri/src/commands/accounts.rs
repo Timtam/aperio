@@ -15,6 +15,7 @@ use crate::cache::CacheRefresher;
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
 use crate::registry::AdapterRegistry;
+use crate::reminders::SchedulerHandle;
 use crate::secrets::{self, SecretSlot};
 use sync_core::{AccountPayload, IdPayload, SyncEvent};
 
@@ -689,6 +690,7 @@ pub async fn delete_account(
     registry: State<'_, Arc<AdapterRegistry>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    scheduler: State<'_, SchedulerHandle>,
     id: String,
 ) -> CommandResult<()> {
     let shared = db.shared();
@@ -701,30 +703,33 @@ pub async fn delete_account(
         .get(&id)?
         .map(|account| account.adapter_kind)
         .ok_or_else(|| AccountsError::NotFound(id.clone()))?;
-    repo.delete(&id)?;
-    // This device's half goes with it. The row's removal syncs and this does
-    // not — another device deleting the account cannot tell this one where its
-    // key file was, so nothing else would ever clean these up.
-    let _ = host_core::account_local::forget_all(
-        &host_core::user_prefs::UserPrefsRepo::new(&shared),
-        &id,
-    );
-    let prefs_for_guard = host_core::user_prefs::UserPrefsRepo::new(&shared);
     // Deleting the account this device syncs through would leave the pointer
     // naming a row that is gone: the orchestrator keeps pushing to that target
     // for the rest of the session, and the next launch comes up not syncing at
     // all, with a log line and nothing the user could have predicted. Refused
     // rather than silently deconfigured — stopping someone's sync is a decision
-    // they should make in the place that says "sync".
+    // they should make in the place that says "sync". Asked before anything is
+    // removed: a refusal that had already deleted the row would be no refusal.
+    let prefs_for_guard = host_core::user_prefs::UserPrefsRepo::new(&shared);
     if host_core::sync_target::selected_account_id(&prefs_for_guard).as_deref() == Some(id.as_str())
     {
         return Err(CommandError {
             code: "active_sync_conflict",
-            message: "This account is the sync target for this device.                       Disconnect it in Settings → Sync before deleting it."
-                .into(),
+            message: concat!(
+                "This account is the sync target for this device. ",
+                "Disconnect it in Settings → Sync before deleting it."
+            )
+            .into(),
         });
     }
+    repo.delete(&id)?;
+    // This device's half goes with it. The row's removal syncs and this does
+    // not — another device deleting the account cannot tell this one where its
+    // key file was, so nothing else would ever clean these up.
+    let _ = host_core::account_local::forget_all(&prefs_for_guard, &id);
     registry.unregister(&id);
+    // Its reminders go now: the planner may be asleep until one of them.
+    scheduler.accounts_changed();
     // Best-effort credential cleanup — leaves no Aperio entry behind in
     // the keychain for that account id.
     if let Err(err) = secrets::delete_all(&id) {

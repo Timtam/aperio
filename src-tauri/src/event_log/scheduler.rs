@@ -345,7 +345,8 @@ impl SyncScheduler {
         self.write_sync_log(app, trigger, &result, duration_ms);
     }
 
-    /// Bring up adapters for external accounts that arrived through sync.
+    /// Bring up adapters for external accounts that arrived through sync, and
+    /// drop those of accounts deleted through it.
     ///
     /// Accounts created on another device (or restored into a fresh install
     /// by the onboarding wizard) land in the `accounts` table via the
@@ -353,7 +354,10 @@ impl SyncScheduler {
     /// that register an adapter. Without this, the account exists (the
     /// sidebar reads the DB and shows its name) but has no adapter, so it
     /// lists no calendars / task lists / address books and shows no items
-    /// until the next app start runs `bootstrap`.
+    /// until the next app start runs `bootstrap`. An account deleted on
+    /// another device is the mirror case: its row is gone, its adapter was
+    /// not, so its calendars stayed readable and its reminders kept ringing
+    /// until the next app start.
     ///
     /// Only ADAPTER-LESS accounts are registered: rebuilding a live
     /// account's adapter would drop the plugin instance's in-memory
@@ -363,47 +367,41 @@ impl SyncScheduler {
     /// round, so a spurious warm pass / event burst here would be constant
     /// background noise.
     pub(crate) fn register_synced_accounts<R: Runtime>(&self, app: &AppHandle<R>) {
-        let registered = {
+        let (registered, removed) = {
             let repo = AccountsRepo::new(&self.db);
-            self.registry.register_missing(&repo)
+            (
+                self.registry.register_missing(&repo),
+                self.registry.unregister_removed(&repo),
+            )
         };
-        if registered == 0 {
+        if registered == 0 && removed == 0 {
             return;
         }
-        info!(
-            registered,
-            "registered adapters for accounts that arrived through sync",
-        );
-        // A fresh adapter has nothing cached, so warm it: the pass
-        // enumerates the new accounts' containers and fills their items.
-        // UN-forced — this warm is a consequence of a background sync, not
-        // a user asking, so a network blip during it must still be
-        // confirmed before it surfaces (auth failures surface either way).
-        self.cache_refresher.trigger_background();
-        // …and tell the frontend to re-read its catalogs NOW instead of
-        // waiting out the pass. `cache-updated` on the three listing scopes
-        // is the channel the app already uses for "the container lists
-        // changed" (CacheSyncListener.tsx re-runs refreshCalendars /
-        // refreshTaskLists / refreshContactLists and invalidates the data
-        // hooks). The listener keys off `scope` alone; the ids stay empty
-        // because this signal is account-wide, not per-container.
-        for scope in [
-            SyncScope::Calendars,
-            SyncScope::TaskLists,
-            SyncScope::ContactLists,
-        ] {
-            let payload = CacheUpdatedPayload {
-                scope: scope.as_str().to_string(),
-                account_id: String::new(),
-                container_id: String::new(),
-            };
-            if let Err(err) = app.emit("cache-updated", &payload) {
-                warn!(
-                    ?err,
-                    "failed to emit cache-updated after account registration"
-                );
+        if removed > 0 {
+            info!(
+                removed,
+                "unregistered adapters for accounts deleted through sync",
+            );
+            // Their reminders go now, not when the planner next reads.
+            if let Some(reminders) = app.try_state::<crate::reminders::SchedulerHandle>() {
+                reminders.accounts_changed();
             }
         }
+        if registered > 0 {
+            info!(
+                registered,
+                "registered adapters for accounts that arrived through sync",
+            );
+            // A fresh adapter has nothing cached, so warm it: the pass
+            // enumerates the new accounts' containers and fills their items.
+            // UN-forced — this warm is a consequence of a background sync,
+            // not a user asking, so a network blip during it must still be
+            // confirmed before it surfaces (auth failures surface either way).
+            self.cache_refresher.trigger_background();
+        }
+        // …and tell the frontend to re-read its catalogs NOW instead of
+        // waiting out the pass.
+        broadcast_account_listings(app);
     }
 
     /// Append one row to the §19.9 sync_log table + emit a
@@ -840,6 +838,30 @@ fn backoff_duration(base: Duration, failures: u32) -> Duration {
 /// Whether a round applied the refresh interval from another device.
 fn interval_arrived(keys: &[String]) -> bool {
     keys.iter().any(|key| key == PREF_SYNC_INTERVAL_MINUTES)
+}
+
+/// The accounts with an adapter changed (some arrived or went through sync or
+/// onboarding): tell the frontend to re-read its catalogs NOW. `cache-updated`
+/// on the three listing scopes is the channel the app already uses for "the
+/// container lists changed" (CacheSyncListener.tsx re-runs refreshCalendars /
+/// refreshTaskLists / refreshContactLists and invalidates the data hooks). The
+/// listener keys off `scope` alone; the ids stay empty because this signal is
+/// account-wide, not per-container.
+pub(crate) fn broadcast_account_listings<R: Runtime>(app: &AppHandle<R>) {
+    for scope in [
+        SyncScope::Calendars,
+        SyncScope::TaskLists,
+        SyncScope::ContactLists,
+    ] {
+        let payload = CacheUpdatedPayload {
+            scope: scope.as_str().to_string(),
+            account_id: String::new(),
+            container_id: String::new(),
+        };
+        if let Err(err) = app.emit("cache-updated", &payload) {
+            warn!(?err, "failed to emit cache-updated after an account change");
+        }
+    }
 }
 
 /// The one refresh interval changed, here or on another device: every loop

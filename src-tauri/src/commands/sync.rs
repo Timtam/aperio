@@ -1556,20 +1556,38 @@ pub async fn preview_sync_target_values(
 ///
 /// The warm pass runs either way: the boot pass already ran before these
 /// accounts existed, so their containers would otherwise stay unfetched.
-fn register_onboarded_accounts(
+fn register_onboarded_accounts<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     shared: &SharedConn,
     registry: &AdapterRegistry,
     refresher: &CacheRefresher,
 ) {
-    let registered = {
+    let (registered, removed) = {
         let repo = AccountsRepo::new(shared);
-        registry.register_missing(&repo)
+        (
+            registry.register_missing(&repo),
+            registry.unregister_removed(&repo),
+        )
     };
     if registered > 0 {
         tracing::info!(
             registered,
             "registered adapters for accounts restored by onboarding",
         );
+    }
+    // A resume replays what other devices did meanwhile, deletions of
+    // accounts included: their adapters go, and their reminders with them —
+    // as after a sync round (`SyncScheduler::register_synced_accounts`).
+    if removed > 0 {
+        tracing::info!(
+            removed,
+            "unregistered adapters for accounts deleted while this device was away",
+        );
+        if let Some(reminders) = tauri::Manager::try_state::<crate::reminders::SchedulerHandle>(app)
+        {
+            reminders.accounts_changed();
+        }
+        crate::event_log::scheduler::broadcast_account_listings(app);
     }
     // UN-forced, matching the mobile path: the restored accounts' first
     // warm is automatic bookkeeping, so a network blip during it must be
@@ -1684,7 +1702,7 @@ pub async fn accept_remote_dataset(
         let _ = prefs.delete(PREF_E2E_ENABLED);
     }
     scheduler.kick();
-    register_onboarded_accounts(&shared, &registry, &refresher);
+    register_onboarded_accounts(&app, &shared, &registry, &refresher);
     // The joined dataset's refresh interval came in with its snapshot,
     // which names no key: re-time every loop to it.
     crate::event_log::scheduler::interval_changed(&app);
@@ -1796,7 +1814,7 @@ pub async fn accept_remote_dataset_values(
         let _ = prefs.delete(PREF_E2E_ENABLED);
     }
     scheduler.kick();
-    register_onboarded_accounts(&shared, &registry, &refresher);
+    register_onboarded_accounts(&app, &shared, &registry, &refresher);
     // The joined dataset's refresh interval came in with its snapshot,
     // which names no key: re-time every loop to it.
     crate::event_log::scheduler::interval_changed(&app);
@@ -3019,7 +3037,7 @@ pub async fn resume_stale_device(
     }
     // A stale-resume re-onboards from the target, so it can materialise
     // accounts this device never saw — same registration gap as a join.
-    register_onboarded_accounts(&db.shared(), &registry, &refresher);
+    register_onboarded_accounts(&app, &db.shared(), &registry, &refresher);
     Ok(report)
 }
 
