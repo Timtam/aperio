@@ -39,9 +39,6 @@ pub struct AudioPlayer {
 }
 
 impl AudioPlayer {
-    /// Spawn the dedicated audio thread. The `OutputStream` is created
-    /// inside the thread and lives as long as it does (the whole
-    /// process), so sinks made from it never outlive their stream.
     /// A player without its thread, for tests: what it is handed goes
     /// nowhere.
     #[cfg(test)]
@@ -50,6 +47,9 @@ impl AudioPlayer {
         Self { tx }
     }
 
+    /// Spawn the dedicated audio thread. The `OutputStream` is created
+    /// inside the thread and lives as long as it does (the whole
+    /// process), so sinks made from it never outlive their stream.
     pub fn spawn() -> Self {
         let (tx, rx) = sync_channel::<PathBuf>(QUEUE_DEPTH);
         thread::Builder::new()

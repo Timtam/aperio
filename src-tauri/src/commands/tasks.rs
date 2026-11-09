@@ -465,6 +465,13 @@ pub async fn delete_task_list(
     let _ = cache.invalidate(&account, SyncScope::Tasks, &id);
     // Its tasks' reminders go at once, without a read of a list that is gone.
     scheduler.external_task_list_removed(&id);
+    // A CalDAV collection can be a calendar as well: the DELETE took its
+    // events with it, and their reminders go too.
+    if registry.account_for_calendar(&id).as_deref() == Some(account.as_str()) {
+        let _ = cache.invalidate(&account, SyncScope::Calendars, "");
+        let _ = cache.invalidate(&account, SyncScope::Events, &id);
+        scheduler.external_calendar_removed(&id);
+    }
     scheduler.invalidate();
     Ok(())
 }

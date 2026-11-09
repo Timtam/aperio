@@ -1106,6 +1106,7 @@ pub async fn calendar_current_user_email(
 pub async fn respond_to_event(
     registry: State<'_, Arc<AdapterRegistry>>,
     cache: State<'_, Arc<CacheStore>>,
+    scheduler: State<'_, SchedulerHandle>,
     calendar_id: String,
     event_id: String,
     status: AttendeeStatus,
@@ -1126,9 +1127,14 @@ pub async fn respond_to_event(
             message: format!("account '{account}' is not routable"),
         });
     };
-    ext.respond_to_event(&event_id, status, send_response)
-        .await?;
+    let responded = ext.respond_to_event(&event_id, status, send_response).await;
+    // A decline takes an Exchange meeting out of the calendar, and with it
+    // its reminder. Failed or not (decision 277: an answer that was lost may
+    // have landed), the next read and the next scan ask the provider.
     let _ = cache.invalidate(&account, SyncScope::Events, &calendar_id);
+    scheduler.external_calendar_written(&calendar_id);
+    scheduler.invalidate();
+    responded?;
     Ok(())
 }
 

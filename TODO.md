@@ -140,7 +140,26 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
   (`external_calendar_written` / `external_task_list_written`), eine
   gelöschte Liste verliert ihre Erinnerungen ohne Abfrage. Das Löschen
   eines Kalenders oder einer Liste weckt den Planer jetzt auch, lokal wie
-  extern.
+  extern; eine Antwort auf eine Einladung liest den Kalender neu. Meldet die
+  Aktualisierung externer Daten eine Änderung beim Anbieter, liest der
+  Planer genau diesen Kalender oder diese Liste neu (Tonis Vorschlag,
+  2026-11-09: an die regelmäßige Aktualisierung hängen).
+- [ ] **Ein Intervall für alles** (Toni, 2026-11-09): Das Sync-Intervall
+  (Einstellungen, Sync; `sync.intervalMinutes`, Standard 5 Minuten) steuert
+  auch die Aktualisierung externer Daten am Desktop (heute fest 30 Minuten,
+  `cache.refreshIntervalMinutes`, ohne Einstellung) und die
+  Kontakt-Synchronisierung (heute eigene Auswahl unter Kontakte,
+  `contacts.syncIntervalMinutes`; die Auswahl entfällt, ein Hinweis verweist
+  auf Sync). Der Planer hängt seit dem Punkt oben an dieser Aktualisierung.
+  Handy prüfen: Es aktualisiert externe Daten nach jedem Sync-Durchlauf im
+  Vordergrund, aber nur mit eingerichtetem Sync-Ziel. Kosten: externe Server
+  am Desktop alle 5 statt alle 30 Minuten.
+- [ ] **Erinnerungen eines gelöschten Kontos oder abgeschalteten Adapters
+  klingeln weiter** (Prüfrunde #162, gab es vorher schon): `delete_account`
+  und das Abschalten oder Entfernen eines Plugins (`commands/plugins.rs`)
+  wecken den Planer nicht und leeren seinen Speicher nicht. Ebenso machen
+  lokale Kontakt-Änderungen die Geburtstags-Erinnerungen erst beim nächsten
+  vollen Durchlauf neu.
 - [ ] **Stufe 2: Klicks aus dem Benachrichtigungscenter und nach dem Beenden**
   (Win+N, Eingabe auf einem Aperio-Eintrag; Stufe 1 erreicht nur das Banner,
   solange Aperio läuft). Ohne COM-Aktivator stellt Windows diese Klicks nicht
