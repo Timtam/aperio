@@ -299,10 +299,16 @@ die Wahl für „jetzt losgehen" in einem geteilten Arbeitskalender oder für ei
 persönlichen Hinweis an einem Termin, den Kollegen lesen können.
 
 Die Wahl erscheint nur dort, wo sie einen Unterschied macht. Ein lokaler
-Kalender hat niemanden sonst, dem er etwas mitteilen könnte, und der Kalender
-deines Telefons, den Aperio nur mitliest, speichert keine Erinnerung, die Aperio
-schreibt – in beiden Fällen gehören die Erinnerungen ohnehin Aperio, und es gibt
-dort keine Wahl.
+Kalender hat niemanden sonst, dem er etwas mitteilen könnte; seine Erinnerungen
+gehören ohnehin Aperio, und es gibt dort keine Wahl.
+
+Beim Kalender deines Telefons (das Konto **Dieses Gerät**) ist es umgekehrt:
+Seine Hinweise gehören der Kalender-App des Telefons. Aperio schreibt dort
+Termine, zeigt und schreibt aber ihre Hinweise nicht und klingelt für diese
+Termine auch nicht, nicht einmal mit einer Standard-Erinnerung des Kalenders.
+Ein Hinweis, den du in der Kalender-App des Telefons setzt, bleibt und klingelt
+dort. Der Editor von Aperio zeigt für so einen Termin trotzdem
+Erinnerungszeilen, aber was du dort einträgst, wird nicht behalten.
 
 Termin-Kennungen gehören dem Kalender und ändern sich hinter Aperios Rücken: Ein
 erneuter Abgleich kann neue vergeben, manche Anbieter tun es nach jeder
@@ -354,10 +360,11 @@ anzeigt, hängt am Startmenü-Eintrag, siehe *Benachrichtigungen unter Windows*
 oben. Die Berechtigung am Handy beschreibt die
 [Mobile App](/de/guides/mobile/).
 
-> **Screenreader-Hinweis:** Erinnerungen werden über eine Live-Region
-> angesagt, sodass du sie auch ohne sichtbaren Fokuswechsel mitbekommst.
-> Die Schaltflächen „Öffnen", „Schließen" und „Später erinnern" sind per
-> `Tab` erreichbar und klar beschriftet.
+> **Screenreader-Hinweis:** Eine Erinnerung kommt nur als Mitteilung deines
+> Betriebssystems, und dein Screenreader liest sie wie jede andere Mitteilung
+> vor. Das Fenster von Aperio sagt sie nicht noch einmal an, und Knöpfe hat die
+> Mitteilung noch keine. Was ansteht, zeigt die Erinnerungs-Übersicht
+> (`Strg+Umschalt+R`); **Eingabe** öffnet die gewählte Erinnerung.
 
 ## Im Hintergrund laufen (Infobereich)
 
@@ -390,5 +397,5 @@ Häkchens wird der Autostart wieder abgeschaltet.
 
 ## Zusammenfassung
 
-Du kannst Erinnerungen anlegen, ihre Töne einstellen und auf sie mit
-Schließen oder Snooze reagieren. Weiter geht es mit der Suche.
+Du kannst Erinnerungen anlegen, wählen, wo sie gelten, ihre Töne einstellen und
+aus einer Mitteilung öffnen, worum es geht. Weiter geht es mit der Suche.

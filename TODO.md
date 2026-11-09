@@ -730,38 +730,20 @@ Siehe DESIGN §4.2.
   an, die der Adapter verwirft und der Planer überspringt. Beide Editoren
   sollten nach der Fähigkeit des Kalenders oder der Liste nur anbieten, was
   ankommt, oder es sagen.
-- [ ] **Anleitung beschreibt, was es nicht gibt.**
-  `web/src/content/docs/de/guides/tutorial/07-notifications.md` und der
-  englische Zwilling beschreiben Schlummern („später erinnern“, „Snooze“) in
-  der Benachrichtigung und in der Zusammenfassung, Knöpfe „Öffnen“,
-  „Schließen“ und „Später erinnern“ in der App und eine Einstellungsseite
-  „Benachrichtigungen“ mit einem Schalter für System-Benachrichtigungen,
-  „Standard-Snooze-Dauer“ und „Standard-Vorlaufzeit für neue Termine“. Dazu
-  versprechen sie einen „Hinweis in der App“ und eine Ansage über eine
-  Live-Region. Nichts davon gibt es: Eine ausgelöste Erinnerung kommt nur als
-  Mitteilung des Betriebssystems, und Schlummern gibt es nur beim Tagesstart.
-  Schlummern versprechen zudem die Startseite (`guides/index.md`) und die
-  Handy-Anleitung (`guides/mobile.md`), jeweils in beiden Sprachen. Und der
-  Abschnitt „Erinnerungen, die nur du bekommst“ sagt, Aperio lese den Kalender
-  des Telefons nur mit, und dort gehörten die Erinnerungen ohnehin Aperio.
-  Tatsächlich schreibt Aperio dort Termine, aber keine Erinnerungen, und der
-  Planer überspringt Gerätekonten; eine dort gesetzte Erinnerung klingelt also
-  nirgends. Schließlich sagt die Anleitung, „Beim nächsten App-Start“ werde
-  ausgelöst, wenn es am Eintrag selbst gesetzt ist. Das gilt nur am Desktop
-  und nur für Einträge in lokalen Kalendern und Listen, denn kein Anbieter
-  speichert diese Art. DESIGN
-  verspricht Schlummern und „Öffnen“ in der Mitteilung (§14.3, §14.5, §14.6)
-  und in §14.1 globale Standard-Erinnerungen für neue Termine und Aufgaben.
-  Gebaut sind Standard-Erinnerungen nur je Kalender. Für Aufgaben gibt es
-  keine Standard-Erinnerung am Eintrag, weder global noch je Liste, nur die
-  globalen Tagesstart-Erinnerungen an Fristen (Einstellungen → Aufgaben, je
-  Aufgabe überschreibbar als „Frühe Erinnerung“).  
-  ↳ Teilweise behoben mit dem Startmenü-Eintrag (2026-10-31): In
-  `07-notifications.md` (beide Sprachen) ersetzt ein Verweis auf den neuen
-  Abschnitt „Benachrichtigungen unter Windows“ die Einstellungsseite
-  „Benachrichtigungen“ (Schalter, Snooze-Dauer, Vorlaufzeit) und die
-  Berechtigungsfrage; der „Hinweis in der App“ ist gestrichen. Alles andere
-  oben ist weiter offen.
+- [x] **Anleitung beschreibt, was es nicht gibt** (2026-11-09). Die
+  Benachrichtigungs-Anleitung (`07-notifications.md`), die Startseite
+  (`guides/index.md`) und die Handy-Anleitung (`guides/mobile.md`), je in
+  beiden Sprachen, versprechen kein Schlummern mehr, keine Knöpfe in der
+  Mitteilung und keine Ansage über eine Live-Region. Der Screenreader-Hinweis
+  nennt stattdessen die Erinnerungs-Übersicht (`Strg+Umschalt+R`). Zum
+  Gerätekalender sagt sie jetzt, was gilt: Seine Hinweise gehören der
+  Kalender-App des Telefons, Aperio zeigt und schreibt sie nicht und klingelt
+  für diese Termine nicht; Erinnerungszeilen im Editor werden dort nicht
+  behalten (das Abschalten im Editor bleibt beim Punkt darüber). DESIGN
+  §14.1, §14.3, §14.5 und §14.6 markieren globale Standard-Erinnerungen,
+  Knöpfe und Schlummern als geplant (A5). Schon vorher richtig: Klick auf die
+  Mitteilung (A5 Stufe 1) und „Beim nächsten App-Start“ auf beiden Geräten
+  (#158).
 - [ ] **macOS: „Systemsound“ ist dort ebenfalls stumm.** Aus dem Code
   gelesen: `notify-rust` reicht den Ton-Namen an `mac-notification-sys`
   weiter, und ohne Namen geht ein leerer Ton hinaus. Den Standardton spielt

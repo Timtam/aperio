@@ -20,7 +20,8 @@ knowledge required.
   numbers and email addresses, plus birthday calendars derived from them.
 - **Different views** – day, week, month, year, agenda and a dedicated task
   view.
-- **Reminders** with sounds and snooze.
+- **Reminders** with sounds of your choice, on the appointment or only for
+  you.
 - **Search** across events and tasks.
 - **Cross-device synchronization** via your own storage (e.g. WebDAV or
   Dropbox).

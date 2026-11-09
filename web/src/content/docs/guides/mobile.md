@@ -119,7 +119,7 @@ are stored **on this device only** (they are not synchronized):
 
 Reminders are delivered as **local notifications**. On first use the app asks for
 **notification permission** – grant it so reminders (and the app icon badge) can
-appear. Reminder sounds, lead times and snooze work as described under
+appear. Reminder sounds and lead times work as described under
 [Notifications](/guides/tutorial/07-notifications/).
 
 **Tapping a reminder** opens what it is about: an appointment in the event

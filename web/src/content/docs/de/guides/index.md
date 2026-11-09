@@ -22,7 +22,7 @@ Du brauchst keine Vorkenntnisse.
   Geburtstagskalender.
 - **Verschiedene Ansichten** – Tag, Woche, Monat, Jahr, Agenda und eine
   eigene Aufgaben-Ansicht.
-- **Erinnerungen** mit Tönen und Snooze.
+- **Erinnerungen** mit Tönen deiner Wahl, am Termin oder nur für dich.
 - **Suche** über Termine und Aufgaben.
 - **Geräteübergreifende Synchronisation** über deinen eigenen Speicher
   (z. B. WebDAV oder Dropbox).

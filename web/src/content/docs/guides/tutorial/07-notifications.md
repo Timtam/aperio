@@ -278,9 +278,15 @@ do, and rings on your phone as well as on your desktop. That is the one for
 your colleagues can read.
 
 The choice appears only where it makes a difference. A local calendar has no
-other client to tell, and the calendar on your phone that Aperio only reads
-stores no reminder Aperio writes — in both, reminders are Aperio's either way
-and no choice is offered.
+other client to tell, so its reminders are Aperio's either way, and no choice
+is offered.
+
+The calendar on your phone (the **This device** account) is the other way
+round: its alerts belong to the phone's calendar app. Aperio writes
+appointments there, but it neither shows nor writes their alerts, and it rings
+no reminder for them, not even a calendar's default reminder. An alert you set
+in the phone's calendar app stays and rings there. Aperio's editor still shows
+reminder rows for such an appointment, but what you enter there is not kept.
 
 Appointment identities belong to the calendar and change underneath Aperio: a
 re-sync can mint new ones, and some providers do it after every edit. A private
@@ -330,10 +336,11 @@ permission: whether it shows Aperio's reminders depends on the Start menu
 entry, see *Notifications on Windows* above. On the phone, the permission is
 described under [Mobile app](/guides/mobile/).
 
-> **Screen-reader note:** Reminders are announced through a live region, so
-> you notice them even without a visible focus change. The "Open",
-> "Dismiss" and "Snooze" buttons are reachable with `Tab` and clearly
-> labeled.
+> **Screen-reader note:** A reminder arrives only as a notification of your
+> operating system, and your screen reader reads it as it reads any other
+> notification. Aperio's window does not announce it a second time, and the
+> notification has no buttons yet. To see what is coming, open the reminders
+> overview with `Ctrl+Shift+R`; **Enter** opens the selected reminder.
 
 ## Running in the background (system tray)
 
@@ -362,5 +369,5 @@ apply to this device only; clear the checkbox to turn autostart off again.
 
 ## Summary
 
-You can create reminders, set their sounds and respond to them with dismiss
-or snooze. Next up is search.
+You can create reminders, choose where they apply, set their sounds and open
+what a notification is about. Next up is search.
