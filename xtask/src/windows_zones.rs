@@ -39,7 +39,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
-use chrono::{DateTime, Months, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Months, NaiveDate, TimeZone, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 use sha2::{Digest, Sha256};
@@ -677,6 +677,11 @@ fn render_windows_zones(
          /// comments): which table the cached events were translated with.\n\
          pub const TABLE_ID: &str = \"{table_id}\";\n\
          \n\
+         /// The first day of the five years the clock guard compared (the pinned\n\
+         /// release's publication). A clock a provider defines by its rules is\n\
+         /// compared over the same years (`crate::zone_clock::clock_window`).\n\
+         pub const CLOCKS_COMPARED_FROM: (i32, u32, u32) = ({from_y}, {from_m}, {from_d});\n\
+         \n\
          /// Windows id → the zone of its default (001) row, resolved to tzdata's zone.\n\
          /// Sorted by the id with ASCII letters lowercased, which is how it is searched.\n\
          pub const WINDOWS_ZONES: &[(&str, &str)] = &[\n",
@@ -686,6 +691,9 @@ fn render_windows_zones(
         from = from.format("%Y-%m-%d"),
         until = until.format("%Y-%m-%d"),
         table_id = table_id(tables),
+        from_y = from.year(),
+        from_m = from.month(),
+        from_d = from.day(),
     );
     for (windows, zone) in folded_order(tables.read.iter().map(|(w, z)| (w.clone(), *z))) {
         out.push_str(&format!("    (\"{windows}\", \"{zone}\"),\n"));

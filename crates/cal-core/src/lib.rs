@@ -75,9 +75,9 @@ pub mod task_status;
 pub mod types;
 pub mod windows_zone;
 pub mod write_leftover;
+pub mod write_refusal;
 // Which tzdata zone runs a clock a provider defines by its rules; it reads
 // offsets, so it is behind the `zones` feature with chrono-tz.
-pub mod write_refusal;
 #[cfg(feature = "zones")]
 pub mod zone_clock;
 // The names and the search are in every build; the offsets are behind the

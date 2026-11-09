@@ -317,16 +317,20 @@ the iCalendar reader):
   imported invitation's series that way, under the file's TZID: the start
   zone as `Name="Europe/Berlin"` beside an empty `Id`, the end zone the other
   way round (live round ICS-5), so a zone with an empty `Id` is named by its
-  `Name` (`zone_definition::element_zone_id`). A zone Exchange defines in
-  full (`Customized Time Zone`, decision 232) reads as the tzdata zone that
-  runs its clock through the five years from the series' first start
+  `Name` (`zone_definition::element_zone_id`). An id nothing names whose
+  definition Exchange sends beside it (`Customized Time Zone`, decision 232,
+  or a registry-only id) reads as the tzdata zone that runs that clock
   (`windows_tz::read_series_definition` over `cal_core::zone_with_clock`,
   decision 279): +00:00 throughout is no zone; otherwise the device's own zone
   where it runs that clock, else the first Windows id's default zone in the
   table's order, else the first listed zone. Clocks are compared as the
-  table's clock guard compares them. The answer is remembered per definition,
-  start and device zone. `UTC`, a UTC name, a registry-only id, and a
-  definition no zone runs mean no zone; the series repeats in UTC.
+  table's clock guard compares them, over five years from the first day the
+  guard compared (`CLOCKS_COMPARED_FROM`) or from the series' first day if
+  that is later, so the clock is matched where the series runs now and the
+  reading does not change with today's date. The answer is remembered per
+  definition, window and device zone. `UTC`, a UTC name, an unknown id
+  without its definition, a definition that cannot be read, and one no zone
+  runs mean no zone; the series repeats in UTC.
 - **Ids the server knows.** A server refuses a save naming an id it does not
   know (`ErrorTimeZone`, and the whole save fails); Exchange 2019 does not know
   `Sao Tome Standard Time`. The adapter asks each server once
@@ -463,10 +467,12 @@ the iCalendar reader):
   landed. A read that failed on the sign-in or found the item gone keeps its
   own error (`Authentication`, `NotFound`; `names_sign_in_or_gone`), as the
   same edit of a timed appointment reports it: a retry mends neither. A
-  series stored on a zone Exchange defines in full keeps that definition
-  while the zone written would run the same clock (`keeps_its_definition`,
-  decision 279): no zone goes out, nothing moves, and Exchange is not asked
-  to swap a definition for an id, which is unmeasured for its exceptions. A
+  series whose start zone Exchange defines in full keeps its stored zones
+  while the zone written would run the same clock as that definition and as
+  the end zone, defined or named, an unreadable end not counting
+  (`keeps_its_definition`, decision 279): no zone goes out, nothing moves,
+  and Exchange is not asked to swap a definition for an id, which is
+  unmeasured for its exceptions. A
   single's save that leaves the day alone still goes out; a series head
   whose copy cannot be read is refused whatever the save changes (248).
 - **Zone definitions.** `StartTimeZone` and `EndTimeZone` carry the zone's

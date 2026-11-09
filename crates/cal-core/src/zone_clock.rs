@@ -11,12 +11,25 @@
 //! ## The comparison
 //!
 //! Two clocks agree when they read the same UTC offset at the start of every
-//! UTC day of the window, and at every hour of a day on which either of them
-//! changes. A difference that starts and ends between two whole hours goes
-//! unseen. The window is five years from its first instant
-//! ([`CLOCK_WINDOW_MONTHS`]). The generator of the Exchange zone table compares
-//! a zone with its Windows id's default zone by the same rule (`cargo xtask
-//! windows-zones`, decision 22a).
+//! UTC day of the window, and at every whole hour of a day at whose start and
+//! end either of them reads different offsets. A difference that starts and
+//! ends between two whole hours goes unseen, and so does a clock that changes
+//! and changes back within one day. The generator of the Exchange zone table
+//! compares a zone with its Windows id's default zone by the same rule
+//! (`cargo xtask windows-zones`, decision 22a).
+//!
+//! ## The window
+//!
+//! Five years ([`CLOCK_WINDOW_MONTHS`]) from the later of two days: the UTC day
+//! of the series' first start, and the first day the table's guard compared
+//! ([`crate::windows_zone::CLOCKS_COMPARED_FROM`], the pinned CLDR release's
+//! publication). The clock is compared where Aperio reads the series now and
+//! ahead, not over years long past, in which a zone may have run another
+//! clock: Cairo was on +02:00 all year from 2014 to 2023, so a series begun in
+//! 2017 on a fixed +02:00 definition would otherwise read as Cairo and ring an
+//! hour early every summer since. The window depends on the build and the
+//! series alone, never on today's date, so a reading does not change as the
+//! years pass.
 //!
 //! ## The zone chosen
 //!
@@ -34,7 +47,7 @@
 //! A clock no zone runs is [`ClockMatch::NoZone`]: the caller says so, and the
 //! series repeats as it did before.
 
-use chrono::{DateTime, Duration, Months, Offset, TimeZone, Utc};
+use chrono::{DateTime, Duration, Months, NaiveDate, NaiveTime, Offset, TimeZone, Utc};
 
 /// How long a window of comparison runs: five years, as the zone table's clock
 /// guard looks ahead.
@@ -107,8 +120,14 @@ pub fn first_clock_difference(
     None
 }
 
-/// The window a clock is compared over: [`CLOCK_WINDOW_MONTHS`] from `from`.
-pub fn clock_window(from: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
+/// The window a series' clock is compared over, by the module's documentation:
+/// [`CLOCK_WINDOW_MONTHS`] from the later of `first_start`'s UTC day and the
+/// first day the table's guard compared.
+pub fn clock_window(first_start: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
+    let midnight = |day: NaiveDate| day.and_time(NaiveTime::MIN).and_utc();
+    let (year, month, day) = crate::windows_zone::CLOCKS_COMPARED_FROM;
+    let guard = NaiveDate::from_ymd_opt(year, month, day).map(midnight);
+    let from = midnight(first_start.date_naive()).max(guard.unwrap_or(first_start));
     let until = from
         .checked_add_months(Months::new(CLOCK_WINDOW_MONTHS))
         .unwrap_or(from);
@@ -126,15 +145,16 @@ pub enum ClockMatch {
     NoZone,
 }
 
-/// The zone that runs `clock` through the five years from `from`, by the order
-/// in the module's documentation. `device` is the device's own zone, in any
-/// spelling tzdata knows; `None`, or a name it does not know, skips that step.
+/// The zone that runs `clock` through the [`clock_window`] of a series whose
+/// first start is `first_start`, by the order in the module's documentation.
+/// `device` is the device's own zone, in any spelling tzdata knows; `None`, or
+/// a name it does not know, skips that step.
 pub fn zone_with_clock(
     clock: &impl Clock,
-    from: DateTime<Utc>,
+    first_start: DateTime<Utc>,
     device: Option<&str>,
 ) -> ClockMatch {
-    let window = clock_window(from);
+    let window = clock_window(first_start);
     let utc = |_: DateTime<Utc>| -> Option<i32> { Some(0) };
     if first_clock_difference(clock, &utc, window).is_none() {
         return ClockMatch::Utc;
@@ -200,7 +220,7 @@ mod tests {
 
     #[test]
     fn the_same_zone_has_no_difference_and_another_names_its_first() {
-        let window = clock_window(utc("2026-01-01T00:00:00Z"));
+        let window = (utc("2026-01-01T00:00:00Z"), utc("2031-01-01T00:00:00Z"));
         assert_eq!(
             first_clock_difference(&tz("Europe/Berlin"), &tz("Europe/Paris"), window),
             None
@@ -228,7 +248,7 @@ mod tests {
 
     #[test]
     fn a_clock_that_cannot_say_differs_from_one_that_can() {
-        let window = clock_window(utc("2026-01-01T00:00:00Z"));
+        let window = (utc("2026-01-01T00:00:00Z"), utc("2031-01-01T00:00:00Z"));
         let silent = |_: DateTime<Utc>| -> Option<i32> { None };
         assert_eq!(
             first_clock_difference(&silent, &fixed(0), window).map(|d| (d.a, d.b)),
@@ -237,12 +257,25 @@ mod tests {
         assert_eq!(first_clock_difference(&silent, &silent, window), None);
     }
 
-    /// A clock change a week off in the fifth year is still seen; one after
-    /// the window is not.
+    /// Five years from the guard's first day, or from a later series' own UTC
+    /// day. A clock change a week off in the fifth year is still seen; one
+    /// after the window is not.
     #[test]
-    fn the_window_is_five_years() {
+    fn the_window_is_five_years_from_the_guard_or_a_later_start() {
         let from = utc("2026-01-01T00:00:00Z");
-        assert_eq!(clock_window(from).1, utc("2031-01-01T00:00:00Z"));
+        assert_eq!(crate::windows_zone::CLOCKS_COMPARED_FROM, (2026, 3, 17));
+        assert_eq!(
+            clock_window(from),
+            (utc("2026-03-17T00:00:00Z"), utc("2031-03-17T00:00:00Z"))
+        );
+        assert_eq!(
+            clock_window(utc("2017-03-06T08:00:00Z")),
+            clock_window(from)
+        );
+        assert_eq!(
+            clock_window(utc("2027-05-20T08:15:00Z")),
+            (utc("2027-05-20T00:00:00Z"), utc("2032-05-20T00:00:00Z"))
+        );
         assert_eq!(
             first_clock_difference(
                 &berlin_late_in(2030),
@@ -337,6 +370,33 @@ mod tests {
         };
         assert_eq!(
             first_clock_difference(&fixed(3 * 3600), &tz(zone), clock_window(from)),
+            None
+        );
+    }
+
+    /// A series begun in 2017 on a fixed +02:00 definition is compared where it
+    /// runs now: Cairo, fixed +02:00 from 2014 to 2023 and on summer time
+    /// again since, does not run it, not even on a device in Cairo.
+    #[test]
+    fn an_old_series_is_compared_where_it_runs_now() {
+        let first_start = utc("2017-03-06T08:00:00Z");
+        let two = fixed(2 * 3600);
+        for device in [None, Some("Africa/Cairo")] {
+            let found = zone_with_clock(&two, first_start, device);
+            let ClockMatch::Zone(zone) = found else {
+                panic!("+02:00 is a clock several zones run: {found:?}");
+            };
+            assert_ne!(zone, "Africa/Cairo", "{device:?}");
+            assert_eq!(
+                first_clock_difference(&two, &tz(zone), clock_window(first_start)),
+                None,
+                "{zone}"
+            );
+        }
+        // Cairo did run it in the series' own first five years.
+        let then = (first_start, utc("2022-03-06T00:00:00Z"));
+        assert_eq!(
+            first_clock_difference(&two, &tz("Africa/Cairo"), then),
             None
         );
     }

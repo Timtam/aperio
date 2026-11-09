@@ -361,12 +361,13 @@ ohne ihre Regeln, rät Aperio nicht: Sonst stünde der Termin danach in Outlook
 über zwei Tage.
 
 Eine Serie mit Uhrzeit in so einer eigenen Zeitzone wiederholt sich in Aperio
-auf der Zeitzone, die genau dieselbe Uhr hat: auf der deines Geräts, wenn sie
-es tut. Eine Serie auf mitteleuropäischer Zeit zeigt also auf einem Gerät in
-Berlin Berlin und auf einem in Paris Paris, zu denselben Zeiten. Speicherst du
-die Serie, behält sie in Exchange ihre eigene Zeitzone, solange die Uhr gleich
-bleibt. Nur eine eigene Zeitzone, deren Uhr keine benannte Zeitzone hat, lässt
-die Serie in UTC laufen, nach einer Zeitumstellung eine Stunde daneben.
+auf der Zeitzone, die genau dieselbe Uhr hat. Hat die Zeitzone deines Geräts
+diese Uhr, ist es ihre: Eine Serie auf mitteleuropäischer Zeit zeigt auf einem
+Gerät in Berlin die Zeitzone Berlin, auf einem in Paris die Zeitzone Paris, zu
+denselben Zeiten. Speicherst du die Serie, behält sie in Exchange ihre eigene
+Zeitzone, solange die Uhr gleich bleibt. In UTC läuft die Serie, nach einer
+Zeitumstellung eine Stunde daneben, nur dann, wenn Exchange die eigene
+Zeitzone ohne ihre Regeln schickt oder keine benannte Zeitzone ihre Uhr hat.
 
 Was du tun kannst: Ändere den Tag in Outlook. Alles andere, etwa Titel, Ort
 oder Erinnerung, kannst du in Aperio weiter ändern, solange du den Tag dabei

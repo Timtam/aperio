@@ -18,14 +18,14 @@
 //! group of cities on one clock, so a Vienna series reads back as Berlin. The
 //! id `UTC` and a UTC name of tzdata mean no zone. An id the table does not
 //! know that is tzdata's own name (236) — the TZID Exchange keeps for an
-//! imported file's series (I6) — reads as that zone. A zone Exchange defines
-//! in full (`Customized Time Zone`, decision 232) reads as the tzdata zone that
-//! runs its clock through the five years from the series' start
-//! ([`read_series_definition`], `cal_core::zone_with_clock`): the device's own
-//! zone where it does, else the first Windows id's default zone, else the
-//! first listed zone (Toni, 2026-11-09). Any other unknown id (one only a
-//! server's registry has, a definition no zone runs or none at all) means no
-//! zone: the series repeats in UTC.
+//! imported file's series (I6) — reads as that zone. An id nothing names whose
+//! definition Exchange sends beside it (`Customized Time Zone`, decision 232,
+//! or an id only a server's registry has) reads as the tzdata zone that runs
+//! that clock ([`read_series_definition`], `cal_core::zone_with_clock`, decision
+//! 279): the device's own zone where it does, else the first Windows id's
+//! default zone, else the first listed zone (Toni, 2026-11-09). An unknown id
+//! without its definition, a definition that cannot be read and one no zone
+//! runs mean no zone: the series repeats in UTC.
 //!
 //! ## Writing a zone
 //!
@@ -207,29 +207,30 @@ fn read_tzdata_name(id: &str) -> WindowsZoneRead {
 }
 
 /// A series' zone from the definition Exchange sends of it (decision 232): the
-/// tzdata zone that runs the definition's clock through the five years from
-/// `from`, the series' first start. `device` is the device's own zone, which
-/// comes first where it runs that clock. A definition that reads +00:00
-/// throughout is no zone; one that cannot be read, or that no zone runs, is
-/// [`WindowsZoneRead::Unknown`].
+/// tzdata zone that runs the definition's clock over the
+/// [`cal_core::clock_window`] of a series first starting at `first_start`.
+/// `device` is the device's own zone, which comes first where it runs that
+/// clock. A definition that reads +00:00 throughout is no zone; one that
+/// cannot be read, or that no zone runs, is [`WindowsZoneRead::Unknown`].
 ///
-/// Remembered per definition, start and device zone: the reminder scan reads
+/// Remembered per definition, window and device zone: the reminder scan reads
 /// every cached item again every few minutes, and the comparison walks five
 /// years of days per candidate zone.
 pub fn read_series_definition(
     definition: &ZoneDefinition,
-    from: DateTime<Utc>,
+    first_start: DateTime<Utc>,
     device: Option<&str>,
 ) -> WindowsZoneRead {
     type Key = (ZoneDefinition, DateTime<Utc>, Option<String>);
     static READ: OnceLock<Mutex<HashMap<Key, WindowsZoneRead>>> = OnceLock::new();
-    let key = (definition.clone(), from, device.map(str::to_string));
+    let window = cal_core::clock_window(first_start);
+    let key = (definition.clone(), window.0, device.map(str::to_string));
     let read = READ.get_or_init(Default::default);
     if let Some(known) = read.lock().ok().and_then(|known| known.get(&key).copied()) {
         return known;
     }
     let answer = match ZoneRules::try_from(definition) {
-        Ok(rules) => match cal_core::zone_with_clock(&rules, from, device) {
+        Ok(rules) => match cal_core::zone_with_clock(&rules, window.0, device) {
             cal_core::ClockMatch::Zone(zone) => WindowsZoneRead::Zone(zone),
             cal_core::ClockMatch::Utc => WindowsZoneRead::Utc,
             cal_core::ClockMatch::NoZone => WindowsZoneRead::Unknown,

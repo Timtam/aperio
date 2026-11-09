@@ -2529,11 +2529,11 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // one the server keeps after this update (`landed`): a kept all-day flag
     // stays, and an all-day item never gets a zone (46a).
     let written = series_windows_zone(landed.all_day, rule_of.recurrence.as_ref(), server_zones);
-    // A series Exchange stores on a zone it defines in full (232) reads as the
-    // zone that runs that clock, and keeps its definition while the zone
-    // written would run the same clock (Toni, 2026-11-09): the clock does not
-    // change, and to Exchange an id in place of the definition is a new zone,
-    // which may drop the series' exceptions (unmeasured for this case, 245).
+    // A series whose start zone Exchange defines in full (232) reads as the
+    // zone that runs that clock, and keeps its zones while the zone written
+    // would run the same clock (Toni, 2026-11-09): the clock does not change,
+    // and to Exchange an id in place of the definition is a new zone, which
+    // may drop the series' exceptions (unmeasured for this case, 245).
     let keeps_definition =
         written.is_some_and(|windows| keeps_its_definition(stored, windows, landed.start));
     let zone_written = !keeps_definition
@@ -3217,23 +3217,31 @@ fn boundary_zone(
     }
 }
 
-/// Whether an item Exchange stores on a zone it defines in full (232), at both
-/// boundaries, runs the clock of the zone behind `windows` through the five
-/// years from `from` (`cal_core::first_clock_difference`): then writing
-/// `windows` would change no time, and the definition stays.
+/// Whether an item whose START zone Exchange defines in full (232) keeps its
+/// stored zones when `windows` would be written: the start's definition runs
+/// the clock of the zone behind `windows` over the series'
+/// [`cal_core::clock_window`] (`cal_core::first_clock_difference`), and so does
+/// the end's zone, a definition or a named one, unless it cannot be read at
+/// all. Writing `windows` would then change no time, and leaving the zones
+/// alone writes what this series wrote before it read as a zone: none. A
+/// series whose start zone is named keeps the rule it always had (it writes
+/// its zone again, N3).
 fn keeps_its_definition(stored: &StoredZones, windows: &str, from: DateTime<Utc>) -> bool {
     let Some(DayZone::Tz(zone)) = boundary_zone(Some(windows), None) else {
         return false;
     };
     let window = cal_core::clock_window(from);
-    let runs = |boundary: Option<&DayZone>| match boundary {
-        Some(DayZone::Rules(rules)) => {
-            cal_core::first_clock_difference(rules.as_ref(), &cal_core::TzClock(zone), window)
-                .is_none()
+    let written = cal_core::TzClock(zone);
+    let same_clock = |boundary: &DayZone| match boundary {
+        DayZone::Rules(rules) => {
+            cal_core::first_clock_difference(rules.as_ref(), &written, window).is_none()
         }
-        _ => false,
+        DayZone::Tz(tz) => {
+            cal_core::first_clock_difference(&cal_core::TzClock(*tz), &written, window).is_none()
+        }
     };
-    runs(stored.start.as_ref()) && runs(stored.end.as_ref())
+    matches!(&stored.start, Some(start @ DayZone::Rules(_)) if same_clock(start))
+        && stored.end.as_ref().is_none_or(same_clock)
 }
 
 /// Whether Exchange marks an item as made without a zone: the end zone
@@ -11031,6 +11039,27 @@ mod tests {
             .set
             .contains(r#"<t:StartTimeZone Id="Tokyo Standard Time"/>"#));
         assert_eq!(plan.rewrite, Some(cal_core::SeriesRewrite::Zone));
+
+        // A defined start beside a named end on the same clock (the shape
+        // `a_zone_definition_lands_on_its_own_boundary` parses), or beside an
+        // end that cannot be read: still only the rule.
+        let start = defined.start.clone();
+        for end in [Some(DayZone::Tz(chrono_tz::Europe::Berlin)), None] {
+            let mixed = StoredZones {
+                start: start.clone(),
+                end: end.clone(),
+            };
+            let plan = planned(&longer, &before, &mixed, EventIdKind::RecurringMaster);
+            assert_eq!(field_uris(&plan.set), ["calendar:Recurrence"], "{end:?}");
+            assert_eq!(plan.rewrite, None, "{end:?}");
+        }
+        // An end on another clock is not kept: the zone goes out.
+        let far_end = StoredZones {
+            start,
+            end: Some(DayZone::Tz(chrono_tz::Asia::Tokyo)),
+        };
+        let plan = planned(&longer, &before, &far_end, EventIdKind::RecurringMaster);
+        assert_eq!(zone_fields(&plan.set), 2, "{}", plan.set);
     }
 
     /// Exchange drops a series' changed and deleted occurrences when its slot
