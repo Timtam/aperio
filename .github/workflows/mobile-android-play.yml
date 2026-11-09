@@ -80,18 +80,18 @@ jobs:
             -o mobile/modules/cal-ffi/android/src/main/jniLibs \
             build -p cal-ffi --release
 
-      # Generated here, never committed (TODO 89a): from the same source and
-      # build as the .so above, so their per-method checksums match it.
+      # Generated here, never committed (TODO 89a), by the one script that also
+      # makes them for a local build and for the FFI-bridges check. It reads
+      # the interface out of a DEBUG host build of cal-ffi, never a release
+      # one: the release profile strips the library (strip = true, LTO), and
+      # with it the UniFFI metadata the generator reads. Pointed at the
+      # release library, the generator wrote nothing and said nothing, and a
+      # silent `if [ -d … ]` here went on; the committed copy hid that until
+      # 89a removed it. The per-method checksums come from the interface, not
+      # from the profile, so these bindings match the release .so above. The
+      # script fails when no cal_ffi.kt comes out.
       - name: Generate UniFFI Kotlin bindings (match the fresh .so)
-        run: |
-          cargo build -p cal-ffi --release
-          cargo run -p cal-ffi --features cli --bin uniffi-bindgen -- \
-            generate --library target/release/libcal_ffi.so \
-            --language kotlin --out-dir target/uniffi-kotlin
-          if [ -d target/uniffi-kotlin/uniffi ]; then
-            rm -rf mobile/modules/cal-ffi/android/src/main/java/uniffi
-            cp -R target/uniffi-kotlin/uniffi mobile/modules/cal-ffi/android/src/main/java/uniffi
-          fi
+        run: node mobile/scripts/kotlin-bindings.mjs
 
       - name: Let the fresh .so into the EAS archive
         run: |
