@@ -132,12 +132,15 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
   `on_action`, bringt aber notify-rust 4.18 und tauri-winrt-notification 0.8
   mit, deren 0.8.0 die Töne brach; Plan
   `C:/scripts/aperio-livetest/a5-plan-2026-11-08.md`, Option A2).
-- [ ] **Gelöschtes Vorkommen einer externen Serie klingelt bis zu 5 Minuten
-  weiter** (Prüfrunde A5, 2026-11-09): `add_event_exdate` und die externen
-  Lösch-/Änderungsbefehle rufen `scheduler.invalidate()`, aber nicht den
-  TTL-Cache der externen Auslöser (`EXTERNAL_TRIGGERS_TTL`), sodass der alte
-  Auslöser noch feuert und in der Übersicht steht. Ein Klick darauf sagt
-  jetzt „nicht gefunden“; die Ursache ist offen.
+- [x] **Gelöschtes Vorkommen einer externen Serie klingelte bis zu 5 Minuten
+  weiter** (Prüfrunde A5, 2026-11-09; DESIGN §14.1 „Externe Termine und
+  Aufgaben“). Ebenso konnte eine eben gesetzte externe Erinnerung zu spät
+  kommen. Jetzt liest der Desktop-Planer nach einem Schreiben in einen
+  externen Kalender oder eine externe Liste nur diesen einen neu
+  (`external_calendar_written` / `external_task_list_written`), eine
+  gelöschte Liste verliert ihre Erinnerungen ohne Abfrage. Das Löschen
+  eines Kalenders oder einer Liste weckt den Planer jetzt auch, lokal wie
+  extern.
 - [ ] **Stufe 2: Klicks aus dem Benachrichtigungscenter und nach dem Beenden**
   (Win+N, Eingabe auf einem Aperio-Eintrag; Stufe 1 erreicht nur das Banner,
   solange Aperio läuft). Ohne COM-Aktivator stellt Windows diese Klicks nicht
