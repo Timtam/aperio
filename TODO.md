@@ -755,7 +755,15 @@ Siehe DESIGN §4.2.
 
 ---
 
-### B8 · 🚩 Das macOS-Artefakt ist ein Entwicklungs-Build `[ ]`
+### B8 · Das macOS-Artefakt ist ein Entwicklungs-Build `[x]`
+Erledigt 2026-11-09 (#167), wie unten vorgeschlagen: Feature
+`custom-protocol` in `src-tauri/Cargo.toml`, beide macOS-`cargo build` mit
+`--features aperio/custom-protocol`, und nach jedem Artefakt-Build prüft
+`cargo xtask ui-embedded`, dass jede Datei aus `dist/` in der Binärdatei
+steckt (Windows, Linux und beide macOS-Architekturen). Der Rot-Beweis in der
+CI: Ohne Feature fehlten der macOS-Binärdatei drei der vier Dateien.
+Ungetestet bleibt, ob das macOS-Artefakt auf einem Mac startet (kein Mac).
+
 Gefunden bei der Prüfung von #81. `build-artifacts.yml` baut macOS mit
 `cargo build --workspace --release` für beide Architekturen und fügt sie mit
 `lipo` zusammen, am Tauri-CLI vorbei. Nur das CLI schaltet das Tauri-Feature

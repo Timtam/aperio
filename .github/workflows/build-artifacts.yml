@@ -235,6 +235,13 @@ jobs:
       - name: Verify every bundled plugin is staged
         run: cargo xtask stage-plugins --release --check
 
+      # A binary without its frontend starts to an empty window: Tauri embeds
+      # dist/ only in a production build. `tauri build` makes one by itself,
+      # and this proves it did — the same check the macOS job needs because it
+      # calls cargo directly.
+      - name: Verify the binary carries the user interface
+        run: cargo xtask ui-embedded target/release/${{ matrix.binary }}
+
       # Tag builds pass the tag (minus `v`); CI / PR builds pass
       # nothing and fall back to the short commit SHA.
       - name: Resolve version
@@ -341,10 +348,10 @@ jobs:
       # Build the embedded frontend once up front (it's arch-
       # independent). The per-arch `cargo build` below compiles
       # the aperio binary, which embeds ../dist at compile time
-      # via tauri-build — so dist/ must already exist. (We call
-      # cargo directly instead of `tauri build` because the
-      # universal artefact needs both arches of every plugin
-      # cdylib, which `tauri build` doesn't produce.)
+      # — so dist/ must already exist. (We call cargo directly
+      # instead of `tauri build` because the universal artefact
+      # needs both arches of every plugin cdylib, which `tauri
+      # build` doesn't produce.)
       - name: Build frontend
         run: npm run build
 
@@ -388,10 +395,15 @@ jobs:
           APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
           APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
           APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+        # `aperio/custom-protocol` makes it a production build: Tauri embeds
+        # dist/ only with this feature, which `tauri build` switches on by
+        # itself and a plain `cargo build` does not. Without it the binary was a
+        # development build — the window loaded `devUrl`, which nothing serves
+        # on a user's Mac, and showed nothing (TODO B8).
         run: |
-          cargo build --workspace --release --target x86_64-apple-darwin
+          cargo build --workspace --release --target x86_64-apple-darwin --features aperio/custom-protocol
           cargo xtask stage-plugins --release --target x86_64-apple-darwin
-          cargo build --workspace --release --target aarch64-apple-darwin
+          cargo build --workspace --release --target aarch64-apple-darwin --features aperio/custom-protocol
           cargo xtask stage-plugins --release --target aarch64-apple-darwin
 
       # Both arches, each against what the workspace declares. The lipo step
@@ -401,6 +413,12 @@ jobs:
         run: |
           cargo xtask stage-plugins --release --target x86_64-apple-darwin --check
           cargo xtask stage-plugins --release --target aarch64-apple-darwin --check
+
+      # Each arch's binary, before lipo fuses them: both must carry dist/.
+      - name: Verify the binaries carry the user interface, per arch
+        run: |
+          cargo xtask ui-embedded target/x86_64-apple-darwin/release/aperio
+          cargo xtask ui-embedded target/aarch64-apple-darwin/release/aperio
 
       - name: Resolve version
         id: version
