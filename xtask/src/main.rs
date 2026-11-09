@@ -65,6 +65,7 @@ fn main() -> ExitCode {
         Some("ts-types") => run(ts_types(&args[1..])),
         Some("tz-list") => run(tz_list(&args[1..])),
         Some("windows-zones") => run(windows_zones::windows_zones(&args[1..])),
+        Some("ui-embedded") => run(ui_embedded(&args[1..])),
         _ => {
             eprintln!("{USAGE}");
             ExitCode::FAILURE
@@ -147,7 +148,16 @@ Tasks:
 
         --check   generate in memory and compare, changing nothing. For CI, so a
                   CLDR or chrono-tz update is a red build until the table is
-                  regenerated.";
+                  regenerated.
+
+  ui-embedded <binary> [--dist <dir>]
+        Prove a built desktop binary carries its user interface: every file of
+        the frontend build (dist/, or --dist) must be in the binary under the
+        path Tauri serves it at (`/index.html`, `/assets/...`). Tauri embeds
+        the frontend only with its `custom-protocol` feature, which
+        `tauri build` switches on by itself and a plain `cargo build` does not;
+        without it the binary loads the dev server's address and opens an
+        empty window. For CI, after every artifact build. Changes nothing.";
 
 /// One bundled plugin, as the workspace describes it.
 struct Bundled {
@@ -1555,6 +1565,108 @@ fn verify(bundled: &[Bundled], bundled_dir: &Path) -> Result<String, String> {
     }
 }
 
+fn ui_embedded(args: &[String]) -> Result<String, String> {
+    let mut binary: Option<PathBuf> = None;
+    let mut dist = PathBuf::from("dist");
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--dist" => {
+                dist = PathBuf::from(
+                    rest.next()
+                        .ok_or_else(|| "--dist needs a path".to_string())?,
+                )
+            }
+            other if other.starts_with("--") => {
+                return Err(format!("unknown argument `{other}`\n\n{USAGE}"))
+            }
+            other if binary.is_none() => binary = Some(PathBuf::from(other)),
+            other => return Err(format!("a second binary `{other}`\n\n{USAGE}")),
+        }
+    }
+    let binary = binary.ok_or_else(|| format!("which binary?\n\n{USAGE}"))?;
+
+    let keys = asset_keys(&dist)?;
+    // An empty frontend build would prove nothing about the binary.
+    if keys.is_empty() {
+        return Err(format!(
+            "{} holds no files; build the frontend first (`npm run build`)",
+            dist.display(),
+        ));
+    }
+    let bytes = fs::read(&binary).map_err(|e| format!("reading {}: {e}", binary.display()))?;
+    let missing = missing_asset_keys(&bytes, &keys);
+    if missing.is_empty() {
+        Ok(format!(
+            "{} carries all {} files of {}",
+            binary.display(),
+            keys.len(),
+            dist.display(),
+        ))
+    } else {
+        Err(format!(
+            "{} does not carry {} of the {} files of {}:\n  {}\n\
+             Tauri embeds the frontend only with its `custom-protocol` feature; a \
+             plain `cargo build` needs `--features aperio/custom-protocol`, or the \
+             binary opens the dev server's address and shows nothing. A binary \
+             built before the last `npm run build` names the older files instead.",
+            binary.display(),
+            missing.len(),
+            keys.len(),
+            dist.display(),
+            missing.join("\n  "),
+        ))
+    }
+}
+
+/// The path Tauri serves each file of the frontend build at, and the key it
+/// embeds the file under: `/` and the path below `dist`, with `/` between the
+/// parts on every platform (`tauri_utils::assets::AssetKey`).
+fn asset_keys(dist: &Path) -> Result<Vec<String>, String> {
+    fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<(), String> {
+        let entries = fs::read_dir(dir).map_err(|e| format!("reading {}: {e}", dir.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("reading {}: {e}", dir.display()))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let key = format!("{prefix}/{name}");
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, &key, out)?;
+            } else {
+                out.push(key);
+            }
+        }
+        Ok(())
+    }
+    let mut keys = Vec::new();
+    walk(dist, "", &mut keys)?;
+    keys.sort();
+    Ok(keys)
+}
+
+/// The keys that do not occur anywhere in `binary`. Tauri writes them as
+/// plain string literals into the binary's asset map, so each embedded file's
+/// key is in the bytes as it is. One pass over the binary: every key starts
+/// with `/`, so only the positions holding one are tried.
+fn missing_asset_keys<'a>(binary: &[u8], keys: &'a [String]) -> Vec<&'a str> {
+    let mut wanted: BTreeSet<&[u8]> = keys.iter().map(|k| k.as_bytes()).collect();
+    let lengths: BTreeSet<usize> = wanted.iter().map(|k| k.len()).collect();
+    for (at, _) in binary.iter().enumerate().filter(|(_, b)| **b == b'/') {
+        for len in &lengths {
+            if let Some(candidate) = binary.get(at..at + len) {
+                wanted.remove(candidate);
+            }
+        }
+        if wanted.is_empty() {
+            break;
+        }
+    }
+    keys.iter()
+        .map(String::as_str)
+        .filter(|k| wanted.contains(k.as_bytes()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2015,6 +2127,49 @@ Link\tEurope/Berlin\t\tEurope/Oslo\t# merged in 2022
         assert_eq!(
             describe_zone_drift("", &text).as_deref(),
             Some(format!("  missing:  {ZONE_NAMES} does not exist").as_str()),
+        );
+    }
+
+    /// The frontend's files, keyed the way Tauri serves them: from the root,
+    /// with `/` between the parts on every platform, nested folders included.
+    #[test]
+    fn asset_keys_are_the_paths_tauri_serves() {
+        let dist = Scratch::new("ui-embedded-keys");
+        fs::create_dir_all(dist.0.join("assets").join("fonts")).unwrap();
+        fs::write(dist.0.join("index.html"), "<html>").unwrap();
+        fs::write(dist.0.join("assets").join("index-ab12.js"), "x").unwrap();
+        fs::write(dist.0.join("assets").join("fonts").join("a.woff2"), "x").unwrap();
+        assert_eq!(
+            asset_keys(&dist.0).unwrap(),
+            vec![
+                "/assets/fonts/a.woff2".to_string(),
+                "/assets/index-ab12.js".to_string(),
+                "/index.html".to_string(),
+            ]
+        );
+    }
+
+    /// A binary built without the frontend (a dev build) is named with each
+    /// file it lacks; one that carries all of them passes, wherever in the
+    /// bytes the keys sit and however they overlap.
+    #[test]
+    fn a_binary_without_the_frontend_names_each_missing_file() {
+        let keys = vec![
+            "/assets/index-ab12.js".to_string(),
+            "/index.html".to_string(),
+        ];
+        let dev_build = b"\x00\x01http://localhost:5173/index.html\x00/assets/".to_vec();
+        assert_eq!(
+            missing_asset_keys(&dev_build, &keys),
+            vec!["/assets/index-ab12.js"]
+        );
+        let embedded = b"/index.html/assets/index-ab12.js".to_vec();
+        assert!(missing_asset_keys(&embedded, &keys).is_empty());
+        // A key cut off by the end of the binary is not there.
+        let cut = b"/index.html\x00/assets/index-ab".to_vec();
+        assert_eq!(
+            missing_asset_keys(&cut, &keys),
+            vec!["/assets/index-ab12.js"]
         );
     }
 }
