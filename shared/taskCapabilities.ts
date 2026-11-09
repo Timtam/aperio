@@ -33,6 +33,7 @@ export const DEFAULT_RECURRENCE_CAPABILITIES: RecurrenceCapabilities = {
  *  for (TODO B7 222). */
 export const DEFAULT_REMINDER_CAPABILITIES: ReminderCapabilities = {
   after_start: false,
+  before_end: false,
 };
 
 /** Mirrors `plugin_core::TaskCapabilities::default()` — flat lists,

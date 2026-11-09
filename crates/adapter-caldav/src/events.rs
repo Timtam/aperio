@@ -3107,7 +3107,7 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
             "ATTACH;VALUE=URI:Basso",
             "TRIGGER;RELATED=END:-PT5M",
             "ATTENDEE:mailto:toni@example.org",
-            "TRIGGER:-P1W",
+            "TRIGGER:-P1M",
         ] {
             assert!(sent.contains(kept), "kept {kept}: {sent}");
         }
@@ -3294,7 +3294,7 @@ RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\nEND:VEVENT\r\nEND:VCALENDAR
         assert!(sent[..master_end].contains(SILENT), "{sent}");
         assert_eq!(sent.matches(SILENT).count(), 1, "{sent}");
         assert!(
-            sent.contains("TRIGGER:-P1W"),
+            sent.contains("TRIGGER:-P1M"),
             "an unshown alarm stays: {sent}"
         );
     }
@@ -3350,9 +3350,9 @@ RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\nEND:VEVENT\r\nEND:VCALENDAR
                 cal_core::ReminderKind::Email {
                     minutes_before: 1440
                 },
-                cal_core::ReminderKind::Relative { minutes_before: 5 },
+                cal_core::ReminderKind::RelativeToEnd { minutes_before: 5 },
             ],
-            "the read shows an audio alarm and an end-related one as reminders"
+            "the read shows an audio alarm as a reminder, an end-related one as one before the end"
         );
         edit.reminders.push(cal_core::Reminder {
             kind: cal_core::ReminderKind::Relative { minutes_before: 60 },
@@ -3398,7 +3398,7 @@ RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Weekly sync\r\nEND:VEVENT\r\nEND:VCALENDAR
             "the removed one goes: {sent}"
         );
         assert!(
-            sent.contains("TRIGGER:-P1W"),
+            sent.contains("TRIGGER:-P1M"),
             "an alarm Aperio never showed is not deleted by an Aperio edit: {sent}"
         );
     }

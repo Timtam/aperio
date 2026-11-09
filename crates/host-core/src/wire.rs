@@ -82,7 +82,12 @@ impl CalendarRow {
         // through `enumerate_birthday_triggers`), whatever account the
         // contacts come from.
         let reminder_capabilities = if birthdays.is_some() {
-            ReminderCapabilities { after_start: true }
+            // All-day birthdays end at midnight: "before the end" would only
+            // repeat "the day before" in other words.
+            ReminderCapabilities {
+                after_start: true,
+                before_end: false,
+            }
         } else {
             reminder_capabilities
         };

@@ -2758,6 +2758,9 @@ function EventEditorScreen({
         afterStartKept={
           calendars.find((c) => c.id === calId)?.reminder_capabilities?.after_start ?? false
         }
+        beforeEndKept={
+          calendars.find((c) => c.id === calId)?.reminder_capabilities?.before_end ?? false
+        }
         onChange={(next) => {
           setReminders(next);
           // The moment the user touches the editor the rows become REAL

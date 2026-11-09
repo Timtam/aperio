@@ -39,7 +39,8 @@ END:VCALENDAR\r\n";
 /// with its EMAIL, a zone, Apple's own properties, and alarms of every
 /// kind the read shows — a display alarm carrying Apple's default mark,
 /// an audio alarm, an e-mail alarm with an ATTENDEE line of its own, one
-/// triggered from the end, and one whose trigger Aperio does not model.
+/// triggered from the end, and one whose trigger Aperio does not model (a
+/// month, which RFC 5545 durations do not have).
 /// A weekly series with one changed occurrence.
 pub const ICLOUD_INVITATION: &str = "BEGIN:VCALENDAR\r\n\
 VERSION:2.0\r\n\
@@ -100,8 +101,8 @@ UID:44444444-4444-4444-8444-444444444444\r\n\
 END:VALARM\r\n\
 BEGIN:VALARM\r\n\
 ACTION:DISPLAY\r\n\
-DESCRIPTION:A week before\r\n\
-TRIGGER:-P1W\r\n\
+DESCRIPTION:A month before\r\n\
+TRIGGER:-P1M\r\n\
 UID:55555555-5555-4555-8555-555555555555\r\n\
 END:VALARM\r\n\
 END:VEVENT\r\n\

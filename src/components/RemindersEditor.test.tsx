@@ -380,3 +380,95 @@ describe('RemindersEditor — editing an all-day row by keyboard', () => {
     expect(screen.getByRole('combobox', { name: /Typ|Type/ }).getAttribute('aria-describedby')).toBeNull();
   });
 });
+
+/**
+ * A reminder counted from the end (CalDAV `TRIGGER;RELATED=END`, decided
+ * 2026-11-09): its own kinds, offered only where they arrive — the calendar
+ * keeps them, or the row stays in Aperio — and a row that has one elsewhere
+ * says it will not arrive. A task has no end.
+ */
+describe('RemindersEditor — a reminder counted from the end', () => {
+  const BEFORE_END: EditableReminder = {
+    kind: { type: 'relative_to_end', minutes_before: 5 },
+    sound: null,
+  };
+
+  function editor(
+    value: EditableReminder[],
+    props: {
+      beforeEndKept?: boolean;
+      placement?: boolean;
+      mode?: 'event' | 'task';
+      allDay?: boolean;
+    } = {},
+  ) {
+    const changes: EditableReminder[][] = [];
+    render(
+      <RemindersEditor
+        value={value}
+        onChange={(next) => changes.push(next)}
+        mode={props.mode ?? 'event'}
+        allDay={props.allDay}
+        beforeEndKept={props.beforeEndKept}
+        placement={props.placement}
+        placementSurface="event"
+      />,
+    );
+    const kind = screen.getByRole('combobox', { name: /Typ|Type/ }) as HTMLSelectElement;
+    return { kind, changes };
+  }
+
+  it('shows it as "before the end" with its amount, where the calendar keeps it', () => {
+    const { kind } = editor([BEFORE_END], { beforeEndKept: true });
+    expect(kind.value).toBe('before_end');
+    expect((screen.getByRole('spinbutton') as HTMLInputElement).value).toBe('5');
+    expect(screen.queryByText(/kommt dort nicht an|will not arrive/)).toBeNull();
+  });
+
+  it('keeps the row counted from the end when its amount changes', () => {
+    const { changes } = editor([BEFORE_END], { beforeEndKept: true });
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '30' } });
+    expect(changes.at(-1)?.[0].kind).toEqual({ type: 'relative_to_end', minutes_before: 30 });
+  });
+
+  it('offers "before the end" and "at the end" only where they arrive', () => {
+    const before: EditableReminder = { kind: { type: 'relative', minutes_before: 15 }, sound: null };
+    const kept = editor([before], { beforeEndKept: true });
+    expect(optionValues(kept.kind)).toEqual(
+      expect.arrayContaining(['before_end', 'at_end']),
+    );
+    expect(optionValues(kept.kind)).not.toContain('after_end');
+    document.body.innerHTML = '';
+    const attached = editor([{ ...before, attach: true }], { placement: true });
+    expect(optionValues(attached.kind)).not.toContain('before_end');
+    document.body.innerHTML = '';
+    const inAperio = editor([{ ...before, attach: false }], { placement: true });
+    expect(optionValues(inAperio.kind)).toContain('before_end');
+  });
+
+  it('says a row will not arrive where the calendar counts from the start', () => {
+    editor([{ ...BEFORE_END, attach: true }], { placement: true });
+    expect(screen.getByText(/kommt dort nicht an|will not arrive/).textContent).toMatch(
+      /ab dem Beginn|from the start/,
+    );
+  });
+
+  it('offers none on a task', () => {
+    const { kind } = editor([{ kind: { type: 'relative', minutes_before: 15 }, sound: null }], {
+      mode: 'task',
+      beforeEndKept: true,
+    });
+    expect(optionValues(kind)).not.toContain('before_end');
+  });
+
+  it('shows one on an all-day appointment as what it is, but offers none there', () => {
+    const { kind } = editor([BEFORE_END], { allDay: true, beforeEndKept: true });
+    expect(kind.value).toBe('before_end');
+    document.body.innerHTML = '';
+    const fresh = editor([{ kind: { type: 'relative', minutes_before: 0 }, sound: null }], {
+      allDay: true,
+      beforeEndKept: true,
+    });
+    expect(optionValues(fresh.kind)).not.toContain('before_end');
+  });
+});

@@ -12,6 +12,11 @@
  * "After start" (TODO B7 222) is a relative reminder with negative minutes,
  * a positive `TRIGGER` in iCalendar.
  *
+ * "Before the end", "at the end" and "after the end" (2026-11-09) are one
+ * stored kind, `relative_to_end` (RFC 5545 `TRIGGER;RELATED=END`), split the
+ * same way. Only an appointment has an end, and only CalDAV and Aperio's own
+ * store keep it (`CalendarRow.reminder_capabilities.before_end`).
+ *
  * An all-day appointment's rows read differently ({@link AllDayReminder}): a
  * day and a clock time, the reading the planner gives the appointment's own
  * reminders (`AllDayReading::Exact` in `crates/host-core/src/reminders.rs`).
@@ -20,7 +25,15 @@
 import type { ReminderKind } from './types';
 
 /** What the kind field of a reminder row offers. */
-export type ReminderKindOption = 'relative' | 'at_start' | 'after_start' | 'absolute' | 'app_start';
+export type ReminderKindOption =
+  | 'relative'
+  | 'at_start'
+  | 'after_start'
+  | 'before_end'
+  | 'at_end'
+  | 'after_end'
+  | 'absolute'
+  | 'app_start';
 
 export type RelativeUnit = 'minutes' | 'hours' | 'days';
 
@@ -36,6 +49,10 @@ export const DEFAULT_MINUTES_BEFORE = 15;
 /** What a reminder newly set to "after start" starts as: 15 minutes after. */
 export const DEFAULT_MINUTES_AFTER = 15;
 
+/** What a reminder newly set to "before the end" or "after the end" starts
+ *  as: 15 minutes. */
+export const DEFAULT_MINUTES_FROM_END = 15;
+
 const MINUTES_PER_DAY = 24 * 60;
 
 /**
@@ -48,6 +65,9 @@ export function reminderKindOption(kind: ReminderKind): ReminderKindOption {
     case 'relative':
       if (kind.minutes_before === 0) return 'at_start';
       return kind.minutes_before < 0 ? 'after_start' : 'relative';
+    case 'relative_to_end':
+      if (kind.minutes_before === 0) return 'at_end';
+      return kind.minutes_before < 0 ? 'after_end' : 'before_end';
     case 'absolute':
       return 'absolute';
     case 'app_start':
@@ -71,6 +91,12 @@ export function reminderKindFor(option: ReminderKindOption, now: Date): Reminder
       return { type: 'relative', minutes_before: 0 };
     case 'after_start':
       return { type: 'relative', minutes_before: -DEFAULT_MINUTES_AFTER };
+    case 'before_end':
+      return { type: 'relative_to_end', minutes_before: DEFAULT_MINUTES_FROM_END };
+    case 'at_end':
+      return { type: 'relative_to_end', minutes_before: 0 };
+    case 'after_end':
+      return { type: 'relative_to_end', minutes_before: -DEFAULT_MINUTES_FROM_END };
     case 'absolute': {
       const at = new Date(now.getTime());
       at.setMinutes(0, 0, 0);
@@ -118,6 +144,26 @@ export function afterStartOffered(
  *  midnight): the kind {@link afterStartOffered} rules on. */
 export function isAfterStart(kind: ReminderKind): boolean {
   return kind.type === 'relative' && kind.minutes_before < 0;
+}
+
+/**
+ * Whether a row may count from the end ("before the end", "at the end"),
+ * decided 2026-11-09 like {@link afterStartOffered}: the calendar keeps it
+ * (`CalendarRow.reminder_capabilities.before_end`: CalDAV, iCloud, the local
+ * store), or the row stays in Aperio. Google, Exchange, Outlook and the
+ * phone's calendar count every reminder from the start.
+ */
+export function beforeEndOffered(
+  row: { attach?: boolean },
+  target: { keptByCalendar: boolean; placement: boolean },
+): boolean {
+  return target.keptByCalendar || (target.placement && row.attach !== true);
+}
+
+/** Whether a reminder counts from the end: the kind {@link beforeEndOffered}
+ *  rules on. */
+export function isFromEnd(kind: ReminderKind): boolean {
+  return kind.type === 'relative_to_end';
 }
 
 /** `minutes_before` as the largest whole unit and its amount. */
@@ -209,8 +255,16 @@ export function clockOfText(text: string): number | null {
   return h < 24 && m < 60 ? h * 60 + m : null;
 }
 
-/** What the kind field of an all-day appointment's reminder row offers. */
-export type AllDayKindOption = 'on_day' | 'days_before' | 'days_after' | 'absolute' | 'app_start';
+/** What the kind field of an all-day appointment's reminder row offers. One
+ *  counted from the end is not offered there, only shown as such when an
+ *  appointment has one ("before the end", with an amount). */
+export type AllDayKindOption =
+  | 'on_day'
+  | 'days_before'
+  | 'days_after'
+  | 'before_end'
+  | 'absolute'
+  | 'app_start';
 
 /** The option an all-day appointment's reminder shows as; an e-mail reminder
  *  (adapter-side, not edited here) shows as "on the day". */
@@ -221,6 +275,8 @@ export function allDayKindOption(kind: ReminderKind): AllDayKindOption {
       if (day === 0) return 'on_day';
       return day < 0 ? 'days_before' : 'days_after';
     }
+    case 'relative_to_end':
+      return 'before_end';
     case 'absolute':
       return 'absolute';
     case 'app_start':
@@ -240,6 +296,7 @@ export function allDayKindFor(option: AllDayKindOption, now: Date): ReminderKind
       return { type: 'relative', minutes_before: MINUTES_PER_DAY };
     case 'days_after':
       return { type: 'relative', minutes_before: -MINUTES_PER_DAY };
+    case 'before_end':
     case 'absolute':
     case 'app_start':
       return reminderKindFor(option, now);
@@ -249,7 +306,8 @@ export function allDayKindFor(option: AllDayKindOption, now: Date): ReminderKind
 /** A calendar default's kind as an all-day appointment takes it
  *  ({@link allDayDefaultMinutes}); every other kind as it is. */
 export function allDayDefaultKind(kind: ReminderKind): ReminderKind {
-  return kind.type === 'relative'
-    ? { type: 'relative', minutes_before: allDayDefaultMinutes(kind.minutes_before) }
-    : kind;
+  if (kind.type === 'relative' || kind.type === 'relative_to_end') {
+    return { type: kind.type, minutes_before: allDayDefaultMinutes(kind.minutes_before) };
+  }
+  return kind;
 }

@@ -5,7 +5,10 @@ import {
   allDayKindFor,
   allDayKindOption,
   afterStartOffered,
+  allDayDefaultKind,
   allDayDefaultMinutes,
+  beforeEndOffered,
+  isFromEnd,
   allDayReminderOf,
   atStartLabelKey,
   clockOfText,
@@ -211,5 +214,42 @@ describe('allDayKindOption / allDayKindFor — the kinds of an all-day row', () 
     for (const option of ['on_day', 'days_before', 'days_after', 'absolute', 'app_start'] as const) {
       expect(allDayKindOption(allDayKindFor(option, now))).toBe(option);
     }
+  });
+});
+
+describe('counting from the end (RFC 5545 RELATED=END, 2026-11-09)', () => {
+  const now = new Date('2026-11-09T10:20:00Z');
+
+  it('reads a stored reminder from the end as before, at or after the end', () => {
+    expect(reminderKindOption({ type: 'relative_to_end', minutes_before: 15 })).toBe('before_end');
+    expect(reminderKindOption({ type: 'relative_to_end', minutes_before: 0 })).toBe('at_end');
+    expect(reminderKindOption({ type: 'relative_to_end', minutes_before: -10 })).toBe('after_end');
+    expect(isFromEnd({ type: 'relative_to_end', minutes_before: 5 })).toBe(true);
+    expect(isFromEnd({ type: 'relative', minutes_before: 5 })).toBe(false);
+  });
+
+  it('starts each of them at 15 minutes, or at the end itself', () => {
+    expect(reminderKindFor('before_end', now)).toEqual({ type: 'relative_to_end', minutes_before: 15 });
+    expect(reminderKindFor('at_end', now)).toEqual({ type: 'relative_to_end', minutes_before: 0 });
+    expect(reminderKindFor('after_end', now)).toEqual({ type: 'relative_to_end', minutes_before: -15 });
+    for (const option of ['before_end', 'at_end', 'after_end'] as const) {
+      expect(reminderKindOption(reminderKindFor(option, now))).toBe(option);
+    }
+  });
+
+  it('is offered where the calendar keeps it, or for a row that stays in Aperio', () => {
+    expect(beforeEndOffered({ attach: true }, { keptByCalendar: true, placement: true })).toBe(true);
+    const google = { keptByCalendar: false, placement: true };
+    expect(beforeEndOffered({ attach: false }, google)).toBe(true);
+    expect(beforeEndOffered({ attach: true }, google)).toBe(false);
+    expect(beforeEndOffered({}, { keptByCalendar: false, placement: false })).toBe(false);
+  });
+
+  it('shows on an all-day row as "before the end", and a default rounds to whole days', () => {
+    expect(allDayKindOption({ type: 'relative_to_end', minutes_before: 60 })).toBe('before_end');
+    expect(allDayDefaultKind({ type: 'relative_to_end', minutes_before: 15 })).toEqual({
+      type: 'relative_to_end',
+      minutes_before: 0,
+    });
   });
 });

@@ -676,18 +676,15 @@ Siehe DESIGN §4.2.
 ### B7 · Erinnerungs-Feinheiten (§14) `[~]`
 - [~] E-Mail-Reminder: UI-Option + (Adapter-)Versand — lokaler Scheduler überspringt sie derzeit bewusst.  
   ↳ Adapter-Hälfte für Google + CalDAV FERTIG (round-trippt als providereigener E-Mail-Alarm — Aperio verschickt selbst nie Mail, genau wie §14 es verlangt). Die UI-Option fehlt auf beiden Oberflächen.
-- [ ] **CalDAV liest Hinweise „zum Ende“ falsch, und „1 Woche vorher“ gar
-  nicht.** Gefunden in der Recherche zu 222 (2026-11-07, aus dem Code
-  gelesen, nicht ausprobiert). `parse_valarms`
-  (`crates/ical-mapping/src/mapping.rs`) prüft `RELATED` nicht. Ein
-  `TRIGGER;RELATED=END:-PT5M` (5 Minuten vor dem Ende) wird als 5 Minuten
-  vor dem BEGINN gelesen und klingelt dann; beim Umschreiben eines eigenen
-  Termins geht er als solcher hinaus (bei Einladungen bleibt er Byte für
-  Byte). Zu tun: `RELATED=END` entweder modellieren oder ganz unangetastet
-  lassen (fremde iCal-Teile ganz oder gar nicht). Wochen (`-P1W`, Apples
-  „1 Woche vorher“) liest der Parser nicht: Aperio zeigt einen solchen
-  Hinweis nicht an, ein Speichern gibt ihn seit dem Fix für Apples stummen
-  Hinweis aber unverändert zurück (vorher fiel er weg).
+- [x] **CalDAV liest Hinweise „zum Ende“ richtig, und „1 Woche vorher“**
+  (Toni, 2026-11-09: „vor dem Ende modellieren“; DESIGN §14.1 „Erinnerungen
+  ab dem Ende“). Neue Art `relative_to_end` im Kern, gelesen und geschrieben
+  als `TRIGGER;RELATED=END`, im Planer vom Ende jedes Vorkommens gezählt,
+  in beiden Editoren als „Vor dem Ende“ und „Zum Ende“ angeboten, wo der
+  Kalender sie behält (Manifest `reminders.before_end`: CalDAV, iCloud,
+  lokal) oder die Zeile nur in Aperio gilt. Google, Exchange, Outlook und
+  der Gerätekalender lassen sie benannt weg. Wochen (`-P1W`) liest CalDAV
+  als 7 Tage.
 - [ ] **Aus Dateien eingelesene iPhone-Termine tragen eine Erinnerung von
   1976.** Aus dem Code gelesen (2026-11-08), nicht ausprobiert. Bis zum Fix
   für Apples stummen Hinweis las der Datei-Import (I4)

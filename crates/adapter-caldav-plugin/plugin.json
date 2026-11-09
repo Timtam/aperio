@@ -19,7 +19,8 @@
   },
   "signed": false,
   "reminders": {
-    "after_start": true
+    "after_start": true,
+    "before_end": true
   },
   "tasks": {
     "task_span": true,

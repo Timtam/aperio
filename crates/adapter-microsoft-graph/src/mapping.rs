@@ -1101,6 +1101,13 @@ fn first_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
             None
         }
         ReminderKind::Relative { minutes_before } => Some(minutes_before),
+        ReminderKind::RelativeToEnd { minutes_before } => {
+            tracing::warn!(
+                minutes_before_end = minutes_before,
+                "reminder relative to the end left out: Outlook counts only from the start"
+            );
+            None
+        }
         _ => None,
     })
 }

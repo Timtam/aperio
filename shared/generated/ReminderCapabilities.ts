@@ -19,4 +19,11 @@ export type ReminderCapabilities = {
  * and Aperio's own store; Google, Exchange and Outlook count only
  * minutes before the start.
  */
-after_start: boolean, };
+after_start: boolean, 
+/**
+ * Keeps a reminder relative to the END ("5 minutes before the end"; RFC
+ * 5545 `TRIGGER;RELATED=END`). CalDAV and iCloud do, and Aperio's own
+ * store; Google, Exchange, Outlook and the phone's calendar have no such
+ * reminder.
+ */
+before_end: boolean, };

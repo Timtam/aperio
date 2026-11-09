@@ -89,8 +89,10 @@ which every calendar backend keeps.
 |---|---|
 | `after_start` | The backend stores a reminder AFTER the start ("10 minutes after the start"; in iCalendar a positive `TRIGGER`), and with it an all-day reminder at a clock time on the day itself ("on the day, 09:00"). Default `false`. Set it only where such a reminder survives the round trip: the CalDAV adapter and the local store do; Google, Exchange and Outlook count only minutes before the start, and their adapters leave such a reminder out rather than fail the write. The reminder editors offer the kind only where this is `true`, or for a reminder that stays in Aperio. |
 
+| `before_end` | The backend stores a reminder counted from the END ("5 minutes before the end"; in iCalendar `TRIGGER;RELATED=END`). Default `false`. The CalDAV adapter and the local store do; Google, Exchange, Outlook and the phone's calendar count every reminder from the start, and their adapters leave such a reminder out rather than fail the write. The reminder editors offer "before the end" and "at the end" only where this is `true`, or for a reminder that stays in Aperio. |
+
 ```json
-"reminders": { "after_start": true }
+"reminders": { "after_start": true, "before_end": true }
 ```
 
 ## `adapter_kind` — the routing key

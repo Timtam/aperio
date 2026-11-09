@@ -3273,6 +3273,10 @@ export function EventDialog({
             calendars.find((c) => c.id === form.calendarId)?.reminder_capabilities
               ?.after_start ?? false
           }
+          beforeEndKept={
+            calendars.find((c) => c.id === form.calendarId)?.reminder_capabilities
+              ?.before_end ?? false
+          }
         />
 
         {/* §14.4 per-event sound override. Edit-only: the key is the
