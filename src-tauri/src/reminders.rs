@@ -388,6 +388,26 @@ impl ReminderScheduler {
         self.invalidate();
     }
 
+    /// The set of accounts with an adapter changed: one deleted (here or on
+    /// another device), a plugin switched off, on, removed or replaced. The
+    /// next scan reads every account again, without the ones that are gone,
+    /// rather than ringing what was planned for them. Wakes the worker, which
+    /// otherwise sleeps until the next planned reminder — possibly one of
+    /// the deleted account's.
+    pub fn accounts_changed(&self) {
+        self.written().everything = true;
+        self.invalidate();
+    }
+
+    /// A contact was created, changed or deleted, or an address book was
+    /// deleted: the birthday reminders are read again at the next scan, which
+    /// this starts. Local contacts change no cache the refresh would report,
+    /// so nothing else would tell the planner.
+    pub fn contacts_changed(&self) {
+        self.written().birthdays = true;
+        self.invalidate();
+    }
+
     fn written(&self) -> std::sync::MutexGuard<'_, WrittenContainers> {
         self.external_written
             .lock()
@@ -1383,6 +1403,49 @@ mod tests {
             s.external_calendar_removed("both");
             s.external_task_list_removed("both");
             assert!(s.external_triggers_cached_or_fetch(true).await.is_empty());
+            assert!(account.reads().is_empty());
+        }
+
+        /// A deleted account's reminders go at the next scan, and the worker
+        /// is woken for it instead of sleeping until one of them.
+        #[tokio::test]
+        async fn a_deleted_account_takes_its_reminders_along() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![of("gone", ItemKind::Event, "cal-1")],
+                Duration::from_secs(10),
+            );
+            s.registry.unregister("acc-1");
+            s.accounts_changed();
+            tokio::time::timeout(Duration::from_secs(1), s.invalidate.notified())
+                .await
+                .expect("the worker is woken");
+            assert!(s.external_triggers_cached_or_fetch(true).await.is_empty());
+            assert_eq!(account.listings(), 0, "the deleted account is not asked");
+        }
+
+        /// A contact change reads the birthdays again at once (no refresh
+        /// reports a local contact), and wakes the worker for it.
+        #[tokio::test]
+        async fn a_contact_change_reads_the_birthdays_again() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![
+                    of("birthday", ItemKind::Event, "aperio-birthdays:list-1"),
+                    of("other", ItemKind::Event, "cal-2"),
+                ],
+                Duration::from_secs(10),
+            );
+            s.contacts_changed();
+            tokio::time::timeout(Duration::from_secs(1), s.invalidate.notified())
+                .await
+                .expect("the worker is woken");
+            assert_eq!(
+                sorted(s.external_triggers_cached_or_fetch(true).await),
+                vec!["other"]
+            );
             assert!(account.reads().is_empty());
         }
 

@@ -356,6 +356,57 @@ impl AdapterRegistry {
         self.register_persisted(repo, true)
     }
 
+    /// The other half of [`Self::register_missing`]: drop the adapter of every
+    /// account whose row is gone — deleted on another device, the deletion
+    /// applied by a sync round. Without this its calendars, lists and address
+    /// books stay readable, and its reminders keep ringing, until the next app
+    /// start. Returns the number of accounts unregistered; nothing when the
+    /// rows cannot be read (a failed read is not a deletion).
+    pub fn unregister_removed(&self, repo: &AccountsRepo<'_>) -> usize {
+        let accounts: HashSet<String> = match repo.list() {
+            Ok(rows) => rows.into_iter().map(|account| account.id).collect(),
+            Err(err) => {
+                warn!(?err, "failed to list accounts; nothing unregistered");
+                return 0;
+            }
+        };
+        let mut registered: HashSet<String> = HashSet::new();
+        registered.extend(
+            self.external_cal
+                .read()
+                .expect("registry cal poison")
+                .keys()
+                .cloned(),
+        );
+        registered.extend(
+            self.external_tasks
+                .read()
+                .expect("registry tasks poison")
+                .keys()
+                .cloned(),
+        );
+        registered.extend(
+            self.external_contacts
+                .read()
+                .expect("registry contacts poison")
+                .keys()
+                .cloned(),
+        );
+        registered.extend(
+            self.external_vc
+                .read()
+                .expect("registry vc poison")
+                .keys()
+                .cloned(),
+        );
+        let mut removed = 0usize;
+        for id in registered.difference(&accounts) {
+            self.unregister(id);
+            removed += 1;
+        }
+        removed
+    }
+
     /// Shared body of [`Self::bootstrap`] + [`Self::register_missing`].
     /// `only_missing` skips accounts that already have an adapter.
     /// Returns the number of accounts newly registered.
@@ -1842,5 +1893,43 @@ mod tests {
             .expect("create device-calendar account");
         assert_eq!(registry.register_missing(&repo), 0);
         assert!(cal_adapter(&registry, LOCAL_ID).is_none());
+    }
+
+    #[test]
+    fn unregister_removed_drops_only_accounts_whose_row_is_gone() {
+        let db = DbHandle::open_in_memory().expect("in-memory db");
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let registry = ical_registry();
+        let kept = repo
+            .create(
+                AdapterKind::new("ical"),
+                "Kept",
+                &ical_config("https://example.invalid/kept.ics"),
+            )
+            .expect("create kept account");
+        let gone = repo
+            .create(
+                AdapterKind::new("ical"),
+                "Gone",
+                &ical_config("https://example.invalid/gone.ics"),
+            )
+            .expect("create gone account");
+        registry.register(&kept).expect("register kept");
+        registry.register(&gone).expect("register gone");
+        // Deleted on another device: the applier removed the row.
+        repo.delete(&gone.id).expect("delete the row");
+
+        assert_eq!(registry.unregister_removed(&repo), 1);
+        assert!(
+            cal_adapter(&registry, &gone.id).is_none(),
+            "its adapter is gone"
+        );
+        assert!(
+            cal_adapter(&registry, &kept.id).is_some(),
+            "the other stays"
+        );
+        // Idempotent: nothing more to drop.
+        assert_eq!(registry.unregister_removed(&repo), 0);
     }
 }

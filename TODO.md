@@ -168,12 +168,17 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
   Minute Intervall fragt Aperio einen Anbieter, der „zu viele Anfragen“
   meldet, jede Minute; heute pausiert nur innerhalb eines Durchlaufs). Erst
   angehen, wenn das wirklich auftritt.
-- [ ] **Erinnerungen eines gelöschten Kontos oder abgeschalteten Adapters
-  klingeln weiter** (Prüfrunde #162, gab es vorher schon): `delete_account`
-  und das Abschalten oder Entfernen eines Plugins (`commands/plugins.rs`)
-  wecken den Planer nicht und leeren seinen Speicher nicht. Ebenso machen
-  lokale Kontakt-Änderungen die Geburtstags-Erinnerungen erst beim nächsten
-  vollen Durchlauf neu.
+- [x] **Erinnerungen eines gelöschten Kontos oder abgeschalteten Adapters
+  klingelten weiter** (Prüfrunde #162; behoben 2026-11-09, DESIGN §14.1):
+  Löschen eines Kontos und Ab-, Ein- oder Ausschalten, Entfernen oder
+  Ersetzen eines Plugins wecken den Desktop-Planer, der alles ohne die
+  verschwundenen Konten neu liest (`accounts_changed`). Ein auf einem
+  anderen Gerät gelöschtes Konto verliert nach der Sync-Runde seinen Adapter
+  (`unregister_removed`, Desktop und Handy); vorher las es bis zum nächsten
+  Start weiter. Kontakt-Änderungen lesen die Geburtstags-Erinnerungen sofort
+  neu (Desktop `contacts_changed`, Handy plant neu). Nebenbei: Das Löschen
+  des Sync-Ziel-Kontos prüft jetzt zuerst; vorher löschte der Desktop die
+  Zeile und das Handy die Zugangsdaten, bevor es ablehnte.
 - [ ] **Stufe 2: Klicks aus dem Benachrichtigungscenter und nach dem Beenden**
   (Win+N, Eingabe auf einem Aperio-Eintrag; Stufe 1 erreicht nur das Banner,
   solange Aperio läuft). Ohne COM-Aktivator stellt Windows diese Klicks nicht

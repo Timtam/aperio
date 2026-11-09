@@ -33,6 +33,7 @@ use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
 use crate::registry::AdapterRegistry;
+use crate::reminders::SchedulerHandle;
 use crate::remote_plugins::RemotePluginsRepo;
 use crate::user_prefs::UserPrefsRepo;
 
@@ -306,6 +307,7 @@ pub async fn set_plugin_enabled(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
+    scheduler: State<'_, SchedulerHandle>,
     request: SetPluginEnabledRequest,
 ) -> CommandResult<()> {
     // Refuse to act on plugins the host doesn't actually have
@@ -393,6 +395,8 @@ pub async fn set_plugin_enabled(
                     registry.unregister(&account.id);
                 }
             }
+            // Switched off, its accounts' reminders stop; on, they come back.
+            scheduler.accounts_changed();
         }
     }
 
@@ -496,6 +500,7 @@ pub async fn install_plugin_archive(
     plugin_manager: State<'_, Arc<PluginManager>>,
     user_plugins_dir: State<'_, UserPluginsDir>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    scheduler: State<'_, SchedulerHandle>,
     request: InstallPluginArchiveRequest,
 ) -> CommandResult<PluginInfo> {
     // Pre-flight: read the manifest WITHOUT extracting. Lets
@@ -576,6 +581,9 @@ pub async fn install_plugin_archive(
                 );
             }
         }
+        // Back online (or a new version of the adapter): their reminders
+        // are read again.
+        scheduler.accounts_changed();
     }
 
     // Build the PluginInfo from the just-loaded LoadedPlugin
@@ -942,6 +950,7 @@ pub async fn uninstall_plugin(
     plugin_manager: State<'_, Arc<PluginManager>>,
     user_plugins_dir: State<'_, UserPluginsDir>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    scheduler: State<'_, SchedulerHandle>,
     request: UninstallPluginRequest,
 ) -> CommandResult<()> {
     let plugin_id = request.plugin_id;
@@ -979,6 +988,8 @@ pub async fn uninstall_plugin(
     //    a functional setup until they retry / restart.
     if plugin_manager.get_including_disabled(&plugin_id).is_some() {
         try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id).await?;
+        // Its accounts are unregistered: their reminders stop now.
+        scheduler.accounts_changed();
     }
 
     // 4) Scrub the plugin directory. Best-effort: if the dir

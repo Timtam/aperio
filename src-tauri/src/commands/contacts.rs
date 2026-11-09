@@ -37,6 +37,7 @@ use crate::db::DbHandle;
 use host_core::wire::ContactListRow;
 
 use crate::registry::{AdapterRegistry, LOCAL_ID};
+use crate::reminders::SchedulerHandle;
 use crate::user_prefs::UserPrefsRepo;
 
 #[tauri::command]
@@ -245,15 +246,19 @@ pub async fn create_contact(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     cache: State<'_, Arc<CacheStore>>,
+    scheduler: State<'_, SchedulerHandle>,
     request: CreateContactRequest,
 ) -> CommandResult<Contact> {
     let account = registry
         .account_for_contact_list(&request.list_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
     if account == LOCAL_ID {
-        return Ok(adapter
+        let created = adapter
             .create_contact(&request.list_id, request.contact)
-            .await?);
+            .await?;
+        // A birthday may have come with it.
+        scheduler.contacts_changed();
+        return Ok(created);
     }
     let Some(ext) = registry.contact_adapter(&account) else {
         return Err(CommandError {
@@ -265,6 +270,7 @@ pub async fn create_contact(
     // After a failure too: a contact or group may stand without one of its
     // steps (decision 273), and the next read shows what the provider holds.
     let _ = cache.invalidate(&account, SyncScope::Contacts, &request.list_id);
+    scheduler.contacts_changed();
     Ok(created?)
 }
 
@@ -273,13 +279,17 @@ pub async fn update_contact(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     cache: State<'_, Arc<CacheStore>>,
+    scheduler: State<'_, SchedulerHandle>,
     contact: Contact,
 ) -> CommandResult<Contact> {
     let account = registry
         .account_for_contact_list(&contact.list_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
     if account == LOCAL_ID {
-        return Ok(adapter.update_contact(contact).await?);
+        let updated = adapter.update_contact(contact).await?;
+        // The birthday, or the name it is announced with, may have changed.
+        scheduler.contacts_changed();
+        return Ok(updated);
     }
     let Some(ext) = registry.contact_adapter(&account) else {
         return Err(CommandError {
@@ -291,6 +301,7 @@ pub async fn update_contact(
     let updated = ext.update_contact(contact).await;
     // After a failure too: a save may have landed in part (decision 273).
     let _ = cache.invalidate(&account, SyncScope::Contacts, &list_id);
+    scheduler.contacts_changed();
     Ok(updated?)
 }
 
@@ -307,6 +318,7 @@ pub async fn delete_contact(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     cache: State<'_, Arc<CacheStore>>,
+    scheduler: State<'_, SchedulerHandle>,
     id: String,
     list_id: Option<String>,
 ) -> CommandResult<()> {
@@ -316,6 +328,7 @@ pub async fn delete_contact(
         .unwrap_or_else(|| LOCAL_ID.to_string());
     if account == LOCAL_ID {
         adapter.delete_contact(&id).await?;
+        scheduler.contacts_changed();
     } else {
         let Some(ext) = registry.contact_adapter(&account) else {
             return Err(CommandError {
@@ -329,6 +342,7 @@ pub async fn delete_contact(
             // (decision 277), so the next read asks the provider.
             let _ = cache.invalidate(&account, SyncScope::Contacts, lid);
         }
+        scheduler.contacts_changed();
         deleted?;
     }
     Ok(())
@@ -359,9 +373,12 @@ pub async fn create_contact_list(
 #[tauri::command]
 pub async fn delete_contact_list(
     adapter: State<'_, LocalAdapter>,
+    scheduler: State<'_, SchedulerHandle>,
     id: String,
 ) -> CommandResult<()> {
     adapter.delete_contact_list(&id)?;
+    // Its birthday calendar, and the reminders on it, go with it.
+    scheduler.contacts_changed();
     Ok(())
 }
 
