@@ -55,7 +55,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     ApplyReport, CompactionReport, Compactor, EventLogApplier, SyncRoundReport, SyncStatus,
-    SyncStore, DEFAULT_SYNC_INTERVAL_MINUTES, PREF_SYNC_INTERVAL_MINUTES,
+    SyncStore, PREF_SYNC_INTERVAL_MINUTES,
 };
 
 /// `user_prefs` key holding the RFC 3339 timestamp of the
@@ -2117,19 +2117,17 @@ impl SyncOrchestrator {
         Ok(())
     }
 
-    /// The configured periodic sync interval (minutes), read from
-    /// `user_prefs` with the default fallback. Mirrors the desktop
-    /// scheduler's `read_interval_minutes`; surfaced in `SyncStatus`.
+    /// The one refresh interval (minutes), surfaced in `SyncStatus`, the
+    /// same value every other reader sees
+    /// ([`crate::resolve_sync_interval_minutes`]).
     fn read_interval_minutes(&self) -> u32 {
-        self.store
-            .get_pref(PREF_SYNC_INTERVAL_MINUTES)
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<u32>().ok())
-            // Clamp to >= 1 minute, matching the desktop scheduler's
-            // `read_interval_minutes` so a stray "0" can't busy-loop.
-            .map(|m| m.max(1))
-            .unwrap_or(DEFAULT_SYNC_INTERVAL_MINUTES)
+        crate::resolve_sync_interval_minutes(
+            self.store
+                .get_pref(PREF_SYNC_INTERVAL_MINUTES)
+                .ok()
+                .flatten()
+                .as_deref(),
+        )
     }
 }
 

@@ -7,8 +7,9 @@
 //! | Trigger     | How this module fires it                                 |
 //! |-------------|----------------------------------------------------------|
 //! | App start   | Single delayed kick (`APP_START_DELAY`) after boot.      |
-//! | Periodic    | `tokio::time::sleep(interval)` loop, default 5 min,      |
-//! |             | configurable via `user_prefs.sync.intervalMinutes`.       |
+//! | Periodic    | `tokio::time::sleep(interval)` loop on the one refresh    |
+//! |             | interval (`sync.intervalMinutes`, Einstellungen →         |
+//! |             | Allgemein), default 5 min; see [`interval_changed`].      |
 //! | On mutation | `EventLogWriter::append` pings a shared `Notify`; the    |
 //! |             | scheduler debounces a `DEBOUNCE_WINDOW` and then pushes. |
 //! | App exit    | `lib.rs` blocks on a final push via the orchestrator's    |
@@ -470,6 +471,10 @@ impl SyncScheduler {
             warn!(?err, "failed to emit user-prefs-changed");
         }
         Self::refresh_reminders_for_settings(app, report);
+        // The refresh interval set on another device paces this one too.
+        if interval_arrived(&report.settings_keys) {
+            interval_changed(app);
+        }
     }
 
     /// Make an arrived preference reach the REMINDER worker, not just the UI.
@@ -730,7 +735,7 @@ impl SyncScheduler {
     /// Values below 1 minute clamp to 1 so a typo (`0`) can't pin
     /// the worker into a hot loop.
     pub fn read_interval_minutes(&self) -> u32 {
-        read_interval_minutes(&self.db)
+        host_core::user_prefs::sync_interval_minutes(&self.db)
     }
 
     /// Convert the configured interval into a `Duration`. When
@@ -764,7 +769,10 @@ impl SyncScheduler {
     /// Returns the clamped value actually persisted, so the frontend
     /// can echo it back into the settings UI.
     pub fn set_interval_minutes(&self, minutes: u32) -> Result<u32, String> {
-        let clamped = minutes.max(1);
+        let clamped = minutes.clamp(
+            sync_engine::MIN_SYNC_INTERVAL_MINUTES,
+            sync_engine::MAX_SYNC_INTERVAL_MINUTES,
+        );
         UserPrefsRepo::new(&self.db)
             .set(PREF_SYNC_INTERVAL_MINUTES, &clamped.to_string())
             .map_err(|err| err.to_string())?;
@@ -798,19 +806,26 @@ fn backoff_duration(base: Duration, failures: u32) -> Duration {
     scaled.min(MAX_BACKOFF)
 }
 
-/// Free function reading the configured interval. Exposed separately
-/// from [`SyncScheduler::read_interval_minutes`] so callers that
-/// don't hold a scheduler handle (e.g. the `get_sync_status` command
-/// when no scheduler State exists in tests) can resolve the same
-/// value.
-pub fn read_interval_minutes(db: &SharedConn) -> u32 {
-    UserPrefsRepo::new(db)
-        .get(PREF_SYNC_INTERVAL_MINUTES)
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse::<u32>().ok())
-        .map(|m| m.max(1))
-        .unwrap_or(DEFAULT_SYNC_INTERVAL_MINUTES)
+/// Whether a round applied the refresh interval from another device.
+fn interval_arrived(keys: &[String]) -> bool {
+    keys.iter().any(|key| key == PREF_SYNC_INTERVAL_MINUTES)
+}
+
+/// The one refresh interval changed, here or on another device: every loop
+/// it paces measures its wait again from now, without an extra pass. The
+/// sync loop itself re-reads it after its round; this reaches the others —
+/// the refresh of external data, the contacts pass and the reminder
+/// planner, whose safety read and empty-horizon retry follow it.
+pub fn interval_changed<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(refresher) = app.try_state::<Arc<CacheRefresher>>() {
+        refresher.interval_changed();
+    }
+    if let Some(contacts) = app.try_state::<Arc<crate::contact_sync::ContactSyncScheduler>>() {
+        contacts.interval_changed();
+    }
+    if let Some(reminders) = app.try_state::<crate::reminders::SchedulerHandle>() {
+        reminders.invalidate();
+    }
 }
 
 #[cfg(test)]
@@ -827,11 +842,23 @@ mod tests {
     }
 
     #[test]
+    fn only_the_refresh_interval_retimes_the_loops() {
+        assert!(interval_arrived(&[
+            "calendar.x.defaultReminders".to_string(),
+            PREF_SYNC_INTERVAL_MINUTES.to_string(),
+        ]));
+        assert!(!interval_arrived(&[
+            "calendar.x.defaultReminders".to_string()
+        ]));
+        assert!(!interval_arrived(&[]));
+    }
+
+    #[test]
     fn read_interval_minutes_defaults_to_five() {
         let (_tmp, db) = fresh_db();
         let shared = db.shared();
         assert_eq!(
-            read_interval_minutes(&shared),
+            host_core::user_prefs::sync_interval_minutes(&shared),
             DEFAULT_SYNC_INTERVAL_MINUTES,
         );
     }
@@ -843,7 +870,7 @@ mod tests {
         UserPrefsRepo::new(&shared)
             .set(PREF_SYNC_INTERVAL_MINUTES, "30")
             .unwrap();
-        assert_eq!(read_interval_minutes(&shared), 30);
+        assert_eq!(host_core::user_prefs::sync_interval_minutes(&shared), 30);
     }
 
     #[test]
@@ -856,7 +883,7 @@ mod tests {
         UserPrefsRepo::new(&shared)
             .set(PREF_SYNC_INTERVAL_MINUTES, "0")
             .unwrap();
-        assert_eq!(read_interval_minutes(&shared), 1);
+        assert_eq!(host_core::user_prefs::sync_interval_minutes(&shared), 1);
     }
 
     #[test]
@@ -867,7 +894,7 @@ mod tests {
             .set(PREF_SYNC_INTERVAL_MINUTES, "not-a-number")
             .unwrap();
         assert_eq!(
-            read_interval_minutes(&shared),
+            host_core::user_prefs::sync_interval_minutes(&shared),
             DEFAULT_SYNC_INTERVAL_MINUTES,
         );
     }

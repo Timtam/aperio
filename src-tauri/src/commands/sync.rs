@@ -11,8 +11,10 @@
 //!     follow-up status fetch.
 //!   - `get_sync_status()` — read-only snapshot for the status
 //!     indicator.
-//!   - `set_sync_interval(minutes)` — Phase Se. Adjusts the
-//!     periodic scheduler.
+//!   - `set_sync_interval(minutes)` — the one refresh interval
+//!     (Einstellungen → Allgemein, "Aktualisierungs-Intervall"): the sync
+//!     loop, the refresh of external data, contacts and the reminder
+//!     planner.
 //!   - `preview_sync_target(config)` — Phase Sf. Reads `meta.json`
 //!     at the given config WITHOUT touching the live orchestrator.
 //!     Frontend uses the result to drive the onboarding dialog.
@@ -1193,12 +1195,15 @@ pub async fn select_sync_account(
     .await
 }
 
-/// Set the periodic sync interval (in minutes). Values below 1 are
-/// clamped to 1 so a typo can't pin the scheduler into a hot loop.
-/// Returns the value actually persisted so the Settings UI can echo
-/// it back into its slider.
+/// Set the one refresh interval (in minutes; "Aktualisierungs-Intervall",
+/// Einstellungen → Allgemein). Held to 1..=1440 minutes so a typo can't pin
+/// a loop hot or stop it for a day. Works without a sync target: it paces
+/// the refresh of external data, contacts and the reminder planner too, and
+/// every one of them measures its wait again at once. Returns the value
+/// actually persisted so the Settings UI can echo it back.
 #[tauri::command]
 pub async fn set_sync_interval(
+    app: tauri::AppHandle,
     scheduler: State<'_, Arc<SyncScheduler>>,
     event_log: State<'_, Arc<crate::event_log::EventLogWriter>>,
     minutes: u32,
@@ -1227,6 +1232,7 @@ pub async fn set_sync_interval(
             value: serde_json::Value::from(clamped),
         },
     ));
+    crate::event_log::scheduler::interval_changed(&app);
 
     Ok(clamped)
 }

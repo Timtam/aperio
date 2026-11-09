@@ -216,6 +216,14 @@ export async function unregisterBackgroundSync(): Promise<void> {
   }
 }
 
+/** The refresh interval changed: register the OS task again so it asks for
+ *  the new cadence (at least 15 minutes). Nothing when the pref is off. */
+export async function reapplyBackgroundSync(): Promise<void> {
+  if (!cached) return;
+  await unregisterBackgroundSync();
+  await registerBackgroundSync();
+}
+
 /** Load the stored pref and reconcile the OS registration to match. Call once on
  *  app start (from the sync-triggers hook). */
 export async function initBackgroundSync(): Promise<void> {

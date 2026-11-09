@@ -34,7 +34,6 @@ use crate::registry::AdapterRegistry;
 // shim pattern host-core's lib.rs uses for its own re-exports.
 pub use host_core::contact_sync::{
     ContactsSyncStatus, PREF_INCLUDE_READ_ONLY_ON_SYNC, PREF_LAST_SYNCED_AT,
-    PREF_SYNC_INTERVAL_MINUTES,
 };
 
 /// How long after app start the first sync pass kicks off. Lets the
@@ -116,6 +115,12 @@ impl ContactSyncScheduler {
             }
         });
         scheduler
+    }
+
+    /// The refresh interval changed: measure the wait for the next pass
+    /// again from now, without a pass.
+    pub fn interval_changed(&self) {
+        self.core.notify_handle().notify_one();
     }
 
     /// Run one sync pass through the core + the desktop observer. Returns

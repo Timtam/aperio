@@ -1485,12 +1485,6 @@ class CalFfiModule : Module() {
       }
     }.runOnQueue(readScope)
 
-    AsyncFunction("setContactsSyncInterval") { minutes: Int ->
-      hostCoded {
-        host.setContactsSyncInterval(minutes.toUInt()).toInt()
-      }
-    }
-
     AsyncFunction("setContactsIncludeReadOnlyOnSync") { enabled: Boolean ->
       hostCoded {
         host.setContactsIncludeReadOnlyOnSync(enabled)

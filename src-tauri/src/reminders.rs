@@ -309,6 +309,13 @@ impl ReminderScheduler {
         scheduler
     }
 
+    /// The one refresh interval (Einstellungen → Allgemein): how long the
+    /// external snapshot answers, and how long the worker sleeps when nothing
+    /// is planned. A change wakes the worker (`interval_changed`).
+    fn refresh_interval(&self) -> Duration {
+        host_core::user_prefs::sync_interval(&self.db)
+    }
+
     /// Wake the worker so it re-scans. Safe to call from any thread; multiple
     /// back-to-back calls are coalesced by `Notify`. Local triggers re-scan on
     /// every wake; external triggers come from the TTL cache unless the caller
@@ -495,7 +502,7 @@ impl ReminderScheduler {
                     // stale still gets discovered.
                     tokio::select! {
                         _ = self.invalidate.notified() => continue,
-                        _ = tokio::time::sleep(EMPTY_HORIZON_RETRY) => continue,
+                        _ = tokio::time::sleep(self.refresh_interval()) => continue,
                     }
                 }
             }
@@ -538,10 +545,12 @@ impl ReminderScheduler {
         } else {
             self.written().clone()
         };
+        // Read before the lock: it reads the database.
+        let ttl = self.refresh_interval();
         let cache_fresh = {
             let guard = self.external_cache.lock().expect("external cache poison");
             match guard.as_ref() {
-                Some(cached) if cached.fetched_at.elapsed() < EXTERNAL_TRIGGERS_TTL => {
+                Some(cached) if cached.fetched_at.elapsed() < ttl => {
                     if written.is_empty() {
                         return cached.triggers.clone();
                     }
@@ -762,15 +771,6 @@ const OVERVIEW_PAST_DAYS: i64 = 7;
 /// How far forward the overview shows upcoming reminders. Longer than the
 /// scheduler horizon so the user can plan ahead.
 const OVERVIEW_FUTURE_DAYS: i64 = 90;
-/// Lifetime of the external-trigger snapshot. Five minutes matches the CalDAV
-/// listing cache — short enough that a freshly created reminder still becomes
-/// eligible to fire within the time the user expects.
-const EXTERNAL_TRIGGERS_TTL: Duration = Duration::from_secs(5 * 60);
-/// When the local + external scan returns nothing, the worker still wakes up
-/// periodically so a freshly-added external reminder that landed AFTER the cache
-/// went stale still gets picked up. Matches the cache TTL.
-const EMPTY_HORIZON_RETRY: Duration = EXTERNAL_TRIGGERS_TTL;
-
 /// Thin alias for the shared scheduler handle that command modules pull out of
 /// `tauri::State`.
 pub type SchedulerHandle = Arc<ReminderScheduler>;
@@ -1226,13 +1226,35 @@ mod tests {
             assert_eq!(account.listings(), 0);
         }
 
+        /// The planner's snapshot answers as long as the refresh interval
+        /// the user chose, not a fixed five minutes.
+        #[tokio::test]
+        async fn the_external_snapshot_lives_as_long_as_the_refresh_interval() {
+            let account = Arc::new(Counting::default());
+            let s = scheduler(
+                account.clone(),
+                vec![of("kept", ItemKind::Event, "cal-1")],
+                Duration::from_secs(6 * 60),
+            );
+            host_core::user_prefs::UserPrefsRepo::new(&s.db)
+                .set(sync_engine::PREF_SYNC_INTERVAL_MINUTES, "15")
+                .unwrap();
+            assert_eq!(
+                sorted(s.external_triggers_cached_or_fetch(true).await),
+                vec!["kept"]
+            );
+            assert_eq!(account.listings(), 0, "six minutes old is fresh at 15");
+        }
+
         #[tokio::test]
         async fn a_cache_that_ran_out_is_read_whole_as_before() {
             let account = Arc::new(Counting::default());
             let s = scheduler(
                 account.clone(),
                 vec![of("old", ItemKind::Event, "cal-9")],
-                EXTERNAL_TRIGGERS_TTL + Duration::from_secs(1),
+                host_core::user_prefs::sync_interval(
+                    &host_core::db::DbHandle::open_in_memory().unwrap().shared(),
+                ) + Duration::from_secs(1),
             );
             s.external_calendar_written("cal-1");
             assert!(s.external_triggers_cached_or_fetch(true).await.is_empty());

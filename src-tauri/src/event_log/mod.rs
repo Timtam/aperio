@@ -13,6 +13,5 @@ pub use host_core::event_log::*;
 
 pub mod scheduler;
 pub use scheduler::{
-    read_interval_minutes, SyncScheduler, SyncStatusPayload, DEFAULT_SYNC_INTERVAL_MINUTES,
-    PREF_SYNC_INTERVAL_MINUTES,
+    SyncScheduler, SyncStatusPayload, DEFAULT_SYNC_INTERVAL_MINUTES, PREF_SYNC_INTERVAL_MINUTES,
 };

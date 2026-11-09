@@ -13,11 +13,11 @@ import {
   enableSyncEncryption,
   getSyncAdapterSummary,
   isCommandError,
-  setSyncInterval,
   type SyncAdapterSummary,
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/dialogStateContext';
+import { useGoToSettingsTab } from '../state/useGoToSettingsTab';
 import { useSync } from '../state/useSync';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SyncProtocolSection } from './SyncProtocolSection';
@@ -51,13 +51,13 @@ import { useSyncErrorMessage } from './sync/syncErrorMessage';
  * decide between joining an existing dataset and starting a new one.
  */
 
-const INTERVAL_PRESETS: readonly number[] = [1, 5, 15, 30, 60, 240];
 
 export function SyncPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const fmt = useDateFormat();
   const { openSyncConflicts } = useDialogState();
+  const goToGeneral = useGoToSettingsTab('general');
   const {
     status,
     refreshStatus,
@@ -91,7 +91,6 @@ export function SyncPanel() {
   // device name, preview→join/init) lives in `SyncTargetConfigForm` and is now
   // rendered only by the first-launch wizard. This panel picks between
   // accounts and keeps the periodic-interval, compaction and E2E controls.
-  const [intervalDraft, setIntervalDraft] = useState<number | null>(null);
   const [busyCompact, setBusyCompact] = useState(false);
   const [busyDisconnect, setBusyDisconnect] = useState(false);
   // Disconnecting is the one irreversible thing on this screen — it drops the
@@ -123,28 +122,6 @@ export function SyncPanel() {
   // adapter is configured (the form takes over).
   const [adapterSummary, setAdapterSummary] =
     useState<SyncAdapterSummary | null>(null);
-
-  const interval = intervalDraft ?? status?.interval_minutes ?? 5;
-
-  const onIntervalChange = useCallback(
-    async (raw: string) => {
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed) || parsed < 1) return;
-      setIntervalDraft(parsed);
-      try {
-        const persisted = await setSyncInterval(parsed);
-        setIntervalDraft(persisted);
-        announce(
-          t('dialogs.settings.sync.intervalChanged', { minutes: persisted }),
-        );
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('set_sync_interval failed', err);
-        setIntervalDraft(status?.interval_minutes ?? 5);
-      }
-    },
-    [announce, status?.interval_minutes, t],
-  );
 
   const onDisconnect = useCallback(async () => {
     setBusyDisconnect(true);
@@ -496,27 +473,16 @@ export function SyncPanel() {
 
       <section aria-labelledby={intervalHeadingId}>
         <h3 id={intervalHeadingId}>
-          {t('dialogs.settings.sync.intervalLabel')}
+          {t('dialogs.settings.general.refreshIntervalLabel')}
         </h3>
-        <select
-          // The section heading names this control for a sighted user; a
-          // combo box has no name from surrounding text, so NVDA announced
-          // "combo box, 15 minutes" with nothing saying what the 15 minutes
-          // were for.
-          aria-label={t('dialogs.settings.sync.intervalLabel')}
-          value={interval}
-          onChange={(e) => void onIntervalChange(e.target.value)}
-          disabled={!status?.configured}
-        >
-          {INTERVAL_PRESETS.map((min) => (
-            <option key={min} value={min}>
-              {t('dialogs.settings.sync.intervalOption', {
-                count: min,
-                minutes: min,
-              })}
-            </option>
-          ))}
-        </select>
+        {/* How often this device syncs is the one refresh interval, under
+            Allgemein (Toni, 2026-11-09), with or without a sync target. */}
+        <FocusableNote className="sync-panel__hint">
+          {t('dialogs.settings.sync.intervalMoved')}
+        </FocusableNote>
+        <button type="button" onClick={goToGeneral}>
+          {t('dialogs.settings.openGeneral')}
+        </button>
       </section>
 
       <section aria-labelledby={adapterHeadingId}>

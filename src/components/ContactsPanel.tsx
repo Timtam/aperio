@@ -6,9 +6,9 @@ import { FocusableNote } from '../a11y/FocusableNote';
 import {
   clearContactsCache,
   setContactsIncludeReadOnlyOnSync,
-  setContactsSyncInterval,
 } from '../api/client';
 import { useContactSync } from '../state/useContactSync';
+import { useGoToSettingsTab } from '../state/useGoToSettingsTab';
 
 /**
  * Contacts settings panel (DESIGN.md §10.6).
@@ -39,33 +39,18 @@ import { useContactSync } from '../state/useContactSync';
  * Settings dialog wraps the whole panel in a `role="tabpanel"`.
  */
 
-/** Preset sync-interval offerings (minutes). Anything outside this
- *  list still round-trips through `setContactsSyncInterval` (the
- *  backend clamps to [1, 1440]) — these are just the convenient
- *  values exposed in the UI. */
-const INTERVAL_PRESETS: readonly number[] = [15, 30, 60, 120, 240];
-
 export function ContactsPanel() {
   const { t, i18n } = useTranslation();
   const { status, triggerSync } = useContactSync();
   const announce = useAnnouncer();
+  const goToGeneral = useGoToSettingsTab('general');
 
   const privacyHeadingId = useId();
   const privacyHintId = useId();
   const syncHeadingId = useId();
   const syncHintId = useId();
-  const intervalLabelId = useId();
-  const intervalSelectId = useId();
   const cacheHeadingId = useId();
   const cacheHintId = useId();
-
-  // Local mirror of the interval so the select updates instantly
-  // on change; the persisted value comes back through
-  // `setContactsSyncInterval` and re-syncs via `useContactSync`'s
-  // next status fetch. We seed from `status?.interval_minutes`
-  // and fall back to 60 (the same default the backend uses).
-  const [intervalDraft, setIntervalDraft] = useState<number | null>(null);
-  const interval = intervalDraft ?? status?.interval_minutes ?? 60;
 
   const [clearing, setClearing] = useState(false);
   // Persisted "also pull read-only directories" toggle.
@@ -95,32 +80,6 @@ export function ContactsPanel() {
   }, [status, includeDirectories]);
   const includeDirectoriesEffective =
     includeDirectories ?? status?.include_read_only_on_sync ?? false;
-
-  const onIntervalChange = useCallback(
-    async (raw: string) => {
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed) || parsed < 1) return;
-      setIntervalDraft(parsed);
-      try {
-        const persisted = await setContactsSyncInterval(parsed);
-        // Reconcile in case the backend clamped — the UI now
-        // reflects what's actually stored.
-        setIntervalDraft(persisted);
-        announce(
-          t('dialogs.settings.contacts.intervalChanged', {
-            minutes: persisted,
-          }),
-        );
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('set_contacts_sync_interval failed', err);
-        // Roll back the optimistic update so the select shows
-        // whatever the persisted value is.
-        setIntervalDraft(null);
-      }
-    },
-    [announce, t],
-  );
 
   const onIncludeDirectoriesToggle = useCallback(
     async (next: boolean) => {
@@ -251,54 +210,20 @@ export function ContactsPanel() {
         <h3 id={syncHeadingId} className="color-labels__heading">
           {t('dialogs.settings.contacts.syncTitle')}
         </h3>
-        <p id={syncHintId} className="tasks-settings__hint">
+        {/* Focus stops: inside the dialog's role="application" plain text
+            is not reachable, and this paragraph no longer describes a
+            control. How often contacts refresh is the one refresh interval,
+            under Allgemein (Toni, 2026-11-09). */}
+        <FocusableNote id={syncHintId} className="tasks-settings__hint">
           {t('dialogs.settings.contacts.syncBody')}
-        </p>
+        </FocusableNote>
+        <FocusableNote className="tasks-settings__hint">
+          {t('dialogs.settings.contacts.intervalMoved')}
+        </FocusableNote>
         <div className="tasks-settings__row">
-          <label
-            id={intervalLabelId}
-            htmlFor={intervalSelectId}
-            className="form__label"
-          >
-            {t('dialogs.settings.contacts.intervalLabel')}
-          </label>
-          <select
-            id={intervalSelectId}
-            value={interval}
-            aria-labelledby={intervalLabelId}
-            aria-describedby={syncHintId}
-            onChange={(e) => {
-              void onIntervalChange(e.target.value);
-            }}
-          >
-            {INTERVAL_PRESETS.map((m) => (
-              <option key={m} value={m}>
-                {/* `count` drives i18next's plural resolution
-                    (picks `_one` vs `_other`); `minutes` is the
-                    actual interpolation. Without `count` the
-                    base key has no plural rule and i18next falls
-                    back to printing the literal key, which is
-                    what screen readers were reading out as
-                    "dialogs.settings.contacts.intervalOption". */}
-                {t('dialogs.settings.contacts.intervalOption', {
-                  count: m,
-                  minutes: m,
-                })}
-              </option>
-            ))}
-            {/* If the persisted value isn't one of the presets
-                (a power user wrote it manually via user_prefs),
-                surface it as an extra option so the select still
-                reflects state truthfully. */}
-            {!INTERVAL_PRESETS.includes(interval) && (
-              <option value={interval}>
-                {t('dialogs.settings.contacts.intervalOption', {
-                  count: interval,
-                  minutes: interval,
-                })}
-              </option>
-            )}
-          </select>
+          <button type="button" onClick={goToGeneral}>
+            {t('dialogs.settings.openGeneral')}
+          </button>
         </div>
         {/* The directory toggle is a checkbox because the wording
             describes a state, not an action. Both manual and

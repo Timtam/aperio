@@ -1,5 +1,5 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -34,10 +34,8 @@ import {
   SyncStatus,
 } from '../api/sync';
 import { listAccounts } from '../api/accounts';
-import { setUserPref } from '../api/prefs';
 import { useSyncErrorMessage } from '../api/syncErrorMessage';
 import { FormScrollView } from '../components/FormScrollView';
-import { RadioGroup } from '../components/RadioGroup';
 import { SyncDevicesPanel } from '../components/sync/SyncDevicesPanel';
 import { SyncTargetAccountPicker } from '../components/sync/SyncTargetAccountPicker';
 import { formatLongDateTime } from '../intl/dateFormat';
@@ -64,8 +62,6 @@ import CalFfi from '../../modules/cal-ffi';
 // which is the one place that legitimately has no accounts yet AND has to decide
 // between joining an existing dataset and starting a new one.
 
-const PREF_SYNC_INTERVAL_MINUTES = 'sync.intervalMinutes';
-const INTERVAL_PRESETS: readonly number[] = [1, 5, 15, 30, 60, 240];
 
 
 export default function SyncScreen() {
@@ -116,28 +112,6 @@ export default function SyncScreen() {
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
     [],
-  );
-
-  const onIntervalChange = useCallback(
-    async (minutes: number) => {
-      try {
-        await setUserPref(PREF_SYNC_INTERVAL_MINUTES, String(minutes));
-        setStatus(await syncStatus());
-        announce(t('dialogs.settings.sync.intervalChanged', { minutes }));
-      } catch (err) {
-        announce(t('mobile.error', { message: errorMessage(err) }));
-      }
-    },
-    [announce, t, errorMessage],
-  );
-
-  const intervalOptions = useMemo(
-    () =>
-      INTERVAL_PRESETS.map((min) => ({
-        value: min,
-        label: t('dialogs.settings.sync.intervalOption', { count: min, minutes: min }),
-      })),
-    [t],
   );
 
   const onCompact = useCallback(async () => {
@@ -658,18 +632,24 @@ export default function SyncScreen() {
         </Pressable>
       )}
 
-      {/* Foreground periodic-sync interval — configured-only. */}
-      {status?.configured && (
-        <View style={styles.field}>
-          <RadioGroup<number>
-            label={t('dialogs.settings.sync.intervalLabel')}
-            value={status.interval_minutes}
-            options={intervalOptions}
-            onChange={(min) => void onIntervalChange(min)}
-            disabled={busy}
-          />
-        </View>
-      )}
+      {/* How often the phone syncs is the one refresh interval, under
+          Allgemein (Toni, 2026-11-09): a sentence and the way there, with or
+          without a sync target. */}
+      <View style={styles.field}>
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.sync.intervalMoved')}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.settings.openGeneral')}
+          onPress={() => navigation.navigate('General')}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText} importantForAccessibility="no">
+            {t('dialogs.settings.openGeneral')}
+          </Text>
+        </Pressable>
+      </View>
 
       {/* Manual compaction (§19.10) — configured-only. */}
       {status?.configured && (

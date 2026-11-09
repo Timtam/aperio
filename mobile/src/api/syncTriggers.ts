@@ -3,11 +3,14 @@
 // alive; mobile drives sync from the JS runtime, which is alive only while the
 // app is FOREGROUNDED. So sync fires on four signals:
 //
-//   1. Launch + foreground-resume → a full `syncNow()` (pull peers' changes).
-//   2. FOREGROUND periodic         → a full `syncNow()` every `sync.intervalMinutes`
-//                                    (default 5, a SYNCED pref) while the app is
-//                                    active — the open-app equivalent of the
-//                                    desktop periodic loop. Paused off-foreground.
+//   1. Launch + foreground-resume → a round: refresh the external data and,
+//                                    with a sync target, a full `syncNow()`.
+//   2. FOREGROUND periodic         → the same round every refresh interval
+//                                    (`sync.intervalMinutes`, "Aktualisierungs-
+//                                    Intervall" under Allgemein; default 5, a
+//                                    SYNCED pref) while the app is active, with
+//                                    or without a sync target
+//                                    (`periodicRound.ts`). Paused off-foreground.
 //   3. App background              → a `pushNow()` (flush our pending log before
 //                                    the OS suspends us).
 //   4. Any local mutation          → a debounced `pushNow()` (the Rust Host already
@@ -31,34 +34,18 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { initBackgroundSync } from '../state/backgroundSync';
-import { getUserPref } from './prefs';
+import { createRoundLoop, runRound } from './periodicRound';
 import { pushNow, syncNow, syncStatus, warmCacheOnForeground } from './sync';
 
 /** Debounce window for the post-mutation push (matches the desktop scheduler's
  *  debounce: coalesce a rapid burst of edits into a single push). */
 const MUTATION_PUSH_DEBOUNCE_MS = 2000;
 
-/** The synced sync-interval pref + its fallback, mirroring sync_engine's
- *  `PREF_SYNC_INTERVAL_MINUTES` / `DEFAULT_SYNC_INTERVAL_MINUTES`. A floor keeps
- *  a stray tiny value from hammering the network. */
-const PREF_SYNC_INTERVAL_MINUTES = 'sync.intervalMinutes';
-const DEFAULT_SYNC_INTERVAL_MINUTES = 5;
-const MIN_SYNC_INTERVAL_MINUTES = 1;
-
-/** Resolve the foreground periodic interval (ms) from the synced pref, clamped
- *  to a sane floor; falls back to the default on absence / a bad value. */
-async function readSyncIntervalMs(): Promise<number> {
-  let minutes = DEFAULT_SYNC_INTERVAL_MINUTES;
-  try {
-    const raw = await getUserPref(PREF_SYNC_INTERVAL_MINUTES);
-    const parsed = raw != null ? Number.parseInt(raw, 10) : NaN;
-    if (Number.isFinite(parsed)) {
-      minutes = Math.max(MIN_SYNC_INTERVAL_MINUTES, parsed);
-    }
-  } catch {
-    // Pref read failed — fall back to the default.
-  }
-  return minutes * 60_000;
+/** The one refresh interval in minutes, as the host resolves it
+ *  (`sync.intervalMinutes`, clamped and defaulted in Rust). It is there with
+ *  or without a sync target. */
+async function refreshIntervalMinutes(): Promise<number> {
+  return (await syncStatus()).interval_minutes;
 }
 
 // Auto (non-user-invoked) rounds run only when a sync target is configured — the
@@ -72,13 +59,6 @@ async function autoSyncIfConfigured(reason: Parameters<typeof syncNow>[0]): Prom
   try {
     if (!(await syncStatus()).configured) return;
     await syncNow(reason);
-    // A completed sync writes the LOCAL store but leaves the external SWR
-    // read-cache cold (the two are orthogonal), so the next day/week open would
-    // do a slow LIVE provider read. Warm the external snapshots now — right
-    // after the round the user already waited for — so those reads serve from
-    // cache instead. Fire-and-forget on the Host worker; per-container
-    // `cache_updated` re-renders any open view.
-    void warmCacheOnForeground().catch(() => undefined);
   } catch {
     // missing target / transient network error — silent, as a background action
     // the user didn't invoke must never surface an error.
@@ -122,45 +102,41 @@ function flushPendingPush(): void {
   void autoPushIfConfigured('app_exit');
 }
 
+/** The foreground round loop, one per app (see `periodicRound.ts`). Each round
+ *  refreshes the external data — with or without a sync target — and syncs when
+ *  a target is set up. */
+const roundLoop = createRoundLoop({
+  // Fire-and-forget on the Host worker; per-container `cache_updated`
+  // re-renders any open view.
+  refresh: () => warmCacheOnForeground(),
+  syncIfConfigured: () => autoSyncIfConfigured('periodic'),
+  intervalMinutes: refreshIntervalMinutes,
+  isActive: () => AppState.currentState === 'active',
+  setTimer: (run, ms) => setTimeout(run, ms),
+  clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+});
+
+/** The refresh interval changed here (Einstellungen → Allgemein): measure the
+ *  wait for the next round again from now. */
+export function rearmPeriodicRound(): void {
+  if (AppState.currentState === 'active') roundLoop.rearm();
+}
+
 /**
- * Wire the sync scheduler. Mount once near the app root. Runs a full round on
- * launch + every foreground-resume, a foreground periodic round every
- * `sync.intervalMinutes` while active, and a push flush on background. All
- * best-effort + silent.
+ * Wire the sync scheduler. Mount once near the app root. Runs a round on
+ * launch and on every return to the foreground, a round every refresh interval
+ * while active, and a push flush on background. A round refreshes the external
+ * data and, with a sync target, syncs. All best-effort + silent.
  */
 export function useSyncTriggers(): void {
   useEffect(() => {
-    // The foreground periodic timer — the open-app equivalent of the desktop's
-    // periodic sync loop. Only ticks while the app is active (cleared on
-    // background); re-armed on each foreground at the current synced interval.
-    let periodic: ReturnType<typeof setInterval> | null = null;
-    const stopPeriodic = () => {
-      if (periodic != null) {
-        clearInterval(periodic);
-        periodic = null;
-      }
-    };
-    const startPeriodic = () => {
-      stopPeriodic();
-      void readSyncIntervalMs().then((ms) => {
-        // The app may have backgrounded while the (async) pref read was in
-        // flight — don't arm a timer that should be paused.
-        if (AppState.currentState === 'active') {
-          periodic = setInterval(() => {
-            void autoSyncIfConfigured('periodic');
-          }, ms);
-        }
-      });
-    };
-
-    // Initial pull on launch (the Host opens lazily on the first bridge call) —
-    // which now warms the external SWR caches once it completes (see
-    // autoSyncIfConfigured) — plus a standalone warm so an UNSYNCED-but-external
-    // setup (no sync target, external accounts) still warms, and the foreground
-    // periodic timer (the app starts active).
-    void autoSyncIfConfigured('app_start');
-    void warmCacheOnForeground().catch(() => undefined);
-    startPeriodic();
+    // The launch round (the Host opens lazily on the first bridge call), then
+    // the timer (the app starts active).
+    void runRound({
+      refresh: () => warmCacheOnForeground(),
+      syncIfConfigured: () => autoSyncIfConfigured('app_start'),
+    });
+    roundLoop.start();
     // Reconcile the OS background-sync registration to the device-local pref —
     // registers (or removes) the BGTaskScheduler/WorkManager task that wakes us
     // to sync while backgrounded/closed.
@@ -168,23 +144,24 @@ export function useSyncTriggers(): void {
 
     const onChange = (state: AppStateStatus) => {
       if (state === 'active') {
-        // Foreground-resume full round + external-cache warm + re-arm the
-        // periodic timer (the synced interval may have changed on another
-        // device while we were away).
-        void autoSyncIfConfigured('periodic');
-        void warmCacheOnForeground().catch(() => undefined);
-        startPeriodic();
+        // Back in the foreground: a round, and the timer again, at the current
+        // interval (it may have changed on another device meanwhile).
+        void runRound({
+          refresh: () => warmCacheOnForeground(),
+          syncIfConfigured: () => autoSyncIfConfigured('periodic'),
+        });
+        roundLoop.start();
       } else {
-        // Off-foreground: pause the periodic timer (no JS runs reliably anyway,
-        // and it saves battery); flush a final push when going to background.
-        stopPeriodic();
+        // Off-foreground: pause the timer (no JS runs reliably anyway, and it
+        // saves battery); flush a final push when going to background.
+        roundLoop.stop();
         if (state === 'background') flushPendingPush();
       }
     };
     const sub = AppState.addEventListener('change', onChange);
     return () => {
       sub.remove();
-      stopPeriodic();
+      roundLoop.stop();
     };
   }, []);
 }

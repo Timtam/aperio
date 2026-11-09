@@ -2388,7 +2388,7 @@ Geburtstage aus verbundenen Kontaktbüchern werden als **eigener, nicht-editierb
 
 #### Datenhaltung
 
-Geburtstagsdaten werden lokal in SQLite gecacht und bei jedem Kontakt-Sync aktualisiert. Da Geburtstage rein aus den Kontaktdaten abgeleitet werden, gibt es kein eigenes API-Ereignis – sie werden beim Start und bei konfigurierbarem Intervall neu berechnet.
+Geburtstagsdaten werden lokal in SQLite gecacht und bei jedem Kontakt-Sync aktualisiert. Da Geburtstage rein aus den Kontaktdaten abgeleitet werden, gibt es kein eigenes API-Ereignis – sie werden beim Start und im Aktualisierungs-Intervall (`sync.intervalMinutes`, Einstellungen → Allgemein) neu berechnet.
 
 ### 10.4 Teilnehmer-Auswahl
 
@@ -2430,7 +2430,7 @@ Kontakte werden bei folgenden Ereignissen synchronisiert:
 | Auslöser | Verhalten |
 |---|---|
 | App-Start | Vollständiger Abgleich aller Kontaktbücher |
-| Konfigurierbares Intervall | Standard: alle 60 Minuten (konfigurierbar) |
+| Aktualisierungs-Intervall | Das eine Intervall unter `Einstellungen → Allgemein` (`sync.intervalMinutes`, synchronisiert, Standard 5 Minuten); keine eigene Kontakt-Einstellung mehr (Toni, 2026-11-09) |
 | Manuell | Per Button in `Einstellungen → Kontakte` |
 
 Kontaktdaten werden **nicht** über das Event Log zwischen Geräten synchronisiert – sie kommen auf jedem Gerät direkt vom jeweiligen Anbieter, analog zur externen Kalender- und Aufgaben-Synchronisation (Abschnitt 18.2).
@@ -2598,9 +2598,9 @@ Eine relative Erinnerung mit negativen Minuten liegt **nach** dem Beginn („10 
 - **Wo sie ankommt**, sagt das Manifest des Adapters (`reminders.after_start`, standardmäßig `false`): CalDAV und iCloud ja, Aperios eigener Speicher ja, Geburtstagskalender immer (ihre Erinnerungen bleiben in Aperio). Google zählt nur 0 bis 40320 Minuten davor, Exchange und Outlook nichts unter 0; deren Adapter lassen eine solche Erinnerung weg und schreiben das ins Protokoll, statt den ganzen Schreibvorgang scheitern zu lassen. Die Kalenderzeile trägt die Fähigkeit (`CalendarRow.reminder_capabilities`), beide Hosts fragen dieselbe Funktion (`host_core::builtin_adapters::reminder_capabilities_for_account`).
 - **Nach dem Terminende** klingelt sie trotzdem, auf beiden Geräten gleich. Das Handy plant sie ohnehin beim System ein; der Desktop holt eine verpasste Erinnerung nach, solange ihr eigener Zeitpunkt (oder das Terminende, wenn es später liegt) höchstens 5 Minuten zurückliegt (`catchup_eligible`).
 - **Serien** klappt der Planer über jedes Vorkommen auf, dessen Erinnerung ins Fenster fällt, nicht nur über die, die darin beginnen: Ein schon laufendes Vorkommen behält seine Erinnerung nach Beginn, auch wenn das Handy während des Termins neu plant.
-- **Externe Termine und Aufgaben** liest der Desktop-Planer für alle Konten auf einmal vom Server und hält das Ergebnis 5 Minuten (`EXTERNAL_TRIGGERS_TTL`), damit nicht jede Änderung jeden Kalender jedes Kontos neu holt. Gelesen wird nur, wenn der Planer aufwacht, und er schläft bis zu seiner nächsten Erinnerung. Was sich danach ändert, kommt auf zwei Wegen, jeweils als ein Kalender oder eine Liste, die allein neu gelesen und deren Einträge ersetzt werden (`external_calendar_triggers`, `external_task_list_triggers` im Kern, mit derselben Regel wie der volle Durchlauf):
+- **Externe Termine und Aufgaben** liest der Desktop-Planer für alle Konten auf einmal vom Server und hält das Ergebnis ein Aktualisierungs-Intervall lang (siehe §19.8), damit nicht jede Änderung jeden Kalender jedes Kontos neu holt. Gelesen wird nur, wenn der Planer aufwacht, und er schläft bis zu seiner nächsten Erinnerung. Was sich danach ändert, kommt auf zwei Wegen, jeweils als ein Kalender oder eine Liste, die allein neu gelesen und deren Einträge ersetzt werden (`external_calendar_triggers`, `external_task_list_triggers` im Kern, mit derselben Regel wie der volle Durchlauf):
   - **Aperio schreibt selbst** in einen externen Kalender oder eine externe Liste: anlegen, ändern, abhaken, verschieben (beide Seiten), löschen, ein Vorkommen auslassen, auf eine Einladung antworten (eine Absage nimmt den Exchange-Termin aus dem Kalender); auch wenn das Schreiben scheiterte, denn es kann trotzdem angekommen sein. Eine gelöschte Liste verliert ihre Einträge ohne Abfrage, ebenso der Kalender, wenn die gelöschte CalDAV-Sammlung beides war.
-  - **Die Aktualisierung externer Daten meldet eine Änderung** beim Anbieter oder von einem anderen Gerät (`cache-updated`, nur bei wirklich geänderten Daten; `external_container_changed`): Sie läuft im Hintergrund in festem Takt und wenn eine Ansicht einen Kalender lädt. Geänderte Kontakte machen die Geburtstagskalender neu (ohne Server), eine geänderte Liste der Kalender oder Listen eines Kontos liest alles neu.
+  - **Die Aktualisierung externer Daten meldet eine Änderung** beim Anbieter oder von einem anderen Gerät (`cache-updated`, nur bei wirklich geänderten Daten; `external_container_changed`): Sie läuft im Hintergrund im Aktualisierungs-Intervall und wenn eine Ansicht einen Kalender lädt. Geänderte Kontakte machen die Geburtstagskalender neu (ohne Server), eine geänderte Liste der Kalender oder Listen eines Kontos liest alles neu.
 
   Ein Kalender oder eine Liste, die mehrere Konten mit derselben Id führen (ein geteilter Google-Kalender), wird ganz neu gelesen: Jedes Konto hat dort eigene Erinnerungen, und ein einzelner Weg liest nur eines. Nur der Planer selbst übernimmt, was sich geändert hat; die Erinnerungs-Übersicht liest es für sich und lässt es ihm. Vorher klingelte ein eben gelöschtes Vorkommen weiter, eine eben gesetzte Erinnerung konnte zu spät kommen, und eine beim Anbieter eingetragene erst, wenn der Planer zufällig aufwachte (2026-11-09). Das Löschen eines Kalenders oder einer Liste weckt den Planer, damit keine vorher geplante Erinnerung daraus noch klingelt. Das Handy hat diesen Speicher nicht: Es liest bei jeder Planung live.
 - **Ganztägige Termine:** Eine Zahl kann nicht zugleich „1 Stunde vorher“ und „am Vortag um 23:00“ heißen, darum entscheidet die Herkunft (`AllDayReading`, zweite Entscheidung vom 2026-11-07, nachdem die erste „Am Tag selbst um 18:00“ auf den nächsten Tag schob):
@@ -3694,10 +3694,19 @@ Konfigurierbar pro Sync-Adapter: Der Nutzer kann ein Passwort (oder einen Schlü
 | Auslöser | Verhalten |
 |---|---|
 | **Bei jeder Änderung** | Neue Log-Einträge werden sofort hochgeladen (sofern Verbindung vorhanden); bei fehlender Verbindung gepuffert |
-| **Konfigurierbares Intervall** | Vollständiger Abgleich (fetch + push) im einstellbaren Takt (Standard: 5 Minuten) |
+| **Aktualisierungs-Intervall** | Vollständiger Abgleich (fetch + push) im einen Aktualisierungs-Intervall (Standard: 5 Minuten; siehe unten) |
 | **Manuell** | Per `Ctrl+R` oder Button in der Statusleiste |
 | **App-Start** | Automatischer Abgleich beim Start |
 | **App-Beenden** | Ausstehende lokale Änderungen werden vor dem Beenden hochgeladen |
+
+**Das eine Aktualisierungs-Intervall** (Toni, 2026-11-09). `Einstellungen → Allgemein → Aktualisierungs-Intervall` (Schlüssel `sync.intervalMinutes`, synchronisiert, 1 bis 1440 Minuten, Standard 5, Auswahl 1/5/15/30/60/240) bestimmt, wie oft Aperio, solange es geöffnet ist:
+
+- mit den anderen Geräten synchronisiert (nur mit Sync-Ziel; am Desktop mit Rückfall-Verzögerung nach Fehlschlägen),
+- externe Kalender, Aufgabenlisten und Kontakte neu holt (Desktop: `CacheRefresher`, vorher fest 30 Minuten ohne Einstellung; Handy: eine Runde je Intervall im Vordergrund, `mobile/src/api/periodicRound.ts`, vorher nur mit Sync-Ziel),
+- Kontakte abgleicht (vorher eigene Auswahl `contacts.syncIntervalMinutes`, Standard 60),
+- und wie lange der Desktop-Planer seinen Stand externer Erinnerungen hält (vorher fest 5 Minuten).
+
+Es gilt mit und ohne Sync-Ziel und ist auch ohne einstellbar. Unter `Synchronisation` und `Kontakte` steht ein Satz mit einem Knopf nach Allgemein. Eine Änderung hier misst jede Wartezeit sofort neu, ohne zusätzlichen Durchlauf (`interval_changed`); ein Wert von einem anderen Gerät ebenso, am Desktop nach dem Durchlauf, der ihn brachte, am Handy beim nächsten Warten. Der Resolver steht einmal in `sync_engine::resolve_sync_interval_minutes`, gelesen über `host_core::user_prefs::sync_interval_minutes`. Die Hintergrund-Synchronisation des Handys wünscht sich das Intervall, mindestens 15 Minuten. Kosten: am Desktop werden externe Server standardmäßig alle 5 statt alle 30 Minuten gefragt.
 
 ### 19.9 Statusanzeige & Barrierefreiheit
 
@@ -4004,7 +4013,7 @@ Jede App-Instanz kommuniziert direkt mit den externen APIs. Konflikte werden dur
 - Geringere Architektur-Komplexität
 - APIs sind genau für diesen Multi-Writer-Fall designed
 
-**Einziger Nachteil:** Mehrere Geräte pollen dieselbe API parallel → höherer API-Kontingentverbrauch. Entschärfung durch konfigurierbares Sync-Intervall pro Gerät (Standard: 5 Minuten; bei vielen Geräten empfohlen: 10–15 Minuten).
+**Einziger Nachteil:** Mehrere Geräte pollen dieselbe API parallel → höherer API-Kontingentverbrauch. Entschärfung durch das Aktualisierungs-Intervall (Standard: 5 Minuten; bei vielen Geräten empfohlen: 10–15 Minuten). Es wird synchronisiert und gilt daher auf allen Geräten gleich (§19.8).
 
 #### Klare Zuständigkeitstrennung
 

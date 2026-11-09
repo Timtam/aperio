@@ -132,9 +132,7 @@ pub fn reconcile_cache_generation(
 }
 
 pub use observer::{CacheObserver, CacheRefreshStatus, FailingAccount, PassOutcome};
-pub use refresh::{
-    CacheRefresher, Forcing, PREF_CACHE_LAST_REFRESHED_AT, PREF_CACHE_REFRESH_INTERVAL_MINUTES,
-};
+pub use refresh::{CacheRefresher, Forcing, PREF_CACHE_LAST_REFRESHED_AT};
 pub use series::{series_rows, SeriesReach, SeriesRows};
 pub use swr::{
     event_self_warm, has_snapshot, is_stale, refresh_contacts, refresh_events, refresh_sections,

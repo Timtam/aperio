@@ -1,15 +1,19 @@
 import { addDays, format } from 'date-fns';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FocusableNote } from '../a11y/FocusableNote';
+import { useAnnouncer } from '../a11y/announcerContext';
 import {
   autostartIsEnabled,
   autostartSet,
+  getSyncStatus,
   getUserPref,
+  setSyncInterval,
   setUserPref,
   trayAvailable,
 } from '../api/client';
+import { useUserPrefsChanged } from '../state/useUserPrefsChanged';
 import { localeFor } from '../intl/dateFormat';
 import { NotificationShortcutSection } from './NotificationShortcutSection';
 import {
@@ -50,8 +54,53 @@ const AUTOSTART_MINIMIZED = 'window.autostartMinimized';
  *    going to the taskbar. Both default off and persist to synced prefs;
  *    gated on `tray_available` so they disable where there's no tray.
  */
+/** The one refresh interval's choices, in minutes (the same on the phone). */
+const REFRESH_INTERVAL_PRESETS: readonly number[] = [1, 5, 15, 30, 60, 240];
+/** Its key: synced, so a change on another device arrives here too. */
+const REFRESH_INTERVAL_PREF = 'sync.intervalMinutes';
+
 export function GeneralPanel() {
   const { t, i18n } = useTranslation();
+  const announce = useAnnouncer();
+  // The one refresh interval (Toni, 2026-11-09): how often Aperio, while it
+  // runs, refreshes its accounts, contacts and reminders, and syncs. Settable
+  // with or without a sync target; the host clamps and resolves it.
+  const refreshHintId = useId();
+  const [refreshInterval, setRefreshInterval] = useState<number | null>(null);
+  const readRefreshInterval = useCallback(() => {
+    void getSyncStatus().then(
+      (status) => setRefreshInterval(status.interval_minutes),
+      () => undefined,
+    );
+  }, []);
+  useEffect(readRefreshInterval, [readRefreshInterval]);
+  useUserPrefsChanged([REFRESH_INTERVAL_PREF], readRefreshInterval);
+  const onRefreshIntervalChange = useCallback(
+    async (raw: string) => {
+      const minutes = Number(raw);
+      if (!Number.isFinite(minutes) || minutes < 1) return;
+      setRefreshInterval(minutes);
+      try {
+        const persisted = await setSyncInterval(minutes);
+        setRefreshInterval(persisted);
+        announce(
+          t('dialogs.settings.general.refreshIntervalChanged', { count: persisted }),
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('set_sync_interval failed', err);
+        readRefreshInterval();
+      }
+    },
+    [announce, readRefreshInterval, t],
+  );
+  const refreshPresets = useMemo(
+    () =>
+      refreshInterval == null || REFRESH_INTERVAL_PRESETS.includes(refreshInterval)
+        ? REFRESH_INTERVAL_PRESETS
+        : [...REFRESH_INTERVAL_PRESETS, refreshInterval].sort((a, b) => a - b),
+    [refreshInterval],
+  );
   const {
     weekStartsOn,
     setWeekStartsOn,
@@ -355,6 +404,35 @@ export function GeneralPanel() {
         </label>
         <p className="form__hint">
           {t('dialogs.settings.general.themeHint')}
+        </p>
+      </section>
+
+      <section
+        className="general-panel__section"
+        aria-label={t('dialogs.settings.general.refreshHeading')}
+      >
+        <h3 className="calendars-panel__account">
+          {t('dialogs.settings.general.refreshHeading')}
+        </h3>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.settings.general.refreshIntervalLabel')}
+          </span>
+          <select
+            value={refreshInterval ?? ''}
+            aria-describedby={refreshHintId}
+            disabled={refreshInterval == null}
+            onChange={(e) => void onRefreshIntervalChange(e.target.value)}
+          >
+            {refreshPresets.map((min) => (
+              <option key={min} value={min}>
+                {t('dialogs.settings.general.refreshIntervalOption', { count: min })}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p id={refreshHintId} className="form__hint general-panel__toggle-hint">
+          {t('dialogs.settings.general.refreshIntervalHint')}
         </p>
       </section>
 

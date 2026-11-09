@@ -445,7 +445,6 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   getContactsSyncStatusJson(): Promise<string>;
   /** Persist the periodic contact-sync interval (minutes, clamped [1,1440]);
    *  resolves to the clamped value. Device-local. */
-  setContactsSyncInterval(minutes: number): Promise<number>;
   /** Persist the "also pull read-only directories" toggle. Device-local. */
   setContactsIncludeReadOnlyOnSync(enabled: boolean): Promise<void>;
   /** Drop every external book's contact cache + reset "last synced"; resolves

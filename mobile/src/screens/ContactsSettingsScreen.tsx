@@ -1,4 +1,4 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -24,11 +24,9 @@ import {
   clearContactsCache,
   getContactsSyncStatus,
   setContactsIncludeReadOnlyOnSync,
-  setContactsSyncInterval,
   syncContactsNow,
   type ContactsSyncStatus,
 } from '../api/contacts';
-import { RadioGroup } from '../components/RadioGroup';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Contacts settings (§10.5 / §10.6) — the mobile twin of the desktop
@@ -41,7 +39,6 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 /** The contacts sync-interval presets (minutes) — coarser than the main sync's
  *  cadence; default 60. Mirrors the desktop dropdown (up to 240). */
-const INTERVAL_PRESETS: readonly number[] = [15, 30, 60, 120, 240];
 
 /** Provider privacy policies surfaced in the standing notice. */
 const PROVIDER_POLICIES: readonly { name: string; url: string }[] = [
@@ -89,6 +86,7 @@ function SwitchRow({
 }
 
 export default function ContactsSettingsScreen() {
+  const navigation = useNavigation();
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
 
@@ -145,19 +143,6 @@ export default function ContactsSettingsScreen() {
     }
   }, [announce, busySync, reload, status?.in_flight, status?.include_read_only_on_sync, t]);
 
-  const onIntervalChange = useCallback(
-    async (minutes: number) => {
-      try {
-        const clamped = await setContactsSyncInterval(minutes);
-        await reload();
-        announce(t('dialogs.settings.contacts.intervalChanged', { minutes: clamped }));
-      } catch (err) {
-        announce(t('mobile.error', { message: writeErrorMessage(err, t) }));
-      }
-    },
-    [announce, reload, t],
-  );
-
   const onToggleIncludeReadOnly = useCallback(async () => {
     const next = !(status?.include_read_only_on_sync ?? false);
     // Optimistic flip so the switch responds immediately.
@@ -201,15 +186,6 @@ export default function ContactsSettingsScreen() {
       }
     },
     [announce, t],
-  );
-
-  const intervalOptions = useMemo(
-    () =>
-      INTERVAL_PRESETS.map((min) => ({
-        value: min,
-        label: t('dialogs.settings.contacts.intervalOption', { count: min, minutes: min }),
-      })),
-    [t],
   );
 
   const lastSynced = useMemo(() => {
@@ -261,12 +237,21 @@ export default function ContactsSettingsScreen() {
           {lastSynced}
         </Text>
 
-        <RadioGroup<number>
-          label={t('dialogs.settings.contacts.intervalLabel')}
-          value={status?.interval_minutes ?? 60}
-          options={intervalOptions}
-          onChange={(min) => void onIntervalChange(min)}
-        />
+        {/* How often contacts refresh is the one refresh interval, under
+            Allgemein (Toni, 2026-11-09): a sentence and the way there. */}
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.contacts.intervalMoved')}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.settings.openGeneral')}
+          onPress={() => navigation.navigate('General')}
+          style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.primaryButtonText} importantForAccessibility="no">
+            {t('dialogs.settings.openGeneral')}
+          </Text>
+        </Pressable>
 
         <SwitchRow
           label={t('dialogs.settings.contacts.includeDirectoriesLabel')}

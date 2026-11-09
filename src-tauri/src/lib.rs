@@ -847,7 +847,6 @@ pub fn run() {
             // configurable sync interval; the privacy notice is
             // a frontend-only concern routed through user_prefs.
             commands::clear_contacts_cache,
-            commands::set_contacts_sync_interval,
             commands::set_contacts_include_read_only_on_sync,
             // Phase Sd (DESIGN.md §19): cross-device sync. The
             // orchestrator is registered in setup; these commands

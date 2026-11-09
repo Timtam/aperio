@@ -84,6 +84,26 @@ impl<'a> UserPrefsRepo<'a> {
     }
 }
 
+/// The one refresh interval, in minutes (Einstellungen → Allgemein,
+/// `sync.intervalMinutes`; Toni, 2026-11-09). The sync round, the refresh of
+/// external data, contacts and the desktop reminder planner all read it here,
+/// through [`sync_engine::resolve_sync_interval_minutes`], so they cannot
+/// drift apart. An unreadable pref reads as the default.
+pub fn sync_interval_minutes(db: &SharedConn) -> u32 {
+    sync_engine::resolve_sync_interval_minutes(
+        UserPrefsRepo::new(db)
+            .get(sync_engine::PREF_SYNC_INTERVAL_MINUTES)
+            .ok()
+            .flatten()
+            .as_deref(),
+    )
+}
+
+/// [`sync_interval_minutes`] as a duration.
+pub fn sync_interval(db: &SharedConn) -> std::time::Duration {
+    std::time::Duration::from_secs(u64::from(sync_interval_minutes(db)) * 60)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +115,32 @@ mod tests {
         let path = dir.path().join("test.sqlite");
         let db = DbHandle::open(&path).unwrap();
         (dir, db)
+    }
+
+    /// Every loop reads the ONE refresh interval: the keys the external
+    /// refresh and the contacts pass had of their own are not read.
+    #[test]
+    fn the_refresh_interval_is_the_sync_interval_and_nothing_else() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        assert_eq!(
+            sync_interval_minutes(&shared),
+            sync_engine::DEFAULT_SYNC_INTERVAL_MINUTES
+        );
+        let repo = UserPrefsRepo::new(&shared);
+        repo.set("cache.refreshIntervalMinutes", "30").unwrap();
+        repo.set("contacts.syncIntervalMinutes", "60").unwrap();
+        assert_eq!(
+            sync_interval_minutes(&shared),
+            sync_engine::DEFAULT_SYNC_INTERVAL_MINUTES
+        );
+        repo.set(sync_engine::PREF_SYNC_INTERVAL_MINUTES, "15")
+            .unwrap();
+        assert_eq!(sync_interval_minutes(&shared), 15);
+        assert_eq!(
+            sync_interval(&shared),
+            std::time::Duration::from_secs(15 * 60)
+        );
     }
 
     #[test]
