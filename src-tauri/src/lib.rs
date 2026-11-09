@@ -17,6 +17,7 @@ mod platform;
 pub mod reminders;
 pub mod secrets;
 pub mod sound;
+pub mod toast;
 pub mod tray;
 mod window_state;
 
@@ -54,8 +55,8 @@ pub fn run() {
     // writes the crash file synchronously).
     logging::install_panic_hook(log_state.logs_dir.clone());
 
-    // The Tauri context, built once here: its identifier is the id the
-    // notification plugin sends toasts under, and the platform setup below
+    // The Tauri context, built once here: its identifier is the id Aperio's
+    // toasts go out under (`toast`), and the platform setup below
     // needs it before the first window (the process pin; see `platform`).
     let context = tauri::generate_context!();
     platform::setup(&context.config().identifier);
@@ -625,6 +626,9 @@ pub fn run() {
         ))
         .manage(audio_player)
         .manage(notification_shortcut)
+        // Before setup: the app-start reminders fire early, and a click on
+        // one stores its tap here.
+        .manage(toast::ReminderTapState::default())
         .manage(commands::SoundsDir(sounds_dir_for_commands))
         .manage(local_adapter)
         .manage(registry)
@@ -982,6 +986,8 @@ pub fn run() {
             notification_shortcut::notification_shortcut_remove,
             notification_shortcut::notification_shortcut_hint_pending,
             notification_shortcut::notification_shortcut_hint_shown,
+            // What a click on a reminder's toast asked to open.
+            toast::take_reminder_tap,
         ])
         .setup(move |app| {
             // The Start menu shortcut, off the main thread: repaired when ours

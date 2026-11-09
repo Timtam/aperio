@@ -1,9 +1,10 @@
 //! Platform-specific startup integration.
 //!
 //! Under Windows Aperio's notifications go out under the Tauri
-//! identifier (`com.aperio.app`): tauri-plugin-notification passes it
-//! explicitly to `CreateToastNotifierWithId` (plugin 2.3.3
-//! `desktop.rs:195-206`, tauri-winrt-notification 0.7.2 `lib.rs:711`).
+//! identifier (`com.aperio.app`): Aperio's own toast (`toast.rs`) passes it
+//! to `CreateToastNotifierWithId` (tauri-winrt-notification 0.7.2
+//! `lib.rs:711`), as tauri-plugin-notification did until 2026-11 (plugin
+//! 2.3.3 `desktop.rs:195-206`).
 //! Windows shows them only when a Start menu shortcut carries that id
 //! (System.AppUserModel.ID); without one it stores every toast and shows
 //! none, not as a banner, not in the notification center. A
@@ -26,12 +27,12 @@
 //! macOS and Linux need nothing similar: macOS uses the bundle
 //! identifier, Linux's notification daemons accept any sender.
 
-/// Whether tauri-plugin-notification sends this build's toasts under
-/// PowerShell's id rather than the identifier: when the exe sits in a
-/// cargo `target\debug` or `target\release` folder. A verbatim port of
-/// plugin 2.3.3 `desktop.rs:195-206`, case-sensitive like it, so Aperio
-/// and the plugin agree about which builds those are. Read the plugin's
-/// rule again when it is updated.
+/// Whether this build's toasts go out under PowerShell's id rather than
+/// the identifier: when the exe sits in a cargo `target\debug` or
+/// `target\release` folder. `toast.rs` applies it. A verbatim port of the
+/// rule tauri-plugin-notification 2.3.3 used while it still sent Aperio's
+/// toasts (`desktop.rs:195-206`), case-sensitive like it, so the builds
+/// that showed as PowerShell before still do.
 #[cfg(any(windows, test))]
 pub(crate) fn toasts_use_powershell_id(exe_dir: &str) -> bool {
     use std::path::MAIN_SEPARATOR as SEP;
@@ -54,7 +55,7 @@ pub(crate) fn is_dev_build() -> bool {
 }
 
 /// Run platform-specific startup. `identifier` is the Tauri identifier,
-/// the id the notification plugin sends toasts under. Errors are logged
+/// the id Aperio's toasts go out under (`toast.rs`). Errors are logged
 /// but never propagated: none of this is needed to bring up the rest of
 /// the app.
 pub fn setup(identifier: &str) {

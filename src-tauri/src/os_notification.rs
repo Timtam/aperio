@@ -1,19 +1,21 @@
 //! What sound an OS notification asks for (DESIGN §14.4), in one place for
 //! the reminder worker and for the notifications the frontend sends.
 //!
-//! tauri-plugin-notification hands the sound name to notify-rust. On Windows
-//! notify-rust sends `<audio silent="true"/>` when there is none (notify-rust
-//! 4.17 `windows.rs:8-11`, tauri-winrt-notification 0.7.2 `lib.rs:479-482`),
+//! The name goes to the toast `crate::toast` shows. On Windows that is a
+//! tauri-winrt-notification toast: no name sends `<audio silent="true"/>`,
 //! and only the exact name `"Default"` maps to `Sound::Default`, which leaves
 //! the audio element out so Windows plays its own notification sound
-//! (`lib.rs:121-123`). Without a name every Aperio notification on Windows
-//! was silent, "System sound" included. macOS reads a name as a sound file
-//! (mac-notification-sys 0.6 `notification.rs:53-60`), so the name is set on
-//! Windows only.
+//! (tauri-winrt-notification 0.7.2 `lib.rs:121-123, 479-482`). That is what
+//! notify-rust did with the same name before Aperio built the toast itself
+//! (notify-rust 4.17 `windows.rs:8-11`). Without a name every Aperio
+//! notification on Windows was silent, "System sound" included. macOS reads a
+//! name as a sound file (mac-notification-sys 0.6 `notification.rs:53-60`),
+//! so the name is set on Windows only.
 
 use cal_core::SoundSource;
 use tauri::AppHandle;
-use tauri_plugin_notification::NotificationExt;
+
+use crate::toast::{show_toast, ToastRequest};
 
 /// The sound name that asks for the system's default notification sound.
 #[cfg(windows)]
@@ -37,15 +39,26 @@ pub fn reminder_sound_name(source: &SoundSource, custom_file_found: bool) -> Opt
 
 /// An OS notification the frontend sends (the day-start review, sync
 /// conflicts), with the system sound. Through here rather than the plugin's
-/// own JavaScript call, so its sound follows the same rule as a reminder's.
+/// own JavaScript call, so its sound follows the same rule as a reminder's,
+/// and a click on it can open what `tap` names (`{dayStart: true}` for the
+/// review; none for the others, whose click only shows the window).
 #[tauri::command]
-pub fn notify_system(app: AppHandle, title: String, body: String) -> Result<(), String> {
-    let builder = app.notification().builder().title(title).body(body);
-    let builder = match SYSTEM_SOUND {
-        Some(name) => builder.sound(name),
-        None => builder,
-    };
-    builder.show().map_err(|err| err.to_string())
+pub fn notify_system(
+    app: AppHandle,
+    title: String,
+    body: String,
+    tap: Option<serde_json::Value>,
+) -> Result<(), String> {
+    show_toast(
+        &app,
+        ToastRequest {
+            title,
+            body: Some(body),
+            sound: SYSTEM_SOUND,
+            tap,
+        },
+    );
+    Ok(())
 }
 
 #[cfg(test)]

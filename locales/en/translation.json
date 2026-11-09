@@ -2218,7 +2218,10 @@
       "openHint": "Opens the linked item",
       "allDay": "All day",
       "allDayRange": "All day · {{from}} to {{to}}",
-      "dayMonth": "{{month}} {{day}}"
+      "dayMonth": "{{month}} {{day}}",
+      "tapWaits": "The reminder opens once the open dialog is closed.",
+      "tapWaitsField": "The reminder opens once you leave the text field.",
+      "tapNotFound": "This reminder's appointment or task was not found. It may have been deleted."
     },
     "search": {
       "title": "Search",

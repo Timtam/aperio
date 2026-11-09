@@ -1,0 +1,104 @@
+{
+  "what": "The data a click on a reminder notification carries (DESIGN §14.3). The phone's scheduler writes it with reminderTapData (shared/reminderTap.ts) into each notification; the desktop's reminder worker writes it with host_core::reminders::Trigger::tap_data into the toast it shows. Both apps read it back with reminderTapOf.",
+  "why": "Two languages write the same keys, and nothing ties them together but this file. A key spelt differently in Rust would make every desktop toast click open nothing, silently, and only on a real Windows machine with a reminder ringing.",
+  "readBy": [
+    "crates/host-core/src/reminders.rs (tests::tap_contract)",
+    "src/intl/reminderTap.contract.test.ts"
+  ],
+  "cases": [
+    {
+      "name": "an occurrence of an own series",
+      "source": {
+        "item_id": "series-1",
+        "item_kind": "event",
+        "container_id": "work",
+        "start": "2026-11-16T09:00:00+00:00",
+        "title": "Standup"
+      },
+      "data": {
+        "itemId": "series-1",
+        "itemKind": "event",
+        "containerId": "work",
+        "start": "2026-11-16T09:00:00+00:00",
+        "title": "Standup"
+      },
+      "tap": {
+        "kind": "event",
+        "eventId": "series-1",
+        "calendarId": "work",
+        "start": "2026-11-16T09:00:00+00:00",
+        "title": "Standup"
+      }
+    },
+    {
+      "name": "a single change of a series, by its own id",
+      "source": {
+        "item_id": "https://dav.example/cal/a.ics|uid-1::rid::2026-11-16T09:00:00Z",
+        "item_kind": "event",
+        "container_id": "dav-cal",
+        "start": "2026-11-16T10:30:00+00:00",
+        "title": "Standup, moved"
+      },
+      "data": {
+        "itemId": "https://dav.example/cal/a.ics|uid-1::rid::2026-11-16T09:00:00Z",
+        "itemKind": "event",
+        "containerId": "dav-cal",
+        "start": "2026-11-16T10:30:00+00:00",
+        "title": "Standup, moved"
+      },
+      "tap": {
+        "kind": "event",
+        "eventId": "https://dav.example/cal/a.ics|uid-1::rid::2026-11-16T09:00:00Z",
+        "calendarId": "dav-cal",
+        "start": "2026-11-16T10:30:00+00:00",
+        "title": "Standup, moved"
+      }
+    },
+    {
+      "name": "a birthday, all day",
+      "source": {
+        "item_id": "aperio-birthday:contact-7:2026",
+        "item_kind": "event",
+        "container_id": "aperio-birthdays:list-1234",
+        "start": "2026-11-20T23:00:00+00:00",
+        "title": "Kim's birthday"
+      },
+      "data": {
+        "itemId": "aperio-birthday:contact-7:2026",
+        "itemKind": "event",
+        "containerId": "aperio-birthdays:list-1234",
+        "start": "2026-11-20T23:00:00+00:00",
+        "title": "Kim's birthday"
+      },
+      "tap": {
+        "kind": "event",
+        "eventId": "aperio-birthday:contact-7:2026",
+        "calendarId": "aperio-birthdays:list-1234",
+        "start": "2026-11-20T23:00:00+00:00",
+        "title": "Kim's birthday"
+      }
+    },
+    {
+      "name": "a task on an external list",
+      "source": {
+        "item_id": "task-9",
+        "item_kind": "task",
+        "container_id": "vikunja-list-3",
+        "start": "2026-11-17T08:00:00+00:00",
+        "title": "Submit report"
+      },
+      "data": {
+        "itemId": "task-9",
+        "itemKind": "task",
+        "containerId": "vikunja-list-3",
+        "start": "2026-11-17T08:00:00+00:00",
+        "title": "Submit report"
+      },
+      "tap": {
+        "kind": "task",
+        "taskId": "task-9",
+        "listId": "vikunja-list-3"
+      }
+    }
+  ]
+}

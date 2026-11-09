@@ -112,40 +112,52 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
 ### A5 · Benachrichtigungs-Aktionen (§14.3)
 - [ ] Action-Buttons in Toasts: **Öffnen** / **Snooze** (konfigurierbare Dauer) / **Erledigt** (nur Aufgaben)
 - [ ] Handler: snooze (neu planen), mark-done, open-from-notification
-- Einstieg: `src-tauri/src/reminders.rs` (`fire()`), Notification-Builder um `.action()` erweitern.
-- [ ] **Tippen auf eine Erinnerung öffnet den Termin** (Wunsch Toni, 2026-10-05;
-  die Handy-Hälfte ist gebaut, A12 Stufe 3; offen ist der Desktop;
-  DESIGN §14.3 „Öffnen“). Heute bringt ein Tipp auf iOS und Android nur die App
-  nach vorn, auf dem zuletzt offenen Bildschirm; unter Windows tut ein Klick
-  nichts (kein Klick-Handler, Fenster bleibt verborgen). Befund (nur gelesen):
-  - **Handy (ein JS-Weg für beide):** Erinnerungen laufen über
-    `expo-notifications` (`mobile/src/reminders/scheduler.ts`, `data` hat nur
-    `itemId`/`itemKind`). Ergänzen: `containerId` und den Beginn des
-    Vorkommens (ohne ihn findet ein Tipp bei Serien das Vorkommen nicht).
-    Nahe der App-Wurzel `addNotificationResponseReceivedListener` plus
-    `getLastNotificationResponse` (Kaltstart), erst nach bereitem Navigator,
-    wiederhergestelltem Stand und entsperrter App-Sperre; dann
-    `navigateNested('CalendarTab','EventEditor',{eventId, calendarId,
-    occurrence, initialTitle})` (Geburtstage brauchen den Titel, wie
-    `RemindersScreen.openReminder`), Aufgaben `TaskEditor` mit `listId`.
-    Kein Kotlin/Swift nötig; API-Namen gegen die Expo-SDK-Doku prüfen.
-  - **Windows:** keinerlei Klick-Haken (`tauri-plugin-notification` setzt
-    kein `on_activated`). Entweder den Toast selbst über
-    `tauri-winrt-notification` mit `on_activated` bauen (Fenster zeigen per
-    `show_main_window`, dann ein Ereignis an die Oberfläche: `getEventById`
-    → `occurrenceOfSeries` → `openEventDialog`; Klicks aus dem Info-Center
-    erreichen ihn evtl. nicht) oder `aperio://`-Link mit Deep-Link- und
-    Single-Instance-Plugin. Geklärt am 2026-10-31: Der Toast trägt
-    `com.aperio.app`, und dieselbe Id trägt der Startmenü-Eintrag, ohne den
-    Windows gar nichts zeigt (`src-tauri/src/notification_shortcut.rs`,
-    DESIGN §14.3); `Aperio.Calendar` ist entfernt. Ein `ToastActivatorCLSID`
-    an diesem Eintrag ist die Stelle, an der Klicks aus dem Info-Center
-    andocken würden.
-  - **Auch:** die Erinnerungsliste des Desktops trägt weder Kalender noch
-    Beginn (`RemindersDialog.openRow` öffnet die Serie statt des Vorkommens,
-    externe Termine ohne Kalender-Id evtl. gar nicht). Ein Tipp auf die
-    Tagesstart-Benachrichtigung soll die Tagesübersicht öffnen (heute nur,
-    solange sie an dem Tag noch nicht lief).
+- Einstieg: `src-tauri/src/toast.rs` (`show_toast`, der Toast mit Klick-Handler). Der Notification-Builder des Plugins hilft nicht: Sein `show()` liest am Desktop nur Titel, Text, Symbol und Ton. Knöpfe brauchen den COM-Aktivator aus Stufe 2 (unten), sonst kommen ihre Klicks aus dem Benachrichtigungscenter nicht an; die Beschriftungen setzt `tauri-winrt-notification` 0.7.2 unmaskiert in Attribute (ein Apostroph bricht den Toast).
+- [x] **Tippen auf eine Erinnerung öffnet den Termin** (Wunsch Toni, 2026-10-05;
+  DESIGN §14.3 „Antippen“ und „Klicken“). Handy: A12 Stufe 3. Desktop
+  (Stufe 1, 2026-11-09): Unter Windows baut Aperio den Toast selbst
+  (`src-tauri/src/toast.rs`, `tauri-winrt-notification` mit `on_activated`);
+  ein Klick auf das Banner zeigt das Fenster und öffnet das Vorkommen, die
+  Aufgabe oder die Tagesstart-Übersicht (`ReminderTapListener.tsx`,
+  `resolveReminderTap`), mit denselben Daten wie das Handy
+  (`shared/contracts/reminderTap.json`). Ist ein Editor oder anderer Dialog
+  offen (oder ein Eingabefeld in Benutzung), wartet der Klick und sagt das an;
+  über der Erinnerungs-Übersicht und der Tagesstart-Übersicht öffnet er
+  sofort, darüber. Die Erinnerungs-Übersicht (`Strg+Umschalt+R`) öffnet auf
+  demselben Weg: das Vorkommen statt der Serie, externe Termine und Aufgaben
+  über Kalender und Liste, und nie mehr den Editor für einen neuen Eintrag,
+  wenn nichts gefunden wird; ein gelöschtes Vorkommen gilt als nicht gefunden.
+- [ ] **macOS/Linux: Klick auf die Benachrichtigung öffnet nichts** (dort
+  bleibt das Plugin ohne Klick-Haken; `tauri-plugin-notification` ab 2.6 hat
+  `on_action`, bringt aber notify-rust 4.18 und tauri-winrt-notification 0.8
+  mit, deren 0.8.0 die Töne brach; Plan
+  `C:/scripts/aperio-livetest/a5-plan-2026-11-08.md`, Option A2).
+- [ ] **Gelöschtes Vorkommen einer externen Serie klingelt bis zu 5 Minuten
+  weiter** (Prüfrunde A5, 2026-11-09): `add_event_exdate` und die externen
+  Lösch-/Änderungsbefehle rufen `scheduler.invalidate()`, aber nicht den
+  TTL-Cache der externen Auslöser (`EXTERNAL_TRIGGERS_TTL`), sodass der alte
+  Auslöser noch feuert und in der Übersicht steht. Ein Klick darauf sagt
+  jetzt „nicht gefunden“; die Ursache ist offen.
+- [ ] **Stufe 2: Klicks aus dem Benachrichtigungscenter und nach dem Beenden**
+  (Win+N, Eingabe auf einem Aperio-Eintrag; Stufe 1 erreicht nur das Banner,
+  solange Aperio läuft). Ohne COM-Aktivator stellt Windows diese Klicks nicht
+  zu (Electron #24524, WinToast #35, Plan
+  `C:/scripts/aperio-livetest/a5-plan-2026-11-08.md`). Bausteine:
+  `INotificationActivationCallback` mit windows-rs `#[implement]` und
+  Klassenfabrik, `CoRegisterClassObject` beim Start; `ToastActivatorCLSID` an
+  der Startmenü-Verknüpfung und `HKCU\Software\Classes\CLSID\{…}\LocalServer32`,
+  geschrieben beim Einrichten und von der Reparatur beim Start; der Toast
+  trägt seine Daten im `launch`-Attribut (eigenes Toast-XML über die
+  `windows`-Kiste, Features `UI_Notifications` und `Data_Xml_Dom`, denn
+  `tauri-winrt-notification` 0.7.2 hat kein `launch`); Start mit
+  `-Embedding`, wenn Aperio nicht läuft; doppelte Zustellung neben
+  `Activated` abfangen. Danach die Knöpfe oben (Snooze, Erledigt),
+  `scenario="reminder"` optional. Erst nach Tonis Live-Test von Stufe 1
+  (Schritte 5 und 6 im Plan) entscheiden.
+- [x] **Handy: Erinnerungsliste öffnete die Serie statt des Vorkommens**
+  (2026-11-09): `RemindersScreen.openReminder` und der Tipp auf die
+  Benachrichtigung teilen sich `eventEditorParams`
+  (`mobile/src/reminders/tapParams.ts`).
 
 ### A7 · Mobile Widgets (iOS zuerst) `[~]`
 Termine und Aufgaben auf dem Home- und Sperrbildschirm, mit Abhaken. Drei

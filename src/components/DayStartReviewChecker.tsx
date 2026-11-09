@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { planDayStart, writeAll } from '@aperio/shared';
+import { DAY_START_TAP_DATA, planDayStart, writeAll } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
@@ -67,11 +67,19 @@ export function DayStartReviewChecker() {
   // What the dialog stack shows now, for the review a silent batch defers:
   // a dialog may have opened while the batch ran.
   const dialogKind = useRef(dialogMode.kind);
-  useEffect(() => {
-    dialogKind.current = dialogMode.kind;
-  }, [dialogMode.kind]);
   // The review a silent batch could not open: a dialog was open when it ended.
   const reviewWaits = useRef(false);
+  // The review came up while a silent batch ran: a click on the day-start
+  // notification opens it (TODO A5). The batch's own opening is then used
+  // up, or closing that review would bring a second one.
+  const reviewShown = useRef(false);
+  useEffect(() => {
+    dialogKind.current = dialogMode.kind;
+    if (dialogMode.kind === 'dayStartReview') {
+      reviewShown.current = true;
+      reviewWaits.current = false;
+    }
+  }, [dialogMode.kind]);
   useEffect(() => {
     if (!reviewWaits.current || dialogMode.kind !== 'none') return;
     reviewWaits.current = false;
@@ -203,11 +211,14 @@ export function DayStartReviewChecker() {
           count: surfaced,
         }),
         'day-start reminders notification',
+        // A click brings the review up again (TODO A5).
+        DAY_START_TAP_DATA,
       );
     }
 
     const hasSilentWork = todayRows.length > 0 || backlogRows.length > 0;
     if (hasSilentWork) {
+      reviewShown.current = false;
       void (async () => {
         // Run each batch in its own pass so a failure on one half
         // (e.g. an offline iCloud account) doesn't block the other.
@@ -240,7 +251,7 @@ export function DayStartReviewChecker() {
         // reminder (the reminders section is informational but still a
         // reason to surface the dialog). Not on top of a dialog that opened
         // meanwhile — a write's wait, a sync prompt —: then once it closes.
-        if (surfaced > 0) {
+        if (surfaced > 0 && !reviewShown.current) {
           if (dialogKind.current === 'none') openDayStartReview();
           else reviewWaits.current = true;
         }

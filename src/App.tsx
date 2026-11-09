@@ -5,6 +5,7 @@ import { DayStartReviewChecker } from './components/DayStartReviewChecker';
 import { DeadlinePinChecker } from './components/DeadlinePinChecker';
 import { FirstLaunchWizardChecker } from './components/FirstLaunchWizardChecker';
 import { NotificationShortcutHintChecker } from './components/NotificationShortcutHintChecker';
+import { ReminderTapListener } from './components/ReminderTapListener';
 import { DialogHost } from './components/DialogHost';
 import { FocusBar } from './components/FocusBar';
 import { Sidebar } from './components/Sidebar';
@@ -106,6 +107,9 @@ export function App() {
                       wizard once; otherwise it's a no-op. Renders nothing. */}
                   <FirstLaunchWizardChecker />
                   <NotificationShortcutHintChecker />
+                  {/* A click on a reminder's notification opens its occurrence,
+                      its task or the day-start review (TODO A5). */}
+                  <ReminderTapListener />
                   {/* Bridges backend `cache-updated` pushes to data
                       invalidation so external views refresh when a
                       background snapshot refresh lands. Renders nothing. */}

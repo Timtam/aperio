@@ -9,17 +9,7 @@ import {
   notificationShortcutStatus,
 } from '../api/client';
 import { useDialogState } from '../state/dialogStateContext';
-
-/** Whether the user is in the middle of something the dialog stack does not
- *  know about: a view's own modal, or a text field in use. */
-function pageBusy(): boolean {
-  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return true;
-  const el = document.activeElement;
-  return (
-    el instanceof HTMLElement &&
-    el.matches('input, textarea, select, [contenteditable="true"]')
-  );
-}
+import { pageBusy } from '../state/pageBusy';
 
 /**
  * Opens the one-time hint (`NotificationShortcutHintDialog`) when the

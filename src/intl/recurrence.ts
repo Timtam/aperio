@@ -30,6 +30,7 @@ export {
   movedTailRule,
   TailShiftRefusedError,
   occurrenceOfSeries,
+  seriesHasOccurrence,
   firstOccurrenceFrom,
   seriesTimesFromOccurrenceEdit,
   exceptionsAtSeriesTime,

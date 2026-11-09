@@ -19,7 +19,7 @@ use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, State, Wry};
+use tauri::{AppHandle, Manager, Runtime, State, Wry};
 use tracing::warn;
 
 use crate::user_prefs::UserPrefsRepo;
@@ -120,7 +120,7 @@ fn try_build(app: &AppHandle) -> tauri::Result<(TrayIcon<Wry>, MenuItem<Wry>, Me
 }
 
 /// Reveal + focus the main window (un-hide from the tray).
-pub fn show_main_window(app: &AppHandle) {
+pub fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(win) = app.get_webview_window(MAIN_WINDOW) {
         let _ = win.show();
         let _ = win.unminimize();

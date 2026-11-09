@@ -46,6 +46,7 @@ export function DialogHost() {
           defaultTime={mode.defaultTime}
           defaultTitle={mode.defaultTitle}
           initialScope={mode.initialScope}
+          shownOccurrence={mode.shownOccurrence}
           prefillFrom={mode.prefillFrom}
           targetPinned={mode.targetPinned}
           importFrom={mode.importFrom}
