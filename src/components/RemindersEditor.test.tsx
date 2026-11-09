@@ -461,6 +461,25 @@ describe('RemindersEditor — a reminder counted from the end', () => {
     expect(optionValues(kind)).not.toContain('before_end');
   });
 
+  it('shows an all-day row after the end with its amount, and keeps it after the end', () => {
+    const { kind, changes } = editor(
+      [{ kind: { type: 'relative_to_end', minutes_before: -60 }, sound: null }],
+      { allDay: true, beforeEndKept: true },
+    );
+    expect(kind.value).toBe('after_end');
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2' } });
+    expect(changes.at(-1)?.[0].kind).toEqual({ type: 'relative_to_end', minutes_before: -120 });
+  });
+
+  it('shows an all-day row at the end without an amount', () => {
+    const { kind } = editor(
+      [{ kind: { type: 'relative_to_end', minutes_before: 0 }, sound: null }],
+      { allDay: true, beforeEndKept: true },
+    );
+    expect(kind.value).toBe('at_end');
+    expect(screen.queryByRole('spinbutton')).toBeNull();
+  });
+
   it('shows one on an all-day appointment as what it is, but offers none there', () => {
     const { kind } = editor([BEFORE_END], { allDay: true, beforeEndKept: true });
     expect(kind.value).toBe('before_end');

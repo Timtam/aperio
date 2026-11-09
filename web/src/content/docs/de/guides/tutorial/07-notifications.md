@@ -223,9 +223,10 @@ wird nicht zu einem Hinweis, den du scheinbar selbst gesetzt hast. Änderst du
 die Erinnerung hier, legst eine daneben oder nimmst sie weg, verschwindet die
 Markierung: Dann ist es deine Entscheidung.
 
-Einen Hinweis, den Aperio nicht lesen kann – Apples „1 Woche vorher" etwa –,
-zeigt Aperio nicht an, und beim Speichern geht er unverändert an den Server
-zurück. Einen, den die App anders schreiben müsste, überlässt sie ebenfalls dem
+Apples „1 Woche vorher“ erscheint als **Vor Beginn**, 7 Tage. Einen Hinweis,
+den Aperio nicht lesen kann – einen in einer Form, die kein Kalenderstandard
+kennt –, zeigt Aperio nicht an, und beim Speichern geht er unverändert an den
+Server zurück. Einen, den die App anders schreiben müsste, überlässt sie ebenfalls dem
 Server und verzichtet auf die Markierung, statt zu raten.
 
 ### Ganztägige Termine und Geburtstage

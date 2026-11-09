@@ -206,7 +206,8 @@ so it stays Apple's default instead of turning into an alert you appear to
 have set by hand. Change the reminder here, add one beside it or take it away,
 and the mark goes: it is your choice then.
 
-An alert Aperio cannot read — Apple's "1 week before", say — does not show up
+Apple's "1 week before" shows as **Before start**, 7 days. An alert Aperio
+cannot read — one in a form no calendar standard defines — does not show up
 in Aperio, and a save hands it back to the server exactly as it was. One that
 this app would have to respell is left to the server too, and the mark is
 dropped rather than guessed.

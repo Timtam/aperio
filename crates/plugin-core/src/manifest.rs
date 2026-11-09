@@ -94,8 +94,8 @@ pub struct ReminderCapabilities {
     pub after_start: bool,
     /// Keeps a reminder relative to the END ("5 minutes before the end"; RFC
     /// 5545 `TRIGGER;RELATED=END`). CalDAV and iCloud do, and Aperio's own
-    /// store; Google, Exchange, Outlook and the phone's calendar have no such
-    /// reminder.
+    /// store; Google, Exchange and Outlook count every reminder from the
+    /// start, and the phone's calendar keeps no reminders at all.
     #[serde(default)]
     pub before_end: bool,
 }

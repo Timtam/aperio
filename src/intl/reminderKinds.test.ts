@@ -245,11 +245,19 @@ describe('counting from the end (RFC 5545 RELATED=END, 2026-11-09)', () => {
     expect(beforeEndOffered({}, { keptByCalendar: false, placement: false })).toBe(false);
   });
 
-  it('shows on an all-day row as "before the end", and a default rounds to whole days', () => {
+  it('shows on an all-day row as before, at or after the end', () => {
     expect(allDayKindOption({ type: 'relative_to_end', minutes_before: 60 })).toBe('before_end');
-    expect(allDayDefaultKind({ type: 'relative_to_end', minutes_before: 15 })).toEqual({
-      type: 'relative_to_end',
-      minutes_before: 0,
-    });
+    expect(allDayKindOption({ type: 'relative_to_end', minutes_before: 0 })).toBe('at_end');
+    expect(allDayKindOption({ type: 'relative_to_end', minutes_before: -60 })).toBe('after_end');
+  });
+
+  it('rounds a default from the end up to whole days, at least one, on an all-day row', () => {
+    const day = 24 * 60;
+    const end = (minutes_before: number) => ({ type: 'relative_to_end' as const, minutes_before });
+    expect(allDayDefaultKind(end(15))).toEqual(end(day));
+    expect(allDayDefaultKind(end(0))).toEqual(end(day));
+    expect(allDayDefaultKind(end(day))).toEqual(end(day));
+    expect(allDayDefaultKind(end(day + 1))).toEqual(end(2 * day));
+    expect(allDayDefaultKind(end(-day))).toEqual(end(-day));
   });
 });

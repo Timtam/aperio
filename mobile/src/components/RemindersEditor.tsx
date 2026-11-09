@@ -465,8 +465,12 @@ function AllDayKindFields({ value, onChange, position, afterStart, allowAppStart
   const kindOption = allDayKindOption(value.kind);
   const showAppStart = allowAppStart || kindOption === 'app_start';
   const showDaysAfter = afterStart || kindOption === 'days_after';
-  // Not offered on an all-day appointment; one it has shows as what it is.
-  const showBeforeEnd = kindOption === 'before_end';
+  // Counting from the end is not offered on an all-day appointment; one it
+  // has shows as what it is.
+  const fromEndOption =
+    kindOption === 'before_end' || kindOption === 'at_end' || kindOption === 'after_end';
+  const setMinutesFromEnd = (minutes_before: number) =>
+    onChange({ ...value, kind: { type: 'relative_to_end', minutes_before } });
 
   return (
     <>
@@ -479,8 +483,19 @@ function AllDayKindFields({ value, onChange, position, afterStart, allowAppStart
           ...(showDaysAfter
             ? [{ value: 'days_after' as const, label: t('reminders.kind.daysAfter') }]
             : []),
-          ...(showBeforeEnd
-            ? [{ value: 'before_end' as const, label: t('reminders.kind.beforeEnd') }]
+          ...(fromEndOption
+            ? [
+                {
+                  value: kindOption,
+                  label: t(
+                    kindOption === 'at_end'
+                      ? 'reminders.kind.atEnd'
+                      : kindOption === 'after_end'
+                        ? 'reminders.kind.afterEnd'
+                        : 'reminders.kind.beforeEnd',
+                  ),
+                },
+              ]
             : []),
           { value: 'absolute', label: t('reminders.kind.absolute') },
           ...(showAppStart
@@ -494,13 +509,18 @@ function AllDayKindFields({ value, onChange, position, afterStart, allowAppStart
         }}
       />
 
-      {value.kind.type === 'relative_to_end' && (
+      {kindOption === 'before_end' && value.kind.type === 'relative_to_end' && (
         <RelativeFields
           position={position}
           minutes={value.kind.minutes_before}
-          onChange={(minutes_before) =>
-            onChange({ ...value, kind: { type: 'relative_to_end', minutes_before } })
-          }
+          onChange={setMinutesFromEnd}
+        />
+      )}
+      {kindOption === 'after_end' && value.kind.type === 'relative_to_end' && (
+        <RelativeFields
+          position={position}
+          minutes={-value.kind.minutes_before}
+          onChange={(minutes) => setMinutesFromEnd(-minutes)}
         />
       )}
       {value.kind.type === 'relative' && (

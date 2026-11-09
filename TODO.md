@@ -682,9 +682,11 @@ Siehe DESIGN §4.2.
   als `TRIGGER;RELATED=END`, im Planer vom Ende jedes Vorkommens gezählt,
   in beiden Editoren als „Vor dem Ende“ und „Zum Ende“ angeboten, wo der
   Kalender sie behält (Manifest `reminders.before_end`: CalDAV, iCloud,
-  lokal) oder die Zeile nur in Aperio gilt. Google, Exchange, Outlook und
-  der Gerätekalender lassen sie benannt weg. Wochen (`-P1W`) liest CalDAV
-  als 7 Tage.
+  lokal) oder die Zeile nur in Aperio gilt. Google, Exchange und Outlook
+  lassen sie benannt weg (der Gerätekalender behält gar keine
+  Erinnerungen). Wochen (`-P1W`) liest CalDAV als 7 Tage. Ein Standard ab
+  dem Ende klingelt bei ganztägigen Terminen am letzten Tag; Migration 0052
+  liest die externen Termine einmal neu.
 - [ ] **Aus Dateien eingelesene iPhone-Termine tragen eine Erinnerung von
   1976.** Aus dem Code gelesen (2026-11-08), nicht ausprobiert. Bis zum Fix
   für Apples stummen Hinweis las der Datei-Import (I4)

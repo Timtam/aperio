@@ -1588,10 +1588,14 @@ pub fn apply_default_reminder_policy(
     // before" on the day, not at 23:45 the evening before; TODO B7 222).
     if event.all_day {
         for r in &mut attached {
-            if let ReminderKind::Relative { minutes_before }
-            | ReminderKind::RelativeToEnd { minutes_before } = &mut r.kind
-            {
-                *minutes_before = whole_days_of(*minutes_before) * MINUTES_PER_DAY;
+            match &mut r.kind {
+                ReminderKind::Relative { minutes_before } => {
+                    *minutes_before = whole_days_of(*minutes_before) * MINUTES_PER_DAY;
+                }
+                ReminderKind::RelativeToEnd { minutes_before } => {
+                    *minutes_before = end_default_days(*minutes_before) * MINUTES_PER_DAY;
+                }
+                _ => {}
             }
         }
     }
@@ -2417,11 +2421,18 @@ fn all_day_trigger_time(
             // The end's day, as whole days after the start's: an occurrence's
             // length can be off by the hour a clock change adds or takes, and
             // only the end's local date counts here, so noon of that day is
-            // the reference.
-            let days = whole_days_of((occ_end? - occ_start).num_minutes());
+            // the reference. An all-day appointment covers at least its start
+            // day, however its end is stored.
+            let days = whole_days_of((occ_end? - occ_start).num_minutes()).max(1);
+            // A calendar default counts in whole days from the end, at least
+            // one: it rings on the appointment's last day, never after it.
+            let minutes = match reading {
+                AllDayReading::WholeDays => end_default_days(*minutes_before) * MINUTES_PER_DAY,
+                AllDayReading::Exact => *minutes_before,
+            };
             (
                 occ_start + ChronoDuration::days(days) + ChronoDuration::hours(12),
-                *minutes_before,
+                minutes,
             )
         }
         ReminderKind::Absolute { at } => return Some(*at),
@@ -2442,6 +2453,20 @@ const MINUTES_PER_DAY: i64 = 24 * 60;
 /// 1 day, half away from zero): the [`AllDayReading::WholeDays`] day.
 fn whole_days_of(minutes: i64) -> i64 {
     ((minutes as f64) / MINUTES_PER_DAY as f64).round() as i64
+}
+
+/// A calendar default counted from the END, as an all-day appointment takes
+/// it: whole days before the end, rounded up and at least one, so "15 minutes
+/// before the end" and "at the end" ring on the appointment's last day at the
+/// day-start time rather than the morning after it is over. One after the end
+/// is rounded like any other. Mirrored by `allDayDefaultKind` in
+/// `shared/reminderKinds.ts`.
+fn end_default_days(minutes: i64) -> i64 {
+    if minutes >= 0 {
+        ((minutes + MINUTES_PER_DAY - 1) / MINUTES_PER_DAY).max(1)
+    } else {
+        whole_days_of(minutes)
+    }
 }
 
 /// Pure, zone-parameterised core of [`all_day_trigger_time`]. Generic over the
@@ -4411,6 +4436,62 @@ mod tests {
         assert_eq!(
             rung_at(before_end(24 * 60)),
             (day, NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+        );
+    }
+
+    /// A calendar default "before the end" (or "at the end") on an all-day
+    /// appointment rings on its last day at the day-start time, not the
+    /// morning after it is over; written into a new one, it is one day before
+    /// the end. An appointment stored without length still covers its day.
+    #[test]
+    fn an_all_day_default_before_the_end_rings_on_the_last_day() {
+        let day = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        let ws = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let we = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let nine = NaiveTime::from_hms_opt(9, 0, 0).unwrap();
+        let rung_at = |ev: Event, defaults: &[DefaultReminder]| {
+            let triggers = ev_triggers(&[ev], defaults, ws, we);
+            assert_eq!(triggers.len(), 1);
+            let local = chrono::Local.from_utc_datetime(&triggers[0].trigger_at.naive_utc());
+            (local.date_naive(), local.time())
+        };
+        for minutes in [15, 0, 60 * 11] {
+            assert_eq!(
+                rung_at(
+                    make_all_day_event(day, vec![]),
+                    &[local(before_end(minutes))]
+                ),
+                (day, nine),
+                "{minutes} minutes before the end"
+            );
+        }
+        // A two-day appointment: its last day.
+        let mut two = make_all_day_event(day, vec![]);
+        two.end = two.start + ChronoDuration::days(2);
+        assert_eq!(
+            rung_at(two, &[local(before_end(15))]),
+            (day.succ_opt().unwrap(), nine)
+        );
+        // Stored without length: its own reminder one hour before the end
+        // rings at 23:00 on its day, not the evening before.
+        let mut zero = make_all_day_event(day, vec![before_end(60)]);
+        zero.end = zero.start;
+        assert_eq!(
+            rung_at(zero, &[]),
+            (day, NaiveTime::from_hms_opt(23, 0, 0).unwrap())
+        );
+
+        // Attached to a new all-day appointment: one day before the end.
+        let db = prefs_db();
+        store_defaults(&db, "cal", &[attached(before_end(15))]);
+        let mut event = new_event_without_reminders();
+        event.all_day = true;
+        assert!(apply_default_reminder_policy(&db, "cal", &mut event, true));
+        assert_eq!(
+            event.reminders[0].kind,
+            ReminderKind::RelativeToEnd {
+                minutes_before: MINUTES_PER_DAY
+            }
         );
     }
 

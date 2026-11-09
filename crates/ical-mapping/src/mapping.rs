@@ -3663,30 +3663,40 @@ END:VCALENDAR\r
     }
 
     #[test]
-    fn an_alarm_relative_to_the_end_is_left_alone() {
-        // RELATED=END means "before the END". Aperio reads it as "before the
-        // start" and shows it that way, so neither keeping the text nor
-        // writing our own is honest — the alarm is not ours to touch.
-        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(
-            "BEGIN:VALARM\r
+    fn an_untouched_alarm_relative_to_the_end_keeps_its_text_and_identity() {
+        // RELATED=END is read as a reminder before the END (since 2026-11-09),
+        // so an untouched one is claimed like any other: its trigger text and
+        // identity go back as the server wrote them, and the set is still the
+        // account's default.
+        let end = "BEGIN:VALARM\r
 ACTION:DISPLAY\r
 DESCRIPTION:Event reminder\r
 TRIGGER;RELATED=END:-PT15M\r
 UID:alarm-end\r
 END:VALARM\r
-",
-        ));
+";
+        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(end));
+        let event = event_with_reminders(vec![
+            ReminderKind::RelativeToEnd { minutes_before: 15 },
+            ReminderKind::Relative { minutes_before: 60 },
+        ]);
+        let out = event_to_ical_preserving(&event, prior);
+
+        assert!(out.contains("UID:alarm-end"), "{out}");
+        assert!(out.contains("TRIGGER;RELATED=END:-PT15M"), "{out}");
+        let (event_part, _) = out.split_once("BEGIN:VALARM").unwrap();
+        assert!(event_part.contains("X-APPLE-DEFAULT-ALARM:TRUE"), "{out}");
+
+        // Moved to before the START, it is another reminder: the server's
+        // alarm goes, identity and all.
+        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(end));
         let event = event_with_reminders(vec![
             ReminderKind::Relative { minutes_before: 15 },
             ReminderKind::Relative { minutes_before: 60 },
         ]);
         let out = event_to_ical_preserving(&event, prior);
-
-        assert!(
-            !out.contains("UID:alarm-end"),
-            "an alarm Aperio misreads must not have its identity carried over:\n{out}"
-        );
-        assert!(!out.contains("X-APPLE-DEFAULT-ALARM"), "{out}");
+        assert!(!out.contains("UID:alarm-end"), "{out}");
+        assert!(!out.contains("RELATED=END"), "{out}");
     }
 
     #[test]
