@@ -14,6 +14,11 @@ pub const TZDATA_VERSION: &str = "2025b";
 /// comments): which table the cached events were translated with.
 pub const TABLE_ID: &str = "1a97f06d833a509a";
 
+/// The first day of the five years the clock guard compared (the pinned
+/// release's publication). A clock a provider defines by its rules is
+/// compared over the same years (`crate::zone_clock::clock_window`).
+pub const CLOCKS_COMPARED_FROM: (i32, u32, u32) = (2026, 3, 17);
+
 /// Windows id → the zone of its default (001) row, resolved to tzdata's zone.
 /// Sorted by the id with ASCII letters lowercased, which is how it is searched.
 pub const WINDOWS_ZONES: &[(&str, &str)] = &[

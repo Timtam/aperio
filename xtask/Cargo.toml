@@ -26,7 +26,8 @@ chrono-tz.workspace = true
 # `windows-zones` resolves every name in the CLDR windowsZones file through
 # cal_core — the rule the EWS adapter asks at runtime — reads the file with the
 # XML reader the adapters already use, and checks it against its pinned sha256.
-cal-core.workspace = true
+# `zones`: the clock comparison the table's guard runs is the core's own.
+cal-core = { workspace = true, features = ["zones"] }
 quick-xml.workspace = true
 sha2.workspace = true
 

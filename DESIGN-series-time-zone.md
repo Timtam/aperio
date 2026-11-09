@@ -355,6 +355,35 @@ keinen, dort ist die Wahl Tonis Sache.
   einen Schnitt. Alle sechs Wege setzen es schon: die Editoren, das
   Übertragen und das Löschen ab einem Termin, je auf dem Desktop und auf dem
   Handy.
+- **279 — eine eigene Zone ist die Zone mit derselben Uhr.** *(gebaut,
+  2026-11-09)* Eine Exchange-Serie, deren Zone Exchange vollständig definiert
+  („Customized Time Zone“, 232), wiederholte sich in Aperio auf UTC, im
+  Sommer eine Stunde daneben, und ein Schnitt (254) zählte auf zwei Uhren.
+  Jetzt liest der Adapter sie als die tzdata-Zone, die in fünf Jahren
+  dieselbe Uhr hat (`cal_core::zone_with_clock`, verglichen wie die
+  Uhrenwache der Tabelle: täglich, an Umstelltagen stündlich). Die fünf Jahre
+  beginnen am ersten Tag, den die Uhrenwache verglich (Veröffentlichung der
+  festgeschriebenen CLDR-Fassung, `CLOCKS_COMPARED_FROM`), oder am ersten Tag
+  der Serie, wenn der später liegt: verglichen wird, wo Aperio die Serie
+  heute liest, nicht in lange vergangenen Jahren. Sonst läse eine Serie von
+  2017 auf festem +02:00 als Kairo, das seit 2023 wieder Sommerzeit hat, und
+  klingelte jeden Sommer eine Stunde zu früh (Prüfrunde). Das Fenster hängt
+  nur am Build und an der Serie, nie am heutigen Datum. Unter mehreren
+  gleichen gilt (Toni): +00:00 durchgehend ist keine Zone; dann die Zone des
+  Geräts; dann die Standardzone jeder Windows-Kennung in der Reihenfolge der
+  Tabelle (für Mitteleuropa Budapest); dann die Weltliste. Passt keine, oder
+  schickt Exchange zur Kennung keine Definition, bleibt es bei UTC. Beim
+  Speichern behält die Serie ihre Zonen, solange die geschriebene Zone
+  dieselbe Uhr hat wie die Definition am Beginn und wie das Ende, ob dieses
+  definiert oder benannt ist; ein unlesbares Ende hält das nicht auf (Toni):
+  Exchange bekommt dann keine Zone, nichts verschiebt sich, und ob ein Tausch
+  der Definition gegen eine Kennung die Ausnahmen behält, ist nicht gemessen
+  (245). Eine Zone mit anderer Uhr ist ein Zonenwechsel wie sonst. Eine Serie,
+  deren Beginn eine benannte Zone trägt, schreibt ihre Zone wie bisher wieder
+  (N3).
+  `READ_RULE` 6 übersetzt den Zwischenspeicher neu; die Gerätezone steht
+  schon im Token. Der Datei-Import (eine Zone, die nur die Datei kennt) kann
+  dieselbe Regel nutzen und tut es noch nicht.
 
 Drei Festlegungen folgen aus diesen Entscheidungen und kamen erst bei der Prüfung
 des Dokuments hinzu; sie stehen in den Abschnitten unten:
@@ -1319,11 +1348,11 @@ Handy im selben PR.
     unbekannten Namen tun.
 
   Ungeprüft bleibt, ob Exchange Namen, die nur in der Windows-Registry stehen
-  (Kamchatka, Mid-Atlantic), so zurückgibt, wie Aperio sie liest: als keine
-  Zone. Eine eigene Zonendefinition schickt Exchange 2019 in
-  `SyncFolderItems` und `GetItem` mit (Live-Test 8a, an einem per EWS
-  angelegten Termin); seit PR 8a liest ein ganztägiger Termin sie selbst, die
-  Uhr einer Serie behandelt sie weiter als keine Zone. Ungeprüft aus PR 8a sind
+  (Kamchatka, Mid-Atlantic), mit ihrer Definition zurückgibt; ohne sie liest
+  Aperio sie als keine Zone, mit ihr als die Zone mit derselben Uhr (279).
+  Eine eigene Zonendefinition schickt Exchange 2019 in `SyncFolderItems` und
+  `GetItem` mit (Live-Test 8a, an einem per EWS angelegten Termin); seit PR 8a
+  liest ein ganztägiger Termin sie selbst, seit 279 auch die Uhr einer Serie. Ungeprüft aus PR 8a sind
   außerdem: ob Exchange das Startdatum einer Regel auf der gespeicherten
   Startzone liest, wo die Uhr bleibt (234, aus Runde 1 abgeleitet). Ob es eine
   Regel vor einer Zone anwendet, die dieselbe Änderung danach schreibt, ist

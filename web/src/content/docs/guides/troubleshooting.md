@@ -329,6 +329,15 @@ programs, Aperio can read when Exchange sends its rules along. When Exchange
 sends only a name Aperio does not know, without its rules, Aperio does not
 guess: the appointment would otherwise stretch over two days in Outlook.
 
+A series with a time of day in such a custom time zone repeats in Aperio on
+the time zone that runs exactly the same clock. If your device's own time
+zone runs that clock, it is that one: a series on Central European time shows
+the time zone Berlin on a device in Berlin and the time zone Paris on one in
+Paris, at the same times. When you save the series, it keeps its own time
+zone in Exchange as long as the clock stays the same. The series repeats in
+UTC, an hour off after a clock change, only when Exchange sends the custom
+time zone without its rules, or when no named time zone runs its clock.
+
 What you can do: change the day in Outlook. Everything else, such as the
 title, the place or the reminder, you can still change in Aperio, as long as
 you do not move the day with it.

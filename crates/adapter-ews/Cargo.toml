@@ -10,7 +10,9 @@ description = "Aperio Exchange Web Services (EWS) adapter — SOAP-over-HTTP cli
 
 [dependencies]
 async-trait.workspace = true
-cal-core.workspace = true
+# `zones`: a zone Exchange defines in full is matched to the tzdata zone that
+# runs its clock (`cal_core::zone_with_clock`, decision 232).
+cal-core = { workspace = true, features = ["zones"] }
 chrono.workspace = true
 futures.workspace = true
 # The device's zone names what an all-day slot was read on (events token).
