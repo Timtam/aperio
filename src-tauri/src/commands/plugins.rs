@@ -531,6 +531,9 @@ pub async fn install_plugin_archive(
             });
         }
         try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id).await?;
+        // Its accounts are unregistered now: should the new version then
+        // fail to land, their reminders must not keep ringing.
+        scheduler.accounts_changed();
     }
 
     // Safe to extract. install_archive wipes any stale

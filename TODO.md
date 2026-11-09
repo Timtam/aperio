@@ -173,10 +173,12 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
   Löschen eines Kontos und Ab-, Ein- oder Ausschalten, Entfernen oder
   Ersetzen eines Plugins wecken den Desktop-Planer, der alles ohne die
   verschwundenen Konten neu liest (`accounts_changed`). Ein auf einem
-  anderen Gerät gelöschtes Konto verliert nach der Sync-Runde seinen Adapter
-  (`unregister_removed`, Desktop und Handy); vorher las es bis zum nächsten
-  Start weiter. Kontakt-Änderungen lesen die Geburtstags-Erinnerungen sofort
-  neu (Desktop `contacts_changed`, Handy plant neu). Nebenbei: Das Löschen
+  anderen Gerät gelöschtes Konto verliert nach der Sync-Runde, dem Beitreten
+  oder der Wiederaufnahme seinen Adapter (`unregister_removed`, Desktop und
+  Handy); vorher las es bis zum nächsten Start weiter. Kontakt-Änderungen
+  lesen die Geburtstags-Erinnerungen sofort neu (Desktop `contacts_changed`,
+  ein externes Adressbuch nach dem Neulesen im Hintergrund; Handy plant
+  neu). Nebenbei: Das Löschen
   des Sync-Ziel-Kontos prüft jetzt zuerst; vorher löschte der Desktop die
   Zeile und das Handy die Zugangsdaten, bevor es ablehnte.
 - [ ] **Stufe 2: Klicks aus dem Benachrichtigungscenter und nach dem Beenden**

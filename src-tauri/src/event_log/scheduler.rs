@@ -400,29 +400,8 @@ impl SyncScheduler {
             self.cache_refresher.trigger_background();
         }
         // …and tell the frontend to re-read its catalogs NOW instead of
-        // waiting out the pass. `cache-updated` on the three listing scopes
-        // is the channel the app already uses for "the container lists
-        // changed" (CacheSyncListener.tsx re-runs refreshCalendars /
-        // refreshTaskLists / refreshContactLists and invalidates the data
-        // hooks). The listener keys off `scope` alone; the ids stay empty
-        // because this signal is account-wide, not per-container.
-        for scope in [
-            SyncScope::Calendars,
-            SyncScope::TaskLists,
-            SyncScope::ContactLists,
-        ] {
-            let payload = CacheUpdatedPayload {
-                scope: scope.as_str().to_string(),
-                account_id: String::new(),
-                container_id: String::new(),
-            };
-            if let Err(err) = app.emit("cache-updated", &payload) {
-                warn!(
-                    ?err,
-                    "failed to emit cache-updated after account registration"
-                );
-            }
-        }
+        // waiting out the pass.
+        broadcast_account_listings(app);
     }
 
     /// Append one row to the §19.9 sync_log table + emit a
@@ -859,6 +838,30 @@ fn backoff_duration(base: Duration, failures: u32) -> Duration {
 /// Whether a round applied the refresh interval from another device.
 fn interval_arrived(keys: &[String]) -> bool {
     keys.iter().any(|key| key == PREF_SYNC_INTERVAL_MINUTES)
+}
+
+/// The accounts with an adapter changed (some arrived or went through sync or
+/// onboarding): tell the frontend to re-read its catalogs NOW. `cache-updated`
+/// on the three listing scopes is the channel the app already uses for "the
+/// container lists changed" (CacheSyncListener.tsx re-runs refreshCalendars /
+/// refreshTaskLists / refreshContactLists and invalidates the data hooks). The
+/// listener keys off `scope` alone; the ids stay empty because this signal is
+/// account-wide, not per-container.
+pub(crate) fn broadcast_account_listings<R: Runtime>(app: &AppHandle<R>) {
+    for scope in [
+        SyncScope::Calendars,
+        SyncScope::TaskLists,
+        SyncScope::ContactLists,
+    ] {
+        let payload = CacheUpdatedPayload {
+            scope: scope.as_str().to_string(),
+            account_id: String::new(),
+            container_id: String::new(),
+        };
+        if let Err(err) = app.emit("cache-updated", &payload) {
+            warn!(?err, "failed to emit cache-updated after an account change");
+        }
+    }
 }
 
 /// The one refresh interval changed, here or on another device: every loop

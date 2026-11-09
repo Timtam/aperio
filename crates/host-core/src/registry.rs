@@ -363,13 +363,10 @@ impl AdapterRegistry {
     /// start. Returns the number of accounts unregistered; nothing when the
     /// rows cannot be read (a failed read is not a deletion).
     pub fn unregister_removed(&self, repo: &AccountsRepo<'_>) -> usize {
-        let accounts: HashSet<String> = match repo.list() {
-            Ok(rows) => rows.into_iter().map(|account| account.id).collect(),
-            Err(err) => {
-                warn!(?err, "failed to list accounts; nothing unregistered");
-                return 0;
-            }
-        };
+        // The adapters first, the rows after: every registration commits its
+        // row before it inserts the adapter, so an adapter seen here has its
+        // row in the list below unless the row is really gone. The other
+        // order would take an account created in between for a deleted one.
         let mut registered: HashSet<String> = HashSet::new();
         registered.extend(
             self.external_cal
@@ -399,6 +396,13 @@ impl AdapterRegistry {
                 .keys()
                 .cloned(),
         );
+        let accounts: HashSet<String> = match repo.list() {
+            Ok(rows) => rows.into_iter().map(|account| account.id).collect(),
+            Err(err) => {
+                warn!(?err, "failed to list accounts; nothing unregistered");
+                return 0;
+            }
+        };
         let mut removed = 0usize;
         for id in registered.difference(&accounts) {
             self.unregister(id);
