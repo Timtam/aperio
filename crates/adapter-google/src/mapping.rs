@@ -1082,6 +1082,16 @@ fn reminder_to_override(r: &Reminder) -> Option<ReminderOverride> {
             method: "email".into(),
             minutes: minutes_before,
         }),
+        // Google counts every reminder from the start: one relative to the
+        // end is left out, like one after the start; the editors do not offer
+        // it on a Google calendar.
+        ReminderKind::RelativeToEnd { minutes_before } => {
+            warn!(
+                minutes_before_end = minutes_before,
+                "reminder relative to the end left out: Google counts only from the start"
+            );
+            None
+        }
         // Google supports neither an absolute reminder time nor an
         // "on app start" notion — both get dropped on write. The
         // user keeps these locally (Aperio's own scheduler picks

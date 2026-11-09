@@ -18,7 +18,8 @@
 //!   - CREATED     → Event.created_at (fallback: DTSTAMP, then now)
 //!   - LAST-MODIFIED → Event.updated_at (same fallback chain)
 //!   - VALARM       → Event.reminders (RFC 5545 §3.6.6, bidirectional):
-//!                    relative TRIGGER (-PT1H, -P1D, …) → Relative,
+//!                    relative TRIGGER (-PT1H, -P1D, -P1W, …) → Relative,
+//!                    TRIGGER;RELATED=END:-PT5M          → RelativeToEnd,
 //!                    absolute TRIGGER;VALUE=DATE-TIME    → Absolute,
 //!                    ACTION:EMAIL                       → Email,
 //!                    ACTION:DISPLAY / AUDIO             → Relative or Absolute;
@@ -526,8 +527,8 @@ fn action_is_read(action: &str) -> bool {
 ///
 /// A write that replaces an attendee's alarms has to decide, per alarm on the
 /// server, whether the user still wants it. It must decide it the way the
-/// user saw it: `ACTION:AUDIO` and `TRIGGER;RELATED=END` both reach the
-/// editor as plain reminders, so a stricter rule (such as
+/// user saw it: `ACTION:AUDIO` reaches the editor as a plain reminder, and
+/// `TRIGGER;RELATED=END` as one before the end, so a stricter rule (such as
 /// [`PriorAlarms::claim`]'s) would leave such an alarm in place *and* render
 /// a second one beside it — a reminder that multiplies on every save.
 ///
@@ -572,7 +573,8 @@ END:VCALENDAR\r\n",
 /// An alarm the read never showed ([`parse_valarms`]) is nobody's to move or
 /// remove here, so it goes back exactly as the server wrote it: Apple's silent
 /// `ACTION:NONE` alarm, an ACTION Aperio does not know, a trigger it cannot
-/// read (Apple's "1 week before", `-P1W`). The silent alarm matters most. The
+/// read (a duration in a shape the parser does not take). The silent alarm
+/// matters most. The
 /// iPhone adds the account's default alert to every appointment that lacks it,
 /// so dropping it — or rewriting it as an alarm that shows, which is what a
 /// save did before — gave an appointment made on the iPhone a second alert
@@ -766,15 +768,12 @@ fn prior_alarms_of(ev: &icalendar::Event) -> Vec<PriorAlarm> {
 /// something the server did not say:
 ///
 /// An alarm the read does not show never gets here: a trigger Aperio cannot
-/// read (Apple's "1 week before", `TRIGGER:-P1W`), an ACTION it does not know,
-/// Apple's silent alarm. Those go back as the server's text
-/// ([`hidden_alarms`]), so the set the PUT carries is never smaller than the
-/// server's for their sake.
+/// read, an ACTION it does not know, Apple's silent alarm. Those go back as
+/// the server's text ([`hidden_alarms`]), so the set the PUT carries is never
+/// smaller than the server's for their sake. `RELATED=END` is read since
+/// 2026-11-09 (a reminder before the end, `RelativeToEnd`), and written so
+/// too, so its trigger text is inherited like any other.
 ///
-/// * `RELATED=END` means "before the END", which Aperio reads as "before the
-///   start" and would keep writing as such. Inheriting the trigger text
-///   freezes a meaning the editor never showed; writing our own silently moves
-///   an alarm nobody touched. Neither is honest, so the alarm is left alone.
 /// * An ACTION we would not have written (AUDIO, where we build DISPLAY) is
 ///   not just a label: RFC 5545 §3.6.6 gives each action its own set of
 ///   allowed properties, and an AUDIO alarm carrying the DESCRIPTION we author
@@ -792,13 +791,6 @@ fn faithful_reminder(
     multi_properties: &[Property],
 ) -> Option<Reminder> {
     let trigger = alarm.properties().get("TRIGGER")?;
-    if trigger
-        .params()
-        .get("RELATED")
-        .is_some_and(|p| !p.value().eq_ignore_ascii_case("START"))
-    {
-        return None;
-    }
     let kind = resolve_trigger(trigger, action)?;
     if action != action_we_would_write(&kind) {
         return None;
@@ -828,6 +820,14 @@ fn action_we_would_write(kind: &ReminderKind) -> &'static str {
 /// to pick the right `ReminderKind`.
 fn resolve_trigger(trigger: &icalendar::Property, action: &str) -> Option<ReminderKind> {
     let raw = trigger.value();
+    // RFC 5545 §3.2.14: a relative trigger counts from the START unless it
+    // says END. Another value is no trigger Aperio can place.
+    let from_end = match trigger.params().get("RELATED").map(|p| p.value()) {
+        None => false,
+        Some(related) if related.eq_ignore_ascii_case("START") => false,
+        Some(related) if related.eq_ignore_ascii_case("END") => true,
+        Some(_) => return None,
+    };
     let is_absolute = trigger
         .params()
         .get("VALUE")
@@ -844,6 +844,14 @@ fn resolve_trigger(trigger: &icalendar::Property, action: &str) -> Option<Remind
     }
 
     let minutes_before = parse_iso_duration_to_minutes_before(raw)?;
+    if from_end {
+        // Aperio's e-mail reminder counts from the start; one from the end is
+        // not read, and goes back as the server wrote it.
+        if action == "EMAIL" {
+            return None;
+        }
+        return Some(ReminderKind::RelativeToEnd { minutes_before });
+    }
     if action == "EMAIL" {
         Some(ReminderKind::Email { minutes_before })
     } else {
@@ -885,8 +893,9 @@ pub fn override_recurrence_id(event_id: &str) -> Option<DateTime<Utc>> {
 /// the reference) becomes a negative `minutes_before`.
 ///
 /// We support the subset of RFC 5545 that real-world servers emit:
-/// optional sign, `P`, optional `<n>D`, optional `T<n>H<n>M<n>S`.
-/// Anything else returns `None` and the caller drops the alarm.
+/// optional sign, `P`, optional `<n>W` or `<n>D`, optional `T<n>H<n>M<n>S`
+/// (Apple writes "1 week before" as `-P1W`). Anything else returns `None` and
+/// the caller drops the alarm.
 fn parse_iso_duration_to_minutes_before(raw: &str) -> Option<i64> {
     let (sign, rest) = if let Some(r) = raw.strip_prefix('-') {
         (-1i64, r)
@@ -902,7 +911,10 @@ fn parse_iso_duration_to_minutes_before(raw: &str) -> Option<i64> {
     };
     let mut total_minutes: i64 = 0;
     if !days_part.is_empty() {
-        let days: i64 = days_part.strip_suffix('D')?.parse().ok()?;
+        let days: i64 = match days_part.strip_suffix('W') {
+            Some(weeks) => weeks.parse::<i64>().ok()? * 7,
+            None => days_part.strip_suffix('D')?.parse().ok()?,
+        };
         total_minutes += days * 1440;
     }
     let mut buf = String::new();
@@ -1506,6 +1518,17 @@ pub fn reminder_to_alarm(reminder: &Reminder, fallback_summary: &str) -> Option<
             // signed iCal duration (negative = before).
             let dur = chrono::Duration::minutes(-*minutes_before);
             Some(Alarm::display(&summary, Trigger::from(dur)).done())
+        }
+        ReminderKind::RelativeToEnd { minutes_before } => {
+            // `TRIGGER;RELATED=END:-PT5M` — five minutes before the end.
+            let dur = chrono::Duration::minutes(-*minutes_before);
+            Some(
+                Alarm::display(
+                    &summary,
+                    Trigger::Duration(dur, Some(icalendar::Related::End)),
+                )
+                .done(),
+            )
         }
         ReminderKind::Absolute { at } => Some(Alarm::display(&summary, Trigger::from(*at)).done()),
         ReminderKind::Email { minutes_before } => {
@@ -3347,26 +3370,26 @@ END:VCALENDAR\r
 
     #[test]
     fn an_alarm_aperio_cannot_read_goes_back_as_the_server_wrote_it() {
-        // Apple's default-alert menu offers "1 week before", and iCloud stores
-        // that as TRIGGER:-P1W — which this crate's duration parser cannot
-        // read. The reminder never reaches the editor. The rebuild used to
-        // drop the VALARM, so a title edit deleted an alert nobody could see.
-        // Now it goes back verbatim, mark and identity included, and the set
-        // the PUT carries is the server's: still the account's default.
-        let week = "BEGIN:VALARM\r
+        // A trigger this crate's duration parser cannot read (a month, which
+        // RFC 5545 durations do not have) never reaches the editor. The
+        // rebuild used to drop the VALARM, so a title edit deleted an alert
+        // nobody could see. Now it goes back verbatim, mark and identity
+        // included, and the set the PUT carries is the server's: still the
+        // account's default.
+        let month = "BEGIN:VALARM\r
 ACTION:DISPLAY\r
 DESCRIPTION:Event reminder\r
-TRIGGER:-P1W\r
-UID:alarm-week\r
+TRIGGER:-P1M\r
+UID:alarm-month\r
 X-APPLE-DEFAULT-ALARM:TRUE\r
 END:VALARM\r
 ";
-        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(week));
+        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(month));
         let event = event_with_reminders(vec![ReminderKind::Relative { minutes_before: 60 }]);
         let out = event_to_ical_preserving(&event, prior);
 
         assert!(
-            out.contains(week),
+            out.contains(month),
             "the unreadable alarm was not carried:\n{out}"
         );
         let (event_part, _) = out.split_once("BEGIN:VALARM").unwrap();
@@ -3375,6 +3398,66 @@ END:VALARM\r
             "nothing left the set, so it is still the account default:\n{out}"
         );
         assert_eq!(out.matches("X-APPLE-DEFAULT-ALARM").count(), 3, "{out}");
+    }
+
+    /// Apple's "1 week before" (`TRIGGER:-P1W`) reads as seven days before,
+    /// and an untouched one goes back as the server wrote it.
+    #[test]
+    fn apples_week_reads_as_seven_days_and_goes_back_untouched() {
+        let week = "BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Event reminder\r
+TRIGGER:-P1W\r
+UID:alarm-week\r
+END:VALARM\r
+";
+        let body = body_with_an_unreadable_alarm(week);
+        let read = parse_calendar_data(&body, "cal-1").unwrap().remove(0);
+        let kinds: Vec<_> = read.reminders.iter().map(|r| r.kind.clone()).collect();
+        assert!(
+            kinds.contains(&ReminderKind::Relative {
+                minutes_before: 7 * 24 * 60
+            }),
+            "{kinds:?}"
+        );
+        let out = event_to_ical_preserving(&read, PriorAlarms::read(&body));
+        // Claimed like any untouched alarm: its trigger and identity stay.
+        assert!(out.contains("TRIGGER:-P1W"), "{out}");
+        assert!(out.contains("UID:alarm-week"), "{out}");
+    }
+
+    /// `TRIGGER;RELATED=END` is a reminder before the END: read as one, and
+    /// written as one; an e-mail alarm from the end is not read.
+    #[test]
+    fn a_reminder_before_the_end_reads_and_writes_as_one() {
+        let end = "BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Event reminder\r
+TRIGGER;RELATED=END:-PT5M\r
+END:VALARM\r
+BEGIN:VALARM\r
+ACTION:EMAIL\r
+DESCRIPTION:Event reminder\r
+SUMMARY:Event reminder\r
+ATTENDEE:mailto:toni@example.org\r
+TRIGGER;RELATED=END:-PT10M\r
+END:VALARM\r
+";
+        let read = parse_calendar_data(&body_with_an_unreadable_alarm(end), "cal-1")
+            .unwrap()
+            .remove(0);
+        let kinds: Vec<_> = read.reminders.iter().map(|r| r.kind.clone()).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ReminderKind::RelativeToEnd { minutes_before: 5 },
+                ReminderKind::Relative { minutes_before: 60 },
+            ]
+        );
+
+        let event = event_with_reminders(vec![ReminderKind::RelativeToEnd { minutes_before: 10 }]);
+        let out = event_to_ical(&event);
+        assert!(out.contains("TRIGGER;RELATED=END:-PT600S"), "{out}");
     }
 
     /// Apple's silent alarm, exactly as the iPhone writes it.
@@ -3580,30 +3663,40 @@ END:VCALENDAR\r
     }
 
     #[test]
-    fn an_alarm_relative_to_the_end_is_left_alone() {
-        // RELATED=END means "before the END". Aperio reads it as "before the
-        // start" and shows it that way, so neither keeping the text nor
-        // writing our own is honest — the alarm is not ours to touch.
-        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(
-            "BEGIN:VALARM\r
+    fn an_untouched_alarm_relative_to_the_end_keeps_its_text_and_identity() {
+        // RELATED=END is read as a reminder before the END (since 2026-11-09),
+        // so an untouched one is claimed like any other: its trigger text and
+        // identity go back as the server wrote them, and the set is still the
+        // account's default.
+        let end = "BEGIN:VALARM\r
 ACTION:DISPLAY\r
 DESCRIPTION:Event reminder\r
 TRIGGER;RELATED=END:-PT15M\r
 UID:alarm-end\r
 END:VALARM\r
-",
-        ));
+";
+        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(end));
+        let event = event_with_reminders(vec![
+            ReminderKind::RelativeToEnd { minutes_before: 15 },
+            ReminderKind::Relative { minutes_before: 60 },
+        ]);
+        let out = event_to_ical_preserving(&event, prior);
+
+        assert!(out.contains("UID:alarm-end"), "{out}");
+        assert!(out.contains("TRIGGER;RELATED=END:-PT15M"), "{out}");
+        let (event_part, _) = out.split_once("BEGIN:VALARM").unwrap();
+        assert!(event_part.contains("X-APPLE-DEFAULT-ALARM:TRUE"), "{out}");
+
+        // Moved to before the START, it is another reminder: the server's
+        // alarm goes, identity and all.
+        let prior = PriorAlarms::read(&body_with_an_unreadable_alarm(end));
         let event = event_with_reminders(vec![
             ReminderKind::Relative { minutes_before: 15 },
             ReminderKind::Relative { minutes_before: 60 },
         ]);
         let out = event_to_ical_preserving(&event, prior);
-
-        assert!(
-            !out.contains("UID:alarm-end"),
-            "an alarm Aperio misreads must not have its identity carried over:\n{out}"
-        );
-        assert!(!out.contains("X-APPLE-DEFAULT-ALARM"), "{out}");
+        assert!(!out.contains("UID:alarm-end"), "{out}");
+        assert!(!out.contains("RELATED=END"), "{out}");
     }
 
     #[test]

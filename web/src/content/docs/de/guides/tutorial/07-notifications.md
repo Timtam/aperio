@@ -25,6 +25,14 @@ lernst, wie du auf sie reagierst.
      ankommt. Sie klingelt auch, wenn der Termin dann schon vorbei ist. Bei
      Aufgaben heißt sie **Nach Fälligkeit**; Aperio zeigt sie dort, bietet sie
      aber nicht neu an.
+   - **Vor dem Ende** und **Zum Ende** (nur bei Terminen): wie lange vor dem
+     Ende des Termins, mit **Anzahl** und **Einheit**, oder genau zu seinem
+     Ende. Wie „Nach Beginn“ gibt es sie nur, wo sie ankommen: in iCloud und
+     anderen CalDAV-Kalendern, Aperios eigenen Kalendern und für eine
+     Erinnerung **Nur in Aperio**. Google, Exchange und Outlook zählen jede
+     Erinnerung ab dem Beginn; hat eine Zeile dort trotzdem eine, sagt sie,
+     dass sie nicht ankommt. Bei einem ganztägigen Termin ist das Ende die
+     Mitternacht nach seinem letzten Tag.
    - **Zu festem Zeitpunkt**: an einem Datum zu einer Uhrzeit.
    - **Beim nächsten App-Start nach Fälligkeit**: Aperio meldet sich, wenn
      der Zeitpunkt verstrichen ist: am Desktop beim nächsten Start, am Handy
@@ -215,9 +223,10 @@ wird nicht zu einem Hinweis, den du scheinbar selbst gesetzt hast. Änderst du
 die Erinnerung hier, legst eine daneben oder nimmst sie weg, verschwindet die
 Markierung: Dann ist es deine Entscheidung.
 
-Einen Hinweis, den Aperio nicht lesen kann – Apples „1 Woche vorher" etwa –,
-zeigt Aperio nicht an, und beim Speichern geht er unverändert an den Server
-zurück. Einen, den die App anders schreiben müsste, überlässt sie ebenfalls dem
+Apples „1 Woche vorher“ erscheint als **Vor Beginn**, 7 Tage. Einen Hinweis,
+den Aperio nicht lesen kann – einen in einer Form, die kein Kalenderstandard
+kennt –, zeigt Aperio nicht an, und beim Speichern geht er unverändert an den
+Server zurück. Einen, den die App anders schreiben müsste, überlässt sie ebenfalls dem
 Server und verzichtet auf die Markierung, statt zu raten.
 
 ### Ganztägige Termine und Geburtstage

@@ -23,6 +23,13 @@ react to them.
      say from a copied event, says that it will not arrive. It rings even if
      the event is over by then. For tasks it is called **After due**; Aperio
      shows it there but does not offer it anew.
+   - **Before the end** and **At the end** (events only): how long before the
+     event ends, with **Amount** and **Unit**, or exactly when it ends. Like
+     "After start", they are only there where they arrive: in iCloud and other
+     CalDAV calendars, Aperio's own calendars, and for a reminder **Only in
+     Aperio**. Google, Exchange and Outlook count every reminder from the
+     start; a row there that has one anyway says that it will not arrive. On
+     an all-day event the end is midnight after its last day.
    - **At fixed time**: on a date at a time.
    - **On next app start after due**: Aperio tells you once the moment has
      passed: on the desktop the next time it starts, on the phone the next
@@ -199,7 +206,8 @@ so it stays Apple's default instead of turning into an alert you appear to
 have set by hand. Change the reminder here, add one beside it or take it away,
 and the mark goes: it is your choice then.
 
-An alert Aperio cannot read — Apple's "1 week before", say — does not show up
+Apple's "1 week before" shows as **Before start**, 7 days. An alert Aperio
+cannot read — one in a form no calendar standard defines — does not show up
 in Aperio, and a save hands it back to the server exactly as it was. One that
 this app would have to respell is left to the server too, and the mark is
 dropped rather than guessed.

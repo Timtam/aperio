@@ -335,6 +335,7 @@ export function CalendarsPanel() {
                 // every default stays in Aperio and rings there, so "after the
                 // start" arrives whatever its adapter keeps.
                 afterStartKept={(cal.reminder_capabilities?.after_start ?? false) || cal.read_only}
+                beforeEndKept={(cal.reminder_capabilities?.before_end ?? false) || cal.read_only}
                 placement={placementFor(cal)}
                 // "On next app start" is host-local by construction and could
                 // never ring as a calendar default — see the editor's prop.

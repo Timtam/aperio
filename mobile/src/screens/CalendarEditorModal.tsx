@@ -349,6 +349,10 @@ export default function CalendarEditorModal({
               (calendar?.reminder_capabilities?.after_start ?? false) ||
               (calendar?.read_only === true && accountKind !== ADAPTER_KIND_DEVICE_CALENDAR)
             }
+            beforeEndKept={
+              (calendar?.reminder_capabilities?.before_end ?? false) ||
+              (calendar?.read_only === true && accountKind !== ADAPTER_KIND_DEVICE_CALENDAR)
+            }
             value={defaultReminders.value}
             onChange={defaultReminders.save}
             placement={placementOffered}

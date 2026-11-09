@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   afterStartLabelKey,
   afterStartOffered,
+  beforeEndOffered,
   allDayKindFor,
   allDayKindOption,
   allDayReminderOf,
@@ -13,6 +14,7 @@ import {
   DEFAULT_ALL_DAY_CLOCK,
   DEFAULT_MINUTES_BEFORE,
   isAfterStart,
+  isFromEnd,
   minutesBeforeOfAllDay,
   RELATIVE_UNIT_MINUTES,
   reminderKindFor,
@@ -96,6 +98,13 @@ export interface RemindersEditorProps {
    */
   afterStartKept?: boolean;
   /**
+   * The calendar keeps a reminder counted from the end
+   * (`CalendarRow.reminder_capabilities.before_end`). Where it does not,
+   * "before the end" and "at the end" are offered only for a row that stays
+   * in Aperio, and a row that has one anyway says it will not arrive.
+   */
+  beforeEndKept?: boolean;
+  /**
    * Show the per-row "Applies" choice — only in Aperio, or attached to new
    * events. Only the calendar-defaults panel turns this on, and only for
    * calendars whose new appointments can carry reminders at all.
@@ -128,6 +137,7 @@ export function RemindersEditor({
   mode,
   allDay = false,
   afterStartKept = false,
+  beforeEndKept = false,
   placement = false,
   placementSurface = 'calendar',
   allowAppStart = true,
@@ -184,6 +194,7 @@ export function RemindersEditor({
                 mode={mode}
                 allDayRow={allDayRows}
                 afterStartKept={afterStartKept}
+                beforeEndKept={beforeEndKept}
                 position={i + 1}
                 placement={placement}
                 placementSurface={placementSurface}
@@ -214,6 +225,8 @@ interface ReminderRowProps {
   allDayRow: boolean;
   /** The calendar keeps "after the start" — see `RemindersEditorProps`. */
   afterStartKept: boolean;
+  /** The calendar keeps "before the end" — see `RemindersEditorProps`. */
+  beforeEndKept: boolean;
   /** 1-based index used in the row's aria-label. */
   position: number;
   /** Show the "Applies" choice. */
@@ -231,6 +244,7 @@ function ReminderRow({
   mode,
   allDayRow,
   afterStartKept,
+  beforeEndKept,
   position,
   placement,
   placementSurface,
@@ -241,11 +255,16 @@ function ReminderRow({
   // shows one it already has but is not offered a new one.
   const afterStart =
     mode === 'event' && afterStartOffered(value, { keptByCalendar: afterStartKept, placement });
+  // The same for counting from the end; a task has no end.
+  const fromEnd =
+    mode === 'event' && beforeEndOffered(value, { keptByCalendar: beforeEndKept, placement });
   // A row that has it where it does not arrive says so, next to the kind.
-  const notKept = mode === 'event' && isAfterStart(value.kind) && !afterStart;
-  const notKeptText = `${t('reminders.afterStartNotKept')}${
-    placement ? ` ${t('reminders.afterStartKeptInAperio')}` : ''
-  }`;
+  const afterStartNotKept = mode === 'event' && isAfterStart(value.kind) && !afterStart;
+  const fromEndNotKept = isFromEnd(value.kind) && !fromEnd;
+  const notKept = afterStartNotKept || fromEndNotKept;
+  const notKeptText = `${t(
+    fromEndNotKept ? 'reminders.fromEndNotKept' : 'reminders.afterStartNotKept',
+  )}${placement ? ` ${t('reminders.afterStartKeptInAperio')}` : ''}`;
   const hintId = useId();
   // NVDA in focus mode never stops on a static paragraph inside the dialog's
   // role=application: the hint describes the row's selects, and is said once
@@ -279,6 +298,7 @@ function ReminderRow({
           onChange={onChange}
           mode={mode}
           afterStart={afterStart}
+          fromEnd={fromEnd}
           allowAppStart={allowAppStart}
           describedBy={describedBy}
         />
@@ -314,6 +334,7 @@ function ReminderRow({
           app_start (host-local catch-up) and email (adapter-delivered),
           where a per-reminder local sound doesn't apply. */}
       {(value.kind.type === 'relative' ||
+        value.kind.type === 'relative_to_end' ||
         value.kind.type === 'absolute') && (
         <SoundPicker
           value={value.sound}
@@ -363,6 +384,8 @@ interface KindFieldsProps {
   onChange: (next: EditableReminder) => void;
   /** "After the start" may be chosen for this row. */
   afterStart: boolean;
+  /** "Before the end" and "at the end" may be chosen for this row. */
+  fromEnd?: boolean;
   allowAppStart: boolean;
   /** The id of the row's "will not arrive" hint, while it shows. */
   describedBy?: string;
@@ -375,6 +398,7 @@ function TimedKindFields({
   onChange,
   mode,
   afterStart,
+  fromEnd = false,
   allowAppStart,
   describedBy,
 }: KindFieldsProps & { mode: 'event' | 'task' }) {
@@ -384,6 +408,11 @@ function TimedKindFields({
   // withdrawn must still read as what it is, and stay changeable.
   const showAppStart = allowAppStart || option === 'app_start';
   const showAfterStart = afterStart || option === 'after_start';
+  const showBeforeEnd = fromEnd || option === 'before_end';
+  const showAtEnd = fromEnd || option === 'at_end';
+  // "After the end" is not offered; a row from a calendar that has one shows
+  // it as what it is.
+  const showAfterEnd = option === 'after_end';
 
   const setKind = (next: ReminderKindOption) => {
     if (next === option) return;
@@ -391,6 +420,8 @@ function TimedKindFields({
   };
   const setMinutes = (minutes_before: number) =>
     onChange({ ...value, kind: { type: 'relative', minutes_before } });
+  const setMinutesFromEnd = (minutes_before: number) =>
+    onChange({ ...value, kind: { type: 'relative_to_end', minutes_before } });
 
   return (
     <>
@@ -412,6 +443,13 @@ function TimedKindFields({
           {showAfterStart && (
             <option value="after_start">{t(afterStartLabelKey(mode))}</option>
           )}
+          {showBeforeEnd && (
+            <option value="before_end">{t('reminders.kind.beforeEnd')}</option>
+          )}
+          {showAtEnd && <option value="at_end">{t('reminders.kind.atEnd')}</option>}
+          {showAfterEnd && (
+            <option value="after_end">{t('reminders.kind.afterEnd')}</option>
+          )}
           <option value="absolute">{t('reminders.kind.absolute')}</option>
           {showAppStart && (
             <option value="app_start">{t('reminders.kind.appStart')}</option>
@@ -426,6 +464,15 @@ function TimedKindFields({
         <RelativeFields
           minutes={-value.kind.minutes_before}
           onChange={(minutes) => setMinutes(-minutes)}
+        />
+      )}
+      {option === 'before_end' && value.kind.type === 'relative_to_end' && (
+        <RelativeFields minutes={value.kind.minutes_before} onChange={setMinutesFromEnd} />
+      )}
+      {option === 'after_end' && value.kind.type === 'relative_to_end' && (
+        <RelativeFields
+          minutes={-value.kind.minutes_before}
+          onChange={(minutes) => setMinutesFromEnd(-minutes)}
         />
       )}
     </>
@@ -447,6 +494,12 @@ function AllDayKindFields({
   const option = allDayKindOption(value.kind);
   const showAppStart = allowAppStart || option === 'app_start';
   const showDaysAfter = afterStart || option === 'days_after';
+  // Counting from the end is not offered on an all-day appointment; one it
+  // has shows as what it is.
+  const fromEndOption =
+    option === 'before_end' || option === 'at_end' || option === 'after_end';
+  const setMinutesFromEnd = (minutes_before: number) =>
+    onChange({ ...value, kind: { type: 'relative_to_end', minutes_before } });
 
   const setKind = (next: AllDayKindOption) => {
     if (next === option) return;
@@ -467,6 +520,17 @@ function AllDayKindFields({
           {showDaysAfter && (
             <option value="days_after">{t('reminders.kind.daysAfter')}</option>
           )}
+          {fromEndOption && (
+            <option value={option}>
+              {t(
+                option === 'at_end'
+                  ? 'reminders.kind.atEnd'
+                  : option === 'after_end'
+                    ? 'reminders.kind.afterEnd'
+                    : 'reminders.kind.beforeEnd',
+              )}
+            </option>
+          )}
           <option value="absolute">{t('reminders.kind.absolute')}</option>
           {showAppStart && (
             <option value="app_start">{t('reminders.kind.appStart')}</option>
@@ -474,6 +538,15 @@ function AllDayKindFields({
         </select>
       </label>
 
+      {option === 'before_end' && value.kind.type === 'relative_to_end' && (
+        <RelativeFields minutes={value.kind.minutes_before} onChange={setMinutesFromEnd} />
+      )}
+      {option === 'after_end' && value.kind.type === 'relative_to_end' && (
+        <RelativeFields
+          minutes={-value.kind.minutes_before}
+          onChange={(minutes) => setMinutesFromEnd(-minutes)}
+        />
+      )}
       {value.kind.type === 'relative' && (
         <AllDayFields
           // A new kind starts its fields afresh (the day-start time).

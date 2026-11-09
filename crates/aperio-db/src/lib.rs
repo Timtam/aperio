@@ -16,7 +16,7 @@ use thiserror::Error;
 
 /// The schema version the current code expects. [`run`] applies every
 /// migration up to and including this one.
-pub const CURRENT_SCHEMA_VERSION: u32 = 51;
+pub const CURRENT_SCHEMA_VERSION: u32 = 52;
 
 #[derive(Debug, Error)]
 pub enum MigrationError {
@@ -236,6 +236,10 @@ const MIGRATIONS: &[Migration] = &[
         target: 51,
         sql: include_str!("sql/0051_app_start_rung.sql"),
     },
+    Migration {
+        target: 52,
+        sql: include_str!("sql/0052_alarm_end_week_rewarm.sql"),
+    },
 ];
 
 /// Bring `conn` up to [`CURRENT_SCHEMA_VERSION`] by applying every
@@ -327,6 +331,41 @@ mod tests {
         )
         .unwrap();
         conn.execute_batch(include_str!("sql/0050_alarm_read_rewarm.sql"))
+            .unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).unwrap() };
+        assert_eq!(count("SELECT COUNT(*) FROM cache_events"), 0);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM cache_sync_state WHERE scope = 'events'"),
+            0
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM cache_sync_state WHERE scope = 'contacts'"),
+            1
+        );
+    }
+
+    /// Migration 0052 does the same after the next read change (alarms from
+    /// the end, weeks): the cached events and their sync state go, every
+    /// other cache stays.
+    #[test]
+    fn migration_0052_re_fetches_the_cached_events_only() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        let tx = conn.transaction().unwrap();
+        for migration in MIGRATIONS.iter().filter(|m| m.target < 52) {
+            tx.execute_batch(migration.sql).unwrap();
+        }
+        tx.commit().unwrap();
+        conn.execute_batch(
+            "INSERT INTO accounts (id, adapter_kind, display_name, created_at, updated_at)
+               VALUES ('acc', 'caldav', 'iCloud', '2026-11-09', '2026-11-09');
+             INSERT INTO cache_events (account_id, calendar_id, id, start_utc, end_utc, payload, cached_at)
+               VALUES ('acc', 'cal', 'e1', '2026-12-14T09:00:00Z', '2026-12-14T10:00:00Z', '{}', '2026-11-09');
+             INSERT INTO cache_sync_state (account_id, scope, container_id, sync_token)
+               VALUES ('acc', 'events', 'cal', 'token-1'), ('acc', 'contacts', 'book', 'token-2');",
+        )
+        .unwrap();
+        conn.execute_batch(include_str!("sql/0052_alarm_end_week_rewarm.sql"))
             .unwrap();
         let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).unwrap() };
         assert_eq!(count("SELECT COUNT(*) FROM cache_events"), 0);

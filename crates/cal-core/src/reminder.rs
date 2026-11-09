@@ -26,6 +26,15 @@ pub enum ReminderKind {
         #[cfg_attr(feature = "ts-export", ts(as = "i32"))]
         minutes_before: i64,
     },
+    /// Relative to the END of an event ("5 minutes before the end"; RFC 5545
+    /// `TRIGGER;RELATED=END`). `minutes_before` may be negative to fire after
+    /// the end. Only CalDAV and Aperio's own store keep it
+    /// (`ReminderCapabilities::before_end`); a task has no end, and the
+    /// planner does not ring it on one.
+    RelativeToEnd {
+        #[cfg_attr(feature = "ts-export", ts(as = "i32"))]
+        minutes_before: i64,
+    },
     /// Fixed point in time, independent of the event.
     Absolute { at: DateTime<Utc> },
     /// Fires on the next app start after the due time.

@@ -289,6 +289,9 @@
       "onTheDay": "On the day",
       "afterStart": "After start",
       "afterDue": "After due",
+      "beforeEnd": "Before the end",
+      "atEnd": "At the end",
+      "afterEnd": "After the end",
       "daysBefore": "Days before",
       "daysAfter": "Days after",
       "absolute": "At fixed time",
@@ -301,6 +304,7 @@
     "clockLabel": "Own time",
     "afterStartNotKept": "This calendar keeps no reminder after the start, so it will not arrive there.",
     "afterStartKeptInAperio": "With “Only in Aperio” it is kept.",
+    "fromEndNotKept": "This calendar counts reminders only from the start, so one from the end will not arrive there.",
     "time": {
       "dayStart": "At the day-start time",
       "clock": "At a time of its own"

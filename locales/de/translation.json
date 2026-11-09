@@ -289,6 +289,9 @@
       "onTheDay": "Am Tag selbst",
       "afterStart": "Nach Beginn",
       "afterDue": "Nach Fälligkeit",
+      "beforeEnd": "Vor dem Ende",
+      "atEnd": "Zum Ende",
+      "afterEnd": "Nach dem Ende",
       "daysBefore": "Tage vorher",
       "daysAfter": "Tage danach",
       "absolute": "Zu festem Zeitpunkt",
@@ -301,6 +304,7 @@
     "clockLabel": "Eigene Uhrzeit",
     "afterStartNotKept": "Dieser Kalender speichert keine Erinnerung nach Beginn, sie kommt dort nicht an.",
     "afterStartKeptInAperio": "Mit „Nur in Aperio“ bleibt sie erhalten.",
+    "fromEndNotKept": "Dieser Kalender zählt Erinnerungen nur ab dem Beginn, eine ab dem Ende kommt dort nicht an.",
     "time": {
       "dayStart": "Zur Tagesstart-Uhrzeit",
       "clock": "Zu einer eigenen Uhrzeit"
