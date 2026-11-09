@@ -395,10 +395,15 @@ jobs:
           APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
           APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
           APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+        # `aperio/custom-protocol` makes it a production build: Tauri embeds
+        # dist/ only with this feature, which `tauri build` switches on by
+        # itself and a plain `cargo build` does not. Without it the binary was a
+        # development build — the window loaded `devUrl`, which nothing serves
+        # on a user's Mac, and showed nothing (TODO B8).
         run: |
-          cargo build --workspace --release --target x86_64-apple-darwin
+          cargo build --workspace --release --target x86_64-apple-darwin --features aperio/custom-protocol
           cargo xtask stage-plugins --release --target x86_64-apple-darwin
-          cargo build --workspace --release --target aarch64-apple-darwin
+          cargo build --workspace --release --target aarch64-apple-darwin --features aperio/custom-protocol
           cargo xtask stage-plugins --release --target aarch64-apple-darwin
 
       # Both arches, each against what the workspace declares. The lipo step

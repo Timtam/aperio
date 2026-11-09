@@ -13,6 +13,16 @@ default-run = "aperio"
 name = "aperio"
 path = "src/main.rs"
 
+[features]
+# A production build: the frontend (`dist/`) is embedded in the binary and
+# served from it, under the CSP in tauri.conf.json. Without it Tauri builds in
+# development mode and the window loads `devUrl`, which nothing serves on a
+# user's machine: an empty window. `tauri build` switches `tauri/custom-protocol`
+# on by itself; a plain `cargo build` of a shipped binary must name this feature
+# (the macOS universal job in .github/workflows/build-artifacts.yml).
+# `cargo xtask ui-embedded` proves a binary has it.
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
