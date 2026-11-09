@@ -221,7 +221,11 @@ export default function ContactsSettingsScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: busySync || status?.in_flight === true }}
-          accessibilityLabel={t('dialogs.settings.contacts.syncNow')}
+          accessibilityLabel={
+            busySync || status?.in_flight === true
+              ? t('dialogs.settings.contacts.syncing')
+              : t('dialogs.settings.contacts.syncNow')
+          }
           disabled={busySync || status?.in_flight === true}
           onPress={() => void onSyncNow()}
           style={({ pressed }) => [
@@ -231,7 +235,7 @@ export default function ContactsSettingsScreen() {
           ]}
         >
           <Text style={styles.primaryButtonText} importantForAccessibility="no">
-            {busySync
+            {busySync || status?.in_flight === true
               ? t('dialogs.settings.contacts.syncing')
               : t('dialogs.settings.contacts.syncNow')}
           </Text>

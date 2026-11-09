@@ -463,9 +463,7 @@ pub async fn set_contact_photo(
 
 /// Run a contact sync pass on demand — used by the "Refresh"
 /// button in the contacts view and the equivalent action in
-/// Settings → Kontakte. Returns `true` when the pass actually
-/// ran, `false` when another pass was already in flight and this
-/// invocation was deduped.
+/// Settings → Kontakte.
 ///
 /// `include_read_only`: explicit per-call override of the
 /// read-only-directory toggle. `Some(true)` always pulls the

@@ -199,6 +199,8 @@ export interface ContactsSyncedPayload {
   last_synced_at: string;
   succeeded_accounts: string[];
   failed_accounts: string[];
+  /** Another pass, which reads the contacts too, starts at once. */
+  in_flight: boolean;
 }
 
 /** "Sync now": a contacts-only pass (warms every external book's cache).

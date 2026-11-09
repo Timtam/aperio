@@ -105,6 +105,10 @@ pub struct CacheRefresher {
     /// `CacheStore::mark_failure`). Single-flight makes this stable for a
     /// pass's duration; the concurrent per-read SWR path never touches it.
     pass_forcing: Arc<Mutex<Forcing>>,
+    /// The accounts the CURRENT pass runs forced for in its contact reads
+    /// alone: "Sync contacts now" asks for the address books, so a calendar
+    /// that a follow-up merged with it reads is not forced by it.
+    pass_contacts_forcing: Arc<Mutex<Forcing>>,
     /// The (account, listing family) pairs a busy provider turned away in the
     /// CURRENT pass (decision 271): the pass asks none of that family's
     /// remaining containers, and records nothing for them. Reset as each pass
@@ -119,7 +123,7 @@ pub struct CacheRefresher {
     /// `Some(forcing)` runs once more when the running pass ends. Bounded to
     /// one: any number of requests during a pass collapse into a single
     /// follow-up, forced for every account any of them forced.
-    follow_up: Arc<Mutex<Option<(Forcing, PassScope)>>>,
+    follow_up: Arc<Mutex<Option<PassRequest>>>,
     /// What the running pass reads. Set under `in_flight`'s lock whenever a
     /// pass is about to start, so a request that finds a pass running can
     /// tell whether that pass stands in for it ([`PassScope::covers`]).
@@ -226,6 +230,53 @@ impl PassScope {
         (!self.only_contacts || wanted.only_contacts)
             && (self.read_only_directories || !wanted.read_only_directories)
     }
+
+    /// What of `wanted` a running pass of this scope leaves out, or `None`
+    /// when it reads it all. A pass that reads the calendars can only miss
+    /// the directories, and a contacts-only pass with them makes up for
+    /// that; a contacts-only pass misses whatever else `wanted` asks for.
+    pub fn remainder(self, wanted: Self) -> Option<Self> {
+        if self.covers(wanted) {
+            None
+        } else if self.only_contacts {
+            Some(wanted)
+        } else {
+            Some(Self {
+                only_contacts: true,
+                read_only_directories: true,
+            })
+        }
+    }
+}
+
+/// One asked-for pass: what it reads, and whose failures it shows at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PassRequest {
+    scope: PassScope,
+    /// Forced in every read ([`Forcing`]).
+    forcing: Forcing,
+    /// Forced in the contact reads alone ("Sync contacts now").
+    contacts_forcing: Forcing,
+}
+
+impl PassRequest {
+    fn new(forcing: Forcing, scope: PassScope) -> Self {
+        Self {
+            scope,
+            forcing,
+            contacts_forcing: Forcing::None,
+        }
+    }
+
+    /// Two requests collapsed into one pass: it reads what either asked for,
+    /// forced where either was.
+    fn merge(self, other: Self) -> Self {
+        Self {
+            scope: self.scope.merge(other.scope),
+            forcing: self.forcing.merge(other.forcing),
+            contacts_forcing: self.contacts_forcing.merge(other.contacts_forcing),
+        }
+    }
 }
 
 /// A host's contacts-sync status holder and its done-signal sink.
@@ -292,6 +343,7 @@ impl CacheRefresher {
             reschedule: Arc::new(Notify::new()),
             in_flight: Arc::new(Mutex::new(false)),
             pass_forcing: Arc::new(Mutex::new(Forcing::None)),
+            pass_contacts_forcing: Arc::new(Mutex::new(Forcing::None)),
             busy_families: Arc::new(Mutex::new(std::collections::HashSet::new())),
             pass_succeeded: Arc::new(AtomicBool::new(false)),
             follow_up: Arc::new(Mutex::new(None)),
@@ -330,8 +382,11 @@ impl CacheRefresher {
             // cannot force an unrelated later pass. Automatic wakes
             // (`trigger_background`, the cache-generation reset at launch)
             // never set it.
+            // Queued, like every wake below: a pass another caller runs
+            // ("sync contacts now" on the command's task) must not swallow
+            // it.
             let forcing = worker.take_trigger();
-            worker.warm_all(forcing).await;
+            worker.warm_all_queued(forcing).await;
 
             loop {
                 match worker.next_wake().await {
@@ -349,9 +404,12 @@ impl CacheRefresher {
                         // CONSUME the latch: a collapsed forced+background
                         // pair resolves as forced, and the flag can't leak
                         // into the next automatic wake.
+                        // Queued: a trigger means the data changed after a
+                        // running pass may have read past it — that pass,
+                        // run by another caller, never stands in for it.
                         let forcing = worker.take_trigger();
                         debug!(target: "aperio::cache", ?forcing, "cache warm trigger");
-                        worker.warm_all(forcing).await;
+                        worker.warm_all_queued(forcing).await;
                     }
                 }
             }
@@ -446,20 +504,26 @@ impl CacheRefresher {
     /// instead of waiting for a confirming second attempt; every other
     /// account counts as an automatic round (see `CacheStore::mark_failure`).
     pub async fn warm_all(self: &Arc<Self>, forcing: impl Into<Forcing>) {
-        self.warm_scoped(forcing.into(), PassScope::FULL).await;
+        self.warm_scoped(PassRequest::new(forcing.into(), PassScope::FULL))
+            .await;
     }
 
     /// A pass on the refresh interval's schedule (the desktop's tick, the
     /// phone's timer and return to the foreground): everything but the
     /// read-only directories, unless the user asked for those too.
     pub async fn warm_periodic(self: &Arc<Self>) {
-        self.warm_scoped(Forcing::None, self.periodic_scope()).await;
+        self.warm_scoped(PassRequest::new(Forcing::None, self.periodic_scope()))
+            .await;
     }
 
     /// [`Self::warm_periodic`] for the phone's OS background round, which
     /// must not be lost (see [`Self::warm_all_queued`]).
     pub async fn warm_periodic_queued(self: &Arc<Self>) {
-        self.queued(Forcing::None, self.periodic_scope()).await;
+        self.queued(
+            PassRequest::new(Forcing::None, self.periodic_scope()),
+            false,
+        )
+        .await;
     }
 
     fn periodic_scope(&self) -> PassScope {
@@ -470,46 +534,54 @@ impl CacheRefresher {
     }
 
     /// "Sync contacts now": the contact lists alone, the read-only
-    /// directories with them when `include_read_only` says so. Forced, as a
-    /// user action is, and queued behind a running pass, never dropped — the
-    /// user pressed a button. `true` when the pass ran within this call,
-    /// `false` when it waits behind the running one; its `contacts-synced`
-    /// follows either way.
+    /// directories with them when `include_read_only` says so. Forced in its
+    /// contact reads, as a user action is, and queued behind a running pass,
+    /// never dropped — the user pressed a button. `true` when its pass ran
+    /// within this call, `false` when it waits behind the running one; its
+    /// `contacts-synced` follows either way. A pass others queued meanwhile
+    /// runs on afterwards without holding up the caller.
     pub async fn warm_contacts(self: &Arc<Self>, include_read_only: bool) -> bool {
-        let scope = PassScope {
-            only_contacts: true,
-            read_only_directories: include_read_only,
+        let request = PassRequest {
+            scope: PassScope {
+                only_contacts: true,
+                read_only_directories: include_read_only,
+            },
+            forcing: Forcing::None,
+            contacts_forcing: Forcing::All,
         };
-        self.queued(Forcing::All, scope).await
+        self.queued(request, true).await
     }
 
     /// Single-flight: a request that lands while a pass is still running
-    /// bails when that pass reads everything it asks for; otherwise (the
-    /// running one reads only contacts, or leaves out the directories) the
-    /// rest follows it as the queued pass.
-    async fn warm_scoped(self: &Arc<Self>, forcing: Forcing, scope: PassScope) {
+    /// bails when that pass reads everything it asks for; otherwise only
+    /// what the running one leaves out ([`PassScope::remainder`]: the
+    /// directories, or all but the contacts) follows it as the queued pass.
+    async fn warm_scoped(self: &Arc<Self>, request: PassRequest) {
         {
             let mut guard = self.in_flight.lock().expect("cache refresher poisoned");
             if *guard {
                 let running = *self.running_scope.lock().expect("cache refresher poisoned");
-                if !running.covers(scope) {
-                    self.queue_follow_up(forcing, scope);
+                if let Some(rest) = running.remainder(request.scope) {
+                    self.queue_follow_up(PassRequest {
+                        scope: rest,
+                        ..request
+                    });
                 }
                 return;
             }
             *guard = true;
-            *self.running_scope.lock().expect("cache refresher poisoned") = scope;
+            *self.running_scope.lock().expect("cache refresher poisoned") = request.scope;
         }
-        self.run_passes(forcing, scope).await;
+        self.run_passes(request, false).await;
     }
 
     /// Record a pass to run once the running one ends, merged into one
     /// already waiting. The caller holds `in_flight`'s lock.
-    fn queue_follow_up(&self, forcing: Forcing, scope: PassScope) {
+    fn queue_follow_up(&self, request: PassRequest) {
         let mut follow_up = self.follow_up.lock().expect("cache refresher poisoned");
         *follow_up = Some(match follow_up.take() {
-            Some((f, sc)) => (f.merge(forcing), sc.merge(scope)),
-            None => (forcing, scope),
+            Some(waiting) => waiting.merge(request),
+            None => request,
         });
     }
 
@@ -533,34 +605,39 @@ impl CacheRefresher {
     /// that landed during the launch pass simply never happened. Here the
     /// request waits, and the running pass runs once more when it ends.
     pub async fn warm_all_queued(self: &Arc<Self>, forcing: impl Into<Forcing>) {
-        self.queued(forcing.into(), PassScope::FULL).await;
+        self.queued(PassRequest::new(forcing.into(), PassScope::FULL), false)
+            .await;
     }
 
-    /// [`Self::warm_all_queued`] for any scope: queued requests collapse
+    /// [`Self::warm_all_queued`] for any request: queued requests collapse
     /// into one follow-up that reads what any of them asked for. `true` when
     /// the pass ran within this call, `false` when it was queued.
-    async fn queued(self: &Arc<Self>, forcing: Forcing, scope: PassScope) -> bool {
+    /// `hand_off`: the passes queued during this one run on a task of their
+    /// own instead of within the call.
+    async fn queued(self: &Arc<Self>, request: PassRequest, hand_off: bool) -> bool {
         {
             let mut guard = self.in_flight.lock().expect("cache refresher poisoned");
             if *guard {
-                self.queue_follow_up(forcing, scope);
+                self.queue_follow_up(request);
                 return false;
             }
             *guard = true;
-            *self.running_scope.lock().expect("cache refresher poisoned") = scope;
+            *self.running_scope.lock().expect("cache refresher poisoned") = request.scope;
         }
-        self.run_passes(forcing, scope).await;
+        self.run_passes(request, hand_off).await;
         true
     }
 
     /// Run passes while one is queued behind the current one. `in_flight`
     /// stays set across them, and the indicator hears "finished" once.
-    async fn run_passes(self: &Arc<Self>, mut forcing: Forcing, mut scope: PassScope) {
+    /// `hand_off`: after the first pass, the queued ones run on a task of
+    /// their own (see [`Self::spawn_passes`]) and this call returns.
+    async fn run_passes(self: &Arc<Self>, mut request: PassRequest, hand_off: bool) {
         loop {
-            let total = self.pass(forcing, scope).await;
+            let (total, contacts) = self.pass(&request).await;
             // Before the lock below: a read here must not widen the gap
             // between clearing `in_flight` and saying "finished".
-            let outcome = self.pass_outcome(scope);
+            let outcome = self.pass_outcome(request.scope);
             // Under the same lock that queues a follow-up, so a request is
             // either taken here or finds the flag cleared and runs itself.
             let next = {
@@ -571,18 +648,28 @@ impl CacheRefresher {
                     .expect("cache refresher poisoned")
                     .take();
                 match &next {
-                    Some((_, next_scope)) => {
-                        *self.running_scope.lock().expect("cache refresher poisoned") = *next_scope;
+                    Some(queued) => {
+                        *self.running_scope.lock().expect("cache refresher poisoned") =
+                            queued.scope;
                     }
                     None => *in_flight = false,
                 }
                 next
             };
+            // The contacts sync is this pass: say so where its status lives
+            // — still running when the next pass, which reads them too,
+            // follows at once.
+            if let Some((core, observer)) = contacts {
+                self.report_contacts(&core, &*observer, next.is_some());
+            }
             match next {
-                Some((queued, queued_scope)) => {
-                    debug!(target: "aperio::cache", forcing = ?queued, scope = ?queued_scope, "a queued cache warm pass follows");
-                    forcing = queued;
-                    scope = queued_scope;
+                Some(queued) => {
+                    debug!(target: "aperio::cache", request = ?queued, "a queued cache warm pass follows");
+                    if hand_off {
+                        self.spawn_passes(queued);
+                        return;
+                    }
+                    request = queued;
                 }
                 None => {
                     // A contacts-only pass leaves "last updated" as it was.
@@ -595,8 +682,41 @@ impl CacheRefresher {
         }
     }
 
-    /// One pass; the caller holds `in_flight`.
-    async fn pass(self: &Arc<Self>, forcing: Forcing, scope: PassScope) -> u32 {
+    /// Run `request` and whatever queues behind it on a task of its own;
+    /// `in_flight` stays set across the hand-over.
+    fn spawn_passes(self: &Arc<Self>, request: PassRequest) {
+        let me = Arc::clone(self);
+        tokio::spawn(async move { me.run_passes(request, false).await });
+    }
+
+    /// Persist "last synced" and send `contacts-synced` with the accounts
+    /// this pass read; `more_follows`: the next pass, which reads the
+    /// contacts too, starts at once.
+    fn report_contacts(
+        &self,
+        core: &ContactSyncCore,
+        observer: &dyn ContactSyncObserver,
+        more_follows: bool,
+    ) {
+        let accounts = std::mem::take(
+            &mut *self
+                .contact_accounts
+                .lock()
+                .expect("cache refresher poisoned"),
+        );
+        let (succeeded, failed): (Vec<_>, Vec<_>) = accounts.into_iter().partition(|(_, ok)| *ok);
+        core.finish_pass(
+            succeeded.into_iter().map(|(id, _)| id).collect(),
+            failed.into_iter().map(|(id, _)| id).collect(),
+            more_follows,
+            observer,
+        );
+    }
+
+    /// One pass; the caller holds `in_flight`. Returns the number of
+    /// containers it read and, when installed, where its contacts report.
+    async fn pass(self: &Arc<Self>, request: &PassRequest) -> (u32, Option<ContactSync>) {
+        let scope = request.scope;
         self.contact_accounts
             .lock()
             .expect("cache refresher poisoned")
@@ -614,7 +734,11 @@ impl CacheRefresher {
         // path records its own failures through `mark_failure` with
         // `Attempt::Read`, where a busy answer does not count and pauses the
         // container (`busy_paused`).
-        *self.pass_forcing.lock().expect("cache refresher poisoned") = forcing;
+        *self.pass_forcing.lock().expect("cache refresher poisoned") = request.forcing.clone();
+        *self
+            .pass_contacts_forcing
+            .lock()
+            .expect("cache refresher poisoned") = request.contacts_forcing.clone();
         self.pass_succeeded.store(false, Ordering::Relaxed);
         self.busy_families
             .lock()
@@ -684,23 +808,7 @@ impl CacheRefresher {
             let repo = UserPrefsRepo::new(&self.db);
             let _ = repo.set(PREF_CACHE_LAST_REFRESHED_AT, &completed.to_rfc3339());
         }
-        // The contacts sync is this pass: say so where its status lives.
-        if let Some((core, observer)) = contact_sync {
-            let accounts = std::mem::take(
-                &mut *self
-                    .contact_accounts
-                    .lock()
-                    .expect("cache refresher poisoned"),
-            );
-            let (succeeded, failed): (Vec<_>, Vec<_>) =
-                accounts.into_iter().partition(|(_, ok)| *ok);
-            core.finish_pass(
-                succeeded.into_iter().map(|(id, _)| id).collect(),
-                failed.into_iter().map(|(id, _)| id).collect(),
-                &*observer,
-            );
-        }
-        total
+        (total, contact_sync)
     }
 
     async fn enumerate_calendars(&self, out: &mut Vec<RefreshTarget>) {
@@ -1009,11 +1117,18 @@ impl CacheRefresher {
         err: &cal_core::Error,
         generation: u64,
     ) {
+        let contacts_read = matches!(scope, SyncScope::ContactLists | SyncScope::Contacts);
         let forced = self
             .pass_forcing
             .lock()
             .expect("cache refresher poisoned")
-            .covers(account);
+            .covers(account)
+            || (contacts_read
+                && self
+                    .pass_contacts_forcing
+                    .lock()
+                    .expect("cache refresher poisoned")
+                    .covers(account));
         let attempt = if forced {
             Attempt::Forced { generation }
         } else {
@@ -2138,6 +2253,26 @@ mod tests {
             !contacts(true).covers(periodic),
             "the calendars were not read"
         );
+        // What a running pass leaves out is all that follows it.
+        assert_eq!(PassScope::FULL.remainder(periodic), None);
+        assert_eq!(periodic.remainder(PassScope::FULL), Some(contacts(true)));
+        assert_eq!(periodic.remainder(contacts(true)), Some(contacts(true)));
+        assert_eq!(contacts(false).remainder(periodic), Some(periodic));
+        assert_eq!(
+            contacts(false).remainder(contacts(true)),
+            Some(contacts(true))
+        );
+    }
+
+    /// Wait until the refresher's passes, handed-off ones included, ended.
+    async fn settled(refresher: &CacheRefresher) {
+        tokio::time::timeout(StdDuration::from_secs(5), async {
+            while refresher.status().refreshing {
+                tokio::time::sleep(StdDuration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the passes end");
     }
 
     /// A pass on the interval's schedule reads the read-only directory only
@@ -2224,6 +2359,7 @@ mod tests {
         set_up.refresher.warm_periodic().await;
         set_up.book.release.notify_one();
         assert!(running.await.unwrap());
+        settled(&set_up.refresher).await;
         assert_eq!(
             set_up.calendars.listings.load(Ordering::SeqCst),
             1,
@@ -2254,5 +2390,144 @@ mod tests {
         assert_eq!(set_up.calendars.listings.load(Ordering::SeqCst), 1);
         assert_eq!(set_up.synced.0.lock().unwrap().len(), 2);
         assert!(!set_up.contacts.status().in_flight);
+    }
+
+    /// A full request during a pass on the interval's schedule adds only
+    /// what that pass leaves out — the directories — not a second pass over
+    /// every calendar.
+    #[tokio::test]
+    async fn a_full_request_during_a_periodic_pass_adds_only_the_directories() {
+        let set_up = book_refresher();
+        set_up.book.hold.store(true, Ordering::SeqCst);
+        let running = tokio::spawn({
+            let refresher = Arc::clone(&set_up.refresher);
+            async move { refresher.warm_periodic().await }
+        });
+        set_up.book.entered.notified().await;
+        set_up.refresher.warm_all(false).await;
+        set_up.book.release.notify_one();
+        running.await.unwrap();
+        assert_eq!(set_up.calendars.listings.load(Ordering::SeqCst), 1);
+        assert_eq!(set_up.book.reads(), vec!["book", "book", "directory"]);
+    }
+
+    /// "Sync now" merged into a follow-up with an automatic request forces
+    /// the contact reads only: a calendar failure there still needs its
+    /// confirming round (decision 271).
+    #[tokio::test]
+    async fn sync_now_forces_only_the_contacts_in_a_merged_follow_up() {
+        let set_up = book_refresher();
+        set_up.book.hold.store(true, Ordering::SeqCst);
+        let running = tokio::spawn({
+            let refresher = Arc::clone(&set_up.refresher);
+            async move { refresher.warm_periodic().await }
+        });
+        set_up.book.entered.notified().await;
+        assert!(!set_up.refresher.warm_contacts(false).await);
+        set_up.refresher.warm_all_queued(false).await;
+        set_up.book.release.notify_one();
+        running.await.unwrap();
+        assert_eq!(set_up.calendars.listings.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            *set_up.refresher.pass_forcing.lock().unwrap(),
+            Forcing::None,
+            "the calendars ran unforced"
+        );
+        assert_eq!(
+            *set_up.refresher.pass_contacts_forcing.lock().unwrap(),
+            Forcing::All,
+            "the books ran forced"
+        );
+    }
+
+    /// "Sync now" returns once its own pass is done: a pass another caller
+    /// queued meanwhile runs on by itself, and the contacts stay "syncing"
+    /// until it ends.
+    #[tokio::test]
+    async fn sync_now_returns_after_its_own_pass() {
+        let (refresher, gated, _) = refresher();
+        let book = Arc::new(Book::default());
+        refresher
+            .registry
+            .register_host_contacts("acc-1", Arc::clone(&book) as Arc<dyn ContactsFeature>);
+        let contacts = ContactSyncCore::new(refresher.db.clone());
+        let synced = Arc::new(Synced::default());
+        refresher.set_contact_sync(
+            Arc::clone(&contacts),
+            Arc::clone(&synced) as Arc<dyn ContactSyncObserver>,
+        );
+        book.hold.store(true, Ordering::SeqCst);
+        let sync_now = tokio::spawn({
+            let refresher = Arc::clone(&refresher);
+            async move { refresher.warm_contacts(false).await }
+        });
+        book.entered.notified().await;
+        refresher.warm_all_queued(false).await;
+        book.release.notify_one();
+        // The follow-up waits in the gated calendar listing meanwhile.
+        let ran = tokio::time::timeout(StdDuration::from_secs(2), sync_now)
+            .await
+            .expect("sync now does not wait for the follow-up")
+            .unwrap();
+        assert!(ran);
+        gated.entered.notified().await;
+        assert!(refresher.status().refreshing);
+        assert!(
+            contacts.status().in_flight,
+            "the follow-up reads the books too"
+        );
+        assert!(synced.0.lock().unwrap()[0].in_flight);
+        gated.release.notify_one();
+        settled(&refresher).await;
+        assert!(!contacts.status().in_flight);
+        let synced = synced.0.lock().unwrap();
+        assert_eq!(synced.len(), 2);
+        assert!(!synced[1].in_flight);
+    }
+
+    /// A wake of the worker (an account change, a manual refresh) during a
+    /// pass another caller runs follows that pass instead of being taken as
+    /// answered by it.
+    #[tokio::test]
+    async fn a_worker_wake_during_another_callers_pass_follows_it() {
+        let set_up = book_refresher();
+        set_up
+            .refresher
+            .start_periodic(&tokio::runtime::Handle::current());
+        // The app-start pass, cut short.
+        set_up.refresher.trigger_background();
+        while set_up.calendars.listings.load(Ordering::SeqCst) < 1 {
+            tokio::time::sleep(StdDuration::from_millis(5)).await;
+        }
+        settled(&set_up.refresher).await;
+        set_up.book.hold.store(true, Ordering::SeqCst);
+        let running = tokio::spawn({
+            let refresher = Arc::clone(&set_up.refresher);
+            async move { refresher.warm_all(false).await }
+        });
+        set_up.book.entered.notified().await;
+        set_up.refresher.trigger_account("acc-1");
+        // Let the worker take the wake while the pass is still held.
+        tokio::time::sleep(StdDuration::from_millis(200)).await;
+        set_up.book.release.notify_one();
+        running.await.unwrap();
+        settled(&set_up.refresher).await;
+        assert_eq!(
+            set_up.calendars.listings.load(Ordering::SeqCst),
+            3,
+            "app start, the held pass, and the wake's pass"
+        );
+    }
+
+    /// "Sync now" is a user action for the books it reads: a book that could
+    /// not be read is named at once, not after a confirming round.
+    #[tokio::test]
+    async fn sync_now_names_a_book_failure_at_once() {
+        let set_up = book_refresher();
+        set_up.book.fail.store(true, Ordering::SeqCst);
+        set_up.refresher.warm_contacts(false).await;
+        let outcome = set_up.statuses.last_outcome();
+        assert_eq!(outcome.failing.len(), 1, "the book's failure is named");
+        assert_eq!(outcome.failing[0].account_id, "acc-1");
     }
 }

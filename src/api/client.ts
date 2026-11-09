@@ -1473,9 +1473,10 @@ export const deleteContactPhoto = (id: string, listId?: string) =>
     listId: listId ?? null,
   });
 
-// ── Contact sync scheduler (Phase 10j, DESIGN.md §10.5) ────────────────
+// ── Contact sync (Phase 10j, DESIGN.md §10.5) ──────────────────────────
 
-/** Snapshot of the backend's contact sync scheduler. `lastSyncedAt`
+/** Snapshot of the backend's contact sync (the external-data refresh's
+ *  passes, which read the address books). `lastSyncedAt`
  *  is RFC 3339 or `null` if no pass has completed yet; the frontend
  *  formats it via the user's locale for the panel footer. */
 export interface ContactsSyncStatus {
@@ -1489,14 +1490,17 @@ export interface ContactsSyncStatus {
 }
 
 /** Payload of the `contacts-synced` Tauri event the backend emits
- *  after every sync pass completes — manual, periodic, or
- *  app-start. The frontend uses `lastSyncedAt` to update the
- *  footer and `succeededAccounts` / `failedAccounts` to decide
- *  which lists to refetch. */
+ *  after every refresh pass — "Sync now", periodic, app start, a
+ *  manual refresh or an account change. The frontend uses
+ *  `lastSyncedAt` to update the footer and `succeededAccounts` /
+ *  `failedAccounts` to decide which lists to refetch. */
 export interface ContactsSyncedPayload {
   last_synced_at: string;
   succeeded_accounts: string[];
   failed_accounts: string[];
+  /** Another pass, which reads the contacts too, starts at once (a
+   *  "Sync now" that waited behind this one): still syncing. */
+  in_flight: boolean;
 }
 
 /** "Sync now": a contacts-only pass of the external-data refresh.

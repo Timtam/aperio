@@ -75,7 +75,8 @@ impl ContactSync {
 
     /// "Sync contacts now": a contacts-only pass. `true` when it ran within
     /// this call, `false` when it waits behind a running pass (its
-    /// `contacts-synced` follows).
+    /// `contacts-synced` follows). Passes queued while it runs go on after
+    /// it returns.
     pub async fn sync_now(&self, include_read_only: bool) -> bool {
         self.refresher.warm_contacts(include_read_only).await
     }

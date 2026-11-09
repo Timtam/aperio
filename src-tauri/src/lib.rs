@@ -1006,13 +1006,25 @@ pub fn run() {
             // prefs-driven interval, deduplicated against the per-read
             // SWR path. Stored in State so `refresh_external_cache` can
             // drive a manual pass.
-            let cache_refresher = cache_refresh::spawn(
+            let cache_refresher = cache_refresh::build(
                 Arc::clone(&registry_for_cache_refresh),
                 Arc::clone(&cache_for_refresh),
                 Arc::clone(&coord_for_refresh),
                 db_for_cache_refresh.clone(),
                 app.handle().clone(),
             );
+            // Phase 10j: the contact sync is the refresher's passes (the
+            // contact lists ride along on the one refresh interval); this
+            // installs its status and `contacts-synced` signal into them —
+            // before the worker starts, so the very first pass reports too.
+            // Stored in State for `sync_contacts_now` / the status read.
+            let contact_sync = ContactSync::install(
+                Arc::clone(&cache_refresher),
+                db_for_contact_sync.clone(),
+                app.handle().clone(),
+            );
+            app.manage(contact_sync);
+            cache_refresh::start(&cache_refresher);
             if cache_generation_reset {
                 // The cache-generation reconcile above cleared external sync
                 // state; kick the warm pass NOW (not "shortly after boot") so the
@@ -1025,16 +1037,6 @@ pub fn run() {
             // for accounts that arrived through sync, so it needs its own
             // handle before the primary Arc moves into Tauri State.
             let refresher_for_sync_scheduler = Arc::clone(&cache_refresher);
-            // Phase 10j: the contact sync is the refresher's passes (the
-            // contact lists ride along on the one refresh interval); this
-            // installs its status and `contacts-synced` signal into them.
-            // Stored in State for `sync_contacts_now` / the status read.
-            let contact_sync = ContactSync::install(
-                Arc::clone(&cache_refresher),
-                db_for_contact_sync.clone(),
-                app.handle().clone(),
-            );
-            app.manage(contact_sync);
             app.manage(cache_refresher);
 
             // Phase Se: sync scheduler. Spawns the periodic worker

@@ -27,7 +27,6 @@ import {
   listAdapterKinds,
   connectGoogleAccount,
   connectMicrosoftAccount,
-  syncContactsNow,
   deleteAccount,
   getUserPref,
   listAccounts,
@@ -433,10 +432,10 @@ export function AccountsPanel() {
         // like calendars (the host's `list_contact_lists` has a blocking
         // cold path), so `refreshContactLists` is what makes the new
         // account's books appear in the sidebar — without it the sidebar
-        // shows no contacts section until the app restarts. We ALSO kick
-        // `syncContactsNow` to pre-warm each book's contents (respecting
-        // the user's "include read-only directories" pref) so opening the
-        // Contacts view is instant.
+        // shows no contacts section until the app restarts. The books'
+        // contents come with the refresh the new account starts
+        // (`trigger_account`, directories included), so opening the
+        // Contacts view is instant without a second, contacts-only pass.
         //
         // An account that owns no calendars and no task lists refreshes only
         // the account list — the two catalog calls have a blocking cold path
@@ -447,7 +446,7 @@ export function AccountsPanel() {
             ? [refreshAccounts()]
             : [refreshAccounts(), refreshCalendars(), refreshTaskLists()];
         if (CONTACTS_CAPABLE_KINDS.has(kind)) {
-          refreshes.push(refreshContactLists(), syncContactsNow());
+          refreshes.push(refreshContactLists());
         }
         void Promise.allSettled(refreshes);
       } catch (err) {

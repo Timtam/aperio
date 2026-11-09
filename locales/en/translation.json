@@ -894,7 +894,7 @@
         "providerPolicyOthers": "For CardDAV, iCloud, and Exchange accounts the privacy policy of your server applies.",
         "providerPolicyAria": "Open {{provider}} privacy policy",
         "syncTitle": "Sync",
-        "syncBody": "All writable address books sync at app start and at the refresh interval. Heavy read-only directories (GAL / Suggested People / Other Contacts / Workspace Directory) only pull on demand.",
+        "syncBody": "Your address books refresh with your calendars and task lists: at app start, at the refresh interval, when you refresh by hand and when an account is added or changed. At the refresh interval the large read-only directories (GAL / Suggested People / Other Contacts / Workspace Directory) are left out unless you tick the switch below.",
         "syncNow": "Sync now",
         "syncing": "Syncing …",
         "includeDirectoriesLabel": "Include read-only directories",

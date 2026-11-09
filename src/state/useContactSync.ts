@@ -15,8 +15,9 @@ import {
 import { useDialogState } from './dialogStateContext';
 
 /**
- * Frontend bridge to the backend contact sync scheduler
- * (DESIGN.md §10.5, backend `crates/src-tauri/src/contact_sync.rs`).
+ * Frontend bridge to the backend contact sync — the external-data
+ * refresh's passes, which read the address books (DESIGN.md §10.5,
+ * backend `src-tauri/src/contact_sync.rs`).
  *
  * Responsibilities:
  *
@@ -71,8 +72,9 @@ export function useContactSync() {
       const payload = event.payload;
       setStatus((prev) => ({
         last_synced_at: payload.last_synced_at,
-        // The pass is done by the time we receive the event.
-        in_flight: false,
+        // Still running when another pass follows at once (a "Sync
+        // now" that waited behind this one).
+        in_flight: payload.in_flight,
         // Same preserve-or-default pattern for the new pref —
         // the event doesn't carry it either; ContactsPanel
         // re-syncs against the next status fetch.

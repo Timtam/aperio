@@ -120,6 +120,9 @@ export function ContactsPanel() {
 
   const onSyncNow = useCallback(
     async (includeReadOnly: boolean) => {
+      // The button stays focusable while a pass reads the contacts (every
+      // refresh does), so the guard lives here (aria-disabled below).
+      if (status?.in_flight === true) return;
       await triggerSync(includeReadOnly);
       announce(
         includeReadOnly
@@ -127,7 +130,7 @@ export function ContactsPanel() {
           : t('dialogs.settings.contacts.syncStarted'),
       );
     },
-    [announce, t, triggerSync],
+    [announce, status?.in_flight, t, triggerSync],
   );
 
   return (
@@ -259,7 +262,9 @@ export function ContactsPanel() {
               // committed.
               void onSyncNow(includeDirectoriesEffective);
             }}
-            disabled={status?.in_flight === true}
+            // Not native `disabled`: every refresh now sets in_flight, and
+            // a native disabled button drops the focus of whoever is on it.
+            aria-disabled={status?.in_flight === true || undefined}
           >
             {status?.in_flight
               ? t('dialogs.settings.contacts.syncing')

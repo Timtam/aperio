@@ -92,6 +92,10 @@ pub struct ContactsSyncedPayload {
     /// Surface a chip / icon for these in the panel so the user
     /// knows the data they see for those books may be stale.
     pub failed_accounts: Vec<String>,
+    /// Another pass, which reads the contacts too, starts at once (a
+    /// "Sync now" that waited behind this one, say): the sync is still
+    /// running.
+    pub in_flight: bool,
 }
 
 /// Status snapshot read by the contacts view's footer. The values
@@ -164,12 +168,14 @@ impl ContactSyncCore {
 
     /// A refresh pass has read the contact lists: `succeeded` are the
     /// accounts all of whose lists came through, `failed` the ones where
-    /// listing or a list threw. Persists "last synced", clears the in-flight
-    /// flag and tells `observer`.
+    /// listing or a list threw. Persists "last synced" and tells `observer`;
+    /// the in-flight flag stays set when `more_follows` (the next pass, which
+    /// reads the contacts too, starts at once).
     pub fn finish_pass(
         &self,
         succeeded: Vec<String>,
         failed: Vec<String>,
+        more_follows: bool,
         observer: &dyn ContactSyncObserver,
     ) {
         let now = Utc::now();
@@ -177,11 +183,12 @@ impl ContactSyncCore {
         if let Err(err) = UserPrefsRepo::new(&self.db).set(PREF_LAST_SYNCED_AT, &now.to_rfc3339()) {
             warn!(?err, "failed to persist contacts.lastSyncedAt");
         }
-        *self.in_flight.lock().expect("sync in-flight poisoned") = false;
+        *self.in_flight.lock().expect("sync in-flight poisoned") = more_follows;
         observer.contacts_synced(&ContactsSyncedPayload {
             last_synced_at: now.to_rfc3339(),
             succeeded_accounts: succeeded,
             failed_accounts: failed,
+            in_flight: more_follows,
         });
     }
 }
@@ -233,7 +240,12 @@ mod tests {
         core.begin_pass();
         assert!(core.status().in_flight);
         let recorder = Recorder::default();
-        core.finish_pass(vec!["a".into()], vec!["b".into()], &recorder);
+        // Another pass follows at once: still running.
+        core.finish_pass(Vec::new(), Vec::new(), true, &recorder);
+        assert!(core.status().in_flight);
+        assert!(recorder.0.lock().unwrap()[0].in_flight);
+        recorder.0.lock().unwrap().clear();
+        core.finish_pass(vec!["a".into()], vec!["b".into()], false, &recorder);
         let status = core.status();
         assert!(!status.in_flight);
         let last = status.last_synced_at.expect("last synced is set");
@@ -242,6 +254,7 @@ mod tests {
         assert_eq!(seen[0].last_synced_at, last);
         assert_eq!(seen[0].succeeded_accounts, vec!["a".to_string()]);
         assert_eq!(seen[0].failed_accounts, vec!["b".to_string()]);
+        assert!(!seen[0].in_flight);
         assert_eq!(core_with(&db).status().last_synced_at, Some(last));
     }
 

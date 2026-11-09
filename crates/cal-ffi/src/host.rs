@@ -6434,9 +6434,11 @@ impl Host {
         to_json(&errors)
     }
 
-    /// Warm the cache when the app foregrounds — the mobile stand-in for a tick
-    /// of the desktop periodic warm loop (which mobile can't run while
-    /// backgrounded). This is AUTOMATIC (not a user action), so it runs the
+    /// Warm the cache at launch — the mobile stand-in for the desktop's
+    /// app-start pass (the read-only contact directories included; the
+    /// timer and a return to the foreground use
+    /// [`Self::warm_cache_on_interval`]). This is AUTOMATIC (not a user
+    /// action), so it runs the
     /// pass UN-forced, exactly like the desktop app-start/periodic pass: a
     /// cold-start/resume network blip must be confirmed by a second attempt
     /// before it surfaces, instead of alarming on the first failure. Only the
@@ -6636,7 +6638,9 @@ impl Host {
     }
 
     /// "Sync now" (Settings → Kontakte): a contacts-only pass of the cache
-    /// refresher, forced like any user action, queued behind a running pass.
+    /// refresher, forced in its contact reads like any user action, queued
+    /// behind a running pass. Blocks for its own pass only: passes others
+    /// queued meanwhile run on a task of their own.
     /// `include_read_only`: `None` reads the persisted pref (matches the
     /// desktop manual button); `Some(_)` overrides it. `true` when the pass ran
     /// within this call, `false` when it waits behind the running one; the
