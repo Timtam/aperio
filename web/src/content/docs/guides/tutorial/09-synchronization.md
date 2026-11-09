@@ -86,7 +86,9 @@ One setting decides how often Aperio, while it is open, does all of this:
 **Settings → General → Refresh interval** (1, 5, 15, 30, 60 or 240 minutes;
 5 by default). At that interval Aperio
 
-- fetches calendars, task lists and contacts from your accounts again,
+- fetches calendars, task lists and contacts from your accounts again (large
+  read-only directories such as a company address list only if you ask for
+  them under **Settings → Contacts**),
 - reconciles with your other devices, if synchronization is set up,
 - and lets reminders follow what it found: an appointment a colleague added
   rings on time, without you opening the calendar.

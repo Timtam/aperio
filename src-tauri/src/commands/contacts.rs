@@ -29,7 +29,7 @@ use super::cache_swr::TauriCacheObserver;
 use super::{CommandError, CommandResult};
 use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SyncScope};
 use crate::contact_sync::{
-    ContactSyncScheduler, ContactsSyncStatus, PREF_INCLUDE_READ_ONLY_ON_SYNC, PREF_LAST_SYNCED_AT,
+    ContactSync, ContactsSyncStatus, PREF_INCLUDE_READ_ONLY_ON_SYNC, PREF_LAST_SYNCED_AT,
 };
 use crate::db::DbHandle;
 // The row shape is declared once, in host-core, so the desktop and the mobile
@@ -463,9 +463,7 @@ pub async fn set_contact_photo(
 
 /// Run a contact sync pass on demand — used by the "Refresh"
 /// button in the contacts view and the equivalent action in
-/// Settings → Kontakte. Returns `true` when the pass actually
-/// ran, `false` when another pass was already in flight and this
-/// invocation was deduped.
+/// Settings → Kontakte.
 ///
 /// `include_read_only`: explicit per-call override of the
 /// read-only-directory toggle. `Some(true)` always pulls the
@@ -473,25 +471,28 @@ pub async fn set_contact_photo(
 /// Workspace Directory, Graph Suggested People); `Some(false)`
 /// always skips them; `None` reads the user's persisted
 /// `contacts.includeReadOnlyOnSync` pref so the manual button
-/// matches whatever the periodic scheduler would do. Most
-/// callers should pass `None` to keep the behaviour consistent.
+/// matches whatever a periodic pass would do. Most callers
+/// should pass `None` to keep the behaviour consistent.
+///
+/// A contacts-only pass of the cache refresher. `true` when it ran
+/// within this call, `false` when it waits behind a running pass;
+/// `contacts-synced` follows either way.
 #[tauri::command]
 pub async fn sync_contacts_now(
-    scheduler: State<'_, Arc<ContactSyncScheduler>>,
+    contacts: State<'_, Arc<ContactSync>>,
     include_read_only: Option<bool>,
 ) -> CommandResult<bool> {
-    let effective = include_read_only.unwrap_or_else(|| scheduler.read_include_read_only_on_sync());
-    // The scheduler owns the Tauri observer, so the pass needs no app handle.
-    Ok(scheduler.run_sync(effective).await)
+    let effective = include_read_only.unwrap_or_else(|| contacts.read_include_read_only_on_sync());
+    Ok(contacts.sync_now(effective).await)
 }
 
 /// Snapshot the contact sync status — used by the contacts view
 /// footer to render "Last synced at …" + the configured interval.
 #[tauri::command]
 pub async fn get_contacts_sync_status(
-    scheduler: State<'_, Arc<ContactSyncScheduler>>,
+    contacts: State<'_, Arc<ContactSync>>,
 ) -> CommandResult<ContactsSyncStatus> {
-    Ok(scheduler.status())
+    Ok(contacts.status())
 }
 
 /// Drop every external adapter's in-memory contact cache and
@@ -529,7 +530,7 @@ pub async fn clear_contacts_cache(
     }
     // Reset the persisted "last synced" timestamp so the panel
     // footer flips back to "no sync run yet" until the next pass
-    // completes. The in-memory state on `ContactSyncScheduler`
+    // completes. The in-memory state on `ContactSync`
     // isn't reset here on purpose — the next `contacts-synced`
     // event will overwrite it. Keeping the in-memory value avoids
     // a brief window where the footer flickers before the prefs

@@ -136,14 +136,17 @@ warned a few days ahead rather than on the morning itself.
 
 Under **Settings → Contacts** you control:
 
-- a **Sync now** button. How often contacts refresh on their own is the
-  **Refresh interval** under **Settings → General** (see
+- a **Sync now** button, which reads your address books at once. On their
+  own, contacts refresh with your calendars and task lists, at the **Refresh
+  interval** under **Settings → General** (see
   [Chapter 09](/guides/tutorial/09-synchronization/)); the section has a button
   that takes you there;
 - whether **read-only directories** (Global Address List, Suggested People,
-  Other Contacts, Workspace Directory) are pulled on every sync. They are
-  skipped by default because they can be very large — search reaches them
-  either way, on demand;
+  Other Contacts, Workspace Directory) are read on every refresh at that
+  interval and by Sync now. They are skipped there by default because they can
+  be very large; Aperio still reads them when it starts, when you refresh by
+  hand and when you add or change an account, and search reaches them either
+  way, on demand;
 - **Clear cache**, which drops the in-memory snapshots of external address
   books. Your own local contacts are untouched; the next sync re-pulls the
   rest.

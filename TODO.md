@@ -153,15 +153,17 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
   und wirksam auch ohne Sync-Ziel; das Handy aktualisiert jetzt auch ohne
   Sync-Ziel im Takt (vorher nur beim Start und beim Zurückkehren). Sync und
   Kontakte zeigen einen Satz mit Knopf nach Allgemein.
-- [ ] **Kontakt-Abgleich in die Aktualisierung falten** (Toni, 2026-11-09,
-  „gleich zusammenlegen“; PR B nach dem einen Intervall): Der eigene
-  Kontakt-Durchlauf (`ContactSyncCore::run_sync`, Desktop-Schleife
-  `ContactSyncScheduler`) liest dieselben Bücher wie die Aktualisierung
-  externer Daten. Die Aktualisierung übernimmt „zuletzt abgeglichen“, die
-  Fertig-Meldung `contacts-synced` und „Jetzt abgleichen“ (ein Durchlauf nur
-  für Kontakte); regelmäßige Durchläufe lassen schreibgeschützte
-  Verzeichnisse aus, außer der Schalter „auch schreibgeschützte Verzeichnisse
-  abgleichen“ ist an. Plan: `C:/scripts/aperio-livetest/one-interval-plan-2026-11-09.md`.
+- [x] **Kontakt-Abgleich in die Aktualisierung gefaltet** (Toni, 2026-11-09,
+  „gleich zusammenlegen“; DESIGN §10.5): Der eigene Kontakt-Durchlauf
+  (`ContactSyncCore::run_sync`, Desktop-Schleife `ContactSyncScheduler`) ist
+  weg; jeder Durchlauf der Aktualisierung externer Daten liest die
+  Kontaktbücher und meldet „zuletzt abgeglichen“ und `contacts-synced`.
+  „Jetzt synchronisieren“ ist ein Durchlauf nur für Kontakte, der hinter
+  einem laufenden wartet. Durchläufe im Takt (am Handy auch Rückkehr in den
+  Vordergrund und Hintergrund-Runde) lassen schreibgeschützte Verzeichnisse
+  aus, außer der Schalter ist an; App-Start, Aktualisieren von Hand und
+  Kontoänderungen lesen sie immer. Ein Takt während eines Kontakt-Durchlaufs
+  folgt ihm, statt zu entfallen.
 - [ ] **Beschäftigten Anbieter über Durchläufe hinweg pausieren** (bei 1
   Minute Intervall fragt Aperio einen Anbieter, der „zu viele Anfragen“
   meldet, jede Minute; heute pausiert nur innerhalb eines Durchlaufs). Erst

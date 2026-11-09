@@ -23,6 +23,7 @@ import {
 import {
   clearContactsCache,
   getContactsSyncStatus,
+  onContactsSynced,
   setContactsIncludeReadOnlyOnSync,
   syncContactsNow,
   type ContactsSyncStatus,
@@ -114,6 +115,11 @@ export default function ContactsSettingsScreen() {
       // Best-effort; the footer keeps its last value.
     }
   }, []);
+
+  // Every refresh of external data reads the contacts, so "syncing" shows
+  // while one runs; its end — or the end of a "Sync now" that waited behind
+  // it — brings the footer and the button back while the screen is open.
+  useFocusEffect(useCallback(() => onContactsSynced(() => void reload()), [reload]));
 
   const onSyncNow = useCallback(async () => {
     // Guard on the backend in-flight state too (a foreground pass may already be
@@ -215,7 +221,11 @@ export default function ContactsSettingsScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: busySync || status?.in_flight === true }}
-          accessibilityLabel={t('dialogs.settings.contacts.syncNow')}
+          accessibilityLabel={
+            busySync || status?.in_flight === true
+              ? t('dialogs.settings.contacts.syncing')
+              : t('dialogs.settings.contacts.syncNow')
+          }
           disabled={busySync || status?.in_flight === true}
           onPress={() => void onSyncNow()}
           style={({ pressed }) => [
@@ -225,7 +235,7 @@ export default function ContactsSettingsScreen() {
           ]}
         >
           <Text style={styles.primaryButtonText} importantForAccessibility="no">
-            {busySync
+            {busySync || status?.in_flight === true
               ? t('dialogs.settings.contacts.syncing')
               : t('dialogs.settings.contacts.syncNow')}
           </Text>

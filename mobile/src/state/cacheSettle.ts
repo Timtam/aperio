@@ -1,4 +1,4 @@
-import { cacheRefreshStatus, warmCacheOnForeground } from '../api/sync';
+import { cacheRefreshStatus, warmCacheOnInterval } from '../api/sync';
 
 // Shared "wait for the external caches to become readable" primitive, used by
 // the day-start checks (useDayStartChecks) and the reminder scheduler's launch
@@ -48,9 +48,12 @@ const CACHE_SETTLE_POLL_MS = 500;
  * mirror stale in either direction. The bridge read asks the Host directly.
  */
 export async function settleExternalCaches(
-  // What starts the pass: the unforced warm by default; the start check
-  // after a grant kicks the (queued) manual refresh instead.
-  kick: () => Promise<void> = warmCacheOnForeground,
+  // What starts the pass: the unforced warm on the interval's terms by
+  // default — it then joins the round's own pass instead of queueing a
+  // second one with the read-only directories (the launch pass reads those
+  // anyway); the start check after a grant kicks the (queued) manual refresh
+  // instead.
+  kick: () => Promise<void> = warmCacheOnInterval,
 ): Promise<'confirmed' | 'capped'> {
   try {
     await kick();

@@ -355,10 +355,16 @@ export type { AccountRefreshErrors, ContainerRefreshError } from '@aperio/shared
 export const refreshErrors = async (): Promise<AccountRefreshErrors[]> =>
   JSON.parse(await CalFfi.refreshErrorsJson()) as AccountRefreshErrors[];
 
-/** Warm the external cache on app-foreground (the mobile stand-in for the
- *  desktop periodic warm loop). Fire-and-forget. */
+/** Warm the external cache at launch, the read-only contact directories
+ *  included. Fire-and-forget. */
 export const warmCacheOnForeground = (): Promise<void> =>
   CalFfi.warmCacheOnForeground();
+
+/** Warm the external cache on the refresh interval's schedule (the foreground
+ *  timer, a return to the foreground): the read-only contact directories only
+ *  when the user asked for them (`contacts.includeReadOnlyOnSync`). */
+export const warmCacheOnInterval = (): Promise<void> =>
+  CalFfi.warmCacheOnInterval();
 
 // ── Sync conflicts ──
 // Field-level conflicts the applier recorded (a field edited differently on two

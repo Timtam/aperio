@@ -33,7 +33,7 @@ pub use host_core::{
 };
 
 use adapter_local::LocalAdapter;
-use contact_sync::ContactSyncScheduler;
+use contact_sync::ContactSync;
 // The sync-engine assembly (writer / applier / snapshot / compactor /
 // orchestrator) is now built by host_core::sync::build_orchestrator; lib.rs
 // only names the desktop-side SyncScheduler.
@@ -497,12 +497,8 @@ pub fn run() {
     // The scheduler also reads the external-contacts snapshot cache to
     // synthesise birthday-calendar reminders — same Arc-sharing pattern.
     let cache_for_scheduler = Arc::clone(&cache_store);
-    // Phase 10j: same Arc-sharing pattern for the contact sync
-    // scheduler. A second clone lives in the background task; the
-    // primary Arc keeps living inside Tauri State so the
-    // `sync_contacts_now` command can dispatch through the same
-    // instance and benefit from the in-flight dedupe guard.
-    let registry_for_contact_sync = Arc::clone(&registry);
+    // Phase 10j: the contacts' status ("last synced") for the contact
+    // sync, which the cache refresher's passes run.
     let db_for_contact_sync = db.shared();
 
     // Phase Sb (DESIGN.md §19): mint or load this install's
@@ -837,10 +833,9 @@ pub fn run() {
             commands::get_contact_photo,
             commands::set_contact_photo,
             commands::delete_contact_photo,
-            // Phase 10j: contact sync scheduler. The
-            // ContactSyncScheduler is registered into State during
-            // setup() below so these commands can fan out to every
-            // external adapter on user demand.
+            // Phase 10j: contact sync. `ContactSync` is registered into
+            // State during setup() below; "sync now" is a contacts-only
+            // pass of the cache refresher.
             commands::sync_contacts_now,
             commands::get_contacts_sync_status,
             // Phase 10k: Settings → Kontakte. Cache management; how often
@@ -1006,32 +1001,30 @@ pub fn run() {
             );
             app.manage(scheduler);
 
-            // Phase 10j: contact sync scheduler. Boots its own
-            // periodic worker (paced by the one refresh interval,
-            // `sync.intervalMinutes`, default 5 min; re-timed by
-            // `interval_changed`) plus runs a one-shot pass shortly after
-            // app start. Stored in State so the
-            // `sync_contacts_now` command can drive a manual pass
-            // through the same in-flight guard.
-            let contact_sync = ContactSyncScheduler::spawn(
-                Arc::clone(&registry_for_contact_sync),
-                db_for_contact_sync.clone(),
-                app.handle().clone(),
-            );
-            app.manage(contact_sync);
-
             // CACHE-3: external-cache warm/periodic refresher. Runs a
             // wide-window warm pass shortly after boot and on a
             // prefs-driven interval, deduplicated against the per-read
             // SWR path. Stored in State so `refresh_external_cache` can
             // drive a manual pass.
-            let cache_refresher = cache_refresh::spawn(
+            let cache_refresher = cache_refresh::build(
                 Arc::clone(&registry_for_cache_refresh),
                 Arc::clone(&cache_for_refresh),
                 Arc::clone(&coord_for_refresh),
                 db_for_cache_refresh.clone(),
                 app.handle().clone(),
             );
+            // Phase 10j: the contact sync is the refresher's passes (the
+            // contact lists ride along on the one refresh interval); this
+            // installs its status and `contacts-synced` signal into them —
+            // before the worker starts, so the very first pass reports too.
+            // Stored in State for `sync_contacts_now` / the status read.
+            let contact_sync = ContactSync::install(
+                Arc::clone(&cache_refresher),
+                db_for_contact_sync.clone(),
+                app.handle().clone(),
+            );
+            app.manage(contact_sync);
+            cache_refresh::start(&cache_refresher);
             if cache_generation_reset {
                 // The cache-generation reconcile above cleared external sync
                 // state; kick the warm pass NOW (not "shortly after boot") so the
