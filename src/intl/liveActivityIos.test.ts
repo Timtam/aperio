@@ -4,6 +4,7 @@ import {
   EMPTY_ACTIVITY_MEMORY,
   MAX_PENDING,
   activityContent,
+  activityPassSummary,
   reconcileIosActivities,
   remember,
   triggerKeyId,
@@ -378,5 +379,90 @@ describe('remember and triggerKeyId', () => {
     const plan = { item_id: 'e', calendar_id: 'c', occurrence_start: '2026-11-09T10:00:00Z', fire_at: '2026-11-09T09:50:00Z' };
     const list = { ...plan, occurrence_start: '2026-11-09T10:00:00+00:00', fire_at: '2026-11-09T09:50:00.000+00:00' };
     expect(triggerKeyId(plan)).toBe(triggerKeyId(list));
+  });
+});
+
+describe('reconcileIosActivities — when to ask iOS for a background round', () => {
+  // Only a running Aperio ends an activity (Toni's iPhone, 2026-11-10: "Vorbei"
+  // on the lock screen all evening). The wake is the earliest end of what keeps
+  // or gets an activity.
+  it('is the end of the running chain, and of a chain started now', () => {
+    const running = input({
+      now: new Date(at('10:00')),
+      chains: [CROSSFADE],
+      reported: [{ id: 'a1', chainKey: 'A', state: 'active' }],
+    });
+    expect(reconcileIosActivities(running).wakeAt).toBe(at('11:30'));
+    const started = input({ now: new Date(at('10:00')), chains: [CROSSFADE] });
+    expect(reconcileIosActivities(started).wakeAt).toBe(at('11:30'));
+  });
+
+  it('is the earliest end among a running and a waiting one', () => {
+    const later = single('C', '13:00', '14:00');
+    const result = reconcileIosActivities(
+      input({
+        now: new Date(at('10:00')),
+        chains: [CROSSFADE, later],
+        reported: [{ id: 'a1', chainKey: 'A', state: 'active' }],
+      }),
+    );
+    expect(types(result.actions)).toEqual(['update', 'schedule']);
+    expect(result.wakeAt).toBe(at('11:30'));
+  });
+
+  it('is none once the chain is over and its activity ended, and none when off', () => {
+    const over = reconcileIosActivities(
+      input({
+        now: new Date(at('12:00')),
+        chains: [CROSSFADE],
+        reported: [{ id: 'a1', chainKey: 'A', state: 'stale' }],
+      }),
+    );
+    expect(over.actions).toEqual([{ type: 'end', id: 'a1' }]);
+    expect(over.wakeAt).toBeNull();
+    const off = reconcileIosActivities(
+      input({
+        now: new Date(at('10:00')),
+        chains: [CROSSFADE],
+        reported: [{ id: 'a1', chainKey: 'A', state: 'active' }],
+        enabled: false,
+      }),
+    );
+    expect(off.wakeAt).toBeNull();
+  });
+
+  it('is none for a chain that is only planned, never started, from the background', () => {
+    const result = reconcileIosActivities(
+      input({ now: new Date(at('10:00')), chains: [CROSSFADE], foreground: false }),
+    );
+    expect(result.actions).toEqual([]);
+    expect(result.wakeAt).toBeNull();
+  });
+});
+
+describe('activityPassSummary — one line per pass', () => {
+  it('says nothing when there was nothing before and nothing was done', () => {
+    expect(
+      activityPassSummary({ origin: 'background', before: 0, done: [], failed: 0, wakeAt: null }),
+    ).toBeNull();
+  });
+
+  it('counts what was done, a running activity kept included, with no title or id', () => {
+    expect(
+      activityPassSummary({ origin: 'background', before: 1, done: [], failed: 0, wakeAt: at('20:00') }),
+    ).toBe(
+      `live activities (background): before=1 ended=0 updated=0 started=0 scheduled=0 failed=0 wake=${at('20:00')}`,
+    );
+    expect(
+      activityPassSummary({
+        origin: 'foreground',
+        before: 2,
+        done: ['end', 'update', 'schedule'],
+        failed: 1,
+        wakeAt: null,
+      }),
+    ).toBe(
+      'live activities (foreground): before=2 ended=1 updated=1 started=0 scheduled=1 failed=1 wake=none',
+    );
   });
 });

@@ -329,6 +329,13 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   (Gerätetest 2026-11-08, #157). Der nächste Abgleich las die verschwundene
   Aktivität als Wegwischen. Jetzt merkt sich Aperio den Build, der das
   Gedächtnis schrieb; ein anderer heißt Update, kein Wegwischen.
+- [x] **iOS: Aktivität blieb nach dem Termin stehen** (Toni, 2026-11-10:
+  „Vorbei“ auf Sperrbildschirm und Dynamic Island den ganzen Abend, Aperio
+  nicht geöffnet). So gebaut: Beenden kann nur ein laufendes Aperio, ein
+  geplantes Ende ohne Push-Server kennt iOS nicht. Jetzt nennt der Abgleich
+  das früheste Ende (`wakeAt`), und die kurze Hintergrundrunde wird dorthin
+  vorgezogen; jeder Durchlauf schreibt eine Protokollzeile mit Zahlen. iOS
+  kann die Runde weiter verschieben.
 - [ ] 🚩 **Mitlaufende Zeiten in der Sprache des Geräts.** Seit #154 sprechen
   sie die Sprache des iPhones; läuft Aperio in einer anderen, stehen
   deutsche Wörter neben englischen Zeiten oder umgekehrt.

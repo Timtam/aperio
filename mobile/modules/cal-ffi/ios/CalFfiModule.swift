@@ -1649,6 +1649,12 @@ public class CalFfiModule: Module {
       await LiveActivityBridge.end(id: id)
     }
 
+    // Only a running Aperio can end an activity: bring the short background
+    // wake-up forward to the earliest end (BackgroundRefresh.swift).
+    AsyncFunction("liveActivityWakeAt") { (at: String) in
+      BackgroundRefresh.wake(at: at.isEmpty ? nil : LiveActivityBridge.instant(at))
+    }
+
     // One line into the app's own rolling log — the file the Logs screen shows.
     // The background round is the one path a user cannot watch happen, so it has
     // to be able to say what it did.

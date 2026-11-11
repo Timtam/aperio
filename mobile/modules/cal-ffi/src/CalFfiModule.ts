@@ -532,6 +532,12 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   liveActivityUpdate(id: string, contentJson: string): Promise<void>;
   /** End an activity at once (a waiting one never starts). */
   liveActivityEnd(id: string): Promise<void>;
+  /** Bring the short background wake-up (`enableBackgroundRefresh`) forward
+   *  to `at` (RFC 3339), the earliest end of an activity, where that comes
+   *  before its interval: only a running Aperio can end one. Empty clears it.
+   *  Still a floor iOS may exceed; it arms nothing while background sync is
+   *  off. iOS only. */
+  liveActivityWakeAt(at: string): Promise<void>;
 
   // ── Live Activities, Android only (an ongoing notification; DESIGN-live-
   //    activities.md, "Android") ──

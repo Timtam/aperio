@@ -77,7 +77,8 @@ Statusleiste.
   Watch; auf dem iPhone ist die Aktivität selbst alles.
 - **Ändern und Beenden** (`update`, `end`) gehen auch aus dem Hintergrund, aber
   nichts weckt Aperio pünktlich: Hintergrund-Abgleich kommt, wann iOS will, und
-  eine lokale Benachrichtigung weckt die App nicht.
+  eine lokale Benachrichtigung weckt die App nicht. Ein geplantes Ende ohne
+  Push-Server gibt es auch ab iOS 26 nicht.
 - **Ohne App** ändert sich der Inhalt nur über Zeitangaben, die iOS selbst
   mitlaufen lässt, und **genau einmal** über `staleDate`: Ab dann ist `isStale`
   wahr, und iOS zeichnet neu. Die mitlaufenden Angaben:
@@ -463,6 +464,18 @@ Durchlauf vergleicht es das mit `Activity.activities` und dem Plan:
 
 Im **Hintergrund-Abgleich** darf Aperio nur ändern und beenden. Er kommt, wann
 iOS will; er räumt auf, taktet aber nichts.
+
+**Zum Ende wecken:** Jeder Durchlauf nennt das früheste Ende der Ketten, die
+eine Aktivität behalten oder bekommen (`wakeAt`). Liegt es vor dem Intervall
+der kurzen Hintergrundrunde (`BGAppRefreshTask`, `BackgroundRefresh.swift`),
+bittet Aperio iOS um die nächste Runde ab diesem Zeitpunkt. Das ist ein
+Wunsch, den iOS verschieben kann, kein Termin; ist der Hintergrund-Abgleich
+aus, weckt es nichts. Anlass: Auf Tonis iPhone sagte eine Aktivität am
+10.11.2026 den ganzen Abend „Vorbei“, und Aperio war nicht geöffnet. Ob danach
+eine Runde kam, ließ sich nicht sagen: Kein Durchlauf schrieb, was er mit den
+Aktivitäten tat. Deshalb schreibt jetzt jeder Durchlauf eine Zeile ins
+Protokoll (nur Zahlen: wie viele liefen, was beendet, geändert, gestartet,
+eingeplant wurde, was scheiterte, und den Weckzeitpunkt).
 
 **Kaltstart nach Tipp auf die Erinnerung:** Der volle Durchlauf liest jedes Konto
 live und kann Sekunden dauern; wer kurz schaut und sperrt, wäre schneller weg.

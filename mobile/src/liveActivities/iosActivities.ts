@@ -10,9 +10,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   EMPTY_ACTIVITY_MEMORY,
+  activityPassSummary,
   reconcileIosActivities,
   remember,
   triggerKeyId,
+  type ActivityAction,
   type ActivityMemory,
   type ActivityWords,
   type LiveActivityPlan,
@@ -108,6 +110,8 @@ function syncIosActivities(
     });
     for (const key of result.covered) covered.add(triggerKeyId(key));
     let memory = result.memory;
+    const done: ActivityAction['type'][] = [];
+    let failed = 0;
     for (const action of result.actions) {
       try {
         switch (action.type) {
@@ -137,7 +141,9 @@ function syncIosActivities(
             break;
           }
         }
+        done.push(action.type);
       } catch (err) {
+        failed += 1;
         // iOS refused (the limit, the switch, an old system). The reminder
         // then rings as a notification, which is the safe side.
         void logLine(
@@ -147,6 +153,19 @@ function syncIosActivities(
       }
     }
     await writeMemory(memory);
+    // Only a running Aperio can end an activity, and iOS wakes it when it
+    // likes: ask for the next background round at the earliest end, so the
+    // activity is not left on the lock screen until the app is next opened.
+    // A wish iOS may defer, never a schedule.
+    await CalFfi.liveActivityWakeAt(result.wakeAt ?? '').catch(() => {});
+    const summary = activityPassSummary({
+      origin: !opts.mayPlan ? 'quick start' : opts.foreground ? 'foreground' : 'background',
+      before: reported.filter((a) => a.state !== 'ended' && a.state !== 'dismissed').length,
+      done,
+      failed,
+      wakeAt: result.wakeAt,
+    });
+    if (summary != null) void logLine('info', summary);
     return covered;
   });
 }

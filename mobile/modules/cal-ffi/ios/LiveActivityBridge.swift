@@ -33,7 +33,7 @@ enum LiveActivityBridge {
         return text
     }
 
-    private static func instant(_ raw: String) -> Date? {
+    static func instant(_ raw: String) -> Date? {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = fractional.date(from: raw) { return date }
