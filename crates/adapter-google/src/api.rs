@@ -947,8 +947,38 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
     let path = format!("/calendars/{cal_enc}/events/{ev_enc}?sendUpdates={su}");
     let body = event_to_body(ev);
     let entry: EventEntry = state.patch_json(&path, &body).await?;
+    // Read before mapping: a rule Aperio cannot read maps to no rule at all.
+    let still_repeats = entry.recurrence.as_ref().is_some_and(|l| !l.is_empty());
     let updated = map_event(entry, &ev.calendar_id)?
         .ok_or_else(|| GoogleError::Protocol("update returned cancelled event".into()))?;
+
+    // The repeat taken away (decision 280). A changed occurrence is a SEPARATE
+    // stored event, as in a cut's dropped tail below, and whether Google
+    // removes it along with the repeat is unmeasured; left, it would stand
+    // beside the single as a ghost. Removed silently and best-effort like a
+    // cut's: the save itself has landed, and a failure here must not undo it.
+    // Only once Google's answer shows the repeat gone: the delete value is
+    // documented, not measured, and deleting an instance of a series that
+    // still repeats would cancel that occurrence for good.
+    let took_repeat_away = matches!(body.recurrence, Some(None));
+    if took_repeat_away && still_repeats {
+        warn!(
+            master = %ev.id,
+            "update_event: Google kept the repeat it was told to remove; changed occurrences left alone"
+        );
+    }
+    if took_repeat_away && !still_repeats {
+        if let Err(e) =
+            drop_modified_instances(state, &ev.calendar_id, &ev.id, updated.ical_uid.as_deref())
+                .await
+        {
+            warn!(
+                master = %ev.id,
+                error = %e,
+                "update_event: changed occurrences of a series made single not removed (ghost tolerated)"
+            );
+        }
+    }
 
     // "This and all following": the master's rule now ends earlier, but a
     // provider-modified occurrence in the dropped tail is a SEPARATE stored event
@@ -1012,6 +1042,49 @@ async fn drop_tail_modified_instances(
         count = ids.len(),
         "drop_tail_modified_instances"
     );
+    delete_instances_silently(state, &cal_enc, ids).await
+}
+
+/// Cancel EVERY changed-occurrence event of `master_id`, once the series is
+/// a single (decision 280). Found by the series' iCalendar UID, which its
+/// changed occurrences share: `singleEvents=false` returns only stored events,
+/// so the answer is the single and those, wherever in time they were moved.
+/// Without a UID nothing can be looked up, and nothing is removed.
+async fn drop_modified_instances(
+    state: &ApiState,
+    calendar_id: &str,
+    master_id: &str,
+    ical_uid: Option<&str>,
+) -> GoogleResult<()> {
+    let Some(uid) = ical_uid else {
+        debug!(
+            master = master_id,
+            "drop_modified_instances: no iCalUID, nothing looked up"
+        );
+        return Ok(());
+    };
+    let cal_enc = urlencoding(calendar_id);
+    let path = format!(
+        "/calendars/{cal_enc}/events?singleEvents=false&showDeleted=false&maxResults=2500&iCalUID={}",
+        urlencoding(uid),
+    );
+    let resp: EventListResponse = state.get_json(&path).await?;
+    let ids = tail_override_instance_ids(&resp.items, master_id, DateTime::<Utc>::MIN_UTC);
+    debug!(
+        master = master_id,
+        count = ids.len(),
+        "drop_modified_instances"
+    );
+    delete_instances_silently(state, &cal_enc, ids).await
+}
+
+/// DELETE each instance with `sendUpdates=none`: cleanup after a series
+/// change that already told the guests, not a second round of cancellations.
+async fn delete_instances_silently(
+    state: &ApiState,
+    cal_enc: &str,
+    ids: Vec<String>,
+) -> GoogleResult<()> {
     for id in ids {
         let inst_enc = urlencoding(&id);
         let del_path = format!("/calendars/{cal_enc}/events/{inst_enc}?sendUpdates=none");
@@ -2796,6 +2869,7 @@ mod tests {
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
+            clear_recurrence: false,
             organized_elsewhere: false,
             id: "master-1::rid::2026-06-01T18:00:00Z".into(),
             calendar_id: "primary".into(),
@@ -2861,6 +2935,194 @@ mod tests {
         );
         assert_eq!(updated.id, moved_override().id, "keeps its override id");
         assert_eq!(updated.title, "Moved again");
+    }
+
+    /// A series made single (decision 280): the PATCH sends Google's delete
+    /// value, and the changed occurrences Google keeps as events of their own
+    /// are removed afterwards, silently — only the series' own, and not one
+    /// that is cancelled already.
+    #[tokio::test]
+    async fn update_event_takes_the_repeat_away_and_removes_the_changed_occurrences() {
+        let mut server = mockito::Server::new_async().await;
+        let patch = server
+            .mock(
+                "PATCH",
+                "/calendars/primary/events/master-1?sendUpdates=none",
+            )
+            .match_body(mockito::Matcher::Regex(r#""recurrence":null"#.into()))
+            .with_status(200)
+            .with_body(
+                r##"{"id":"master-1","status":"confirmed","summary":"Moved again",
+                     "iCalUID":"series-1@google.com",
+                     "start":{"dateTime":"2026-06-05T18:00:00Z"},
+                     "end":{"dateTime":"2026-06-05T19:00:00Z"}}"##,
+            )
+            .create_async()
+            .await;
+        let listed = server
+            .mock("GET", "/calendars/primary/events")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("iCalUID".into(), "series-1@google.com".into()),
+                mockito::Matcher::UrlEncoded("singleEvents".into(), "false".into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r##"{"items":[
+                  {"id":"master-1","status":"confirmed","iCalUID":"series-1@google.com",
+                   "start":{"dateTime":"2026-06-05T18:00:00Z"},
+                   "end":{"dateTime":"2026-06-05T19:00:00Z"}},
+                  {"id":"master-1_20260601T180000Z","status":"confirmed",
+                   "recurringEventId":"master-1",
+                   "start":{"dateTime":"2026-05-30T18:00:00Z"},
+                   "end":{"dateTime":"2026-05-30T19:00:00Z"},
+                   "originalStartTime":{"dateTime":"2026-06-01T18:00:00Z"}},
+                  {"id":"master-1_20260615T180000Z","status":"cancelled",
+                   "recurringEventId":"master-1",
+                   "start":{"dateTime":"2026-06-15T18:00:00Z"},
+                   "end":{"dateTime":"2026-06-15T19:00:00Z"},
+                   "originalStartTime":{"dateTime":"2026-06-15T18:00:00Z"}},
+                  {"id":"other_20260608T180000Z","status":"confirmed",
+                   "recurringEventId":"other",
+                   "start":{"dateTime":"2026-06-08T18:00:00Z"},
+                   "end":{"dateTime":"2026-06-08T19:00:00Z"},
+                   "originalStartTime":{"dateTime":"2026-06-08T18:00:00Z"}}
+                ]}"##,
+            )
+            .create_async()
+            .await;
+        let removed = server
+            .mock(
+                "DELETE",
+                "/calendars/primary/events/master-1_20260601T180000Z?sendUpdates=none",
+            )
+            .with_status(204)
+            .create_async()
+            .await;
+        let left = server
+            .mock(
+                "DELETE",
+                mockito::Matcher::Regex(
+                    r"^/calendars/primary/events/(other|master-1_20260615)".into(),
+                ),
+            )
+            .expect(0)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let made_single = Event {
+            id: "master-1".into(),
+            clear_recurrence: true,
+            ..moved_override()
+        };
+        let updated = update_event(&state, &made_single).await.unwrap();
+        patch.assert_async().await;
+        listed.assert_async().await;
+        removed.assert_async().await;
+        left.assert_async().await;
+        assert!(updated.recurrence.is_none());
+    }
+
+    /// Without the host's signal a series edit neither deletes the repeat nor
+    /// looks for changed occurrences; and a cleanup that fails leaves the
+    /// save standing.
+    #[tokio::test]
+    async fn only_the_signal_removes_a_repeat_and_a_failed_cleanup_keeps_the_save() {
+        let mut server = mockito::Server::new_async().await;
+        let sent = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let sink = Arc::clone(&sent);
+        let patch = server
+            .mock(
+                "PATCH",
+                "/calendars/primary/events/master-1?sendUpdates=none",
+            )
+            .with_status(200)
+            .with_body_from_request(move |request| {
+                sink.lock()
+                    .unwrap()
+                    .push(request.utf8_lossy_body().unwrap().into_owned());
+                br##"{"id":"master-1","status":"confirmed","summary":"Moved again",
+                     "iCalUID":"series-1@google.com",
+                     "start":{"dateTime":"2026-06-05T18:00:00Z"},
+                     "end":{"dateTime":"2026-06-05T19:00:00Z"}}"##
+                    .to_vec()
+            })
+            .expect(2)
+            .create_async()
+            .await;
+        let listed = server
+            .mock("GET", "/calendars/primary/events")
+            .match_query(mockito::Matcher::Any)
+            .with_status(500)
+            .with_body(r#"{"error":{"code":500,"message":"backend"}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let edit = Event {
+            id: "master-1".into(),
+            ..moved_override()
+        };
+        update_event(&state, &edit).await.unwrap();
+        let made_single = Event {
+            clear_recurrence: true,
+            ..edit
+        };
+        let updated = update_event(&state, &made_single).await.unwrap();
+        assert_eq!(updated.title, "Moved again");
+        patch.assert_async().await;
+        listed.assert_async().await;
+        let sent = sent.lock().unwrap().clone();
+        assert!(!sent[0].contains("recurrence"), "{}", sent[0]);
+        assert!(sent[1].contains(r#""recurrence":null"#), "{}", sent[1]);
+    }
+
+    /// Decision 280: the changed occurrences go only once Google's answer
+    /// shows the repeat gone. One that still repeats, even with a rule
+    /// Aperio cannot read, keeps them: deleting an instance of a live series
+    /// would cancel it.
+    #[tokio::test]
+    async fn a_repeat_google_kept_keeps_its_changed_occurrences() {
+        for kept in ["RRULE:FREQ=WEEKLY", "RRULE:FREQ=FORTNIGHTLY-ISH"] {
+            let mut server = mockito::Server::new_async().await;
+            let patch = server
+                .mock(
+                    "PATCH",
+                    "/calendars/primary/events/master-1?sendUpdates=none",
+                )
+                .match_body(mockito::Matcher::Regex(r#""recurrence":null"#.into()))
+                .with_status(200)
+                .with_body(format!(
+                    r#"{{"id":"master-1","status":"confirmed","summary":"Moved again",
+                        "iCalUID":"series-1@google.com","recurrence":["{kept}"],
+                        "start":{{"dateTime":"2026-06-05T18:00:00Z"}},
+                        "end":{{"dateTime":"2026-06-05T19:00:00Z"}}}}"#
+                ))
+                .create_async()
+                .await;
+            let listed = server
+                .mock("GET", mockito::Matcher::Any)
+                .expect(0)
+                .create_async()
+                .await;
+            let removed = server
+                .mock("DELETE", mockito::Matcher::Any)
+                .expect(0)
+                .create_async()
+                .await;
+
+            let state = fixture_state(&server.url());
+            let made_single = Event {
+                id: "master-1".into(),
+                clear_recurrence: true,
+                ..moved_override()
+            };
+            update_event(&state, &made_single).await.unwrap();
+            patch.assert_async().await;
+            listed.assert_async().await;
+            removed.assert_async().await;
+        }
     }
 
     #[tokio::test]

@@ -153,6 +153,32 @@ pub fn kept_fields(
         .collect()
 }
 
+/// Whether `edit` takes the repeat away from a series (decision 280): it has
+/// none, the copy the host last read has one, and that copy is the version
+/// the edit was made from (the same known ETag).
+///
+/// An adapter that writes only the fields it is given (Google, Microsoft 365)
+/// cannot tell "no repeat" from "nothing to say about the repeat": both are a
+/// missing rule. Sending its delete value for every missing rule would cost a
+/// series whose rule Aperio could not read — it holds such a series as no
+/// repeat — its repeat on any later save. So the delete goes out only on this
+/// proof: the user saw a repeat and removed it. An edit made from an older
+/// copy than the host's (another device has made the event a series since)
+/// removes nothing; then the series comes back, as before.
+///
+/// Never for an occurrence, which has no rule of its own to remove.
+pub fn clears_recurrence(edit: &Event, opened: Option<&Event>) -> bool {
+    let Some(opened) = opened else {
+        return false;
+    };
+    let occurrence = !matches!(crate::split_override_id(&edit.id), Ok(None));
+    edit.recurrence.is_none()
+        && opened.recurrence.is_some()
+        && opened.etag.is_some()
+        && opened.etag == edit.etag
+        && !occurrence
+}
+
 /// `edit`, with the content it left alone taken from `provider`: the title,
 /// description, location and reminders named in [`Event::keep_fields`], and
 /// the invitees when [`Event::keep_attendees`] says the edit did not change
@@ -286,6 +312,7 @@ mod tests {
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
+            clear_recurrence: false,
             organized_elsewhere: false,
             id: "ev".into(),
             calendar_id: "cal".into(),
@@ -584,5 +611,70 @@ mod tests {
         assert_eq!(created.title, moved.title);
         assert_eq!(created.location, moved.location);
         assert_eq!(created.attendees, moved.attendees);
+    }
+
+    /// Decision 280: the delete goes out only when the user saw a repeat and
+    /// removed it, on the very version the host read.
+    #[test]
+    fn a_repeat_is_cleared_only_from_the_copy_the_edit_was_made_from() {
+        let read = Event {
+            etag: Some("v1".into()),
+            ..event()
+        };
+        let single = Event {
+            recurrence: None,
+            ..read.clone()
+        };
+        assert!(clears_recurrence(&single, Some(&read)));
+
+        // Nothing read, or read without a repeat (a rule Aperio could not
+        // read looks like that): nothing to remove.
+        assert!(!clears_recurrence(&single, None));
+        let read_single = Event {
+            recurrence: None,
+            ..read.clone()
+        };
+        assert!(!clears_recurrence(&single, Some(&read_single)));
+
+        // The edit keeps a repeat, changed or not.
+        assert!(!clears_recurrence(&read, Some(&read)));
+
+        // Made from another version, or from one nobody can name.
+        let older = Event {
+            etag: Some("v0".into()),
+            ..single.clone()
+        };
+        assert!(!clears_recurrence(&older, Some(&read)));
+        let unnamed = Event {
+            etag: None,
+            ..event()
+        };
+        let unnamed_single = Event {
+            recurrence: None,
+            ..unnamed.clone()
+        };
+        assert!(!clears_recurrence(&unnamed_single, Some(&unnamed)));
+    }
+
+    /// An occurrence has no rule of its own, even when its row says so, and
+    /// an id that only looks like one is no series either.
+    #[test]
+    fn an_occurrence_never_clears_a_repeat() {
+        let read = Event {
+            etag: Some("v1".into()),
+            ..event()
+        };
+        for id in ["ev::rid::2026-11-16T15:00:00Z", "ev::rid::not-a-slot"] {
+            let occurrence = Event {
+                id: id.into(),
+                recurrence: None,
+                ..read.clone()
+            };
+            let opened = Event {
+                id: id.into(),
+                ..read.clone()
+            };
+            assert!(!clears_recurrence(&occurrence, Some(&opened)), "{id}");
+        }
     }
 }

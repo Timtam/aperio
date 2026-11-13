@@ -52,6 +52,17 @@ flow and token refresh; the adapter sends a `Bearer` token.
   (`clear_attendees`) sends an empty list, but only when notifying: Graph
   mails whenever `attendees` is in the body, so a silent removal cannot
   reach it.
+- **No repeat is a `null`, and only on the host's word** (decision 280). A
+  missing pattern leaves `recurrence` out of the PATCH, since a series whose
+  pattern the adapter cannot read has none either. Only `clear_recurrence`,
+  which `guard_update` sets when the cached copy repeats, the edit does not,
+  and the edit was made from that very version (same ETag), sends
+  `"recurrence": null`, as Graph's update reference shows it. Not where the
+  event read just before the PATCH holds no pattern (an occurrence, or a
+  series another client made single). Unmeasured against a live mailbox,
+  and dormant today: the adapter reads only `/calendarView`, so no cached
+  row repeats and `guard_update` never sets the flag for a Microsoft 365
+  event. It takes effect once the adapter reads series masters.
 
 - **Graph always notifies.** Attendees in the body of a create or an update
   are mailed, and deleting a meeting on the organizer's calendar sends its

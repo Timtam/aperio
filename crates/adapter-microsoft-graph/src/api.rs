@@ -615,6 +615,12 @@ fn description_matches(server: Option<&str>, outgoing: Option<&str>) -> bool {
 fn body_for_update(current: Option<&EventEntry>, ev: &Event) -> GraphResult<EventWriteBody> {
     let mut body = event_to_body(ev)?;
     if let Some(current) = current {
+        // Nothing to take away where the server holds no pattern: an
+        // occurrence, or a series some other client made single already
+        // (decision 280).
+        if matches!(body.recurrence, Some(None)) && current.recurrence.is_none() {
+            body.recurrence = None;
+        }
         let server_text = current
             .body
             .as_ref()
@@ -1438,6 +1444,46 @@ mod tests {
         // be worse than a flattened description.
         let body = body_for_update(None, &event_fixture(Some("whatever"))).expect("body");
         assert_eq!(body.body.map(|b| b.content).as_deref(), Some("whatever"));
+    }
+
+    /// Decision 280: the pattern goes with `null` while the server still holds
+    /// one; where it holds none (an occurrence, or a series another client
+    /// made single already) there is nothing to take away. A failed read
+    /// sends it, as the host said so.
+    #[test]
+    fn update_takes_a_pattern_away_only_where_the_server_has_one() {
+        let single: EventEntry = serde_json::from_str(SERVER_EVENT_HTML).expect("entry");
+        let series: EventEntry = serde_json::from_value(serde_json::json!({
+            "id": "ev1",
+            "subject": "Weekly",
+            "isAllDay": false,
+            "isReminderOn": false,
+            "start": {"dateTime": "2026-05-25T10:00:00", "timeZone": "UTC"},
+            "end":   {"dateTime": "2026-05-25T10:30:00", "timeZone": "UTC"},
+            "recurrence": {
+                "pattern": {"type": "weekly", "interval": 1, "daysOfWeek": ["monday"]},
+                "range": {"type": "noEnd", "startDate": "2026-05-25"}
+            }
+        }))
+        .expect("entry");
+        let made_single = Event {
+            clear_recurrence: true,
+            ..event_fixture(None)
+        };
+        let null = |body: &EventWriteBody| {
+            serde_json::to_value(body)
+                .expect("serialise")
+                .get("recurrence")
+                == Some(&serde_json::Value::Null)
+        };
+        assert!(null(
+            &body_for_update(Some(&series), &made_single).expect("body")
+        ));
+        assert!(null(&body_for_update(None, &made_single).expect("body")));
+        let body = body_for_update(Some(&single), &made_single).expect("body");
+        assert!(body.recurrence.is_none(), "nothing to take away");
+        let body = body_for_update(Some(&series), &event_fixture(None)).expect("body");
+        assert!(body.recurrence.is_none(), "no signal, no delete");
     }
 
     #[tokio::test]

@@ -638,6 +638,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
+        clear_recurrence: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
@@ -909,8 +910,12 @@ pub struct EventWriteBody {
         rename = "reminderMinutesBeforeStart"
     )]
     pub reminder_minutes_before_start: Option<i64>,
+    /// `None` leaves the field out, so Graph keeps its pattern; `Some(Some)`
+    /// writes this one; `Some(None)` is JSON `null`, which Graph documents
+    /// for taking the pattern away. That one only on a series the host says
+    /// the edit made single ([`Event::clear_recurrence`], decision 280).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub recurrence: Option<RecurrenceObject>,
+    pub recurrence: Option<Option<RecurrenceObject>>,
     /// Microsoft Graph QUIRK: putting attendees in the body makes Graph
     /// EMAIL them on create/update — there is no per-request suppress. So we
     /// write this ONLY when the user opted to notify; declining means Graph
@@ -998,7 +1003,7 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
         is_reminder_on: reminder_minutes.is_some(),
         reminder_minutes_before_start: reminder_minutes,
         recurrence: match new.recurrence.as_ref() {
-            Some(r) => Some(rrule_to_recurrence(&r.rrule, new.start)?),
+            Some(r) => Some(Some(rrule_to_recurrence(&r.rrule, new.start)?)),
             None => None,
         },
         attendees: Some(attendees_to_write(&new.attendees, new.send_invitations))
@@ -1030,7 +1035,11 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
         is_reminder_on: reminder_minutes.is_some(),
         reminder_minutes_before_start: reminder_minutes,
         recurrence: match ev.recurrence.as_ref() {
-            Some(r) => Some(rrule_to_recurrence(&r.rrule, ev.start)?),
+            Some(r) => Some(Some(rrule_to_recurrence(&r.rrule, ev.start)?)),
+            // The repeat removed (decision 280): Graph's delete value. A
+            // missing pattern alone says nothing — a series whose pattern
+            // Aperio could not read has none either.
+            None if ev.clear_recurrence => Some(None),
             None => None,
         },
         // Not when the edit left the invitees alone (decision 71a): the list
@@ -2229,6 +2238,40 @@ mod tests {
         ev.send_invitations = false;
         let json = serde_json::to_value(event_to_body(&ev).unwrap()).unwrap();
         assert!(json.get("attendees").is_none(), "{json}");
+    }
+
+    /// A series made single sends `null`, the value Graph documents for
+    /// taking the pattern away, but only with the host's signal (decision
+    /// 280): a missing pattern alone leaves the field out.
+    #[test]
+    fn a_pattern_is_removed_only_with_the_hosts_signal() {
+        let raw = r#"{
+            "id": "series-1",
+            "start": { "dateTime": "2026-05-25T10:00:00.0000000", "timeZone": "UTC" },
+            "end":   { "dateTime": "2026-05-25T11:00:00.0000000", "timeZone": "UTC" },
+            "isAllDay": false
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let mut ev = map_event(entry, "primary").unwrap().unwrap();
+        let json = serde_json::to_value(event_to_body(&ev).unwrap()).unwrap();
+        assert!(json.get("recurrence").is_none(), "{json}");
+
+        ev.clear_recurrence = true;
+        let json = serde_json::to_value(event_to_body(&ev).unwrap()).unwrap();
+        assert_eq!(
+            json.get("recurrence"),
+            Some(&serde_json::Value::Null),
+            "{json}"
+        );
+
+        // A pattern still there is written, the signal or not.
+        ev.recurrence = Some(EventRecurrence {
+            rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+            exceptions: vec![],
+            tzid: None,
+        });
+        let json = serde_json::to_value(event_to_body(&ev).unwrap()).unwrap();
+        assert_eq!(json["recurrence"]["pattern"]["type"], "weekly", "{json}");
     }
 
     #[test]

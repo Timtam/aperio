@@ -593,6 +593,7 @@ fn persist_new_event(
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
+        clear_recurrence: false,
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
@@ -657,6 +658,7 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
+        clear_recurrence: false,
         // Someone else's meeting kept from a file (I6) is the only kind with
         // an organizer here.
         organized_elsewhere: organizer.is_some(),

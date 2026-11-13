@@ -463,6 +463,7 @@ mod tests {
                 keep_attendees: false,
                 keep_fields: Vec::new(),
                 clear_attendees: false,
+                clear_recurrence: false,
                 created_at: at,
                 updated_at: at,
                 etag: None,

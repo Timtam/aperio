@@ -1355,6 +1355,41 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   mit einem verschobenen Start neu geschrieben werden, dann seine, auf den
   neuen Start gebaut — sofern Aperio seine aktuelle Fassung lesen konnte;
   sonst geht die eigene mit.
+- **„Wiederholt sich nicht“ erreicht den Anbieter (280).** Google und
+  Microsoft 365 schreiben Feld für Feld und lassen weg, wozu sie keinen Wert
+  bekommen. Eine Serie, die man auf „wiederholt sich nicht“ setzte, behielt
+  dort deshalb ihre Wiederholung: Die Änderung war als „aktualisiert“
+  angesagt, und beim nächsten Abgleich stand die Serie wieder da. Eine fehlende
+  Regel allein darf aber nichts löschen, denn auch eine Serie, deren Regel
+  Aperio nicht lesen kann, steht in Aperio ohne Regel da und verlöre sie bei
+  jedem späteren Speichern. Deshalb setzt `guard_update` (beide Geräte)
+  `clear_recurrence` nur, wenn der zuletzt gelesene Stand eine Wiederholung
+  hat, die Änderung keine mehr, und die Änderung aus genau dieser Fassung
+  stammt (dasselbe bekannte ETag; Toni, 2026-11-13). Nie bei einem Vorkommen.
+  Ein Editor auf älterem Stand, etwa nachdem ein anderes Gerät den Termin
+  inzwischen zur Serie gemacht hat, löscht nichts; dann kommt die Serie wieder
+  wie bisher. Mit dem Signal schickt Google `"recurrence": null` und Graph
+  ebenso. Beide Werte sind dokumentiert, gemessen ist keiner: Google löscht
+  laut seiner Patch-Anleitung ein Feld mit `null`, und Microsoft zeigt
+  `"recurrence": null` als Beispiel im PATCH. Graph lässt das Feld weg, wenn
+  der Server ohnehin kein Muster hält (ein Vorkommen, oder ein anderes
+  Programm hat die Serie schon aufgelöst). Der Graph-Teil ruht vorerst: Der
+  Adapter liest nur `/calendarView`, also nur einzelne Vorkommen, nie den
+  Serienkopf. Eine Microsoft-365-Serie steht in Aperio deshalb nie als Serie
+  da, und `guard_update` setzt das Signal dort nie. Er greift, sobald der
+  Adapter Serienköpfe liest (Toni, 2026-11-13). Die geänderten Vorkommen
+  gehen mit der Wiederholung, sonst stünden sie als Geister neben dem
+  Einzeltermin (Toni, 2026-11-13). Google hält sie als
+  eigene Termine; ob es sie mit der Wiederholung entfernt, ist nicht
+  gemessen. Der Google-Adapter entfernt sie danach selbst, gefunden über die
+  iCalendar-UID der Serie, still und ohne die Speicherung scheitern zu lassen,
+  wie beim Kürzen einer Serie. Das geschieht nur, wenn Googles Antwort keine
+  Regel mehr trägt: Ein Vorkommen einer Serie zu löschen, die sich weiter
+  wiederholt, sagte es endgültig ab. CalDAV (auch iCloud) schreibt den ganzen
+  Termin neu und hält die geänderten Vorkommen als eigene Blöcke in derselben
+  Datei. Mit dem Signal schreibt es den Einzeltermin ohne sie, ohne das
+  Signal bleiben sie wie bisher. EWS vergleicht mit seiner eigenen Kopie und
+  braucht das Signal nicht.
 - **„Nur dieser Termin" bleibt in seiner Serie (79b).** Bisher schnitt jede
   Oberfläche ein geändertes Vorkommen aus seiner Serie heraus: eine `EXDATE`
   auf die Serie und ein eigenständiger Termin daneben. Damit verliert es, was

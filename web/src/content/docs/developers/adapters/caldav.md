@@ -145,6 +145,12 @@ Apple's well-known endpoints.
     A resource that holds overrides without their master (an invitation to
     single occurrences) loses the one block, and the resource itself goes
     with its last block.
+  - A series made single (`clear_recurrence`, decision 280) is written
+    without any of its overrides; left, they would stand beside the single
+    as ghosts. Only on that flag, which `guard_update` sets when the cached
+    copy repeats, the edit does not, and both carry the same ETag: a missing
+    rule alone keeps every override, as a rule Aperio cannot read is missing
+    too.
 - **Keep recurring masters.** The folder-complete sync keeps every event
   regardless of date; the legacy windowed fallback still keeps any event
   with a recurrence even when its first occurrence is outside the window

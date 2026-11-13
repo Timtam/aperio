@@ -374,6 +374,7 @@ fn map_event(
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
+        clear_recurrence: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
