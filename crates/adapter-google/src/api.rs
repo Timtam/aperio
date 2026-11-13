@@ -25,7 +25,7 @@ use url::Url;
 use crate::auth::{self, TokenSet, GOOGLE_TOKEN_URL};
 use crate::error::{GoogleError, GoogleResult};
 use crate::mapping::{
-    all_day_slot, clears_repeat, event_to_body, invitation_import_body, map_calendar, map_event,
+    all_day_slot, event_to_body, invitation_import_body, map_calendar, map_event,
     new_event_to_body, CalendarListResponse, EventEntry, EventListResponse,
 };
 
@@ -947,6 +947,8 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
     let path = format!("/calendars/{cal_enc}/events/{ev_enc}?sendUpdates={su}");
     let body = event_to_body(ev);
     let entry: EventEntry = state.patch_json(&path, &body).await?;
+    // Read before mapping: a rule Aperio cannot read maps to no rule at all.
+    let still_repeats = entry.recurrence.as_ref().is_some_and(|l| !l.is_empty());
     let updated = map_event(entry, &ev.calendar_id)?
         .ok_or_else(|| GoogleError::Protocol("update returned cancelled event".into()))?;
 
@@ -955,7 +957,17 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
     // removes it along with the repeat is unmeasured; left, it would stand
     // beside the single as a ghost. Removed silently and best-effort like a
     // cut's: the save itself has landed, and a failure here must not undo it.
-    if clears_repeat(ev) {
+    // Only once Google's answer shows the repeat gone: the delete value is
+    // documented, not measured, and deleting an instance of a series that
+    // still repeats would cancel that occurrence for good.
+    let took_repeat_away = matches!(body.recurrence, Some(None));
+    if took_repeat_away && still_repeats {
+        warn!(
+            master = %ev.id,
+            "update_event: Google kept the repeat it was told to remove; changed occurrences left alone"
+        );
+    }
+    if took_repeat_away && !still_repeats {
         if let Err(e) =
             drop_modified_instances(state, &ev.calendar_id, &ev.id, updated.ical_uid.as_deref())
                 .await
@@ -3064,6 +3076,53 @@ mod tests {
         let sent = sent.lock().unwrap().clone();
         assert!(!sent[0].contains("recurrence"), "{}", sent[0]);
         assert!(sent[1].contains(r#""recurrence":null"#), "{}", sent[1]);
+    }
+
+    /// Decision 280: the changed occurrences go only once Google's answer
+    /// shows the repeat gone. One that still repeats, even with a rule
+    /// Aperio cannot read, keeps them: deleting an instance of a live series
+    /// would cancel it.
+    #[tokio::test]
+    async fn a_repeat_google_kept_keeps_its_changed_occurrences() {
+        for kept in ["RRULE:FREQ=WEEKLY", "RRULE:FREQ=FORTNIGHTLY-ISH"] {
+            let mut server = mockito::Server::new_async().await;
+            let patch = server
+                .mock(
+                    "PATCH",
+                    "/calendars/primary/events/master-1?sendUpdates=none",
+                )
+                .match_body(mockito::Matcher::Regex(r#""recurrence":null"#.into()))
+                .with_status(200)
+                .with_body(format!(
+                    r#"{{"id":"master-1","status":"confirmed","summary":"Moved again",
+                        "iCalUID":"series-1@google.com","recurrence":["{kept}"],
+                        "start":{{"dateTime":"2026-06-05T18:00:00Z"}},
+                        "end":{{"dateTime":"2026-06-05T19:00:00Z"}}}}"#
+                ))
+                .create_async()
+                .await;
+            let listed = server
+                .mock("GET", mockito::Matcher::Any)
+                .expect(0)
+                .create_async()
+                .await;
+            let removed = server
+                .mock("DELETE", mockito::Matcher::Any)
+                .expect(0)
+                .create_async()
+                .await;
+
+            let state = fixture_state(&server.url());
+            let made_single = Event {
+                id: "master-1".into(),
+                clear_recurrence: true,
+                ..moved_override()
+            };
+            update_event(&state, &made_single).await.unwrap();
+            patch.assert_async().await;
+            listed.assert_async().await;
+            removed.assert_async().await;
+        }
     }
 
     #[tokio::test]

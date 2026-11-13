@@ -536,12 +536,6 @@ Siehe DESIGN §4.2.
   unter der Serie (`EventDialog.tsx`, `seriesIdOf`). Ein am Desktop gewählter
   Klang erreicht die Ausnahme also nicht. Eine Regel festlegen, am besten im
   Kern (`sound.rs`: erst die Ausnahme, dann die Serie).
-  🚩 **CalDAV: Ändern des Serienkopfs schreibt nur den Kopf.** `put_master_only`
-  verlässt sich darauf, dass der Server die übrigen Ausnahmen der Ressource
-  wieder anhängt (Kommentar in `events.rs` seit 27f9fcd1). Das ist nicht
-  belegt; ein Server, der sich an RFC 4791 hält, verwirft sie. Live messen
-  (iCloud, Nextcloud) und bei Bedarf auf das Zusammenführen umstellen, das
-  #80 für Ausnahmen gebaut hat.
   🚩 **Offen aus PR 2:**
   - `EXDATE` einer Zeit-Serie wird weiter als UTC geschrieben, nicht mit
     `TZID`; nur die Ganztagsform ist jetzt richtig.
@@ -1453,9 +1447,19 @@ Vorschläge sind nicht aufgenommen.
       ↳ Entscheidung 280 (DESIGN.md): Beide APIs löschen mit `null`
       (dokumentiert, nicht gemessen). `guard_update` setzt
       `clear_recurrence` nur, wenn der gelesene Stand sich wiederholt, die
-      Änderung nicht, und dasselbe ETag trägt (Toni, 2026-11-13). Google
-      entfernt danach die geänderten Vorkommen der Serie selbst, gefunden
-      über die iCalendar-UID (Toni, 2026-11-13).
+      Änderung nicht, und dasselbe ETag trägt (Toni, 2026-11-13). Der
+      Google-Adapter entfernt danach die geänderten Vorkommen der Serie
+      selbst, gefunden über die iCalendar-UID, sobald Googles Antwort keine
+      Regel mehr trägt. CalDAV schreibt den Einzeltermin ohne sie (Toni,
+      2026-11-13). Der Graph-Teil ruht: Microsoft 365 liest nur einzelne
+      Vorkommen, eine Serie steht dort nie als Serie da (Toni, 2026-11-13).
+- [ ] **Microsoft 365 zeigt Serien nur als einzelne Vorkommen.** Der
+      Graph-Adapter liest nur `/calendarView`, das jede Serie schon auf dem
+      Server in Vorkommen auflöst, und nie den Serienkopf
+      (`seriesMasterId`). In Aperio lässt sich eine Microsoft-365-Serie
+      deshalb weder als Serie bearbeiten noch auf „wiederholt sich nicht“
+      setzen. Der Graph-Teil von Entscheidung 280 ruht, bis der Adapter
+      Serienköpfe liest. Erst klären, ob und wie das in den Cache passt.
 - [ ] **Gerätekalender: ein einzelnes Vorkommen bearbeiten oder löschen.** Im
       Gerätekalender des Handys trifft das Bearbeiten oder Löschen eines
       einzelnen Vorkommens vermutlich das falsche Ziel. iOS
@@ -2097,6 +2101,15 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Domänen-Kiste — auf eins käme man nur, wenn auch der reine HTTP-Client das
   FFI-SDK einbindet.
 #### A11 · Kern und Oberflächen trennen `[~]` — erledigte Punkte
+
+- [x] **CalDAV: Ändern des Serienkopfs schreibt nur den Kopf.**
+  `put_master_only` verließ sich darauf, dass der Server die übrigen
+  Ausnahmen der Ressource wieder anhängt.
+  ↳ Erledigt mit #84 (bb5b65ee, 2026-09-19): `put_master_only` gibt es
+  nicht mehr. `update_master` liest die Ressource und legt jede Ausnahme
+  Byte für Byte zurück (`merge_with_overrides`), statt auf den Server zu
+  bauen. Das belegt `a_master_update_puts_every_override_back`. Der Punkt
+  stand trotzdem noch oben, bemerkt am 2026-11-13.
 
 - [x] **Nebenfunde aus dem Entwurf zu 118, erledigter Teil:** Tag, Woche,
   Monat und Agenda sagen eine abgelehnte Termin-Löschung in Worten an, wie die

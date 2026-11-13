@@ -127,7 +127,9 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   whether it drops them with the repeat is unmeasured, so afterwards the
   adapter lists the series' stored events by its `iCalUID`
   (`singleEvents=false`) and deletes each changed occurrence with
-  `sendUpdates=none`, best-effort, as after a cut.
+  `sendUpdates=none`, best-effort, as after a cut. Only when the PATCH
+  answer carries no `recurrence` lines any more: deleting an instance of a
+  series Google kept would cancel that occurrence.
 - **Zone data.** Wall clocks are read and written with chrono-tz's tzdata
   (2025b, the newest chrono-tz release). For a zone whose rules changed
   since (Casablanca and El Aaiún from 2026-09-20; Vancouver, Edmonton and

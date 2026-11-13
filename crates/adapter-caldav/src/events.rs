@@ -418,7 +418,9 @@ fn splice_into_vevent(vcal: &str, lines: &str) -> String {
 /// (`truncate_tail_overrides` on a timed series with an UNTIL) drops the
 /// overrides past the cutoff. An ALL-DAY series keeps them all: its DATE-only
 /// UNTIL and its local-midnight RECURRENCE-IDs cannot be compared exactly, so
-/// their cross-client cleanup stays a known gap rather than a guess.
+/// their cross-client cleanup stays a known gap rather than a guess. A series
+/// made single ([`Event::clear_recurrence`], decision 280) drops every
+/// override.
 pub async fn update_event(
     client: &Client,
     event: Event,
@@ -433,7 +435,14 @@ pub async fn update_event(
         let series_id = series_id.to_string();
         return update_override(client, event, &series_id, slot, credentials, ctx).await;
     }
-    let cutoff = if event.truncate_tail_overrides && !event.all_day {
+    let cutoff = if event.clear_recurrence && event.recurrence.is_none() {
+        // The repeat taken away (decision 280): every changed occurrence goes
+        // with it, or it would stand beside the single as a ghost. Only on the
+        // host's word, as a series whose rule Aperio cannot read arrives
+        // without one too. Nothing is compared, so an all-day series is no
+        // exception here.
+        Some(DateTime::<Utc>::MIN_UTC)
+    } else if event.truncate_tail_overrides && !event.all_day {
         event
             .recurrence
             .as_ref()
@@ -2979,6 +2988,46 @@ ORGANIZER:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
             1,
             "the rebuilt master names its zone, which is not added twice: {body}"
         );
+    }
+
+    /// Decision 280: a series made single drops its changed occurrences, but
+    /// only on the host's word. A missing rule alone keeps every override, as
+    /// a rule Aperio cannot read is missing too.
+    #[tokio::test]
+    async fn a_series_made_single_drops_its_overrides_only_on_the_hosts_word() {
+        for signal in [true, false] {
+            let mut server = Server::new_async().await;
+            let (seen, _get, put) =
+                serve_series(&mut server, SERIES_BODY, "\"server-etag\"", 1).await;
+            let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+            let mut events = crate::mapping::parse_calendar_data_with_href(
+                SERIES_BODY,
+                cal_url.as_str(),
+                Some("/calendars/alice/work/series.ics"),
+            )
+            .unwrap();
+            let mut master = events.remove(0);
+            master.etag = None;
+            master.recurrence = None;
+            master.clear_recurrence = signal;
+            update_event(
+                &client(),
+                master,
+                &creds(&server.url()),
+                &WriteCtx::default(),
+            )
+            .await
+            .unwrap();
+            put.assert_async().await;
+            let body = seen.lock().unwrap()[0].clone();
+            assert!(!body.contains("RRULE:FREQ=WEEKLY;BYDAY=MO"), "{body}");
+            assert_eq!(
+                body.contains("RECURRENCE-ID"),
+                !signal,
+                "signal {signal}: {body}"
+            );
+            assert_eq!(body.contains(block_of(SERIES_BODY, "Retitled")), !signal);
+        }
     }
 
     /// Skipping an occurrence adds one EXDATE line to the master and drops

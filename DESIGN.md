@@ -1373,13 +1373,23 @@ Besprechung sagte sie dem Gast ab. Jetzt:
   laut seiner Patch-Anleitung ein Feld mit `null`, und Microsoft zeigt
   `"recurrence": null` als Beispiel im PATCH. Graph lässt das Feld weg, wenn
   der Server ohnehin kein Muster hält (ein Vorkommen, oder ein anderes
-  Programm hat die Serie schon aufgelöst). Google hält geänderte Vorkommen als
-  eigene Termine; ob es sie mit der Wiederholung entfernt, ist nicht gemessen.
-  Aperio entfernt sie danach selbst, still und ohne die Speicherung scheitern
-  zu lassen, wie beim Kürzen einer Serie (Toni, 2026-11-13). Gefunden werden
-  sie über die iCalendar-UID der Serie. CalDAV schreibt den ganzen Termin neu,
-  und EWS vergleicht mit seiner eigenen Kopie; beide brauchten das Signal
-  nicht.
+  Programm hat die Serie schon aufgelöst). Der Graph-Teil ruht vorerst: Der
+  Adapter liest nur `/calendarView`, also nur einzelne Vorkommen, nie den
+  Serienkopf. Eine Microsoft-365-Serie steht in Aperio deshalb nie als Serie
+  da, und `guard_update` setzt das Signal dort nie. Er greift, sobald der
+  Adapter Serienköpfe liest (Toni, 2026-11-13). Die geänderten Vorkommen
+  gehen mit der Wiederholung, sonst stünden sie als Geister neben dem
+  Einzeltermin (Toni, 2026-11-13). Google hält sie als
+  eigene Termine; ob es sie mit der Wiederholung entfernt, ist nicht
+  gemessen. Der Google-Adapter entfernt sie danach selbst, gefunden über die
+  iCalendar-UID der Serie, still und ohne die Speicherung scheitern zu lassen,
+  wie beim Kürzen einer Serie. Das geschieht nur, wenn Googles Antwort keine
+  Regel mehr trägt: Ein Vorkommen einer Serie zu löschen, die sich weiter
+  wiederholt, sagte es endgültig ab. CalDAV (auch iCloud) schreibt den ganzen
+  Termin neu und hält die geänderten Vorkommen als eigene Blöcke in derselben
+  Datei. Mit dem Signal schreibt es den Einzeltermin ohne sie, ohne das
+  Signal bleiben sie wie bisher. EWS vergleicht mit seiner eigenen Kopie und
+  braucht das Signal nicht.
 - **„Nur dieser Termin" bleibt in seiner Serie (79b).** Bisher schnitt jede
   Oberfläche ein geändertes Vorkommen aus seiner Serie heraus: eine `EXDATE`
   auf die Serie und ein eigenständiger Termin daneben. Damit verliert es, was
