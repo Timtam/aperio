@@ -867,6 +867,7 @@ mod delta_tests {
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
+            clear_recurrence: false,
             organized_elsewhere: false,
             id: "ev-1".into(),
             calendar_id: "cal-1".into(),

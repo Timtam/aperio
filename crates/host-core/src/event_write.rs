@@ -53,6 +53,11 @@ impl Drop for EventWriteTicket {
 /// and never be written. The proof is asked before the row is read, so a
 /// refresh landing in between can only make the row newer, never older.
 ///
+/// A series whose repeat the edit removed is marked so
+/// ([`Event::clear_recurrence`], decision 280) when that copy had one and is
+/// the version the edit was made from: an adapter that leaves out a missing
+/// rule then sends its delete value, and only then.
+///
 /// Returns the write's ticket: the host holds it across the adapter call.
 pub fn guard_update(
     cache: &CacheStore,
@@ -72,6 +77,9 @@ pub fn guard_update(
     // Always assigned, never merged: an event that comes back from a save and
     // is sent again must not carry an old list in.
     event.keep_fields = cal_core::event_diff::kept_fields(event, read.as_ref(), proven);
+    // Assigned the same way: the repeat is removed only from the version the
+    // edit was made from (decision 280).
+    event.clear_recurrence = cal_core::event_diff::clears_recurrence(event, read.as_ref());
     // Begun only now, so this write's own ticket never disproves the copy it
     // was just compared with.
     cache.begin_event_write(account, read_calendar);

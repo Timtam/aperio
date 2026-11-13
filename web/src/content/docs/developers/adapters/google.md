@@ -117,6 +117,17 @@ Colours: Google calendars expose a `backgroundColor` hex, taken directly.
   be another device's newer change, which this device's start must not be
   paired with. Before, every save, a rename included, wrote the array anew
   and erased deletions other apps had written.
+- **No repeat is a `null`, and only on the host's word** (decision 280). A
+  missing rule leaves `recurrence` out of the PATCH, since a series whose
+  lines the adapter cannot read has no rule either. Only `clear_recurrence`,
+  which `guard_update` sets when the cached copy repeats, the edit does not,
+  and the edit was made from that very version (same ETag), sends
+  `"recurrence": null`, Google's documented way to delete a field. Never on
+  an occurrence. Google keeps changed occurrences as events of their own;
+  whether it drops them with the repeat is unmeasured, so afterwards the
+  adapter lists the series' stored events by its `iCalUID`
+  (`singleEvents=false`) and deletes each changed occurrence with
+  `sendUpdates=none`, best-effort, as after a cut.
 - **Zone data.** Wall clocks are read and written with chrono-tz's tzdata
   (2025b, the newest chrono-tz release). For a zone whose rules changed
   since (Casablanca and El Aaiún from 2026-09-20; Vancouver, Edmonton and

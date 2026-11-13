@@ -267,6 +267,15 @@ pub struct Event {
     /// (decision 74a). NOT persisted and meaningless on a read.
     #[serde(default, skip_serializing_if = "is_false")]
     pub clear_attendees: bool,
+    /// Transient write-only signal: the edit took the repeat away from a
+    /// series, and the copy it was made from is the one the host last read
+    /// (`event_diff::clears_recurrence`, decision 280). An adapter that leaves
+    /// out a field it was given no value for (Google, Microsoft 365) writes
+    /// its delete value only with this, so a series whose rule Aperio could
+    /// not read, and so holds as no repeat, never loses it to an unrelated
+    /// save. Never on an occurrence. NOT persisted and meaningless on a read.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_recurrence: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Provider ETag / sync tag, used for optimistic-concurrency on push.

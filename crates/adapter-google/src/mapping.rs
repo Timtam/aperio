@@ -724,6 +724,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
+        clear_recurrence: false,
         organized_elsewhere: people.organized_elsewhere,
         send_invitations: false,
         truncate_tail_overrides: false,
@@ -804,8 +805,13 @@ pub struct EventWriteBody {
     pub start: Option<EventDateTimeWrite>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end: Option<EventDateTimeWrite>,
+    /// `None` leaves the field out, so Google keeps its repeat; `Some(Some)`
+    /// writes these lines; `Some(None)` is JSON `null`, Google's way to
+    /// delete a field on a PATCH, which takes the repeat away. That one only
+    /// on a series the host says the edit made single
+    /// ([`Event::clear_recurrence`], decision 280).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub recurrence: Option<Vec<String>>,
+    pub recurrence: Option<Option<Vec<String>>>,
     pub reminders: EventRemindersWrite,
     /// Attendees are written whenever there are any (Google stores them);
     /// whether Google EMAILS them is governed by the `sendUpdates` query
@@ -918,7 +924,7 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
         recurrence: new
             .recurrence
             .as_ref()
-            .map(|r| recurrence_to_lines(r, new.all_day, tzid)),
+            .map(|r| Some(recurrence_to_lines(r, new.all_day, tzid))),
         reminders: reminders_to_write(&new.reminders),
         attendees: Some(attendees_to_write(&new.attendees)).filter(|list| !list.is_empty()),
     }
@@ -988,9 +994,15 @@ pub fn event_to_body(ev: &Event) -> EventWriteBody {
         recurrence: if keeps_slot {
             None
         } else {
-            ev.recurrence
-                .as_ref()
-                .map(|r| recurrence_to_lines(r, ev.all_day, tzid))
+            match ev.recurrence.as_ref() {
+                Some(r) => Some(Some(recurrence_to_lines(r, ev.all_day, tzid))),
+                // The repeat removed (decision 280): Google's delete value.
+                // A missing rule alone says nothing — a series whose lines
+                // Aperio could not read has none either — and an occurrence
+                // has no rule of its own to remove.
+                None if clears_repeat(ev) => Some(None),
+                None => None,
+            }
         },
         reminders: reminders_to_write(&ev.reminders),
         // Left out of the PATCH when the edit did not change the invitees
@@ -1005,6 +1017,14 @@ pub fn event_to_body(ev: &Event) -> EventWriteBody {
             Some(attendees_to_write(&ev.attendees)).filter(|list| !list.is_empty())
         },
     }
+}
+
+/// Whether a PATCH of `ev` takes its repeat away: the host's signal, on a
+/// series' own id and never on an occurrence's (decision 280).
+pub(crate) fn clears_repeat(ev: &Event) -> bool {
+    ev.clear_recurrence
+        && ev.recurrence.is_none()
+        && matches!(cal_core::split_override_id(&ev.id), Ok(None))
 }
 
 fn range_to_write(when: DateTime<Utc>, all_day: bool, tzid: Option<&str>) -> EventDateTimeWrite {
@@ -1435,6 +1455,50 @@ mod tests {
         assert_eq!(body["attendees"], serde_json::json!([]));
     }
 
+    /// A series made single sends `null`, Google's delete value, but only
+    /// with the host's signal (decision 280): a missing rule alone leaves the
+    /// field out, as one Aperio could not read is missing too, and an
+    /// occurrence never removes a repeat.
+    #[test]
+    fn a_repeat_is_removed_only_with_the_hosts_signal() {
+        let raw = r#"{
+            "id": "series-1",
+            "start": { "dateTime": "2026-05-25T10:00:00Z" },
+            "end":   { "dateTime": "2026-05-25T11:00:00Z" }
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let mut ev = map_event(entry, "primary").unwrap().unwrap();
+        let body = serde_json::to_value(event_to_body(&ev)).unwrap();
+        assert!(body.get("recurrence").is_none(), "{body}");
+
+        ev.clear_recurrence = true;
+        let body = serde_json::to_value(event_to_body(&ev)).unwrap();
+        assert_eq!(
+            body.get("recurrence"),
+            Some(&serde_json::Value::Null),
+            "{body}"
+        );
+
+        let occurrence = Event {
+            id: "series-1::rid::2026-05-25T10:00:00Z".into(),
+            ..ev.clone()
+        };
+        let body = serde_json::to_value(event_to_body(&occurrence)).unwrap();
+        assert!(body.get("recurrence").is_none(), "{body}");
+
+        // A rule still there is written as lines, the signal or not.
+        let repeating = Event {
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY".into(),
+                exceptions: vec![],
+                tzid: None,
+            }),
+            ..ev.clone()
+        };
+        let body = serde_json::to_value(event_to_body(&repeating)).unwrap();
+        assert_eq!(body["recurrence"][0], "RRULE:FREQ=WEEKLY", "{body}");
+    }
+
     #[test]
     fn map_event_all_day() {
         let raw = r#"{
@@ -1561,6 +1625,7 @@ mod tests {
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
+            clear_recurrence: false,
             organized_elsewhere: false,
             id: "ev-z".into(),
             calendar_id: "primary".into(),
@@ -1608,6 +1673,7 @@ mod tests {
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
+            clear_recurrence: false,
             organized_elsewhere: false,
             id: "ev-all-day".into(),
             calendar_id: "primary".into(),
@@ -1913,6 +1979,7 @@ mod tests {
             keep_attendees: false,
             keep_fields: Vec::new(),
             clear_attendees: false,
+            clear_recurrence: false,
             organized_elsewhere: false,
             id: "ev-1".into(),
             calendar_id: "primary".into(),

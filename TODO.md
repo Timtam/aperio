@@ -1440,7 +1440,7 @@ Vorschläge sind nicht aufgenommen.
       (shared/recurrence.ts) klären, ob Test oder Code falsch ist. Dann die
       Erwartungen auf die Geräte- bzw. Serienuhr umstellen und die Datei per
       PowerShell in sieben Zonen prüfen.
-- [ ] **„Wiederholt sich nicht“ erreicht Google und Microsoft 365 nicht.**
+- [x] **„Wiederholt sich nicht“ erreicht Google und Microsoft 365 nicht.**
       Setzt man eine Google- oder Microsoft-365-Serie auf „wiederholt sich
       nicht“, erreicht das den Server nie. Die Serie kommt beim nächsten
       Abgleich zurück, obwohl „aktualisiert“ angesagt wurde. Ursache:
@@ -1450,6 +1450,12 @@ Vorschläge sind nicht aufgenommen.
       API braucht (Google: [] oder null? Graph: null?). Diesen Wert dann nur
       auf Master/Einzeltermin senden (nie beim PATCH eines Vorkommens), wie
       clear_attendees, mit mockito-Tests und Doku.
+      ↳ Entscheidung 280 (DESIGN.md): Beide APIs löschen mit `null`
+      (dokumentiert, nicht gemessen). `guard_update` setzt
+      `clear_recurrence` nur, wenn der gelesene Stand sich wiederholt, die
+      Änderung nicht, und dasselbe ETag trägt (Toni, 2026-11-13). Google
+      entfernt danach die geänderten Vorkommen der Serie selbst, gefunden
+      über die iCalendar-UID (Toni, 2026-11-13).
 - [ ] **Gerätekalender: ein einzelnes Vorkommen bearbeiten oder löschen.** Im
       Gerätekalender des Handys trifft das Bearbeiten oder Löschen eines
       einzelnen Vorkommens vermutlich das falsche Ziel. iOS

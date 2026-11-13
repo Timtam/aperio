@@ -55,6 +55,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
         keep_attendees: false,
         keep_fields: Vec::new(),
         clear_attendees: false,
+        clear_recurrence: false,
         organized_elsewhere: false,
         id: id.into(),
         calendar_id: CAL.into(),
@@ -1478,6 +1479,45 @@ fn the_write_guard_compares_with_the_cached_read() {
     let mut moved = read.clone();
     let _ = crate::event_write::guard_update(&store, ACC, "other-cal", &mut moved);
     assert!(!moved.keep_attendees);
+}
+
+/// Decision 280: the guard tells the adapter to take a repeat away only when
+/// the cached copy has one and the edit was made from that very copy. A
+/// series whose rule the editor could not read arrives without one too, from
+/// an older server state, and must keep its repeat.
+#[test]
+fn the_write_guard_clears_a_repeat_only_from_the_copy_it_read() {
+    let store = setup();
+    let mut read = event("ev-1", 9, 10);
+    read.recurrence = Some(EventRecurrence {
+        rrule: "FREQ=WEEKLY;BYDAY=SA".into(),
+        exceptions: vec![],
+        tzid: None,
+    });
+    store.upsert_event(ACC, CAL, &read).unwrap();
+
+    let mut single = read.clone();
+    single.recurrence = None;
+    let _ = crate::event_write::guard_update(&store, ACC, CAL, &mut single);
+    assert!(single.clear_recurrence);
+
+    let mut stale = single.clone();
+    stale.clear_recurrence = false;
+    stale.etag = Some("etag-older".into());
+    let _ = crate::event_write::guard_update(&store, ACC, CAL, &mut stale);
+    assert!(!stale.clear_recurrence, "a different server state");
+
+    // Always assigned: a flag an event brings along never survives the guard.
+    let mut kept = read.clone();
+    kept.clear_recurrence = true;
+    let _ = crate::event_write::guard_update(&store, ACC, CAL, &mut kept);
+    assert!(!kept.clear_recurrence, "the repeat is still there");
+
+    // Nothing cached in the calendar it moved from: nothing proves the clear.
+    let mut moved = single.clone();
+    moved.clear_recurrence = false;
+    let _ = crate::event_write::guard_update(&store, ACC, "other-cal", &mut moved);
+    assert!(!moved.clear_recurrence);
 }
 
 /// A whole-calendar refresh through the SWR path, answered with `rows`.

@@ -11804,6 +11804,7 @@ mod tests {
                 keep_attendees: false,
                 keep_fields: Vec::new(),
                 clear_attendees: false,
+                clear_recurrence: false,
                 organized_elsewhere: false,
                 id: id.to_string(),
                 calendar_id: "cal".into(),
