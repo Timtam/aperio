@@ -140,6 +140,11 @@ export interface ReconcileResult {
   covered: LiveTriggerKey[];
   /** The memory for the activities that stay; `remember` adds a new one. */
   memory: ActivityMemory;
+  /** The earliest end among the chains that keep or get an activity, or
+   *  `null` with none. Only a running Aperio can end an activity, and iOS
+   *  wakes it when it likes; this is the moment to ask it for (TODO A12,
+   *  Toni's iPhone 2026-11-10: "Vorbei" on the lock screen all evening). */
+  wakeAt: string | null;
 }
 
 /** At most this many activities wait to start, the earliest ones: scheduled
@@ -338,9 +343,11 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
         const content = activityContent(chain, input.now, input.locale, input.words, input.hideOnLockScreen);
         if (dismissed[content.current.key] != null) continue;
         actions.push({ type: 'start', chainKey: chainKeyOf(chain), content, keys: [...chain.keys] });
+        served.add(chain);
         continue;
       }
       if (!input.planAhead || !toSchedule.has(chain)) continue;
+      served.add(chain);
       actions.push({
         type: 'schedule',
         chainKey: chainKeyOf(chain),
@@ -353,7 +360,45 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
     }
   }
 
-  return { actions, covered, memory: { activities, dismissed, build: input.build } };
+  let wakeAt: string | null = null;
+  for (const chain of served) {
+    if (wakeAt == null || ms(chain.end) < ms(wakeAt)) wakeAt = chain.end;
+  }
+
+  return { actions, covered, memory: { activities, dismissed, build: input.build }, wakeAt };
+}
+
+/** Where a pass ran: in front, in an OS background round, or the quick start
+ *  from the last plan on a return to the app. */
+export type ActivityPassOrigin = 'foreground' | 'background' | 'quick start';
+
+/**
+ * One pass as one log line, or `null` when there was nothing to say: no
+ * activity before, none touched. Counts only, no titles and no ids.
+ *
+ * The background round is the one path nobody watches, and an activity left
+ * on the lock screen after its appointment could mean either that no round
+ * ran or that a round ran and kept it. Without this line the two looked the
+ * same (Toni's iPhone, 2026-11-10).
+ */
+export function activityPassSummary(pass: {
+  origin: ActivityPassOrigin;
+  /** Activities running or waiting when the pass began. */
+  before: number;
+  /** The actions iOS accepted, by type. */
+  done: ActivityAction['type'][];
+  /** The actions iOS refused (each logged on its own). */
+  failed: number;
+  wakeAt: string | null;
+}): string | null {
+  if (pass.before === 0 && pass.done.length === 0 && pass.failed === 0) return null;
+  const count = (type: ActivityAction['type']) => pass.done.filter((t) => t === type).length;
+  return (
+    `live activities (${pass.origin}): before=${pass.before}` +
+    ` ended=${count('end')} updated=${count('update')}` +
+    ` started=${count('start')} scheduled=${count('schedule')}` +
+    ` failed=${pass.failed} wake=${pass.wakeAt ?? 'none'}`
+  );
 }
 
 /** The memory once a start or a schedule has given the activity its id. */

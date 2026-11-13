@@ -45,6 +45,12 @@ enum BackgroundRefresh {
   private static let lock = NSLock()
   private static var minutes = floorMinutes
   private static var wanted = false
+  /// The earliest end of a Live Activity that runs or waits, if any. Only a
+  /// running Aperio can end one — iOS has no scheduled end without a push
+  /// server — so the next wake-up is brought forward to it when it comes
+  /// before the interval is up. Without this an activity said "over" on the
+  /// lock screen all evening (Toni's iPhone, 2026-11-10).
+  private static var activityEnd: Date?
 
   /// Start (or re-arm) the refresh task. Called by the JS layer whenever the
   /// background-sync preference is on, which includes every app start.
@@ -65,19 +71,39 @@ enum BackgroundRefresh {
     BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
   }
 
+  /// The earliest end of a Live Activity, or nil with none; handed over by
+  /// every Live Activity pass (`shared/liveActivityIos.ts`, `wakeAt`).
+  ///
+  /// Re-armed only when it changed: every pass hands it over, and submitting
+  /// an unchanged request again would only push the interval's floor later.
+  static func wake(at end: Date?) {
+    lock.lock()
+    let changed = activityEnd != end
+    activityEnd = end
+    lock.unlock()
+    if changed { schedule() }
+  }
+
   /// Submit the next request. One is pending at a time; the handler re-arms
   /// after every run, because a request is consumed by being run.
   static func schedule() {
     lock.lock()
     let armed = wanted
     let delay = Double(minutes) * 60
+    let end = activityEnd
     lock.unlock()
     guard armed else { return }
 
     let request = BGAppRefreshTaskRequest(identifier: identifier)
     // A floor, not an appointment: the system decides the actual moment from
-    // battery, network and how the app is used.
-    request.earliestBeginDate = Date(timeIntervalSinceNow: delay)
+    // battery, network and how the app is used. An activity that ends before
+    // the interval is up brings it forward; one already past is the round
+    // under way's to end.
+    var begin = Date(timeIntervalSinceNow: delay)
+    if let end = end, end > Date(), end < begin {
+      begin = end
+    }
+    request.earliestBeginDate = begin
     do {
       try BGTaskScheduler.shared.submit(request)
     } catch {

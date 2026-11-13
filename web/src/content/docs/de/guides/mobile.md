@@ -194,7 +194,13 @@ wechselt die Aktivität zu ihm.
 VoiceOver liest jede Aktivität als einen Satz, die mitlaufenden Zeiten
 eingeschlossen. Ohne laufendes Aperio ändert das iPhone eine Aktivität nur
 einmal von selbst: zum nächsten Termin, oder zu **Vorbei**, wenn nichts folgt.
-Das Beenden und alles Spätere warten, bis du Aperio wieder öffnest.
+Beenden kann sie nur ein laufendes Aperio. Deshalb bittet Aperio iOS, es zum
+Ende des Termins kurz im Hintergrund laufen zu lassen. Wann das geschieht,
+entscheidet iOS, manchmal erst Stunden später. Auf jeden Fall endet die
+Aktivität, sobald du Aperio öffnest. Ist die **Hintergrund-Synchronisation**
+aus, wartet sie immer darauf. Spätestens acht Stunden nach ihrem Start beendet
+iOS sie selbst; auf dem Sperrbildschirm kann sie danach noch bis zu vier
+Stunden stehen.
 
 Ein- und ausschalten unter **Einstellungen, Allgemein, Live-Aktivitäten für
 Termine** (standardmäßig an, nur dieses Gerät). Schalten die iPhone-Einstellungen
