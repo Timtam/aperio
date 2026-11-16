@@ -180,10 +180,13 @@ pub fn system_line(details: &HostDetails) -> String {
         app.push_str(&format!(" ({})", extras.join(", ")));
     }
 
+    // A phone passes its system version; the desktop reads a whole label
+    // itself, name included, because "Windows 11 Pro" is not "Windows" plus
+    // a version number.
     let os = os_name(std::env::consts::OS);
-    let os = match given(&details.os_version).or_else(own_os_version) {
+    let os = match given(&details.os_version) {
         Some(version) => format!("{os} {version}"),
-        None => os.to_string(),
+        None => own_os_label().unwrap_or_else(|| os.to_string()),
     };
 
     let mut parts = vec![app, os, std::env::consts::ARCH.to_string()];
@@ -204,34 +207,156 @@ fn os_name(os: &str) -> &str {
     }
 }
 
-/// The operating system's version where the core can read it itself. On the
-/// phone the host passes it ([`HostDetails::os_version`]) and this is `None`.
+/// The operating system as the desktop names it itself, e.g. `Windows 11 Pro
+/// 25H2 (build 26220.9836)`, `macOS 15.6.1 (build 24G90)`, `Ubuntu 24.04.1
+/// LTS`. `None` where the core cannot read it; on the phone the host passes
+/// the version instead ([`HostDetails::os_version`]).
 #[cfg(windows)]
-fn own_os_version() -> Option<String> {
-    let v = windows_version::OsVersion::current();
-    Some(format!("{}.{}.{}", v.major, v.minor, v.build))
+fn own_os_label() -> Option<String> {
+    Some(windows_label(&windows_facts()))
 }
 
 #[cfg(target_os = "macos")]
-fn own_os_version() -> Option<String> {
-    let out = std::process::Command::new("sw_vers")
-        .arg("-productVersion")
-        .output()
-        .ok()?;
-    let version = String::from_utf8(out.stdout).ok()?;
-    let version = version.trim();
-    (!version.is_empty()).then(|| version.to_string())
+fn own_os_label() -> Option<String> {
+    let out = std::process::Command::new("sw_vers").output().ok()?;
+    macos_label(&String::from_utf8_lossy(&out.stdout))
 }
 
 #[cfg(target_os = "linux")]
-fn own_os_version() -> Option<String> {
-    let text = std::fs::read_to_string("/etc/os-release").ok()?;
+fn own_os_label() -> Option<String> {
+    // os-release(5): /etc first, /usr/lib only when /etc has none.
+    let text = std::fs::read_to_string("/etc/os-release")
+        .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+        .ok()?;
     os_release_pretty_name(&text)
 }
 
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-fn own_os_version() -> Option<String> {
+fn own_os_label() -> Option<String> {
     None
+}
+
+/// What the Windows label is made of. Plain data, so every platform tests the
+/// rule ([`windows_label`]) and only the reading is Windows-only.
+#[derive(Debug, Default)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct WindowsFacts {
+    /// `ProductName` from the registry, e.g. "Windows 10 Pro" (also on 11).
+    product_name: Option<String>,
+    /// `DisplayVersion`, e.g. "25H2"; exists since 20H2.
+    display_version: Option<String>,
+    /// `ReleaseId`, e.g. "1909"; frozen at "2009" since 20H2.
+    release_id: Option<String>,
+    build: u32,
+    /// The update build revision, the number after the build's dot.
+    ubr: u32,
+    is_server: bool,
+    /// A compatibility layer fakes the version the process sees.
+    compat_mode: bool,
+}
+
+/// `Windows 11 Pro 25H2 (build 26220.9836)`.
+///
+/// Windows 11 still reports kernel version 10.0, and Microsoft keeps "Windows
+/// 10" in `ProductName` for compatibility. What tells them apart is the build:
+/// a workstation at 22000 or later is Windows 11. A server is never renamed:
+/// Windows Server 2025 shares its build, 26100, with Windows 11 24H2.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_label(facts: &WindowsFacts) -> String {
+    let clean = |v: &Option<String>| -> Option<String> {
+        v.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let mut name = clean(&facts.product_name).unwrap_or_else(|| "Windows".to_string());
+    if !facts.is_server
+        && facts.build >= 22000
+        && (name == "Windows 10" || name.starts_with("Windows 10 "))
+    {
+        name = format!("Windows 11{}", &name["Windows 10".len()..]);
+    }
+    if let Some(release) = clean(&facts.display_version).or_else(|| clean(&facts.release_id)) {
+        name.push(' ');
+        name.push_str(&release);
+    }
+    let mut details = match (facts.build, facts.ubr) {
+        (0, _) => Vec::new(),
+        (build, 0) => vec![format!("build {build}")],
+        (build, ubr) => vec![format!("build {build}.{ubr}")],
+    };
+    if facts.compat_mode {
+        details.push("compatibility mode".to_string());
+    }
+    if details.is_empty() {
+        name
+    } else {
+        format!("{name} ({})", details.join(", "))
+    }
+}
+
+/// Read what [`windows_label`] needs: the kernel's version through
+/// `RtlGetVersion`, which needs no manifest, and the rest from
+/// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`, in its 64-bit view
+/// (the 32-bit one can name another edition).
+#[cfg(windows)]
+fn windows_facts() -> WindowsFacts {
+    use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
+    use winreg::RegKey;
+
+    let key = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey_with_flags(
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            KEY_READ | KEY_WOW64_64KEY,
+        )
+        .ok();
+    let text = |name: &str| -> Option<String> { key.as_ref()?.get_value(name).ok() };
+    let kernel = windows_version::OsVersion::current();
+    // Aperio needs Windows 10, so a major version below 10 is a compatibility
+    // layer. It fakes the kernel's version, ProductName and CurrentBuildNumber,
+    // but not CurrentBuild, DisplayVersion or UBR (measured, 2026-11-16).
+    let compat_mode = kernel.major < 10;
+    let build = if compat_mode {
+        text("CurrentBuild")
+            .and_then(|b| b.trim().parse().ok())
+            .unwrap_or(kernel.build)
+    } else {
+        kernel.build
+    };
+    WindowsFacts {
+        product_name: if compat_mode {
+            None
+        } else {
+            text("ProductName")
+        },
+        display_version: text("DisplayVersion"),
+        release_id: text("ReleaseId"),
+        build,
+        ubr: key
+            .as_ref()
+            .and_then(|k| k.get_value::<u32, _>("UBR").ok())
+            .unwrap_or(0),
+        is_server: windows_version::is_server(),
+        compat_mode,
+    }
+}
+
+/// `macOS 15.6.1 (build 24G90)` from plain `sw_vers` output.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn macos_label(sw_vers: &str) -> Option<String> {
+    let field = |key: &str| {
+        sw_vers.lines().find_map(|line| {
+            let (k, v) = line.split_once(':')?;
+            let v = v.trim();
+            (k.trim() == key && !v.is_empty()).then_some(v)
+        })
+    };
+    let version = field("ProductVersion")?;
+    let name = field("ProductName").unwrap_or("macOS");
+    Some(match field("BuildVersion") {
+        Some(build) => format!("{name} {version} (build {build})"),
+        None => format!("{name} {version}"),
+    })
 }
 
 /// `PRETTY_NAME` from an os-release file, without its quotes.
@@ -765,9 +890,203 @@ mod tests {
     #[test]
     fn the_system_line_names_version_system_and_architecture() {
         let line = system_line(&HostDetails::default());
-        assert!(line.starts_with(&format!("Aperio {} · ", env!("CARGO_PKG_VERSION"))));
-        assert!(line.contains(os_name(std::env::consts::OS)));
-        assert!(line.contains(std::env::consts::ARCH));
+        let parts: Vec<&str> = line.split(" · ").collect();
+        assert_eq!(parts.len(), 3, "{line}");
+        assert_eq!(parts[0], format!("Aperio {}", env!("CARGO_PKG_VERSION")));
+        assert!(!parts[1].trim().is_empty(), "{line}");
+        assert_eq!(parts[2], std::env::consts::ARCH);
+    }
+
+    /// The label this machine reads for itself, checked on every CI system:
+    /// Windows (a server there), macOS and Linux each read their own way.
+    #[test]
+    fn this_machine_names_itself() {
+        let label = own_os_label();
+        let line = system_line(&HostDetails::default());
+        // Seen with --nocapture: what each system really reads.
+        println!("this machine: {line:?}");
+        if let Some(label) = &label {
+            assert_eq!(
+                line.split(" · ").nth(1),
+                Some(label.as_str()),
+                "the line carries the label as read"
+            );
+        }
+        if cfg!(windows) {
+            let label = label.expect("Windows always has a label");
+            assert!(label.starts_with("Windows"), "{label}");
+            assert!(label.contains("(build "), "{label}");
+            assert!(
+                !label.contains("10.0."),
+                "never the kernel's version: {label}"
+            );
+        } else if cfg!(target_os = "macos") {
+            let label = label.expect("sw_vers answers on macOS");
+            assert!(label.starts_with("macOS "), "{label}");
+            assert!(label.chars().any(|c| c.is_ascii_digit()), "{label}");
+        } else if cfg!(target_os = "linux") {
+            // A container may lack os-release; then the line says "Linux".
+            if let Some(label) = label {
+                assert!(!label.trim().is_empty());
+            }
+        }
+    }
+
+    fn windows(
+        name: Option<&str>,
+        display: Option<&str>,
+        release: Option<&str>,
+        build: u32,
+        ubr: u32,
+        is_server: bool,
+    ) -> WindowsFacts {
+        WindowsFacts {
+            product_name: name.map(Into::into),
+            display_version: display.map(Into::into),
+            release_id: release.map(Into::into),
+            build,
+            ubr,
+            is_server,
+            compat_mode: false,
+        }
+    }
+
+    #[test]
+    fn windows_11_is_named_by_its_build_not_its_product_name() {
+        // Toni's machine, read 2026-11-16: the registry still says "Windows 10".
+        assert_eq!(
+            windows_label(&windows(
+                Some("Windows 10 Pro"),
+                Some("25H2"),
+                Some("2009"),
+                26220,
+                9836,
+                false
+            )),
+            "Windows 11 Pro 25H2 (build 26220.9836)"
+        );
+        // 22000 is Windows 11's first build, and counts.
+        assert_eq!(
+            windows_label(&windows(
+                Some("Windows 10 Home"),
+                Some("21H2"),
+                None,
+                22000,
+                1,
+                false
+            )),
+            "Windows 11 Home 21H2 (build 22000.1)"
+        );
+        assert_eq!(
+            windows_label(&windows(Some("Windows 10"), None, None, 22631, 0, false)),
+            "Windows 11 (build 22631)"
+        );
+    }
+
+    #[test]
+    fn windows_10_stays_windows_10() {
+        assert_eq!(
+            windows_label(&windows(
+                Some("Windows 10 Pro"),
+                Some("22H2"),
+                Some("2009"),
+                19045,
+                7850,
+                false
+            )),
+            "Windows 10 Pro 22H2 (build 19045.7850)"
+        );
+        // Before 20H2 there is no DisplayVersion; ReleaseId names the update.
+        assert_eq!(
+            windows_label(&windows(
+                Some("Windows 10 Pro"),
+                None,
+                Some("1909"),
+                18363,
+                418,
+                false
+            )),
+            "Windows 10 Pro 1909 (build 18363.418)"
+        );
+        // Only "Windows 10" itself is renamed, not a name that merely starts so.
+        assert_eq!(
+            windows_label(&windows(Some("Windows 100"), None, None, 26100, 0, false)),
+            "Windows 100 (build 26100)"
+        );
+    }
+
+    #[test]
+    fn a_server_is_never_renamed_windows_11() {
+        // Server 2025 shares build 26100 with Windows 11 24H2.
+        assert_eq!(
+            windows_label(&windows(
+                Some("Windows Server 2025 Standard"),
+                Some("24H2"),
+                Some("2009"),
+                26100,
+                4061,
+                true
+            )),
+            "Windows Server 2025 Standard 24H2 (build 26100.4061)"
+        );
+        assert_eq!(
+            windows_label(&windows(Some("Windows 10 Pro"), None, None, 26100, 0, true)),
+            "Windows 10 Pro (build 26100)"
+        );
+    }
+
+    #[test]
+    fn missing_or_faked_facts_still_name_the_build() {
+        assert_eq!(
+            windows_label(&WindowsFacts {
+                build: 26220,
+                ubr: 9836,
+                ..Default::default()
+            }),
+            "Windows (build 26220.9836)"
+        );
+        assert_eq!(
+            windows_label(&WindowsFacts {
+                product_name: Some("  ".into()),
+                display_version: Some(String::new()),
+                release_id: Some("2009".into()),
+                build: 26220,
+                ..Default::default()
+            }),
+            "Windows 2009 (build 26220)"
+        );
+        assert_eq!(
+            windows_label(&WindowsFacts {
+                display_version: Some("25H2".into()),
+                build: 26220,
+                ubr: 9836,
+                compat_mode: true,
+                ..Default::default()
+            }),
+            "Windows 25H2 (build 26220.9836, compatibility mode)"
+        );
+        assert_eq!(windows_label(&WindowsFacts::default()), "Windows");
+    }
+
+    #[test]
+    fn macos_reads_name_version_and_build_from_sw_vers() {
+        assert_eq!(
+            macos_label(
+                "ProductName:\t\tmacOS\nProductVersion:\t\t15.6.1\nBuildVersion:\t\t24G90\n"
+            )
+            .as_deref(),
+            Some("macOS 15.6.1 (build 24G90)")
+        );
+        assert_eq!(
+            macos_label("ProductVersion: 15.1\n").as_deref(),
+            Some("macOS 15.1")
+        );
+        assert_eq!(
+            macos_label("ProductName: macOS\n"),
+            None,
+            "no version, no label"
+        );
+        assert_eq!(macos_label(""), None);
     }
 
     #[test]

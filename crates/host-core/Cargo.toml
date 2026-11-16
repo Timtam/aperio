@@ -60,9 +60,11 @@ reqwest.workspace = true
 zip.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-# The system line of a feedback message names the Windows version. Already in
-# the tree through Tauri; one call, no further dependencies of its own.
+# The system line of a feedback message names the Windows version: the kernel's
+# build through windows-version, edition, feature update and patch level from
+# the registry through winreg. Both already in the tree through Tauri.
 windows-version = "0.1"
+winreg = "0.55"
 
 [dev-dependencies]
 tempfile = "3"

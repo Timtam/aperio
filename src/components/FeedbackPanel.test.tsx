@@ -29,7 +29,7 @@ const invokeMock = vi.hoisted(() =>
       case 'feedback_info':
         return Promise.resolve({
           available: backend.available,
-          system: 'Aperio 0.2.0 · Windows 10.0.26220 · x86_64',
+          system: 'Aperio 0.2.0 · Windows 11 Pro 25H2 (build 26220.9836) · x86_64',
         });
       case 'feedback_logs': {
         const text = backend.logs[Math.min(backend.logsCalls, backend.logs.length - 1)];
@@ -84,7 +84,7 @@ describe('FeedbackPanel', () => {
   it('shows the system line that goes along', async () => {
     await renderPanel();
     expect(
-      screen.getByText('Geht immer mit: Aperio 0.2.0 · Windows 10.0.26220 · x86_64'),
+      screen.getByText('Geht immer mit: Aperio 0.2.0 · Windows 11 Pro 25H2 (build 26220.9836) · x86_64'),
     ).toBeTruthy();
   });
 
