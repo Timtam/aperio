@@ -1,6 +1,6 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import { ParsedAttendee } from './CalFfi.types';
+import { AppVersion, ParsedAttendee } from './CalFfi.types';
 
 /** Native→JS events the module emits (the external-cache push). `payload` /
  *  `status` are JSON strings (a `CacheUpdatedPayload` / `CacheRefreshStatus`). */
@@ -478,9 +478,8 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  `FeedbackOutcome` JSON out. */
   sendFeedbackJson(draftJson: string, detailsJson: string): Promise<string>;
   /** The installed app's own version and build number (EAS assigns the build
-   *  at build time, so app.json does not know it). Empty strings when the
-   *  platform does not say. */
-  appVersion(): { version: string; build: string };
+   *  at build time, so app.json does not know it). */
+  appVersion(): AppVersion;
 
   /** Write one line into that same rolling log.
    *
