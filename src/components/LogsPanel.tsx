@@ -1,5 +1,5 @@
 import { save } from '@tauri-apps/plugin-dialog';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -15,6 +15,7 @@ import {
   setLogLevel,
   type LogLevel,
 } from '../api/client';
+import { useSettingsNav } from '../state/settingsNavContext';
 
 const LEVELS: LogLevel[] = ['error', 'warn', 'info', 'debug', 'trace'];
 
@@ -34,6 +35,8 @@ function errMessage(err: unknown): string {
 export function LogsPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
+  const nav = useSettingsNav();
+  const sendHintId = `${useId()}-send-hint`;
 
   const [level, setLevel] = useState<LogLevel>('info');
   const [redact, setRedact] = useState(true);
@@ -192,6 +195,16 @@ export function LogsPanel() {
           {t('dialogs.settings.logs.redactHint')}
         </p>
         <div className="form__actions">
+          {nav && (
+            <button
+              type="button"
+              className="form__action"
+              onClick={() => nav.goToTab('feedback', { feedbackWithLogs: true })}
+              aria-describedby={sendHintId}
+            >
+              {t('dialogs.settings.logs.sendLogs')}
+            </button>
+          )}
           <button
             type="button"
             className="form__action"
@@ -216,6 +229,11 @@ export function LogsPanel() {
             {t('dialogs.settings.logs.clear')}
           </button>
         </div>
+        {nav && (
+          <p id={sendHintId} className="form__hint">
+            {t('dialogs.settings.logs.sendLogsHint')}
+          </p>
+        )}
         {dirPath && (
           <p className="form__hint">
             {t('dialogs.settings.logs.location', { path: dirPath })}{' '}

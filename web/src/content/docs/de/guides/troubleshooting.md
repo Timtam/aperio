@@ -24,6 +24,8 @@ einem Fehlerbericht beilegen kannst.
   ein Ticket oder einen Chat.
 - **Protokolle löschen** — entfernt die gespeicherten Protokolldateien (die
   aktuelle Sitzung protokolliert weiter).
+- **Protokolle senden** — öffnet das Feedback-Formular mit angehängten
+  Protokollen (siehe [Feedback senden](#feedback-senden)).
 
 ## Datenschutz
 
@@ -508,5 +510,27 @@ einmal, denn das legte am Ziel eine zweite Kopie an.
 
 1. Stelle in Einstellungen → Protokolle die Stufe auf **Debug**.
 2. Stelle das Problem nach.
-3. **Exportiere** das Protokoll (oder kopiere es) und lege es deinem Bericht
-   bei — zusammen mit dem, was du getan und was du erwartet hast.
+3. Wähle **Protokolle senden** und schreib dazu, was du getan und was du
+   erwartet hast. Oder **exportiere** das Protokoll (oder kopiere es) und lege
+   es einem Bericht auf GitHub bei.
+
+## Feedback senden
+
+Unter **Einstellungen → Feedback** schreibst du direkt aus Aperio an den
+Entwickler: was dir auffällt, was fehlt oder was nicht funktioniert. Die
+Nachricht geht über den Dienst Static Forms; Aperio verschickt keine E-Mails.
+
+- **E-Mail-Adresse** ist freiwillig. Gibst du sie an, kann dir der Entwickler
+  antworten.
+- **Protokolle anhängen** legt die Protokolle als ZIP-Datei bei, geschwärzt wie
+  beim Export und höchstens die neuesten 2 MB. Bevor du sendest, kannst du
+  genau den Text lesen, der mitgeht: am Computer im Feld darunter, auf dem
+  Telefon über **Protokolle lesen**.
+- **Geht immer mit** nennt die Version von Aperio, das Betriebssystem und
+  seine Version, auf dem Telefon auch die Build-Nummer und unter Android das
+  Gerätemodell.
+
+Gesendet wird erst, wenn du auf **Senden** drückst. Das Formular ist ohne
+sichtbares Rätsel gegen Spam geschützt: Aperio löst eine kleine Rechenaufgabe
+selbst. Selbst gebaute Versionen von Aperio haben keinen Schlüssel für das
+Formular und sagen das an seiner Stelle.

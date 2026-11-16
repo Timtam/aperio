@@ -6799,6 +6799,46 @@ impl Host {
         Ok(dir.display().to_string())
     }
 
+    // ─── Feedback ──────────────────────────────────────────────────────────────
+    //
+    // The phone twins of the desktop `feedback_info` / `feedback_logs` /
+    // `send_feedback`. Everything but the widgets is `host_core::feedback`; the
+    // phone adds what only it knows (store version, build, system version,
+    // device) as a `HostDetails` JSON, and every answer travels as JSON of the
+    // generated types.
+
+    /// Whether this build can send feedback, and the system line the form
+    /// shows. `details_json` is a `HostDetails`.
+    pub fn feedback_info_json(&self, details_json: String) -> Result<String, StoreError> {
+        let details = from_json::<host_core::feedback::HostDetails>("details", &details_json)?;
+        to_json(&host_core::feedback::info(&details))
+    }
+
+    /// The redacted log text a message would carry, for the form to show. The
+    /// form hands this very text back in the draft.
+    pub fn feedback_logs(&self) -> Result<String, StoreError> {
+        let dir = crate::logging::logs_dir().ok_or_else(|| StoreError::Storage {
+            detail: "logging not initialised".into(),
+        })?;
+        Ok(host_core::feedback::logs(dir))
+    }
+
+    /// Send one message; answers a `FeedbackOutcome` JSON. Only a draft or
+    /// details that do not parse are an error: every ending of the send itself
+    /// is an outcome the form has a sentence for.
+    pub fn send_feedback_json(
+        &self,
+        draft_json: String,
+        details_json: String,
+    ) -> Result<String, StoreError> {
+        let draft = from_json::<host_core::feedback::FeedbackDraft>("draft", &draft_json)?;
+        let details = from_json::<host_core::feedback::HostDetails>("details", &details_json)?;
+        let outcome = self
+            .runtime
+            .block_on(host_core::feedback::send(&draft, &details));
+        to_json(&outcome)
+    }
+
     // ─── Sync conflicts ────────────────────────────────────────────────────────
     //
     // Field-level conflicts the sync applier recorded (a field edited differently
@@ -10326,6 +10366,61 @@ mod tests {
         // doesn't error even with no content yet.
         assert!(h1.logs_dir_path().unwrap().contains("logs"));
         let _ = h1.get_recent_logs(Some(10)).unwrap();
+    }
+
+    #[test]
+    fn the_feedback_form_hears_what_the_phone_passes() {
+        let (_dir, host, _kc) = open_host();
+        let info: serde_json::Value = serde_json::from_str(
+            &host
+                .feedback_info_json(
+                    r#"{"app_version":"1.0.0","build":"70","os_version":"18.1","device":null}"#
+                        .into(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            info["available"],
+            host_core::feedback::info(&Default::default()).available,
+            "the posture is the build's, not the phone's"
+        );
+        let system = info["system"].as_str().unwrap();
+        assert!(system.contains("(app 1.0.0, build 70)"), "{system}");
+        assert!(system.contains(" 18.1 · "), "{system}");
+
+        // Every field is optional, so the phone can send what it has.
+        assert!(host.feedback_info_json("{}".into()).is_ok());
+        assert!(matches!(
+            host.feedback_info_json("not json".into()),
+            Err(StoreError::InvalidField { ref field, .. }) if field == "details"
+        ));
+        assert!(matches!(
+            host.send_feedback_json("[]".into(), "{}".into()),
+            Err(StoreError::InvalidField { ref field, .. }) if field == "draft"
+        ));
+        // Logging is initialised by open_host; the text is redacted log text.
+        let _ = host.feedback_logs().unwrap();
+    }
+
+    #[test]
+    fn a_feedback_send_answers_an_outcome_not_an_error() {
+        let (_dir, host, _kc) = open_host();
+        let answer: serde_json::Value = serde_json::from_str(
+            &host
+                .send_feedback_json(r#"{"message":"   "}"#.into(), "{}".into())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(answer["outcome"], "failed");
+        // A keyless build stops at the key, a keyed one at the empty message;
+        // neither touches the network.
+        let expected = if host_core::feedback::info(&Default::default()).available {
+            "empty_message"
+        } else {
+            "unavailable"
+        };
+        assert_eq!(answer["reason"], expected);
     }
 
     #[test]

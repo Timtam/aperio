@@ -22,10 +22,16 @@ import type { SettingsTabId } from '../components/SettingsDialog';
  * Split out of `SettingsDialog` so that component file keeps exporting only
  * its component (Fast Refresh), the same split `dialogStateContext.ts` makes.
  */
+/** What a panel can ask of the tab it sends the user to. */
+export interface SettingsTabOptions {
+  /** Open the feedback form with "attach logs" ticked ("Send logs"). */
+  feedbackWithLogs?: boolean;
+}
+
 export interface SettingsNavValue {
   /** Show `tab` in the CURRENT Settings dialog and move focus onto its tab
    *  button. No new dialog frame, no unmount of the dialog itself. */
-  goToTab: (tab: SettingsTabId) => void;
+  goToTab: (tab: SettingsTabId, options?: SettingsTabOptions) => void;
 }
 
 export const SettingsNavContext = createContext<SettingsNavValue | null>(null);

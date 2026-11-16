@@ -72,3 +72,4 @@ export * from './deviceRegistry';
 export * from './widgetSnapshot';
 export * from './movedOriginals';
 export * from './fileImport';
+export * from './feedback';

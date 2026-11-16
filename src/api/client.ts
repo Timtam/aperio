@@ -759,6 +759,9 @@ export type {
 import type {
   AccountFormSpec,
   EventGroup,
+  FeedbackDraft,
+  FeedbackInfo,
+  FeedbackOutcome,
   Reminder,
   SuggestionDecline,
 } from '@aperio/shared';
@@ -2184,6 +2187,18 @@ export const clearLogs = () => invoke<void>('clear_logs');
 
 /** The on-disk logs directory path, for display + copy. */
 export const logsDirPath = () => invoke<string>('logs_dir_path');
+
+// ── Feedback (host_core::feedback) ──
+
+/** Whether this build can send feedback, and the system line that goes along. */
+export const feedbackInfo = () => invoke<FeedbackInfo>('feedback_info');
+
+/** The redacted log text a message would carry, for the form to show. */
+export const feedbackLogs = () => invoke<string>('feedback_logs');
+
+/** Send one message. Every ending is an outcome, never a thrown error. */
+export const sendFeedback = (draft: FeedbackDraft) =>
+  invoke<FeedbackOutcome>('send_feedback', { draft });
 
 // ── SFTP host-key trust dialog (§19.5) ──
 

@@ -53,9 +53,21 @@ rrule.workspace = true
 # (cal-ffi already links it).
 tokio.workspace = true
 async-trait.workspace = true
+# The feedback form (host_core::feedback) posts to Static Forms: a challenge
+# fetch and one submit, and the logs travel zipped. Both crates are already in
+# the phone's core through the adapters and the plugin installer.
+reqwest.workspace = true
+zip.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# The system line of a feedback message names the Windows version. Already in
+# the tree through Tauri; one call, no further dependencies of its own.
+windows-version = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
+# The feedback sender is tested against a local server, like the adapters.
+mockito = "1"
 # The registry tests need ONE real plugin to register an account against.
 # iCal is the cheapest: no keychain secret, and opening an instance does no
 # network I/O (the feed is only fetched on the first read).

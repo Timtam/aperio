@@ -174,6 +174,11 @@ export type RootStackParamList = {
   Signatures: undefined;
   // Diagnostics: the rolling log — detail level, recent lines, redacted export.
   Logs: undefined;
+  // Feedback form (host_core::feedback). `withLogs`: opened by "Send logs",
+  // with the logs switch on. Its logs are read on a screen of their own; the
+  // text travels outside navigation state (state/feedbackLogs.ts).
+  Feedback: { withLogs?: boolean } | undefined;
+  FeedbackLogs: undefined;
   Contacts: undefined;
   ContactLists: undefined;
   ContactEditor: { contactId: string | null; listId: string };

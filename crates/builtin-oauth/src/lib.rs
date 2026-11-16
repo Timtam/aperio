@@ -172,6 +172,17 @@ pub fn has_builtin_client(provider: Provider) -> bool {
     builtin_client(provider).is_some()
 }
 
+/// The key the in-app feedback form submits with, or `None` when this build
+/// carries none.
+///
+/// Not an OAuth client: a Static Forms API key, which Static Forms documents as
+/// safe to expose, since it can only submit to its one form and can neither read
+/// submissions nor sign in. It lives here because it is baked exactly like the
+/// clients above, from the same file and the same CI secrets.
+pub fn feedback_form_key() -> Option<&'static str> {
+    non_empty(option_env!("APERIO_STATICFORMS_API_KEY"))
+}
+
 /// How many credentials this build carries, for the About screen and for logs.
 /// Deliberately a count and never a list of values.
 pub fn baked_count() -> u32 {
@@ -229,6 +240,15 @@ mod tests {
         assert!(Provider::Webex.requires_secret());
         assert!(Provider::Google.requires_secret());
         assert!(!Provider::Microsoft.requires_secret());
+    }
+
+    #[test]
+    fn the_feedback_key_is_absent_or_non_empty() {
+        // Same posture rule as the clients: an unset CI secret expands to "",
+        // and the form must then say it cannot send, not post an empty key.
+        if let Some(key) = feedback_form_key() {
+            assert!(!key.is_empty());
+        }
     }
 
     #[test]

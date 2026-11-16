@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
@@ -1538,6 +1539,48 @@ class CalFfiModule : Module() {
       hostCoded {
         host.logsDirPath()
       }
+    }
+
+    // Feedback form (host_core::feedback): JSON of the generated types in and
+    // out, like the desktop's commands.
+    AsyncFunction("feedbackInfoJson") { detailsJson: String ->
+      hostCoded {
+        host.feedbackInfoJson(detailsJson)
+      }
+    }
+
+    AsyncFunction("feedbackLogs") {
+      hostCoded {
+        host.feedbackLogs()
+      }
+    }
+
+    AsyncFunction("sendFeedbackJson") { draftJson: String, detailsJson: String ->
+      hostCoded {
+        host.sendFeedbackJson(draftJson, detailsJson)
+      }
+    }
+
+    // The app's own version name and code, for the feedback form's system
+    // line. The build number is assigned by EAS at build time, so app.json
+    // does not know it; the installed package does.
+    Function("appVersion") {
+      val context = appContext.reactContext?.applicationContext
+        ?: return@Function mapOf("version" to "", "build" to "")
+      val pm = context.packageManager
+      val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        pm.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
+      } else {
+        @Suppress("DEPRECATION")
+        pm.getPackageInfo(context.packageName, 0)
+      }
+      val build = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        info.longVersionCode.toString()
+      } else {
+        @Suppress("DEPRECATION")
+        info.versionCode.toString()
+      }
+      mapOf("version" to (info.versionName ?: ""), "build" to build)
     }
 
     AsyncFunction("syncConflictCount") {

@@ -7,7 +7,7 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // Settings hub — the app-config home (the SettingsTab stack root). A clean list
 // of destinations only: General (language / week start / sounds), Tasks,
 // Calendars, Task lists, Accounts, Contacts, Sync, Reminders, Colour labels,
-// Logs. The actual controls live on the pushed sub-screens. Calendars / Task
+// Logs, Feedback. The actual controls live on the pushed sub-screens. Calendars / Task
 // lists cross-navigate to the same catalog screens the Calendar / Tasks tabs use
 // (tap an item → its editor, where per-calendar default reminders + sound and
 // per-list overrides + sound live) — a discoverable path from Settings to the
@@ -127,6 +127,14 @@ export default function SettingsScreen({
           style={({ pressed }) => [styles.link, pressed && styles.pressed]}
         >
           <Text style={styles.linkText}>{t('dialogs.settings.tabs.logs')}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.settings.tabs.feedback')}
+          onPress={() => navigation.navigate('Feedback')}
+          style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+        >
+          <Text style={styles.linkText}>{t('dialogs.settings.tabs.feedback')}</Text>
         </Pressable>
       </View>
     </ScrollView>

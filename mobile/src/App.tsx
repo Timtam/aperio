@@ -69,6 +69,8 @@ import GeneralSettingsScreen from './screens/GeneralSettingsScreen';
 import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
 import LogsScreen from './screens/LogsScreen';
+import FeedbackScreen from './screens/FeedbackScreen';
+import FeedbackLogsScreen from './screens/FeedbackLogsScreen';
 import MonthScreen from './screens/MonthScreen';
 import EventGroupCarryModal from './screens/EventGroupCarryModal';
 import EventGroupModal from './screens/EventGroupModal';
@@ -485,6 +487,16 @@ function SettingsStackNav() {
         name="Logs"
         component={LogsScreen}
         options={{ title: t('dialogs.settings.tabs.logs') }}
+      />
+      <SettingsStack.Screen
+        name="Feedback"
+        component={FeedbackScreen}
+        options={{ title: t('dialogs.settings.tabs.feedback') }}
+      />
+      <SettingsStack.Screen
+        name="FeedbackLogs"
+        component={FeedbackLogsScreen}
+        options={{ title: t('dialogs.settings.feedback.logsLabel') }}
       />
       <SettingsStack.Screen
         name="TaskSettings"

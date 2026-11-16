@@ -467,6 +467,21 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** The on-disk logs directory, for display. */
   logsDirPath(): Promise<string>;
 
+  /** Feedback form (host_core::feedback): whether this build can send, and
+   *  the system line. Takes and answers JSON of the generated `HostDetails` /
+   *  `FeedbackInfo`. */
+  feedbackInfoJson(detailsJson: string): Promise<string>;
+  /** The redacted log text a feedback message would carry, for the form to
+   *  show; the form hands this very text back in the draft. */
+  feedbackLogs(): Promise<string>;
+  /** Send one message: `FeedbackDraft` + `HostDetails` JSON in, a
+   *  `FeedbackOutcome` JSON out. */
+  sendFeedbackJson(draftJson: string, detailsJson: string): Promise<string>;
+  /** The installed app's own version and build number (EAS assigns the build
+   *  at build time, so app.json does not know it). Empty strings when the
+   *  platform does not say. */
+  appVersion(): { version: string; build: string };
+
   /** Write one line into that same rolling log.
    *
    *  The JS layer could read the log but never add to it, which left the

@@ -50,15 +50,16 @@ jobs:
       # Names and presence only — a credential must never reach a build log, so
       # nothing here prints a value or even a length. Turns a later "still says
       # no credentials stored" into one glance instead of a hunt.
-      - name: Which OAuth clients this build can bake in
+      - name: Which built-in keys this build can bake in
         env:
           APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
           APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
           APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
           APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
           APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+          APERIO_STATICFORMS_API_KEY: ${{ secrets.APERIO_STATICFORMS_API_KEY }}
         run: |
-          for v in APERIO_OAUTH_WEBEX_CLIENT_ID APERIO_OAUTH_WEBEX_CLIENT_SECRET                    APERIO_OAUTH_GOOGLE_CLIENT_ID APERIO_OAUTH_GOOGLE_CLIENT_SECRET                    APERIO_OAUTH_MICROSOFT_CLIENT_ID; do
+          for v in APERIO_OAUTH_WEBEX_CLIENT_ID APERIO_OAUTH_WEBEX_CLIENT_SECRET                    APERIO_OAUTH_GOOGLE_CLIENT_ID APERIO_OAUTH_GOOGLE_CLIENT_SECRET                    APERIO_OAUTH_MICROSOFT_CLIENT_ID APERIO_STATICFORMS_API_KEY; do
             if [ -n "${!v:-}" ]; then echo "$v: present"; else echo "$v: MISSING"; fi
           done
 
@@ -78,6 +79,7 @@ jobs:
           APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
           APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
           APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+          APERIO_STATICFORMS_API_KEY: ${{ secrets.APERIO_STATICFORMS_API_KEY }}
         run: |
           cargo build -p cal-ffi --release --target aarch64-apple-ios
           cargo build -p cal-ffi --release --target aarch64-apple-ios-sim

@@ -29,6 +29,10 @@ const VARS: &[&str] = &[
     "APERIO_OAUTH_GOOGLE_CLIENT_ID",
     "APERIO_OAUTH_GOOGLE_CLIENT_SECRET",
     "APERIO_OAUTH_MICROSOFT_CLIENT_ID",
+    // Not an OAuth client: the key the in-app feedback form submits with.
+    // Baked the same way and from the same file, so a build and its CI wiring
+    // have one place for every value Aperio ships with.
+    "APERIO_STATICFORMS_API_KEY",
 ];
 
 const FILE_VAR: &str = "APERIO_OAUTH_CLIENTS_FILE";

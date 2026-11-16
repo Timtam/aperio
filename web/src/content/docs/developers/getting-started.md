@@ -37,6 +37,15 @@ npm run tauri dev
 The first build compiles the whole Rust workspace and can take a while;
 subsequent builds are incremental.
 
+## The feedback form in a local build
+
+Settings, Feedback sends through Static Forms with a key the build carries
+(`APERIO_STATICFORMS_API_KEY`, DESIGN.md §17.6). A local build has none, so
+the form shows a note instead. To try it, put the key into
+`oauth-clients.local.env` beside the workspace root, the file the built-in
+OAuth clients come from; `crates/builtin-oauth/README.md` describes it. CI
+reads the key from the repository secret of the same name.
+
 ## Notifications on Windows in a development build
 
 Windows shows a notification only when a Start menu shortcut carries the

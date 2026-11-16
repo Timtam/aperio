@@ -1,4 +1,4 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -76,6 +76,7 @@ function SwitchRow({
 export default function LogsScreen() {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const navigation = useNavigation();
 
   const [level, setLevel] = useState<LogLevel>('info');
   const [redact, setRedact] = useState(true);
@@ -197,6 +198,19 @@ export default function LogsScreen() {
         />
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.settings.logs.redactHint')}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.settings.logs.sendLogs')}
+          onPress={() => navigation.navigate('Feedback', { withLogs: true })}
+          style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.primaryButtonText} importantForAccessibility="no">
+            {t('dialogs.settings.logs.sendLogs')}
+          </Text>
+        </Pressable>
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.logs.sendLogsHint')}
         </Text>
         <Pressable
           accessibilityRole="button"

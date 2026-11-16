@@ -304,7 +304,7 @@ fn newest_log_file(logs_dir: &Path) -> Option<PathBuf> {
 /// This catches: credentials embedded in URLs (`scheme://user:pass@host`),
 /// e-mail addresses, JWTs, and long token runs. It does NOT catch free-form
 /// names / phone numbers / short provider keys with hyphens.
-fn redact_text(input: &str) -> String {
+pub(crate) fn redact_text(input: &str) -> String {
     static URL_CREDS: OnceLock<Regex> = OnceLock::new();
     static EMAIL: OnceLock<Regex> = OnceLock::new();
     static JWT: OnceLock<Regex> = OnceLock::new();

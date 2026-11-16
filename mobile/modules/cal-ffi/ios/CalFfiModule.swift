@@ -944,6 +944,37 @@ public class CalFfiModule: Module {
       }
     }
 
+    // Feedback form (host_core::feedback): JSON of the generated types in and
+    // out, like the desktop's commands.
+    AsyncFunction("feedbackInfoJson") { (detailsJson: String) -> String in
+      try self.hostCoded {
+        try self.host.feedbackInfoJson(detailsJson: detailsJson)
+      }
+    }
+
+    AsyncFunction("feedbackLogs") { () -> String in
+      try self.hostCoded {
+        try self.host.feedbackLogs()
+      }
+    }
+
+    AsyncFunction("sendFeedbackJson") { (draftJson: String, detailsJson: String) -> String in
+      try self.hostCoded {
+        try self.host.sendFeedbackJson(draftJson: draftJson, detailsJson: detailsJson)
+      }
+    }
+
+    // The app's own version and build, for the feedback form's system line.
+    // EAS assigns the build number at build time, so app.json does not know
+    // it; the installed bundle does.
+    Function("appVersion") { () -> [String: String] in
+      let info = Bundle.main.infoDictionary
+      return [
+        "version": info?["CFBundleShortVersionString"] as? String ?? "",
+        "build": info?["CFBundleVersion"] as? String ?? "",
+      ]
+    }
+
     AsyncFunction("syncConflictCount") { () -> Int in
       Int(try self.hostCoded { try self.host.syncConflictCount() })
     }.runOnQueue(readQueue)

@@ -649,7 +649,8 @@
         "plugins": "Plugins",
         "logs": "Logs",
         "dayMarkers": "Check-in",
-        "signatures": "Signatures"
+        "signatures": "Signatures",
+        "feedback": "Feedback"
       },
       "logs": {
         "hint": "Aperio keeps a rolling log file to help diagnose problems. Choose how much detail to record, view the latest lines, or export the log to send for support.",
@@ -678,7 +679,39 @@
         "exported": "Logs exported.",
         "copied": "Logs copied to clipboard.",
         "pathCopied": "Path copied.",
-        "cleared": "Logs cleared."
+        "cleared": "Logs cleared.",
+        "sendLogs": "Send logs …",
+        "sendLogsHint": "Opens the feedback form with the logs attached. You see there what goes along before you send."
+      },
+      "feedback": {
+        "hint": "Write what you notice, what is missing or what does not work. The message goes to Aperio's developer through the Static Forms service. Only what you see here is sent, and only when you press Send.",
+        "unavailable": "This build of Aperio cannot send feedback because it lacks the form's key. Builds you compiled yourself are an example. You are welcome to get in touch through the project page on GitHub.",
+        "messageLabel": "Message",
+        "emailLabel": "Email address (optional)",
+        "emailHint": "Only needed if you would like a reply. It goes along as the reply address.",
+        "attachLogs": "Attach logs",
+        "attachLogsHint": "Helps track down problems. Email addresses and access tokens are replaced with placeholders first. At most the newest 2 MB go along, packed as a ZIP file.",
+        "logsLabel": "These logs go along",
+        "logsLoading": "Loading the logs …",
+        "logsEmpty": "No log entries yet.",
+        "logsFailed": "The logs could not be read. You can send without them.",
+        "viewLogs_one": "Read the logs (1 line)",
+        "viewLogs_other": "Read the logs ({{count}} lines)",
+        "system": "Always goes along: {{system}}",
+        "systemLabel": "Always goes along",
+        "send": "Send",
+        "sending": "Sending …",
+        "sent": "Thank you! Your message has arrived.",
+        "failure": {
+          "unavailable": "This build cannot send feedback.",
+          "emptyMessage": "Please write a message first.",
+          "invalidEmail": "The email address does not look complete. Leave the field empty if you do not need a reply.",
+          "tooLarge": "The message is too large to send. Shorten it or send without logs.",
+          "network": "The feedback service cannot be reached. Check the internet connection and try again.",
+          "busy": "Too many messages are arriving right now. Try again in a few minutes.",
+          "service": "The feedback service ran into an error. Try again later.",
+          "rejected": "The feedback service refused the message. Try again later or get in touch through the project page on GitHub."
+        }
       },
       "general": {
         "hint": "App-wide settings.",
