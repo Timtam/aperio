@@ -21,6 +21,8 @@ Open **Settings → Logs** (German: *Protokolle*). There you can:
 - **Copy the log to the clipboard** — handy for pasting into an issue or chat.
 - **Clear logs** — removes the stored log files (the current session keeps
   logging).
+- **Send logs** — opens the feedback form with the logs attached (see
+  [Sending feedback](#sending-feedback)).
 
 ## Privacy
 
@@ -467,5 +469,25 @@ because that would create a second copy at the target.
 
 1. In Settings → Logs, set the level to **Debug**.
 2. Reproduce the problem.
-3. **Export** the log (or copy it) and attach it to your report, together with
-   what you did and what you expected.
+3. Choose **Send logs** and write what you did and what you expected. Or
+   **export** the log (or copy it) and attach it to a report on GitHub.
+
+## Sending feedback
+
+Under **Settings → Feedback** you write to the developer straight from Aperio:
+what you notice, what is missing or what does not work. The message goes
+through the Static Forms service; Aperio sends no email itself.
+
+- **Email address** is optional. If you give it, the developer can reply.
+- **Attach logs** adds the logs as a ZIP file, redacted as for an export: as
+  many of the newest lines as fit in the message packed (about 4 MB as ZIP,
+  usually all of the last 14 days, at most 32 MB of text). Before you send, you
+  can read exactly the text that goes along: on the computer in the field
+  below, on the phone through **Read the logs**.
+- **Always goes along** names the Aperio version, the operating system and its
+  version and the processor architecture, on the phone also the app version
+  and the build number and on Android the device model.
+
+Nothing is sent until you press **Send**. The form is protected against spam
+without a visible puzzle: Aperio solves a small computation itself. Builds of
+Aperio you compiled yourself carry no key for the form and say so in its place.

@@ -54,6 +54,8 @@ on:
         required: false
       APERIO_OAUTH_MICROSOFT_CLIENT_ID:
         required: false
+      APERIO_STATICFORMS_API_KEY:
+        required: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -187,16 +189,17 @@ jobs:
       # nothing here prints a value or even a length. The mobile workflows carry
       # the identical step; this one exists because a CALLED workflow has its
       # own secret scope, so their answer says nothing about this build's.
-      - name: Which OAuth clients this build can bake in
+      - name: Which built-in keys this build can bake in
         env:
           APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
           APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
           APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
           APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
           APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+          APERIO_STATICFORMS_API_KEY: ${{ secrets.APERIO_STATICFORMS_API_KEY }}
         shell: bash
         run: |
-          for v in APERIO_OAUTH_WEBEX_CLIENT_ID                    APERIO_OAUTH_WEBEX_CLIENT_SECRET                    APERIO_OAUTH_GOOGLE_CLIENT_ID                    APERIO_OAUTH_GOOGLE_CLIENT_SECRET                    APERIO_OAUTH_MICROSOFT_CLIENT_ID; do
+          for v in APERIO_OAUTH_WEBEX_CLIENT_ID                    APERIO_OAUTH_WEBEX_CLIENT_SECRET                    APERIO_OAUTH_GOOGLE_CLIENT_ID                    APERIO_OAUTH_GOOGLE_CLIENT_SECRET                    APERIO_OAUTH_MICROSOFT_CLIENT_ID APERIO_STATICFORMS_API_KEY; do
             if [ -n "${!v:-}" ]; then echo "$v: present"; else echo "$v: MISSING"; fi
           done
 
@@ -219,6 +222,7 @@ jobs:
           APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
           APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
           APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+          APERIO_STATICFORMS_API_KEY: ${{ secrets.APERIO_STATICFORMS_API_KEY }}
         run: npm run tauri -- build
 
       # Sanity-check the staging step worked: the release zip is
@@ -363,16 +367,17 @@ jobs:
       # nothing here prints a value or even a length. The mobile workflows carry
       # the identical step; this one exists because a CALLED workflow has its
       # own secret scope, so their answer says nothing about this build's.
-      - name: Which OAuth clients this build can bake in
+      - name: Which built-in keys this build can bake in
         env:
           APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
           APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
           APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
           APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
           APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+          APERIO_STATICFORMS_API_KEY: ${{ secrets.APERIO_STATICFORMS_API_KEY }}
         shell: bash
         run: |
-          for v in APERIO_OAUTH_WEBEX_CLIENT_ID                    APERIO_OAUTH_WEBEX_CLIENT_SECRET                    APERIO_OAUTH_GOOGLE_CLIENT_ID                    APERIO_OAUTH_GOOGLE_CLIENT_SECRET                    APERIO_OAUTH_MICROSOFT_CLIENT_ID; do
+          for v in APERIO_OAUTH_WEBEX_CLIENT_ID                    APERIO_OAUTH_WEBEX_CLIENT_SECRET                    APERIO_OAUTH_GOOGLE_CLIENT_ID                    APERIO_OAUTH_GOOGLE_CLIENT_SECRET                    APERIO_OAUTH_MICROSOFT_CLIENT_ID APERIO_STATICFORMS_API_KEY; do
             if [ -n "${!v:-}" ]; then echo "$v: present"; else echo "$v: MISSING"; fi
           done
 
@@ -395,6 +400,7 @@ jobs:
           APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
           APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
           APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+          APERIO_STATICFORMS_API_KEY: ${{ secrets.APERIO_STATICFORMS_API_KEY }}
         # `aperio/custom-protocol` makes it a production build: Tauri embeds
         # dist/ only with this feature, which `tauri build` switches on by
         # itself and a plain `cargo build` does not. Without it the binary was a

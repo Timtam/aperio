@@ -9,7 +9,9 @@ Kontakte-Anwendung für Desktop und Mobilgeräte (Android und iOS). Diese Erklä
 beschreibt, welche Daten die App und diese Website verarbeiten. Kurz gesagt:
 **Aperio betreibt keinen eigenen Server und enthält keine Analyse, Werbung,
 Tracking oder Absturzberichte; deine Daten bleiben auf deinem Gerät oder in den
-von dir gewählten Konten und Speichern.**
+von dir gewählten Konten und Speichern.** Nur wenn du selbst Feedback sendest,
+geht diese Nachricht an den Entwickler (siehe
+[Feedback und Protokolle senden](#feedback-und-protokolle-senden)).
 
 ## Verantwortlicher
 
@@ -73,6 +75,44 @@ Kontakte) werden ausschließlich genutzt, um die von dir in der App aufgerufenen
 Funktionen bereitzustellen, lokal auf deinem Gerät verarbeitet und nicht an
 Dritte verkauft, übertragen oder weitergegeben.
 
+## Feedback und Protokolle senden
+
+Unter **Einstellungen → Feedback** (und über **Protokolle senden** im Bereich
+Protokolle) kannst du dem Entwickler eine Nachricht schicken. Das passiert nur,
+wenn du auf **Senden** drückst; vorher verlässt nichts das Gerät, und alles,
+was mitgeht, steht im Formular.
+
+- **Was gesendet wird:** deine Nachricht; deine E-Mail-Adresse, wenn du eine
+  angibst, damit eine Antwort dich erreicht; eine Zeile mit der Version von
+  Aperio, dem Betriebssystem und seiner Version und der Prozessorarchitektur
+  (auf dem Telefon auch App-Version und Build-Nummer, unter Android das
+  Gerätemodell), die auch im Betreff der Benachrichtigung steht; auf deinen
+  Wunsch die Protokolle der App als ZIP-Datei, so viel, wie gepackt in die
+  Nachricht passt (etwa 4 MB, höchstens 32 MB Text), in denen E-Mail-Adressen
+  und Zugriffstokens vorher durch Platzhalter ersetzt sind. Wie
+  bei jeder Verbindung erhält der Dienst technisch deine IP-Adresse.
+- **Über wen:** Die Nachricht geht an ein Formular bei
+  [Static Forms](https://www.staticforms.dev/privacy-policy), das sie per
+  E-Mail an den Verantwortlichen zustellt und in seinem Posteingang aufbewahrt.
+  Static Forms ist Auftragsverarbeiter; ein Vertrag zur Auftragsverarbeitung
+  besteht. Die Formulardaten liegen in der EU (AWS, Frankfurt). Die
+  Benachrichtigungs-E-Mail versendet Static Forms über AWS in den USA.
+- **Spam-Prüfung:** Static Forms bewertet jede Einsendung mit einem KI-Spamfilter.
+  Dafür gehen nur die zur Bewertung nötigen Felder an einen KI-Anbieter;
+  Anhänge, Zugangsdaten und Tokens werden vorher entfernt und E-Mail-Adressen
+  maskiert. Der Anbieter speichert nichts und trainiert nicht mit den Daten;
+  die Auswertung kann außerhalb der EU stattfinden. Die beteiligten
+  Unterauftragnehmer nennt die
+  [Liste von Static Forms](https://www.staticforms.dev/dpa/sub-processors).
+  Gegen Bots schützt das Formular außerdem eine Rechenaufgabe, die Aperio auf
+  deinem Gerät löst (ALTCHA); dafür werden keine Daten über dich übertragen.
+- **Zweck und Grundlage:** deine Rückmeldung zu lesen, zu beantworten und
+  Fehler in Aperio zu beheben (Art. 6 Abs. 1 lit. f DSGVO); das Absenden ist
+  freiwillig.
+- **Speicherdauer:** Einsendungen werden gelöscht, sobald die Rückmeldung
+  bearbeitet ist, spätestens nach 12 Monaten. Möchtest du eine Nachricht früher
+  gelöscht haben, schreib an contact@toni-barth.online.
+
 ## Diese Website
 
 Diese Dokumentationsseite wird als statische Dateien über **GitHub Pages**
@@ -90,4 +130,4 @@ Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch. Zur
 Ausübung wende dich an contact@toni-barth.online. Außerdem hast du das Recht,
 dich bei einer Datenschutz-Aufsichtsbehörde zu beschweren.
 
-_Zuletzt aktualisiert: 18. Juli 2026._
+_Zuletzt aktualisiert: 16. November 2026._

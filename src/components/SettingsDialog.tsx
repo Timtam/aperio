@@ -19,6 +19,7 @@ import { AccountsPanel } from './AccountsPanel';
 import { CalendarsPanel } from './CalendarsPanel';
 import { ColorLabelsPanel } from './ColorLabelsPanel';
 import { DayMarkersPanel } from './DayMarkersPanel';
+import { FeedbackPanel } from './FeedbackPanel';
 import { SignaturesPanel } from './SignaturesPanel';
 import { ContactsPanel } from './ContactsPanel';
 import { GeneralPanel } from './GeneralPanel';
@@ -61,7 +62,8 @@ export type SettingsTabId =
   | 'contacts'
   | 'sync'
   | 'plugins'
-  | 'logs';
+  | 'logs'
+  | 'feedback';
 
 const TAB_ORDER: SettingsTabId[] = [
   'general',
@@ -75,6 +77,7 @@ const TAB_ORDER: SettingsTabId[] = [
   'sync',
   'plugins',
   'logs',
+  'feedback',
 ];
 
 export interface SettingsDialogProps {
@@ -136,6 +139,7 @@ export function SettingsDialog({
     sync: null,
     plugins: null,
     logs: null,
+    feedback: null,
   });
 
   const focusTab = useCallback(
@@ -162,13 +166,26 @@ export function SettingsDialog({
     [],
   );
 
+  // "Send logs" opens the feedback tab with its box ticked. Read once, when
+  // the panel mounts; leaving the tab clears it, so coming back through the
+  // tab list opens the plain form.
+  const [feedbackWithLogs, setFeedbackWithLogs] = useState(false);
+  useEffect(() => {
+    if (activeTab !== 'feedback') setFeedbackWithLogs(false);
+  }, [activeTab]);
+
   // What a PANEL uses to send the user to another tab (Sync → "Add an
   // account"). `focusTab` is exactly right for it: it lands focus on the
   // destination tab button — a named, announcing element that survives the
   // panel swap — before the panel underneath is unmounted. See
   // `settingsNavContext.ts` for why `openSettings(tab)` cannot do this.
   const nav = useMemo<SettingsNavValue>(
-    () => ({ goToTab: focusTab }),
+    () => ({
+      goToTab: (tab, options) => {
+        setFeedbackWithLogs(options?.feedbackWithLogs === true);
+        focusTab(tab);
+      },
+    }),
     [focusTab],
   );
 
@@ -220,6 +237,7 @@ export function SettingsDialog({
         sync: t('dialogs.settings.tabs.sync'),
         plugins: t('dialogs.settings.tabs.plugins'),
         logs: t('dialogs.settings.tabs.logs'),
+        feedback: t('dialogs.settings.tabs.feedback'),
       }) satisfies Record<SettingsTabId, string>,
     [t],
   );
@@ -315,6 +333,9 @@ export function SettingsDialog({
             {activeTab === 'sync' && <SyncPanel />}
             {activeTab === 'plugins' && <PluginsPanel />}
             {activeTab === 'logs' && <LogsPanel />}
+            {activeTab === 'feedback' && (
+              <FeedbackPanel initialAttachLogs={feedbackWithLogs} />
+            )}
           </div>
         </div>
       </SettingsNavContext.Provider>

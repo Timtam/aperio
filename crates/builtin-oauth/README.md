@@ -33,6 +33,9 @@ APERIO_OAUTH_WEBEX_CLIENT_SECRET=abcdef1234567890…
 
 # Microsoft Graph — public client, id only
 # APERIO_OAUTH_MICROSOFT_CLIENT_ID=…
+
+# Static Forms — the in-app feedback form (not an OAuth client)
+# APERIO_STATICFORMS_API_KEY=…
 ```
 
 Blank lines and `#` comments are ignored, a leading `export ` is tolerated so
@@ -92,6 +95,16 @@ access token happens to lapse.
 **Scope is the mitigation, not obscurity.** A secret compiled into a shipped
 binary is extractable. That is inherent to the posture, so the registration asks
 for the narrowest scopes that work and the credential stays revocable.
+
+## The feedback form's key
+
+`APERIO_STATICFORMS_API_KEY` is not an OAuth credential, but it is baked the
+same way, from the same file and the same CI secrets, so a build has one place
+for every value it ships with. `feedback_form_key()` hands it out, and
+`host_core::feedback` is its only caller. Static Forms documents the key as
+safe to expose: it can only submit to its form, never read submissions or sign
+in. A build without it shows a note in place of the feedback form, saying this
+build cannot send, rather than a form that fails on the button.
 
 ## Adding a provider
 

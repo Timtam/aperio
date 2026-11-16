@@ -8,7 +8,9 @@ Aperio is an accessibility-first calendar, task and contact application for
 desktop and mobile (Android and iOS). This policy explains what data the app and
 this website process. In short: **Aperio runs no server of its own and contains
 no analytics, advertising, tracking or crash reporting; your data stays on your
-device or in the accounts and storage you choose.**
+device or in the accounts and storage you choose.** Only when you send feedback
+yourself does that message go to the developer (see
+[Sending feedback and logs](#sending-feedback-and-logs)).
 
 The German version under [`/de/privacy/`](/de/privacy/) is the legally
 authoritative one for an operator based in Germany.
@@ -69,6 +71,41 @@ including the Limited Use requirements. Google data (calendar, tasks, contacts)
 is used only to provide the features you invoke in the app, is processed locally
 on your device, and is not sold, transferred or shared with third parties.
 
+## Sending feedback and logs
+
+Under **Settings → Feedback** (and through **Send logs** in the Logs section)
+you can send the developer a message. This happens only when you press
+**Send**; nothing leaves the device before, and everything that goes along is
+shown in the form.
+
+- **What is sent:** your message; your email address, if you give one, so that
+  a reply can reach you; a line with the Aperio version, the operating system
+  and its version and the processor architecture (on the phone also the app
+  version and the build number, on Android the device model), which also
+  stands in the notification's subject; if you choose, the app's logs as a ZIP
+  file, as much as fits in the message packed (about 4 MB, at most 32 MB of
+  text), with email addresses and access tokens replaced by placeholders first.
+  As with any connection, the service technically receives your IP address.
+- **Through whom:** the message goes to a form at
+  [Static Forms](https://www.staticforms.dev/privacy-policy), which emails it
+  to the controller and keeps it in its inbox. Static Forms is a processor; a
+  data processing agreement is in place. The form data is stored in the EU
+  (AWS, Frankfurt). Static Forms sends the notification email through AWS in
+  the United States.
+- **Spam check:** Static Forms rates each submission with an AI spam filter.
+  Only the fields needed for the rating go to an AI provider; attachments,
+  credentials and tokens are removed and email addresses masked first. The
+  provider stores nothing and does not train on the data; the rating may take
+  place outside the EU. The sub-processors involved are named in
+  [Static Forms' list](https://www.staticforms.dev/dpa/sub-processors). Against
+  bots the form is also protected by a computation Aperio solves on your device
+  (ALTCHA); no data about you is transferred for it.
+- **Purpose and legal basis:** to read and answer your feedback and to fix
+  problems in Aperio (Art. 6(1)(f) GDPR); sending is voluntary.
+- **Retention:** submissions are deleted once the feedback has been dealt with,
+  at the latest after 12 months. If you would like a message deleted sooner,
+  write to contact@toni-barth.online.
+
 ## This website
 
 This documentation site is served as static files via **GitHub Pages**. The host
@@ -85,4 +122,4 @@ of processing, data portability and objection. To exercise them, contact
 contact@toni-barth.online. You also have the right to lodge a complaint with a
 data-protection supervisory authority.
 
-_Last updated: 18 July 2026._
+_Last updated: 16 November 2026._

@@ -944,6 +944,42 @@ public class CalFfiModule: Module {
       }
     }
 
+    // Feedback form (host_core::feedback): JSON of the generated types in and
+    // out, like the desktop's commands.
+    AsyncFunction("feedbackInfoJson") { (detailsJson: String) -> String in
+      try self.hostCoded {
+        try self.host.feedbackInfoJson(detailsJson: detailsJson)
+      }
+    }
+
+    // Reads, redacts and zips up to 32 MB of logs: seconds on a phone, so not
+    // on the default queue either.
+    AsyncFunction("feedbackLogs") { () -> String in
+      try self.hostCoded {
+        try self.host.feedbackLogs()
+      }
+    }.runOnQueue(lookupQueue)
+
+    // A send is two requests with 60 s timeouts each, and one more pair when
+    // the captcha answer expired: never on the default queue, which every
+    // short call shares. lookupQueue hosts the other network-bound calls.
+    AsyncFunction("sendFeedbackJson") { (draftJson: String, detailsJson: String) -> String in
+      try self.hostCoded {
+        try self.host.sendFeedbackJson(draftJson: draftJson, detailsJson: detailsJson)
+      }
+    }.runOnQueue(lookupQueue)
+
+    // The app's own version and build, for the feedback form's system line.
+    // EAS assigns the build number at build time, so app.json does not know
+    // it; the installed bundle does.
+    Function("appVersion") { () -> [String: String] in
+      let info = Bundle.main.infoDictionary
+      return [
+        "version": info?["CFBundleShortVersionString"] as? String ?? "",
+        "build": info?["CFBundleVersion"] as? String ?? "",
+      ]
+    }
+
     AsyncFunction("syncConflictCount") { () -> Int in
       Int(try self.hostCoded { try self.host.syncConflictCount() })
     }.runOnQueue(readQueue)

@@ -3077,8 +3077,10 @@ dependencies = [
  "chrono-tz",
  "dirs 5.0.1",
  "iana-time-zone",
+ "mockito",
  "plugin-core",
  "regex",
+ "reqwest 0.12.28",
  "rrule",
  "rusqlite",
  "serde",
@@ -3095,6 +3097,9 @@ dependencies = [
  "ts-rs",
  "uuid",
  "vc-core",
+ "windows-version",
+ "winreg 0.55.0",
+ "zip",
 ]
 
 [[package]]

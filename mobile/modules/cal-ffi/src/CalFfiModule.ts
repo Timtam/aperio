@@ -1,6 +1,6 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import { ParsedAttendee } from './CalFfi.types';
+import { AppVersion, ParsedAttendee } from './CalFfi.types';
 
 /** Native→JS events the module emits (the external-cache push). `payload` /
  *  `status` are JSON strings (a `CacheUpdatedPayload` / `CacheRefreshStatus`). */
@@ -466,6 +466,20 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   clearLogs(): Promise<void>;
   /** The on-disk logs directory, for display. */
   logsDirPath(): Promise<string>;
+
+  /** Feedback form (host_core::feedback): whether this build can send, and
+   *  the system line. Takes and answers JSON of the generated `HostDetails` /
+   *  `FeedbackInfo`. */
+  feedbackInfoJson(detailsJson: string): Promise<string>;
+  /** The redacted log text a feedback message would carry, for the form to
+   *  show; the form hands this very text back in the draft. */
+  feedbackLogs(): Promise<string>;
+  /** Send one message: `FeedbackDraft` + `HostDetails` JSON in, a
+   *  `FeedbackOutcome` JSON out. */
+  sendFeedbackJson(draftJson: string, detailsJson: string): Promise<string>;
+  /** The installed app's own version and build number (EAS assigns the build
+   *  at build time, so app.json does not know it). */
+  appVersion(): AppVersion;
 
   /** Write one line into that same rolling log.
    *

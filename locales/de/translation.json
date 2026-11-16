@@ -646,7 +646,8 @@
         "plugins": "Plugins",
         "logs": "Protokolle",
         "dayMarkers": "Check-in",
-        "signatures": "Signaturen"
+        "signatures": "Signaturen",
+        "feedback": "Feedback"
       },
       "logs": {
         "hint": "Aperio führt zur Fehlersuche eine rollierende Protokolldatei. Wähle, wie ausführlich protokolliert wird, sieh die letzten Zeilen ein oder exportiere das Protokoll, um es für den Support zu senden.",
@@ -675,7 +676,40 @@
         "exported": "Protokolle exportiert.",
         "copied": "Protokolle in die Zwischenablage kopiert.",
         "pathCopied": "Pfad kopiert.",
-        "cleared": "Protokolle gelöscht."
+        "cleared": "Protokolle gelöscht.",
+        "sendLogs": "Protokolle senden …",
+        "sendLogsHint": "Öffnet das Feedback-Formular mit angehängten Protokollen. Du siehst dort, was mitgeht, bevor du sendest."
+      },
+      "feedback": {
+        "hint": "Schreib, was dir auffällt, was fehlt oder was nicht funktioniert. Die Nachricht geht über den Dienst Static Forms an den Entwickler von Aperio. Gesendet wird nur, was du hier siehst, und erst, wenn du auf „Senden“ drückst.",
+        "unavailable": "Dieser Build von Aperio kann kein Feedback senden, weil ihm der Schlüssel für das Formular fehlt. Das betrifft zum Beispiel selbst gebaute Versionen. Melde dich gern über die Projektseite auf GitHub.",
+        "messageLabel": "Nachricht",
+        "emailLabel": "E-Mail-Adresse (freiwillig)",
+        "emailHint": "Nur nötig, wenn du eine Antwort möchtest. Sie geht als Antwortadresse mit.",
+        "attachLogs": "Protokolle anhängen",
+        "attachLogsHint": "Hilft bei der Fehlersuche. E-Mail-Adressen und Zugriffstokens sind vorher durch Platzhalter ersetzt. Es gehen so viele der neuesten Zeilen mit, wie gepackt als ZIP-Datei in die Nachricht passen, meist alle der letzten 14 Tage.",
+        "logsLabel": "Diese Protokolle gehen mit",
+        "logsLoading": "Protokolle werden geladen …",
+        "logsEmpty": "Es gibt noch keine Protokolleinträge.",
+        "logsFailed": "Die Protokolle konnten nicht gelesen werden. Du kannst ohne sie senden.",
+        "logsNotAttached": "Es sind keine Protokolle angehängt.",
+        "viewLogs_one": "Protokolle lesen (1 Zeile)",
+        "viewLogs_other": "Protokolle lesen ({{count}} Zeilen)",
+        "system": "Geht immer mit: {{system}}",
+        "systemLabel": "Geht immer mit",
+        "send": "Senden",
+        "sending": "Wird gesendet …",
+        "sent": "Danke! Deine Nachricht ist angekommen.",
+        "failure": {
+          "unavailable": "Dieser Build kann kein Feedback senden.",
+          "emptyMessage": "Bitte schreib zuerst eine Nachricht.",
+          "invalidEmail": "Die E-Mail-Adresse sieht nicht vollständig aus. Lass das Feld leer, wenn du keine Antwort brauchst.",
+          "tooLarge": "Die Nachricht ist zu groß zum Senden. Kürze sie oder sende ohne Protokolle.",
+          "network": "Der Feedback-Dienst ist nicht erreichbar. Prüf die Internetverbindung und versuch es noch einmal.",
+          "busy": "Gerade gehen zu viele Nachrichten ein. Versuch es in ein paar Minuten noch einmal.",
+          "service": "Beim Feedback-Dienst ist ein Fehler aufgetreten. Versuch es später noch einmal.",
+          "rejected": "Der Feedback-Dienst hat die Nachricht abgelehnt. Versuch es später noch einmal oder melde dich über die Projektseite auf GitHub."
+        }
       },
       "general": {
         "hint": "App-weite Einstellungen.",
