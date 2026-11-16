@@ -4546,6 +4546,26 @@ will die eigene Integration, und eine stille Anmeldung als Aperio bände das Kon
 an Zugangsdaten, die der Nutzer nicht gewählt hat und nicht rotieren kann, ohne
 dass es von außen sichtbar wäre.
 
+- **Google fragt nach schmalen Scopes, mit Aperios Registrierung ohne
+  Verzeichnis (281).** Statt des vollen Kalender-Scopes fragt die
+  Google-Anmeldung nach vier schmalen: `calendar.events`,
+  `calendar.calendarlist.readonly`, `calendar.calendars` (Adresse des
+  Hauptkalenders, Umbenennen) und `calendar.events.freebusy` (Verfügbarkeit,
+  die `calendar.events` nicht abdeckt). Dazu wie bisher `tasks`, `contacts`,
+  `contacts.other.readonly` und `drive.file`. Nach `directory.readonly`, dem
+  Workspace-Verzeichnis, fragt sie nur, wenn der Nutzer einen eigenen
+  Google-Cloud-Client mitbringt; das ist ihm zugesagt. Mit der eingebauten
+  Registrierung fehlt es, denn Google prüft jeden Scope, den die veröffentlichte
+  App erfragt. Das Verzeichnis bleibt dann leer wie bei einem privaten Konto,
+  und Googles 403 für den nicht erfragten Scope gilt bei den beiden
+  Verzeichnis-Methoden als erwartet: Es steht nur im Debug-Protokoll, nicht als
+  Warnung. Scope-Namen kennt der Host nicht: Er sagt jeder Anmelde-Phase nur, ob sie
+  die Registrierung des Builds nutzt (`client_source: "builtin"`, dieselbe
+  Angabe wie in der Kontozeile), und der Adapter wählt danach; ohne die Angabe
+  ist es der Client des Nutzers. Token mit dem vollen Kalender-Scope arbeiten
+  weiter, erst eine erneute Anmeldung bekommt die schmale Liste (Toni,
+  2026-11-16; erster Schritt zur OAuth-Prüfung bei Google).
+
 **`host_channel`.** Setzt das Plugin es, bekommt jede Instanz ein Capability-Token
 und kann darüber ein rotiertes Zugangsdatum zurückmelden (Abschnitt 20.10). Aus,
 solange es nicht verlangt wird: das Token ist Vollmacht, und Vollmacht, die

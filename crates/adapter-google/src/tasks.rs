@@ -2,7 +2,7 @@
 //!
 //! Tasks live behind a separate REST surface from Calendar (different
 //! base URL, different request shape), but share the same OAuth
-//! token thanks to the combined consent scope (see `auth::SCOPES`).
+//! token thanks to the combined consent scope (see `auth::scopes`).
 //! This module reuses `ApiState`'s token + refresh plumbing through
 //! the lower-level `send_with_refresh` helper, so a 401 here drives
 //! the same lazy refresh the Calendar paths use.

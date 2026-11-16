@@ -406,6 +406,24 @@ fn is_directory_precondition(status: u16, body: &str) -> bool {
     lower.contains("failed_precondition") || lower.contains("g suite domain")
 }
 
+/// The other answer that is not a failure: Google refusing a directory listing
+/// or search because the sign-in never asked for the directory scope. That is
+/// every account on the build's own registration (decision 281), and
+/// `contacts::directory_unavailable` turns it into an empty directory.
+///
+/// Narrow on all three counts: the status, the two directory methods (read
+/// from the request path, since the answer names its method only past the cut
+/// an error keeps), and Google's reason for a scope not granted, read from the
+/// WHOLE answer. A Calendar or Tasks call refused for a missing scope is a
+/// real problem and keeps its warning.
+fn is_directory_scope_not_granted(status: u16, path: &str, body: &str) -> bool {
+    status == 403
+        && (path.ends_with("people:listDirectoryPeople")
+            || path.ends_with("people:searchDirectoryPeople"))
+        && (error_reason(body).as_deref() == Some("insufficientPermissions")
+            || body.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT"))
+}
+
 /// Decode the response body as JSON, surfacing HTTP errors as
 /// `GoogleError::Http`. `pub(crate)` for the tasks module — same
 /// rationale as `send_with_refresh` above.
@@ -414,6 +432,7 @@ pub(crate) async fn decode_json<T: DeserializeOwned>(
 ) -> GoogleResult<T> {
     let status = response.status();
     let retry_after = retry_after_of(response.headers());
+    let path = response.url().path().to_string();
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
         if let Some(turned_away) = throttled(status.as_u16(), retry_after, &text) {
@@ -433,8 +452,11 @@ pub(crate) async fn decode_json<T: DeserializeOwned>(
         // round, forever: one user's log carried 116 of them over two weeks and
         // read as a broken Google account while nothing was wrong. A log that
         // cries every half hour about an expected answer is a log nobody reads
-        // when something real happens.
-        if is_directory_precondition(status.as_u16(), &message) {
+        // when something real happens. The same goes for a sign-in that never
+        // asked for the directory (`is_directory_scope_not_granted`).
+        if is_directory_precondition(status.as_u16(), &message)
+            || is_directory_scope_not_granted(status.as_u16(), &path, &text)
+        {
             tracing::debug!(
                 status = status.as_u16(),
                 body = %message,
@@ -3270,7 +3292,60 @@ mod tests {
 
 #[cfg(test)]
 mod directory_precondition_tests {
-    use super::is_directory_precondition;
+    use super::{is_directory_precondition, is_directory_scope_not_granted};
+
+    /// Google's answer to a scope the sign-in did not ask for. The method name
+    /// sits far past the 300 characters an error keeps.
+    const NOT_GRANTED: &str = r#"{"error":{"code":403,"message":"Request had insufficient authentication scopes.","errors":[{"message":"Insufficient Permission","domain":"global","reason":"insufficientPermissions"}],"status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT","domain":"googleapis.com","metadata":{"service":"people.googleapis.com","method":"google.people.v1.PeopleService.ListDirectoryPeople"}}]}}"#;
+
+    /// A built-in sign-in has no directory scope (decision 281): both
+    /// directory methods answer 403, and neither is a failure.
+    #[test]
+    fn a_directory_scope_not_granted_is_expected() {
+        for path in [
+            "/v1/people:listDirectoryPeople",
+            "/v1/people:searchDirectoryPeople",
+        ] {
+            assert!(
+                is_directory_scope_not_granted(403, path, NOT_GRANTED),
+                "{path}"
+            );
+        }
+        // Only the ErrorInfo reason, no `errors` list: still recognised.
+        let details_only = r#"{"error":{"code":403,"status":"PERMISSION_DENIED","details":[{"reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}"#;
+        assert!(is_directory_scope_not_granted(
+            403,
+            "/v1/people:listDirectoryPeople",
+            details_only
+        ));
+    }
+
+    /// A missing scope anywhere else is a real problem and keeps its warning,
+    /// and so does any other refusal of the directory.
+    #[test]
+    fn a_scope_missing_elsewhere_still_warns() {
+        for path in [
+            "/calendar/v3/calendars/primary",
+            "/tasks/v1/users/@me/lists",
+            "/v1/people:searchContacts",
+        ] {
+            assert!(
+                !is_directory_scope_not_granted(403, path, NOT_GRANTED),
+                "{path}"
+            );
+        }
+        let other = r#"{"error":{"code":403,"errors":[{"reason":"forbidden"}],"status":"PERMISSION_DENIED"}}"#;
+        assert!(!is_directory_scope_not_granted(
+            403,
+            "/v1/people:listDirectoryPeople",
+            other
+        ));
+        assert!(!is_directory_scope_not_granted(
+            401,
+            "/v1/people:listDirectoryPeople",
+            NOT_GRANTED
+        ));
+    }
 
     /// The answer that costs nothing and used to shout every half hour.
     #[test]

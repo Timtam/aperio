@@ -48,12 +48,32 @@ use crate::error::{GoogleError, GoogleResult};
 
 pub const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-/// Read + write calendar access. Read-only would be
-/// `https://www.googleapis.com/auth/calendar.readonly`; we ask for
-/// full access up front so the write paths don't trigger a second
-/// consent screen.
-pub const SCOPE_CALENDAR: &str = "https://www.googleapis.com/auth/calendar";
-/// Read + write Tasks access. Same rationale as the calendar scope
+/// Read + write events on every calendar the user can reach: `events.list`
+/// (sync, the iCalUID lookups), `get`, `instances`, `insert`, `import`,
+/// `patch` and `delete` — owned calendars, shared ones the user may write to,
+/// and subscribed ones Aperio only reads. Asked for up front so a write never
+/// triggers a second consent screen.
+///
+/// One of four narrow Calendar scopes that replaced the full `calendar` scope.
+/// That one also lets an app share calendars (ACL), change the user's Calendar
+/// settings, and create or delete whole calendars; Aperio does none of it.
+pub const SCOPE_CALENDAR_EVENTS: &str = "https://www.googleapis.com/auth/calendar.events";
+/// `calendarList.list` — which calendars the account has, their colour and the
+/// user's access role. Read-only: Aperio never adds, removes, hides or recolours
+/// a calendar-list entry.
+pub const SCOPE_CALENDAR_LIST_READONLY: &str =
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+/// `calendars.get` on `primary` (the account's own address, for RSVPs and
+/// invitation imports) and `calendars.patch` (renaming a calendar). The only
+/// scope short of the full one that renames a calendar the app did not create.
+pub const SCOPE_CALENDAR_CALENDARS: &str = "https://www.googleapis.com/auth/calendar.calendars";
+/// `freebusy.query` — attendee availability in the event editor.
+/// [`SCOPE_CALENDAR_EVENTS`] does not authorize that method. This one is
+/// documented as "the availability on Google calendars you have access to",
+/// which is what looking up an attendee's address needs.
+pub const SCOPE_CALENDAR_FREEBUSY: &str =
+    "https://www.googleapis.com/auth/calendar.events.freebusy";
+/// Read + write Tasks access. Same rationale as the events scope
 /// — the listing/CRUD flows both need write so we may as well ask
 /// up front.
 pub const SCOPE_TASKS: &str = "https://www.googleapis.com/auth/tasks";
@@ -72,6 +92,11 @@ pub const SCOPE_CONTACTS_OTHER_READONLY: &str =
 /// returns useful results for Workspace accounts; personal
 /// `@gmail.com` accounts respond with 403 / empty, so the list
 /// renders as empty there and that's the documented behaviour.
+///
+/// Requested only on [`ClientRegistration::BringYourOwn`]. A sign-in through
+/// the build's own registration leaves it out, and the directory list then
+/// reads as empty exactly as it does for a personal account: Google answers 403
+/// for a scope that was not granted.
 pub const SCOPE_DIRECTORY_READONLY: &str = "https://www.googleapis.com/auth/directory.readonly";
 /// Per-file Drive access — the narrowest scope Google offers for it. It grants
 /// the app nothing but the files it created itself, so an Aperio account can
@@ -83,23 +108,60 @@ pub const SCOPE_DIRECTORY_READONLY: &str = "https://www.googleapis.com/auth/dire
 /// the narrower thing, at the cost of a second consent screen appearing in the
 /// middle of the sync settings; the decision to ask once was deliberate.
 pub const SCOPE_DRIVE_FILE: &str = "https://www.googleapis.com/auth/drive.file";
+
+/// Whose OAuth client registration a sign-in uses.
+///
+/// The host passes this as a generic fact — `client_source: "builtin"` in the
+/// interactive-auth arguments, nothing for a client the user typed in — and
+/// knows no scope names. Which scopes follow from it is this adapter's call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientRegistration {
+    /// The registration the app build carries. Google verifies every scope a
+    /// published app's consent screen asks for, so this one asks for nothing
+    /// beyond what Aperio uses in every account: no Workspace directory.
+    Builtin,
+    /// A client the user created in their own Google Cloud project. It also
+    /// asks for [`SCOPE_DIRECTORY_READONLY`], as it always has.
+    BringYourOwn,
+}
+
 /// The combined scope string we request on the consent screen.
 /// Google's OAuth dialog renders one entry per space-separated
 /// scope; granting once covers every feature this adapter exposes
 /// (Calendar + Tasks + Contacts incl. the auto-collected Other
-/// list and the Workspace Directory) so users don't see a
-/// separate dialog when they later open another surface of the
-/// app — Drive included, since one Google account can now also hold the sync
-/// dataset.
+/// list, and the Workspace Directory on a client the user brought)
+/// so users don't see a separate dialog when they later open another
+/// surface of the app — Drive included, since one Google account can
+/// now also hold the sync dataset.
 ///
-/// **Re-consent note:** users with tokens minted before Phase 10h
-/// have `calendar tasks`. Tokens minted between 10h-1 and 10h-2
-/// have `calendar tasks contacts` but not the two read-only
-/// additions. Either way, the next call against a missing scope
-/// fails with 403; the wrapping command should surface the
-/// standard "reconnect this account" affordance rather than
-/// silently degrading.
-pub const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/directory.readonly https://www.googleapis.com/auth/drive.file";
+/// **Re-consent note:** tokens keep the scopes they were granted with. Users
+/// with tokens minted before Phase 10h have `calendar tasks`; tokens minted
+/// between 10h-1 and 10h-2 have `calendar tasks contacts` but not the two
+/// read-only additions. Either way, the next call against a missing scope
+/// fails with 403; the wrapping command should surface the standard
+/// "reconnect this account" affordance rather than silently degrading.
+/// Tokens minted before the four narrow Calendar scopes hold the full
+/// `calendar` scope instead, which covers every call the narrow ones do, so
+/// those accounts keep working without a reconnect. A reconnect asks for this
+/// list only (no `include_granted_scopes`, and `prompt=consent`), so the
+/// token it mints carries only this list.
+pub fn scopes(registration: ClientRegistration) -> String {
+    let mut scopes = vec![
+        SCOPE_CALENDAR_EVENTS,
+        SCOPE_CALENDAR_LIST_READONLY,
+        SCOPE_CALENDAR_CALENDARS,
+        SCOPE_CALENDAR_FREEBUSY,
+        SCOPE_TASKS,
+        SCOPE_CONTACTS,
+        SCOPE_CONTACTS_OTHER_READONLY,
+    ];
+    if registration == ClientRegistration::BringYourOwn {
+        scopes.push(SCOPE_DIRECTORY_READONLY);
+    }
+    scopes.push(SCOPE_DRIVE_FILE);
+    scopes.join(" ")
+}
+
 /// 5 minute ceiling on the consent dance. Google rejects unused
 /// codes after a similar window anyway and waiting longer means
 /// Aperio is hung holding a TCP port.
@@ -125,18 +187,27 @@ pub struct TokenSet {
 /// native auth session. The caller then hands `code` + the returned `state` +
 /// this `pkce_verifier` to [`exchange_code`]. `redirect_uri` is caller-supplied
 /// (`http://127.0.0.1:{port}` for the loopback, `aperio://oauth-callback` for a
-/// native session) and MUST match the one used at exchange.
+/// native session) and MUST match the one used at exchange. `registration`
+/// decides the scopes (see [`scopes`]).
 pub fn authorize(
     client_id: &str,
     redirect_uri: &str,
     auth_url: &str,
+    registration: ClientRegistration,
 ) -> GoogleResult<AuthorizeResponse> {
     if client_id.trim().is_empty() {
         return Err(GoogleError::Config("client_id must not be empty".into()));
     }
     let (verifier, challenge) = generate_pkce();
     let state = generate_state();
-    let url = build_auth_url(auth_url, client_id, redirect_uri, &challenge, &state)?;
+    let url = build_auth_url(
+        auth_url,
+        client_id,
+        redirect_uri,
+        registration,
+        &challenge,
+        &state,
+    )?;
     Ok(AuthorizeResponse {
         authorize_url: url.to_string(),
         pkce_verifier: verifier,
@@ -169,11 +240,13 @@ pub struct AuthorizeResponse {
 ///
 /// `token_url` and `auth_url` are exposed as parameters for tests;
 /// production callers pass the constants above via [`run_default`].
+/// `registration` decides the scopes (see [`scopes`]).
 pub async fn run(
     client_id: &str,
     client_secret: &str,
     auth_url: &str,
     token_url: &str,
+    registration: ClientRegistration,
     http: &reqwest::Client,
 ) -> GoogleResult<TokenSet> {
     if client_id.trim().is_empty() {
@@ -189,7 +262,7 @@ pub async fn run(
     let port = listener.local_addr()?.port();
     let redirect_uri = format!("http://127.0.0.1:{port}");
 
-    let authz = authorize(client_id, &redirect_uri, auth_url)?;
+    let authz = authorize(client_id, &redirect_uri, auth_url, registration)?;
     debug!(url = %authz.authorize_url, "opening Google consent screen");
     // open::that is best-effort. On the rare host where it fails (no
     // default browser, headless container) we surface the URL via the
@@ -222,6 +295,7 @@ pub async fn run(
 pub async fn run_default(
     client_id: &str,
     client_secret: &str,
+    registration: ClientRegistration,
     http: &reqwest::Client,
 ) -> GoogleResult<TokenSet> {
     run(
@@ -229,6 +303,7 @@ pub async fn run_default(
         client_secret,
         GOOGLE_AUTH_URL,
         GOOGLE_TOKEN_URL,
+        registration,
         http,
     )
     .await
@@ -289,6 +364,7 @@ fn build_auth_url(
     auth_url: &str,
     client_id: &str,
     redirect_uri: &str,
+    registration: ClientRegistration,
     challenge: &str,
     state: &str,
 ) -> GoogleResult<url::Url> {
@@ -298,7 +374,7 @@ fn build_auth_url(
         .append_pair("client_id", client_id)
         .append_pair("redirect_uri", redirect_uri)
         .append_pair("response_type", "code")
-        .append_pair("scope", SCOPES)
+        .append_pair("scope", &scopes(registration))
         .append_pair("code_challenge", challenge)
         .append_pair("code_challenge_method", "S256")
         .append_pair("state", state)
@@ -527,12 +603,91 @@ mod tests {
         assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
+    /// The two lists, spelled out. A scope that joins or leaves either one is
+    /// a change to what Google's verification reviews (the built-in
+    /// registration) or to what a user who brought a client has granted, so it
+    /// has to show up as a changed line here.
+    #[test]
+    fn each_registration_asks_for_exactly_its_scopes() {
+        assert_eq!(
+            scopes(ClientRegistration::Builtin),
+            "https://www.googleapis.com/auth/calendar.events \
+             https://www.googleapis.com/auth/calendar.calendarlist.readonly \
+             https://www.googleapis.com/auth/calendar.calendars \
+             https://www.googleapis.com/auth/calendar.events.freebusy \
+             https://www.googleapis.com/auth/tasks \
+             https://www.googleapis.com/auth/contacts \
+             https://www.googleapis.com/auth/contacts.other.readonly \
+             https://www.googleapis.com/auth/drive.file"
+        );
+        assert_eq!(
+            scopes(ClientRegistration::BringYourOwn),
+            "https://www.googleapis.com/auth/calendar.events \
+             https://www.googleapis.com/auth/calendar.calendarlist.readonly \
+             https://www.googleapis.com/auth/calendar.calendars \
+             https://www.googleapis.com/auth/calendar.events.freebusy \
+             https://www.googleapis.com/auth/tasks \
+             https://www.googleapis.com/auth/contacts \
+             https://www.googleapis.com/auth/contacts.other.readonly \
+             https://www.googleapis.com/auth/directory.readonly \
+             https://www.googleapis.com/auth/drive.file"
+        );
+    }
+
+    /// Neither list asks for the full Calendar scope, and only a client the
+    /// user brought asks for the Workspace directory — said as properties, so
+    /// a reordered list does not hide either.
+    #[test]
+    fn no_registration_asks_for_full_calendar_and_only_bring_your_own_for_the_directory() {
+        for registration in [
+            ClientRegistration::Builtin,
+            ClientRegistration::BringYourOwn,
+        ] {
+            let list = scopes(registration);
+            let asked: Vec<&str> = list.split(' ').collect();
+            assert!(
+                !asked.contains(&"https://www.googleapis.com/auth/calendar"),
+                "{registration:?}: {list}"
+            );
+            assert_eq!(
+                asked.contains(&SCOPE_DIRECTORY_READONLY),
+                registration == ClientRegistration::BringYourOwn,
+                "{registration:?}: {list}"
+            );
+        }
+    }
+
+    /// The consent URL carries the registration's list, for both.
+    #[test]
+    fn authorize_asks_for_the_scopes_of_its_registration() {
+        for registration in [
+            ClientRegistration::Builtin,
+            ClientRegistration::BringYourOwn,
+        ] {
+            let authz = authorize(
+                "my-client-id.apps.googleusercontent.com",
+                "aperio://oauth-callback",
+                GOOGLE_AUTH_URL,
+                registration,
+            )
+            .unwrap();
+            let url = url::Url::parse(&authz.authorize_url).unwrap();
+            let pairs: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+            assert_eq!(
+                pairs.get("scope").map(String::as_str),
+                Some(scopes(registration).as_str()),
+                "{registration:?}"
+            );
+        }
+    }
+
     #[test]
     fn build_auth_url_carries_every_required_param() {
         let url = build_auth_url(
             GOOGLE_AUTH_URL,
             "my-client-id.apps.googleusercontent.com",
             "http://127.0.0.1:12345",
+            ClientRegistration::BringYourOwn,
             "challenge",
             "state",
         )
@@ -547,7 +702,10 @@ mod tests {
             Some("http://127.0.0.1:12345")
         );
         assert_eq!(pairs.get("response_type").map(String::as_str), Some("code"));
-        assert_eq!(pairs.get("scope").map(String::as_str), Some(SCOPES));
+        assert_eq!(
+            pairs.get("scope").map(String::as_str),
+            Some(scopes(ClientRegistration::BringYourOwn).as_str())
+        );
         assert_eq!(
             pairs.get("code_challenge_method").map(String::as_str),
             Some("S256")
@@ -570,6 +728,7 @@ mod tests {
             "my-client-id.apps.googleusercontent.com",
             "aperio://oauth-callback",
             GOOGLE_AUTH_URL,
+            ClientRegistration::Builtin,
         )
         .unwrap();
         // 32-byte verifier → 43 base64url chars; 16-byte state → 32 hex chars.
@@ -598,7 +757,12 @@ mod tests {
     #[test]
     fn authorize_rejects_an_empty_client_id() {
         assert!(matches!(
-            authorize("", "aperio://oauth-callback", GOOGLE_AUTH_URL),
+            authorize(
+                "",
+                "aperio://oauth-callback",
+                GOOGLE_AUTH_URL,
+                ClientRegistration::Builtin
+            ),
             Err(GoogleError::Config(_)),
         ));
     }

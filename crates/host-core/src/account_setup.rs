@@ -26,7 +26,9 @@ use sync_engine::{SecretError, SecretSlot};
 
 /// Key in `config_json` recording that an account signs in with the build's own
 /// OAuth registration rather than one the user supplied. Host bookkeeping — it
-/// is stripped before the plugin ever sees the config.
+/// is stripped before the plugin ever sees the config. The same key carries the
+/// same fact into a plugin's interactive-auth arguments, where a plugin may
+/// read it (see [`OauthClient::write_source`]).
 pub const CLIENT_SOURCE_KEY: &str = "client_source";
 /// The only value [`CLIENT_SOURCE_KEY`] takes.
 pub const CLIENT_SOURCE_BUILTIN: &str = "builtin";
@@ -113,6 +115,32 @@ pub struct OauthClient {
     /// `None` for a public PKCE client, whose provider issues tokens without
     /// one.
     pub secret: Option<String>,
+    /// Whether this is the registration the build carries rather than one the
+    /// user supplied. Told to the plugin by [`Self::write_source`].
+    pub builtin: bool,
+}
+
+impl OauthClient {
+    /// Tell a plugin's auth phase whose registration this sign-in uses:
+    /// [`CLIENT_SOURCE_KEY`] = [`CLIENT_SOURCE_BUILTIN`] for the build's own,
+    /// and no such key for one the user supplied — the same fact, under the
+    /// same name, that an account row records.
+    ///
+    /// A generic fact, not a list of permissions: what follows from it is the
+    /// plugin's business (Google asks for less on the built-in registration).
+    /// The key is REMOVED for the user's own client, because a reconnect starts
+    /// its arguments from the stored row, and what the row says must not
+    /// outvote the client this sign-in actually uses.
+    pub fn write_source(&self, args: &mut Map<String, Value>) {
+        if self.builtin {
+            args.insert(
+                CLIENT_SOURCE_KEY.to_string(),
+                Value::String(CLIENT_SOURCE_BUILTIN.to_string()),
+            );
+        } else {
+            args.remove(CLIENT_SOURCE_KEY);
+        }
+    }
 }
 
 /// What [`choose_oauth_client`] settled on, for a caller about to create a row.
@@ -163,6 +191,7 @@ pub fn choose_oauth_client(
             client: OauthClient {
                 id: id.to_string(),
                 secret: wants_secret.then(|| secret.to_string()),
+                builtin: false,
             },
             config: vec![(oauth.client_id_field.clone(), Value::String(id.to_string()))],
             persist_secret: wants_secret,
@@ -186,6 +215,7 @@ pub fn choose_oauth_client(
         client: OauthClient {
             id: client.client_id.to_string(),
             secret: client.client_secret.map(str::to_string),
+            builtin: true,
         },
         // No client id in the row: the built-in one is a property of the BUILD,
         // not of the account, and persisting it would pin the account to
@@ -799,6 +829,7 @@ fn resolve_oauth_client(
         return Ok(OauthClient {
             id: client.client_id.to_string(),
             secret: client.client_secret.map(str::to_string),
+            builtin: true,
         });
     }
 
@@ -867,7 +898,11 @@ fn resolve_oauth_client(
         }
         None => None,
     };
-    Ok(OauthClient { id, secret })
+    Ok(OauthClient {
+        id,
+        secret,
+        builtin: false,
+    })
 }
 
 #[cfg(test)]
@@ -1618,6 +1653,10 @@ mod tests {
         .expect("a full pair");
         assert_eq!(choice.client.id, "C-mine", "surrounding space is trimmed");
         assert!(choice.persist_secret);
+        assert!(
+            !choice.client.builtin,
+            "a typed pair is the user's own client"
+        );
 
         let plan = plan_new_account(&schema, &Map::new(), Some(&choice)).unwrap();
         assert!(plan.config_json.contains("C-mine"));
@@ -1670,6 +1709,7 @@ mod tests {
         match choose_oauth_client(oauth, None, None) {
             Ok(choice) => {
                 assert!(has_builtin_client(oauth));
+                assert!(choice.client.builtin, "the build's own client says so");
                 assert!(
                     !choice.persist_secret,
                     "the build's own secret does not belong in the user's keychain"
@@ -1685,6 +1725,56 @@ mod tests {
                 assert!(!has_builtin_client(oauth));
                 assert!(err.to_string().contains("client ID"), "{err}");
             }
+        }
+    }
+
+    /// What a plugin's auth phase is told: the build's own registration as
+    /// `client_source: "builtin"`, the user's own client as no such key —
+    /// even when the arguments started from a row that still says `builtin`.
+    #[test]
+    fn the_auth_arguments_say_whose_registration_signs_in() {
+        let client = |builtin| OauthClient {
+            id: "C".into(),
+            secret: Some("s".into()),
+            builtin,
+        };
+        let mut args = Map::new();
+        client(true).write_source(&mut args);
+        assert_eq!(
+            args.get(CLIENT_SOURCE_KEY).and_then(Value::as_str),
+            Some(CLIENT_SOURCE_BUILTIN)
+        );
+
+        let mut args = Map::new();
+        args.insert(
+            CLIENT_SOURCE_KEY.into(),
+            Value::String(CLIENT_SOURCE_BUILTIN.into()),
+        );
+        args.insert("tenant".into(), Value::String("kept".into()));
+        client(false).write_source(&mut args);
+        assert!(!args.contains_key(CLIENT_SOURCE_KEY), "{args:?}");
+        assert_eq!(args.get("tenant").and_then(Value::as_str), Some("kept"));
+    }
+
+    /// An existing account resolves to the same posture it was created in.
+    #[test]
+    fn opening_knows_whose_registration_an_account_uses() {
+        let schema = oauth_schema();
+        let oauth = schema.oauth.as_ref().unwrap();
+        let own = resolve_oauth_client(&schema, oauth, r#"{"client_id":"C-mine"}"#, &mut |_| {
+            Ok("s3cr3t".to_string())
+        })
+        .unwrap();
+        assert!(!own.builtin);
+        match resolve_oauth_client(
+            &schema,
+            oauth,
+            r#"{"client_source":"builtin"}"#,
+            &mut |_| Err(SecretError::NotFound),
+        ) {
+            Ok(client) => assert!(client.builtin),
+            // This build carries no credentials for the provider.
+            Err(_) => assert!(!has_builtin_client(oauth)),
         }
     }
 

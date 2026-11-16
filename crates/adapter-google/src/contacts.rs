@@ -2664,6 +2664,60 @@ mod tests {
         }
     }
 
+    /// A sign-in through the build's own registration never asks for the
+    /// directory scope. Such an account reads the directory as empty, the way
+    /// a personal account does, and the typeahead and a group's member lookup
+    /// still find its own contacts. The body is Google's answer to a scope not
+    /// granted.
+    #[tokio::test]
+    async fn a_directory_scope_not_granted_reads_as_no_directory() {
+        let not_granted = r#"{"error":{"code":403,"message":"Request had insufficient authentication scopes.","errors":[{"message":"Insufficient Permission","domain":"global","reason":"insufficientPermissions"}],"status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT","domain":"googleapis.com","metadata":{"service":"people.googleapis.com","method":"google.people.v1.PeopleService.ListDirectoryPeople"}}]}}"#;
+        let mut server = Server::new_async().await;
+        let _list = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/people:listDirectoryPeople\?".into()),
+            )
+            .with_status(403)
+            .with_body(not_granted)
+            .create_async()
+            .await;
+        let _search = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/people:searchDirectoryPeople\?".into()),
+            )
+            .with_status(403)
+            .with_body(not_granted)
+            .create_async()
+            .await;
+        let _personal = server
+            .mock("GET", Matcher::Regex(r"^/people:searchContacts\?".into()))
+            .with_status(200)
+            .with_body(
+                r#"{"results":[{"person":{"resourceName":"people/c1","emailAddresses":[{"value":"a@x.de"}]}}]}"#,
+            )
+            .create_async()
+            .await;
+        let _other = server
+            .mock("GET", Matcher::Regex(r"^/otherContacts:search\?".into()))
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+
+        let listed = get_contacts(&state, GOOGLE_DIRECTORY_LIST_ID).await;
+        assert!(matches!(&listed, Ok(rows) if rows.is_empty()), "{listed:?}");
+        for strict in [false, true] {
+            let hits = search_sources(&state, "a@x.de", strict).await;
+            assert!(
+                matches!(&hits, Ok(rows) if rows.len() == 1),
+                "strict {strict}: {hits:?}"
+            );
+        }
+    }
+
     /// A listing of Other Contacts Google turns away for throttling is an
     /// error, not an empty list the host would take for the whole of it; a
     /// scope not granted still reads as no Other Contacts.

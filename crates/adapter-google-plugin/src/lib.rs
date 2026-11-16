@@ -40,7 +40,7 @@ pub const MANIFEST: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "
 use std::os::raw::{c_char, c_void};
 
 use adapter_google::drive::{DriveSyncAdapter, GoogleDriveAccountConfig};
-use adapter_google::{GoogleAdapter, TokenSet};
+use adapter_google::{ClientRegistration, GoogleAdapter, TokenSet};
 use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use plugin_sdk::cal_core::adapter::{Capability, Credentials as CalCredentials};
@@ -1046,6 +1046,23 @@ struct InteractiveAuthArgs {
     state: Option<String>,
     #[serde(default)]
     returned_state: Option<String>,
+    /// `"builtin"` when the sign-in uses the OAuth registration the app build
+    /// carries; absent for a client the user brought. The host's generic fact
+    /// about the posture — which scopes follow from it is decided here.
+    #[serde(default)]
+    client_source: Option<String>,
+}
+
+impl InteractiveAuthArgs {
+    /// Whose registration this sign-in uses. Anything but `"builtin"` is a
+    /// client the user brought: the historical contract, under which the
+    /// desktop's own Google command still sends a typed pair and nothing else.
+    fn registration(&self) -> ClientRegistration {
+        match self.client_source.as_deref() {
+            Some("builtin") => ClientRegistration::Builtin,
+            _ => ClientRegistration::BringYourOwn,
+        }
+    }
 }
 
 /// Validate the OAuth CSRF `state`: the redirect's returned state must be
@@ -1074,12 +1091,15 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
     if client_id.is_empty() {
         return Err("client_id must not be empty".to_string());
     }
+    // Both phases that build a consent URL ask for the same registration's
+    // scopes; the exchange builds none.
+    let registration = args.registration();
     match args.phase.as_deref() {
         Some("authorize") => {
             let redirect_uri = args
                 .redirect_uri
                 .ok_or_else(|| "redirect_uri is required in the authorize phase".to_string())?;
-            let authz = GoogleAdapter::oauth_authorize(client_id, &redirect_uri)
+            let authz = GoogleAdapter::oauth_authorize(client_id, &redirect_uri, registration)
                 .map_err(|e| auth_failure("Google authorize", e))?;
             serde_json::to_vec(&authz).map_err(|e| format!("serialise authorize response: {e}"))
         }
@@ -1121,9 +1141,10 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
             if secret.trim().is_empty() {
                 return Err("client_id and client_secret must not be empty".to_string());
             }
-            let tokens = GoogleAdapter::authenticate_interactive(client_id, secret.trim())
-                .await
-                .map_err(|e| auth_failure("Google OAuth", e))?;
+            let tokens =
+                GoogleAdapter::authenticate_interactive(client_id, secret.trim(), registration)
+                    .await
+                    .map_err(|e| auth_failure("Google OAuth", e))?;
             serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
         }
         Some(other) => Err(format!("unknown interactive_auth phase: {other}")),
@@ -1155,6 +1176,70 @@ mod tests {
             message: "invalid_grant".into(),
         };
         assert!(super::auth_failure("Google exchange", other).starts_with("Google exchange: "),);
+    }
+
+    /// The `scope` the authorize phase puts in its consent URL, for the
+    /// arguments a host sends.
+    fn consent_scope(args: serde_json::Value) -> String {
+        let runtime = plugin_sdk::PluginRuntime::new().expect("runtime");
+        let bytes = runtime
+            .block_on(super::plugin_interactive_auth(args.to_string()))
+            .expect("the authorize phase is pure and succeeds");
+        let authz: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let url = authz["authorize_url"].as_str().unwrap();
+        let encoded = url
+            .split(['?', '&'])
+            .find_map(|pair| pair.strip_prefix("scope="))
+            .expect("the consent URL names its scopes");
+        // Form encoding: `+` for a space, `%XX` for a byte.
+        let bytes = encoded.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'+' => out.push(b' '),
+                b'%' => {
+                    let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap();
+                    out.push(u8::from_str_radix(hex, 16).unwrap());
+                    i += 2;
+                }
+                b => out.push(b),
+            }
+            i += 1;
+        }
+        String::from_utf8(out).unwrap()
+    }
+
+    /// The host's generic fact picks the list: `client_source: "builtin"` is
+    /// the build's own registration and asks for no Workspace directory; no
+    /// fact, or any other value, is a client the user brought and keeps it.
+    #[test]
+    fn the_authorize_phase_asks_for_the_scopes_of_the_registration_it_is_told() {
+        use adapter_google::auth::scopes;
+        use adapter_google::ClientRegistration;
+        let args = |source: Option<&str>| {
+            let mut args = serde_json::json!({
+                "client_id": "abc.apps.googleusercontent.com",
+                "redirect_uri": "aperio://oauth-callback",
+                "phase": "authorize",
+            });
+            if let Some(source) = source {
+                args["client_source"] = serde_json::Value::String(source.to_string());
+            }
+            args
+        };
+        assert_eq!(
+            consent_scope(args(Some("builtin"))),
+            scopes(ClientRegistration::Builtin)
+        );
+        assert_eq!(
+            consent_scope(args(None)),
+            scopes(ClientRegistration::BringYourOwn)
+        );
+        assert_eq!(
+            consent_scope(args(Some("something-else"))),
+            scopes(ClientRegistration::BringYourOwn)
+        );
     }
 
     /// The manifest ships beside this crate and is the ONLY thing that tells

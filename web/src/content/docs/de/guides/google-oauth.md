@@ -110,8 +110,10 @@ Jetzt entstehen die beiden Zeichenketten für Aperio:
    - Google-Konto auswählen.
    - Falls die Warnseite „Google hat diese App nicht überprüft" erscheint
      (siehe Schritt 4): **„Erweitert" → „Aperio öffnen (unsicher)"**.
-   - Den angefragten Berechtigungen (Kalender, Aufgaben, Kontakte)
-     **zustimmen**.
+   - Den angefragten Berechtigungen **zustimmen**: Termine deiner Kalender,
+     Kalenderliste und Kalendernamen, Frei/Belegt-Zeiten, Aufgaben,
+     Kontakte, das Verzeichnis deiner Organisation und die Drive-Dateien,
+     die Aperio selbst anlegt.
 4. Der Browser-Tab schließt sich automatisch; deine Google-Kalender,
    -Aufgabenlisten und -Kontakte erscheinen in der Seitenleiste.
 

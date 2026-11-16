@@ -12,6 +12,33 @@ OAuth2. The host runs the OAuth flow and threads the resulting access/
 refresh token to the adapter; token refresh is handled host-side. The
 adapter just sends a `Bearer` token.
 
+The consent asks for four narrow Calendar scopes instead of the full
+`calendar` scope (`auth::scopes`):
+
+- `calendar.events`: read and write events on every calendar the user can
+  reach, which covers sync, `events.get`, `instances`, `insert`, `import`,
+  `patch` and `delete`.
+- `calendar.calendarlist.readonly`: the calendar list. Aperio never changes
+  a list entry.
+- `calendar.calendars`: `calendars.get` on `primary`, which gives the
+  account's address for RSVPs and invitation imports, and `calendars.patch`
+  to rename a calendar.
+- `calendar.events.freebusy`: `freebusy.query` for attendee availability.
+  `calendar.events` does not cover it.
+
+After those come `tasks`, `contacts`, `contacts.other.readonly` and
+`drive.file`. `directory.readonly` (the Workspace directory) is asked for
+only when the user signs in with their own Google Cloud client. With the
+app's built-in registration it is left out, and the directory list reads as
+empty, as it does for a personal account. Google's 403 for that missing scope
+on the two directory methods is logged at debug, not as a warning. The host
+only says which
+registration a sign-in uses (`client_source: "builtin"` in the auth
+arguments, nothing for the user's own client). Which scopes follow is the
+adapter's decision. Tokens granted the full `calendar` scope earlier keep
+working, because it covers every call the narrow set makes. Only a reconnect
+switches an account to the narrow set.
+
 ## Reading data
 
 - **Events:** `events.list` with `singleEvents=false`, so recurring
@@ -300,4 +327,4 @@ little — a cancel's answer may name only its id and status, a listing right
 after a write may lag once, Google may spell the rule otherwise, a 400 may
 refuse Aperio's id — so a different answer from Google fails a named test.
 A live check needs a Google account and an OAuth client configured for the
-Calendar/Tasks/People scopes.
+Calendar/Tasks/People scopes listed under Authentication.

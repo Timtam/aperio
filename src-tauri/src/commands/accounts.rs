@@ -844,13 +844,15 @@ pub async fn connect_google_account(
     //    system browser and blocks the command until the user
     //    completes consent (or times out at 5 min, or the user
     //    denies). Errors here are surfaced verbatim — we
-    //    haven't touched anything persistent yet.
+    //    haven't touched anything persistent yet. This command only ever
+    //    signs in with the pair the user typed.
     let tokens = run_plugin_auth(
         plugin_manager.inner(),
         PLUGIN_ID_GOOGLE,
-        json!({
-            "client_id": client_id,
-            "client_secret": client_secret,
+        connect_auth_args(&host_core::account_setup::OauthClient {
+            id: client_id.to_string(),
+            secret: Some(client_secret.to_string()),
+            builtin: false,
         }),
     )
     .await?;
@@ -1315,6 +1317,44 @@ fn probe_error(err: host_core::registry::RegistryError) -> CommandError {
     }
 }
 
+/// What a plugin's loopback sign-in is handed for a NEW account: the client
+/// pair under the protocol's own names, and whose registration it is
+/// ([`host_core::account_setup::OauthClient::write_source`]) — a plugin may ask
+/// for less on the build's own registration.
+fn connect_auth_args(client: &host_core::account_setup::OauthClient) -> Value {
+    let mut args = serde_json::Map::new();
+    args.insert("client_id".into(), Value::String(client.id.clone()));
+    if let Some(secret) = &client.secret {
+        args.insert("client_secret".into(), Value::String(secret.clone()));
+    }
+    client.write_source(&mut args);
+    Value::Object(args)
+}
+
+/// What a plugin's loopback sign-in is handed to REPAIR an account.
+///
+/// Everything else the account was configured with rides along — the tenant
+/// for Graph, the site for Webex. The per-provider closures this replaces each
+/// rebuilt two or three fields by hand and dropped the rest. The client is the
+/// one the host resolved, and so is whose registration it is: the row's own
+/// `client_source` does not outvote it.
+fn reconnect_auth_args(
+    oauth: &plugin_core::account_schema::AccountOauth,
+    values: &serde_json::Map<String, Value>,
+    client: &host_core::account_setup::OauthClient,
+) -> Value {
+    let mut args = values.clone();
+    args.insert(
+        oauth.client_id_field.clone(),
+        Value::String(client.id.clone()),
+    );
+    if let (Some(field), Some(secret)) = (oauth.client_secret_field.as_deref(), &client.secret) {
+        args.insert(field.to_string(), Value::String(secret.clone()));
+    }
+    client.write_source(&mut args);
+    Value::Object(args)
+}
+
 /// Create an account for any plugin that declares an account schema.
 ///
 /// The one connect path that does not grow a branch per adapter. It reads the
@@ -1392,13 +1432,8 @@ pub async fn connect_account(
             supplied_secret.as_deref(),
         )
         .map_err(account_setup_error)?;
-        let mut args = serde_json::Map::new();
-        args.insert("client_id".into(), Value::String(choice.client.id.clone()));
-        if let Some(secret) = &choice.client.secret {
-            args.insert("client_secret".into(), Value::String(secret.clone()));
-        }
-        tokens =
-            Some(run_plugin_auth(plugin_manager.inner(), &plugin_id, Value::Object(args)).await?);
+        let args = connect_auth_args(&choice.client);
+        tokens = Some(run_plugin_auth(plugin_manager.inner(), &plugin_id, args).await?);
         oauth_choice = Some(choice);
     }
 
@@ -1753,20 +1788,8 @@ pub async fn reconnect_account(
             message: err.to_string(),
         }
     })?;
-    let client = &choice.client;
-
-    // Everything else the account was configured with rides along — the tenant
-    // for Graph, the site for Webex. The per-provider closures this replaces
-    // each rebuilt two or three fields by hand and dropped the rest.
-    let mut args = values.clone();
-    args.insert(
-        oauth.client_id_field.clone(),
-        Value::String(client.id.clone()),
-    );
-    if let (Some(field), Some(secret)) = (oauth.client_secret_field.as_deref(), &client.secret) {
-        args.insert(field.to_string(), Value::String(secret.clone()));
-    }
-    let tokens = run_plugin_auth(&plugin_manager, &plugin_id, Value::Object(args)).await?;
+    let args = reconnect_auth_args(oauth, &values, &choice.client);
+    let tokens = run_plugin_auth(&plugin_manager, &plugin_id, args).await?;
 
     // Collect the writes BEFORE performing any of them. A provider that returns
     // no refresh token has left the account no better off, and writing the new
@@ -1918,5 +1941,56 @@ mod tests {
         assert_eq!(err.message, "provider-busy: http-429");
         let other = probe_error(host_core::registry::RegistryError::Construct("x".into()));
         assert_eq!(other.code, "probe_failed");
+    }
+
+    fn client(builtin: bool) -> host_core::account_setup::OauthClient {
+        host_core::account_setup::OauthClient {
+            id: "C".into(),
+            secret: Some("s".into()),
+            builtin,
+        }
+    }
+
+    fn source(args: &Value) -> Option<&str> {
+        args.get(host_core::account_setup::CLIENT_SOURCE_KEY)
+            .and_then(Value::as_str)
+    }
+
+    /// A new account's loopback sign-in tells the plugin whose registration
+    /// it uses — Google asks for no Workspace directory on the build's own.
+    #[test]
+    fn a_new_sign_in_says_whose_registration_it_uses() {
+        let builtin = connect_auth_args(&client(true));
+        assert_eq!(source(&builtin), Some("builtin"));
+        assert_eq!(builtin["client_id"], "C");
+        assert_eq!(builtin["client_secret"], "s");
+        assert_eq!(source(&connect_auth_args(&client(false))), None);
+    }
+
+    /// A repair says it too, and the client the host resolved wins over what
+    /// the stored row says; the row's other values ride along.
+    #[test]
+    fn a_repair_says_whose_registration_it_uses() {
+        let oauth: plugin_core::account_schema::AccountOauth = serde_json::from_value(json!({
+            "client_id_field": "client_id",
+            "client_secret_field": "client_secret",
+            "builtin_provider": "google",
+        }))
+        .unwrap();
+        let row = |source: Option<&str>| {
+            let mut values = serde_json::Map::new();
+            values.insert("folder_name".into(), json!("Aperio"));
+            if let Some(source) = source {
+                values.insert("client_source".into(), json!(source));
+            }
+            values
+        };
+        let builtin = reconnect_auth_args(&oauth, &row(None), &client(true));
+        assert_eq!(source(&builtin), Some("builtin"));
+        assert_eq!(builtin["folder_name"], "Aperio");
+        let own = reconnect_auth_args(&oauth, &row(Some("builtin")), &client(false));
+        assert_eq!(source(&own), None, "{own}");
+        assert_eq!(own["client_id"], "C");
+        assert_eq!(own["client_secret"], "s");
     }
 }
