@@ -107,7 +107,10 @@ Now the two strings for Aperio are created:
    - Pick your Google account.
    - If the "Google hasn't verified this app" warning page appears (see
      step 4): **"Advanced" → "Go to Aperio (unsafe)"**.
-   - **Approve** the requested permissions (calendar, tasks, contacts).
+   - **Approve** the requested permissions: the events in your calendars,
+     your calendar list and calendar names, free/busy times, tasks,
+     contacts, your organization's directory and the Drive files Aperio
+     creates itself.
 4. The browser tab closes automatically; your Google calendars, task lists
    and contacts appear in the sidebar.
 

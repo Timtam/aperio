@@ -34,7 +34,7 @@ use cal_core::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-pub use auth::TokenSet;
+pub use auth::{ClientRegistration, TokenSet};
 pub use error::{GoogleError, GoogleResult};
 
 use crate::api::ApiState;
@@ -135,16 +135,18 @@ impl GoogleAdapter {
     /// Run the interactive OAuth dance: localhost listener, browser
     /// open, code exchange. Returns the resulting [`TokenSet`] so
     /// the caller can persist `refresh_token` to keychain.
+    /// `registration` decides the scopes (see [`auth::scopes`]).
     pub async fn authenticate_interactive(
         client_id: &str,
         client_secret: &str,
+        registration: ClientRegistration,
     ) -> GoogleResult<TokenSet> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| GoogleError::Io(e.to_string()))?;
-        auth::run_default(client_id, client_secret, &http).await
+        auth::run_default(client_id, client_secret, registration, &http).await
     }
 
     /// Host-driven OAuth **authorize** phase (mobile): build the consent URL +
@@ -152,12 +154,13 @@ impl GoogleAdapter {
     /// `aperio://oauth-callback`). Pure — the host opens the URL in a native
     /// auth session, then calls [`Self::oauth_exchange`] with the returned code
     /// + this verifier/state. (Desktop instead uses the loopback
-    /// [`Self::authenticate_interactive`].)
+    /// [`Self::authenticate_interactive`].) `registration` decides the scopes.
     pub fn oauth_authorize(
         client_id: &str,
         redirect_uri: &str,
+        registration: ClientRegistration,
     ) -> GoogleResult<auth::AuthorizeResponse> {
-        auth::authorize(client_id, redirect_uri, auth::GOOGLE_AUTH_URL)
+        auth::authorize(client_id, redirect_uri, auth::GOOGLE_AUTH_URL, registration)
     }
 
     /// Host-driven OAuth **exchange** phase (mobile): swap the authorization

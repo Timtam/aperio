@@ -396,6 +396,11 @@ own registration, and the account records only *which* one it was (a marker plus
 a short fingerprint), never the credential. Half a pair — an id typed with the
 secret left blank — is refused rather than quietly completed.
 
+Every auth phase is told which registration it signs in with: the arguments
+carry `"client_source": "builtin"` for the app's own, and no `client_source`
+for a client the user typed in. A plugin may ask for fewer scopes on the app's
+own registration. Google, for one, leaves out the Workspace directory there.
+
 A failed phase comes back to the host as text. Build it with
 `plugin_sdk::auth_error(phase, &error)` from the `cal_core::Error` your adapter
 maps the failure to: a message that starts with a refusal or leftover token

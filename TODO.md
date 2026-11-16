@@ -970,6 +970,18 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Google: was ein nicht gewährter Scope trägt, zeigen oder verbergen.**
+      Seit Entscheidung 281 fragt eine Anmeldung mit Aperios eigener
+      Registrierung nicht nach `directory.readonly`. Die Liste
+      „Google-Verzeichnis“ steht trotzdem in der Seitenleiste und bleibt leer.
+      Auch kann der
+      Nutzer auf Googles Zustimmungsseite einzelne Scopes abwählen; dann
+      scheitern etwa Umbenennen oder Zusagen mit einem nackten 403, denn
+      `throttled` kennt `insufficientPermissions` nicht. Die Token-Antwort nennt
+      die gewährten Scopes (`TokenSet.scope`), gelesen werden sie nie. Zu
+      entscheiden: Listen und Aktionen nach dem gewährten Scope zeigen, und
+      einen fehlenden Scope als „erneut anmelden“ sagen. Aus Schritt 1 der
+      Vorbereitung auf Googles OAuth-Prüfung (2026-11-16).
 - [ ] **Google: eine importierte Einladungsserie schickt ihre Löschungen als
       `EXDATE`.** Die Einladung eines anderen geht über `events.import` in
       einem Aufruf hinein, ihre gelöschten Termine als Löschzeilen. Ob Google

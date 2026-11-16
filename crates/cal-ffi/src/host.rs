@@ -8971,6 +8971,9 @@ impl Host {
                 Some(id) if !id.trim().is_empty() => host_core::account_setup::OauthClient {
                     id: id.trim().to_string(),
                     secret: None,
+                    // An id in the row is one the user brought: the build's
+                    // own registration is never written there.
+                    builtin: false,
                 },
                 _ => {
                     return Err(StoreError::Sync {
@@ -9661,6 +9664,11 @@ impl Host {
     /// each and silently dropped the rest, which is invisible right up until a
     /// single-tenant Azure registration is rejected for being asked at
     /// `/common`.
+    ///
+    /// It also says whose registration the client is
+    /// ([`host_core::account_setup::OauthClient::write_source`]): a plugin may
+    /// ask for less on the build's own, and the row's own `client_source` does
+    /// not outvote the client resolved here.
     fn auth_args(
         oauth: &plugin_core::account_schema::AccountOauth,
         values: &serde_json::Map<String, serde_json::Value>,
@@ -9686,6 +9694,7 @@ impl Host {
             args.insert(field.to_string(), secret.clone());
         }
         args.insert("client_secret".to_string(), secret);
+        client.write_source(&mut args);
         args.insert(
             "phase".to_string(),
             serde_json::Value::String(phase.to_string()),
@@ -14387,6 +14396,98 @@ mod tests {
             "drive scope must be present: {url}"
         );
         assert_eq!(v["pkce_verifier"].as_str().unwrap().len(), 43);
+    }
+
+    /// The consent URL in an authorize answer.
+    fn authorize_url(out: &str) -> String {
+        let v: serde_json::Value = serde_json::from_str(out).unwrap();
+        v["authorize_url"].as_str().unwrap().to_string()
+    }
+
+    /// The Google consent the phone opens for `client`, through the argument
+    /// builder every schema-driven sign-in on the phone shares (connect,
+    /// reconnect, both phases) and the bundled plugin.
+    fn google_consent(host: &Host, client: host_core::account_setup::OauthClient) -> String {
+        let (plugin_id, schema) = host.schema_for("google").unwrap();
+        let oauth = schema.oauth.as_ref().unwrap();
+        let args = Host::auth_args(oauth, &serde_json::Map::new(), &client, "authorize", &[]);
+        let bytes = host
+            .runtime
+            .block_on(
+                host.plugin_manager
+                    .interactive_auth(&plugin_id, &args.to_string()),
+            )
+            .unwrap();
+        authorize_url(std::str::from_utf8(&bytes).unwrap())
+    }
+
+    /// A sign-in through the build's own registration tells the plugin so,
+    /// and Google then asks for no Workspace directory; a client the user
+    /// brought keeps it. Neither asks for the full Calendar scope.
+    #[test]
+    fn the_phone_tells_google_whose_registration_signs_in() {
+        let (_dir, host, _kc) = open_host();
+        let client = |builtin| host_core::account_setup::OauthClient {
+            id: "abc.apps.googleusercontent.com".into(),
+            secret: None,
+            builtin,
+        };
+        let builtin = google_consent(&host, client(true));
+        assert!(!builtin.contains("directory.readonly"), "{builtin}");
+        assert!(builtin.contains("calendar.events"), "{builtin}");
+        let own = google_consent(&host, client(false));
+        assert!(own.contains("directory.readonly"), "{own}");
+        for url in [&builtin, &own] {
+            assert!(
+                !url.contains("auth%2Fcalendar+") && !url.contains("auth%2Fcalendar&"),
+                "the full Calendar scope is not asked for: {url}"
+            );
+        }
+    }
+
+    /// The phone's connect form with a typed pair is the user's own client.
+    #[test]
+    fn a_typed_google_pair_keeps_the_directory_on_the_phone() {
+        let (_dir, host, _kc) = open_host();
+        let out = host
+            .begin_account_oauth_json(
+                "google".to_string(),
+                r#"{"client_id":"abc.apps.googleusercontent.com","client_secret":"s"}"#.to_string(),
+            )
+            .unwrap();
+        let url = authorize_url(&out);
+        assert!(url.contains("directory.readonly"), "{url}");
+    }
+
+    /// A repair on the phone asks for the scopes of the registration the
+    /// account uses. A row with an id is the user's own client, whatever else
+    /// it says; a row on the build's own registration asks for no directory —
+    /// asserted where this build carries one, refused where it does not.
+    #[test]
+    fn a_google_repair_on_the_phone_keeps_its_registration() {
+        let (_dir, host, _kc) = open_host();
+        let row = |config: &str| {
+            AccountsRepo::new(&host.db.shared())
+                .create(AdapterKind::new("google"), "G", config)
+                .unwrap()
+                .id
+        };
+        let own =
+            row(r#"{"client_id":"abc.apps.googleusercontent.com","client_source":"builtin"}"#);
+        let url = authorize_url(&host.begin_account_reconnect_json(own).unwrap());
+        assert!(url.contains("directory.readonly"), "{url}");
+
+        let builtin = row(r#"{"client_source":"builtin"}"#);
+        let (_, schema) = host.schema_for("google").unwrap();
+        let carried = host_core::account_setup::has_builtin_client(schema.oauth.as_ref().unwrap());
+        match host.begin_account_reconnect_json(builtin) {
+            Ok(out) => {
+                assert!(carried);
+                let url = authorize_url(&out);
+                assert!(!url.contains("directory.readonly"), "{url}");
+            }
+            Err(_) => assert!(!carried),
+        }
     }
 
     #[test]
