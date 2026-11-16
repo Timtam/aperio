@@ -84,10 +84,12 @@ was mitgeht, steht im Formular.
 
 - **Was gesendet wird:** deine Nachricht; deine E-Mail-Adresse, wenn du eine
   angibst, damit eine Antwort dich erreicht; eine Zeile mit der Version von
-  Aperio, dem Betriebssystem und seiner Version (auf dem Telefon auch die
-  Build-Nummer, unter Android das Gerätemodell); auf deinen Wunsch die
-  Protokolle der App als ZIP-Datei, höchstens die neuesten 2 MB, in denen
-  E-Mail-Adressen und Zugriffstokens vorher durch Platzhalter ersetzt sind. Wie
+  Aperio, dem Betriebssystem und seiner Version und der Prozessorarchitektur
+  (auf dem Telefon auch App-Version und Build-Nummer, unter Android das
+  Gerätemodell), die auch im Betreff der Benachrichtigung steht; auf deinen
+  Wunsch die Protokolle der App als ZIP-Datei, so viel, wie gepackt in die
+  Nachricht passt (etwa 4 MB, höchstens 32 MB Text), in denen E-Mail-Adressen
+  und Zugriffstokens vorher durch Platzhalter ersetzt sind. Wie
   bei jeder Verbindung erhält der Dienst technisch deine IP-Adresse.
 - **Über wen:** Die Nachricht geht an ein Formular bei
   [Static Forms](https://www.staticforms.dev/privacy-policy), das sie per

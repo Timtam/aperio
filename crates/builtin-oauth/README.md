@@ -103,8 +103,8 @@ same way, from the same file and the same CI secrets, so a build has one place
 for every value it ships with. `feedback_form_key()` hands it out, and
 `host_core::feedback` is its only caller. Static Forms documents the key as
 safe to expose: it can only submit to its form, never read submissions or sign
-in. A build without it shows the feedback form with a note that this build
-cannot send, rather than a form that fails on the button.
+in. A build without it shows a note in place of the feedback form, saying this
+build cannot send, rather than a form that fails on the button.
 
 ## Adding a provider
 

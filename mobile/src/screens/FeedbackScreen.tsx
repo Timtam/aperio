@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -19,7 +19,11 @@ import { FormScrollView } from '../components/FormScrollView';
 import { ReadOnlyField } from '../components/ReadOnlyField';
 import { SwitchRow } from '../components/SwitchRow';
 import type { RootStackScreenProps } from '../navigation/types';
-import { feedbackLogLines, holdFeedbackLogs } from '../state/feedbackLogs';
+import {
+  feedbackLogLines,
+  holdFeedbackLogs,
+  type HeldFeedbackLogs,
+} from '../state/feedbackLogs';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Feedback: a message, an optional reply address and, on request, the logs,
@@ -30,12 +34,8 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // logs" on the Logs screen opens this one with the switch on.
 
 /** The logs as the form holds them: not asked for yet, on the way, read, or
- *  unreadable. */
-type Logs =
-  | { state: 'idle' }
-  | { state: 'loading' }
-  | { state: 'ready'; text: string }
-  | { state: 'failed' };
+ *  unreadable. The reading screen sees the same shape. */
+type Logs = HeldFeedbackLogs;
 
 export default function FeedbackScreen({
   navigation,
@@ -74,9 +74,9 @@ export default function FeedbackScreen({
 
   // The reading screen shows what this form holds, and nothing once it is gone.
   useEffect(() => {
-    holdFeedbackLogs(logs.state === 'ready' ? logs.text : null);
-  }, [logs]);
-  useEffect(() => () => holdFeedbackLogs(null), []);
+    holdFeedbackLogs(attachLogs ? logs : { state: 'idle' });
+  }, [attachLogs, logs]);
+  useEffect(() => () => holdFeedbackLogs({ state: 'idle' }), []);
 
   // Read once, when the switch is first turned on: the form then shows and
   // sends that text, rather than a newer one the user has not seen.
@@ -108,15 +108,18 @@ export default function FeedbackScreen({
     setError(null);
     setNotice(null);
     setBusy(true);
+    const sentMessage = message;
     try {
       const outcome = await sendFeedback({
-        message,
+        message: sentMessage,
         email: email.trim() === '' ? null : email,
         logs: attachLogs && logs.state === 'ready' ? logs.text : null,
       });
       const sentence = feedbackOutcomeSentence(outcome, t);
       if (outcome.outcome === 'sent') {
-        setMessage('');
+        // Only what was sent is cleared: text typed while it was on its way
+        // stays in the field.
+        setMessage((current) => (current === sentMessage ? '' : current));
         setAttachLogs(false);
         setLogs({ state: 'idle' });
         setNotice(sentence);
@@ -133,6 +136,13 @@ export default function FeedbackScreen({
     }
   }, [busy, waitingForLogs, message, email, attachLogs, logs, t]);
 
+  // Counted once per read, not per keystroke: the text can be 30 MB. Above
+  // the early returns, like every hook.
+  const lineCount = useMemo(
+    () => (logs.state === 'ready' ? feedbackLogLines(logs.text).length : 0),
+    [logs],
+  );
+
   if (!info) return <View style={styles.screen} />;
 
   if (!info.available) {
@@ -143,7 +153,6 @@ export default function FeedbackScreen({
     );
   }
 
-  const lineCount = logs.state === 'ready' ? feedbackLogLines(logs.text).length : 0;
   const sendDisabled = busy || waitingForLogs;
 
   return (

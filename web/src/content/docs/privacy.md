@@ -80,10 +80,12 @@ shown in the form.
 
 - **What is sent:** your message; your email address, if you give one, so that
   a reply can reach you; a line with the Aperio version, the operating system
-  and its version (on the phone also the build number, on Android the device
-  model); if you choose, the app's logs as a ZIP file, at most the newest 2 MB,
-  with email addresses and access tokens replaced by placeholders first. As
-  with any connection, the service technically receives your IP address.
+  and its version and the processor architecture (on the phone also the app
+  version and the build number, on Android the device model), which also
+  stands in the notification's subject; if you choose, the app's logs as a ZIP
+  file, as much as fits in the message packed (about 4 MB, at most 32 MB of
+  text), with email addresses and access tokens replaced by placeholders first.
+  As with any connection, the service technically receives your IP address.
 - **Through whom:** the message goes to a form at
   [Static Forms](https://www.staticforms.dev/privacy-policy), which emails it
   to the controller and keeps it in its inbox. Static Forms is a processor; a

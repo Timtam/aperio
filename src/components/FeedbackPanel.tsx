@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -11,6 +11,10 @@ import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { feedbackInfo, feedbackLogs, sendFeedback } from '../api/client';
 import { ReadOnlyText } from './ReadOnlyText';
+
+/** The logs field, rendered again only when its text changes: the text can
+ *  be 30 MB, and every keystroke in the message renders the panel. */
+const LogsField = memo(ReadOnlyText);
 
 /** The logs as the form holds them: not asked for yet, on the way, read, or
  *  unreadable. */
@@ -108,22 +112,31 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
     setError(null);
     setNotice(null);
     setBusy(true);
+    const sentMessage = message;
+    // A failure after the panel is gone (the dialog closed, another tab
+    // chosen) has no alert line to stand in; the announcer still says it.
+    const fail = (sentence: string) => {
+      if (mounted.current) setError(sentence);
+      else announce(sentence);
+    };
     try {
       const outcome = await sendFeedback({
-        message,
+        message: sentMessage,
         email: email.trim() === '' ? null : email,
         logs: attachLogs && logs.state === 'ready' ? logs.text : null,
       });
       const sentence = feedbackOutcomeSentence(outcome, t);
       if (outcome.outcome === 'sent') {
-        setMessage('');
+        // Only what was sent is cleared: text typed while it was on its way
+        // stays in the field.
+        setMessage((current) => (current === sentMessage ? '' : current));
         setAttachLogs(false);
         setLogs({ state: 'idle' });
         setNotice(sentence);
         announce(sentence);
         return;
       }
-      setError(sentence);
+      fail(sentence);
       const field = feedbackFailureField(outcome);
       if (field === 'message') messageRef.current?.focus();
       if (field === 'email') emailRef.current?.focus();
@@ -132,7 +145,7 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
       // itself failing, which the service sentence covers well enough.
       // eslint-disable-next-line no-console
       console.warn('send_feedback failed', err);
-      setError(t('dialogs.settings.feedback.failure.service'));
+      fail(t('dialogs.settings.feedback.failure.service'));
     } finally {
       setBusy(false);
     }
@@ -189,6 +202,9 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
           />
         </label>
 
+        {/* The hint stands outside the label: inside, it would be part of the
+            field's name as well as its description, and NVDA would say it
+            twice. */}
         <label className="form__field">
           <span className="form__label">
             {t('dialogs.settings.feedback.emailLabel')}
@@ -201,10 +217,10 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
             autoComplete="email"
             aria-describedby={emailHintId}
           />
-          <span id={emailHintId} className="form__hint">
-            {t('dialogs.settings.feedback.emailHint')}
-          </span>
         </label>
+        <p id={emailHintId} className="form__hint">
+          {t('dialogs.settings.feedback.emailHint')}
+        </p>
 
         <label className="general-panel__toggle">
           <input
@@ -220,7 +236,7 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
         </p>
 
         {attachLogs && (
-          <ReadOnlyText
+          <LogsField
             label={t('dialogs.settings.feedback.logsLabel')}
             value={logsText}
           />

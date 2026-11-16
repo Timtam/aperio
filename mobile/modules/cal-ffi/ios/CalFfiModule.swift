@@ -952,17 +952,22 @@ public class CalFfiModule: Module {
       }
     }
 
+    // Reads, redacts and zips up to 32 MB of logs: seconds on a phone, so not
+    // on the default queue either.
     AsyncFunction("feedbackLogs") { () -> String in
       try self.hostCoded {
         try self.host.feedbackLogs()
       }
-    }
+    }.runOnQueue(lookupQueue)
 
+    // A send is two requests with 60 s timeouts each, and one more pair when
+    // the captcha answer expired: never on the default queue, which every
+    // short call shares. lookupQueue hosts the other network-bound calls.
     AsyncFunction("sendFeedbackJson") { (draftJson: String, detailsJson: String) -> String in
       try self.hostCoded {
         try self.host.sendFeedbackJson(draftJson: draftJson, detailsJson: detailsJson)
       }
-    }
+    }.runOnQueue(lookupQueue)
 
     // The app's own version and build, for the feedback form's system line.
     // EAS assigns the build number at build time, so app.json does not know

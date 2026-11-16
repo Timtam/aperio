@@ -523,12 +523,13 @@ Nachricht geht über den Dienst Static Forms; Aperio verschickt keine E-Mails.
 - **E-Mail-Adresse** ist freiwillig. Gibst du sie an, kann dir der Entwickler
   antworten.
 - **Protokolle anhängen** legt die Protokolle als ZIP-Datei bei, geschwärzt wie
-  beim Export und höchstens die neuesten 2 MB. Bevor du sendest, kannst du
-  genau den Text lesen, der mitgeht: am Computer im Feld darunter, auf dem
-  Telefon über **Protokolle lesen**.
+  beim Export: so viele der neuesten Zeilen, wie gepackt in die Nachricht
+  passen (etwa 4 MB als ZIP, meist alle der letzten 14 Tage, höchstens 32 MB
+  Text). Bevor du sendest, kannst du genau den Text lesen, der mitgeht: am
+  Computer im Feld darunter, auf dem Telefon über **Protokolle lesen**.
 - **Geht immer mit** nennt die Version von Aperio, das Betriebssystem und
-  seine Version, auf dem Telefon auch die Build-Nummer und unter Android das
-  Gerätemodell.
+  seine Version und die Prozessorarchitektur, auf dem Telefon auch die
+  App-Version und die Build-Nummer und unter Android das Gerätemodell.
 
 Gesendet wird erst, wenn du auf **Senden** drückst. Das Formular ist ohne
 sichtbares Rätsel gegen Spam geschützt: Aperio löst eine kleine Rechenaufgabe

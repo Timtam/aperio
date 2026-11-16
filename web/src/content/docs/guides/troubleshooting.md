@@ -479,12 +479,14 @@ what you notice, what is missing or what does not work. The message goes
 through the Static Forms service; Aperio sends no email itself.
 
 - **Email address** is optional. If you give it, the developer can reply.
-- **Attach logs** adds the logs as a ZIP file, redacted as for an export and at
-  most the newest 2 MB. Before you send, you can read exactly the text that goes
-  along: on the computer in the field below, on the phone through **Read the
-  logs**.
+- **Attach logs** adds the logs as a ZIP file, redacted as for an export: as
+  many of the newest lines as fit in the message packed (about 4 MB as ZIP,
+  usually all of the last 14 days, at most 32 MB of text). Before you send, you
+  can read exactly the text that goes along: on the computer in the field
+  below, on the phone through **Read the logs**.
 - **Always goes along** names the Aperio version, the operating system and its
-  version, on the phone also the build number and on Android the device model.
+  version and the processor architecture, on the phone also the app version
+  and the build number and on Android the device model.
 
 Nothing is sent until you press **Send**. The form is protected against spam
 without a visible puzzle: Aperio solves a small computation itself. Builds of

@@ -21,6 +21,9 @@ const backend = vi.hoisted(() => ({
   logsCalls: 0,
   outcome: { outcome: 'sent' } as FeedbackOutcome,
   sent: [] as unknown[],
+  // When set, a send waits until the test calls `release`.
+  hold: false,
+  release: null as null | (() => void),
 }));
 
 const invokeMock = vi.hoisted(() =>
@@ -38,7 +41,10 @@ const invokeMock = vi.hoisted(() =>
       }
       case 'send_feedback':
         backend.sent.push(args?.draft);
-        return Promise.resolve(backend.outcome);
+        if (!backend.hold) return Promise.resolve(backend.outcome);
+        return new Promise((resolve) => {
+          backend.release = () => resolve(backend.outcome);
+        });
       default:
         return Promise.resolve(null);
     }
@@ -59,6 +65,8 @@ beforeEach(() => {
   backend.logsCalls = 0;
   backend.outcome = { outcome: 'sent' };
   backend.sent = [];
+  backend.hold = false;
+  backend.release = null;
   announced.length = 0;
   invokeMock.mockClear();
 });
@@ -155,7 +163,12 @@ describe('FeedbackPanel', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Nachricht' }), {
       target: { value: 'x' },
     });
-    const email = screen.getByRole('textbox', { name: /E-Mail-Adresse/ });
+    // Exactly the label: the hint is the description, not part of the name.
+    const email = screen.getByRole('textbox', { name: 'E-Mail-Adresse (freiwillig)' });
+    expect(email.getAttribute('aria-describedby')).toBeTruthy();
+    expect(
+      document.getElementById(email.getAttribute('aria-describedby') ?? '')?.textContent,
+    ).toMatch(/Antwortadresse/);
     fireEvent.change(email, { target: { value: 'kaputt' } });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Senden' }));
@@ -163,6 +176,57 @@ describe('FeedbackPanel', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/sieht nicht vollständig aus/);
     expect(document.activeElement).toBe(email);
     expect(backend.sent).toEqual([{ message: 'x', email: 'kaputt', logs: null }]);
+  });
+});
+
+describe('FeedbackPanel while a send is on its way', () => {
+  it('keeps text typed during the send, which was not sent', async () => {
+    backend.hold = true;
+    await renderPanel();
+    const message = screen.getByRole('textbox', { name: 'Nachricht' }) as HTMLTextAreaElement;
+    fireEvent.change(message, { target: { value: 'Erster Teil' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Senden' }));
+    });
+    fireEvent.change(message, { target: { value: 'Erster Teil und mehr' } });
+    await act(async () => {
+      backend.release?.();
+    });
+    expect(backend.sent).toEqual([{ message: 'Erster Teil', email: null, logs: null }]);
+    expect(message.value).toBe('Erster Teil und mehr');
+  });
+
+  it('says a failure that comes back after the panel is gone', async () => {
+    backend.hold = true;
+    backend.outcome = { outcome: 'failed', reason: 'network' };
+    const { unmount } = render(<FeedbackPanel />);
+    await screen.findByRole('button', { name: 'Senden' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Nachricht' }), {
+      target: { value: 'x' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Senden' }));
+    });
+    unmount();
+    await act(async () => {
+      backend.release?.();
+    });
+    expect(announced).toEqual([
+      'Der Feedback-Dienst ist nicht erreichbar. Prüf die Internetverbindung und versuch es noch einmal.',
+    ]);
+  });
+
+  it('shows a failure in the panel, not twice', async () => {
+    backend.outcome = { outcome: 'failed', reason: 'busy' };
+    await renderPanel();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Nachricht' }), {
+      target: { value: 'x' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Senden' }));
+    });
+    expect(screen.getByRole('alert').textContent).toMatch(/zu viele Nachrichten/);
+    expect(announced).toEqual([]);
   });
 });
 

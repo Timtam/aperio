@@ -1549,17 +1549,22 @@ class CalFfiModule : Module() {
       }
     }
 
+    // Reads, redacts and zips up to 32 MB of logs: seconds on a phone, so not
+    // on the default queue either.
     AsyncFunction("feedbackLogs") {
       hostCoded {
         host.feedbackLogs()
       }
-    }
+    }.runOnQueue(lookupScope)
 
+    // A send is two requests with 60 s timeouts each, and one more pair when
+    // the captcha answer expired: never on the default queue, which every
+    // short call shares. lookupScope hosts the other network-bound calls.
     AsyncFunction("sendFeedbackJson") { draftJson: String, detailsJson: String ->
       hostCoded {
         host.sendFeedbackJson(draftJson, detailsJson)
       }
-    }
+    }.runOnQueue(lookupScope)
 
     // The app's own version name and code, for the feedback form's system
     // line. The build number is assigned by EAS at build time, so app.json

@@ -45,8 +45,16 @@ export function SwitchRow({
           />
         </View>
       </Pressable>
+      {/* The switch already carries the hint as its accessibilityHint, so the
+          visible copy is hidden from both readers: importantForAccessibility
+          for TalkBack, accessibilityElementsHidden for VoiceOver. With only
+          the first, VoiceOver read the hint a second time on the next swipe. */}
       {hint != null && (
-        <Text style={styles.hint} importantForAccessibility="no">
+        <Text
+          style={styles.hint}
+          importantForAccessibility="no"
+          accessibilityElementsHidden
+        >
           {hint}
         </Text>
       )}

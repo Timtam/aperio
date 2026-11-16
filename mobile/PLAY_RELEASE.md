@@ -532,8 +532,28 @@ Für **geschlossen, offen, Produktion** gilt das alles:
   nutzerinitiierte Übertragungen, weil der Nutzer das Zielkonto selbst
   verbindet: "Weitergabe = Nein" ist vertretbar. Beim E2E-verschlüsselten
   Sync-Ziel greift zusätzlich die Verschlüsselungs-Ausnahme.
-  Zweckangabe: **nur** "App-Funktionalität" — "Kontoverwaltung" meint ein Konto
-  *bei dir*, und das gibt es nicht.
+  Zweckangabe für den Sync: "App-Funktionalität" — "Kontoverwaltung" meint ein
+  Konto *bei dir*, und das gibt es nicht.
+- **Datensicherheit: das Feedback-Formular** (Einstellungen → Feedback,
+  DESIGN.md §17.6). Es sendet an *dich*, über Static Forms, und ist damit
+  Erhebung, nicht Weitergabe: Static Forms ist dein Dienstleister
+  (Auftragsverarbeiter). Alles ist freiwillig und geht nur auf Knopfdruck. Zu
+  erklären sind:
+  - *Persönliche Daten → E-Mail-Adresse*: freiwillig, Zweck
+    "Kommunikation des Entwicklers".
+  - *Nachrichten → Andere In-App-Nachrichten* (der Text der Rückmeldung):
+    freiwillig, Zweck "Kommunikation des Entwicklers".
+  - *App-Informationen und -Leistung → Diagnose*: die angehängten Protokolle
+    und die Systemzeile (App- und Systemversion, Build, Gerätemodell),
+    freiwillig, Zweck "Kommunikation des Entwicklers".
+  - *Geräte- oder andere IDs*: keine. Die Protokolle sind geschwärzt, und das
+    Gerätemodell ist keine Kennung.
+  - Übertragung verschlüsselt: ja (HTTPS). Löschung auf Anfrage: ja (Mail an
+    die Adresse aus der Datenschutzerklärung, Abschnitt
+    `privacy.md#sending-feedback-and-logs`).
+  Für den App Store gilt dasselbe in Apples Begriffen: Kontaktinformationen
+  (E-Mail), Nutzerinhalte (Kundensupport), Diagnose; jeweils nicht mit der
+  Identität verknüpft, kein Tracking.
 - **Inhaltsbewertung** (IARC-Fragebogen). Ohne Bewertung keine
   Veröffentlichung.
 - **Zielgruppe und Inhalte.** Altersbänder auswählen — für Aperio "18 und

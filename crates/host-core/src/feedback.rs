@@ -16,9 +16,11 @@
 //!  - the message the user typed;
 //!  - the e-mail address, if the user gave one, as the reply-to;
 //!  - the system line ([`system_line`]), which the form shows;
-//!  - on request, the logs: every log file, the newest [`LOGS_MAX_BYTES`],
-//!    redacted, zipped. The form shows that very text first ([`logs`]), and the
-//!    text it showed is what is sent, redacted once more on the way out.
+//!  - on request, the logs: every log file, redacted, as many of the newest
+//!    lines as fit zipped in [`LOGS_ZIP_BUDGET`] (at most
+//!    [`LOGS_TEXT_CEILING`] of text). The form shows that very text first
+//!    ([`logs`]), and the text it showed is what is sent, redacted once more on
+//!    the way out.
 //!
 //! The key the form submits with is baked into the build
 //! ([`builtin_oauth::feedback_form_key`]). A build without one reports
@@ -32,15 +34,26 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// How much log text a message carries at most: the newest 2 MiB, the same
-/// cap as copying the logs. Zipped, that is a few hundred kilobytes, far under
-/// the service's limit for a whole request.
-pub const LOGS_MAX_BYTES: usize = 2 * 1024 * 1024;
+/// How large the zipped logs may be: as many of the newest lines go as fit in
+/// this (Toni, 2026-11-16), leaving the rest of [`REQUEST_MAX_BYTES`] for the
+/// message and the framing. Logs zip to about a fifth or less, so this is some
+/// 20 MB of text and often all 14 days.
+pub const LOGS_ZIP_BUDGET: usize = 4_000_000;
+
+/// The most log text the core reads at all, whatever would fit: the text is
+/// held, redacted, zipped and shown in full, on phones too, so it needs a
+/// bound of its own.
+pub const LOGS_TEXT_CEILING: usize = 32 * 1024 * 1024;
 
 /// What Static Forms accepts for one whole request is 4.5 MB. Checked here
 /// before sending, with room for the multipart framing, so an oversized message
 /// is named as such instead of arriving as a refused connection.
 const REQUEST_MAX_BYTES: usize = 4_400_000;
+
+/// Room the captcha answer takes in a body: base64 of a JSON holding two
+/// 64-character hex strings, a salt and a number, a few hundred bytes. Kept
+/// generous, because it only decides whether to ask for a challenge at all.
+const TOKEN_ALLOWANCE: usize = 4096;
 
 const SUBMIT_URL: &str = "https://api.staticforms.dev/submit";
 const CHALLENGE_URL: &str = "https://www.staticforms.dev/api/altcha/challenge";
@@ -151,10 +164,77 @@ pub fn info(details: &HostDetails) -> FeedbackInfo {
     }
 }
 
-/// The log text a message would carry: every log file, the newest
-/// [`LOGS_MAX_BYTES`], redacted. The form shows exactly this before sending.
+/// The log text a message would carry: every log file, redacted, then as many
+/// of the newest whole lines as fit zipped in [`LOGS_ZIP_BUDGET`]. The form
+/// shows exactly this before sending, and sending leaves it as it is:
+/// redacting and fitting it again change nothing ([`prepare_logs`]).
+///
+/// Reads, redacts and zips up to [`LOGS_TEXT_CEILING`] of text: seconds on a
+/// phone, so a host calls it off its interface thread.
 pub fn logs(logs_dir: &Path) -> String {
-    crate::logging::collect(logs_dir, true, Some(LOGS_MAX_BYTES))
+    logs_within(logs_dir, LOGS_TEXT_CEILING, LOGS_ZIP_BUDGET)
+}
+
+fn logs_within(logs_dir: &Path, ceiling: usize, budget: usize) -> String {
+    // `collect` caps before it redacts, and redacting can lengthen a line
+    // (`a@b.de` becomes `[redacted-email]`), so the cap comes again after it.
+    let text = capped(
+        &crate::logging::collect(logs_dir, true, Some(ceiling)),
+        ceiling,
+    );
+    match fit_zipped(text, budget) {
+        Ok((text, _)) => text,
+        Err(err) => {
+            tracing::warn!(error = %err, "feedback: zipping the logs failed");
+            String::new()
+        }
+    }
+}
+
+/// The newest whole lines of `text` whose zip fits in `budget` bytes, and that
+/// zip. Text whose zip already fits comes back unchanged, which is what keeps
+/// a send from changing the text [`logs`] showed. Each round shrinks the text
+/// by the ratio the last zip measured, a little more to be safe; after a few
+/// rounds the last zip is returned whatever its size, and the request's own
+/// size check names it.
+fn fit_zipped(text: String, budget: usize) -> zip::result::ZipResult<(String, Vec<u8>)> {
+    let mut text = text;
+    let mut zip = zip_logs(&text)?;
+    for _ in 0..8 {
+        if zip.len() <= budget || text.is_empty() {
+            break;
+        }
+        let ratio = budget as f64 / zip.len() as f64;
+        let target = ((text.len() as f64) * ratio * 0.97) as usize;
+        text = capped(&text, target.min(text.len().saturating_sub(1)));
+        zip = zip_logs(&text)?;
+    }
+    Ok((text, zip))
+}
+
+/// The line that stands where older lines were cut, the same words
+/// `logging::collect` uses.
+const TRUNCATED: &str = "[… earlier log lines truncated …]\n";
+
+/// `text` when it fits in `max` bytes; otherwise [`TRUNCATED`] and the newest
+/// whole lines that fit with it. A single line longer than that is cut at a
+/// character boundary.
+fn capped(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let room = max.saturating_sub(TRUNCATED.len());
+    let mut cut = text.len() - room;
+    while !text.is_char_boundary(cut) {
+        cut += 1;
+    }
+    let tail = &text[cut..];
+    let at_line_start = text.as_bytes()[cut - 1] == b'\n';
+    let tail = match tail.find('\n') {
+        Some(i) if !at_line_start && i + 1 < tail.len() => &tail[i + 1..],
+        _ => tail,
+    };
+    format!("{TRUNCATED}{tail}")
 }
 
 /// `Aperio 0.2.0 (app 1.0.0, build 70) · iOS 18.1 · aarch64`, with whatever
@@ -409,12 +489,22 @@ impl Service<'_> {
             Some(_) => return Err(FeedbackFailure::InvalidEmail),
         };
         let system = system_line(details);
-        let attachment = match draft.logs.as_deref() {
+        let attachment = match draft.logs.clone() {
             None => None,
-            Some(text) => Some(zip_logs(&capped_and_redacted(text)).map_err(|err| {
-                tracing::warn!(error = %err, "feedback: zipping the logs failed");
-                FeedbackFailure::Service
-            })?),
+            // Redacting and zipping up to 32 MB takes a while: off the async
+            // worker, like the captcha's search.
+            Some(text) => Some(
+                tokio::task::spawn_blocking(move || {
+                    prepare_logs(&text, LOGS_TEXT_CEILING, LOGS_ZIP_BUDGET).map(|(_, zip)| zip)
+                })
+                .await
+                .map_err(|err| err.to_string())
+                .and_then(|zipped| zipped.map_err(|err| err.to_string()))
+                .map_err(|err| {
+                    tracing::warn!(error = %err, "feedback: zipping the logs failed");
+                    FeedbackFailure::Service
+                })?,
+            ),
         };
 
         let fields = Fields {
@@ -423,6 +513,13 @@ impl Service<'_> {
             reply_to: email.map(str::to_string),
             system,
         };
+
+        // Too large is known before any challenge: each one counts against a
+        // limit all Aperio users share, and solving it costs the device work.
+        let (_, without_token) = self.body(&fields, "", attachment.as_deref());
+        if without_token.len() + TOKEN_ALLOWANCE > REQUEST_MAX_BYTES {
+            return Err(FeedbackFailure::TooLarge);
+        }
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
@@ -472,13 +569,7 @@ impl Service<'_> {
             Refusal::Failure(FeedbackFailure::Service)
         })?;
 
-        let (content_type, body) = match attachment {
-            None => (
-                "application/json".to_string(),
-                fields.json(self.key, &token).into_bytes(),
-            ),
-            Some(zip) => fields.multipart(self.key, &token, zip),
-        };
+        let (content_type, body) = self.body(fields, &token, attachment);
         if body.len() > REQUEST_MAX_BYTES {
             return Err(Refusal::Failure(FeedbackFailure::TooLarge));
         }
@@ -497,6 +588,18 @@ impl Service<'_> {
         let status = response.status().as_u16();
         let text = response.text().await.unwrap_or_default();
         submit_verdict(status, &text)
+    }
+
+    /// The request body and its content type: JSON without an attachment,
+    /// multipart with one.
+    fn body(&self, fields: &Fields, token: &str, attachment: Option<&[u8]>) -> (String, Vec<u8>) {
+        match attachment {
+            None => (
+                "application/json".to_string(),
+                fields.json(self.key, token).into_bytes(),
+            ),
+            Some(zip) => fields.multipart(self.key, token, zip),
+        }
     }
 
     /// Fetch one ALTCHA challenge. The key travels in the query, as Static
@@ -668,20 +771,17 @@ fn looks_like_email(email: &str) -> bool {
         && !email.chars().any(char::is_whitespace)
 }
 
-/// The text a host hands back is the text it showed, but the host is not
-/// trusted to have kept to the rules: cap it to the newest
-/// [`LOGS_MAX_BYTES`] and redact it again. Redacting twice changes nothing.
-fn capped_and_redacted(text: &str) -> String {
-    let text = if text.len() > LOGS_MAX_BYTES {
-        let mut cut = text.len() - LOGS_MAX_BYTES;
-        while !text.is_char_boundary(cut) {
-            cut += 1;
-        }
-        &text[cut..]
-    } else {
-        text
-    };
-    crate::logging::redact_text(text)
+/// The zip a send attaches, and the text in it. The text a host hands back is
+/// the text it showed, but the host is not trusted to have kept to the rules:
+/// redact it again, cap it and fit it, in the order [`logs`] does. For the
+/// text `logs` gave, the text comes out unchanged.
+fn prepare_logs(
+    text: &str,
+    ceiling: usize,
+    budget: usize,
+) -> zip::result::ZipResult<(String, Vec<u8>)> {
+    let text = capped(&crate::logging::redact_text(text), ceiling);
+    fit_zipped(text, budget)
 }
 
 fn zip_logs(text: &str) -> zip::result::ZipResult<Vec<u8>> {
@@ -1155,12 +1255,31 @@ mod tests {
         }
     }
 
+    /// What a send makes of a text, with small bounds so the tests run fast.
+    fn prepared(text: &str, ceiling: usize, budget: usize) -> String {
+        prepare_logs(text, ceiling, budget).unwrap().0
+    }
+
+    /// Log lines that zip about as badly as real ones with ids in them.
+    fn varied_lines(count: usize) -> String {
+        (0..count)
+            .map(|i| {
+                // UUID-like pieces: runs under 32 characters, which the
+                // redaction keeps, as it keeps real ids.
+                let h = hex(&Sha256::digest(i.to_string().as_bytes()));
+                let id = format!("{}-{}-{}", &h[0..8], &h[8..20], &h[20..28]);
+                format!("2026-11-16T18:00:00Z  INFO aperio: a@b.de synced {id}\n")
+            })
+            .collect()
+    }
+
     #[test]
     fn the_logs_are_capped_to_the_newest_bytes_and_redacted() {
-        let mut text = "x".repeat(LOGS_MAX_BYTES);
+        let ceiling = 64 * 1024;
+        let mut text = "x".repeat(ceiling);
         text.push_str("\nme@example.org says hi\n");
-        let out = capped_and_redacted(&text);
-        assert!(out.len() <= LOGS_MAX_BYTES, "capped");
+        let out = prepared(&text, ceiling, 1_000_000);
+        assert!(out.len() <= ceiling, "capped");
         assert!(
             out.ends_with("[redacted-email] says hi\n"),
             "newest kept, redacted"
@@ -1170,15 +1289,102 @@ mod tests {
 
     #[test]
     fn capping_never_splits_a_character() {
-        // Two-byte characters at even offsets, and an odd total, so the cut
-        // lands inside one and has to move.
-        let mut text = "ä".repeat(LOGS_MAX_BYTES / 2 + 1);
+        // One line of two-byte characters, cut where the arithmetic lands
+        // inside one: the cut has to move to the next character.
+        let max = 64 * 1024;
+        let mut text = "ä".repeat(max / 2 + 1);
         text.push_str("öx");
-        assert_eq!((text.len() - LOGS_MAX_BYTES) % 2, 1);
-        let out = capped_and_redacted(&text);
+        assert_eq!((text.len() - (max - TRUNCATED.len())) % 2, 1);
+        let out = capped(&text, max);
         assert!(out.ends_with("öx"));
-        assert!(out.starts_with('ä'));
-        assert!(out.len() <= LOGS_MAX_BYTES);
+        assert!(out.starts_with(TRUNCATED));
+        assert!(out[TRUNCATED.len()..].starts_with('ä'));
+        assert!(out.len() <= max);
+    }
+
+    #[test]
+    fn capping_keeps_whole_lines_and_says_what_it_cut() {
+        // Room for the marker and 8 bytes; an older line longer than that.
+        let max = TRUNCATED.len() + 8;
+        let old = format!("{}\n", "x".repeat(40));
+        // The cut lands right after a newline: that line is whole and stays.
+        assert_eq!(
+            capped(&format!("{old}bbb\nccc\n"), max),
+            format!("{TRUNCATED}bbb\nccc\n")
+        );
+        // The cut lands inside a line: that line goes.
+        assert_eq!(
+            capped(&format!("{old}bbbbb\ncc\n"), max),
+            format!("{TRUNCATED}cc\n")
+        );
+        // Text that fits is left alone.
+        assert_eq!(capped("short\n", max), "short\n");
+    }
+
+    #[test]
+    fn what_the_form_shows_is_what_is_sent() {
+        // More than fits, with addresses that grow when redacted: the form
+        // shows the newest lines that fit zipped, and sending changes nothing,
+        // neither the text nor the zip it makes.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("aperio.log.2026-11-16"),
+            varied_lines(3_000),
+        )
+        .unwrap();
+        let (ceiling, budget) = (1024 * 1024, 20_000);
+
+        let shown = logs_within(dir.path(), ceiling, budget);
+        assert!(shown.starts_with(TRUNCATED), "older lines were cut");
+        assert!(!shown.contains("a@b.de"));
+        let zip = zip_logs(&shown).unwrap();
+        assert!(zip.len() <= budget, "{}", zip.len());
+
+        let (sent, sent_zip) = prepare_logs(&shown, ceiling, budget).unwrap();
+        assert_eq!(sent, shown, "sending changes nothing");
+        assert_eq!(sent_zip, zip);
+    }
+
+    #[test]
+    fn a_send_caps_after_redacting() {
+        // Under the ceiling as handed back, over it once redacted: a cap taken
+        // before the redaction would let the text grow past it.
+        let ceiling = 4 * 1024;
+        let text = "a@b.de\n".repeat(ceiling / 7);
+        assert!(text.len() <= ceiling);
+        let sent = prepared(&text, ceiling, 1_000_000);
+        assert!(sent.len() <= ceiling, "{}", sent.len());
+        assert!(sent.starts_with(TRUNCATED));
+    }
+
+    #[test]
+    fn the_shown_text_is_capped_after_redacting() {
+        let dir = tempfile::tempdir().unwrap();
+        let ceiling = 4 * 1024;
+        std::fs::write(
+            dir.path().join("aperio.log.2026-11-16"),
+            "a@b.de\n".repeat(ceiling / 7),
+        )
+        .unwrap();
+        let shown = logs_within(dir.path(), ceiling, 1_000_000);
+        assert!(shown.len() <= ceiling, "{}", shown.len());
+    }
+
+    #[test]
+    fn as_much_as_fits_goes_along() {
+        let text = crate::logging::redact_text(&varied_lines(3_000));
+        let budget = 20_000;
+        let (fitted, zip) = fit_zipped(text.clone(), budget).unwrap();
+        assert!(zip.len() <= budget);
+        // Not a token sample: the shrink aims just under the budget.
+        assert!(zip.len() * 10 >= budget * 8, "{} of {budget}", zip.len());
+        assert!(
+            text.ends_with(fitted.strip_prefix(TRUNCATED).unwrap()),
+            "the newest lines"
+        );
+        // Text whose zip fits is left as it is.
+        let (small, _) = fit_zipped("one line\n".to_string(), budget).unwrap();
+        assert_eq!(small, "one line\n");
     }
 
     #[test]
@@ -1444,7 +1650,12 @@ mod tests {
             reply_to: Some("a@b.de".into()),
             system: "sys".into(),
         };
-        let zip = zip_logs(&capped_and_redacted("me@example.org did a thing\n")).unwrap();
+        let (_, zip) = prepare_logs(
+            "me@example.org did a thing\n",
+            LOGS_TEXT_CEILING,
+            LOGS_ZIP_BUDGET,
+        )
+        .unwrap();
         let (content_type, body) = fields.multipart("k", "t", &zip);
         let boundary = content_type
             .strip_prefix("multipart/form-data; boundary=")
@@ -1587,7 +1798,12 @@ mod tests {
     #[tokio::test]
     async fn an_oversized_message_is_refused_before_it_is_sent() {
         let mut local = Local::new().await;
-        let _challenge = challenge_mock(&mut local.server, 2).create_async().await;
+        // Not even a challenge: those count against a limit every Aperio user
+        // shares.
+        let challenge = challenge_mock(&mut local.server, 2)
+            .expect(0)
+            .create_async()
+            .await;
         let submit = local
             .server
             .mock("POST", "/submit")
@@ -1599,6 +1815,7 @@ mod tests {
             local.send(&draft(&huge)).await,
             Err(FeedbackFailure::TooLarge)
         );
+        challenge.assert_async().await;
         submit.assert_async().await;
     }
 
