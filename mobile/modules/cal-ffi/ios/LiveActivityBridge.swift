@@ -181,4 +181,89 @@ enum LiveActivityBridge {
         else { return }
         await activity.end(nil, dismissalPolicy: .immediate)
     }
+
+    /// End now with this final content, and let iOS remove it at `at`, at
+    /// the latest four hours on (`ActivityUIDismissalPolicy.after`). It leaves
+    /// the Dynamic Island at once and can no longer change: the trial
+    /// `endEarly` in `shared/liveActivityIos.ts`.
+    static func endAfter(id: String, contentJson: String, at: String) async throws {
+        guard #available(iOS 17.0, *) else {
+            throw LiveActivityBridgeError.unavailable("needs iOS 17")
+        }
+        guard let date = instant(at) else {
+            throw LiveActivityBridgeError.badContent("end \(at)")
+        }
+        guard let activity = Activity<AperioEventAttributes>.activities.first(where: { $0.id == id })
+        else { throw LiveActivityBridgeError.notFound(id) }
+        let activityContent = try content(contentJson)
+        await activity.end(activityContent, dismissalPolicy: .after(date))
+    }
+
+    /// End every running or waiting activity whose end, as the last pass
+    /// handed it over (`ActivityEnds`), has passed. Returns how many.
+    ///
+    /// This is no rule of its own: the pass decided when each activity ends,
+    /// and this only notices that the moment has come. It runs first thing
+    /// when iOS wakes Aperio, before the JS bundle, the network or the plan,
+    /// because a wake may last seconds.
+    static func endOverdue(now: Date = Date()) async -> Int {
+        guard #available(iOS 17.0, *) else { return 0 }
+        let ends = ActivityEnds.load()
+        guard !ends.isEmpty else { return 0 }
+        var ended: [String] = []
+        for activity in Activity<AperioEventAttributes>.activities {
+            // By name, as in `listJson`: `.pending` exists only from iOS 26.
+            let state = String(describing: activity.activityState)
+            if state == "ended" || state == "dismissed" { continue }
+            guard let end = ends[activity.id], end <= now else { continue }
+            await activity.end(nil, dismissalPolicy: .immediate)
+            ended.append(activity.id)
+        }
+        ActivityEnds.remove(ended)
+        return ended.count
+    }
+}
+
+/// Each activity's end as the last Live Activity pass handed it over
+/// (`activityEnds` in `shared/liveActivityIos.ts`), kept across launches: a
+/// launch into the background reaches the wake-up handler before any JS runs.
+enum ActivityEnds {
+    private static let key = "aperio.liveActivities.ends.v1"
+    private static let lock = NSLock()
+
+    /// Replace what is kept with `json`, an object `{id: RFC 3339}`. Anything
+    /// unreadable keeps nothing, which ends nothing early.
+    static func save(json: String) {
+        var kept: [String: String] = [:]
+        if let data = json.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+            kept = object.filter { LiveActivityBridge.instant($0.value) != nil }
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        UserDefaults.standard.set(kept, forKey: key)
+    }
+
+    static func load() -> [String: Date] {
+        lock.lock()
+        let raw = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        lock.unlock()
+        return raw.compactMapValues { LiveActivityBridge.instant($0) }
+    }
+
+    static func remove(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        var raw = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        for id in ids {
+            raw.removeValue(forKey: id)
+        }
+        UserDefaults.standard.set(raw, forKey: key)
+    }
+
+    /// The earliest end still to come, or nil.
+    static func earliest(after now: Date = Date()) -> Date? {
+        load().values.filter { $0 > now }.min()
+    }
 }

@@ -319,6 +319,20 @@ export function refreshRemindersSoon(): void {
   }, DEBOUNCE_MS);
 }
 
+/** Set while an OS background round runs (`duringBackgroundRound`). */
+let backgroundRound = false;
+
+/** Run an OS background round: while it runs, the round alone replans the
+ *  reminders (see the hook below). */
+export async function duringBackgroundRound<T>(run: () => Promise<T>): Promise<T> {
+  backgroundRound = true;
+  try {
+    return await run();
+  } finally {
+    backgroundRound = false;
+  }
+}
+
 // Re-plan whenever fresh data lands outside a local mutation: a peer sync
 // round applied changes (a desktop-created task can add/remove reminders or
 // change the day-start counts) or an external-cache refresh finished.
@@ -328,7 +342,17 @@ export function refreshRemindersSoon(): void {
 // while the gate is still closed (it rides toward its 5s cap on a busy
 // bridge) — the replan then parks and runs once at gate-open instead of
 // competing with the first paint. Post-open: plain pass-through.
-setRemindersRefreshHook(() => whenStartupSettled('reminders', refreshRemindersSoon));
+//
+// Not while an iPhone background round runs: the round reschedules itself
+// once its providers are in, and each flush of the pass started another full
+// scan of every account behind it — three in one round on Toni's iPhone
+// (2026-11-17), in the thirty seconds iOS gives. Data that lands after the
+// round's own scan waits for the next occasion; iOS suspends the app once the
+// round is done anyway. Android's round has minutes and keeps the replans.
+setRemindersRefreshHook(() => {
+  if (backgroundRound && Platform.OS === 'ios') return;
+  whenStartupSettled('reminders', refreshRemindersSoon);
+});
 
 /** One run of the "on next app start" reminders at a time: the launch and the
  *  first foreground flip can come together, and two runs would both see what
@@ -397,7 +421,13 @@ export function useReminderTriggers(): void {
     // A running Live Activity starts at once from the last plan; the full
     // pass below reconciles it with fresh data (iPhone only, a no-op else).
     startFromLastPlan();
-    whenStartupSettled('reminders', () => void rescheduleReminders());
+    // A launch straight into the background is iOS starting an OS round,
+    // which scans once itself after its providers. A second scan here, with
+    // the session's cache settle in front of it, ate the thirty seconds the
+    // round has (Toni's iPhone, 2026-11-17). Opening the app scans below.
+    if (AppState.currentState !== 'background') {
+      whenStartupSettled('reminders', () => void rescheduleReminders());
+    }
     // Its own key: the gate keeps one parked run per key.
     whenStartupSettled('appStartReminders', () => void fireAppStartReminders());
     const sub = AppState.addEventListener('change', (state) => {

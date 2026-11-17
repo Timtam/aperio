@@ -178,15 +178,23 @@ VoiceOver reads each activity as one sentence, the self-updating times
 included. Without Aperio running, the iPhone changes an activity only once by
 itself: to the next appointment, or to **Over** when nothing follows. Only a
 running Aperio can end it, so Aperio asks iOS to let it run briefly in the
-background when the appointment ends. When that happens is up to iOS,
-sometimes only hours later. The activity always ends once you open Aperio.
-With **Background sync** off, it always waits for that. iOS ends it by itself
-at the latest eight hours after it started; it can then stay on the lock
-screen for up to four more hours.
+background when the appointment ends, and then ends what is over before
+anything else. When that happens is up to iOS: usually a few minutes after the
+end, sometimes only hours later. The activity always ends once you open
+Aperio. With **Background sync** off, it always waits for that. iOS ends it by
+itself at the latest eight hours after it started; it can then stay on the
+lock screen for up to four more hours.
 
 Switch it under **Settings, General, Live Activities for appointments**
 (default on, this device only). If the iPhone settings turn Live Activities off
 for Aperio, a line below the switch says so, with a button to those settings.
+
+Below it is a trial, **end Live Activities ahead** (default off): once nothing
+follows an appointment and its end is at most four hours away, Aperio ends the
+activity ahead, and the iPhone removes it right at the end, even without
+Aperio running. In exchange it leaves the Dynamic Island at once, stays only
+on the lock screen and shows no later changes. Whether it stays that way will
+be decided after the first experience with it.
 
 ## Live Activities (Android)
 

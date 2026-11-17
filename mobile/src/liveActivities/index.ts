@@ -11,7 +11,7 @@ import { androidRemindersAndActivities } from './androidActivities';
 import { iosRemindersAndActivities } from './iosActivities';
 
 export { reminderKeyId } from './reminderKey';
-export { startFromLastPlan } from './iosActivities';
+export { endFromLastPlan, startFromLastPlan } from './iosActivities';
 
 export function remindersAndActivities(
   horizonMinutes: number,

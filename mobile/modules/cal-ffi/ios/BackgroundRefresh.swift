@@ -26,11 +26,16 @@ import UIKit
 //
 // It runs the SAME work: `runTasks` executes every registered TaskManager task
 // for this launch reason, which is the app's background-sync task. There is no
-// second code path to keep in step.
+// second code path to keep in step. One thing comes before it: Live Activities
+// whose end has passed are ended here, natively, before the JS bundle, the
+// network or the plan (`LiveActivityBridge.endOverdue`). A wake comes minutes
+// late at best and may last seconds; on Toni's iPhone (build 71, 2026-11-17)
+// one woke ten minutes after an appointment's end, died eight seconds later on
+// hung requests, and the activity said "over" for two more hours.
 //
 // Everything here fails soft. No task service, no permitted identifier, a
-// refused submit — each ends in a log line, and the app is exactly as it was
-// before this file existed.
+// refused submit — each ends in a log line (Aperio's own, `NativeLog`), and the
+// app is exactly as it was before this file existed.
 
 enum BackgroundRefresh {
   /// Must match `BGTaskSchedulerPermittedIdentifiers` in app.json. iOS refuses
@@ -45,12 +50,6 @@ enum BackgroundRefresh {
   private static let lock = NSLock()
   private static var minutes = floorMinutes
   private static var wanted = false
-  /// The earliest end of a Live Activity that runs or waits, if any. Only a
-  /// running Aperio can end one — iOS has no scheduled end without a push
-  /// server — so the next wake-up is brought forward to it when it comes
-  /// before the interval is up. Without this an activity said "over" on the
-  /// lock screen all evening (Toni's iPhone, 2026-11-10).
-  private static var activityEnd: Date?
 
   /// Start (or re-arm) the refresh task. Called by the JS layer whenever the
   /// background-sync preference is on, which includes every app start.
@@ -71,17 +70,21 @@ enum BackgroundRefresh {
     BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
   }
 
-  /// The earliest end of a Live Activity, or nil with none; handed over by
-  /// every Live Activity pass (`shared/liveActivityIos.ts`, `wakeAt`).
+  /// Each Live Activity's end, handed over by every Live Activity pass
+  /// (`activityEnds` in `shared/liveActivityIos.ts`) and kept across launches
+  /// (`ActivityEnds`). Only a running Aperio can end one — iOS has no
+  /// scheduled end without a push server — so the next wake-up is brought
+  /// forward to the earliest end when it comes before the interval is up.
+  /// Without this an activity said "over" on the lock screen all evening
+  /// (Toni's iPhone, 2026-11-10).
   ///
-  /// Re-armed only when it changed: every pass hands it over, and submitting
-  /// an unchanged request again would only push the interval's floor later.
-  static func wake(at end: Date?) {
-    lock.lock()
-    let changed = activityEnd != end
-    activityEnd = end
-    lock.unlock()
-    if changed { schedule() }
+  /// Re-armed only when the earliest end changed: every pass hands them over,
+  /// and submitting an unchanged request again would only push the
+  /// interval's floor later.
+  static func follow(endsJson: String) {
+    let before = ActivityEnds.earliest()
+    ActivityEnds.save(json: endsJson)
+    if ActivityEnds.earliest() != before { schedule() }
   }
 
   /// Submit the next request. One is pending at a time; the handler re-arms
@@ -90,9 +93,9 @@ enum BackgroundRefresh {
     lock.lock()
     let armed = wanted
     let delay = Double(minutes) * 60
-    let end = activityEnd
     lock.unlock()
     guard armed else { return }
+    let end = ActivityEnds.earliest()
 
     let request = BGAppRefreshTaskRequest(identifier: identifier)
     // A floor, not an appointment: the system decides the actual moment from
@@ -100,7 +103,7 @@ enum BackgroundRefresh {
     // the interval is up brings it forward; one already past is the round
     // under way's to end.
     var begin = Date(timeIntervalSinceNow: delay)
-    if let end = end, end > Date(), end < begin {
+    if let end = end, end < begin {
       begin = end
     }
     request.earliestBeginDate = begin
@@ -109,12 +112,15 @@ enum BackgroundRefresh {
     } catch {
       // `notPermitted` on a build whose Info.plist lacks the identifier or the
       // `fetch` background mode; `unavailable` when the user has turned
-      // Background App Refresh off. Neither is worth bothering anyone with.
+      // Background App Refresh off. Neither is worth a warning, but the log
+      // says why no wake-up came.
       NSLog("[Aperio] background refresh not scheduled: \(error)")
+      NativeLog.write("info", "background refresh not scheduled: \(error)")
     }
   }
 
-  /// Run the app's registered background tasks, then re-arm.
+  /// End the overdue Live Activities, run the app's registered background
+  /// tasks, then re-arm.
   ///
   /// The re-arm happens on every exit path INCLUDING failure and expiry — a
   /// request that is not replaced is a task that never runs again, which would
@@ -126,20 +132,50 @@ enum BackgroundRefresh {
     wanted = true
     lock.unlock()
 
+    let round = Round(task)
+    NativeLog.write("info", "background refresh: woken")
     task.expirationHandler = {
-      NSLog("[Aperio] background refresh ran out of time")
-      task.setTaskCompleted(success: false)
-      schedule()
+      round.finish(success: false, how: "ran out of time")
     }
-    guard let service = AperioTaskServiceHelper.sharedTaskService() else {
-      NSLog("[Aperio] background refresh found no task service")
-      task.setTaskCompleted(success: false)
-      schedule()
-      return
+    Task {
+      let ended = await LiveActivityBridge.endOverdue()
+      if ended > 0 {
+        NativeLog.write("info", "background refresh: ended \(ended) live activities that were over")
+      }
+      guard let service = AperioTaskServiceHelper.sharedTaskService() else {
+        round.finish(success: false, how: "found no task service")
+        return
+      }
+      service.runTasks(with: EXTaskLaunchReasonBackgroundTask, userInfo: nil) { _ in
+        round.finish(success: true, how: "done")
+      }
     }
-    service.runTasks(with: EXTaskLaunchReasonBackgroundTask, userInfo: nil) { _ in
-      task.setTaskCompleted(success: true)
-      schedule()
+  }
+
+  /// One run of the task, finished exactly once: by the tasks completing or
+  /// by iOS calling time, whichever comes first. Shared between iOS's
+  /// expiration handler and the run; `finished` is guarded by its lock.
+  private final class Round: @unchecked Sendable {
+    private let task: BGTask
+    private let began = Date()
+    private let lock = NSLock()
+    private var finished = false
+
+    init(_ task: BGTask) {
+      self.task = task
+    }
+
+    func finish(success: Bool, how: String) {
+      lock.lock()
+      let first = !finished
+      finished = true
+      lock.unlock()
+      guard first else { return }
+      let seconds = String(format: "%.1f", Date().timeIntervalSince(began))
+      NSLog("[Aperio] background refresh \(how) after \(seconds) s")
+      NativeLog.write(success ? "info" : "warn", "background refresh: \(how) after \(seconds) s")
+      task.setTaskCompleted(success: success)
+      BackgroundRefresh.schedule()
     }
   }
 }
@@ -157,6 +193,14 @@ public class AperioBackgroundRefreshSubscriber: ExpoAppDelegateSubscriber {
       forTaskWithIdentifier: BackgroundRefresh.identifier, using: nil
     ) { task in
       BackgroundRefresh.run(task)
+    }
+    // Any launch, also one into the background for another reason (the
+    // overnight processing task among them): what is over is ended at once.
+    Task {
+      let ended = await LiveActivityBridge.endOverdue()
+      if ended > 0 {
+        NativeLog.write("info", "launch: ended \(ended) live activities that were over")
+      }
     }
     return true
   }

@@ -77,6 +77,14 @@ export interface RememberedActivity {
   /** The content last sent, so an unchanged one is not sent again: every
    *  update counts against the Apple Watch's budget. */
   content: string;
+  /** The end of its chain as of the last pass: the moment the native wake
+   *  ends it (`activityEnds`). Gone after it is no swipe. Absent in a memory
+   *  written before it was kept. */
+  endsAt?: string;
+  /** Ended ahead, with iOS removing it at `endsAt` (the trial
+   *  `ReconcileInput.endEarly`): still on the lock screen, but it can no
+   *  longer change. */
+  endedEarly?: boolean;
 }
 
 export interface ActivityMemory {
@@ -91,18 +99,29 @@ export interface ActivityMemory {
 export const EMPTY_ACTIVITY_MEMORY: ActivityMemory = { activities: {}, dismissed: {} };
 
 export type ActivityAction =
-  | { type: 'start'; chainKey: string; content: ActivityContent; keys: string[] }
+  | {
+      type: 'start';
+      chainKey: string;
+      content: ActivityContent;
+      keys: string[];
+      /** The end of its chain (`RememberedActivity.endsAt`). */
+      endsAt: string;
+    }
   | {
       type: 'schedule';
       chainKey: string;
       content: ActivityContent;
       keys: string[];
       at: string;
+      endsAt: string;
       /** The reminders the scheduled start's alert stands for. */
       signal: LiveTriggerKey[];
     }
   | { type: 'update'; id: string; content: ActivityContent }
-  | { type: 'end'; id: string };
+  | { type: 'end'; id: string }
+  /** End now with this final content, and let iOS remove it at `at`
+   *  (`dismissalPolicy: .after`). */
+  | { type: 'endAfter'; id: string; content: ActivityContent; at: string };
 
 export interface ReconcileInput {
   now: Date;
@@ -130,6 +149,11 @@ export interface ReconcileInput {
    *  memory's means the app was updated since: an activity gone then is no
    *  swipe. */
   build: string;
+  /** Trial (Toni, 2026-11-17): end an activity ahead once nothing follows in
+   *  its chain and its end is within iOS's four hours, so iOS removes it on
+   *  time without Aperio running then. It leaves the Dynamic Island at once
+   *  and can no longer change. */
+  endEarly: boolean;
 }
 
 export interface ReconcileResult {
@@ -141,9 +165,11 @@ export interface ReconcileResult {
   /** The memory for the activities that stay; `remember` adds a new one. */
   memory: ActivityMemory;
   /** The earliest end among the chains that keep or get an activity, or
-   *  `null` with none. Only a running Aperio can end an activity, and iOS
-   *  wakes it when it likes; this is the moment to ask it for (TODO A12,
-   *  Toni's iPhone 2026-11-10: "Vorbei" on the lock screen all evening). */
+   *  `null` with none; one ended ahead does not count, iOS removes it by
+   *  itself. Only a running Aperio can end an activity, and iOS wakes it when
+   *  it likes; this is the moment to ask it for (TODO A12, Toni's iPhone
+   *  2026-11-10: "Vorbei" on the lock screen all evening). The wake itself
+   *  follows `activityEnds`, which knows the ids of activities started now. */
   wakeAt: string | null;
 }
 
@@ -156,6 +182,10 @@ const SYSTEM_END_MS = 8 * 60 * 60 * 1000;
 
 /** How long a swipe is remembered: an appointment is over well within it. */
 const DISMISSAL_MEMORY_MS = 24 * 60 * 60 * 1000;
+
+/** iOS removes an ended activity at the date asked for, but at the latest
+ *  four hours after the end; a minute less leaves room for the clocks. */
+const EARLY_END_WINDOW_MS = 4 * 60 * 60 * 1000 - 60 * 1000;
 
 const ms = (iso: string) => Date.parse(iso);
 
@@ -255,6 +285,13 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
       const report = reported.get(id);
       const gone = report == null || report.state === 'dismissed' || report.state === 'ended';
       if (!gone) continue;
+      // Ended ahead by Aperio, and on the lock screen until iOS removes it.
+      if (remembered.endedEarly === true && report?.state === 'ended') continue;
+      // Gone once its chain was over: ended by the native wake
+      // (`activityEnds`) or removed by iOS, not swiped. Nor when no chain
+      // holds its appointments any more: a swipe would keep nothing away.
+      if (remembered.endsAt != null && ms(remembered.endsAt) <= now) continue;
+      if (chainOf(chains, remembered.keys) == null) continue;
       const started = ms(remembered.startsAt);
       if (started <= now && now - started < SYSTEM_END_MS) {
         dismissed[remembered.shownKey] = input.now.toISOString();
@@ -279,8 +316,35 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
     activityContent(chain, new Date(ms(chain.start)), input.locale, input.words, input.hideOnLockScreen);
 
   const served = new Set<LiveActivityChain>();
+  // Chains whose activity was ended ahead: iOS removes it by itself, so no
+  // background round is asked for.
+  const endedAhead = new Set<LiveActivityChain>();
   for (const report of input.reported) {
-    if (report.state === 'ended' || report.state === 'dismissed') continue;
+    if (report.state === 'dismissed') continue;
+    if (report.state === 'ended') {
+      const early = input.memory.activities[report.id];
+      if (early?.endedEarly !== true) continue;
+      // Ended ahead (`endEarly`): it shows until iOS removes it. Kept while
+      // it still shows the right thing, and from the background in any case,
+      // where nothing could replace it. Otherwise ended again, which asks iOS
+      // to remove it now, and in front started afresh below.
+      const chain = input.enabled ? chainOf(chains, early.keys) : undefined;
+      if (chain != null && !served.has(chain)) {
+        const sent = JSON.stringify(
+          activityContent(chain, input.now, input.locale, input.words, input.hideOnLockScreen),
+        );
+        const unchanged =
+          early.endsAt != null && ms(early.endsAt) === ms(chain.end) && early.content === sent;
+        if (unchanged || !input.foreground) {
+          served.add(chain);
+          endedAhead.add(chain);
+          activities[report.id] = { ...early, keys: [...chain.keys] };
+          continue;
+        }
+      }
+      actions.push({ type: 'end', id: report.id });
+      continue;
+    }
     // Aperio ends these itself, so they are no swipes next time: they leave
     // the memory here and are not counted as gone.
     if (!input.enabled) {
@@ -291,6 +355,16 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
     const chain = chainOf(chains, remembered?.keys ?? [report.chainKey]);
     if (chain == null || served.has(chain)) {
       actions.push({ type: 'end', id: report.id });
+      continue;
+    }
+    if (report.state === 'pending' && !input.planAhead) {
+      // A pass from the last plan has no fresh reminders: it cannot tell a
+      // silent one, and so not which chains come first. A waiting activity
+      // whose chain is still there is the full pass's to judge.
+      if (remembered != null) {
+        served.add(chain);
+        activities[report.id] = { ...remembered, keys: [...chain.keys], endsAt: chain.end };
+      }
       continue;
     }
     if (report.state === 'pending') {
@@ -312,7 +386,7 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
       }
       served.add(chain);
       covered.push(...firstSignal(chain));
-      activities[report.id] = { ...remembered, keys: [...chain.keys] };
+      activities[report.id] = { ...remembered, keys: [...chain.keys], endsAt: chain.end };
       continue;
     }
     // A running activity never jumps ahead to a chain that has not begun: an
@@ -331,7 +405,16 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
       shownKey: content.current.key,
       startsAt: remembered?.startsAt ?? chain.start,
       content: sent,
+      endsAt: chain.end,
     };
+    // The trial: nothing follows any more, and iOS can remove it at the end
+    // by itself. The final content is what it shows until then.
+    if (input.endEarly && content.next == null && ms(chain.end) - now <= EARLY_END_WINDOW_MS) {
+      activities[report.id].endedEarly = true;
+      endedAhead.add(chain);
+      actions.push({ type: 'endAfter', id: report.id, content, at: chain.end });
+      continue;
+    }
     if (remembered?.content !== sent) actions.push({ type: 'update', id: report.id, content });
   }
 
@@ -342,7 +425,13 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
         // Running: started now, without an alert — the reminder rang already.
         const content = activityContent(chain, input.now, input.locale, input.words, input.hideOnLockScreen);
         if (dismissed[content.current.key] != null) continue;
-        actions.push({ type: 'start', chainKey: chainKeyOf(chain), content, keys: [...chain.keys] });
+        actions.push({
+          type: 'start',
+          chainKey: chainKeyOf(chain),
+          content,
+          keys: [...chain.keys],
+          endsAt: chain.end,
+        });
         served.add(chain);
         continue;
       }
@@ -355,6 +444,7 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
         content: contentAtStart(chain),
         keys: [...chain.keys],
         at: chain.start,
+        endsAt: chain.end,
         signal: firstSignal(chain),
       });
     }
@@ -362,15 +452,17 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
 
   let wakeAt: string | null = null;
   for (const chain of served) {
+    if (endedAhead.has(chain)) continue;
     if (wakeAt == null || ms(chain.end) < ms(wakeAt)) wakeAt = chain.end;
   }
 
   return { actions, covered, memory: { activities, dismissed, build: input.build }, wakeAt };
 }
 
-/** Where a pass ran: in front, in an OS background round, or the quick start
- *  from the last plan on a return to the app. */
-export type ActivityPassOrigin = 'foreground' | 'background' | 'quick start';
+/** Where a pass ran: in front, in an OS background round, the quick start
+ *  from the last plan on a return to the app, or the same from the last plan
+ *  as the first step of a background round. */
+export type ActivityPassOrigin = 'foreground' | 'background' | 'quick start' | 'round start';
 
 /**
  * One pass as one log line, or `null` when there was nothing to say: no
@@ -393,12 +485,30 @@ export function activityPassSummary(pass: {
 }): string | null {
   if (pass.before === 0 && pass.done.length === 0 && pass.failed === 0) return null;
   const count = (type: ActivityAction['type']) => pass.done.filter((t) => t === type).length;
+  const early = count('endAfter');
   return (
     `live activities (${pass.origin}): before=${pass.before}` +
     ` ended=${count('end')} updated=${count('update')}` +
     ` started=${count('start')} scheduled=${count('schedule')}` +
+    (early > 0 ? ` ended ahead=${early}` : '') +
     ` failed=${pass.failed} wake=${pass.wakeAt ?? 'none'}`
   );
+}
+
+/**
+ * What the native wake may end by itself, without the plan or the network:
+ * each activity Aperio keeps, by id, with the end of its chain as of this
+ * pass. iOS gives a background round about thirty seconds and often less, and
+ * the round's own pass comes last; the wake ends these first
+ * (`BackgroundRefresh.swift`). One ended ahead is left out, as iOS removes it
+ * itself.
+ */
+export function activityEnds(memory: ActivityMemory): Record<string, string> {
+  const ends: Record<string, string> = {};
+  for (const [id, activity] of Object.entries(memory.activities)) {
+    if (activity.endsAt != null && activity.endedEarly !== true) ends[id] = activity.endsAt;
+  }
+  return ends;
 }
 
 /** The memory once a start or a schedule has given the activity its id. */
@@ -417,6 +527,7 @@ export function remember(
         shownKey: action.content.current.key,
         startsAt: action.type === 'schedule' ? action.at : now.toISOString(),
         content: JSON.stringify(action.content),
+        endsAt: action.endsAt,
       },
     },
   };

@@ -279,7 +279,14 @@ public class CalFfiModule: Module {
     // queue keeps it clear of the default AsyncFunction queue; the lock in
     // the accessor makes a racing first call simply wait for the remainder.
     OnCreate {
-      self.slowQueue.async { _ = self.host }
+      self.slowQueue.async {
+        // Native lines (the background wake-up's) go to the Host's log from
+        // here on, including those written while it was still opening.
+        let host = self.host
+        NativeLog.install { level, message in
+          host.logLine(level: level, message: message)
+        }
+      }
     }
 
     Function("parseAttendee") { (entry: String) -> [String: Any?] in
@@ -1685,10 +1692,15 @@ public class CalFfiModule: Module {
       await LiveActivityBridge.end(id: id)
     }
 
-    // Only a running Aperio can end an activity: bring the short background
-    // wake-up forward to the earliest end (BackgroundRefresh.swift).
-    AsyncFunction("liveActivityWakeAt") { (at: String) in
-      BackgroundRefresh.wake(at: at.isEmpty ? nil : LiveActivityBridge.instant(at))
+    AsyncFunction("liveActivityEndAfter") { (id: String, contentJson: String, at: String) async throws in
+      try await LiveActivityBridge.endAfter(id: id, contentJson: contentJson, at: at)
+    }
+
+    // Only a running Aperio can end an activity: each one's end, kept for the
+    // short background wake-up, which comes forward to the earliest and ends
+    // the overdue ones first (BackgroundRefresh.swift).
+    AsyncFunction("liveActivityEnds") { (endsJson: String) in
+      BackgroundRefresh.follow(endsJson: endsJson)
     }
 
     // One line into the app's own rolling log — the file the Logs screen shows.

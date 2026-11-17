@@ -336,6 +336,22 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   das früheste Ende (`wakeAt`), und die kurze Hintergrundrunde wird dorthin
   vorgezogen; jeder Durchlauf schreibt eine Protokollzeile mit Zahlen. iOS
   kann die Runde weiter verschieben.
+- [x] **iOS: Aktivität blieb wieder stehen** (Toni, 2026-11-17, Build 71,
+  Feedback-Mail mit Protokollen). iOS weckte Aperio zehn Minuten nach dem
+  Ende, die Runde starb nach acht Sekunden an hängenden Anfragen, bevor der
+  Durchlauf kam. Ein Ende zur festen Zeit gibt es ohne Push-Server auch in iOS
+  27 nicht. Jetzt beendet jedes Wecken zuerst: nativ vor allem anderen
+  (`endOverdue` mit den übergebenen Enden), dann aus dem letzten Plan, dann
+  erst das Netz; ein Einlesen statt drei je Runde; ein Sync-Fehler bricht die
+  Runde nicht mehr ab; Wecken, Ende und Ablauf der Runde stehen in Aperios
+  Protokoll. Ein Durchlauf aus dem letzten Plan lässt wartende Aktivitäten in
+  Ruhe, ein Start in den Hintergrund startet keine. DESIGN-live-activities.md,
+  „Beim Wecken zuerst beenden“.
+- [ ] **Versuch „vorab beenden“ auswerten** (Schalter in den Einstellungen,
+  aus): Toni prüft auf dem iPhone, wie die vorab beendete Aktivität auf dem
+  Sperrbildschirm mit VoiceOver wirkt, ob die Zeiten weiterzählen und ob sie
+  pünktlich verschwindet. Danach entscheiden: behalten (als Voreinstellung
+  oder Schalter) oder entfernen.
 - [ ] 🚩 **Mitlaufende Zeiten in der Sprache des Geräts.** Seit #154 sprechen
   sie die Sprache des iPhones; läuft Aperio in einer anderen, stehen
   deutsche Wörter neben englischen Zeiten oder umgekehrt.
