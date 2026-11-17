@@ -14,7 +14,12 @@ import {
   syncStatus,
 } from '../api/sync';
 import { logLine } from '../api/logs';
-import { markExternalCachesSettled, rescheduleReminders } from '../reminders/scheduler';
+import { endFromLastPlan } from '../liveActivities';
+import {
+  duringBackgroundRound,
+  markExternalCachesSettled,
+  rescheduleReminders,
+} from '../reminders/scheduler';
 import { refreshWidgetSnapshot } from './widgetSnapshot';
 
 // OS-scheduled background sync — the piece syncTriggers.ts explicitly deferred:
@@ -52,10 +57,22 @@ let cached = DEFAULT_ENABLED;
 // runs ONE guarded sync round + reschedules local reminders for any freshly
 // pulled items. Silent + best-effort, exactly like the foreground auto-rounds —
 // a missing target or a transient error must never surface.
-TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
+TaskManager.defineTask(BACKGROUND_SYNC_TASK, () => duringBackgroundRound(backgroundRound));
+
+async function backgroundRound(): Promise<BackgroundTask.BackgroundTaskResult> {
   try {
-    // Ask the calendar and task PROVIDERS for anything new, first, because it is
-    // the slowest part and everything below reads what it lands.
+    // Said at once: a round iOS cuts short leaves no line of its own, and
+    // "not woken" and "woken but cut short" have to be told apart afterwards
+    // (Toni's iPhone, 2026-11-17).
+    void logLine('info', 'background round: started');
+    // What is over is ended FIRST, from the last plan and without the
+    // network: the providers below can take the whole of iOS's thirty
+    // seconds, and an activity left on the lock screen until the app is next
+    // opened is the one thing a late round must not cost (iPhone only).
+    await endFromLastPlan();
+    // Then ask the calendar and task PROVIDERS for anything new, before the
+    // rest, because it is the slowest part and everything below reads what it
+    // lands.
     //
     // This used to be missing entirely, and its absence is easy to miss: the
     // round ran `syncNow`, which is the DEVICE-TO-DEVICE engine — it carries a
@@ -71,11 +88,23 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     // evidence on neither side of it.
     const started = Date.now();
     let applied = 0;
+    let syncFailed = false;
     // Automatic, so un-forced: nobody asked, and a busy provider or a blip
     // must fail a second round before it warns (decision 271).
     await refreshExternalCacheInBackground().catch(() => undefined);
-    if ((await syncStatus()).configured) {
-      applied = (await syncNow('background')).applied;
+    // A failed device sync (the server unreachable, a round already under
+    // way) is the sync's own business: it used to throw the whole round away,
+    // and with it the reminders, the Live Activities and the widget below.
+    if (await syncStatus().then((s) => s.configured, () => false)) {
+      try {
+        applied = (await syncNow('background')).applied;
+      } catch (err) {
+        syncFailed = true;
+        void logLine(
+          'warn',
+          `background round: device sync failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
     const refreshFinished = await waitForExternalRefresh();
     // A pull may have added/changed events → reschedule the local reminders so
@@ -95,7 +124,7 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     });
     await logLine(
       'info',
-      `background round: applied=${applied}, providers=${
+      `background round: applied=${applied}${syncFailed ? ' (sync failed)' : ''}, providers=${
         refreshFinished ? 'complete' : 'budget'
       }, widget=${snapshotWritten ? 'written' : 'failed'}, ${
         Date.now() - started
@@ -109,7 +138,7 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     );
     return BackgroundTask.BackgroundTaskResult.Failed;
   }
-});
+}
 
 /** Longest we will sit waiting for the provider pass before writing the
  *  snapshot anyway — a budget, not a completion check.

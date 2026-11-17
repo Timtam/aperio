@@ -48,7 +48,10 @@ import { useAppBadgePref } from '../state/appBadge';
 import { useAppLockPref, whenAppLockReleased, whileOsSheetOpen } from '../state/appLock';
 import CalFfi from '../../modules/cal-ffi';
 import { ensurePermission, rescheduleReminders } from '../reminders/scheduler';
-import { useLiveActivitiesPref } from '../state/liveActivitiesPref';
+import {
+  useLiveActivitiesPref,
+  useLiveActivityEndEarlyPref,
+} from '../state/liveActivitiesPref';
 import {
   useNotificationPermission,
   type NotificationPermission,
@@ -195,6 +198,7 @@ export default function GeneralSettingsScreen() {
   // return, and said after a trip through the button below, as the
   // notification line is.
   const [liveActivities, setLiveActivities] = useLiveActivitiesPref();
+  const [endEarly, setEndEarly] = useLiveActivityEndEarlyPref();
   const [liveSupport, setLiveSupport] = useState<{ available: boolean; enabled: boolean } | null>(
     null,
   );
@@ -580,6 +584,15 @@ export default function GeneralSettingsScreen() {
               // every reminder back as a notification.
               onToggle={() => void setLiveActivities(!liveActivities).then(rescheduleReminders)}
             />
+            {liveActivities && (
+              <SwitchRow
+                label={t('dialogs.settings.general.liveActivitiesEndEarlyLabel')}
+                hint={t('dialogs.settings.general.liveActivitiesEndEarlyHint')}
+                value={endEarly}
+                // Re-planned at once: on ends a running last appointment ahead.
+                onToggle={() => void setEndEarly(!endEarly).then(rescheduleReminders)}
+              />
+            )}
             {liveActivities && !liveSupport.enabled && (
               <>
                 <Text style={styles.hint} accessibilityRole="text">

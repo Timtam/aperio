@@ -36,3 +36,37 @@ export function useLiveActivitiesPref(): [boolean, (next: boolean) => Promise<vo
   }, []);
   return [enabled, set];
 }
+
+// The trial "end ahead" (Toni, 2026-11-17; DESIGN-live-activities.md,
+// "Versuch: vorab beenden"): once nothing follows in its chain and its end is
+// within four hours, the next full pass that sees the activity running ends it
+// with iOS removing it at the end. Off by default; device-local, read fresh by
+// every pass like the switch above.
+const END_EARLY_KEY = 'aperio.liveActivities.endEarly';
+
+/** Whether activities are ended ahead (the trial), read now. Default off. */
+export async function readLiveActivityEndEarly(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(END_EARLY_KEY)) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/** Settings hook for the trial: the current value and a setter that stores
+ *  it. The caller re-plans after a flip. */
+export function useLiveActivityEndEarlyPref(): [boolean, (next: boolean) => Promise<void>] {
+  const [enabled, setEnabled] = useState(false);
+  useEffect(() => {
+    void readLiveActivityEndEarly().then(setEnabled);
+  }, []);
+  const set = useCallback(async (next: boolean) => {
+    setEnabled(next);
+    try {
+      await AsyncStorage.setItem(END_EARLY_KEY, String(next));
+    } catch {
+      // Best-effort; the next read keeps the old value.
+    }
+  }, []);
+  return [enabled, set];
+}

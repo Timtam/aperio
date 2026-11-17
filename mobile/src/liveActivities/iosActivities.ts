@@ -10,12 +10,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   EMPTY_ACTIVITY_MEMORY,
+  activityEnds,
   activityPassSummary,
+  nextWake,
   reconcileIosActivities,
   remember,
   triggerKeyId,
   type ActivityAction,
   type ActivityMemory,
+  type ActivityPassOrigin,
   type ActivityWords,
   type LiveActivityPlan,
   type LiveTriggerKey,
@@ -28,7 +31,10 @@ import i18n from '../../i18n';
 import { liveActivityPlan, type PlannedReminder } from '../api/liveActivities';
 import { logLine } from '../api/logs';
 import { upcomingReminders, type UpcomingReminder } from '../api/reminders';
-import { readLiveActivitiesEnabled } from '../state/liveActivitiesPref';
+import {
+  readLiveActivitiesEnabled,
+  readLiveActivityEndEarly,
+} from '../state/liveActivitiesPref';
 import { reminderKeyId } from './reminderKey';
 
 const MEMORY_KEY = 'aperio.liveActivities.ios.memory.v1';
@@ -41,6 +47,9 @@ interface Support {
   previews: 'always' | 'whenUnlocked' | 'never';
   /** The app's build (`CFBundleVersion`); absent from a module before it. */
   build?: string;
+  /** Activities the native wake ended at their end, of the last day; absent
+   *  from a module before it. */
+  endedByWake?: string[];
 }
 
 
@@ -80,7 +89,7 @@ function serially<T>(run: () => Promise<T>): Promise<T> {
 function syncIosActivities(
   plan: LiveActivityPlan,
   reminders: PlannedReminder[],
-  opts: { foreground: boolean; mayPlan: boolean },
+  opts: { foreground: boolean; mayPlan: boolean; origin: ActivityPassOrigin },
 ): Promise<Set<string>> {
   return serially(async () => {
     const covered = new Set<string>();
@@ -107,6 +116,8 @@ function syncIosActivities(
       words: words(),
       hideOnLockScreen: support.previews !== 'always',
       build: support.build ?? '',
+      endEarly: await readLiveActivityEndEarly(),
+      endedByWake: support.endedByWake ?? [],
     });
     for (const key of result.covered) covered.add(triggerKeyId(key));
     let memory = result.memory;
@@ -117,6 +128,9 @@ function syncIosActivities(
         switch (action.type) {
           case 'end':
             await CalFfi.liveActivityEnd(action.id);
+            break;
+          case 'endAfter':
+            await CalFfi.liveActivityEndAfter(action.id, JSON.stringify(action.content), action.at);
             break;
           case 'update':
             await CalFfi.liveActivityUpdate(action.id, JSON.stringify(action.content));
@@ -144,6 +158,12 @@ function syncIosActivities(
         done.push(action.type);
       } catch (err) {
         failed += 1;
+        // Not ended ahead after all: it runs on, and the next pass tries
+        // again; until then the native wake ends it like any other.
+        if (action.type === 'endAfter' && memory.activities[action.id] != null) {
+          const { endedEarly: _refused, ...kept } = memory.activities[action.id];
+          memory = { ...memory, activities: { ...memory.activities, [action.id]: kept } };
+        }
         // iOS refused (the limit, the switch, an old system). The reminder
         // then rings as a notification, which is the safe side.
         void logLine(
@@ -152,18 +172,23 @@ function syncIosActivities(
         );
       }
     }
-    await writeMemory(memory);
     // Only a running Aperio can end an activity, and iOS wakes it when it
-    // likes: ask for the next background round at the earliest end, so the
-    // activity is not left on the lock screen until the app is next opened.
-    // A wish iOS may defer, never a schedule.
-    await CalFfi.liveActivityWakeAt(result.wakeAt ?? '').catch(() => {});
+    // likes: hand each activity's end to the native side, which asks for the
+    // next background round at the earliest one and, when woken, ends the
+    // overdue ones before the round's JS runs. A wish iOS may defer, never a
+    // schedule. Handed over BEFORE the memory is written: cut off between the
+    // two, the native side keeps an older end and ends the activity at it,
+    // which it reports (`endedByWake`), so nothing reads that as a swipe. The
+    // other order could leave a memory that knows nothing of such an end.
+    const ends = activityEnds(memory);
+    await CalFfi.liveActivityEnds(JSON.stringify(ends)).catch(() => {});
+    await writeMemory(memory);
     const summary = activityPassSummary({
-      origin: !opts.mayPlan ? 'quick start' : opts.foreground ? 'foreground' : 'background',
+      origin: opts.origin,
       before: reported.filter((a) => a.state !== 'ended' && a.state !== 'dismissed').length,
       done,
       failed,
-      wakeAt: result.wakeAt,
+      wakeAt: nextWake(ends, now),
     });
     if (summary != null) void logLine('info', summary);
     return covered;
@@ -207,9 +232,11 @@ export async function iosRemindersAndActivities(
   try {
     // Kept for the next return to the app, which starts from it at once.
     await AsyncStorage.setItem(PLAN_KEY, JSON.stringify(answer.plan)).catch(() => {});
+    const foreground = AppState.currentState === 'active';
     covered = await syncIosActivities(answer.plan, answer.reminders, {
-      foreground: AppState.currentState === 'active',
+      foreground,
       mayPlan: true,
+      origin: foreground ? 'foreground' : 'background',
     });
   } catch (err) {
     void logLine(
@@ -229,15 +256,38 @@ export async function iosRemindersAndActivities(
  */
 export function startFromLastPlan(): void {
   if (Platform.OS !== 'ios') return;
-  void (async () => {
+  // Also called on a launch straight into the background, where iOS refuses
+  // every start: only a launch that is not in the background may try. An
+  // early `inactive` still counts as in front.
+  void passFromLastPlan('quick start', AppState.currentState !== 'background');
+}
+
+/**
+ * The first step of a background round: the same pass from the last plan,
+ * without the network, before the round reads every account. It ends what
+ * is over and changes what runs; it starts and plans nothing.
+ *
+ * A round gets about thirty seconds from iOS, often less, and its full pass
+ * comes last, behind the providers. On Toni's iPhone (build 71, 2026-11-17)
+ * iOS woke Aperio ten minutes after an appointment ended, the round died on
+ * hung requests before its pass, and the activity said "over" for two more
+ * hours. Never throws.
+ */
+export function endFromLastPlan(): Promise<void> {
+  if (Platform.OS !== 'ios') return Promise.resolve();
+  return passFromLastPlan('round start', false);
+}
+
+async function passFromLastPlan(origin: ActivityPassOrigin, foreground: boolean): Promise<void> {
+  try {
     const raw = await AsyncStorage.getItem(PLAN_KEY).catch(() => null);
     if (raw == null) return;
     const plan = JSON.parse(raw) as LiveActivityPlan;
-    await syncIosActivities(plan, [], { foreground: true, mayPlan: false });
-  })().catch((err: unknown) => {
+    await syncIosActivities(plan, [], { foreground, mayPlan: false, origin });
+  } catch (err) {
     void logLine(
       'warn',
-      `live activity quick start failed: ${err instanceof Error ? err.message : String(err)}`,
+      `live activity ${origin} failed: ${err instanceof Error ? err.message : String(err)}`,
     );
-  });
+  }
 }
