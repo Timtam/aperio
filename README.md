@@ -50,15 +50,15 @@ Accessibility is the project's founding constraint, not an afterthought:
 ## Documentation
 
 The documentation is one Astro Starlight site (landing page, legal pages and
-all docs), published via GitHub Pages: **<https://timtam.github.io/aperio/>**
+all docs), published via GitHub Pages: **<https://aperiocal.app/>**
 The source lives in [`web/`](web/).
 
 | Section | Audience |
 |---|---|
-| [User Guide (English)](https://timtam.github.io/aperio/guides/) | Using Aperio |
-| [Benutzerhandbuch (Deutsch)](https://timtam.github.io/aperio/de/guides/) | Aperio benutzen |
-| [Developer Guide](https://timtam.github.io/aperio/developers/) | Architecture, contributing |
-| [Plugin Development](https://timtam.github.io/aperio/plugins/) | Writing adapters against the C ABI |
+| [User Guide (English)](https://aperiocal.app/guides/) | Using Aperio |
+| [Benutzerhandbuch (Deutsch)](https://aperiocal.app/de/guides/) | Aperio benutzen |
+| [Developer Guide](https://aperiocal.app/developers/) | Architecture, contributing |
+| [Plugin Development](https://aperiocal.app/plugins/) | Writing adapters against the C ABI |
 
 In-repo: [`DESIGN.md`](DESIGN.md) is the complete (German) specification
 the implementation is audited against; [`TODO.md`](TODO.md) is the
@@ -67,7 +67,7 @@ code-verified list of what is still open.
 > **Connecting Google (for now):** Aperio does not ship a verified Google
 > app registration yet, so connecting a Google account currently requires
 > your own free Google Cloud OAuth client. The user guide contains a
-> [step-by-step walkthrough](https://timtam.github.io/aperio/guides/google-oauth/).
+> [step-by-step walkthrough](https://aperiocal.app/guides/google-oauth/).
 > An official, published registration is planned — afterwards this step
 > disappears.
 

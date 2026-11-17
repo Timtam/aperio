@@ -523,7 +523,7 @@ Für **geschlossen, offen, Produktion** gilt das alles:
 
 - **Datenschutzerklärung (URL).** Pflicht für jede App, unabhängig von
   Datenerhebung. Existiert bereits:
-  `https://timtam.github.io/aperio/privacy/` (Quelle:
+  `https://aperiocal.app/privacy/` (Quelle:
   `web/src/content/docs/privacy.md`, enthält schon einen Abschnitt zu den
   Mobil-Berechtigungen).
 - **Datensicherheit.** Der entscheidende Begriff: "Erhebung" heißt

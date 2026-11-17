@@ -3,7 +3,8 @@
 //
 // Astro emits NO error for a dead internal link, and a static host answers it
 // with a bare 404 — the failure mode that broke the tutorial renumbering
-// (redirect targets missing the /aperio/ base went clean through the build).
+// (redirect targets missing the then /aperio/ base went clean through the
+// build).
 // Checking the built output catches every variant of that at once: typoed
 // hrefs, un-based redirect targets, links to renamed pages.
 //
@@ -15,7 +16,7 @@ import { join, resolve } from 'node:path';
 const DIST = resolve(import.meta.dirname, '..', 'dist');
 // Must match astro.config.mjs. The config exports nothing, so restate it here;
 // a drift shows up immediately as "every link is external/unknown".
-const BASE = '/aperio/';
+const BASE = '/';
 
 if (!existsSync(DIST)) {
   console.error(`dist/ not found at ${DIST} — run \`npm run build\` first.`);

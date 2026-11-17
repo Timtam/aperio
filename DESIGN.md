@@ -5522,19 +5522,20 @@ web/
 
 **i18n:** `en` ist die Root-Locale (Auslieferung ohne Präfix), `de` die zweite (`/de/…`). Nur das Benutzerhandbuch ist zweisprachig; Entwickler-/Plugin-Doku sind Englisch und fallen für `de`-Besucher automatisch auf Englisch zurück.
 
-**Deployment:** `.github/workflows/docs.yml` baut bei jedem Push auf `web/**` die Site (`npm ci && npm run build`) und deployt `web/dist` nach GitHub Pages. Interimsziel ist der Projektpfad `https://timtam.github.io/aperio/` (daher `base: '/aperio/'`); ein „Diese Seite bearbeiten"-Link je Seite zeigt direkt auf GitHub.
+**Deployment:** `.github/workflows/docs.yml` baut bei jedem Push auf `web/**` die Site (`npm ci && npm run build`) und deployt `web/dist` nach GitHub Pages, seit 2026-11-17 an die Wurzel der eigenen Domain `https://aperiocal.app/` (`base: '/'`; für die OAuth-Verifizierung nötig, `github.io` lehnt Google ab). Ein „Diese Seite bearbeiten"-Link je Seite zeigt direkt auf GitHub. Die Domain steht in den Pages-Einstellungen des Repositorys, HTTPS ist erzwungen; DNS und alte Links: `web/README.md`.
 
 **Erreichbare URLs:**
 
 ```
-https://timtam.github.io/aperio/              → Landing
-https://timtam.github.io/aperio/guides/       → Benutzerhandbuch (Englisch)
-https://timtam.github.io/aperio/de/guides/    → Benutzerhandbuch (Deutsch)
-https://timtam.github.io/aperio/developers/   → Entwickler-Doku
-https://timtam.github.io/aperio/plugins/      → Plugin-Entwicklung
+https://aperiocal.app/              → Landing
+https://aperiocal.app/guides/       → Benutzerhandbuch (Englisch)
+https://aperiocal.app/de/guides/    → Benutzerhandbuch (Deutsch)
+https://aperiocal.app/developers/   → Entwickler-Doku
+https://aperiocal.app/plugins/      → Plugin-Entwicklung
+https://aperiocal.app/privacy/      → Datenschutz (Englisch; Deutsch unter /de/privacy/)
 ```
 
-Beim Wechsel auf eine eigene Domain (für die OAuth-Verifizierung ohnehin nötig) genügt eine Config-Änderung (`SITE`/`BASE`); Details in `web/README.md`.
+Alte Links auf `timtam.github.io/aperio/…` leitet GitHub auf die Domain um; das verbliebene Präfix `/aperio` nimmt ein kleines Skript auf jeder Seite ab (`OLD_BASE_REDIRECT` in `web/astro.config.mjs`).
 
 ### 24.6 Pflege & Aktualität
 

@@ -33,21 +33,26 @@ documentation.
 ## Deployment
 
 `.github/workflows/docs.yml` builds **this** site and deploys it to GitHub
-Pages on every push to `web/**`. Interim target: the project path
-`https://timtam.github.io/aperio/` (so `base` is `/aperio/`).
+Pages on every push to `web/**`, at the root of Aperio's own domain:
+**<https://aperiocal.app/>** (since 2026-11-17; `base` is `/`).
 
-### Switching to a custom domain (for OAuth verification)
+### The domain
 
-The domain is needed for Google/Microsoft verification anyway. To move from the
-`/aperio/` project path to a domain root:
-
-1. Add the domain as a GitHub Pages custom domain (creates a `CNAME`).
-2. In `astro.config.mjs`, set `SITE` to the domain and `BASE` to `'/'`. The
-   rehype plugin re-bases content links and Starlight re-bases its own nav
-   automatically.
-3. Drop the `/aperio` prefix from the **hero `link:` values** in
-   `src/content/docs/index.mdx` and `src/content/docs/de/index.mdx` (hero links
-   come from frontmatter and bypass the rehype re-basing — the only manual
-   touch-point).
-4. Fill in the real legal content (`/impressum`, `/privacy`, `/terms` + `/de/…`)
-   and have it reviewed.
+- The custom domain is set in the repository's Pages settings, not by a
+  `CNAME` file: a site deployed by a workflow ignores one. The domain is
+  verified for the GitHub account (a `_github-pages-challenge-…` TXT record),
+  and GitHub issues its certificate; HTTPS is enforced (`.app` works only
+  over HTTPS anyway).
+- DNS (at the registrar, netcup): four `A` and four `AAAA` records for the
+  apex pointing at GitHub Pages, `www` as a `CNAME` to `timtam.github.io`, no
+  wildcard record.
+- The site used to be the project site at `timtam.github.io/aperio/`. GitHub
+  redirects that to the domain with the path kept, so an old link arrives at
+  `aperiocal.app/aperio/…`. Every page carries a small script
+  (`OLD_BASE_REDIRECT` in `astro.config.mjs`) that drops that prefix; the
+  404 page is the one that runs it.
+- Hero links (`src/content/docs/index.mdx`, `src/content/docs/de/index.mdx`)
+  come from frontmatter and bypass the rehype re-basing: should `BASE` ever
+  change, change them by hand.
+- Still open: the terms page (`/terms`, `/de/terms`) is a draft with
+  placeholders.

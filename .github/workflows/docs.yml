@@ -41,8 +41,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       # Single Astro Starlight site (landing + bilingual docs), replacing
-      # the four mdBooks. Built at base /aperio/ for the GitHub Pages project
-      # path; switch `site`/`base` in web/astro.config.mjs for a custom domain.
+      # the four mdBooks. Served at the root of Aperio's own domain,
+      # aperiocal.app (the custom domain is set in the repository's Pages
+      # settings; `site` and `base` live in web/astro.config.mjs).
       - name: Install dependencies
         run: npm ci
         working-directory: web

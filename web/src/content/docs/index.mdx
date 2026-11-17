@@ -6,10 +6,11 @@ hero:
   tagline: An accessible, keyboard-first calendar, tasks and contacts app for the desktop. Screen-reader-first, local-first, provider-agnostic.
   actions:
     # NOTE: hero links come from frontmatter and bypass the base-rewrite
-    # rehype plugin, so they carry the deploy base explicitly. On the domain
-    # switch (BASE → '/') drop the `/aperio` prefix here and in de/index.mdx.
+    # rehype plugin, so they carry the deploy base explicitly (today '/'). If
+    # BASE in astro.config.mjs ever changes, change it here and in
+    # de/index.mdx too.
     - text: User Guide
-      link: /aperio/guides/
+      link: /guides/
       icon: right-arrow
     - text: View on GitHub
       link: https://github.com/Timtam/aperio
