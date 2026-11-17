@@ -2,12 +2,29 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-// Deploy target. Interim: GitHub Pages *project* site at /aperio/. When the
-// custom domain lands, set `site` to it and `BASE` to '/' — that single
-// change is enough; the rehype plugin below re-bases content links and
-// Starlight re-bases its own navigation automatically.
-const SITE = 'https://timtam.github.io';
-const BASE = '/aperio/';
+// Deploy target: GitHub Pages under Aperio's own domain (2026-11-17), at the
+// root. It used to be the project site at timtam.github.io/aperio/; GitHub
+// redirects that to the domain, and `OLD_BASE_REDIRECT` below takes the old
+// /aperio/ prefix off. Should the base ever move again, `BASE` is the one
+// switch: the rehype plugin below re-bases content links and Starlight
+// re-bases its own navigation.
+const SITE = 'https://aperiocal.app';
+const BASE = '/';
+
+/**
+ * Old links keep working: every page used to live under /aperio/, and GitHub
+ * redirects timtam.github.io/aperio/x to aperiocal.app/aperio/x, which no
+ * longer exists. A static host can only answer that with its 404 page, so
+ * every page (the 404 page among them) carries this: on a path under the old
+ * prefix, go to the same path without it. Nothing else ever lives there.
+ */
+const OLD_BASE_REDIRECT = `(() => {
+  const old = '/aperio';
+  const path = location.pathname;
+  if (path === old || path.startsWith(old + '/')) {
+    location.replace((path.slice(old.length) || '/') + location.search + location.hash);
+  }
+})();`;
 
 /**
  * Prefix internal absolute links (`/guides/…`) in Markdown/MDX content with
@@ -17,7 +34,7 @@ const BASE = '/aperio/';
  * already-based and external (`//`, `http`) links are left alone.
  */
 function rehypeBaseLinks() {
-  const prefix = BASE.replace(/\/$/, ''); // "/aperio"
+  const prefix = BASE.replace(/\/$/, ''); // "" at the root
   /** @param {any} node */
   const walk = (node) => {
     if (node.type === 'element' && node.tagName === 'a') {
@@ -107,6 +124,7 @@ export default defineConfig({
   markdown: { rehypePlugins: [rehypeBaseLinks] },
   integrations: [
     starlight({
+      head: [{ tag: 'script', content: OLD_BASE_REDIRECT }],
       title: 'Aperio',
       tagline: 'Accessible, keyboard-first calendar, tasks & contacts.',
       defaultLocale: 'root',
