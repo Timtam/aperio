@@ -319,17 +319,18 @@ export function refreshRemindersSoon(): void {
   }, DEBOUNCE_MS);
 }
 
-/** Set while an OS background round runs (`duringBackgroundRound`). */
-let backgroundRound = false;
+/** OS background rounds under way (`duringBackgroundRound`). A count: the
+ *  overnight and the short task run the same round and may overlap. */
+let backgroundRounds = 0;
 
-/** Run an OS background round: while it runs, the round alone replans the
- *  reminders (see the hook below). */
+/** Run an OS background round: while it runs in the background, the round
+ *  alone replans the reminders (see the hook below). */
 export async function duringBackgroundRound<T>(run: () => Promise<T>): Promise<T> {
-  backgroundRound = true;
+  backgroundRounds += 1;
   try {
     return await run();
   } finally {
-    backgroundRound = false;
+    backgroundRounds -= 1;
   }
 }
 
@@ -343,14 +344,16 @@ export async function duringBackgroundRound<T>(run: () => Promise<T>): Promise<T
 // bridge) — the replan then parks and runs once at gate-open instead of
 // competing with the first paint. Post-open: plain pass-through.
 //
-// Not while an iPhone background round runs: the round reschedules itself
-// once its providers are in, and each flush of the pass started another full
-// scan of every account behind it — three in one round on Toni's iPhone
-// (2026-11-17), in the thirty seconds iOS gives. Data that lands after the
-// round's own scan waits for the next occasion; iOS suspends the app once the
-// round is done anyway. Android's round has minutes and keeps the replans.
+// Not while an iPhone background round runs in the background: the round
+// reschedules itself once its providers are in, and each flush of the pass
+// started another full scan of every account behind it — three in one round
+// on Toni's iPhone (2026-11-17), in the thirty seconds iOS gives. Data that
+// lands after the round's own scan waits for the next occasion; iOS suspends
+// the app once the round is done anyway. Once the app is open, a round still
+// under way keeps its replans like any other moment. Android's round has
+// minutes and keeps them too.
 setRemindersRefreshHook(() => {
-  if (backgroundRound && Platform.OS === 'ios') return;
+  if (backgroundRounds > 0 && Platform.OS === 'ios' && AppState.currentState !== 'active') return;
   whenStartupSettled('reminders', refreshRemindersSoon);
 });
 

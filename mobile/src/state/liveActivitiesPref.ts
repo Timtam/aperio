@@ -37,10 +37,11 @@ export function useLiveActivitiesPref(): [boolean, (next: boolean) => Promise<vo
   return [enabled, set];
 }
 
-// The trial "end ahead" (Toni, 2026-11-17; DESIGN-live-activities.md, "Ende
-// ohne Wecken"): once nothing follows in a chain and its end is within four
-// hours, the activity is ended at once with iOS removing it at the end. Off by
-// default; device-local, read fresh by every pass like the switch above.
+// The trial "end ahead" (Toni, 2026-11-17; DESIGN-live-activities.md,
+// "Versuch: vorab beenden"): once nothing follows in its chain and its end is
+// within four hours, the next full pass that sees the activity running ends it
+// with iOS removing it at the end. Off by default; device-local, read fresh by
+// every pass like the switch above.
 const END_EARLY_KEY = 'aperio.liveActivities.endEarly';
 
 /** Whether activities are ended ahead (the trial), read now. Default off. */

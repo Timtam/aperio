@@ -6,11 +6,13 @@ import {
   activityContent,
   activityEnds,
   activityPassSummary,
+  nextWake,
   reconcileIosActivities,
   remember,
   triggerKeyId,
   type ActivityMemory,
   type ReconcileInput,
+  type ReconcileResult,
   type ReportedActivity,
 } from '../../shared/liveActivityIos';
 import type { LiveActivityChain, LiveActivitySection } from '../../shared/types';
@@ -81,11 +83,24 @@ function input(overrides: Partial<ReconcileInput>): ReconcileInput {
     hideOnLockScreen: false,
     build: '68',
     endEarly: false,
+    endedByWake: [],
     ...overrides,
   };
 }
 
 const types = (actions: { type: string }[]) => actions.map((a) => a.type);
+
+/** The wake a pass hands over once iOS took every start and schedule: what
+ *  the native side arms. */
+function wakeAfter(result: ReconcileResult, now: string): string | null {
+  let memory = result.memory;
+  result.actions.forEach((action, i) => {
+    if (action.type === 'start' || action.type === 'schedule') {
+      memory = remember(memory, `new${i}`, action, new Date(at(now)));
+    }
+  });
+  return nextWake(activityEnds(memory), new Date(at(now)));
+}
 
 describe('activityContent — the one switch iOS makes alone', () => {
   it('goes to the next appointment of the chain', () => {
@@ -394,9 +409,9 @@ describe('reconcileIosActivities — when to ask iOS for a background round', ()
       chains: [CROSSFADE],
       reported: [{ id: 'a1', chainKey: 'A', state: 'active' }],
     });
-    expect(reconcileIosActivities(running).wakeAt).toBe(at('11:30'));
+    expect(wakeAfter(reconcileIosActivities(running), '10:00')).toBe(at('11:30'));
     const started = input({ now: new Date(at('10:00')), chains: [CROSSFADE] });
-    expect(reconcileIosActivities(started).wakeAt).toBe(at('11:30'));
+    expect(wakeAfter(reconcileIosActivities(started), '10:00')).toBe(at('11:30'));
   });
 
   it('is the earliest end among a running and a waiting one', () => {
@@ -409,7 +424,7 @@ describe('reconcileIosActivities — when to ask iOS for a background round', ()
       }),
     );
     expect(types(result.actions)).toEqual(['update', 'schedule']);
-    expect(result.wakeAt).toBe(at('11:30'));
+    expect(wakeAfter(result, '10:00')).toBe(at('11:30'));
   });
 
   it('is none once the chain is over and its activity ended, and none when off', () => {
@@ -421,7 +436,7 @@ describe('reconcileIosActivities — when to ask iOS for a background round', ()
       }),
     );
     expect(over.actions).toEqual([{ type: 'end', id: 'a1' }]);
-    expect(over.wakeAt).toBeNull();
+    expect(wakeAfter(over, '12:00')).toBeNull();
     const off = reconcileIosActivities(
       input({
         now: new Date(at('10:00')),
@@ -430,7 +445,7 @@ describe('reconcileIosActivities — when to ask iOS for a background round', ()
         enabled: false,
       }),
     );
-    expect(off.wakeAt).toBeNull();
+    expect(wakeAfter(off, '10:00')).toBeNull();
   });
 
   it('is none for a chain that is only planned, never started, from the background', () => {
@@ -438,7 +453,14 @@ describe('reconcileIosActivities — when to ask iOS for a background round', ()
       input({ now: new Date(at('10:00')), chains: [CROSSFADE], foreground: false }),
     );
     expect(result.actions).toEqual([]);
-    expect(result.wakeAt).toBeNull();
+    expect(wakeAfter(result, '10:00')).toBeNull();
+  });
+
+  it('is never an end already past', () => {
+    expect(nextWake({ a: at('09:00'), b: at('11:00'), c: at('10:30') }, new Date(at('10:00')))).toBe(
+      at('10:30'),
+    );
+    expect(nextWake({ a: at('09:00') }, new Date(at('10:00')))).toBeNull();
   });
 });
 
@@ -503,14 +525,22 @@ describe('reconcileIosActivities — each activity knows its end (Toni, 2026-11-
     expect(planned.actions[0]).toMatchObject({ type: 'schedule', endsAt: at('11:30') });
   });
 
-  it('is no swipe when it is gone after the end it was kept with, and starts again if the chain runs on', () => {
-    // The native wake ended it at 11:30; meanwhile the appointment was
-    // extended, which the next pass in front finds.
-    const extended: LiveActivityChain = { ...CROSSFADE, end: at('12:00') };
-    const result = reconcileIosActivities(
+  // The native wake ended it at 11:30; meanwhile the appointment was
+  // extended, which the next pass in front finds.
+  const extendedAfterTheEnd = (endedByWake: string[]) =>
+    reconcileIosActivities(
       input({
         now: new Date(at('11:40')),
-        chains: [extended],
+        chains: [
+          {
+            ...CROSSFADE,
+            end: at('12:00'),
+            sections: [
+              CROSSFADE.sections[0],
+              section('B', '10:45', '12:00', { start: '10:55', end: '12:00', signal: true }),
+            ],
+          },
+        ],
         memory: {
           activities: {
             a1: { keys: ['A', 'B'], shownKey: 'B', startsAt: at('09:50'), content: '', endsAt: at('11:30') },
@@ -518,25 +548,21 @@ describe('reconcileIosActivities — each activity knows its end (Toni, 2026-11-
           dismissed: {},
           build: '68',
         },
+        endedByWake,
       }),
     );
+
+  it('is no swipe when the native wake ended it, and starts again if the chain runs on', () => {
+    const result = extendedAfterTheEnd(['a1']);
     expect(result.memory.dismissed).toEqual({});
     expect(types(result.actions)).toEqual(['start']);
   });
 
-  it('is no swipe when no chain holds its appointments any more', () => {
-    const result = reconcileIosActivities(
-      input({
-        now: new Date(at('10:10')),
-        chains: [single('X', '10:00', '11:00')],
-        memory: {
-          activities: { a1: { keys: ['A', 'B'], shownKey: 'A', startsAt: at('09:50'), content: '' } },
-          dismissed: {},
-          build: '68',
-        },
-      }),
-    );
-    expect(result.memory.dismissed).toEqual({});
+  it('is still a swipe when it is merely found gone after its end', () => {
+    // Swiped at 11:10, extended since, and no pass in between: the swipe holds.
+    const result = extendedAfterTheEnd([]);
+    expect(Object.keys(result.memory.dismissed)).toEqual(['B']);
+    expect(result.actions).toEqual([]);
   });
 
   it('leaves a waiting activity to the full pass when the pass runs from the last plan', () => {
@@ -596,7 +622,7 @@ describe('reconcileIosActivities — each activity knows its end (Toni, 2026-11-
       }),
     );
     expect(result.actions).toEqual([{ type: 'end', id: 'a1' }]);
-    expect(result.wakeAt).toBeNull();
+    expect(wakeAfter(result, '11:40')).toBeNull();
   });
 });
 
@@ -632,13 +658,19 @@ describe('reconcileIosActivities — the trial: ended ahead (Toni, 2026-11-17)',
       },
     ]);
     expect(result.memory.activities.a1).toMatchObject({ endedEarly: true, endsAt: at('11:30') });
-    expect(result.wakeAt).toBeNull();
-    expect(activityEnds(result.memory)).toEqual({});
+    expect(wakeAfter(result, '10:50')).toBeNull();
   });
 
   it('does it from the background too, where ending is allowed', () => {
     const result = reconcileIosActivities({ ...running('10:50'), foreground: false });
     expect(types(result.actions)).toEqual(['endAfter']);
+  });
+
+  it('never from the last plan, whose end may have moved since', () => {
+    for (const foreground of [true, false]) {
+      const result = reconcileIosActivities({ ...running('10:50'), planAhead: false, foreground });
+      expect(types(result.actions)).toEqual([]);
+    }
   });
 
   it('waits while another appointment of the chain follows', () => {
@@ -654,7 +686,7 @@ describe('reconcileIosActivities — the trial: ended ahead (Toni, 2026-11-17)',
   it('does nothing of the kind with the trial off', () => {
     const result = reconcileIosActivities({ ...running('10:50'), endEarly: false });
     expect(types(result.actions)).toEqual([]);
-    expect(result.wakeAt).toBe(at('11:30'));
+    expect(wakeAfter(result, '10:50')).toBe(at('11:30'));
   });
 
   const endedAhead = (overrides: Partial<ReconcileInput> = {}, chain: LiveActivityChain = CROSSFADE) =>
@@ -685,7 +717,35 @@ describe('reconcileIosActivities — the trial: ended ahead (Toni, 2026-11-17)',
     expect(result.actions).toEqual([]);
     expect(result.memory.dismissed).toEqual({});
     expect(result.memory.activities.a1.endedEarly).toBe(true);
-    expect(result.wakeAt).toBeNull();
+    expect(wakeAfter(result, '11:00')).toBeNull();
+  });
+
+  it('keeps it once the earlier appointment is over and the chain starts later', () => {
+    // At 11:05 A has ended, and the plan's chain is only B, from its window
+    // at 10:45: the chain's start, and with it the relevance, moved, while
+    // the activity shows the same.
+    const onlyB: LiveActivityChain = {
+      keys: ['B'],
+      start: at('10:45'),
+      end: at('11:30'),
+      sections: [CROSSFADE.sections[1]],
+    };
+    const result = reconcileIosActivities(endedAhead({ now: new Date(at('11:05')) }, onlyB));
+    expect(result.actions).toEqual([]);
+  });
+
+  it('gives back a live one in front once the trial is off', () => {
+    const result = reconcileIosActivities(endedAhead({ endEarly: false }));
+    expect(types(result.actions)).toEqual(['end', 'start']);
+    const background = reconcileIosActivities(endedAhead({ endEarly: false, foreground: false }));
+    expect(background.actions).toEqual([]);
+  });
+
+  it('is no swipe once iOS removed it at its end', () => {
+    const result = reconcileIosActivities(
+      endedAhead({ now: new Date(at('11:40')), chains: [{ ...CROSSFADE, end: at('12:00') }], reported: [] }),
+    );
+    expect(result.memory.dismissed).toEqual({});
   });
 
   it('replaces one ended ahead in front when its appointment changed', () => {

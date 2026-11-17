@@ -12,6 +12,7 @@ import {
   EMPTY_ACTIVITY_MEMORY,
   activityEnds,
   activityPassSummary,
+  nextWake,
   reconcileIosActivities,
   remember,
   triggerKeyId,
@@ -46,6 +47,9 @@ interface Support {
   previews: 'always' | 'whenUnlocked' | 'never';
   /** The app's build (`CFBundleVersion`); absent from a module before it. */
   build?: string;
+  /** Activities the native wake ended at their end, of the last day; absent
+   *  from a module before it. */
+  endedByWake?: string[];
 }
 
 
@@ -113,6 +117,7 @@ function syncIosActivities(
       hideOnLockScreen: support.previews !== 'always',
       build: support.build ?? '',
       endEarly: await readLiveActivityEndEarly(),
+      endedByWake: support.endedByWake ?? [],
     });
     for (const key of result.covered) covered.add(triggerKeyId(key));
     let memory = result.memory;
@@ -167,19 +172,23 @@ function syncIosActivities(
         );
       }
     }
-    await writeMemory(memory);
     // Only a running Aperio can end an activity, and iOS wakes it when it
     // likes: hand each activity's end to the native side, which asks for the
     // next background round at the earliest one and, when woken, ends the
-    // overdue ones before anything else runs. A wish iOS may defer, never a
-    // schedule.
-    await CalFfi.liveActivityEnds(JSON.stringify(activityEnds(memory))).catch(() => {});
+    // overdue ones before the round's JS runs. A wish iOS may defer, never a
+    // schedule. Handed over BEFORE the memory is written: cut off between the
+    // two, the native side keeps an older end and ends the activity at it,
+    // which it reports (`endedByWake`), so nothing reads that as a swipe. The
+    // other order could leave a memory that knows nothing of such an end.
+    const ends = activityEnds(memory);
+    await CalFfi.liveActivityEnds(JSON.stringify(ends)).catch(() => {});
+    await writeMemory(memory);
     const summary = activityPassSummary({
       origin: opts.origin,
       before: reported.filter((a) => a.state !== 'ended' && a.state !== 'dismissed').length,
       done,
       failed,
-      wakeAt: result.wakeAt,
+      wakeAt: nextWake(ends, now),
     });
     if (summary != null) void logLine('info', summary);
     return covered;

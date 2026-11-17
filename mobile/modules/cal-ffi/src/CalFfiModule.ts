@@ -521,11 +521,13 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
 
   // ── Live Activities, iOS only (ActivityKit; DESIGN-live-activities.md) ──
   // The rules are in `shared/liveActivityIos.ts`; these only carry them out.
-  /** JSON `{available, enabled, canSchedule, previews}`: an iPhone on iOS 17
-   *  or later (the widget extension that draws an activity needs it; an iPad
-   *  has none), iOS's per-app switch, iOS 26 or later (an activity can be
-   *  scheduled ahead), and the notification preview setting (`always`,
-   *  `whenUnlocked`, `never`) the activity follows on the lock screen. */
+  /** JSON `{available, enabled, canSchedule, previews, build, endedByWake}`:
+   *  an iPhone on iOS 17 or later (the widget extension that draws an activity
+   *  needs it; an iPad has none), iOS's per-app switch, iOS 26 or later (an
+   *  activity can be scheduled ahead), the notification preview setting
+   *  (`always`, `whenUnlocked`, `never`) the activity follows on the lock
+   *  screen, the app's build, and the ids of the activities the native wake
+   *  ended at their end during the last day. */
   liveActivitySupportJson(): Promise<string>;
   /** JSON `[{id, chainKey, state}]` of Aperio's activities, `state` one of
    *  `pending`, `active`, `stale`, `ended`, `dismissed`. */
@@ -555,8 +557,9 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  the last one handed over. Only a running Aperio can end an activity: the
    *  native side brings the short background wake-up (`enableBackgroundRefresh`)
    *  forward to the earliest end, where that comes before its interval, and
-   *  when woken ends the overdue ones before anything else runs. Still a floor
-   *  iOS may exceed; it arms nothing while background sync is off. iOS only. */
+   *  when woken ends the overdue ones before the round's JS runs. Still a
+   *  floor iOS may exceed; it arms nothing while background sync is off. iOS
+   *  only. */
   liveActivityEnds(endsJson: string): Promise<void>;
 
   // ── Live Activities, Android only (an ongoing notification; DESIGN-live-

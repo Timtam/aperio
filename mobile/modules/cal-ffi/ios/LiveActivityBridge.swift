@@ -42,7 +42,7 @@ enum LiveActivityBridge {
         return plain.date(from: raw)
     }
 
-    /// `{available, enabled, canSchedule, previews, build}`.
+    /// `{available, enabled, canSchedule, previews, build, endedByWake}`.
     ///
     /// Not available on an iPad, which has no Live Activities: a switch there
     /// would send the user to look for a setting that does not exist.
@@ -77,6 +77,8 @@ enum LiveActivityBridge {
             "canSchedule": canSchedule,
             "previews": previews,
             "build": build,
+            // Gone because the wake ended them, not because they were swiped.
+            "endedByWake": EndedByWake.recent(),
         ])
     }
 
@@ -204,22 +206,24 @@ enum LiveActivityBridge {
     ///
     /// This is no rule of its own: the pass decided when each activity ends,
     /// and this only notices that the moment has come. It runs first thing
-    /// when iOS wakes Aperio, before the JS bundle, the network or the plan,
+    /// when iOS wakes Aperio, before the round's JS, the network or the plan,
     /// because a wake may last seconds.
+    ///
+    /// The overdue ends are taken out of the store in one step, so a launch
+    /// and a wake that run at once do not both end, and count, the same one.
     static func endOverdue(now: Date = Date()) async -> Int {
         guard #available(iOS 17.0, *) else { return 0 }
-        let ends = ActivityEnds.load()
-        guard !ends.isEmpty else { return 0 }
+        let due = ActivityEnds.takeOverdue(now: now)
+        guard !due.isEmpty else { return 0 }
         var ended: [String] = []
-        for activity in Activity<AperioEventAttributes>.activities {
+        for activity in Activity<AperioEventAttributes>.activities where due.contains(activity.id) {
             // By name, as in `listJson`: `.pending` exists only from iOS 26.
             let state = String(describing: activity.activityState)
             if state == "ended" || state == "dismissed" { continue }
-            guard let end = ends[activity.id], end <= now else { continue }
             await activity.end(nil, dismissalPolicy: .immediate)
             ended.append(activity.id)
         }
-        ActivityEnds.remove(ended)
+        EndedByWake.add(ended, at: now)
         return ended.count
     }
 }
@@ -251,19 +255,65 @@ enum ActivityEnds {
         return raw.compactMapValues { LiveActivityBridge.instant($0) }
     }
 
-    static func remove(_ ids: [String]) {
-        guard !ids.isEmpty else { return }
+    /// Remove and return the ids whose end is `now` or earlier, in one step.
+    static func takeOverdue(now: Date) -> Set<String> {
         lock.lock()
         defer { lock.unlock() }
-        var raw = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
-        for id in ids {
-            raw.removeValue(forKey: id)
+        let raw = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        var due = Set<String>()
+        var kept: [String: String] = [:]
+        for (id, value) in raw {
+            if let end = LiveActivityBridge.instant(value), end <= now {
+                due.insert(id)
+            } else {
+                kept[id] = value
+            }
         }
-        UserDefaults.standard.set(raw, forKey: key)
+        if !due.isEmpty {
+            UserDefaults.standard.set(kept, forKey: key)
+        }
+        return due
     }
 
     /// The earliest end still to come, or nil.
     static func earliest(after now: Date = Date()) -> Date? {
         load().values.filter { $0 > now }.min()
+    }
+}
+
+/// The activities the wake ended at their end, for a day: the next pass reads
+/// them (`supportJson`, `endedByWake`) so that one gone this way is not taken
+/// for a swipe. An activity merely found gone after its end may still have
+/// been swiped before it.
+enum EndedByWake {
+    private static let key = "aperio.liveActivities.endedByWake.v1"
+    private static let lock = NSLock()
+    private static let keptFor: TimeInterval = 24 * 60 * 60
+
+    static func add(_ ids: [String], at now: Date) {
+        guard !ids.isEmpty else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        var raw = fresh(now: now)
+        let stamp = ISO8601DateFormatter().string(from: now)
+        for id in ids {
+            raw[id] = stamp
+        }
+        UserDefaults.standard.set(raw, forKey: key)
+    }
+
+    static func recent(now: Date = Date()) -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(fresh(now: now).keys)
+    }
+
+    /// The entries of the last day; the caller holds the lock.
+    private static func fresh(now: Date) -> [String: String] {
+        let raw = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        return raw.filter { _, stamp in
+            guard let at = LiveActivityBridge.instant(stamp) else { return false }
+            return now.timeIntervalSince(at) < keptFor
+        }
     }
 }

@@ -335,7 +335,8 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   geplantes Ende ohne Push-Server kennt iOS nicht. Jetzt nennt der Abgleich
   das früheste Ende (`wakeAt`), und die kurze Hintergrundrunde wird dorthin
   vorgezogen; jeder Durchlauf schreibt eine Protokollzeile mit Zahlen. iOS
-  kann die Runde weiter verschieben.
+  kann die Runde weiter verschieben. (Seit 2026-11-17 übergibt jeder
+  Durchlauf die Enden selbst, `activityEnds`, siehe unten.)
 - [x] **iOS: Aktivität blieb wieder stehen** (Toni, 2026-11-17, Build 71,
   Feedback-Mail mit Protokollen). iOS weckte Aperio zehn Minuten nach dem
   Ende, die Runde starb nach acht Sekunden an hängenden Anfragen, bevor der
@@ -350,8 +351,9 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
 - [ ] **Versuch „vorab beenden“ auswerten** (Schalter in den Einstellungen,
   aus): Toni prüft auf dem iPhone, wie die vorab beendete Aktivität auf dem
   Sperrbildschirm mit VoiceOver wirkt, ob die Zeiten weiterzählen und ob sie
-  pünktlich verschwindet. Danach entscheiden: behalten (als Voreinstellung
-  oder Schalter) oder entfernen.
+  pünktlich verschwindet. Vorab beendet wird erst, wenn Aperio läuft, während
+  die Aktivität zu sehen ist (öffnen genügt). Danach entscheiden: behalten
+  (als Voreinstellung oder Schalter) oder entfernen.
 - [ ] 🚩 **Mitlaufende Zeiten in der Sprache des Geräts.** Seit #154 sprechen
   sie die Sprache des iPhones; läuft Aperio in einer anderen, stehen
   deutsche Wörter neben englischen Zeiten oder umgekehrt.

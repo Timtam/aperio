@@ -27,7 +27,7 @@ import UIKit
 // It runs the SAME work: `runTasks` executes every registered TaskManager task
 // for this launch reason, which is the app's background-sync task. There is no
 // second code path to keep in step. One thing comes before it: Live Activities
-// whose end has passed are ended here, natively, before the JS bundle, the
+// whose end has passed are ended here, natively, before the round's JS, the
 // network or the plan (`LiveActivityBridge.endOverdue`). A wake comes minutes
 // late at best and may last seconds; on Toni's iPhone (build 71, 2026-11-17)
 // one woke ten minutes after an appointment's end, died eight seconds later on

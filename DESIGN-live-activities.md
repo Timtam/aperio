@@ -466,10 +466,11 @@ Im **Hintergrund-Abgleich** darf Aperio nur ändern und beenden. Er kommt, wann
 iOS will; er räumt auf, taktet aber nichts.
 
 **Zum Ende wecken:** Jeder Durchlauf übergibt der nativen Seite das Ende der
-Kette jeder Aktivität, die bleibt (`activityEnds`, gemerkt als `endsAt`).
-Liegt das früheste vor dem Intervall der kurzen Hintergrundrunde
-(`BGAppRefreshTask`, `BackgroundRefresh.swift`), bittet Aperio iOS um die
-nächste Runde ab diesem Zeitpunkt. Das ist ein Wunsch, den iOS verschieben
+Kette jeder Aktivität, die bleibt (`activityEnds`, gemerkt als `endsAt`), noch
+bevor er sein Gedächtnis schreibt. Liegt das früheste noch kommende
+(`nextWake`) vor dem Intervall der kurzen Hintergrundrunde (`BGAppRefreshTask`,
+`BackgroundRefresh.swift`), bittet Aperio iOS um die nächste Runde ab diesem
+Zeitpunkt; die Protokollzeile nennt genau diesen Zeitpunkt. Das ist ein Wunsch, den iOS verschieben
 kann, kein Termin; ist der Hintergrund-Abgleich aus, weckt es nichts. Anlass:
 Auf Tonis iPhone sagte eine Aktivität am 10.11.2026 den ganzen Abend „Vorbei“,
 und Aperio war nicht geöffnet. Ob danach eine Runde kam, ließ sich nicht sagen:
@@ -489,20 +490,23 @@ gewünschten Zeitpunkt, manchmal nie, und hat etwa 30 Sekunden. Eine gesunde
 Runde brauchte schon 16 bis 24 davon, und der Durchlauf kam zuletzt, hinter
 den Konten. Darum macht jedes Wecken das Beenden zuerst:
 
-- **Nativ, vor allem anderen:** `LiveActivityBridge.endOverdue` beendet jede
+- **Nativ, vor der JS-Runde:** `LiveActivityBridge.endOverdue` beendet jede
   laufende oder wartende Aktivität, deren übergebenes Ende vorbei ist, am
   Anfang der kurzen Runde und bei jedem Start der App, auch in den Hintergrund.
   Das ist keine eigene Regel: Der Durchlauf hat das Ende bestimmt, Swift
   bemerkt nur, dass es da ist. Die Enden überdauern einen Neustart
-  (`ActivityEnds`, UserDefaults).
+  (`ActivityEnds`, UserDefaults) und werden in einem Schritt entnommen, damit
+  Start und Wecken zugleich nicht dieselbe zweimal beenden. Welche Swift so
+  beendet hat, meldet es einen Tag lang (`endedByWake` in `supportJson`).
 - **Dann der Durchlauf aus dem letzten Plan** (`endFromLastPlan`, Herkunft
   „round start“) als erster Schritt der JS-Runde, ohne Netz: Er deckt auch die
   nächtliche Runde (`expo-background-task`) ab, die nicht durch den Swift-Teil
   läuft.
-- **Ein Einlesen je Runde:** Solange eine iPhone-Runde läuft, löst ein
-  Cache-Update keinen eigenen Erinnerungs-Durchlauf aus (vorher bis zu drei
-  hintereinander, jeder liest alle Konten); ein Start direkt in den
-  Hintergrund liest nicht zusätzlich beim Einhängen der Oberfläche.
+- **Ein Einlesen je Runde:** Solange eine iPhone-Runde im Hintergrund läuft,
+  löst ein Cache-Update keinen eigenen Erinnerungs-Durchlauf aus (vorher bis
+  zu drei hintereinander, jeder liest alle Konten); ist die App offen, gilt das
+  nicht. Ein Start direkt in den Hintergrund liest nicht zusätzlich beim
+  Einhängen der Oberfläche.
 - **Ein Sync-Fehler bricht die Runde nicht mehr ab:** Erinnerungen, Aktivitäten
   und Widget laufen weiter, die Zusammenfassung sagt „(sync failed)“.
 - **Protokoll:** „background round: started“ am Anfang der JS-Runde; Wecken,
@@ -521,14 +525,21 @@ startet nichts (iOS lehnt es dort ab).
 aus). Die einzige Art, wie iOS eine Aktivität ohne Push pünktlich entfernt: Die
 App beendet sie und gibt eine Entfernzeit mit (`dismissalPolicy: .after`),
 höchstens vier Stunden nach dem Beenden. Ist der Schalter an, beendet ein
-Durchlauf (auch im Hintergrund) eine laufende Aktivität so, sobald in ihrer
+voller Durchlauf (vorne oder im Hintergrund, nie einer aus dem letzten Plan,
+dessen Ende veraltet sein kann) eine laufende Aktivität so, sobald in ihrer
 Kette nichts mehr folgt und das Ende höchstens vier Stunden (weniger eine
-Minute) entfernt ist; der Inhalt bleibt der letzte. Preis: Sie verschwindet
-sofort aus der Dynamic Island, bleibt nur auf dem Sperrbildschirm und kann sich
-nicht mehr ändern. Ein späterer Durchlauf behält sie, solange sie noch das
-Richtige zeigt, und aus dem Hintergrund in jedem Fall; zeigt sie im Vordergrund
-Falsches (Ende verschoben, anderer Inhalt), beendet er sie erneut und startet
-eine neue. Ob ein zweites Beenden einer beendeten Aktivität sie sofort
+Minute) entfernt ist; der Inhalt bleibt der letzte. Das geschieht also erst,
+wenn Aperio läuft, während die Aktivität zu sehen ist, bei einem einzelnen
+Termin oft schon vor dem Beginn; eine ab iOS 26 eingeplante Aktivität, die
+iOS allein startet, wird erst beim nächsten Durchlauf vorab beendet. Der
+angezeigte Anschluss („Danach“) zählt nicht als Folgetermin. Preis: Sie
+verschwindet sofort aus der Dynamic Island, bleibt nur auf dem Sperrbildschirm
+und kann sich nicht mehr ändern. Ein späterer Durchlauf behält sie, solange
+sie noch dasselbe zeigt (die Rangfolge `relevance` zählt dabei nicht, sie
+folgt dem Beginn der Kette) und der Schalter an ist, und aus dem Hintergrund in
+jedem Fall; zeigt sie im Vordergrund Falsches (Ende verschoben, anderer
+Inhalt) oder ist der Schalter inzwischen aus, beendet er sie erneut und
+startet eine neue. Ob ein zweites Beenden einer beendeten Aktivität sie sofort
 entfernt, und ob die mitlaufenden Zeiten in einer beendeten weiterzählen, sagt
 Apple nirgends; das prüft Toni auf dem iPhone, danach wird entschieden.
 
@@ -626,12 +637,13 @@ Gedächtnis schrieb (`supportJson` meldet ihn). Ist es ein anderer, gilt keine
 fehlende Aktivität als weggewischt, und ein laufender Termin startet beim
 Öffnen neu.
 
-**Kein Wegwischen nach dem Ende.** Fehlt eine Aktivität erst nach dem Ende,
-das sich Aperio zu ihr gemerkt hat (`endsAt`), hat das native Wecken oder iOS
-sie beendet. Ebenso wenig, wenn keine Kette ihre Termine mehr enthält: Ein
-Wegwischen hielte dann nichts fern. Wurde der Termin inzwischen verlängert,
-startet er beim Öffnen neu. Eine vorab beendete (Versuch) zählt erst als
-weggewischt, wenn sie vor ihrer Entfernzeit verschwindet.
+**Kein Wegwischen, wenn das Wecken beendet hat.** Was das native Wecken an
+seinem Ende beendet hat, meldet Swift (`endedByWake`); das zählt nie als
+weggewischt. Wurde der Termin inzwischen verlängert, startet er beim Öffnen
+neu. Nur „nach dem Ende fehlt sie“ reicht dafür nicht: Sie kann vorher
+weggewischt worden sein, und dann bleibt sie weg. Eine vorab beendete
+(Versuch) zählt erst als weggewischt, wenn sie vor ihrer Entfernzeit
+verschwindet.
 
 ### Technik
 
