@@ -5,7 +5,9 @@
 //! logs live. The desktop passes no [`HostDetails`]: its version is the core's,
 //! and the core reads the Windows, macOS or Linux version itself.
 
-use host_core::feedback::{self, FeedbackDraft, FeedbackInfo, FeedbackOutcome, HostDetails};
+use host_core::feedback::{
+    self, FeedbackDraft, FeedbackFailure, FeedbackInfo, FeedbackOutcome, HostDetails,
+};
 use tauri::State;
 
 use super::{CommandError, CommandResult};
@@ -31,6 +33,13 @@ pub async fn feedback_logs(log_state: State<'_, LogState>) -> CommandResult<Stri
             code: "internal",
             message: err.to_string(),
         })
+}
+
+/// What the send would refuse at once, without the network: the form asks
+/// before it shows its "sending" dialog. `None` when the draft can go.
+#[tauri::command]
+pub fn feedback_check(draft: FeedbackDraft) -> CommandResult<Option<FeedbackFailure>> {
+    Ok(feedback::check(&draft))
 }
 
 /// Send one message. Every ending is an outcome the form has a sentence for,

@@ -7,6 +7,7 @@ import { Platform } from 'react-native';
 
 import type {
   FeedbackDraft,
+  FeedbackFailure,
   FeedbackInfo,
   FeedbackOutcome,
   HostDetails,
@@ -40,6 +41,11 @@ export const feedbackInfo = async (): Promise<FeedbackInfo> =>
 
 /** The redacted log text a message would carry, for the form to show. */
 export const feedbackLogs = (): Promise<string> => CalFfi.feedbackLogs();
+
+/** What the send would refuse at once, without the network, or `null` when
+ *  the draft can go. Asked before the "sending" dialog shows. */
+export const feedbackCheck = async (draft: FeedbackDraft): Promise<FeedbackFailure | null> =>
+  JSON.parse(await CalFfi.feedbackCheckJson(JSON.stringify(draft))) as FeedbackFailure | null;
 
 /** Send one message. Every ending is an outcome, never a thrown error. */
 export const sendFeedback = async (draft: FeedbackDraft): Promise<FeedbackOutcome> =>

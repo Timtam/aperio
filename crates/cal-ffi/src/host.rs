@@ -6823,6 +6823,15 @@ impl Host {
         Ok(host_core::feedback::logs(dir))
     }
 
+    /// What the send would refuse at once, without the network
+    /// (`host_core::feedback::check`): answers a `FeedbackFailure` JSON, or
+    /// `null` when the draft can go. The form asks before it shows its
+    /// "sending" dialog. `draft_json` is a `FeedbackDraft`.
+    pub fn feedback_check_json(&self, draft_json: String) -> Result<String, StoreError> {
+        let draft = from_json::<host_core::feedback::FeedbackDraft>("draft", &draft_json)?;
+        to_json(&host_core::feedback::check(&draft))
+    }
+
     /// Send one message; answers a `FeedbackOutcome` JSON. Only a draft or
     /// details that do not parse are an error: every ending of the send itself
     /// is an outcome the form has a sentence for.
@@ -10401,6 +10410,31 @@ mod tests {
         ));
         // Logging is initialised by open_host; the text is redacted log text.
         let _ = host.feedback_logs().unwrap();
+    }
+
+    #[test]
+    fn the_feedback_check_answers_a_reason_or_null() {
+        let (_dir, host, _kc) = open_host();
+        let keyed = host_core::feedback::info(&Default::default()).available;
+        let empty = host
+            .feedback_check_json(r#"{"message":"  "}"#.into())
+            .unwrap();
+        assert_eq!(
+            empty,
+            if keyed {
+                r#""empty_message""#
+            } else {
+                r#""unavailable""#
+            }
+        );
+        let fine = host
+            .feedback_check_json(r#"{"message":"Hallo"}"#.into())
+            .unwrap();
+        assert_eq!(fine, if keyed { "null" } else { r#""unavailable""# });
+        assert!(matches!(
+            host.feedback_check_json("[]".into()),
+            Err(StoreError::InvalidField { ref field, .. }) if field == "draft"
+        ));
     }
 
     #[test]

@@ -449,6 +449,36 @@ fn os_release_pretty_name(text: &str) -> Option<String> {
     })
 }
 
+/// What the send would refuse at once, without the network: a build without
+/// the form's key, an empty message, a reply address that does not look
+/// complete. `None` when the draft can go.
+///
+/// The form asks this before it shows its "sending, please wait" dialog: a
+/// draft that never leaves must not be announced as on its way (Toni,
+/// 2026-11-18). [`send`] applies the same checks, so a host that skips this
+/// gets the same answer, only later.
+pub fn check(draft: &FeedbackDraft) -> Option<FeedbackFailure> {
+    if builtin_oauth::feedback_form_key().is_none() {
+        return Some(FeedbackFailure::Unavailable);
+    }
+    check_fields(draft).err()
+}
+
+/// The message and the reply address as the send uses them, or why the draft
+/// cannot go: trimmed, and an empty address is none.
+fn check_fields(draft: &FeedbackDraft) -> Result<(&str, Option<&str>), FeedbackFailure> {
+    let message = draft.message.trim();
+    if message.is_empty() {
+        return Err(FeedbackFailure::EmptyMessage);
+    }
+    let email = match draft.email.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(email) if looks_like_email(email) => Some(email),
+        Some(_) => return Err(FeedbackFailure::InvalidEmail),
+    };
+    Ok((message, email))
+}
+
 /// Send one message. Never panics and never returns an error type: every way
 /// it can end is a [`FeedbackOutcome`] the form has a sentence for.
 pub async fn send(draft: &FeedbackDraft, details: &HostDetails) -> FeedbackOutcome {
@@ -479,15 +509,7 @@ impl Service<'_> {
         draft: &FeedbackDraft,
         details: &HostDetails,
     ) -> Result<(), FeedbackFailure> {
-        let message = draft.message.trim();
-        if message.is_empty() {
-            return Err(FeedbackFailure::EmptyMessage);
-        }
-        let email = match draft.email.as_deref().map(str::trim) {
-            None | Some("") => None,
-            Some(email) if looks_like_email(email) => Some(email),
-            Some(_) => return Err(FeedbackFailure::InvalidEmail),
-        };
+        let (message, email) = check_fields(draft)?;
         let system = system_line(details);
         let attachment = match draft.logs.clone() {
             None => None,
@@ -1817,6 +1839,50 @@ mod tests {
         );
         challenge.assert_async().await;
         submit.assert_async().await;
+    }
+
+    #[test]
+    fn the_check_finds_what_the_send_refuses_at_once() {
+        let with_email = |email: &str| FeedbackDraft {
+            message: "x".into(),
+            email: Some(email.into()),
+            logs: None,
+        };
+        assert_eq!(
+            check_fields(&draft(" \n ")),
+            Err(FeedbackFailure::EmptyMessage)
+        );
+        assert_eq!(
+            check_fields(&with_email("not an address")),
+            Err(FeedbackFailure::InvalidEmail)
+        );
+        assert_eq!(check_fields(&with_email("  ")), Ok(("x", None)));
+        assert_eq!(
+            check_fields(&with_email(" me@example.org ")),
+            Ok(("x", Some("me@example.org")))
+        );
+        // The public check: the key first, then the same fields.
+        let keyed = builtin_oauth::feedback_form_key().is_some();
+        let expect = |failure: FeedbackFailure| {
+            Some(if keyed {
+                failure
+            } else {
+                FeedbackFailure::Unavailable
+            })
+        };
+        assert_eq!(check(&draft("  ")), expect(FeedbackFailure::EmptyMessage));
+        assert_eq!(
+            check(&with_email("not an address")),
+            expect(FeedbackFailure::InvalidEmail)
+        );
+        assert_eq!(
+            check(&draft("Hallo")),
+            if keyed {
+                None
+            } else {
+                Some(FeedbackFailure::Unavailable)
+            }
+        );
     }
 
     #[tokio::test]

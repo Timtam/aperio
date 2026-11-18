@@ -712,6 +712,7 @@ pub fn run() {
             commands::logs_dir_path,
             commands::feedback_info,
             commands::feedback_logs,
+            commands::feedback_check,
             commands::send_feedback,
             commands::open_external_url,
             commands::list_calendars,
