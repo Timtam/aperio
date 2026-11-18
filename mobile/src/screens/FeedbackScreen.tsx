@@ -17,6 +17,7 @@ import {
 import { feedbackInfo, feedbackLogs, sendFeedback } from '../api/feedback';
 import { FormScrollView } from '../components/FormScrollView';
 import { ReadOnlyField } from '../components/ReadOnlyField';
+import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { SwitchRow } from '../components/SwitchRow';
 import type { RootStackScreenProps } from '../navigation/types';
 import {
@@ -24,6 +25,7 @@ import {
   holdFeedbackLogs,
   type HeldFeedbackLogs,
 } from '../state/feedbackLogs';
+import { waitWithDialog } from '../state/stepWriteWait';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Feedback: a message, an optional reply address and, on request, the logs,
@@ -37,10 +39,22 @@ import { useThemedStyles, type ThemeColors } from '../theme';
  *  unreadable. The reading screen sees the same shape. */
 type Logs = HeldFeedbackLogs;
 
-export default function FeedbackScreen({
-  navigation,
-  route,
-}: RootStackScreenProps<'Feedback'>) {
+/**
+ * The form, and beside it the "sending, please wait" dialog (Toni,
+ * 2026-11-18): on iOS a dialog presents from the screen it is rendered in.
+ * Beside the content, not in it, so it stays mounted whichever state the
+ * form shows.
+ */
+export default function FeedbackScreen(props: RootStackScreenProps<'Feedback'>) {
+  return (
+    <>
+      <FeedbackForm {...props} />
+      <StepWriteWaitHost />
+    </>
+  );
+}
+
+function FeedbackForm({ navigation, route }: RootStackScreenProps<'Feedback'>) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const initialAttachLogs = route.params?.withLogs === true;
@@ -110,11 +124,25 @@ export default function FeedbackScreen({
     setBusy(true);
     const sentMessage = message;
     try {
-      const outcome = await sendFeedback({
-        message: sentMessage,
-        email: email.trim() === '' ? null : email,
-        logs: attachLogs && logs.state === 'ready' ? logs.text : null,
-      });
+      // The dialog takes the screen reader's focus and says itself: the
+      // button's own word changing is not said, and a send with the logs can
+      // take up to a minute. It is gone before the result is said.
+      const outcome = await waitWithDialog(
+        {
+          title: t('dialogs.settings.feedback.waitTitle'),
+          body: t(
+            attachLogs
+              ? 'dialogs.settings.feedback.waitBodyLogs'
+              : 'dialogs.settings.feedback.waitBody',
+          ),
+        },
+        () =>
+          sendFeedback({
+            message: sentMessage,
+            email: email.trim() === '' ? null : email,
+            logs: attachLogs && logs.state === 'ready' ? logs.text : null,
+          }),
+      );
       const sentence = feedbackOutcomeSentence(outcome, t);
       if (outcome.outcome === 'sent') {
         // Only what was sent is cleared: text typed while it was on its way

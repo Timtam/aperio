@@ -11,6 +11,7 @@ import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { feedbackInfo, feedbackLogs, sendFeedback } from '../api/client';
 import { ReadOnlyText } from './ReadOnlyText';
+import { useStepWriteWait } from './useStepWriteWait';
 
 /** The logs field, rendered again only when its text changes: the text can
  *  be 30 MB, and every keystroke in the message renders the panel. */
@@ -54,6 +55,19 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
 
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
+
+  // "Sending, please wait" while the send runs (Toni, 2026-11-18): the
+  // button's own word changing is not said by a screen reader, and a send with
+  // the logs can take up to a minute. The dialog takes focus, says itself, and
+  // is gone with focus back on Send before the result is shown or said.
+  const { waitDialog, wait } = useStepWriteWait({
+    title: t('dialogs.settings.feedback.waitTitle'),
+    body: t(
+      attachLogs
+        ? 'dialogs.settings.feedback.waitBodyLogs'
+        : 'dialogs.settings.feedback.waitBody',
+    ),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -120,11 +134,13 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
       else announce(sentence);
     };
     try {
-      const outcome = await sendFeedback({
-        message: sentMessage,
-        email: email.trim() === '' ? null : email,
-        logs: attachLogs && logs.state === 'ready' ? logs.text : null,
-      });
+      const outcome = await wait(true, () =>
+        sendFeedback({
+          message: sentMessage,
+          email: email.trim() === '' ? null : email,
+          logs: attachLogs && logs.state === 'ready' ? logs.text : null,
+        }),
+      );
       const sentence = feedbackOutcomeSentence(outcome, t);
       if (outcome.outcome === 'sent') {
         // Only what was sent is cleared: text typed while it was on its way
@@ -149,7 +165,7 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
     } finally {
       setBusy(false);
     }
-  }, [busy, attachLogs, logs, message, email, t, announce]);
+  }, [busy, attachLogs, logs, message, email, t, announce, wait]);
 
   // Nothing until the build's posture is known, so a keyless build never
   // shows a form for a moment and then takes it away.
@@ -266,6 +282,7 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
           </button>
         </div>
       </form>
+      {waitDialog}
     </div>
   );
 }

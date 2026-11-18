@@ -699,6 +699,9 @@
         "systemLabel": "Geht immer mit",
         "send": "Senden",
         "sending": "Wird gesendet …",
+        "waitTitle": "Feedback wird gesendet, bitte warten …",
+        "waitBody": "Aperio sendet deine Nachricht. Das dauert meist nur wenige Sekunden.",
+        "waitBodyLogs": "Aperio sendet deine Nachricht mit den Protokollen. Das kann bis zu einer Minute dauern.",
         "sent": "Danke! Deine Nachricht ist angekommen.",
         "failure": {
           "unavailable": "Dieser Build kann kein Feedback senden.",

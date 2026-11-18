@@ -702,6 +702,9 @@
         "systemLabel": "Always goes along",
         "send": "Send",
         "sending": "Sending …",
+        "waitTitle": "Sending feedback, please wait …",
+        "waitBody": "Aperio is sending your message. This usually takes only a few seconds.",
+        "waitBodyLogs": "Aperio is sending your message with the logs. This can take up to a minute.",
         "sent": "Thank you! Your message has arrived.",
         "failure": {
           "unavailable": "This build cannot send feedback.",

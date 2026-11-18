@@ -152,7 +152,7 @@ describe('FeedbackPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Senden' }));
     });
     const thanks = 'Danke! Deine Nachricht ist angekommen.';
-    expect(screen.getByText(thanks)).toBeTruthy();
+    expect(await screen.findByText(thanks)).toBeTruthy();
     expect(announced).toEqual([thanks]);
     expect((message as HTMLTextAreaElement).value).toBe('');
   });
@@ -173,7 +173,7 @@ describe('FeedbackPanel', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Senden' }));
     });
-    expect(screen.getByRole('alert').textContent).toMatch(/sieht nicht vollständig aus/);
+    expect((await screen.findByRole('alert')).textContent).toMatch(/sieht nicht vollständig aus/);
     expect(document.activeElement).toBe(email);
     expect(backend.sent).toEqual([{ message: 'x', email: 'kaputt', logs: null }]);
   });
@@ -192,6 +192,8 @@ describe('FeedbackPanel while a send is on its way', () => {
     await act(async () => {
       backend.release?.();
     });
+    // Settled: the thanks comes once the wait dialog is gone.
+    expect(await screen.findByText('Danke! Deine Nachricht ist angekommen.')).toBeTruthy();
     expect(backend.sent).toEqual([{ message: 'Erster Teil', email: null, logs: null }]);
     expect(message.value).toBe('Erster Teil und mehr');
   });
@@ -211,9 +213,11 @@ describe('FeedbackPanel while a send is on its way', () => {
     await act(async () => {
       backend.release?.();
     });
-    expect(announced).toEqual([
-      'Der Feedback-Dienst ist nicht erreichbar. Prüf die Internetverbindung und versuch es noch einmal.',
-    ]);
+    await waitFor(() =>
+      expect(announced).toEqual([
+        'Der Feedback-Dienst ist nicht erreichbar. Prüf die Internetverbindung und versuch es noch einmal.',
+      ]),
+    );
   });
 
   it('shows a failure in the panel, not twice', async () => {
@@ -225,8 +229,64 @@ describe('FeedbackPanel while a send is on its way', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Senden' }));
     });
-    expect(screen.getByRole('alert').textContent).toMatch(/zu viele Nachrichten/);
+    expect((await screen.findByRole('alert')).textContent).toMatch(/zu viele Nachrichten/);
     expect(announced).toEqual([]);
+  });
+
+  // Toni, 2026-11-18: the button's word changing is not said, and a send with
+  // the logs can take a minute; a dialog says it is under way.
+  const waitDialog = () =>
+    screen.queryByRole('dialog', { name: 'Feedback wird gesendet, bitte warten …' });
+
+  it('shows a dialog while it is on its way, focused, gone before the thanks', async () => {
+    backend.hold = true;
+    await renderPanel();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Nachricht' }), {
+      target: { value: 'Hallo' },
+    });
+    const send = screen.getByRole('button', { name: 'Senden' });
+    send.focus();
+    await act(async () => {
+      fireEvent.click(send);
+    });
+    const dialog = await waitFor(() => {
+      const found = waitDialog();
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    await waitFor(() =>
+      expect(document.activeElement?.textContent).toBe(
+        'Aperio sendet deine Nachricht. Das dauert meist nur wenige Sekunden.',
+      ),
+    );
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(announced).toEqual([]);
+    await act(async () => {
+      backend.release?.();
+    });
+    const thanks = 'Danke! Deine Nachricht ist angekommen.';
+    expect(await screen.findByText(thanks)).toBeTruthy();
+    expect(waitDialog()).toBeNull();
+    expect(announced).toEqual([thanks]);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Senden' }));
+  });
+
+  it('says in the dialog that the logs make it longer', async () => {
+    backend.hold = true;
+    await renderPanel({ initialAttachLogs: true });
+    const field = await screen.findByRole('textbox', { name: 'Diese Protokolle gehen mit' });
+    await waitFor(() => expect((field as HTMLTextAreaElement).value).toBe(backend.logs[0]));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Nachricht' }), {
+      target: { value: 'Mit Protokollen' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Senden' }));
+    });
+    await waitFor(() => expect(waitDialog()?.textContent).toMatch(/mit den Protokollen/));
+    await act(async () => {
+      backend.release?.();
+    });
+    await waitFor(() => expect(waitDialog()).toBeNull());
   });
 });
 
