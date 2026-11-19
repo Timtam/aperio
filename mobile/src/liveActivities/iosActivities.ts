@@ -31,10 +31,7 @@ import i18n from '../../i18n';
 import { liveActivityPlan, type PlannedReminder } from '../api/liveActivities';
 import { logLine } from '../api/logs';
 import { upcomingReminders, type UpcomingReminder } from '../api/reminders';
-import {
-  readLiveActivitiesEnabled,
-  readLiveActivityEndEarly,
-} from '../state/liveActivitiesPref';
+import { readLiveActivitiesEnabled } from '../state/liveActivitiesPref';
 import { reminderKeyId } from './reminderKey';
 
 const MEMORY_KEY = 'aperio.liveActivities.ios.memory.v1';
@@ -116,7 +113,6 @@ function syncIosActivities(
       words: words(),
       hideOnLockScreen: support.previews !== 'always',
       build: support.build ?? '',
-      endEarly: await readLiveActivityEndEarly(),
       endedByWake: support.endedByWake ?? [],
     });
     for (const key of result.covered) covered.add(triggerKeyId(key));
@@ -128,9 +124,6 @@ function syncIosActivities(
         switch (action.type) {
           case 'end':
             await CalFfi.liveActivityEnd(action.id);
-            break;
-          case 'endAfter':
-            await CalFfi.liveActivityEndAfter(action.id, JSON.stringify(action.content), action.at);
             break;
           case 'update':
             await CalFfi.liveActivityUpdate(action.id, JSON.stringify(action.content));
@@ -158,12 +151,6 @@ function syncIosActivities(
         done.push(action.type);
       } catch (err) {
         failed += 1;
-        // Not ended ahead after all: it runs on, and the next pass tries
-        // again; until then the native wake ends it like any other.
-        if (action.type === 'endAfter' && memory.activities[action.id] != null) {
-          const { endedEarly: _refused, ...kept } = memory.activities[action.id];
-          memory = { ...memory, activities: { ...memory.activities, [action.id]: kept } };
-        }
         // iOS refused (the limit, the switch, an old system). The reminder
         // then rings as a notification, which is the safe side.
         void logLine(

@@ -208,16 +208,6 @@ Termine** (standardmäßig an, nur dieses Gerät). Schalten die iPhone-Einstellu
 Live-Aktivitäten für Aperio aus, sagt das eine Zeile unter dem Schalter, mit
 einem Knopf zu diesen Einstellungen.
 
-Darunter steht ein Versuch, **Live-Aktivität vorab beenden** (standardmäßig aus):
-Zeigt eine Aktivität den letzten Termin, zu dem sie wechselt, und endet er in
-höchstens vier Stunden, beendet Aperio sie vorab, sobald es läuft, während sie
-zu sehen ist (geöffnet oder bei einer Runde im Hintergrund), oft schon vor dem
-Beginn. Das iPhone entfernt sie dann pünktlich zum Ende, auch ohne laufendes
-Aperio. Das angezeigte „Danach“ zählt dabei nicht als Folgetermin. Dafür
-verschwindet sie sofort aus der Dynamic Island, bleibt nur auf dem
-Sperrbildschirm und zeigt keine späteren Änderungen mehr. Ob es so bleibt,
-entscheidet sich nach den ersten Erfahrungen.
-
 ## Live-Aktivitäten (Android)
 
 Auf Android ist es eine **laufende Benachrichtigung**: Von der letzten Erinnerung

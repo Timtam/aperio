@@ -632,7 +632,6 @@ const ONLY_ON = new Map([
     'liveActivitySchedule',
     'liveActivityUpdate',
     'liveActivityEnd',
-    'liveActivityEndAfter',
     'liveActivityEnds',
   ].map((name) => [name, ['ios', 'ActivityKit; Android shows its live notification natively']]),
   ...[

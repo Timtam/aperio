@@ -189,16 +189,6 @@ Switch it under **Settings, General, Live Activities for appointments**
 (default on, this device only). If the iPhone settings turn Live Activities off
 for Aperio, a line below the switch says so, with a button to those settings.
 
-Below it is a trial, **end Live Activities ahead** (default off): when an
-activity shows the last appointment it moves on to, and that one ends within
-four hours, Aperio ends it ahead as soon as it runs while the activity is
-showing (opened, or in a background round), often before the start. The
-iPhone then removes it right at the end, even without Aperio running. The
-"Next" it shows does not count as a following appointment here. In exchange it
-leaves the Dynamic Island at once, stays only on the lock screen and shows no
-later changes. Whether it stays that way will be decided after the first
-experience with it.
-
 ## Live Activities (Android)
 
 On Android the same thing is an **ongoing notification**: from an

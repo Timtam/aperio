@@ -184,23 +184,6 @@ enum LiveActivityBridge {
         await activity.end(nil, dismissalPolicy: .immediate)
     }
 
-    /// End now with this final content, and let iOS remove it at `at`, at
-    /// the latest four hours on (`ActivityUIDismissalPolicy.after`). It leaves
-    /// the Dynamic Island at once and can no longer change: the trial
-    /// `endEarly` in `shared/liveActivityIos.ts`.
-    static func endAfter(id: String, contentJson: String, at: String) async throws {
-        guard #available(iOS 17.0, *) else {
-            throw LiveActivityBridgeError.unavailable("needs iOS 17")
-        }
-        guard let date = instant(at) else {
-            throw LiveActivityBridgeError.badContent("end \(at)")
-        }
-        guard let activity = Activity<AperioEventAttributes>.activities.first(where: { $0.id == id })
-        else { throw LiveActivityBridgeError.notFound(id) }
-        let activityContent = try content(contentJson)
-        await activity.end(activityContent, dismissalPolicy: .after(date))
-    }
-
     /// End every running or waiting activity whose end, as the last pass
     /// handed it over (`ActivityEnds`), has passed. Returns how many.
     ///

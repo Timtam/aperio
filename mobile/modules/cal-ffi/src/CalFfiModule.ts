@@ -548,11 +548,6 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   liveActivityUpdate(id: string, contentJson: string): Promise<void>;
   /** End an activity at once (a waiting one never starts). */
   liveActivityEnd(id: string): Promise<void>;
-  /** End a running activity now with this final content, and let iOS remove
-   *  it at `at` (RFC 3339, within four hours): `dismissalPolicy: .after`. It
-   *  leaves the Dynamic Island at once and can no longer change (the trial
-   *  `endEarly`). */
-  liveActivityEndAfter(id: string, contentJson: string, at: string): Promise<void>;
   /** Each activity's end, as JSON `{id: RFC 3339}` (`activityEnds`), replacing
    *  the last one handed over. Only a running Aperio can end an activity: the
    *  native side brings the short background wake-up (`enableBackgroundRefresh`)

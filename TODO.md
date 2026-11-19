@@ -348,12 +348,14 @@ zur Aktivität. Entscheidungen, Plattformgrenzen und Begründungen:
   Protokoll. Ein Durchlauf aus dem letzten Plan lässt wartende Aktivitäten in
   Ruhe, ein Start in den Hintergrund startet keine. DESIGN-live-activities.md,
   „Beim Wecken zuerst beenden“.
-- [ ] **Versuch „vorab beenden“ auswerten** (Schalter in den Einstellungen,
-  aus): Toni prüft auf dem iPhone, wie die vorab beendete Aktivität auf dem
-  Sperrbildschirm mit VoiceOver wirkt, ob die Zeiten weiterzählen und ob sie
-  pünktlich verschwindet. Vorab beendet wird erst, wenn Aperio läuft, während
-  die Aktivität zu sehen ist (öffnen genügt). Danach entscheiden: behalten
-  (als Voreinstellung oder Schalter) oder entfernen.
+- [x] **Versuch „vorab beenden“ ausgewertet** (Toni, 2026-11-19, Build 72):
+  Es funktioniert. VoiceOver liest die vorab beendete Aktivität auf dem
+  Sperrbildschirm mit weiterzählenden Zeiten, und iOS entfernt sie pünktlich
+  zum Ende. Dafür verschwindet sie sofort aus der Dynamic Island. Toni hat
+  entschieden: Schalter und Code wieder heraus, also aus wie bisher.
+  Ergebnis und Weg stehen in DESIGN-live-activities.md („Versuch: vorab
+  beenden“); der Code liegt in #174 (f347f295, 65904bb2), falls es später
+  doch gewünscht wird.
 - [ ] 🚩 **Mitlaufende Zeiten in der Sprache des Geräts.** Seit #154 sprechen
   sie die Sprache des iPhones; läuft Aperio in einer anderen, stehen
   deutsche Wörter neben englischen Zeiten oder umgekehrt.
@@ -987,6 +989,42 @@ Vorschläge in Claude Code, die mit dem Screenreader kaum erreichbar sind und
 von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
+
+- [ ] **iOS mit Xcode 27 bauen, bis April 2027** (Apple-Mail zu Build 72,
+      2026-11-17, ITMS-90725): Ab April 2027 nimmt App Store Connect nur
+      noch Builds mit dem iOS-27-SDK an. Aperio baut mit dem iOS-26.4-SDK,
+      weil EAS für Expo SDK 56 das Bild `sdk-56` (Xcode 26.4) nimmt. Laut
+      Expo starten Apps aus einem Xcode-27-Bild auf iOS 27 nur mit dem
+      UIKit-Szenen-Lebenszyklus: Unter Expo SDK 57 per
+      `ios.enableSceneSupport` in `expo-build-properties`, ab SDK 58 ist
+      Xcode 27 der Standard. Also erst Expo SDK heben (57 oder 58), dann
+      das Bild. Prüfen, was der Szenen-Lebenszyklus für die eigenen
+      App-Delegate-Teile heißt (`AperioBackgroundRefreshSubscriber`,
+      Widget-Aktionen, Live-Aktivitäten) und ob `BGTaskScheduler.submit`
+      (in iOS 27 veraltet) ersetzt werden muss. Quelle:
+      docs.expo.dev/build-reference/infrastructure.
+- [ ] **Feedback-Formular am Handy: bei offener Tastatur nicht bis „Senden“
+      wischbar** (Toni, 2026-11-19, Build 72, VoiceOver): Steht der Fokus in
+      einem Textfeld und die Tastatur ist offen, erreicht Wischen nach rechts
+      den Senden-Knopf nicht; nur Drei-Finger-Blättern hilft. Toni hat es nur
+      im Feedback-Formular bemerkt. Es nutzt `FormScrollView`
+      (KeyboardAvoidingView mit Polster und ScrollView) wie die Editoren,
+      liegt aber als geschobener Bildschirm im Einstellungs-Stapel statt als
+      Blatt. Erst am Gerät eingrenzen: dieselbe Probe auf „Signaturen“ und
+      „Synchronisation“ (gleicher Stapel, gleiche Hülle) und in einem Editor;
+      dann die Ursache (Polsterhöhe, Rahmen der ScrollView unter der
+      Tastatur) beheben, nicht nur den Knopf versetzen.
+- [ ] **Serien ohne Zeitzone reparierbar machen** (Toni, 2026-11-19): Eine
+      iCloud-Serie steht seit der Zeitumstellung eine Stunde zu früh, auch im
+      Kalender des iPhones. Sie ist also ohne Zone (in UTC) gespeichert.
+      Woher, ist unbekannt; ein Weg war Aperios alter Fehler, der beim
+      Bearbeiten einer ganzen Serie die Zone verlor (seit dem Wächter in
+      `src/components/EventDialog.seriesZone.test.tsx` behoben). Eine Serie
+      ohne Zone lässt Aperio absichtlich so (sie könnte in UTC gemeint sein).
+      Abhilfe in Aperio gibt es erst mit der Zeitzonen-Auswahl im Editor
+      (DESIGN-series-time-zone.md, Stufen 8 bis 14, noch nicht gebaut); bis
+      dahin im Kalender des iPhones neu speichern. Vorher prüfen: wie viele
+      Serien ohne Zone in Tonis Daten liegen.
 
 - [ ] **Google: was ein nicht gewährter Scope trägt, zeigen oder verbergen.**
       Seit Entscheidung 281 fragt eine Anmeldung mit Aperios eigener

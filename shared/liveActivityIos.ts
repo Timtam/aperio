@@ -81,10 +81,6 @@ export interface RememberedActivity {
    *  ends it (`activityEnds`). Absent in a memory written before it was
    *  kept. */
   endsAt?: string;
-  /** Ended ahead, with iOS removing it at `endsAt` (the trial
-   *  `ReconcileInput.endEarly`): still on the lock screen, but it can no
-   *  longer change. */
-  endedEarly?: boolean;
 }
 
 export interface ActivityMemory {
@@ -118,10 +114,7 @@ export type ActivityAction =
       signal: LiveTriggerKey[];
     }
   | { type: 'update'; id: string; content: ActivityContent }
-  | { type: 'end'; id: string }
-  /** End now with this final content, and let iOS remove it at `at`
-   *  (`dismissalPolicy: .after`). */
-  | { type: 'endAfter'; id: string; content: ActivityContent; at: string };
+  | { type: 'end'; id: string };
 
 export interface ReconcileInput {
   now: Date;
@@ -149,11 +142,6 @@ export interface ReconcileInput {
    *  memory's means the app was updated since: an activity gone then is no
    *  swipe. */
   build: string;
-  /** Trial (Toni, 2026-11-17): end an activity ahead once nothing follows in
-   *  its chain and its end is within iOS's four hours, so iOS removes it on
-   *  time without Aperio running then. It leaves the Dynamic Island at once
-   *  and can no longer change. */
-  endEarly: boolean;
   /** Activities the native wake ended at their end (`activityEnds`,
    *  `LiveActivityBridge.endOverdue`): gone, but not swiped. */
   endedByWake: readonly string[];
@@ -180,10 +168,6 @@ const SYSTEM_END_MS = 8 * 60 * 60 * 1000;
 
 /** How long a swipe is remembered: an appointment is over well within it. */
 const DISMISSAL_MEMORY_MS = 24 * 60 * 60 * 1000;
-
-/** iOS removes an ended activity at the date asked for, but at the latest
- *  four hours after the end; a minute less leaves room for the clocks. */
-const EARLY_END_WINDOW_MS = 4 * 60 * 60 * 1000 - 60 * 1000;
 
 const ms = (iso: string) => Date.parse(iso);
 
@@ -283,14 +267,6 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
       const report = reported.get(id);
       const gone = report == null || report.state === 'dismissed' || report.state === 'ended';
       if (!gone) continue;
-      // Ended ahead by Aperio: on the lock screen until iOS removes it, and
-      // removed by iOS at that moment.
-      if (
-        remembered.endedEarly === true &&
-        (report?.state === 'ended' || (remembered.endsAt != null && ms(remembered.endsAt) <= now))
-      ) {
-        continue;
-      }
       // Ended by the native wake at the end it was handed. Only those: an
       // activity merely found gone after its end may still have been swiped
       // before it, and its appointment extended since.
@@ -320,29 +296,7 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
 
   const served = new Set<LiveActivityChain>();
   for (const report of input.reported) {
-    if (report.state === 'dismissed') continue;
-    if (report.state === 'ended') {
-      const early = input.memory.activities[report.id];
-      if (early?.endedEarly !== true) continue;
-      // Ended ahead (`endEarly`): it shows until iOS removes it. Kept while
-      // it still shows the right thing and the trial is on, and from the
-      // background in any case, where nothing could replace it. Otherwise
-      // ended again, which asks iOS to remove it now, and in front started
-      // afresh below.
-      const chain = input.enabled ? chainOf(chains, early.keys) : undefined;
-      if (chain != null && !served.has(chain)) {
-        const shows = activityContent(chain, input.now, input.locale, input.words, input.hideOnLockScreen);
-        const unchanged =
-          early.endsAt != null && ms(early.endsAt) === ms(chain.end) && sameShown(early.content, shows);
-        if ((unchanged && input.endEarly) || !input.foreground) {
-          served.add(chain);
-          activities[report.id] = { ...early, keys: [...chain.keys] };
-          continue;
-        }
-      }
-      actions.push({ type: 'end', id: report.id });
-      continue;
-    }
+    if (report.state === 'ended' || report.state === 'dismissed') continue;
     // Aperio ends these itself, so they are no swipes next time: they leave
     // the memory here and are not counted as gone.
     if (!input.enabled) {
@@ -405,20 +359,6 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
       content: sent,
       endsAt: chain.end,
     };
-    // The trial: nothing follows any more, and iOS can remove it at the end
-    // by itself. The final content is what it shows until then. Only on fresh
-    // data: a pass from the last plan might end it at an end since moved, and
-    // nothing in the background could take that back.
-    if (
-      input.endEarly &&
-      input.planAhead &&
-      content.next == null &&
-      ms(chain.end) - now <= EARLY_END_WINDOW_MS
-    ) {
-      activities[report.id].endedEarly = true;
-      actions.push({ type: 'endAfter', id: report.id, content, at: chain.end });
-      continue;
-    }
     if (remembered?.content !== sent) actions.push({ type: 'update', id: report.id, content });
   }
 
@@ -457,19 +397,6 @@ export function reconcileIosActivities(input: ReconcileInput): ReconcileResult {
   return { actions, covered, memory: { activities, dismissed, build: input.build } };
 }
 
-/** Whether a stored content shows what `content` shows. The relevance is left
- *  out: it follows the chain's start, which moves once an earlier appointment
- *  of the chain is over, while the activity shows the same. */
-function sameShown(stored: string, content: ActivityContent): boolean {
-  try {
-    const { relevance: _stored, ...was } = JSON.parse(stored) as ActivityContent;
-    const { relevance: _now, ...is } = content;
-    return JSON.stringify(was) === JSON.stringify(is);
-  } catch {
-    return false;
-  }
-}
-
 /** Where a pass ran: in front, in an OS background round, the quick start
  *  from the last plan on a return to the app, or the same from the last plan
  *  as the first step of a background round. */
@@ -497,12 +424,10 @@ export function activityPassSummary(pass: {
 }): string | null {
   if (pass.before === 0 && pass.done.length === 0 && pass.failed === 0) return null;
   const count = (type: ActivityAction['type']) => pass.done.filter((t) => t === type).length;
-  const early = count('endAfter');
   return (
     `live activities (${pass.origin}): before=${pass.before}` +
     ` ended=${count('end')} updated=${count('update')}` +
     ` started=${count('start')} scheduled=${count('schedule')}` +
-    (early > 0 ? ` ended ahead=${early}` : '') +
     ` failed=${pass.failed} wake=${pass.wakeAt ?? 'none'}`
   );
 }
@@ -512,13 +437,12 @@ export function activityPassSummary(pass: {
  * each activity Aperio keeps, by id, with the end of its chain as of this
  * pass. iOS gives a background round about thirty seconds and often less, and
  * the round's own pass comes last; the wake ends these first
- * (`BackgroundRefresh.swift`). One ended ahead is left out, as iOS removes it
- * itself.
+ * (`BackgroundRefresh.swift`).
  */
 export function activityEnds(memory: ActivityMemory): Record<string, string> {
   const ends: Record<string, string> = {};
   for (const [id, activity] of Object.entries(memory.activities)) {
-    if (activity.endsAt != null && activity.endedEarly !== true) ends[id] = activity.endsAt;
+    if (activity.endsAt != null) ends[id] = activity.endsAt;
   }
   return ends;
 }

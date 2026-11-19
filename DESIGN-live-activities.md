@@ -521,27 +521,23 @@ Aktivität, deren Kette noch da ist, bleibt dann, wie sie ist; sie zu prüfen is
 Sache des vollen Durchlaufs. Ein Durchlauf beim Start in den Hintergrund
 startet nichts (iOS lehnt es dort ab).
 
-**Versuch: vorab beenden** (Toni, 2026-11-17, Schalter in den Einstellungen,
-aus). Die einzige Art, wie iOS eine Aktivität ohne Push pünktlich entfernt: Die
-App beendet sie und gibt eine Entfernzeit mit (`dismissalPolicy: .after`),
-höchstens vier Stunden nach dem Beenden. Ist der Schalter an, beendet ein
-voller Durchlauf (vorne oder im Hintergrund, nie einer aus dem letzten Plan,
-dessen Ende veraltet sein kann) eine laufende Aktivität so, sobald in ihrer
-Kette nichts mehr folgt und das Ende höchstens vier Stunden (weniger eine
-Minute) entfernt ist; der Inhalt bleibt der letzte. Das geschieht also erst,
-wenn Aperio läuft, während die Aktivität zu sehen ist, bei einem einzelnen
-Termin oft schon vor dem Beginn; eine ab iOS 26 eingeplante Aktivität, die
-iOS allein startet, wird erst beim nächsten Durchlauf vorab beendet. Der
-angezeigte Anschluss („Danach“) zählt nicht als Folgetermin. Preis: Sie
-verschwindet sofort aus der Dynamic Island, bleibt nur auf dem Sperrbildschirm
-und kann sich nicht mehr ändern. Ein späterer Durchlauf behält sie, solange
-sie noch dasselbe zeigt (die Rangfolge `relevance` zählt dabei nicht, sie
-folgt dem Beginn der Kette) und der Schalter an ist, und aus dem Hintergrund in
-jedem Fall; zeigt sie im Vordergrund Falsches (Ende verschoben, anderer
-Inhalt) oder ist der Schalter inzwischen aus, beendet er sie erneut und
-startet eine neue. Ob ein zweites Beenden einer beendeten Aktivität sie sofort
-entfernt, und ob die mitlaufenden Zeiten in einer beendeten weiterzählen, sagt
-Apple nirgends; das prüft Toni auf dem iPhone, danach wird entschieden.
+**Versuch: vorab beenden** (Toni, 2026-11-17 bis 2026-11-19; entfernt). Die
+einzige Art, wie iOS eine Aktivität ohne Push pünktlich entfernt: Die App
+beendet sie und gibt eine Entfernzeit mit (`dismissalPolicy: .after`),
+höchstens vier Stunden nach dem Beenden. Gebaut als Schalter (aus): Ein voller
+Durchlauf beendete eine laufende Aktivität so, sobald in ihrer Kette nichts
+mehr folgte und das Ende höchstens vier Stunden entfernt war; der Inhalt
+blieb der letzte. Tonis Test auf dem iPhone (Build 72, iOS 27.2.1): Es
+funktioniert. VoiceOver liest die Aktivität auf dem Sperrbildschirm weiter mit
+mitlaufenden Zeiten (Apple dokumentiert das nicht, gemessen), und iOS entfernt
+sie pünktlich zum Ende, auch ohne laufendes Aperio. Dafür verschwindet sie
+sofort aus der Dynamic Island und kann sich nicht mehr ändern. Toni hat
+entschieden, Schalter und Code wieder herauszunehmen: aus, wie bisher. Der
+Code liegt in #174 (Commits f347f295, 65904bb2), mit Regeln und Tests: Ein
+späterer Durchlauf behielt die vorab beendete, solange sie dasselbe zeigte
+(ohne `relevance`), nur auf frischen Daten (nie aus dem letzten Plan), und
+eine vorab beendete zählte erst als weggewischt, wenn sie vor ihrer
+Entfernzeit verschwand.
 
 **Kaltstart nach Tipp auf die Erinnerung:** Der volle Durchlauf liest jedes Konto
 live und kann Sekunden dauern; wer kurz schaut und sperrt, wäre schneller weg.
@@ -641,9 +637,7 @@ fehlende Aktivität als weggewischt, und ein laufender Termin startet beim
 seinem Ende beendet hat, meldet Swift (`endedByWake`); das zählt nie als
 weggewischt. Wurde der Termin inzwischen verlängert, startet er beim Öffnen
 neu. Nur „nach dem Ende fehlt sie“ reicht dafür nicht: Sie kann vorher
-weggewischt worden sein, und dann bleibt sie weg. Eine vorab beendete
-(Versuch) zählt erst als weggewischt, wenn sie vor ihrer Entfernzeit
-verschwindet.
+weggewischt worden sein, und dann bleibt sie weg.
 
 ### Technik
 
