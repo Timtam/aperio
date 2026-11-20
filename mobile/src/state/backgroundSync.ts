@@ -7,6 +7,7 @@ import * as TaskManager from 'expo-task-manager';
 import CalFfi from '../../modules/cal-ffi';
 
 import { getUserPref } from '../api/prefs';
+import { applyLanguageChoice, readLanguageChoice } from '../settings/language';
 import {
   cacheRefreshStatus,
   refreshExternalCacheInBackground,
@@ -65,6 +66,13 @@ async function backgroundRound(): Promise<BackgroundTask.BackgroundTaskResult> {
     // "not woken" and "woken but cut short" have to be told apart afterwards
     // (Toni's iPhone, 2026-11-17).
     void logLine('info', 'background round: started');
+    // In the language the user chose, before anything below words a
+    // notification, the widget or a Live Activity. Only the app's screens
+    // applied the stored choice (`useStoredLanguage`), and a round in a
+    // background launch runs without them: iOS starts React Native without a
+    // window there (modules/background-launch), Android's headless runs never
+    // had one. i18n would otherwise be the device's language.
+    await readLanguageChoice().then(applyLanguageChoice).catch(() => undefined);
     // What is over is ended FIRST, from the last plan and without the
     // network: the providers below can take the whole of iOS's thirty
     // seconds, and an activity left on the lock screen until the app is next

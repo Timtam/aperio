@@ -1029,9 +1029,8 @@ Vorschläge sind nicht aufgenommen.
       hellem oder dunklem Design (react-native-screens #5137, offen); die
       Polsterung der Tab-Wurzeln auf größenveränderbaren iPhones (iPhone Duo,
       Leiste als Seitenschiene); Pressables in der Kopfzeile unter
-      react-native-screens 4.30; ob Xcode 27 `BGTaskScheduler.submit` in
-      `mobile/modules/cal-ffi/ios/BackgroundRefresh.swift` als veraltet meldet
-      (Warnung im EAS-Bauprotokoll suchen, dann ersetzen).
+      react-native-screens 4.30. (`BGTaskScheduler.submit` meldet Xcode 27.1
+      nicht als veraltet: Build 73, 2026-11-20.)
 - [ ] **Feedback-Formular am Handy: bei offener Tastatur nicht bis „Senden“
       wischbar** (Toni, 2026-11-19, Build 72, VoiceOver): Steht der Fokus in
       einem Textfeld und die Tastatur ist offen, erreicht Wischen nach rechts

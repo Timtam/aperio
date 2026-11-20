@@ -41,12 +41,22 @@ cycle. Expo SDK 58 generates a `SceneDelegate` and starts React Native in
   open). `modules/background-launch` starts the React host without a window
   when no scene has connected two seconds after launch (release builds only).
   Remove it once Expo fixes the issue.
+- **What only the screens did.** Such a round runs without the app's screens,
+  so it cannot lean on what they set up. The round applies the stored app
+  language itself before it words reminders, the widget or Live Activities
+  (Android's headless runs needed that all along), and `BackgroundRefresh`
+  keeps the refresh interval in `UserDefaults`, so its re-arm does not fall
+  back to 15 minutes.
 - **Links into a running app.** After such a launch, a window that connects
   with a link (a Live Activity tap, an .ics opened in Aperio) finds React
   Native running: React Native keeps its first initial URL and sends no event
-  for the link. expo-linking's app-delegate subscriber records it, so the
-  reminder tap and the file import read `Linking.getLinkingURL()` (and clear
-  it once taken) instead of React Native's `getInitialURL()`.
+  for the link. expo-linking's app-delegate subscriber records it, so on iOS
+  the reminder tap and the file import read `Linking.getLinkingURL()` (and
+  clear it once taken) instead of React Native's `getInitialURL()`. Android
+  cannot use that record for the launch link: expo-linking writes it again
+  whenever Android recreates the activity, which would open the tap again. It
+  takes the link from the activity's launch intent once per launch
+  (`CalFfi.takeLaunchLink`, the rules of the file import's launch intent).
 - **VoiceOver interruptions.** React Native 0.88 posts a layout change to
   VoiceOver for every changed text, which cuts announcements. 0.89 skips text
   in hidden subtrees; `patches/react-native+0.88.1.patch` backports that

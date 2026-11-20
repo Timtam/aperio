@@ -1,5 +1,11 @@
 #import "AperioTaskServiceHelper.h"
 
+/// What `EXTaskService` answers to, declared here so `@selector(shared)` names
+/// a known selector without importing the ExpoTaskManager pod.
+@protocol AperioTaskServiceSingleton <NSObject>
++ (id)shared;
+@end
+
 @implementation AperioTaskServiceHelper
 
 + (nullable id<EXTaskServiceInterface>)sharedTaskService {

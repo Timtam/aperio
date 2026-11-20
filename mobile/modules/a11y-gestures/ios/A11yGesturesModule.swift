@@ -39,7 +39,7 @@ private enum WindowGestureInstaller {
     }
     class_replaceMethod(
       UIWindow.self,
-      Selector(("accessibilityPerformMagicTap")),
+      #selector(UIWindow.accessibilityPerformMagicTap),
       imp_implementationWithBlock(magicBlock),
       "B@:"
     )
@@ -62,7 +62,7 @@ private enum WindowGestureInstaller {
     }
     class_replaceMethod(
       UIWindow.self,
-      Selector(("accessibilityScroll:")),
+      #selector(UIWindow.accessibilityScroll(_:)),
       imp_implementationWithBlock(scrollBlock),
       "B@:q"
     )

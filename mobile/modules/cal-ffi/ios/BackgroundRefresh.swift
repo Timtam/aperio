@@ -47,8 +47,14 @@ enum BackgroundRefresh {
   /// harder to read later.
   private static let floorMinutes = 15
 
+  /// The interval JavaScript last asked for, kept across launches: a launch
+  /// straight into the background runs none of the app's screens, so nothing
+  /// calls `enable` in it, and the re-arm after its round fell back to the
+  /// floor (a 60-minute interval became 15 until the app was next opened).
+  private static let minutesKey = "aperio.backgroundRefresh.minutes"
+
   private static let lock = NSLock()
-  private static var minutes = floorMinutes
+  private static var minutes = max(floorMinutes, UserDefaults.standard.integer(forKey: minutesKey))
   private static var wanted = false
 
   /// Start (or re-arm) the refresh task. Called by the JS layer whenever the
@@ -57,7 +63,9 @@ enum BackgroundRefresh {
     lock.lock()
     minutes = max(floorMinutes, requested)
     wanted = true
+    let kept = minutes
     lock.unlock()
+    UserDefaults.standard.set(kept, forKey: minutesKey)
     schedule()
   }
 

@@ -2,7 +2,9 @@ import { reminderTapOf, reminderTapOfUrl, type ReminderTap } from '@aperio/share
 import * as Linking from 'expo-linking';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
+import CalFfi from '../../modules/cal-ffi';
 import { getEventById, listCalendars } from '../api/calendar';
 import { logLine } from '../api/logs';
 import { navigateNested, whenNavigationReady } from '../navigation/navigationRef';
@@ -97,17 +99,25 @@ export function ReminderTapRouter() {
       const tap = url ? reminderTapOfUrl(url) : null;
       if (tap == null) return;
       // Taken: Expo's record of the last link must not hand it out again
-      // when this mounts anew (a window that reconnects).
+      // when this mounts anew (on iOS, a window that reconnects).
       Linking.clearInitialURL();
       setWaiting(tap);
     };
-    // The link that opened the app, from Expo's record rather than React
-    // Native's initial URL: under the scene life cycle a window that connects
-    // to an Aperio already running (started in the background,
-    // `modules/background-launch`) brings its link to Expo's app-delegate
-    // subscriber only; React Native keeps the initial URL of its first start
-    // and sends no event for it.
-    take(Linking.getLinkingURL());
+    // The link that opened the app.
+    // - Android: the activity's launch intent, once per launch
+    //   (`takeLaunchLink`). Android hands the same intent to an activity it
+    //   recreates (a font size or language change), and Expo records its URL
+    //   again each time, so its record would open the appointment again.
+    // - iOS: Expo's record rather than React Native's initial URL. Under the
+    //   scene life cycle a window that connects to an Aperio already running
+    //   (started in the background, `modules/background-launch`) brings its
+    //   link to Expo's app-delegate subscriber only; React Native keeps the
+    //   initial URL of its first start and sends no event for it.
+    if (Platform.OS === 'android') {
+      void CalFfi.takeLaunchLink().then(take, () => undefined);
+    } else {
+      take(Linking.getLinkingURL());
+    }
     const subscription = Linking.addEventListener('url', ({ url }) => take(url));
     return () => subscription.remove();
   }, []);
