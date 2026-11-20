@@ -17,11 +17,11 @@ import {
   whenAppLockCoverGone,
   whenAppLockReleased,
 } from '../state/appLock';
-import { registerStepWriteWaitHost } from '../state/stepWriteWait';
+import { registerStepWriteWaitHost, type WaitTexts } from '../state/stepWriteWait';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // The "please wait" dialog while a series is created in steps (decisions 227,
-// 265). It has no button, and neither the back button nor a tap outside closes
+// 265), and with words of its own while feedback is sent. It has no button, and neither the back button nor a tap outside closes
 // it: the write it waits for cannot be left halfway. Screen-reader focus lands
 // on its sentence when it shows. The imperative opener lives in
 // ../state/stepWriteWait; this is the render host. Each screen that writes in
@@ -55,6 +55,8 @@ export function StepWriteWaitHost() {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const [visible, setVisible] = useState(false);
+  // The words of the wait under way; none means a series in steps.
+  const [texts, setTexts] = useState<WaitTexts | undefined>(undefined);
   const messageRef = useRef<Text | null>(null);
   const shown = useRef<{ promise: Promise<void>; resolve: () => void } | null>(null);
   const dismissed = useRef<(() => void) | null>(null);
@@ -66,7 +68,8 @@ export function StepWriteWaitHost() {
   useEffect(
     () =>
       registerStepWriteWaitHost({
-        open: () => {
+        open: (next) => {
+          setTexts(next);
           let resolve = () => {};
           const promise = new Promise<void>((r) => {
             resolve = r;
@@ -136,10 +139,10 @@ export function StepWriteWaitHost() {
               text sizes the card would otherwise run off the screen. */}
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
             <Text style={styles.title} accessibilityRole="header">
-              {t('dialogs.stepWrite.title')}
+              {texts?.title ?? t('dialogs.stepWrite.title')}
             </Text>
             <Text ref={messageRef} style={styles.message} accessibilityRole="text">
-              {t('dialogs.stepWrite.body')}
+              {texts?.body ?? t('dialogs.stepWrite.body')}
             </Text>
           </ScrollView>
         </View>

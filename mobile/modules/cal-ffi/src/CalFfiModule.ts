@@ -474,6 +474,9 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** The redacted log text a feedback message would carry, for the form to
    *  show; the form hands this very text back in the draft. */
   feedbackLogs(): Promise<string>;
+  /** What the send would refuse at once, without the network: `FeedbackDraft`
+   *  JSON in, a `FeedbackFailure` JSON or `null` out. */
+  feedbackCheckJson(draftJson: string): Promise<string>;
   /** Send one message: `FeedbackDraft` + `HostDetails` JSON in, a
    *  `FeedbackOutcome` JSON out. */
   sendFeedbackJson(draftJson: string, detailsJson: string): Promise<string>;

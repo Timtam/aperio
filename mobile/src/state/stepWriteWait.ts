@@ -6,15 +6,22 @@
 // its screen: on iOS a dialog presents from the screen it is rendered in, and
 // one rendered at the app root could not present over a screen shown as a
 // sheet. Kept apart from the host COMPONENT so that file only exports a
-// component (Fast Refresh). Mirrors the desktop's useStepWriteWait.
+// component (Fast Refresh). Mirrors the desktop's useStepWriteWait. The
+// feedback send uses the same dialog with its own words (`waitWithDialog`).
 
 import type { StepWriteWait } from '@aperio/shared';
 
-/** What the mounted host does: show the dialog, and hide it again — settling
- *  only once it is gone, so what the caller presents or says next does not
- *  race its dismissal. */
+/** What a "please wait" dialog says, where it is not a series in steps. */
+export interface WaitTexts {
+  title: string;
+  body: string;
+}
+
+/** What the mounted host does: show the dialog (with the series' words, or
+ *  `texts`), and hide it again — settling only once it is gone, so what the
+ *  caller presents or says next does not race its dismissal. */
 export interface StepWriteWaitHost {
-  open: () => void;
+  open: (texts?: WaitTexts) => void;
   close: () => Promise<void>;
 }
 
@@ -49,12 +56,23 @@ async function closeIfOpen(): Promise<void> {
  * holds, the dialog is up while it runs and gone before this settles. Without
  * a mounted host the write just runs.
  */
-export const stepWriteWait: StepWriteWait = async (inSteps, write) => {
+export const stepWriteWait: StepWriteWait = (inSteps, write) =>
+  inSteps ? withDialog(undefined, write) : write();
+
+/**
+ * The same dialog around any long call, saying `texts`: up while `write`
+ * runs, gone before this settles. Without a mounted host the call just runs.
+ */
+export function waitWithDialog<T>(texts: WaitTexts, write: () => Promise<T>): Promise<T> {
+  return withDialog(texts, write);
+}
+
+async function withDialog<T>(texts: WaitTexts | undefined, write: () => Promise<T>): Promise<T> {
   const top = hosts[hosts.length - 1];
-  if (!inSteps || (openIn == null && top == null)) return write();
+  if (openIn == null && top == null) return write();
   if (openIn == null && top != null) {
     openIn = top;
-    top.open();
+    top.open(texts);
   }
   if (held > 0) return write();
   try {
@@ -62,7 +80,7 @@ export const stepWriteWait: StepWriteWait = async (inSteps, write) => {
   } finally {
     await closeIfOpen();
   }
-};
+}
 
 /**
  * Keep the dialog up across several writes — the copies a carry writes one

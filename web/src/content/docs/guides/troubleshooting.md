@@ -488,6 +488,9 @@ through the Static Forms service; Aperio sends no email itself.
   version and the processor architecture, on the phone also the app version
   and the build number and on Android the device model.
 
-Nothing is sent until you press **Send**. The form is protected against spam
+Nothing is sent until you press **Send**. While it is on its way, a dialog
+"Sending feedback, please wait …" is shown and takes the focus; with the logs
+this can take up to a minute. It closes by itself, and then the form shows and
+says the result. The form is protected against spam
 without a visible puzzle: Aperio solves a small computation itself. Builds of
 Aperio you compiled yourself carry no key for the form and say so in its place.

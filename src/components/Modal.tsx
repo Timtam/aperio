@@ -238,6 +238,15 @@ export function Modal({
       if (!d || !d.isConnected) return;
       const active = document.activeElement;
       if (active instanceof HTMLElement && d.contains(active)) return; // already recovered
+      // Focus is in ANOTHER open dialog: one opened from this one's content
+      // (the feedback panel's "sending" dialog inside Settings). It portals
+      // out of this dialog's DOM, but React bubbles its focusout through this
+      // one, so without this a window switch during its wait pulled focus to
+      // this dialog's close button behind it, where Escape closed both
+      // mid-send. That dialog's own net looks after it.
+      if (active instanceof HTMLElement && active.closest('[role="dialog"][aria-modal="true"]')) {
+        return;
+      }
       const focusables = getFocusables(d);
       // The header close button is present but in a busy dialog, whose
       // sentence is its stop.

@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { StepWriteWait } from '@aperio/shared';
 
-import { StepWriteWaitDialog } from './StepWriteWait';
+import { StepWriteWaitDialog, type WaitTexts } from './StepWriteWait';
 
 /** One frame of the browser, or a tick where there is none. */
 function frame(): Promise<void> {
@@ -24,7 +24,7 @@ function frame(): Promise<void> {
  * after the other —, so it opens at the first that needs it and says so once;
  * the release it returns closes it, again before it settles.
  */
-export function useStepWriteWait(): {
+export function useStepWriteWait(texts?: WaitTexts): {
   waitDialog: ReactNode;
   wait: StepWriteWait;
   hold: () => () => Promise<void>;
@@ -65,6 +65,17 @@ export function useStepWriteWait(): {
       if (held.current === 0 && opened.current) await close();
     };
   }, [close]);
-  const waitDialog = useMemo(() => <StepWriteWaitDialog open={open} />, [open]);
+  // `texts` by its strings: a caller builds the object anew on every render.
+  const title = texts?.title;
+  const body = texts?.body;
+  const waitDialog = useMemo(
+    () => (
+      <StepWriteWaitDialog
+        open={open}
+        texts={title != null && body != null ? { title, body } : undefined}
+      />
+    ),
+    [open, title, body],
+  );
   return { waitDialog, wait, hold };
 }

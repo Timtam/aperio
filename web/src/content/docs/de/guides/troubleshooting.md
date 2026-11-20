@@ -531,7 +531,10 @@ Nachricht geht über den Dienst Static Forms; Aperio verschickt keine E-Mails.
   seine Version und die Prozessorarchitektur, auf dem Telefon auch die
   App-Version und die Build-Nummer und unter Android das Gerätemodell.
 
-Gesendet wird erst, wenn du auf **Senden** drückst. Das Formular ist ohne
+Gesendet wird erst, wenn du auf **Senden** drückst. Solange das läuft, steht
+ein Fenster „Feedback wird gesendet, bitte warten …“ da und bekommt den Fokus;
+mit Protokollen kann das bis zu einer Minute dauern. Es schließt sich von
+selbst, danach steht das Ergebnis im Formular und wird angesagt. Das Formular ist ohne
 sichtbares Rätsel gegen Spam geschützt: Aperio löst eine kleine Rechenaufgabe
 selbst. Selbst gebaute Versionen von Aperio haben keinen Schlüssel für das
 Formular und sagen das an seiner Stelle.

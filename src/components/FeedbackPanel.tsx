@@ -5,12 +5,14 @@ import {
   feedbackFailureField,
   feedbackOutcomeSentence,
   type FeedbackInfo,
+  type FeedbackOutcome,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
-import { feedbackInfo, feedbackLogs, sendFeedback } from '../api/client';
+import { feedbackCheck, feedbackInfo, feedbackLogs, sendFeedback } from '../api/client';
 import { ReadOnlyText } from './ReadOnlyText';
+import { useStepWriteWait } from './useStepWriteWait';
 
 /** The logs field, rendered again only when its text changes: the text can
  *  be 30 MB, and every keystroke in the message renders the panel. */
@@ -47,6 +49,9 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
   const [attachLogs, setAttachLogs] = useState(initialAttachLogs);
   const [logs, setLogs] = useState<Logs>({ state: 'idle' });
   const [busy, setBusy] = useState(false);
+  // The guard against a second send: `busy` itself goes back before the
+  // dialog closes, so the button focus returns to says "Send" again.
+  const sending = useRef(false);
   const [error, setError] = useState<string | null>(null);
   // The thanks after a send, on screen as well as spoken: a sighted user
   // hears nothing, and the form clearing alone does not say it worked.
@@ -54,6 +59,22 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
 
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
+
+  // "Sending, please wait" while the send runs (Toni, 2026-11-18): the
+  // button's own word changing is not said by a screen reader, and a send with
+  // the logs can take up to a minute. The dialog takes focus, says itself, and
+  // is gone with focus back on Send before the result is shown or said.
+  // The logs go along only when they were read; a failed read sends the
+  // message alone, and the dialog says so.
+  const sentLogs = attachLogs && logs.state === 'ready' ? logs.text : null;
+  const { waitDialog, wait } = useStepWriteWait({
+    title: t('dialogs.settings.feedback.waitTitle'),
+    body: t(
+      sentLogs != null
+        ? 'dialogs.settings.feedback.waitBodyLogs'
+        : 'dialogs.settings.feedback.waitBody',
+    ),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -106,13 +127,19 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
   };
 
   const onSend = useCallback(async () => {
-    if (busy) return;
+    if (sending.current) return;
     // Ticked but not yet read: sending now would send something unseen.
     if (attachLogs && logs.state === 'loading') return;
     setError(null);
     setNotice(null);
+    sending.current = true;
     setBusy(true);
     const sentMessage = message;
+    const draft = {
+      message: sentMessage,
+      email: email.trim() === '' ? null : email,
+      logs: sentLogs,
+    };
     // A failure after the panel is gone (the dialog closed, another tab
     // chosen) has no alert line to stand in; the announcer still says it.
     const fail = (sentence: string) => {
@@ -120,11 +147,24 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
       else announce(sentence);
     };
     try {
-      const outcome = await sendFeedback({
-        message: sentMessage,
-        email: email.trim() === '' ? null : email,
-        logs: attachLogs && logs.state === 'ready' ? logs.text : null,
-      });
+      // What the send would refuse at once (an empty message, an incomplete
+      // address) is said without the dialog: a draft that never leaves must
+      // not be announced as on its way. The check is the core's, without the
+      // logs, which it does not read.
+      const refused = await feedbackCheck({ ...draft, logs: null });
+      const outcome: FeedbackOutcome =
+        refused != null
+          ? { outcome: 'failed', reason: refused }
+          : await wait(true, async () => {
+              try {
+                return await sendFeedback(draft);
+              } finally {
+                // Back to "Send" before the dialog closes and focus returns
+                // to the button: it must not say "Sending …" once it is done.
+                sending.current = false;
+                setBusy(false);
+              }
+            });
       const sentence = feedbackOutcomeSentence(outcome, t);
       if (outcome.outcome === 'sent') {
         // Only what was sent is cleared: text typed while it was on its way
@@ -147,9 +187,10 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
       console.warn('send_feedback failed', err);
       fail(t('dialogs.settings.feedback.failure.service'));
     } finally {
+      sending.current = false;
       setBusy(false);
     }
-  }, [busy, attachLogs, logs, message, email, t, announce]);
+  }, [attachLogs, logs.state, sentLogs, message, email, t, announce, wait]);
 
   // Nothing until the build's posture is known, so a keyless build never
   // shows a form for a moment and then takes it away.
@@ -266,6 +307,7 @@ export function FeedbackPanel({ initialAttachLogs = false }: { initialAttachLogs
           </button>
         </div>
       </form>
+      {waitDialog}
     </div>
   );
 }

@@ -4,25 +4,32 @@ import { useTranslation } from 'react-i18next';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { Modal } from './Modal';
 
+/** What a "please wait" dialog says: its title and its one sentence. */
+export interface WaitTexts {
+  title: string;
+  body: string;
+}
+
 /**
  * The "please wait" dialog while a series is created in steps (decisions 227,
  * 265): the calendar takes a new series without its deleted occurrences, and
  * the adapter removes them again one by one, which can take up to half a
- * minute.
+ * minute. Also while feedback is sent (`texts`), which with the logs can take
+ * as long.
  * Without it a blind user heard silence for that long and could not tell work
  * from a hang, and a sighted one saw a form that looked ready.
  *
  * It has no button and closes when the write is done; its sentence is its one
  * stop and what the screen reader reads on open.
  */
-export function StepWriteWaitDialog({ open }: { open: boolean }) {
+export function StepWriteWaitDialog({ open, texts }: { open: boolean; texts?: WaitTexts }) {
   const { t } = useTranslation();
   const noteRef = useRef<HTMLParagraphElement>(null);
   return (
     <Modal
       isOpen={open}
       onClose={ignore}
-      title={t('dialogs.stepWrite.title')}
+      title={texts?.title ?? t('dialogs.stepWrite.title')}
       className="modal--confirm"
       dismissOnBackdrop={false}
       initialFocusRef={noteRef}
@@ -30,7 +37,7 @@ export function StepWriteWaitDialog({ open }: { open: boolean }) {
     >
       <div className="form">
         <FocusableNote ref={noteRef} className="form__hint">
-          {t('dialogs.stepWrite.body')}
+          {texts?.body ?? t('dialogs.stepWrite.body')}
         </FocusableNote>
       </div>
     </Modal>

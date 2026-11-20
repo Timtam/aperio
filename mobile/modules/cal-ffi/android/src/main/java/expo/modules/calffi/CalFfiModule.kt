@@ -1557,6 +1557,13 @@ class CalFfiModule : Module() {
       }
     }.runOnQueue(lookupScope)
 
+    // What the send would refuse at once: no network, so the default queue.
+    AsyncFunction("feedbackCheckJson") { draftJson: String ->
+      hostCoded {
+        host.feedbackCheckJson(draftJson)
+      }
+    }
+
     // A send is two requests with 60 s timeouts each, and one more pair when
     // the captcha answer expired: never on the default queue, which every
     // short call shares. lookupScope hosts the other network-bound calls.

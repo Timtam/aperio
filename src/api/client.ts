@@ -760,6 +760,7 @@ import type {
   AccountFormSpec,
   EventGroup,
   FeedbackDraft,
+  FeedbackFailure,
   FeedbackInfo,
   FeedbackOutcome,
   Reminder,
@@ -2195,6 +2196,11 @@ export const feedbackInfo = () => invoke<FeedbackInfo>('feedback_info');
 
 /** The redacted log text a message would carry, for the form to show. */
 export const feedbackLogs = () => invoke<string>('feedback_logs');
+
+/** What the send would refuse at once, without the network, or `null` when
+ *  the draft can go. Asked before the "sending" dialog shows. */
+export const feedbackCheck = (draft: FeedbackDraft) =>
+  invoke<FeedbackFailure | null>('feedback_check', { draft });
 
 /** Send one message. Every ending is an outcome, never a thrown error. */
 export const sendFeedback = (draft: FeedbackDraft) =>
