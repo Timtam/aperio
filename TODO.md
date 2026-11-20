@@ -1004,9 +1004,10 @@ Vorschläge sind nicht aufgenommen.
       (in iOS 27 veraltet) ersetzt werden muss. Quelle:
       docs.expo.dev/build-reference/infrastructure.
       ↳ Gebaut (Toni, 2026-11-20: direkt auf SDK 58): Expo SDK 58, React
-      Native 0.88.1, eigenes Modul für Hintergrundstarts ohne Szene, Puffer
-      für frühe Links, der 0.89-Schutz gegen unterbrochene VoiceOver-Ansagen
-      als Patch, R8 aus, Push-Berechtigung über expo-notifications.
+      Native 0.88.1, eigenes Modul für Hintergrundstarts ohne Szene, Links
+      einer verbindenden Szene über expo-linking (`getLinkingURL`), der
+      0.89-Schutz gegen unterbrochene VoiceOver-Ansagen als Patch, R8 aus,
+      Push-Berechtigung über expo-notifications.
       Einzelheiten in mobile/README.md („What the move to SDK 58 brought“).
 - [ ] **Nach SDK 58 aufräumen, sobald es geht:** den React-Native-Patch und
       `buildReactNativeFromSource` mit SDK 59 (React Native 0.89) streichen;
@@ -1028,7 +1029,9 @@ Vorschläge sind nicht aufgenommen.
       hellem oder dunklem Design (react-native-screens #5137, offen); die
       Polsterung der Tab-Wurzeln auf größenveränderbaren iPhones (iPhone Duo,
       Leiste als Seitenschiene); Pressables in der Kopfzeile unter
-      react-native-screens 4.30.
+      react-native-screens 4.30; ob Xcode 27 `BGTaskScheduler.submit` in
+      `mobile/modules/cal-ffi/ios/BackgroundRefresh.swift` als veraltet meldet
+      (Warnung im EAS-Bauprotokoll suchen, dann ersetzen).
 - [ ] **Feedback-Formular am Handy: bei offener Tastatur nicht bis „Senden“
       wischbar** (Toni, 2026-11-19, Build 72, VoiceOver): Steht der Fokus in
       einem Textfeld und die Tastatur ist offen, erreicht Wischen nach rechts
@@ -1721,7 +1724,9 @@ nur eine Klasse für vom Nutzer angestoßene Vordergrundarbeit.
 - [x] **Schritt 0** — App-Group-Entitlement allein (`plugins/withAppGroup.js`),
       ohne Widget und ohne Datenbank-Umzug. Beantwortet: signiert die
       Capability überhaupt gegen unser Profil? Genau daran scheiterte Bau #5
-      mit `aps-environment` (siehe `withoutPushEntitlement.js`).
+      mit `aps-environment` (damals `withoutPushEntitlement.js`; seit SDK 58
+      lässt expo-notifications mit `enableRemoteNotifications: false` die
+      Push-Berechtigung weg).
 - [x] **Schritt 1** — Widget-Target über `@bacons/apple-targets`  
   ↳ Erledigt: Target an drei Stellen verdrahtet; das Widget wurde seither AUF dem Telefon beobachtet, was nur eine installierte, signierte Extension kann.
       (`mobile/targets/widget/`), feste Zeile, keine Daten. Beweist, dass das

@@ -10,15 +10,9 @@ import { useAppLockLocked } from '../state/appLockContext';
 import i18n from '../../i18n';
 import { announceAround } from '../a11y/speechHold';
 import { closeDayStartReview, requestDayStartReview } from '../state/dayStartRequest';
-import { listenForLinks } from '../state/earlyLinks';
 import { eventEditorParams } from './tapParams';
 
 let tapCount = 0;
-
-/** Whether the address the app was launched with was taken: once per run of
- *  the JavaScript, as `Linking.getInitialURL` answers with it for the whole
- *  run (as in IncomingFileImport). */
-let initialUrlTaken = false;
 
 /** A route of its own for every tap: navigating to an editor of the same name
  *  otherwise reuses the one that is up and replaces its params under state
@@ -101,14 +95,21 @@ export function ReminderTapRouter() {
   useEffect(() => {
     const take = (url: string | null) => {
       const tap = url ? reminderTapOfUrl(url) : null;
-      if (tap != null) setWaiting(tap);
+      if (tap == null) return;
+      // Taken: Expo's record of the last link must not hand it out again
+      // when this mounts anew (a window that reconnects).
+      Linking.clearInitialURL();
+      setWaiting(tap);
     };
-    if (!initialUrlTaken) {
-      initialUrlTaken = true;
-      void Linking.getInitialURL().then(take);
-    }
-    // Also the taps that came while no screen listened (`earlyLinks`).
-    return listenForLinks((url) => reminderTapOfUrl(url) != null, take);
+    // The link that opened the app, from Expo's record rather than React
+    // Native's initial URL: under the scene life cycle a window that connects
+    // to an Aperio already running (started in the background,
+    // `modules/background-launch`) brings its link to Expo's app-delegate
+    // subscriber only; React Native keeps the initial URL of its first start
+    // and sends no event for it.
+    take(Linking.getLinkingURL());
+    const subscription = Linking.addEventListener('url', ({ url }) => take(url));
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {

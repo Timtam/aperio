@@ -41,9 +41,12 @@ cycle. Expo SDK 58 generates a `SceneDelegate` and starts React Native in
   open). `modules/background-launch` starts the React host without a window
   when no scene has connected two seconds after launch (release builds only).
   Remove it once Expo fixes the issue.
-- **Links that come before a screen.** A link that opens the app after such a
-  launch arrives as a `url` event while no screen listens yet;
-  `src/state/earlyLinks.ts` keeps it for the screen that owns it.
+- **Links into a running app.** After such a launch, a window that connects
+  with a link (a Live Activity tap, an .ics opened in Aperio) finds React
+  Native running: React Native keeps its first initial URL and sends no event
+  for the link. expo-linking's app-delegate subscriber records it, so the
+  reminder tap and the file import read `Linking.getLinkingURL()` (and clear
+  it once taken) instead of React Native's `getInitialURL()`.
 - **VoiceOver interruptions.** React Native 0.88 posts a layout change to
   VoiceOver for every changed text, which cuts announcements. 0.89 skips text
   in hidden subtrees; `patches/react-native+0.88.1.patch` backports that

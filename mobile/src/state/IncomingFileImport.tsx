@@ -11,14 +11,9 @@ import { logLine } from '../api/logs';
 import { navigateNested, whenNavigationReady } from '../navigation/navigationRef';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from './calendarVisibility';
-import { listenForLinks } from './earlyLinks';
 import { importTarget, incomingFileOfUrl, readAndPresent } from './fileImportFlow';
 import { newImportToken } from './importProgress';
 import { readLastUsedCalendar } from './lastUsedCalendar';
-
-/** Whether the URL the app was launched with was taken: once per run of the
- *  JavaScript, as `Linking.getInitialURL` answers with it for the whole run. */
-let initialUrlTaken = false;
 
 /**
  * A calendar file shared into Aperio or opened in it from another app
@@ -86,14 +81,17 @@ export function IncomingFileImport() {
     if (Platform.OS === 'ios') {
       const open = (url: string | null) => {
         const file = url ? incomingFileOfUrl(url) : null;
-        if (file) void present(file);
+        if (!file) return;
+        // Taken: Expo's record of the last link must not hand it out again.
+        Linking.clearInitialURL();
+        void present(file);
       };
-      if (!initialUrlTaken) {
-        initialUrlTaken = true;
-        void Linking.getInitialURL().then(open);
-      }
-      // Also the files that came while no screen listened (`earlyLinks`).
-      return listenForLinks((url) => incomingFileOfUrl(url) != null, open);
+      // The file that opened the app, from Expo's record (see
+      // ReminderTapRouter: a window that connects to an Aperio already
+      // running brings its link only there).
+      open(Linking.getLinkingURL());
+      const subscription = Linking.addEventListener('url', ({ url }) => open(url));
+      return () => subscription.remove();
     }
     const take = () => {
       CalFfi.takeIncomingFileJson()

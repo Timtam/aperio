@@ -21,9 +21,9 @@ import UIKit
 // expo-task-manager hands it the queued event. A scene that connects later
 // starts React Native the usual way; the root view factory finds the running
 // host and only adds its surface. That host started without the scene's launch
-// options, so a link that opens the app afterwards arrives as an ordinary link
-// event, not as the initial URL; the reminder tap and the file import listen
-// for both.
+// options, and React Native sends no event for the link a connecting scene
+// brings; expo-linking's app-delegate subscriber records it, and the reminder
+// tap and the file import read it from there (`Linking.getLinkingURL`).
 //
 // Debug builds (the dev client) are left alone: its launcher picks the bundle
 // and needs a window to do it.

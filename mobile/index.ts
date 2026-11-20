@@ -1,9 +1,5 @@
 import { registerRootComponent } from 'expo';
 
-// First: keeps links that arrive before any screen listens (a launch into
-// the background runs the bundle without a window).
-import './src/state/earlyLinks';
-
 import {
   installConferenceDetector,
   installGroupSuggestionRules,
