@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputInstance,
 } from 'react-native';
 
 import type { MemberRight, TaskListShare, TaskUser } from '@aperio/shared';
@@ -102,7 +103,7 @@ export default function TaskMembersScreen({
 
   // The add field is always there: where a write took the pressed control
   // away, the screen reader's focus goes to it, as on the desktop.
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const focusAddField = useCallback(() => {
     // After the render that took the control away.
     requestAnimationFrame(() => {

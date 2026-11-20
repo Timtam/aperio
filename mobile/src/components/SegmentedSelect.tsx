@@ -1,5 +1,5 @@
 import { SegmentedControl } from '@expo/ui/community/segmented-control';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -17,9 +17,11 @@ export interface SegmentedOption<T extends string | number> {
  * "radio button" text. For long or variable option lists use {@link RadioGroup}
  * instead: a segmented control can only hold a handful of segments.
  *
- * The native control carries no label of its own, so the legend Text is rendered
- * alongside it (as in RadioGroup). Selection is mapped by index (robust against
- * two options sharing a label).
+ * On iOS the legend is the control's own name (@expo/ui 58's
+ * `accessibilityLabel`, a SwiftUI label), and the visible legend is hidden from
+ * VoiceOver so it is not read twice. Android's control takes no label, so there
+ * the legend Text stays a stop of its own before it (as in RadioGroup).
+ * Selection is mapped by index (robust against two options sharing a label).
  */
 export function SegmentedSelect<T extends string | number>({
   label,
@@ -39,8 +41,11 @@ export function SegmentedSelect<T extends string | number>({
   );
   return (
     <View style={styles.group}>
-      <Text style={styles.legend}>{label}</Text>
+      <Text style={styles.legend} aria-hidden={Platform.OS === 'ios'}>
+        {label}
+      </Text>
       <SegmentedControl
+        accessibilityLabel={label}
         values={options.map((o) => o.label)}
         selectedIndex={selectedIndex}
         onChange={(e) => {

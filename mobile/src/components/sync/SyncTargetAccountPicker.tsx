@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type TextInstance,
 } from 'react-native';
 
 import {
@@ -153,15 +154,15 @@ export function SyncTargetAccountPicker({
 
   // The one node that outlives every state change in here, and whose text IS
   // the state. See the component doc.
-  const statusRef = useRef<Text>(null);
-  const errorRef = useRef<Text>(null);
+  const statusRef = useRef<TextInstance>(null);
+  const errorRef = useRef<TextInstance>(null);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
     [],
   );
 
-  const focusOn = useCallback((node: Text | null) => {
+  const focusOn = useCallback((node: TextInstance | null) => {
     const tag = node ? findNodeHandle(node) : null;
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, []);

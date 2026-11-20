@@ -7,8 +7,8 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
+  type TextInputInstance,
 } from 'react-native';
 
 import {
@@ -130,7 +130,7 @@ export default function QuickAddTaskModal({
     [titleMatches, navigation, listId, date],
   );
 
-  const titleRef = useRef<TextInput | null>(null);
+  const titleRef = useRef<TextInputInstance | null>(null);
   // Don't let the async last-used read clobber a list the user already picked.
   const userPicked = useRef(false);
   /** The list the picker showed when the user first touched it. */

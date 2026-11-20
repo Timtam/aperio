@@ -28,6 +28,9 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputInstance,
+  type TextInstance,
+  type ViewInstance,
 } from 'react-native';
 
 import type {
@@ -297,7 +300,7 @@ export default function TaskEditorModal({
   const [poolRead, setPoolRead] = useState(0);
   // "Try again" unmounts the moment it is pressed. Focus goes to the field's
   // label, which stays while the people load, and the outcome is said.
-  const assigneesLabelRef = useRef<Text>(null);
+  const assigneesLabelRef = useRef<TextInstance>(null);
   const poolRetried = useRef(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   // Create mode only: subtask titles staged on the form, written right after the
@@ -346,9 +349,9 @@ export default function TaskEditorModal({
   // list/global default until re-edited (matches the desktop).
   const itemSound = useSoundPref(loaded ? `sound.item.${loaded.id}` : null);
 
-  const titleRef = useRef<TextInput | null>(null);
-  const scheduledDateRef = useRef<View | null>(null);
-  const deadlineDateRef = useRef<View | null>(null);
+  const titleRef = useRef<TextInputInstance | null>(null);
+  const scheduledDateRef = useRef<ViewInstance | null>(null);
+  const deadlineDateRef = useRef<ViewInstance | null>(null);
 
   // Header title (announced on present) reflects the mode.
   useEffect(() => {
@@ -1766,7 +1769,7 @@ function DateTimeField({
   onChangeDate: (v: string) => void;
   onChangeTime: (v: string) => void;
   onClear: () => void;
-  fieldRef: RefObject<View | null>;
+  fieldRef: RefObject<ViewInstance | null>;
   editable: boolean;
   /** Whether the owning source can store a time of day at all. */
   timeStorable: boolean;
@@ -1791,7 +1794,7 @@ function DateTimeField({
    * every field. The button that replaced it is the honest landing place: same
    * spot, and it undoes what was just done.
    */
-  const addTimeRef = useRef<View>(null);
+  const addTimeRef = useRef<ViewInstance>(null);
   const reparkOnAddTime = useRef(false);
   useEffect(() => {
     if (hasTime || !reparkOnAddTime.current) return;

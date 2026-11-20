@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type TextInstance,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
@@ -57,7 +58,7 @@ export function StepWriteWaitHost() {
   const [visible, setVisible] = useState(false);
   // The words of the wait under way; none means a series in steps.
   const [texts, setTexts] = useState<WaitTexts | undefined>(undefined);
-  const messageRef = useRef<Text | null>(null);
+  const messageRef = useRef<TextInstance | null>(null);
   const shown = useRef<{ promise: Promise<void>; resolve: () => void } | null>(null);
   const dismissed = useRef<(() => void) | null>(null);
   // Whether a write wants the dialog, and whether it was put on screen: a

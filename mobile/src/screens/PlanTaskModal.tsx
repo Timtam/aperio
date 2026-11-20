@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type ViewInstance,
 } from 'react-native';
 
 import type { Task } from '@aperio/shared';
@@ -66,7 +67,7 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const todayRef = useRef<View | null>(null);
+  const todayRef = useRef<ViewInstance | null>(null);
 
   // Load the task fresh, then drive SR focus onto the Today preset — the most
   // frequently-used action (desktop auto-focuses it).

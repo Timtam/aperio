@@ -6,6 +6,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  type TextInstance,
 } from 'react-native';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -28,7 +29,7 @@ export function CloseOnlyNotice({
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const ref = useRef<Text | null>(null);
+  const ref = useRef<TextInstance | null>(null);
   useEffect(() => {
     // After the render that put it there, so the node exists.
     requestAnimationFrame(() => {

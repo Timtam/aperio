@@ -990,7 +990,7 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
-- [ ] **iOS mit Xcode 27 bauen, bis April 2027** (Apple-Mail zu Build 72,
+- [x] **iOS mit Xcode 27 bauen, bis April 2027** (Apple-Mail zu Build 72,
       2026-11-17, ITMS-90725): Ab April 2027 nimmt App Store Connect nur
       noch Builds mit dem iOS-27-SDK an. Aperio baut mit dem iOS-26.4-SDK,
       weil EAS für Expo SDK 56 das Bild `sdk-56` (Xcode 26.4) nimmt. Laut
@@ -1003,6 +1003,32 @@ Vorschläge sind nicht aufgenommen.
       Widget-Aktionen, Live-Aktivitäten) und ob `BGTaskScheduler.submit`
       (in iOS 27 veraltet) ersetzt werden muss. Quelle:
       docs.expo.dev/build-reference/infrastructure.
+      ↳ Gebaut (Toni, 2026-11-20: direkt auf SDK 58): Expo SDK 58, React
+      Native 0.88.1, eigenes Modul für Hintergrundstarts ohne Szene, Puffer
+      für frühe Links, der 0.89-Schutz gegen unterbrochene VoiceOver-Ansagen
+      als Patch, R8 aus, Push-Berechtigung über expo-notifications.
+      Einzelheiten in mobile/README.md („What the move to SDK 58 brought“).
+- [ ] **Nach SDK 58 aufräumen, sobald es geht:** den React-Native-Patch und
+      `buildReactNativeFromSource` mit SDK 59 (React Native 0.89) streichen;
+      `modules/background-launch` streichen, sobald expo/expo#52878 behoben
+      ist; @bacons/apple-targets heben, sobald es eine Fassung für SDK 58
+      gibt.
+- [ ] **Barrierefreiheit nach SDK 58, je einzeln mit Gerätetest** (Recherche
+      2026-11-20): (1) `aria-hidden` statt des Paars
+      `accessibilityElementsHidden` + `importantForAccessibility` auf View,
+      Text, Pressable, Image und TextInput (setzt beide schon seit 0.85; nicht
+      auf Switch und ActivityIndicator); (2) auf iOS echte
+      Kopfzeilen-Knöpfe (`unstable_headerLeftItems`/`RightItems`) für
+      Abbrechen und Sync statt Pressables, die VoiceOver per Mittelpunkt-Tipp
+      auslöst; (3) `onAccessibilityTap` an Stellen, wo dieser Tipp danebengeht;
+      (4) ein Versuch mit dem nativen Picker und Switch von @expo/ui (beide
+      jetzt mit Namen), nur übernehmen, wenn VoiceOver sie per Wischen
+      erreicht.
+- [ ] **SDK-58-Risiken beobachten:** die Farbe der Statusleiste bei fest
+      hellem oder dunklem Design (react-native-screens #5137, offen); die
+      Polsterung der Tab-Wurzeln auf größenveränderbaren iPhones (iPhone Duo,
+      Leiste als Seitenschiene); Pressables in der Kopfzeile unter
+      react-native-screens 4.30.
 - [ ] **Feedback-Formular am Handy: bei offener Tastatur nicht bis „Senden“
       wischbar** (Toni, 2026-11-19, Build 72, VoiceOver): Steht der Fokus in
       einem Textfeld und die Tastatur ist offen, erreicht Wischen nach rechts

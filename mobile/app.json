@@ -90,7 +90,6 @@
     },
     "owner": "tonirbarth",
     "plugins": [
-      "./plugins/withoutPushEntitlement",
       [
         "expo-splash-screen",
         {
@@ -109,7 +108,8 @@
         "expo-notifications",
         {
           "icon": "./assets/android-icon-monochrome.png",
-          "color": "#1d4ed8"
+          "color": "#1d4ed8",
+          "enableRemoteNotifications": false
         }
       ],
       [
@@ -146,7 +146,20 @@
           "faceIDPermission": "Allow $(PRODUCT_NAME) to unlock the app with Face ID."
         }
       ],
-      "@bacons/apple-targets"
+      "@bacons/apple-targets",
+      "expo-status-bar",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": false
+          },
+          "ios": {
+            "buildReactNativeFromSource": true
+          }
+        }
+      ],
+      "expo-asset"
     ]
   }
 }

@@ -324,7 +324,7 @@ export default function ContactListsScreen({
               <View key={book.id} style={styles.row}>
                 <Pressable
                   ref={(node) => {
-                    rowTags.current[book.id] = node ? findNodeHandle(node) : null;
+                    rowTags.current[book.id] = node ? (findNodeHandle(node) ?? null) : null;
                   }}
                   accessible
                   accessibilityRole="switch"

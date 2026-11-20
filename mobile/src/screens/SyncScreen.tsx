@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInstance,
 } from 'react-native';
 
 import {
@@ -100,12 +101,12 @@ export default function SyncScreen() {
   const [changeNewPp, setChangeNewPp] = useState(''); // rotate: new passphrase
   const [disablePp, setDisablePp] = useState(''); // disable: current passphrase
   const [adoptPp, setAdoptPp] = useState(''); // adopt peer-enabled E2E passphrase
-  const adoptBannerRef = useRef<Text>(null);
+  const adoptBannerRef = useRef<TextInstance>(null);
   // Disconnecting unmounts the summary card AND the button that was pressed, so
   // screen-reader focus would drop to nothing. This line is the one node that
   // survives it and whose text IS the new state ("not configured"), which is the
   // same anchor the desktop panel lands on.
-  const statusLineRef = useRef<Text>(null);
+  const statusLineRef = useRef<TextInstance>(null);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),

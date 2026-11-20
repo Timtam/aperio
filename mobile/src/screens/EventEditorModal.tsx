@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInstance,
 } from 'react-native';
 
 import type {
@@ -298,7 +299,7 @@ function EventEditorScreen({
     sentence: string;
     proceed: () => Promise<void>;
   } | null>(null);
-  const splitNoticeRef = useRef<Text>(null);
+  const splitNoticeRef = useRef<TextInstance>(null);
   useEffect(() => {
     if (splitNotice == null) return;
     // After the render that put it there, so the node exists.

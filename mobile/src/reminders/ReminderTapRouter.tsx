@@ -10,6 +10,7 @@ import { useAppLockLocked } from '../state/appLockContext';
 import i18n from '../../i18n';
 import { announceAround } from '../a11y/speechHold';
 import { closeDayStartReview, requestDayStartReview } from '../state/dayStartRequest';
+import { listenForLinks } from '../state/earlyLinks';
 import { eventEditorParams } from './tapParams';
 
 let tapCount = 0;
@@ -106,8 +107,8 @@ export function ReminderTapRouter() {
       initialUrlTaken = true;
       void Linking.getInitialURL().then(take);
     }
-    const subscription = Linking.addEventListener('url', ({ url }) => take(url));
-    return () => subscription.remove();
+    // Also the taps that came while no screen listened (`earlyLinks`).
+    return listenForLinks((url) => reminderTapOfUrl(url) != null, take);
   }, []);
 
   useEffect(() => {

@@ -1,5 +1,3 @@
-import { InteractionManager } from 'react-native';
-
 /**
  * First-paint gate for the app-global startup scans (app badge, day-start
  * checks, reminder rescheduling). Their launch runs each fan out dozens of
@@ -59,11 +57,15 @@ const OPEN_CAP_MS = 5000;
  */
 export function armStartupGate(): () => void {
   const cap = setTimeout(openGate, OPEN_CAP_MS);
-  const interaction = InteractionManager.runAfterInteractions(() => {
-    setTimeout(openGate, SETTLE_DELAY_MS);
+  // The first idle moment after the first paint, as InteractionManager's
+  // runAfterInteractions gave it before React Native 0.88 removed it.
+  let settle: ReturnType<typeof setTimeout> | null = null;
+  const idle = requestIdleCallback(() => {
+    settle = setTimeout(openGate, SETTLE_DELAY_MS);
   });
   return () => {
     clearTimeout(cap);
-    interaction.cancel();
+    cancelIdleCallback(idle);
+    if (settle != null) clearTimeout(settle);
   };
 }

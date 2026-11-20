@@ -23,6 +23,7 @@ import {
   View,
   type StyleProp,
   type ViewStyle,
+  type ScrollViewInstance,
 } from 'react-native';
 
 import type {
@@ -745,7 +746,7 @@ export function CalendarDayList({
   // sits near the top. This is purely
   // visual: it touches no accessibilityLabel/role/action/tap handler, and only
   // the GRID path calls it — list/linear modes stack from the top already.
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   // Native pull-to-refresh — kicks a manual sync + external-cache warm; the list
   // reloads off the resulting cache-update. iOS + Android both back RefreshControl.
   const { refreshing, onRefresh } = usePullRefresh();

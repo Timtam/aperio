@@ -1,4 +1,4 @@
-import { NativeModule, requireNativeModule } from 'expo-modules-core';
+import { NativeModule, requireNativeModule } from 'expo';
 
 // App-wide VoiceOver gesture host. The native UIWindow category
 // (modules/a11y-gestures/ios/AperioWindowGestures.m) catches a magic tap

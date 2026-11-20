@@ -1,6 +1,6 @@
 import { SegmentedControl } from '@expo/ui/community/segmented-control';
 import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import type { CalendarViewKind } from './calendarViews';
 
@@ -10,6 +10,11 @@ import type { CalendarViewKind } from './calendarViews';
 // .segmented) and a Material SingleChoiceSegmentedButtonRow on Android, so
 // VoiceOver/TalkBack get native segmented-control semantics. Selecting the
 // already-active view is a no-op.
+//
+// Its name: on iOS on the control itself (@expo/ui 58's `accessibilityLabel`,
+// a SwiftUI label). A label on the plain wrapper View never reached VoiceOver,
+// since iOS reads no label from a view that is not an accessibility element.
+// Android has no label on the control, and keeps the wrapper's.
 
 export type { CalendarViewKind };
 
@@ -33,8 +38,12 @@ export function CalendarViewSwitcher({
     options.findIndex((o) => o.key === active),
   );
   return (
-    <View accessibilityLabel={t('toolbar.viewSwitch')} style={styles.row}>
+    <View
+      accessibilityLabel={Platform.OS === 'android' ? t('toolbar.viewSwitch') : undefined}
+      style={styles.row}
+    >
       <SegmentedControl
+        accessibilityLabel={t('toolbar.viewSwitch')}
         values={options.map((o) => o.label)}
         selectedIndex={selectedIndex}
         onChange={(e) => {

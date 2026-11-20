@@ -11,6 +11,7 @@ import { logLine } from '../api/logs';
 import { navigateNested, whenNavigationReady } from '../navigation/navigationRef';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from './calendarVisibility';
+import { listenForLinks } from './earlyLinks';
 import { importTarget, incomingFileOfUrl, readAndPresent } from './fileImportFlow';
 import { newImportToken } from './importProgress';
 import { readLastUsedCalendar } from './lastUsedCalendar';
@@ -91,8 +92,8 @@ export function IncomingFileImport() {
         initialUrlTaken = true;
         void Linking.getInitialURL().then(open);
       }
-      const subscription = Linking.addEventListener('url', ({ url }) => open(url));
-      return () => subscription.remove();
+      // Also the files that came while no screen listened (`earlyLinks`).
+      return listenForLinks((url) => incomingFileOfUrl(url) != null, open);
     }
     const take = () => {
       CalFfi.takeIncomingFileJson()

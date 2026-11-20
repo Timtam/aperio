@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputInstance,
 } from 'react-native';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -271,7 +272,7 @@ export default function AccountsScreen() {
 
   // The connect form's own name box, so a refused submit can put the cursor
   // where the problem is instead of only saying so.
-  const nameInput = useRef<TextInput>(null);
+  const nameInput = useRef<TextInputInstance>(null);
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
 
@@ -1135,7 +1136,7 @@ export default function AccountsScreen() {
               <View
                 key={account.id}
                 ref={(node) => {
-                  rowTags.current[account.id] = node ? findNodeHandle(node) : null;
+                  rowTags.current[account.id] = node ? (findNodeHandle(node) ?? null) : null;
                 }}
                 accessible
                 accessibilityRole="text"

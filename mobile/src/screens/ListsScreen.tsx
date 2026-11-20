@@ -190,7 +190,7 @@ export default function ListsScreen() {
               <View key={list.id} style={styles.row}>
                 <Pressable
                   ref={(node) => {
-                    rowTags.current[list.id] = node ? findNodeHandle(node) : null;
+                    rowTags.current[list.id] = node ? (findNodeHandle(node) ?? null) : null;
                   }}
                   accessible
                   accessibilityRole="switch"
