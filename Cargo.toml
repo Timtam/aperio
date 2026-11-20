@@ -135,7 +135,6 @@ type_complexity = "allow"
 aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
 ical-mapping = { path = "crates/ical-mapping" }
-cal-core-wasm = { path = "crates/cal-core-wasm" }
 builtin-oauth = { path = "crates/builtin-oauth" }
 adapter-local = { path = "crates/adapter-local" }
 adapter-device-calendar = { path = "crates/adapter-device-calendar" }
@@ -206,7 +205,6 @@ icalendar = "0.16"
 rrule = "0.14"
 
 # Auth
-oauth2 = "4"
 keyring = "2"
 
 # Krypto
