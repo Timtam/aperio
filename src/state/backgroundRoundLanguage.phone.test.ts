@@ -1,3 +1,7 @@
+// @vitest-environment node
+// Node, not jsdom: under jsdom Vite resolves every import of the module under
+// test as it transforms it, and CI's frontend job has no mobile/node_modules,
+// so `react-native` could not be found there even though it is mocked.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -16,21 +20,37 @@ const state = vi.hoisted(() => ({
   applyFails: false,
 }));
 
-// The phone's own packages, by their path: the module under test resolves
-// them from mobile/node_modules, which a bare name here would not reach.
-vi.mock('../../mobile/node_modules/react-native', () => ({ Platform: { OS: 'ios' } }));
-vi.mock('../../mobile/node_modules/@react-native-async-storage/async-storage', () => ({
-  default: { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() },
+const phonePackages = vi.hoisted(() => ({
+  reactNative: () => ({ Platform: { OS: 'ios' } }),
+  asyncStorage: () => ({
+    default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
+  }),
+  backgroundTask: () => ({
+    BackgroundTaskResult: { Success: 1, Failed: 2 },
+    BackgroundTaskStatus: { Restricted: 1, Available: 2 },
+  }),
+  taskManager: () => ({
+    defineTask: (_name: string, run: () => Promise<unknown>) => {
+      state.handler = run;
+    },
+  }),
 }));
-vi.mock('../../mobile/node_modules/expo-background-task', () => ({
-  BackgroundTaskResult: { Success: 1, Failed: 2 },
-  BackgroundTaskStatus: { Restricted: 1, Available: 2 },
-}));
-vi.mock('../../mobile/node_modules/expo-task-manager', () => ({
-  defineTask: (_name: string, run: () => Promise<unknown>) => {
-    state.handler = run;
-  },
-}));
+
+// The phone's own packages, under both spellings. Where mobile/node_modules
+// is installed (a developer's machine), the module under test resolves them
+// there, which only the path reaches; where it is not (CI's frontend job),
+// neither resolves and the bare name is what matches.
+vi.mock('react-native', phonePackages.reactNative);
+vi.mock('../../mobile/node_modules/react-native', phonePackages.reactNative);
+vi.mock('@react-native-async-storage/async-storage', phonePackages.asyncStorage);
+vi.mock(
+  '../../mobile/node_modules/@react-native-async-storage/async-storage',
+  phonePackages.asyncStorage,
+);
+vi.mock('expo-background-task', phonePackages.backgroundTask);
+vi.mock('../../mobile/node_modules/expo-background-task', phonePackages.backgroundTask);
+vi.mock('expo-task-manager', phonePackages.taskManager);
+vi.mock('../../mobile/node_modules/expo-task-manager', phonePackages.taskManager);
 vi.mock('../../mobile/modules/cal-ffi', () => ({ default: {} }));
 vi.mock('../../mobile/src/api/prefs', () => ({ getUserPref: async () => null }));
 vi.mock('../../mobile/src/settings/language', () => ({
