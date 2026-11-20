@@ -1699,10 +1699,6 @@ public class CalFfiModule: Module {
       await LiveActivityBridge.end(id: id)
     }
 
-    AsyncFunction("liveActivityEndAfter") { (id: String, contentJson: String, at: String) async throws in
-      try await LiveActivityBridge.endAfter(id: id, contentJson: contentJson, at: at)
-    }
-
     // Only a running Aperio can end an activity: each one's end, kept for the
     // short background wake-up, which comes forward to the earliest and ends
     // the overdue ones first (BackgroundRefresh.swift).
