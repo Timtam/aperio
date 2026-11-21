@@ -18,11 +18,8 @@ use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
 use cal_core::event_diff::EventField;
-use chrono::{
-    DateTime, Duration, Local, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone,
-    Utc,
-};
-use chrono_tz::Tz;
+use cal_core::Zone;
+use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
@@ -163,11 +160,11 @@ fn recurrence_line(line: &str) -> Option<RecurrenceLine<'_>> {
 /// The zone a series' wall clocks are read in: none for a series of days or
 /// one on UTC, its zone, or the reason it has none Aperio can use — a name
 /// tzdata does not know, which costs a wall clock that needs it.
-type SeriesZone = Result<Option<Tz>, &'static str>;
+type SeriesZone = Result<Option<Zone>, &'static str>;
 
 /// The zone tzdata names `name`, in any ASCII case and by any of its links.
-fn zone_named(name: &str) -> Option<Tz> {
-    cal_core::canonical_zone(name)?.parse().ok()
+fn zone_named(name: &str) -> Option<Zone> {
+    cal_core::zone_of(name)
 }
 
 /// The instant a wall-clock time names in `tz`, as RFC 5545 reads one
@@ -176,16 +173,11 @@ fn zone_named(name: &str) -> Option<Tz> {
 /// reading; a time a clock change skips is read with the offset from before
 /// the change. A timed deletion has to land on the occurrence's instant
 /// exactly, or it cancels nothing.
-pub(crate) fn wall_clock_in(tz: Tz, wall: NaiveDateTime) -> DateTime<Utc> {
-    match tz.from_local_datetime(&wall) {
-        LocalResult::Single(at) | LocalResult::Ambiguous(at, _) => at.with_timezone(&Utc),
-        LocalResult::None => {
-            let before = tz
-                .offset_from_utc_datetime(&(wall - Duration::days(1)))
-                .fix();
-            Utc.from_utc_datetime(&(wall - Duration::seconds(before.local_minus_utc().into())))
-        }
-    }
+///
+/// That rule is cal-core's `WallPolicy::Rfc5545`; it names an instant for
+/// every wall time but the first day of chrono's range.
+pub(crate) fn wall_clock_in(tz: Zone, wall: NaiveDateTime) -> Option<DateTime<Utc>> {
+    tz.to_utc(wall, cal_core::WallPolicy::Rfc5545)
 }
 
 /// A date as Aperio anchors every all-day boundary: the instant of its LOCAL
@@ -271,7 +263,10 @@ fn exdates_of_line(
         } else if let Ok(wall) = NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%S") {
             match zone {
                 _ if all_day => read.push(local_midnight(wall.date())),
-                Ok(Some(tz)) => read.push(wall_clock_in(tz, wall)),
+                Ok(Some(tz)) => match wall_clock_in(tz, wall) {
+                    Some(at) => read.push(at),
+                    None => problem = Some("a wall clock outside the years a zone can read"),
+                },
                 Ok(None) => read.push(Utc.from_utc_datetime(&wall)),
                 Err(why) => problem = Some(why),
             }
@@ -371,12 +366,10 @@ fn recurrence_to_lines(rec: &EventRecurrence, all_day: bool, zone: Option<&str>)
             )
         } else {
             match zone {
-                Some((name, tz))
-                    if wall_clock_in(tz, deleted.with_timezone(&tz).naive_local()) == deleted =>
-                {
+                Some((name, tz)) if wall_clock_in(tz, tz.wall(deleted)) == Some(deleted) => {
                     format!(
                         "EXDATE;TZID={name}:{}",
-                        deleted.with_timezone(&tz).format("%Y%m%dT%H%M%S")
+                        tz.wall(deleted).format("%Y%m%dT%H%M%S")
                     )
                 }
                 _ => format!("EXDATE:{}", deleted.format("%Y%m%dT%H%M%SZ")),
