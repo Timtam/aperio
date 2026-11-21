@@ -493,8 +493,8 @@ wieder aufgenommen wurde (97a bis 99a später am Tag, zu den Stufen 6 und 7):
   Windows-Zone `UTC` ausdrücklich, wie einen anderen Zonenwechsel, und der
   Picker kann UTC auch bei Exchange anbieten. Eine neue Serie in UTC
   schreibt weiter keine Zone (26a). Verworfen: den Wechsel mit Grund
-  ablehnen. Vor dem Merge misst ein Live-Test an Tonis Server, dass
-  Exchange die Zone so annimmt und die Serie danach auf UTC wiederholt.
+  ablehnen. Der Live-Test vor dem Merge hat es an Tonis Server bestätigt
+  (Stufe 7).
 
 Geprüft vorab (2026-11-21, Tonis Desktop-Daten nur lesend): Von 89 Serien mit
 Uhrzeit im Zwischenspeicher haben drei keine Zone, alle bei CalDAV und alle mit
@@ -1321,7 +1321,12 @@ Handy im selben PR.
    Beginn und Ende auf der neuen Uhr (240) und die Regel (241). Nur am
    Serienkopf, und nur mit der Kopie des Servers. Jedes Ändern einer Serie
    mit Uhrzeit fragt dafür die Zonenliste des Servers; kennt er `UTC`
-   nicht, lehnt 98a ab. Der Live-Test dazu (`ews-zones utc`) steht aus.
+   nicht, lehnt 98a ab. Live-Test Zonen-UTC (22. November 2026, Tonis Server,
+   Programm `ews-zones utc` über Aperios eigenen Adapter): Der Server kennt
+   `UTC`. Eine Serie in Berlin, vier Dienstage ab dem 20. Oktober um 10:00,
+   stand vorher um 08:00 und nach der Zeitumstellung um 09:00 UTC; nach dem
+   Wechsel speichert Exchange Beginn- und Endzone `UTC`, und alle vier Termine
+   stehen um 08:00 UTC. Die Serie wiederholt sich also auf UTC.
 8. **Datum, Uhrzeit und Regel auf einer Serien-Uhr** — `feat(shared): dates, times and repeat rules on a series clock`.
    Umrechnung mit Lücke und Doppelstunde, Formularfelder mit Uhr, Regel-Ableitung
    aus dem Tages-Schlüssel, WKST, UNTIL. Noch unsichtbar. Fixture
