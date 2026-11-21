@@ -1030,6 +1030,18 @@ Vorschläge sind nicht aufgenommen.
       auf iOS als benannter Container (`NamedSegmentedControl`), Blocktitel
       „Geplant für“/„Fällig“/„Teilnehmer“ als Überschriften, Speichern/Senden
       als Kopfzeilen-Knopf (noch Pressable, siehe (2)).
+- [ ] **Wischen bei offener Tastatur: Diagnose-Build auswerten** (Toni,
+      2026-11-21, zurückgestellt). Mit offener Tastatur springt VoiceOver nach
+      dem letzten sichtbaren Feld in die Tastatur; drei Flächen-Varianten
+      halfen nicht. Ursache laut Recherche (wf_4b33d7c5-1ce, dekompiliertes
+      UIKit iOS 18.2/26.1): VoiceOver wirft bei offener Tastatur alles
+      dahinter Liegende aus der Reihenfolge; Tabellen (Apples Kontakte)
+      entgehen dem, weil sie ihre Zeilen selbst aufzählen. Der Diagnose-Build
+      (6c79223f, Schalter unter Einstellungen → Protokolle) liegt bereit:
+      geordneter Container, Fokus folgt, Tastatur schließt, Drei-Finger aus.
+      Gebaut wurde er nicht: das EAS-Kontingent für iOS ist bis 2026-12-01
+      verbraucht. Danach bauen (oder auf GitHubs Mac mit `eas build
+      --local`), Toni vergleicht, Gewinner fest einbauen, Labor wieder raus.
 - [ ] **Magic Tap und waagerechtes Drei-Finger-Wischen nur, wo ein Bildschirm
       sie nutzt** (Recherche 2026-11-21, bestätigt): `A11yGesturesModule.swift`
       meldet beide am Fenster immer als erledigt, auch wo kein Bildschirm eine
