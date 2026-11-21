@@ -100,7 +100,6 @@ pub trait DeviceLocalRead: Send + Sync {
     ) -> serde_json::Map<String, serde_json::Value>;
 }
 
-/// Process-wide registry of all non-local adapter instances.
 /// The data families one account's loaded adapter serves (see
 /// [`AdapterRegistry::served_families`]). Meetings have no cache of their
 /// own, so they are not a family here.
@@ -111,6 +110,7 @@ pub struct ServedFamilies {
     pub contacts: bool,
 }
 
+/// Process-wide registry of all non-local adapter instances.
 pub struct AdapterRegistry {
     /// External adapters with CalendarFeature, keyed by account_id.
     external_cal: RwLock<HashMap<String, Arc<dyn CalendarFeature>>>,
@@ -664,6 +664,25 @@ impl AdapterRegistry {
     /// `delete_account` so the registry doesn't hand out a stale
     /// reference after deletion.
     pub fn unregister(&self, account_id: &str) {
+        self.drop_adapters(account_id);
+        self.registered_config
+            .lock()
+            .expect("registry poisoned")
+            .remove(account_id);
+        let mut routes = self.routes.lock().expect("registry routes poison");
+        routes
+            .calendar_to_account
+            .retain(|_, owner| owner != account_id);
+        routes
+            .list_to_account
+            .retain(|_, owner| owner != account_id);
+        routes
+            .contact_list_to_account
+            .retain(|_, owner| owner != account_id);
+    }
+
+    /// Take `account_id` out of every adapter map.
+    fn drop_adapters(&self, account_id: &str) {
         self.external_cal
             .write()
             .expect("registry cal poison")
@@ -680,20 +699,24 @@ impl AdapterRegistry {
             .write()
             .expect("registry vc poison")
             .remove(account_id);
-        self.registered_config
-            .lock()
-            .expect("registry poisoned")
-            .remove(account_id);
-        let mut routes = self.routes.lock().expect("registry routes poison");
-        routes
-            .calendar_to_account
-            .retain(|_, owner| owner != account_id);
-        routes
-            .list_to_account
-            .retain(|_, owner| owner != account_id);
-        routes
-            .contact_list_to_account
-            .retain(|_, owner| owner != account_id);
+    }
+
+    /// Run `place`, which fills the adapter maps for `account_id`, and take
+    /// out whatever it placed if it fails part-way. A plugin can declare a
+    /// family whose surface this host cannot open (a sub-vtable of an unknown
+    /// revision, or one without its minimum methods) while the families before
+    /// it opened fine. Left in, those would make a half-registered account
+    /// look like a loaded adapter that serves fewer families
+    /// ([`Self::served_families`]), and the cache of the families it still
+    /// declares would be discarded at the next start. A failed registration
+    /// leaves no adapter behind: the account is one whose adapter did not
+    /// load, which keeps everything and is retried by the next sweep.
+    fn placed_whole<T>(
+        &self,
+        account_id: &str,
+        place: impl FnOnce() -> Result<T, RegistryError>,
+    ) -> Result<T, RegistryError> {
+        place().inspect_err(|_| self.drop_adapters(account_id))
     }
 
     /// Look up the account-id that owns `calendar_id`. Returns
@@ -1345,6 +1368,49 @@ impl AdapterRegistry {
             .ok_or_else(|| RegistryError::PluginMissing(plugin_id.to_string()))?
             .manifest
             .clone();
+        let registered = self.placed_whole(&account.id, || {
+            self.place_surfaces(account, &manifest, &instance)
+        })?;
+        // A sync target has nothing to place here. It holds no calendars, no
+        // task lists, no contacts and no meetings — the orchestrator opens it
+        // against its own configuration, not through this path.
+        //
+        // This used to be an error, and saying so beat registering nothing in
+        // silence, because a sync-only account could not exist. One can now:
+        // storage backends are accounts you add. Left as an error, every one of
+        // them would sit in the sweep failing on every round, get parked as
+        // unregisterable, and show the user a permanent fault for an account
+        // that is working exactly as intended.
+        let sync_only = !manifest.capabilities.is_empty()
+            && manifest
+                .capabilities
+                .iter()
+                .all(|c| *c == plugin_core::Capability::Sync);
+        // `has_data_family()` would be the wrong test here: it excludes
+        // meetings, so a videoconference plugin that failed to place its
+        // adapter would fall silent instead of reporting.
+        if !registered && sync_only {
+            return Ok(());
+        }
+        if !registered {
+            return Err(RegistryError::Construct(format!(
+                "plugin `{plugin_id}` declares no capability this account can use: {:?}",
+                manifest.capabilities
+            )));
+        }
+        drop(instance);
+        Ok(())
+    }
+
+    /// Put `instance` into the map of every family the plugin declares, and
+    /// say whether it went anywhere. Called through [`Self::placed_whole`],
+    /// which takes back what a failure part-way already placed.
+    fn place_surfaces(
+        &self,
+        account: &Account,
+        manifest: &plugin_core::PluginManifest,
+        instance: &Arc<LoadedInstance>,
+    ) -> Result<bool, RegistryError> {
         let mut registered = false;
         if manifest.has_capability(&plugin_core::Capability::Calendar) {
             self.insert_calendar(&account.id, instance.clone())?;
@@ -1385,35 +1451,18 @@ impl AdapterRegistry {
                 }
             }
         }
-        // A sync target has nothing to place here. It holds no calendars, no
-        // task lists, no contacts and no meetings — the orchestrator opens it
-        // against its own configuration, not through this path.
-        //
-        // This used to be an error, and saying so beat registering nothing in
-        // silence, because a sync-only account could not exist. One can now:
-        // storage backends are accounts you add. Left as an error, every one of
-        // them would sit in the sweep failing on every round, get parked as
-        // unregisterable, and show the user a permanent fault for an account
-        // that is working exactly as intended.
-        let sync_only = !manifest.capabilities.is_empty()
-            && manifest
-                .capabilities
-                .iter()
-                .all(|c| *c == plugin_core::Capability::Sync);
-        // `has_data_family()` would be the wrong test here: it excludes
-        // meetings, so a videoconference plugin that failed to place its
-        // adapter would fall silent instead of reporting.
-        if !registered && sync_only {
-            return Ok(());
-        }
-        if !registered {
-            return Err(RegistryError::Construct(format!(
-                "plugin `{plugin_id}` declares no capability this account can use: {:?}",
-                manifest.capabilities
-            )));
-        }
-        drop(instance);
-        Ok(())
+        Ok(registered)
+    }
+
+    /// Test hook for [`Self::placed_whole`]: a registration that fails after
+    /// placing some surfaces, simulated by `place`.
+    #[cfg(test)]
+    pub(crate) fn place_for_tests<T>(
+        &self,
+        account_id: &str,
+        place: impl FnOnce() -> Result<T, RegistryError>,
+    ) -> Result<T, RegistryError> {
+        self.placed_whole(account_id, place)
     }
 }
 

@@ -3403,3 +3403,151 @@ fn an_account_without_its_adapter_keeps_its_cache() {
     assert_eq!(store.read_contacts(ACC, BOOK).unwrap().len(), 1);
     assert!(!store.refresh_errors().unwrap().is_empty(), "error kept");
 }
+
+fn calendar_adapter() -> Arc<PartialBootstrapAdapter> {
+    Arc::new(PartialBootstrapAdapter {
+        changes: vec![],
+        unfetched: vec![],
+    })
+}
+
+fn tasks_adapter() -> Arc<SectionAdapter> {
+    Arc::new(SectionAdapter {
+        sections: vec![],
+        calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    })
+}
+
+#[test]
+fn an_adapter_that_stops_serving_calendars_loses_their_cache() {
+    let store = setup();
+    seed_every_family(&store);
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            CAL,
+            &cal_core::Error::Network("down".into()),
+            Attempt::Forced { generation: 0 },
+        )
+        .unwrap();
+    assert!(count(&store, "SELECT COUNT(*) FROM cache_events_fts") > 0);
+    let registry = bare_registry();
+    registry.register_host_adapter(ACC, None, Some(tasks_adapter()));
+    registry.register_host_contacts(ACC, Arc::new(RegisteredContacts));
+
+    let dropped = super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap();
+
+    assert_eq!(dropped, 1, "only the calendar family");
+    assert!(store.read_calendars(ACC).unwrap().is_empty());
+    assert!(store.read_events(ACC, CAL, wide()).unwrap().is_empty());
+    assert_eq!(
+        count(&store, "SELECT COUNT(*) FROM cache_events"),
+        0,
+        "no event rows"
+    );
+    assert_eq!(
+        count(&store, "SELECT COUNT(*) FROM cache_events_fts"),
+        0,
+        "no event search rows"
+    );
+    assert_eq!(
+        count(
+            &store,
+            "SELECT COUNT(*) FROM cache_sync_state WHERE scope IN ('calendars', 'events')"
+        ),
+        0,
+        "no calendar sync state"
+    );
+    assert_eq!(store.read_task_lists(ACC).unwrap().len(), 1);
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 1);
+    assert_eq!(store.read_contacts(ACC, BOOK).unwrap().len(), 1);
+}
+
+#[test]
+fn an_adapter_that_stops_serving_contacts_loses_their_cache() {
+    let store = setup();
+    seed_every_family(&store);
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Contacts,
+            BOOK,
+            &cal_core::Error::Network("down".into()),
+            Attempt::Forced { generation: 0 },
+        )
+        .unwrap();
+    let registry = bare_registry();
+    registry.register_host_adapter(ACC, Some(calendar_adapter()), Some(tasks_adapter()));
+
+    let dropped = super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap();
+
+    assert_eq!(dropped, 1, "only the contact family");
+    assert!(store.read_contacts(ACC, BOOK).unwrap().is_empty());
+    assert!(store.read_contact_lists(ACC).unwrap().is_empty());
+    assert_eq!(
+        count(
+            &store,
+            "SELECT COUNT(*) FROM cache_sync_state WHERE scope IN ('contact_lists', 'contacts')"
+        ),
+        0,
+        "no contact sync state"
+    );
+    assert_eq!(store.read_calendars(ACC).unwrap().len(), 1);
+    assert_eq!(store.read_events(ACC, CAL, wide()).unwrap().len(), 1);
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 1);
+}
+
+#[test]
+fn a_host_internal_account_keeps_its_cache_whatever_is_registered() {
+    let store = setup();
+    // The device calendar registers its surfaces from the host, at its own
+    // moment: what is registered at startup says nothing about what it serves.
+    store
+        .db
+        .with_conn(|c| {
+            c.execute(
+                "UPDATE accounts SET adapter_kind = 'device_calendar' WHERE id = ?1",
+                params![ACC],
+            )
+        })
+        .unwrap();
+    seed_every_family(&store);
+    let registry = bare_registry();
+    registry.register_host_adapter(ACC, Some(calendar_adapter()), None);
+
+    let dropped = super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap();
+
+    assert_eq!(dropped, 0);
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 1);
+    assert_eq!(store.read_contacts(ACC, BOOK).unwrap().len(), 1);
+}
+
+#[test]
+fn a_registration_that_fails_part_way_keeps_the_cache() {
+    let store = setup();
+    seed_every_family(&store);
+    let registry = bare_registry();
+    // The plugin declares calendars and tasks; its calendar surface opened,
+    // its tasks surface did not.
+    let failed = registry.place_for_tests(ACC, || {
+        registry.register_host_adapter(ACC, Some(calendar_adapter()), None);
+        Err::<(), _>(crate::registry::RegistryError::Construct(
+            "plugin doesn't expose the TasksFeature surface".into(),
+        ))
+    });
+    assert!(failed.is_err());
+    assert_eq!(
+        registry.served_families(ACC),
+        None,
+        "a failed registration leaves no adapter behind"
+    );
+
+    let dropped = super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap();
+
+    assert_eq!(dropped, 0);
+    assert_eq!(store.read_calendars(ACC).unwrap().len(), 1);
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 1);
+    assert_eq!(store.read_contacts(ACC, BOOK).unwrap().len(), 1);
+    assert!(!store.refresh_errors().unwrap().is_empty(), "error kept");
+}
