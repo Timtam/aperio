@@ -14,7 +14,10 @@ use super::cache_swr;
 use super::cache_swr::TauriCacheObserver;
 use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SeriesRows, SyncScope};
 
-use host_core::builtin_adapters::{local_reminder_capabilities, reminder_capabilities_for_account};
+use host_core::builtin_adapters::{
+    local_reminder_capabilities, recurrence_capabilities_for_account,
+    reminder_capabilities_for_account,
+};
 use plugin_core::{PluginManager, RecurrenceCapabilities, ReminderCapabilities};
 
 use super::birthdays::{
@@ -34,31 +37,6 @@ use host_core::wire::CalendarRow;
 
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
-
-/// Resolve an account's recurrence capabilities from its plugin
-/// manifest. Local calendars (`account_id == LOCAL_ID`) and any
-/// account whose plugin we can't resolve fall back to full
-/// RFC-5545 support — the host's own SQLite store has no
-/// restrictions, and a missing manifest shouldn't silently strip
-/// options the source might actually support.
-fn recurrence_caps_for_account(
-    account_id: &str,
-    account_kinds: &std::collections::HashMap<String, AdapterKind>,
-    plugin_manager: &PluginManager,
-) -> RecurrenceCapabilities {
-    let Some(kind) = account_kinds.get(account_id) else {
-        return RecurrenceCapabilities::default();
-    };
-    // Which plugin serves this kind is the PLUGIN's own statement, read from
-    // its manifest. A host-internal kind (the local store) has none, and full
-    // RFC-5545 support is the right fallback — the host's own SQLite store has
-    // no restrictions, and a missing manifest must not silently strip options
-    // the source might actually support.
-    plugin_manager
-        .plugin_for_adapter_kind(kind.as_str())
-        .map(|p| p.manifest.recurrence.clone())
-        .unwrap_or_default()
-}
 
 /// Frontend-supplied payload for creating a local calendar.
 #[derive(Debug, Deserialize)]
@@ -159,7 +137,7 @@ pub async fn list_calendars(
                 .account_for_calendar(&cal.id)
                 .unwrap_or_else(|| LOCAL_ID.to_string());
             let recurrence_capabilities =
-                recurrence_caps_for_account(&account_id, &account_kinds, &plugin_manager);
+                recurrence_capabilities_for_account(&plugin_manager, &account_id, &account_kinds);
             let reminder_capabilities =
                 reminder_capabilities_for_account(&plugin_manager, &account_id, &account_kinds);
             CalendarRow::new(
@@ -175,7 +153,7 @@ pub async fn list_calendars(
         // editing never targets them, so the default (full) is moot
         // but kept consistent.
         let recurrence_capabilities =
-            recurrence_caps_for_account(&account_id, &account_kinds, &plugin_manager);
+            recurrence_capabilities_for_account(&plugin_manager, &account_id, &account_kinds);
         // `new` stamps the birthday layer from the id, and with it the
         // reminders a birthday calendar keeps (all: they stay in Aperio).
         decorated.push(CalendarRow::new(

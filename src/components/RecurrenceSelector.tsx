@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { DEFAULT_RECURRENCE_CAPABILITIES } from '@aperio/shared';
 
 import type { RecurrenceCapabilities, RecurrenceFreq } from '../api/types';
 import {
@@ -49,21 +50,6 @@ export interface RecurrenceSelectorProps {
   capabilities?: RecurrenceCapabilities;
 }
 
-/** Permissive fallback when no `capabilities` prop is supplied —
- *  every axis fully supported. Mirrors
- *  `plugin_core::RecurrenceCapabilities::default`. */
-const FULL_CAPS: RecurrenceCapabilities = {
-  frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
-  interval_frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
-  relative_monthly: true,
-  relative_yearly: true,
-  weekly_byday: true,
-  monthly_day_of_month: true,
-  count: true,
-  until: true,
-  deletions_in_steps: false,
-};
-
 /** Lowercase the selector's `Freq` to the wire `RecurrenceFreq`.
  *  `NONE` has no capability axis and returns null. */
 function freqKey(freq: Freq): RecurrenceFreq | null {
@@ -97,7 +83,7 @@ export function RecurrenceSelector({
   capabilities,
 }: RecurrenceSelectorProps) {
   const { t, i18n } = useTranslation();
-  const caps = capabilities ?? FULL_CAPS;
+  const caps = capabilities ?? DEFAULT_RECURRENCE_CAPABILITIES;
   // Stabilise the fallback Date so the memos below don't re-run every
   // render when `start` is omitted (a fresh `new Date()` each render
   // would otherwise bust their dependency arrays). Keyed on the start

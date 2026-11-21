@@ -3577,6 +3577,13 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   fragen sie. Exchange fragt für eine ganztägige Serie auch keine Serverzonen
   mehr ab. Microsoft 365, Google und CalDAV schrieben ganztägige Tage schon
   vorher ohne Zone.
+  ↳ **Kalender melden ihre Serien-Zonen (Zeitzonen-Auswahl, Stufe 6,
+  2026-11-21, 97a):** Das Manifest sagt in `recurrence.time_zones`, welche
+  Zonen eine Serie haben kann: `"all"`, `"none"` (Handy-Kalender) oder eine
+  Liste. Die Exchange-Liste (334 Zonen) schreibt `cargo xtask windows-zones`
+  aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
+  die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
+  Stufen 10 und 11.
   ✅ **Ganztägige Serien wiederholen sich an Kalendertagen** (48a, erledigt
   2026-09-20). Welche Uhr eine Serie liest, sagt jetzt der Kern
   (`cal_core::expansion_clock`, Tabelle `seriesClock.json`): eine ganztägige

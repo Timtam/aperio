@@ -1634,28 +1634,20 @@ impl Host {
             .unwrap_or_default()
     }
 
-    /// Resolve an account's recurrence capabilities from its plugin manifest
-    /// (mirrors the desktop `recurrence_caps_for_account`): the local store + any
-    /// account whose plugin we can't resolve fall back to full RFC-5545 support —
-    /// the host's own SQLite store has no restrictions, and a missing manifest
-    /// shouldn't silently strip options the source might actually support.
+    /// An account's recurrence capabilities, by the host's one rule
+    /// ([`host_core::builtin_adapters::recurrence_capabilities_for_account`]):
+    /// the built-in manifests first, so the phone's own calendars say they
+    /// store no series zone, then the loaded plugins.
     fn recurrence_caps_for_account(
         &self,
         account_id: &str,
         account_kinds: &std::collections::HashMap<String, AdapterKind>,
     ) -> RecurrenceCapabilities {
-        if account_id == LOCAL_ID {
-            return RecurrenceCapabilities::default();
-        }
-        let Some(plugin) = account_kinds
-            .get(account_id)
-            .and_then(|kind| self.plugin_manager.plugin_for_adapter_kind(kind.as_str()))
-        else {
-            return RecurrenceCapabilities::default();
-        };
-        Some(plugin)
-            .map(|p| p.manifest.recurrence.clone())
-            .unwrap_or_default()
+        host_core::builtin_adapters::recurrence_capabilities_for_account(
+            &self.plugin_manager,
+            account_id,
+            account_kinds,
+        )
     }
 
     /// Apply the `TakeRemote` conflict resolution: write the stored

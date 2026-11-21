@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { DEFAULT_RECURRENCE_CAPABILITIES } from '@aperio/shared';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type {
@@ -23,20 +24,9 @@ import { SelectFieldButton } from './SelectFieldButton';
 // by the Host from the adapter's plugin manifest) FILTERS options the backend
 // can't store — an unsupported frequency / interval / weekday picker /
 // day-of-month / end-mode is dropped rather than offered then silently lost on
-// save. Absent → full RFC-5545 (FULL_CAPS). <select> → collapsed picker, numbers →
-// numeric TextInput, weekday checkboxes → a collapsed multi-select, fixed-dates → rows.
-
-const FULL_CAPS: RecurrenceCapabilities = {
-  frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
-  interval_frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
-  relative_monthly: true,
-  relative_yearly: true,
-  weekly_byday: true,
-  monthly_day_of_month: true,
-  count: true,
-  until: true,
-  deletions_in_steps: false,
-};
+// save. Absent → full RFC-5545 (DEFAULT_RECURRENCE_CAPABILITIES). <select> →
+// collapsed picker, numbers → numeric TextInput, weekday checkboxes → a
+// collapsed multi-select, fixed-dates → rows.
 
 type EndMode = TaskRecurrenceValue['endMode'];
 
@@ -113,7 +103,7 @@ export function TaskRecurrenceSelector({
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const caps = capabilities ?? FULL_CAPS;
+  const caps = capabilities ?? DEFAULT_RECURRENCE_CAPABILITIES;
   const intervalOk = intervalSupported(value.freq, caps);
   const update = (patch: Partial<TaskRecurrenceValue>) =>
     onChange({ ...value, ...patch });

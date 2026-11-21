@@ -26,6 +26,7 @@ export const DEFAULT_RECURRENCE_CAPABILITIES: RecurrenceCapabilities = {
   count: true,
   until: true,
   deletions_in_steps: false,
+  time_zones: 'all',
 };
 
 /** Mirrors `plugin_core::ReminderCapabilities::default()` — nothing beyond

@@ -158,6 +158,14 @@ pub struct RecurrenceCapabilities {
     /// with the series itself — RFC 5545 — writes it in one request.
     #[serde(default)]
     pub deletions_in_steps: bool,
+    /// The time zones a series in this calendar can repeat on
+    /// (DESIGN-series-time-zone.md, stage 6, decision 97a): every zone, none
+    /// (the calendar stores no zone, as the phone's own calendars), or only
+    /// the listed ones. The editors mark the others in the zone list and do
+    /// not offer them (22a). Every zone by default, as the other axes.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(type = "\"all\" | \"none\" | Array<string>"))]
+    pub time_zones: SeriesTimeZones,
 }
 
 impl Default for RecurrenceCapabilities {
@@ -172,6 +180,71 @@ impl Default for RecurrenceCapabilities {
             count: true,
             until: true,
             deletions_in_steps: false,
+            time_zones: SeriesTimeZones::Every,
+        }
+    }
+}
+
+/// Which time zones a calendar stores for a series
+/// ([`RecurrenceCapabilities::time_zones`]).
+///
+/// In `plugin.json` it is `"all"`, `"none"` or a list of zone names. A list
+/// holds canonical tzdata names in exact case, and it is the adapter's own
+/// statement: Exchange's is generated from CLDR by `cargo xtask
+/// windows-zones`, so the host names no provider (decision 97a). What one
+/// server of a provider does not know is not in it; that is said when a save
+/// meets it (stage 7).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SeriesTimeZones {
+    /// Every zone (`"all"`).
+    #[default]
+    Every,
+    /// No zone (`"none"`): a series there repeats on the device's clock or
+    /// in UTC, and the editors offer no choice.
+    NoZone,
+    /// Only these canonical tzdata names.
+    Only(Vec<String>),
+}
+
+impl SeriesTimeZones {
+    /// Whether a series in this calendar can repeat on `zone`, a canonical
+    /// tzdata name in exact case. The caller canonicalizes: a list names a
+    /// place tzdata merged with another city (Oslo with Berlin, 25b) by the
+    /// city it points to, as the editors store it.
+    pub fn stores(&self, zone: &str) -> bool {
+        match self {
+            Self::Every => true,
+            Self::NoZone => false,
+            Self::Only(zones) => zones.iter().any(|listed| listed == zone),
+        }
+    }
+}
+
+impl Serialize for SeriesTimeZones {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Every => serializer.serialize_str("all"),
+            Self::NoZone => serializer.serialize_str("none"),
+            Self::Only(zones) => zones.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SeriesTimeZones {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Written {
+            Word(String),
+            List(Vec<String>),
+        }
+        match Written::deserialize(deserializer)? {
+            Written::Word(word) if word == "all" => Ok(Self::Every),
+            Written::Word(word) if word == "none" => Ok(Self::NoZone),
+            Written::Word(other) => Err(serde::de::Error::custom(format!(
+                "time_zones: expected \"all\", \"none\" or a list of zone names, found \"{other}\""
+            ))),
+            Written::List(zones) => Ok(Self::Only(zones)),
         }
     }
 }
@@ -1410,6 +1483,67 @@ mod tests {
         assert!(m.recurrence.deletions_in_steps);
         // The task block's recurrence is its own and says nothing of it.
         assert!(!m.tasks.recurrence.deletions_in_steps);
+    }
+
+    /// Decision 97a: `recurrence.time_zones` is `"all"`, `"none"` or a list,
+    /// every zone where it is missing, and a word it does not know refuses the
+    /// manifest rather than read as a guess.
+    #[test]
+    fn series_time_zones_read_all_none_or_a_list() {
+        let manifest = |time_zones: &str| {
+            let block = if time_zones.is_empty() {
+                String::new()
+            } else {
+                format!(r#", "recurrence": {{ "time_zones": {time_zones} }}"#)
+            };
+            let json = format!(
+                r#"{{
+                    "id": "x.y",
+                    "name": "X",
+                    "version": "1.0.0",
+                    "plugin_type": "adapter",
+                    "capabilities": ["calendar"],
+                    "abi_version": {ABI_VERSION},
+                    "min_app_version": "1.0.0"{block}
+                }}"#
+            );
+            PluginManifest::from_bytes(json.as_bytes())
+        };
+        let zones = |time_zones: &str| manifest(time_zones).expect("parses").recurrence.time_zones;
+
+        assert_eq!(zones(""), SeriesTimeZones::Every);
+        assert_eq!(zones(r#""all""#), SeriesTimeZones::Every);
+        assert_eq!(zones(r#""none""#), SeriesTimeZones::NoZone);
+        assert_eq!(
+            zones(r#"["Europe/Berlin", "Asia/Tokyo"]"#),
+            SeriesTimeZones::Only(vec!["Europe/Berlin".into(), "Asia/Tokyo".into()])
+        );
+        assert!(manifest(r#""some""#).is_err());
+        assert!(manifest("true").is_err());
+
+        let only = zones(r#"["Europe/Berlin"]"#);
+        assert!(only.stores("Europe/Berlin"));
+        assert!(
+            !only.stores("europe/berlin"),
+            "exact case: the caller canonicalizes"
+        );
+        assert!(!only.stores("Asia/Tokyo"));
+        assert!(SeriesTimeZones::Every.stores("Asia/Tokyo"));
+        assert!(!SeriesTimeZones::NoZone.stores("Asia/Tokyo"));
+
+        // Written back the way it is read.
+        for written in [r#""all""#, r#""none""#, r#"["Europe/Berlin"]"#] {
+            let read = zones(written);
+            assert_eq!(
+                serde_json::to_string(&read).unwrap(),
+                written.replace(' ', "")
+            );
+        }
+        // The task block's recurrence is its own.
+        assert_eq!(
+            manifest(r#""none""#).unwrap().tasks.recurrence.time_zones,
+            SeriesTimeZones::Every
+        );
     }
 
     #[test]

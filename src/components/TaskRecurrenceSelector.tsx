@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { DEFAULT_RECURRENCE_CAPABILITIES } from '@aperio/shared';
 
 import type { RecurrenceCapabilities, RecurrenceFreq } from '../api/types';
 import type {
@@ -30,20 +31,6 @@ const WEEKDAYS: { iso: string; key: string }[] = [
   { iso: 'SA', key: 'sat' },
   { iso: 'SU', key: 'sun' },
 ];
-
-/** Permissive fallback when no `capabilities` prop is supplied — every
- *  axis fully supported. Mirrors `RecurrenceCapabilities::default`. */
-const FULL_CAPS: RecurrenceCapabilities = {
-  frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
-  interval_frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
-  relative_monthly: true,
-  relative_yearly: true,
-  weekly_byday: true,
-  monthly_day_of_month: true,
-  count: true,
-  until: true,
-  deletions_in_steps: false,
-};
 
 /** Lowercase the selector's `TaskFreq` to the wire `RecurrenceFreq`.
  *  `NONE` has no capability axis and returns null. */
@@ -85,7 +72,7 @@ export function TaskRecurrenceSelector({
   capabilities,
 }: TaskRecurrenceSelectorProps) {
   const { t } = useTranslation();
-  const caps = capabilities ?? FULL_CAPS;
+  const caps = capabilities ?? DEFAULT_RECURRENCE_CAPABILITIES;
   const update = (patch: Partial<TaskRecurrenceValue>) =>
     onChange({ ...value, ...patch });
 
