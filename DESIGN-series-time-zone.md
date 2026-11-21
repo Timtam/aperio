@@ -939,11 +939,10 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   schrieb Exchange für fünf der 18 UTC-Namen (`UTC`, `Etc/UTC`, `Etc/GMT`,
   `Etc/Universal`, `Etc/Zulu`) `Id="UTC"`. Ab Stufe 4 schreiben alle UTC-Namen
   keine Zone (26a); ein Anlegen ohne Zone ist laut Microsoft-Dokumentation UTC.
-- **Exchange:** Erst messen, was ein Update ohne StartTimeZone mit einer Serie
-  macht, die eine Zone hat. Lässt sich das Feld entfernen, entfernt ein Wechsel
-  auf UTC es. Sonst steht „UTC (ohne Sommerzeit)“ in einer Exchange-Serie mit
-  Zone markiert in der Liste: „UTC (ohne Sommerzeit) (Exchange kann die Zone
-  dieser Serie nicht entfernen)“, und lässt sich nicht wählen.
+- **Exchange:** Ein Update ohne StartTimeZone lässt einer Serie ihre Zone
+  (Runde 1). Ein Wechsel auf UTC schreibt deshalb seit Stufe 7 die
+  Windows-Zone `UTC` ausdrücklich (99a), und „UTC (ohne Sommerzeit)“ ist auch
+  in einer Exchange-Serie mit Zone wählbar.
 - **Zonen, die Exchange nicht speichern kann,** sind nach 22a markiert und
   nicht wählbar. Seit Stufe 4 sind es vier:
   - Antarctica/Troll, für das CLDR keinen Windows-Namen hat;
@@ -1313,6 +1312,12 @@ Handy im selben PR.
    wo die Zone hinausginge. Beide Oberflächen lesen die Zone als ihre Stadt
    aus der Weltliste des Kerns (`zoneCityText`). Kopieren und Verschieben
    nach Exchange legen an und werden so mit der Zone im Grund abgelehnt.
+   99a: Ändert Aperio eine Serie, deren Kopie auf dem Server auf einer
+   benannten Zone wiederholt, auf UTC (oder auf keine Zone), schreibt der
+   Adapter zuerst `StartTimeZone`/`EndTimeZone` mit `Id="UTC"`, danach
+   Beginn und Ende auf der neuen Uhr (240) und die Regel (241). Nur am
+   Serienkopf, und nur mit der Kopie des Servers; kennt der Server `UTC`
+   nicht, lehnt 98a ab. Der Live-Test dazu (`ews-zones utc`) steht aus.
 8. **Datum, Uhrzeit und Regel auf einer Serien-Uhr** — `feat(shared): dates, times and repeat rules on a series clock`.
    Umrechnung mit Lücke und Doppelstunde, Formularfelder mit Uhr, Regel-Ableitung
    aus dem Tages-Schlüssel, WKST, UNTIL. Noch unsichtbar. Fixture

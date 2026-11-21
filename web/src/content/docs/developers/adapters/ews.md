@@ -357,6 +357,13 @@ the iCalendar reader):
   provider. UTC is no zone and is not listed; Exchange stores a UTC series
   without one. What one server does not know is not in it either; a save
   refuses it, as the bullet above says.
+- **Switching to UTC.** An update without a zone leaves a series its zone
+  (live round 1). So a series master whose server copy repeats on a named
+  zone and that an edit puts on UTC, or on no zone, gets Exchange's own
+  `UTC` zone written first, then its slot on the new clock and its rule
+  (decision 99a). A new series in UTC still writes no zone (26a), and an
+  edit without the server's copy writes as before. A server whose zone list
+  lacks `UTC` refuses the switch by name.
 - **Writing.** An all-day series writes no zone (`cal_core::written_series_zone`).
   A zone makes Exchange move an all-day series to that zone's midnights and
   stretch it over more days (live test). Any other series' stored zone goes
