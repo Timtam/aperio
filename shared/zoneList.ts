@@ -4,7 +4,7 @@
 // The names, the search, and where a stored or device zone stands are rules in
 // the core and answer synchronously on both surfaces. The offsets need tzdata's
 // rules: the phone asks its native core, the desktop asks its host (its
-// WebAssembly module leaves chrono-tz out), so that one question is a Promise
+// WebAssembly module leaves the zone data out), so that one question is a Promise
 // on both surfaces. An answer names the instant it is for; `offsetsAreFor`
 // lets a form drop one for a start it no longer has.
 //

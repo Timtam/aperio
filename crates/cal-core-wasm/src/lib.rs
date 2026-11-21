@@ -238,7 +238,8 @@ pub fn expansion_clock(all_day: bool, tzid: &str) -> String {
 
 /// The world zone list's names: every listed zone's id, city, area and region,
 /// by position. See `cal_core::zone_list`. The offsets are not here: they need
-/// chrono-tz, which this module leaves out, and the desktop asks its host.
+/// the zones (cal-zone: jiff and its bundled tzdata), which this module leaves
+/// out, and the desktop asks its host.
 #[wasm_bindgen(js_name = zoneLabels)]
 pub fn zone_labels() -> Result<String, JsValue> {
     rules::zone_labels().map_err(to_js)

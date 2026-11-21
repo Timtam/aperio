@@ -91,8 +91,9 @@ cargo fmt --all -- --check                              # CI's first gate
 cargo xtask ts-types
 cargo xtask ts-types --check                            # what CI runs
 
-# After a chrono-tz update, or a new CLDR windowsZones file in
-# crates/cal-core/cldr/: regenerate the zone tables, in this order.
+# After a jiff-tzdb bump (with backward, etcetera and version from the same
+# tzdata release in crates/cal-core/tzdata/), or a new CLDR windowsZones file
+# in crates/cal-core/cldr/: regenerate the zone tables, in this order.
 # CI checks both are current.
 cargo xtask tz-list
 cargo xtask windows-zones

@@ -94,7 +94,9 @@ icalendar = "0.16"          # iCal-Parsing (VEVENT, VTODO, VALARM)
 oauth2 = "4"                # OAuth2 für Daten-, Sync- und Videokonferenz-Adapter
 keyring = "2"               # Sichere Speicherung von Zugangsdaten
 chrono = { version = "0.4", features = ["serde"] }
-chrono-tz = "0.10"          # Zeitzonen; `cargo xtask tz-list` liest ihre tz-Dateien, `windows-zones` vergleicht mit ihnen die Uhren der Exchange-Zonen
+jiff = "1.0.1"              # liest TZif-Daten für cal-zone; ohne Datenbank-Features, fragt nie das Betriebssystem
+jiff-tzdb = "=1.0.0"        # die mitgelieferte IANA-tzdata (2026f); `cargo xtask tz-list` liest ihre Namen, `windows-zones` vergleicht damit die Uhren der Exchange-Zonen
+rrule = { path = "crates/rrule" }  # RFC-5545-Wiederholung, Aperios Abzweig von rrule 0.14.0 auf cal-zones Zonen
 libloading = "0.8"          # Dynamisches Laden von Plugin-Bibliotheken
 aes-gcm = "0.10"            # AES-256-GCM für E2E-Verschlüsselung
 argon2 = "0.5"              # Schlüsselableitung aus Passwort

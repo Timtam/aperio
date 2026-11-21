@@ -2387,7 +2387,7 @@ export const listFailedPlugins = () =>
 
 /** Every listed zone's offset at a series' start and its standard offset as of
  *  today, and the order of the world zone list. A host command rather than a
- *  WebAssembly door: the offsets need chrono-tz, which the module leaves out
+ *  WebAssembly door: the offsets need the zone data, which the module leaves out
  *  (src-tauri/src/commands/time_zones.rs). */
 export const zoneOffsets = (question: ZoneOffsetsQuestion) =>
   invoke<ZoneOffsets>('zone_offsets', { question });

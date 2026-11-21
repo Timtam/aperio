@@ -59,7 +59,7 @@ const hitIs = (hit: ZoneHit, want: HitRow): boolean =>
 /**
  * The world zone list through the real WebAssembly door and the shared shell —
  * the path the desktop takes. Rows that need offsets are not run here: the
- * offsets need chrono-tz, which the module leaves out. The core reads every row
+ * offsets need the zone data, which the module leaves out. The core reads every row
  * in `crates/cal-core/src/zone_list.rs`, and the phone's doors in
  * `crates/cal-ffi/src/lib.rs`.
  */
