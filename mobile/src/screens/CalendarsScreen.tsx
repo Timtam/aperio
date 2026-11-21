@@ -241,7 +241,7 @@ export default function CalendarsScreen({
               <View key={cal.id} style={styles.row}>
                 <Pressable
                   ref={(node) => {
-                    rowTags.current[cal.id] = node ? findNodeHandle(node) : null;
+                    rowTags.current[cal.id] = node ? (findNodeHandle(node) ?? null) : null;
                   }}
                   accessible
                   accessibilityRole="switch"

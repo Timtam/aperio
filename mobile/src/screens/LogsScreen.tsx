@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   Share,
@@ -22,6 +23,7 @@ import {
   type LogLevel,
 } from '../api/logs';
 import { RadioGroup } from '../components/RadioGroup';
+import { setFormLab, useFormLab, type WindowGestures } from '../a11y/formLab';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Diagnostics / logs (§ Diagnostics) — the mobile twin of the desktop LogsPanel.
@@ -172,6 +174,10 @@ export default function LogsScreen() {
       <Text style={styles.hint} accessibilityRole="text">
         {t('dialogs.settings.logs.hint')}
       </Text>
+
+      {/* The VoiceOver form lab of the diagnostic build (iOS, temporary;
+          src/a11y/formLab.ts). */}
+      {Platform.OS === 'ios' && <FormLabSection />}
 
       {/* Detail level */}
       <View style={styles.section}>
@@ -324,3 +330,52 @@ const makeStyles = (c: ThemeColors) =>
     pressed: { opacity: 0.7 },
     disabled: { opacity: 0.5 },
   });
+
+/** The diagnostic build's switches for swiping through a form with the
+ *  keyboard open (src/a11y/formLab.ts). Temporary: goes with the lab. */
+function FormLabSection() {
+  const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
+  const lab = useFormLab();
+  const windowOptions: { value: WindowGestures; label: string }[] = [
+    { value: 'normal', label: t('dialogs.settings.logs.formLab.windowNormal') },
+    { value: 'narrow', label: t('dialogs.settings.logs.formLab.windowNarrow') },
+    { value: 'off', label: t('dialogs.settings.logs.formLab.windowOff') },
+  ];
+  return (
+    <View style={styles.section}>
+      <Text style={styles.heading} accessibilityRole="header">
+        {t('dialogs.settings.logs.formLab.heading')}
+      </Text>
+      <Text style={styles.hint} accessibilityRole="text">
+        {t('dialogs.settings.logs.formLab.hint')}
+      </Text>
+      <SwitchRow
+        label={t('dialogs.settings.logs.formLab.container')}
+        value={lab.container}
+        onToggle={() => setFormLab({ container: !lab.container })}
+      />
+      <SwitchRow
+        label={t('dialogs.settings.logs.formLab.focusFollows')}
+        value={lab.focusFollows}
+        onToggle={() => setFormLab({ focusFollows: !lab.focusFollows })}
+      />
+      <SwitchRow
+        label={t('dialogs.settings.logs.formLab.resignOnLeave')}
+        value={lab.resignOnLeave}
+        onToggle={() => setFormLab({ resignOnLeave: !lab.resignOnLeave })}
+      />
+      <RadioGroup<WindowGestures>
+        label={t('dialogs.settings.logs.formLab.windowGestures')}
+        value={lab.windowGestures}
+        options={windowOptions}
+        onChange={(windowGestures) => setFormLab({ windowGestures })}
+      />
+      <SwitchRow
+        label={t('dialogs.settings.logs.formLab.log')}
+        value={lab.log}
+        onToggle={() => setFormLab({ log: !lab.log })}
+      />
+    </View>
+  );
+}

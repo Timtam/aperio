@@ -23,6 +23,7 @@ import {
   View,
   type StyleProp,
   type ViewStyle,
+  type ScrollViewInstance,
 } from 'react-native';
 
 import type {
@@ -745,7 +746,7 @@ export function CalendarDayList({
   // sits near the top. This is purely
   // visual: it touches no accessibilityLabel/role/action/tap handler, and only
   // the GRID path calls it — list/linear modes stack from the top already.
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   // Native pull-to-refresh — kicks a manual sync + external-cache warm; the list
   // reloads off the resulting cache-update. iOS + Android both back RefreshControl.
   const { refreshing, onRefresh } = usePullRefresh();
@@ -1621,7 +1622,7 @@ export function CalendarDayList({
     const join = joinAction(ev, t);
     const actions: MenuAction[] = [
       ...(join ? [join.action] : []),
-      { name: 'activate', label: t('mobile.editTaskLabel') },
+      { name: 'activate', label: t('dialogs.event.editTitle') },
       { name: 'moveCopy', label: t('mobile.moveCopy') },
       // The entry point to event groups. It sits with the non-destructive
       // verbs because it is a statement ABOUT the event, not something done to

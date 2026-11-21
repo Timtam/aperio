@@ -56,7 +56,10 @@ export function SelectFieldButton<T extends string | number>({
       <Text
         style={styles.legend}
         accessibilityRole={labelAsHeading ? 'header' : undefined}
-        importantForAccessibility={labelAsHeading ? 'yes' : 'no'}
+        // The button names itself ("Liste: Aufgaben"), so the legend is hidden
+        // from both readers unless it is a section heading. aria-hidden, not
+        // importantForAccessibility alone: iOS ignores that one.
+        aria-hidden={!labelAsHeading}
       >
         {label}
       </Text>

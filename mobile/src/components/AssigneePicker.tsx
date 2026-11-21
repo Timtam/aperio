@@ -7,6 +7,8 @@ import {
   StyleSheet,
   Text,
   View,
+  type TextInstance,
+  type ViewInstance,
 } from 'react-native';
 
 import type { TaskAssignment, TaskUser } from '@aperio/shared';
@@ -45,7 +47,7 @@ export function AssigneePicker({
   onChange: (next: TaskUser[]) => void;
   /** The field's label, so the editor can put the screen reader's cursor on
    *  it when the picker replaces a state whose label had it. */
-  labelRef?: Ref<Text>;
+  labelRef?: Ref<TextInstance>;
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -60,7 +62,7 @@ export function AssigneePicker({
     u.id === currentUserId ? t('dialogs.task.assignees.you', { name: u.name }) : u.name;
 
   /** One per remove button, in render order — the repark targets. */
-  const removeRefs = useRef<(View | null)[]>([]);
+  const removeRefs = useRef<(ViewInstance | null)[]>([]);
 
   const add = (user: TaskUser) => {
     if (selectedIds.has(user.id)) return;
@@ -154,7 +156,7 @@ export function AssigneePicker({
               </Text>
               <Pressable
                 ref={(node) => {
-                  removeRefs.current[i] = node as View | null;
+                  removeRefs.current[i] = node as ViewInstance | null;
                 }}
                 accessibilityRole="button"
                 accessibilityLabel={t('dialogs.task.assignees.remove', { name: u.name })}

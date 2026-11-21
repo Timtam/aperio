@@ -1,0 +1,19 @@
+diff --git a/node_modules/react-native/React/Fabric/Mounting/ComponentViews/Text/RCTParagraphComponentView.mm b/node_modules/react-native/React/Fabric/Mounting/ComponentViews/Text/RCTParagraphComponentView.mm
+index 228ec0d..f86101e 100644
+--- a/node_modules/react-native/React/Fabric/Mounting/ComponentViews/Text/RCTParagraphComponentView.mm
++++ b/node_modules/react-native/React/Fabric/Mounting/ComponentViews/Text/RCTParagraphComponentView.mm
+@@ -146,6 +146,14 @@ using namespace facebook::react;
+     const auto &newData = std::static_pointer_cast<const ParagraphShadowNode::ConcreteState>(state)->getData();
+     const auto &oldData = std::static_pointer_cast<const ParagraphShadowNode::ConcreteState>(oldState)->getData();
+     if (!newData.attributedString.isContentEqual(oldData.attributedString)) {
++      // Changes inside a hidden subtree must not interrupt VoiceOver on visible content.
++      UIView *view = self;
++      while (view != nil) {
++        if (view.accessibilityElementsHidden) {
++          return;
++        }
++        view = view.superview;
++      }
+       UIAccessibilityPostNotification(UIAccessibilityLayoutChangedNotification, nil);
+     }
+   }

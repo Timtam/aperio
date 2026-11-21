@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type TextInstance,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -225,7 +226,7 @@ export default function TasksScreen({
   // when a delete empties the list.
   const rowTags = useRef<Record<string, number | null>>({});
   const headerTags = useRef<Record<string, number | null>>({});
-  const emptyRef = useRef<Text>(null);
+  const emptyRef = useRef<TextInstance>(null);
   const pendingFocusId = useRef<string | null>(null);
   // Where focus goes when the pending row no longer shows after the refetch:
   // a check-off that landed in part may or may not have moved it.
@@ -718,7 +719,7 @@ export default function TasksScreen({
       <Pressable
         key={id}
         ref={(node) => {
-          headerTags.current[id] = node ? findNodeHandle(node) : null;
+          headerTags.current[id] = node ? (findNodeHandle(node) ?? null) : null;
         }}
         accessible
         // A VoiceOver/TalkBack HEADING so the group regions (Backlog / lists /
@@ -806,7 +807,7 @@ export default function TasksScreen({
       <Pressable
         key={task.id}
         ref={(node) => {
-          rowTags.current[task.id] = node ? findNodeHandle(node) : null;
+          rowTags.current[task.id] = node ? (findNodeHandle(node) ?? null) : null;
         }}
         accessible
         accessibilityRole="button"
@@ -913,7 +914,7 @@ export default function TasksScreen({
       </View>
 
       <View style={styles.groupByBar}>
-        <Text style={styles.groupByLabel} importantForAccessibility="no">
+        <Text style={styles.groupByLabel} aria-hidden>
           {t('views.tasks.groupBy.label')}
         </Text>
         {(['state', 'list'] as const).map((mode) => {

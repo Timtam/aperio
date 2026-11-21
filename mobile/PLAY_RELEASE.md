@@ -162,8 +162,8 @@ plus Anfrage-Fluss — deutlich mehr Arbeit.
   gitignorierte Entwicklungsartefakte.
 
 Bereits in Ordnung, kein Handlungsbedarf: `targetSdk` ist über den
-RN-0.85-Versionskatalog auf **36** — die Frist zum 31.08.2026 ist damit
-erfüllt. `versionCode` regelt EAS server-seitig (`appVersionSource: "remote"` +
+Versionskatalog von React Native 0.88 (Expo SDK 58) auf **36**, `compileSdk`
+auf 37 — die Frist zum 31.08.2026 ist damit erfüllt. `versionCode` regelt EAS server-seitig (`appVersionSource: "remote"` +
 `autoIncrement`), also **kein** `android.versionCode` in `app.json` eintragen.
 Das Produktionsprofil erzeugt korrekt ein `.aab`.
 

@@ -644,6 +644,10 @@ const ONLY_ON = new Map([
     'takeIncomingFileJson',
     ['android', 'a shared or opened file arrives as an Android intent; iOS hands it to Linking'],
   ],
+  [
+    'takeLaunchLink',
+    ['android', 'once per launch intent; iOS reads its launch link from expo-linking'],
+  ],
 ]);
 
 /** What JavaScript can call and what the native modules register, kept apart

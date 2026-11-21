@@ -1,4 +1,4 @@
-import { requireNativeViewManager } from 'expo-modules-core';
+import { requireNativeView } from 'expo';
 import { type ComponentType, type ReactNode } from 'react';
 import { type ViewProps } from 'react-native';
 
@@ -20,4 +20,4 @@ export interface A11yPagerViewProps extends ViewProps {
 }
 
 export const A11yPagerView: ComponentType<A11yPagerViewProps> =
-  requireNativeViewManager('A11yPager');
+  requireNativeView('A11yPager');

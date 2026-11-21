@@ -18,14 +18,71 @@ announcements** (live region + `announceForAccessibility`).
 
 ## Stack
 
-- Expo SDK 56 (React Native 0.85, React 19, TypeScript 6), `blank-typescript`.
+- Expo SDK 58 (React Native 0.88, React 19.3, TypeScript 6), `blank-typescript`,
+  with the UIKit scene life cycle (Xcode 27 / iOS 27 SDK) since 2026-11.
 - **EAS Build + EAS Submit** for cloud iOS builds, code-signing and
   TestFlight upload. No Mac required — EAS builds and signs on Expo's cloud
   macOS workers.
 
-`AGENTS.md` is the Expo template's reminder that SDK 56 changed several
-APIs; check the versioned docs at <https://docs.expo.dev/versions/v56.0.0/>
-before adding Expo packages.
+`AGENTS.md` is the Expo template's reminder that the SDK changes APIs; check
+the versioned docs at <https://docs.expo.dev/versions/v58.0.0/> before adding
+Expo packages.
+
+### What the move to SDK 58 brought (2026-11)
+
+Apple takes only builds made with the iOS 27 SDK (Xcode 27) from April 2027,
+and an app built with it starts on iOS 27 only under the UIKit scene life
+cycle. Expo SDK 58 generates a `SceneDelegate` and starts React Native in
+`scene(_:willConnectTo:)`. What that and the version jump needed here:
+
+- **Background launches.** When iOS relaunches a terminated app for a
+  background task it connects no scene, so under SDK 58 no JavaScript ran: no
+  sync, reminder or widget round after the app had been ended (expo/expo#52878,
+  open). `modules/background-launch` starts the React host without a window
+  when no scene has connected two seconds after launch (release builds only).
+  Remove it once Expo fixes the issue.
+- **What only the screens did.** Such a round runs without the app's screens,
+  so it cannot lean on what they set up. The round applies the stored app
+  language itself before it words reminders, the widget or Live Activities
+  (Android's headless runs needed that all along), and `BackgroundRefresh`
+  keeps the refresh interval in `UserDefaults`, so its re-arm does not fall
+  back to 15 minutes.
+- **Links into a running app.** After such a launch, a window that connects
+  with a link (a Live Activity tap, an .ics opened in Aperio) finds React
+  Native running: React Native keeps its first initial URL and sends no event
+  for the link. expo-linking's app-delegate subscriber records it, so on iOS
+  the reminder tap and the file import read `Linking.getLinkingURL()` (and
+  clear it once taken) instead of React Native's `getInitialURL()`. Android
+  cannot use that record for the launch link: expo-linking writes it again
+  whenever Android recreates the activity, which would open the tap again. It
+  takes the link from the activity's launch intent once per launch
+  (`CalFfi.takeLaunchLink`, the rules of the file import's launch intent).
+- **Named segmented controls.** @expo/ui 58's `accessibilityLabel` on a
+  segmented control is not spoken: it lands on the control's own node, which
+  VoiceOver never focuses. `NamedSegmentedControl.ios.tsx` builds the Picker
+  itself and marks it `.accessibilityElement(children: .contain)` before the
+  label, so VoiceOver speaks the name as focus enters the control.
+- **VoiceOver interruptions.** React Native 0.88 posts a layout change to
+  VoiceOver for every changed text, which cuts announcements. 0.89 skips text
+  in hidden subtrees; `patches/react-native+0.88.1.patch` backports that
+  guard. It only takes effect because `expo-build-properties` builds React
+  Native from source on iOS (`buildReactNativeFromSource`), which makes iOS
+  builds slower. Drop both with SDK 59 (React Native 0.89).
+- **Android release builds stay unminified** (`enableMinifyInReleaseBuilds:
+  false`): SDK 58 turns R8 on by default, and the UniFFI bindings reach Rust
+  through JNA reflection, which R8 can break.
+- **No push entitlement** comes from expo-notifications' own
+  `enableRemoteNotifications: false`; the plugin that deleted the key is gone.
+- **Versions Expo does not manage:** react-native-bottom-tabs and
+  @bottom-tabs/react-navigation 1.5.0 (1.3 does not build on React Native
+  0.88; 1.5 also fixes VoiceOver calling every visited tab "selected" on iOS
+  27). @react-navigation stays on v7 (v8 is an alpha that breaks the bottom
+  tabs navigator). @bacons/apple-targets 5.0.0 has no SDK 58 release; it is
+  kept and checked by the EAS build.
+- **Code:** refs are typed with React Native's instance types (`TextInstance`,
+  `ViewInstance`, ...) under its strict TypeScript API; InteractionManager is
+  gone (the startup gate waits for an idle callback); our modules import from
+  `expo`, our config plugins from `expo/config-plugins`.
 
 ## Local development (Windows)
 

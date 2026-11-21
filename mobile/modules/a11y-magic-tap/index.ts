@@ -1,4 +1,4 @@
-import { requireNativeViewManager } from 'expo-modules-core';
+import { requireNativeView } from 'expo';
 import { type ComponentType, type ReactNode } from 'react';
 import { type ViewProps } from 'react-native';
 
@@ -21,4 +21,4 @@ export interface A11yMagicTapViewProps extends Omit<ViewProps, 'onMagicTap'> {
 }
 
 export const A11yMagicTapView: ComponentType<A11yMagicTapViewProps> =
-  requireNativeViewManager('A11yMagicTap');
+  requireNativeView('A11yMagicTap');

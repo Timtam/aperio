@@ -261,7 +261,7 @@ export default function ConflictsScreen({ navigation }: RootStackScreenProps<'Co
     <View style={styles.screen}>
       <Text
         ref={(node) => {
-          introTag.current = node ? findNodeHandle(node) : null;
+          introTag.current = node ? (findNodeHandle(node) ?? null) : null;
         }}
         style={styles.intro}
         accessibilityRole="text"
@@ -362,7 +362,7 @@ function ConflictGroupCard({
   return (
     <View style={styles.card} accessibilityRole="none">
       <Text
-        ref={(node) => onHeadingRef(group.key, node ? findNodeHandle(node) : null)}
+        ref={(node) => onHeadingRef(group.key, node ? (findNodeHandle(node) ?? null) : null)}
         style={styles.cardName}
         accessibilityRole="header"
         accessibilityLabel={`${kindLabel} ${name}, ${countLabel}`}

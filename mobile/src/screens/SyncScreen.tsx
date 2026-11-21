@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInstance,
 } from 'react-native';
 
 import {
@@ -100,12 +101,12 @@ export default function SyncScreen() {
   const [changeNewPp, setChangeNewPp] = useState(''); // rotate: new passphrase
   const [disablePp, setDisablePp] = useState(''); // disable: current passphrase
   const [adoptPp, setAdoptPp] = useState(''); // adopt peer-enabled E2E passphrase
-  const adoptBannerRef = useRef<Text>(null);
+  const adoptBannerRef = useRef<TextInstance>(null);
   // Disconnecting unmounts the summary card AND the button that was pressed, so
   // screen-reader focus would drop to nothing. This line is the one node that
   // survives it and whose text IS the new state ("not configured"), which is the
   // same anchor the desktop panel lands on.
-  const statusLineRef = useRef<Text>(null);
+  const statusLineRef = useRef<TextInstance>(null);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -578,7 +579,7 @@ export default function SyncScreen() {
           <Text style={styles.hint} accessibilityRole="text">
             {t('dialogs.settings.sync.adoptRemoteE2eHint')}
           </Text>
-          <Text style={styles.label}>
+          <Text style={styles.label} aria-hidden>
             {t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel')}
           </Text>
           <TextInput
@@ -702,7 +703,7 @@ export default function SyncScreen() {
               <Text style={styles.hint} accessibilityRole="text">
                 {t('dialogs.settings.sync.passphraseChangeHint')}
               </Text>
-              <Text style={styles.label}>{t('dialogs.settings.sync.passphraseChangeOld')}</Text>
+              <Text style={styles.label} aria-hidden>{t('dialogs.settings.sync.passphraseChangeOld')}</Text>
               <TextInput
                 style={styles.input}
                 value={changeOldPp}
@@ -712,7 +713,7 @@ export default function SyncScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              <Text style={styles.label}>{t('dialogs.settings.sync.passphraseChangeNew')}</Text>
+              <Text style={styles.label} aria-hidden>{t('dialogs.settings.sync.passphraseChangeNew')}</Text>
               <TextInput
                 style={styles.input}
                 value={changeNewPp}
@@ -745,7 +746,7 @@ export default function SyncScreen() {
               <Text style={styles.hint} accessibilityRole="text">
                 {t('dialogs.settings.sync.disableE2eHint')}
               </Text>
-              <Text style={styles.label}>{t('dialogs.settings.sync.passphraseChangeOld')}</Text>
+              <Text style={styles.label} aria-hidden>{t('dialogs.settings.sync.passphraseChangeOld')}</Text>
               <TextInput
                 style={styles.input}
                 value={disablePp}
@@ -782,7 +783,7 @@ export default function SyncScreen() {
             <Text style={styles.warning} accessibilityRole="text">
               {t('dialogs.settings.sync.e2eIrreversibleWarning')}
             </Text>
-            <Text style={styles.label}>{t('dialogs.settings.sync.e2ePassphrase')}</Text>
+            <Text style={styles.label} aria-hidden>{t('dialogs.settings.sync.e2ePassphrase')}</Text>
             <TextInput
               style={styles.input}
               value={e2ePassphrase}

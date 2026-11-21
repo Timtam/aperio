@@ -989,7 +989,7 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
-- [ ] **iOS mit Xcode 27 bauen, bis April 2027** (Apple-Mail zu Build 72,
+- [x] **iOS mit Xcode 27 bauen, bis April 2027** (Apple-Mail zu Build 72,
       2026-11-17, ITMS-90725): Ab April 2027 nimmt App Store Connect nur
       noch Builds mit dem iOS-27-SDK an. Aperio baut mit dem iOS-26.4-SDK,
       weil EAS für Expo SDK 56 das Bild `sdk-56` (Xcode 26.4) nimmt. Laut
@@ -1002,7 +1002,60 @@ Vorschläge sind nicht aufgenommen.
       Widget-Aktionen, Live-Aktivitäten) und ob `BGTaskScheduler.submit`
       (in iOS 27 veraltet) ersetzt werden muss. Quelle:
       docs.expo.dev/build-reference/infrastructure.
-- [ ] **Feedback-Formular am Handy: bei offener Tastatur nicht bis „Senden“
+      ↳ Gebaut (Toni, 2026-11-20: direkt auf SDK 58): Expo SDK 58, React
+      Native 0.88.1, eigenes Modul für Hintergrundstarts ohne Szene, Links
+      einer verbindenden Szene über expo-linking (`getLinkingURL`), der
+      0.89-Schutz gegen unterbrochene VoiceOver-Ansagen als Patch, R8 aus,
+      Push-Berechtigung über expo-notifications.
+      Einzelheiten in mobile/README.md („What the move to SDK 58 brought“).
+- [ ] **Nach SDK 58 aufräumen, sobald es geht:** den React-Native-Patch und
+      `buildReactNativeFromSource` mit SDK 59 (React Native 0.89) streichen;
+      `modules/background-launch` streichen, sobald expo/expo#52878 behoben
+      ist; @bacons/apple-targets heben, sobald es eine Fassung für SDK 58
+      gibt.
+- [ ] **Barrierefreiheit nach SDK 58, je einzeln mit Gerätetest** (Recherche
+      2026-11-20): (1) `aria-hidden` statt des Paars
+      `accessibilityElementsHidden` + `importantForAccessibility` auf View,
+      Text, Pressable, Image und TextInput (setzt beide schon seit 0.85; nicht
+      auf Switch und ActivityIndicator); (2) auf iOS echte
+      Kopfzeilen-Knöpfe (`unstable_headerLeftItems`/`RightItems`) für
+      Abbrechen und Sync statt Pressables, die VoiceOver per Mittelpunkt-Tipp
+      auslöst; (3) `onAccessibilityTap` an Stellen, wo dieser Tipp danebengeht;
+      (4) ein Versuch mit dem nativen Picker und Switch von @expo/ui (beide
+      jetzt mit Namen), nur übernehmen, wenn VoiceOver sie per Wischen
+      erreicht.
+      ↳ Teil gebaut (Toni, 2026-11-21, nach Build 74): doppelte Stopps weg
+      (sichtbare Beschriftung `aria-hidden`, wo das Feld denselben Namen
+      trägt; fünf Stellen waren nur für Android versteckt), Segment-Umschalter
+      auf iOS als benannter Container (`NamedSegmentedControl`), Blocktitel
+      „Geplant für“/„Fällig“/„Teilnehmer“ als Überschriften, Speichern/Senden
+      als Kopfzeilen-Knopf (noch Pressable, siehe (2)).
+- [ ] **Wischen bei offener Tastatur: Diagnose-Build auswerten** (Toni,
+      2026-11-21, zurückgestellt). Mit offener Tastatur springt VoiceOver nach
+      dem letzten sichtbaren Feld in die Tastatur; drei Flächen-Varianten
+      halfen nicht. Ursache laut Recherche (wf_4b33d7c5-1ce, dekompiliertes
+      UIKit iOS 18.2/26.1): VoiceOver wirft bei offener Tastatur alles
+      dahinter Liegende aus der Reihenfolge; Tabellen (Apples Kontakte)
+      entgehen dem, weil sie ihre Zeilen selbst aufzählen. Der Diagnose-Build
+      (6c79223f, Schalter unter Einstellungen → Protokolle) liegt bereit:
+      geordneter Container, Fokus folgt, Tastatur schließt, Drei-Finger aus.
+      Gebaut wurde er nicht: das EAS-Kontingent für iOS ist bis 2026-12-01
+      verbraucht. Danach bauen (oder auf GitHubs Mac mit `eas build
+      --local`), Toni vergleicht, Gewinner fest einbauen, Labor wieder raus.
+- [ ] **Magic Tap und waagerechtes Drei-Finger-Wischen nur, wo ein Bildschirm
+      sie nutzt** (Recherche 2026-11-21, bestätigt): `A11yGesturesModule.swift`
+      meldet beide am Fenster immer als erledigt, auch wo kein Bildschirm eine
+      Aktion angemeldet hat. Das schluckt außerhalb des Kalenders das
+      System-Magic-Tap (Musik Play/Pause) und die Rückmeldung am Rand. Braucht
+      eine native Markierung „aktive Route hat eine Aktion, Sperre aus“, neu
+      gesetzt bei Navigation, Sperre und An-/Abmelden.
+- [ ] **SDK-58-Risiken beobachten:** die Farbe der Statusleiste bei fest
+      hellem oder dunklem Design (react-native-screens #5137, offen); die
+      Polsterung der Tab-Wurzeln auf größenveränderbaren iPhones (iPhone Duo,
+      Leiste als Seitenschiene); Pressables in der Kopfzeile unter
+      react-native-screens 4.30. (`BGTaskScheduler.submit` meldet Xcode 27.1
+      nicht als veraltet: Build 73, 2026-11-20.)
+- [x] **Feedback-Formular am Handy: bei offener Tastatur nicht bis „Senden“
       wischbar** (Toni, 2026-11-19, Build 72, VoiceOver): Steht der Fokus in
       einem Textfeld und die Tastatur ist offen, erreicht Wischen nach rechts
       den Senden-Knopf nicht; nur Drei-Finger-Blättern hilft. Toni hat es nur
@@ -1013,6 +1066,18 @@ Vorschläge sind nicht aufgenommen.
       „Synchronisation“ (gleicher Stapel, gleiche Hülle) und in einem Editor;
       dann die Ursache (Polsterhöhe, Rahmen der ScrollView unter der
       Tastatur) beheben, nicht nur den Knopf versetzen.
+      ↳ Gebaut (2026-11-21): Mit Build 74 traf es auch den Aufgaben-Editor
+      (Priorität/Aufwand bei neuer Aufgabe, nur mit offener Tastatur). In
+      Blättern rechnete `FormScrollView` den Tastaturabstand ohne den
+      Abstand des Blatts vom Bildschirmrand, ein Streifen lag hinter der
+      Tastatur; jetzt vom Fensterrand aus. Speichern und Senden sitzen in der
+      Kopfzeile (`useActionHeader`).
+      ↳ Build 75 (Toni): der Streifen-Fix allein half nicht; hinter dem
+      letzten sichtbaren Feld springt VoiceOver in die Tastatur, Apples
+      Kontakte scrollt dagegen weiter. Ursache: die verkürzte Fläche legt die
+      nächsten Felder auf dem Bildschirm unter das Tastaturfenster. Jetzt wie
+      in UIKit: volle Höhe, React Native setzt den verdeckten Teil als
+      Einzug (`automaticallyAdjustKeyboardInsets`).
 - [ ] **Serien ohne Zeitzone reparierbar machen** (Toni, 2026-11-19): Eine
       iCloud-Serie steht seit der Zeitumstellung eine Stunde zu früh, auch im
       Kalender des iPhones. Sie ist also ohne Zone (in UTC) gespeichert.
@@ -1702,7 +1767,9 @@ nur eine Klasse für vom Nutzer angestoßene Vordergrundarbeit.
 - [x] **Schritt 0** — App-Group-Entitlement allein (`plugins/withAppGroup.js`),
       ohne Widget und ohne Datenbank-Umzug. Beantwortet: signiert die
       Capability überhaupt gegen unser Profil? Genau daran scheiterte Bau #5
-      mit `aps-environment` (siehe `withoutPushEntitlement.js`).
+      mit `aps-environment` (damals `withoutPushEntitlement.js`; seit SDK 58
+      lässt expo-notifications mit `enableRemoteNotifications: false` die
+      Push-Berechtigung weg).
 - [x] **Schritt 1** — Widget-Target über `@bacons/apple-targets`  
   ↳ Erledigt: Target an drei Stellen verdrahtet; das Widget wurde seither AUF dem Telefon beobachtet, was nur eine installierte, signierte Extension kann.
       (`mobile/targets/widget/`), feste Zeile, keine Daten. Beweist, dass das

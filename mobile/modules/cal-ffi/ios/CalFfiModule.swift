@@ -10,7 +10,11 @@ import UIKit
 /// Adapts the UniFFI `CacheObserverBridge` callback to Expo events. A finished
 /// background refresh / warm pass calls back here (on a background thread);
 /// `sendEvent` forwards it to JS. Mirrors the Android `JsCacheObserver`.
-private final class JsCacheObserver: CacheObserverBridge {
+///
+/// `@unchecked Sendable`: the bridge protocol is Sendable, since UniFFI calls
+/// it from a background thread, and a weak reference has to be a `var`. It is
+/// set once in `init` and only read afterwards.
+private final class JsCacheObserver: CacheObserverBridge, @unchecked Sendable {
   weak var module: CalFfiModule?
   init(module: CalFfiModule) { self.module = module }
   func cacheUpdated(payloadJson: String) {
@@ -24,7 +28,8 @@ private final class JsCacheObserver: CacheObserverBridge {
 /// Adapts the UniFFI `ContactSyncObserverBridge` callback to an Expo event. A
 /// finished contact-sync pass calls back here (on a background thread);
 /// `sendEvent` forwards it to JS. Mirrors the Android `JsContactSyncObserver`.
-private final class JsContactSyncObserver: ContactSyncObserverBridge {
+/// `@unchecked Sendable` for the same reason as `JsCacheObserver`.
+private final class JsContactSyncObserver: ContactSyncObserverBridge, @unchecked Sendable {
   weak var module: CalFfiModule?
   init(module: CalFfiModule) { self.module = module }
   func contactsSynced(payloadJson: String) {
@@ -142,7 +147,7 @@ public class CalFfiModule: Module {
   /// it the way the desktop's `useSyncErrorMessage` does. Without it the phone
   /// showed the engine's English `Display` text, because an unmapped Swift
   /// error reaches JS as its description and nothing else.
-  final class SyncCodedError: Exception {
+  final class SyncCodedError: Exception, @unchecked Sendable {
     let syncCode: String
     let syncDetail: String
     init(code: String, detail: String) {
@@ -158,7 +163,7 @@ public class CalFfiModule: Module {
   /// message — which starts with the token the surfaces translate
   /// (`cal_core::WriteRefusal`). Without it an unmapped Swift error reaches
   /// JS as its description and the shared translator matches nothing.
-  final class EventCodedError: Exception {
+  final class EventCodedError: Exception, @unchecked Sendable {
     let writeCode: String
     let writeDetail: String
     init(code: String, detail: String) {

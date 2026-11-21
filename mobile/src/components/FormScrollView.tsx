@@ -1,23 +1,44 @@
-import { type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
+  View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { useHeaderHeight } from '@react-navigation/elements';
 
-// Form scroll container that keeps a focused TextInput — and the VoiceOver
-// cursor on it — stable when the keyboard opens. A bare <ScrollView> lets iOS
-// re-inset / re-layout the moment the keyboard appears, which can drop the
-// input's focus and bounce the VoiceOver cursor into the view behind (the
-// app-wide "focus jumps as soon as a field is focused" report). A
-// KeyboardAvoidingView owns the avoidance instead, so the scroll view doesn't
-// fight the keyboard. Drop-in replacement for the editors' root ScrollView; the
-// header height feeds keyboardVerticalOffset so the avoided area accounts for
-// the (modal) nav header.
+import { A11yFormContainer } from '../../modules/a11y-form';
+import { getFormLab } from '../a11y/formLab';
+
+// The editors' and forms' root scroll container, and how it lives with the
+// keyboard.
+//
+// On iOS the scroll view keeps its full height and runs on under the
+// keyboard; React Native sets the covered part as its bottom content inset,
+// natively and in window coordinates (`automaticallyAdjustKeyboardInsets`),
+// and scrolls the focused input into view. That is how UIKit's own forms do it
+// (Contacts, "New Contact"), and it is what VoiceOver needs: it reads the
+// inset to know which part of the scroll view the keyboard hides, and keeps
+// scrolling to the fields below.
+//
+// The earlier approach shortened the form instead (a KeyboardAvoidingView,
+// later its own bottom padding), so the scroll view ended at the keyboard's
+// edge. The fields below it then lay, on screen, under the keyboard's window:
+// swiping right past the last visible field, VoiceOver went into the keyboard
+// rather than scrolling on (Toni, builds 72 to 75: the feedback form's Send, a
+// new task's Priority and Effort; Apple's Contacts scrolled on). The shortened
+// form had been chosen against a report of focus jumping when the keyboard
+// opened (6dad7a5a, 2026-06-20); if that comes back, it is the trade to
+// revisit, not the shortening.
+//
+// Android resizes the window for the keyboard itself.
+//
+// The diagnostic build's form lab (src/a11y/formLab.ts) can put the content
+// into one ordered VoiceOver container (modules/a11y-form), the way a table
+// is; it takes the content's style over, so the layout stays the same. Read
+// once, when the form mounts: a switch changed later must not rebuild an open
+// form (half-typed fields would be lost).
 
 export function FormScrollView({
   style,
@@ -30,22 +51,28 @@ export function FormScrollView({
   accessibilityViewIsModal?: boolean;
   children: ReactNode;
 }) {
-  const headerHeight = useHeaderHeight();
+  const [ordered] = useState(() => getFormLab().container);
+  const Ordered = ordered ? A11yFormContainer : null;
   return (
-    <KeyboardAvoidingView
-      accessibilityViewIsModal={accessibilityViewIsModal}
-      style={[styles.flex, style]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={headerHeight}
-    >
+    <View accessibilityViewIsModal={accessibilityViewIsModal} style={[styles.flex, style]}>
       <ScrollView
         style={styles.flex}
-        contentContainerStyle={contentContainerStyle}
+        contentContainerStyle={Ordered ? undefined : contentContainerStyle}
         keyboardShouldPersistTaps="handled"
+        // Set once, at mount: React Native reads it when the keyboard moves,
+        // and a change while the keyboard is up would be missed.
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+        automaticallyAdjustsScrollIndicatorInsets={Platform.OS === 'ios'}
       >
-        {children}
+        {Ordered ? (
+          <Ordered ordered style={contentContainerStyle}>
+            {children}
+          </Ordered>
+        ) : (
+          children
+        )}
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

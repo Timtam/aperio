@@ -9,7 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  View,
+  type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -61,7 +61,7 @@ export default function ContactsPrivacyNoticeModal({
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
-  const ackRef = useRef<View>(null);
+  const ackRef = useRef<ViewInstance>(null);
 
   const provider = providerPolicyFor(adapterKind);
 

@@ -22,6 +22,8 @@ import tasksIcon from '../assets/tabs/tasks.png';
 // three-finger swipe routing) from app start, independent of which screen loads
 // first.
 import './a11y/gestureHost';
+// The VoiceOver form lab of a diagnostic build (iOS, temporary).
+import './a11y/formLab';
 import { useSyncTriggers } from './api/syncTriggers';
 import { AppLockGate } from './components/AppLockGate';
 import DayStartReviewModal from './components/DayStartReviewModal';

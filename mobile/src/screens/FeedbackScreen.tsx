@@ -17,6 +17,7 @@ import {
 
 import { feedbackCheck, feedbackInfo, feedbackLogs, sendFeedback } from '../api/feedback';
 import { FormScrollView } from '../components/FormScrollView';
+import { useActionHeader } from '../components/useActionHeader';
 import { ReadOnlyField } from '../components/ReadOnlyField';
 import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { SwitchRow } from '../components/SwitchRow';
@@ -197,6 +198,23 @@ function FeedbackForm({ navigation, route }: RootStackScreenProps<'Feedback'>) {
     [logs],
   );
 
+  // Send in the header, always on screen: at the end of the form, with the
+  // keyboard open, VoiceOver did not scroll down to it (useActionHeader).
+  const sendDisabled = busy || waitingForLogs;
+  const sendFromHeader = useCallback(() => void onSend(), [onSend]);
+  useActionHeader(
+    navigation,
+    info?.available === true
+      ? {
+          label: busy
+            ? t('dialogs.settings.feedback.sending')
+            : t('dialogs.settings.feedback.send'),
+          onPress: sendFromHeader,
+          disabled: sendDisabled,
+        }
+      : null,
+  );
+
   if (!info) return <View style={styles.screen} />;
 
   if (!info.available) {
@@ -207,10 +225,12 @@ function FeedbackForm({ navigation, route }: RootStackScreenProps<'Feedback'>) {
     );
   }
 
-  const sendDisabled = busy || waitingForLogs;
-
   return (
     <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      {/* The outcome first: one swipe after the header's Send, and in view
+          after a tap there, even with the keyboard up. */}
+      {error && <Text style={styles.error}>{error}</Text>}
+      {notice && <Text style={styles.hint}>{notice}</Text>}
       <Text style={styles.hint}>{t('dialogs.settings.feedback.hint')}</Text>
 
       <View style={styles.field}>
@@ -277,27 +297,6 @@ function FeedbackForm({ navigation, route }: RootStackScreenProps<'Feedback'>) {
         value={info.system}
       />
 
-      {error && <Text style={styles.error}>{error}</Text>}
-      {notice && <Text style={styles.hint}>{notice}</Text>}
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: sendDisabled }}
-        accessibilityLabel={
-          busy ? t('dialogs.settings.feedback.sending') : t('dialogs.settings.feedback.send')
-        }
-        disabled={sendDisabled}
-        onPress={() => void onSend()}
-        style={({ pressed }) => [
-          styles.primaryButton,
-          pressed && styles.pressed,
-          sendDisabled && styles.disabled,
-        ]}
-      >
-        <Text style={styles.primaryButtonText} importantForAccessibility="no">
-          {busy ? t('dialogs.settings.feedback.sending') : t('dialogs.settings.feedback.send')}
-        </Text>
-      </Pressable>
     </FormScrollView>
   );
 }
@@ -321,14 +320,6 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surface,
     },
     multiline: { minHeight: 140 },
-    primaryButton: {
-      paddingVertical: 14,
-      paddingHorizontal: 18,
-      borderRadius: 10,
-      backgroundColor: c.accent,
-      alignItems: 'center',
-    },
-    primaryButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
     ghostButton: {
       paddingVertical: 12,
       paddingHorizontal: 16,
@@ -340,5 +331,4 @@ const makeStyles = (c: ThemeColors) =>
     },
     ghostButtonText: { fontSize: 15, fontWeight: '600', color: c.link },
     pressed: { opacity: 0.7 },
-    disabled: { opacity: 0.5 },
   });

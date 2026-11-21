@@ -817,7 +817,7 @@ export default function AgendaScreen({
     const join = joinAction(ev, t);
     const actions: MenuAction[] = [
       ...(join ? [join.action] : []),
-      { name: 'activate', label: t('mobile.editTaskLabel') },
+      { name: 'activate', label: t('dialogs.event.editTitle') },
       { name: 'moveCopy', label: t('mobile.moveCopy') },
       // The agenda is the screen where the same appointment showing up four
       // times is most obvious, so leaving the entry point out of it would be

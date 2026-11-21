@@ -7,6 +7,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  type TextInstance,
 } from 'react-native';
 
 import {
@@ -114,7 +115,7 @@ export default function EventGroupModal({
    * one node that is always there, and hearing it again says plainly which
    * screen this still is.
    */
-  const headingRef = useRef<Text>(null);
+  const headingRef = useRef<TextInstance>(null);
   const reparkFocus = useCallback(() => {
     const tag = findNodeHandle(headingRef.current);
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
