@@ -107,6 +107,14 @@ keinen, dort ist die Wahl Tonis Sache.
     (sha256) in `crates/cal-core/tzdata/` festgehalten sind.
   - Die Exchange-Tabelle kommt aus CLDR release-49: British Columbia, Alberta
     und Manitoba Standard Time für Vancouver, Edmonton/Inuvik und Winnipeg.
+    Tonis Exchange-Server kennt sie noch nicht (Live-Test Zonen, 21. November
+    2026, Programm `ews-zones`): von seinen 140 Kennungen ist keine der drei
+    dabei, und eine Testserie mit einer davon lehnt er mit `ErrorTimeZone`
+    ab. Aperio fragt die Liste des Servers (`GetServerTimeZones`) und schreibt
+    eine Serie in diesen Zonen dort ohne Zone, mit einer Warnung im
+    Protokoll; dem Nutzer sagt das erst Stufe 7. Pacific, Mountain und
+    Central Standard Time laufen auf dem Server bis Oktober 2031 wie Los
+    Angeles, Denver und Chicago, so wie Aperio sie liest.
   - chrono-Typen bleiben überall; `chrono::Local` liest für die Geräte-Uhr
     weiter die Daten des Betriebssystems.
   - Ein wöchentlicher Lauf (`zone-data-watch.yml`) meldet in einem Issue, wenn
@@ -1426,9 +1434,6 @@ Handy im selben PR.
   und Browser. Gemessen war nur der alte Stand: WebView2 152 und Edge 154
   stimmten mit 2025b überein; Node 24 (tzdata 2026b) wich für Vancouver ab
   1. November 2026 und für Chisinau ab.
-- Ob Toni's Exchange „British Columbia“, „Alberta“ und „Manitoba Standard
-  Time“ kennt (CLDR release-49; Manitoba dokumentiert Microsoft nicht). Prüft
-  das Live-Programm `ews-zones` außerhalb des Repos.
 - Ob iCloud und Google VTIMEZONEs mit Zahlen-TZNAME (`+04`) und Dublins
   vertauschten Bezeichnungen annehmen.
 - Größenzuwachs der iOS-App und was der Aufruf der Versätze für 312 Zonen auf

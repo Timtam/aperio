@@ -327,13 +327,18 @@ the iCalendar reader):
   table's clock guard compares them, over five years from the first day the
   guard compared (`CLOCKS_COMPARED_FROM`) or from the series' first day if
   that is later, so the clock is matched where the series runs now and the
-  reading does not change with today's date. The answer is remembered per
-  definition, window and device zone. `UTC`, a UTC name, an unknown id
+  reading does not change with today's date. The zone must also read the
+  definition's offset at the series' first start, because every later
+  occurrence repeats that wall time: a fixed UTC−06:00 definition first used
+  in December 2025 is `America/Regina`, not `America/Edmonton`, which ran
+  −07:00 then. The answer is remembered per definition, first start and
+  device zone. `UTC`, a UTC name, an unknown id
   without its definition, a definition that cannot be read, and one no zone
   runs mean no zone; the series repeats in UTC.
 - **Ids the server knows.** A server refuses a save naming an id it does not
   know (`ErrorTimeZone`, and the whole save fails); Exchange 2019 does not know
-  `Sao Tome Standard Time`. The adapter asks each server once
+  `Sao Tome Standard Time`, nor, in November 2026, CLDR release-49's
+  `British Columbia`, `Alberta` and `Manitoba Standard Time` (live test). The adapter asks each server once
   (`GetServerTimeZones`) and writes only ids it knows. An unknown one goes out
   without a zone and is logged. An update without a zone keeps the series' old
   zone in Exchange, so an update to an unknown zone leaves the old one there.
