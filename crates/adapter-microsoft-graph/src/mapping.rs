@@ -441,8 +441,10 @@ pub struct GraphDateTime {
 
 impl GraphDateTime {
     /// Convert to UTC. For `timeZone == "UTC"` we just append `Z`
-    /// before parsing; for anything else we route through
-    /// `chrono_tz` (Graph speaks the IANA names natively).
+    /// before parsing; anything else must be tzdata's own name in exact
+    /// case (Graph speaks the IANA names natively), read with
+    /// `cal_core::Zone`. A wall time the zone skips or shows twice is an
+    /// error (`WallPolicy::Strict`).
     pub(crate) fn to_utc(&self) -> GraphResult<DateTime<Utc>> {
         // Strip the seven-digit fractional second Graph likes to
         // emit but chrono rejects past three digits.
@@ -455,20 +457,18 @@ impl GraphDateTime {
                 .parse::<DateTime<Utc>>()
                 .map_err(|e| GraphError::Protocol(format!("graph datetime: {e}: {with_z}")));
         }
-        let tz: chrono_tz::Tz = self.time_zone.parse().map_err(|e| {
-            GraphError::Protocol(format!("unknown timezone '{}': {e:?}", self.time_zone))
+        let tz = cal_core::Zone::named(&self.time_zone).ok_or_else(|| {
+            GraphError::Protocol(format!("unknown timezone '{}'", self.time_zone))
         })?;
         let naive = chrono::NaiveDateTime::parse_from_str(&trimmed, "%Y-%m-%dT%H:%M:%S")
             .map_err(|e| GraphError::Protocol(format!("graph naive datetime: {e}")))?;
-        tz.from_local_datetime(&naive)
-            .single()
+        tz.to_utc(naive, cal_core::WallPolicy::Strict)
             .ok_or_else(|| {
                 GraphError::Protocol(format!(
                     "ambiguous local time {naive} in {}",
                     self.time_zone
                 ))
             })
-            .map(|local| local.with_timezone(&Utc))
     }
 
     /// All-day boundary: the calendar DAY named in the wire string,
@@ -1069,17 +1069,12 @@ fn write_datetime(when: DateTime<Utc>, all_day: bool, tzid: Option<&str>) -> Gra
                 .to_string(),
             time_zone: "UTC".into(),
         }
-    } else if let Some((name, tz)) =
-        tzid.and_then(|t| t.parse::<chrono_tz::Tz>().ok().map(|tz| (t, tz)))
-    {
+    } else if let Some((name, tz)) = tzid.and_then(|t| cal_core::Zone::named(t).map(|tz| (t, tz))) {
         // A zoned recurring master: send the LOCAL wall-clock + its IANA zone so
         // Graph expands the series DST-correctly on its side (Graph accepts IANA
         // names). A one-off is an exact instant, so it stays on the UTC branch.
         GraphDateTimeWrite {
-            date_time: when
-                .with_timezone(&tz)
-                .format("%Y-%m-%dT%H:%M:%S")
-                .to_string(),
+            date_time: tz.wall(when).format("%Y-%m-%dT%H:%M:%S").to_string(),
             time_zone: name.to_string(),
         }
     } else {
