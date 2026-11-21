@@ -107,6 +107,15 @@ pub enum WriteRefusal {
     /// the server saying so where they could not see it. The detail is the
     /// UID, or what the server named.
     UidTaken,
+    /// The series' time zone is one the calendar cannot store, so nothing was
+    /// written (decision 98a): writing it without one would leave the series
+    /// on UTC, where it slides by the zone's daylight saving. Exchange cannot
+    /// store a zone CLDR names no Windows id for, or names one that runs
+    /// another clock, and one server may not know an id at all. The detail is
+    /// the zone's canonical tzdata name, which the surfaces read out as its
+    /// city, and a machine token for the log after a space: `no-windows-zone`,
+    /// `other-clock`, `not-on-server`.
+    SeriesZoneNotStorable,
 }
 
 /// What a provider answered when it turned a request away for throttling, as
@@ -218,6 +227,7 @@ impl WriteRefusal {
             Self::DeletionsNotKept => "deletions-not-kept",
             Self::ProviderBusy => "provider-busy",
             Self::UidTaken => "uid-taken",
+            Self::SeriesZoneNotStorable => "series-zone-not-storable",
         }
     }
 
@@ -279,6 +289,7 @@ impl WriteRefusal {
             Self::DeletionsNotKept,
             Self::ProviderBusy,
             Self::UidTaken,
+            Self::SeriesZoneNotStorable,
         ] {
             let token = refusal.token();
             let rest = match message.strip_prefix(token) {
@@ -400,7 +411,9 @@ mod tests {
             WriteRefusal::CopyUnreadable,
             WriteRefusal::ExceptionsWouldBeLost,
             WriteRefusal::DeletionsNotKept,
+            WriteRefusal::ProviderBusy,
             WriteRefusal::UidTaken,
+            WriteRefusal::SeriesZoneNotStorable,
         ] {
             let msg = refusal.message("detail");
             assert_eq!(

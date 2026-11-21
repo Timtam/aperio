@@ -194,8 +194,9 @@ impl Default for RecurrenceCapabilities {
 /// holds canonical tzdata names in exact case, and it is the adapter's own
 /// statement: Exchange's is generated from CLDR by `cargo xtask
 /// windows-zones`, so the host names no provider (decision 97a). What one
-/// server of a provider does not know is not in it; stage 7 is to say so
-/// when a save meets it.
+/// server of a provider does not know is not in it; a save that meets it
+/// is refused by name (`cal_core::WriteRefusal::SeriesZoneNotStorable`,
+/// decision 98a).
 ///
 /// UTC is no zone (`cal_core::series_clock_zone` reads every UTC name as
 /// none) and is never listed: ask only for a named zone. A series in UTC

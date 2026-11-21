@@ -2044,8 +2044,8 @@ pub(crate) fn new_event_to_calendar_item_xml_in<D: TimeZone>(
     device: &D,
 ) -> EwsResult<String> {
     // The zone is looked up once: it decides the rule's first day as well as
-    // what is written, and a zone Exchange cannot store is logged once.
-    let written = series_windows_zone(event.all_day, event.recurrence.as_ref(), server_zones);
+    // what is written, and a zone Exchange cannot store refuses the create.
+    let written = series_windows_zone(event.all_day, event.recurrence.as_ref(), server_zones)?;
     let mut out = String::new();
     out.push_str("        <t:CalendarItem>\n");
     out.push_str(&format!(
@@ -2142,29 +2142,34 @@ pub(crate) fn new_event_to_calendar_item_xml_in<D: TimeZone>(
     Ok(out)
 }
 
-/// The Windows id a series is written with, by `windows_tz`'s rule; `None`
-/// writes no zone. An all-day series writes none (the core's
-/// `written_series_zone`, decision 46a): Exchange would move it to the zone's
-/// midnights and stretch it over more days. A zone Exchange cannot store —
-/// here, or on this server — is logged by name, once per write.
+/// What Exchange gets for a series' zone, by `windows_tz`'s rule. An all-day
+/// series writes none (the core's `written_series_zone`, decision 46a):
+/// Exchange would move it to the zone's midnights and stretch it over more
+/// days.
+fn series_zone_write(
+    all_day: bool,
+    recurrence: Option<&EventRecurrence>,
+    server_zones: Option<&ServerTimeZones>,
+) -> crate::windows_tz::WindowsZoneWrite {
+    let tzid = cal_core::written_series_zone(recurrence.and_then(|r| r.tzid.as_deref()), all_day);
+    crate::windows_tz::windows_zone_for(tzid, server_zones)
+}
+
+/// The Windows id a series is written with ([`series_zone_write`]); `None`
+/// writes no zone. A zone Exchange cannot store — here, or on this server —
+/// refuses the write by name (decision 98a): written without one, the series
+/// would stand on UTC and slide by the zone's daylight saving.
 fn series_windows_zone(
     all_day: bool,
     recurrence: Option<&EventRecurrence>,
     server_zones: Option<&ServerTimeZones>,
-) -> Option<&'static str> {
-    use crate::windows_tz::{windows_zone_for, WindowsZoneWrite};
-    let tzid = cal_core::written_series_zone(recurrence.and_then(|r| r.tzid.as_deref()), all_day);
-    match windows_zone_for(tzid, server_zones) {
-        WindowsZoneWrite::Id(windows) => Some(windows),
-        WindowsZoneWrite::NoZone => None,
+) -> EwsResult<Option<&'static str>> {
+    use crate::windows_tz::WindowsZoneWrite;
+    match series_zone_write(all_day, recurrence, server_zones) {
+        WindowsZoneWrite::Id(windows) => Ok(Some(windows)),
+        WindowsZoneWrite::NoZone => Ok(None),
         WindowsZoneWrite::NotStorable { zone, reason } => {
-            tracing::warn!(
-                target: "adapter_ews::zones",
-                zone,
-                ?reason,
-                "Exchange cannot store this series time zone; the series is written without one",
-            );
-            None
+            Err(EwsError::Protocol(reason.refusal(zone)))
         }
     }
 }
@@ -2517,10 +2522,10 @@ pub(crate) fn plan_update_in<D: TimeZone>(
         _ => event,
     };
     // The zone a zoned recurring master is written with, by the same rule as a
-    // create, looked up once: a zone Exchange cannot store is logged once per
-    // write. It goes out when the series' zone, its all-day flag or its slot
-    // may change. `series_windows_zone` is a pure function of (all_day,
-    // recurrence), so those are the exact gate; the slot rides along as
+    // create, looked up once: a zone Exchange cannot store refuses the update
+    // where the zone would go out (98a), below. It goes out when the series'
+    // zone, its all-day flag or its slot may change. `series_zone_write` is a
+    // pure function of (all_day, recurrence), so those are the exact gate; the slot rides along as
     // insurance for the unmeasured claim that a server-side edit can drop the
     // zone. A time-only gate would drop it on a rule-only change — weekly to
     // daily without moving the series. The rule itself never opens the gate:
@@ -2529,7 +2534,11 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // wait on the clock the zone decides. The all-day flag it reads is the
     // one the server keeps after this update (`landed`): a kept all-day flag
     // stays, and an all-day item never gets a zone (46a).
-    let written = series_windows_zone(landed.all_day, rule_of.recurrence.as_ref(), server_zones);
+    let zone_write = series_zone_write(landed.all_day, rule_of.recurrence.as_ref(), server_zones);
+    let written = match zone_write {
+        crate::windows_tz::WindowsZoneWrite::Id(windows) => Some(windows),
+        _ => None,
+    };
     // A series whose start zone Exchange defines in full (232) reads as the
     // zone that runs that clock, and keeps its zones while the zone written
     // would run the same clock (Toni, 2026-11-09): the clock does not change,
@@ -2537,9 +2546,18 @@ pub(crate) fn plan_update_in<D: TimeZone>(
     // may drop the series' exceptions (unmeasured for this case, 245).
     let keeps_definition =
         written.is_some_and(|windows| keeps_its_definition(stored, windows, landed.start));
-    let zone_written = !keeps_definition
-        && written.is_some()
-        && (rule_changed || touches(EventField::AllDay) || slot_changed);
+    let zone_goes_out =
+        !keeps_definition && (rule_changed || touches(EventField::AllDay) || slot_changed);
+    // A zone Exchange cannot store, where it would go out, refuses the whole
+    // update (decision 98a) instead of leaving the series on the zone the
+    // server holds or on UTC. An edit that writes no zone — the title, a
+    // reminder — still saves.
+    if zone_goes_out {
+        if let crate::windows_tz::WindowsZoneWrite::NotStorable { zone, reason } = zone_write {
+            return Err(EwsError::Protocol(reason.refusal(zone)));
+        }
+    }
+    let zone_written = zone_goes_out && written.is_some();
     // An update that writes a NEW zone keeps the item's stored wall clock and
     // relabels it in that zone, so the item moves by the offset (live round 1,
     // B2; the 8a live test, step 9). The zone therefore goes first, and when
@@ -5389,16 +5407,34 @@ mod tests {
 
     /// A create and an update write the zone by `windows_tz`'s one rule: a
     /// device spelling resolves first, a merged place writes its target's id,
-    /// the ids the hand table got wrong are CLDR's, and a zone Exchange cannot
-    /// store or a UTC name writes none.
+    /// the ids the hand table got wrong are CLDR's, and a UTC name writes none.
+    /// A zone Exchange cannot store refuses both by name (decision 98a).
     #[test]
     fn create_and_update_write_the_zone_by_the_one_rule() {
+        for (tzid, detail) in [
+            ("Antarctica/Troll", "Antarctica/Troll no-windows-zone"),
+            ("America/Scoresbysund", "America/Scoresbysund other-clock"),
+        ] {
+            let mut create = new_event_min("Zoned");
+            create.recurrence = Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY".into(),
+                exceptions: Vec::new(),
+                tzid: Some(tzid.into()),
+            });
+            let want = cal_core::WriteRefusal::SeriesZoneNotStorable.message(detail);
+            match new_event_to_calendar_item_xml(&create) {
+                Err(EwsError::Protocol(message)) => assert_eq!(message, want, "create {tzid}"),
+                other => panic!("create {tzid}: {other:?}"),
+            }
+            match event_to_update_field_xml(&zoned_master(Some(tzid))) {
+                Err(EwsError::Protocol(message)) => assert_eq!(message, want, "update {tzid}"),
+                other => panic!("update {tzid}: {other:?}"),
+            }
+        }
         let cases = [
             ("Asia/Calcutta", Some("India Standard Time")),
             ("Asia/Beirut", Some("Middle East Standard Time")),
             ("Europe/Amsterdam", Some("Romance Standard Time")),
-            ("Antarctica/Troll", None),
-            ("America/Scoresbysund", None),
             ("UTC", None),
             ("Etc/UTC", None),
         ];
@@ -5476,12 +5512,14 @@ mod tests {
         }
     }
 
-    /// Decision 41a: an id the server does not know goes out without a zone,
-    /// because Exchange 2019 refuses the whole save over it (live test A9).
-    /// The ids it knows are written, in the server's case or not; a server
+    /// Decision 41a: the server is asked which ids it knows, because Exchange
+    /// 2019 refuses the whole save over one it does not (live test A9). The
+    /// ids it knows are written, in the server's case or not. One it does not
+    /// know refuses the create and an update that writes the zone, by name
+    /// (decision 98a); an update that writes no zone still saves. A server
     /// that could not be asked, or knows none, gets the CLDR ids.
     #[test]
-    fn a_zone_the_server_does_not_know_is_written_without_a_zone() {
+    fn a_zone_the_server_does_not_know_refuses_the_write() {
         let server = ServerTimeZones::new(["w. europe standard time", "UTC"]);
         let written = |tzid: &str, zones: Option<&ServerTimeZones>| {
             let mut create = new_event_min("Zoned");
@@ -5490,28 +5528,37 @@ mod tests {
                 exceptions: Vec::new(),
                 tzid: Some(tzid.into()),
             });
-            let xml = new_event_to_calendar_item_xml_on(&create, zones).unwrap();
-            let (set, _) = event_to_update_field_xml_on(
+            let xml = new_event_to_calendar_item_xml_on(&create, zones);
+            let set = event_to_update_field_xml_on(
                 &zoned_master(Some(tzid)),
                 None,
                 zones,
                 EventIdKind::RecurringMaster,
             )
-            .unwrap();
+            .map(|(set, _)| set);
             (xml, set)
         };
 
         let (xml, set) = written("Europe/Berlin", Some(&server));
+        let (xml, set) = (xml.unwrap(), set.unwrap());
         let start = r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#;
         assert!(xml.contains(start), "create Berlin: {xml}");
         assert!(set.contains(start), "update Berlin: {set}");
 
+        let want =
+            cal_core::WriteRefusal::SeriesZoneNotStorable.message("Africa/Sao_Tome not-on-server");
         let (xml, set) = written("Africa/Sao_Tome", Some(&server));
-        assert!(!xml.contains("TimeZone"), "create Sao Tome: {xml}");
-        assert!(!set.contains("TimeZone"), "update Sao Tome: {set}");
+        match (xml, set) {
+            (Err(EwsError::Protocol(create)), Err(EwsError::Protocol(update))) => {
+                assert_eq!(create, want, "create Sao Tome");
+                assert_eq!(update, want, "update Sao Tome");
+            }
+            other => panic!("Sao Tome: {other:?}"),
+        }
 
         for zones in [None, Some(&ServerTimeZones::default())] {
             let (xml, _) = written("Africa/Sao_Tome", zones);
+            let xml = xml.unwrap();
             assert!(
                 xml.contains(r#"<t:StartTimeZone Id="Sao Tome Standard Time"/>"#),
                 "create Sao Tome, server list {zones:?}: {xml}"
@@ -6938,7 +6985,8 @@ mod tests {
                             let zone_field = block.contains(r#"FieldURI="calendar:StartTimeZone""#)
                                 || block.contains(r#"FieldURI="calendar:EndTimeZone""#);
                             let timed_servers_zone =
-                                series_windows_zone(false, edit.recurrence.as_ref(), Some(&server));
+                                series_windows_zone(false, edit.recurrence.as_ref(), Some(&server))
+                                    .unwrap();
                             if zone_field
                                 && keep.contains(&EventField::AllDay)
                                 && !before.all_day
@@ -6974,7 +7022,8 @@ mod tests {
                                     edit.all_day,
                                     before.recurrence.as_ref(),
                                     Some(&server),
-                                );
+                                )
+                                .unwrap();
                                 assert!(
                                     rule.is_some_and(|rule| block.contains(&rule))
                                         || zone.is_some_and(|zone| block.contains(zone)),
@@ -7003,6 +7052,7 @@ mod tests {
                                             edit.recurrence.as_ref(),
                                             Some(&server),
                                         )
+                                        .unwrap()
                                         .is_none();
                                 let servers_rule_only = uri.as_deref()
                                     == Some("calendar:Recurrence")
@@ -10479,11 +10529,43 @@ mod tests {
         assert!(!xml.contains("TimeZone"), "{xml}");
     }
 
-    /// A zone this server cannot store goes out without one, so the series
-    /// repeats on UTC and starts on the UTC day: Tokyo's Monday 08:00 is
-    /// Sunday 23:00 in UTC.
+    /// An edit that writes no zone saves whatever zone the series stores
+    /// (decision 98a refuses only a zone that would go out): a new title on a
+    /// series in a zone Exchange cannot store writes the title alone.
     #[test]
-    fn a_zone_the_server_cannot_store_starts_on_the_utc_day() {
+    fn an_edit_that_writes_no_zone_saves_a_series_in_an_unstorable_zone() {
+        let before = zoned_master(Some("Antarctica/Troll"));
+        let mut edit = before.clone();
+        edit.title = "Renamed".into();
+        let (set, _) =
+            event_to_update_field_xml_on(&edit, Some(&before), None, EventIdKind::RecurringMaster)
+                .expect("a title alone saves");
+        assert!(set.contains("Renamed"), "{set}");
+        assert!(!set.contains("TimeZone"), "{set}");
+        // Moving it writes the zone, and is refused.
+        let mut moved = before.clone();
+        moved.start += chrono::Duration::hours(1);
+        moved.end += chrono::Duration::hours(1);
+        match event_to_update_field_xml_on(
+            &moved,
+            Some(&before),
+            None,
+            EventIdKind::RecurringMaster,
+        ) {
+            Err(EwsError::Protocol(message)) => assert_eq!(
+                message,
+                cal_core::WriteRefusal::SeriesZoneNotStorable
+                    .message("Antarctica/Troll no-windows-zone")
+            ),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// A zone this server cannot store refuses the create (decision 98a).
+    /// Written without one, as before, the series repeated on UTC and started
+    /// on the UTC day: Tokyo's Monday 08:00 stood on Sunday 23:00.
+    #[test]
+    fn a_zone_the_server_cannot_store_refuses_the_create() {
         let server = ServerTimeZones::new(["W. Europe Standard Time"]);
         let mut ev = new_event_min("Weekly");
         ev.start = "2026-10-18T23:00:00Z".parse().unwrap();
@@ -10493,15 +10575,17 @@ mod tests {
             exceptions: Vec::new(),
             tzid: Some("Asia/Tokyo".into()),
         });
-        let xml = new_event_to_calendar_item_xml_in(
+        match new_event_to_calendar_item_xml_in(
             &ev,
             Some(&server),
             &crate::test_zone("Europe/Berlin"),
-        )
-        .unwrap();
-        assert!(!xml.contains("TimeZone"), "{xml}");
-        assert_eq!(element(&xml, "StartDate"), "2026-10-18");
-        assert_eq!(element(&xml, "DaysOfWeek"), "Sunday");
+        ) {
+            Err(EwsError::Protocol(message)) => assert_eq!(
+                message,
+                cal_core::WriteRefusal::SeriesZoneNotStorable.message("Asia/Tokyo not-on-server")
+            ),
+            other => panic!("{other:?}"),
+        }
     }
 
     fn w_europe_zones() -> StoredZones {

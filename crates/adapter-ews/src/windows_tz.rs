@@ -145,6 +145,25 @@ pub enum NotStorable {
     NotOnServer { windows: &'static str },
 }
 
+impl NotStorable {
+    /// The machine word the refusal carries for the log
+    /// ([`cal_core::WriteRefusal::SeriesZoneNotStorable`]).
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::NoWindowsZone => "no-windows-zone",
+            Self::OtherClock { .. } => "other-clock",
+            Self::NotOnServer { .. } => "not-on-server",
+        }
+    }
+
+    /// The refusal of a write that would store `zone`, a canonical tzdata
+    /// name, for this reason (decision 98a): its message carries the zone and
+    /// this word.
+    pub fn refusal(self, zone: &str) -> String {
+        cal_core::WriteRefusal::SeriesZoneNotStorable.message(&format!("{zone} {}", self.token()))
+    }
+}
+
 /// The Windows zone ids one Exchange server knows, from `GetServerTimeZones`,
 /// compared in ASCII case folded.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

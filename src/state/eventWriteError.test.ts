@@ -245,6 +245,37 @@ describe('an all-day day in a time zone Aperio cannot read', () => {
   });
 });
 
+describe('a series zone the calendar cannot store (decision 98a)', () => {
+  it('names the city, not the zone id or the word for the log, and wrote nothing', () => {
+    // Exchange refuses a series in a zone it, or this server, cannot store
+    // rather than leave it on UTC; the detail carries the canonical name and
+    // a word for the log.
+    const desktop = command('protocol', 'series-zone-not-storable: America/Vancouver not-on-server');
+    const phone = new Error(
+      "Calling the 'createEventJson' function has failed\n→ Caused by: " +
+        'series-zone-not-storable: America/Indiana/Indianapolis other-clock',
+    );
+    expect(eventWriteRefusal(desktop)?.refusal).toBe('series-zone-not-storable');
+    expect(eventWriteErrorMessage(desktop, t)).toBe(
+      'Dieser Kalender kann die Zeitzone Vancouver für eine Serie nicht speichern. ' +
+        'Ohne sie würde die Serie bei der Zeitumstellung verrutschen, deshalb wurde nichts gespeichert.',
+    );
+    expect(eventWriteErrorMessage(phone, t)).toContain('Zeitzone Indianapolis (Indiana) für');
+    for (const err of [desktop, phone]) {
+      expect(eventWriteErrorMessage(err, t)).not.toMatch(/\/|not-on-server|other-clock/);
+    }
+    expect(eventWriteFailureReason(desktop, t)).toBe(
+      'dieser Kalender kann die Zeitzone Vancouver für eine Serie nicht speichern',
+    );
+    expect(writeNeverLanded(desktop)).toBe(true);
+  });
+
+  it('reads a zone the world list does not hold as its name', () => {
+    const err = command('protocol', 'series-zone-not-storable: EST5EDT no-windows-zone');
+    expect(eventWriteErrorMessage(err, t)).toContain('Zeitzone EST5EDT für');
+  });
+});
+
 describe('a save that would drop occurrences of a series', () => {
   it('reads as its own refusal, behind the wrapper too, says what and how many, and as nothing written', () => {
     // Decisions 243-253: Exchange drops a series' changed and deleted

@@ -14,6 +14,7 @@ import {
   parseExceptionsLoss,
   type ExceptionsLoss,
 } from './exceptionsLoss';
+import { zoneCityText } from './zoneList';
 
 /** The sentence each refusal reads as. Typed by the generated union, so a new
  *  refusal in the core is a compile error here and not an English sentence in
@@ -31,6 +32,7 @@ const REFUSAL_KEYS: Record<WriteRefusal, string> = {
   'deletions-not-kept': 'dialogs.event.writeError.deletionsNotKept',
   'provider-busy': 'dialogs.event.writeError.providerBusy',
   'uid-taken': 'dialogs.event.writeError.uidTaken',
+  'series-zone-not-storable': 'dialogs.event.writeError.seriesZoneNotStorable',
 };
 
 const TOKENS = Object.keys(REFUSAL_KEYS) as WriteRefusal[];
@@ -50,6 +52,7 @@ const REFUSAL_REASON_KEYS: Record<WriteRefusal, string> = {
   'deletions-not-kept': 'dialogs.event.writeError.reason.deletionsNotKept',
   'provider-busy': 'dialogs.event.writeError.reason.providerBusy',
   'uid-taken': 'dialogs.event.writeError.reason.uidTaken',
+  'series-zone-not-storable': 'dialogs.event.writeError.reason.seriesZoneNotStorable',
 };
 
 /** The sentence each leftover reads as (`cal_core::WriteLeftover`): something
@@ -446,7 +449,7 @@ export function eventWriteFailureReason(err: unknown, t: Translate): string {
       if (why === OUT_OF_TIME) return t('dialogs.event.writeError.reason.deletionsNotKeptTime');
       if (why === PROVIDER_BUSY) return t('dialogs.event.writeError.reason.deletionsNotKeptBusy');
     }
-    return t(REFUSAL_REASON_KEYS[refusal.refusal], { detail: refusal.detail });
+    return t(REFUSAL_REASON_KEYS[refusal.refusal], refusalVars(refusal));
   }
   const known = codedError(err);
   if (known?.code === 'forbidden') {
@@ -485,7 +488,7 @@ function refusalSentence(
   t: Translate,
 ): string {
   if (refusal.refusal !== 'deletions-not-kept') {
-    return t(refusal.key, { detail: refusal.detail });
+    return t(refusal.key, refusalVars(refusal));
   }
   const { invited, why } = stepDetail(refusal.detail);
   const sentence =
@@ -495,6 +498,21 @@ function refusalSentence(
         ? t('dialogs.event.writeError.deletionsNotKeptBusy')
         : t(refusal.key);
   return invited ? `${sentence} ${t('dialogs.event.writeError.invitationsCancelledToo')}` : sentence;
+}
+
+/**
+ * What a refusal's sentence is filled with: its detail, and for a zone a
+ * calendar cannot store (decision 98a) the zone's city. Its detail is the
+ * canonical zone name and a word for the log, `America/Vancouver
+ * not-on-server`; a screen reader reads "Vancouver", not the slashes.
+ */
+function refusalVars(refusal: { refusal: WriteRefusal; detail: string }): {
+  detail: string;
+  city?: string;
+} {
+  if (refusal.refusal !== 'series-zone-not-storable') return { detail: refusal.detail };
+  const zone = refusal.detail.split(/\s+/)[0] ?? '';
+  return { detail: refusal.detail, city: zoneCityText(zone) };
 }
 
 /** A leftover's sentence, and where the invitees may have heard of the write,
