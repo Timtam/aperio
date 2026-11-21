@@ -21,6 +21,9 @@ members = [
     # iCalendar text to events and back, shared by CalDAV, the iCal feeds and
     # file import, and Exchange's invitations.
     "crates/ical-mapping",
+    # RFC 5545 recurrence expansion: rrule 0.14.0, forked so its zones are
+    # cal-zone's (see crates/rrule/SOURCE).
+    "crates/rrule",
     "crates/plugin-core",
     "crates/plugin-sdk",
     "crates/sync-core",
@@ -214,7 +217,7 @@ icalendar = "0.16"
 # recurring events fire reminders for every occurrence, not just the
 # series master. Frontend uses rrule.js in the renderer; the Rust
 # side stays self-contained.
-rrule = "0.14"
+rrule = { path = "crates/rrule" }
 
 # Auth
 oauth2 = "4"
