@@ -161,8 +161,10 @@ pub struct RecurrenceCapabilities {
     /// The time zones a series in this calendar can repeat on
     /// (DESIGN-series-time-zone.md, stage 6, decision 97a): every zone, none
     /// (the calendar stores no zone, as the phone's own calendars), or only
-    /// the listed ones. The editors mark the others in the zone list and do
-    /// not offer them (22a). Every zone by default, as the other axes.
+    /// the listed ones. UTC is no zone and is in no list: a calendar that
+    /// stores a repeat rule stores a series in UTC (26a). The zone picker of
+    /// stage 11 is to mark the others and not offer them (22a). Every zone by
+    /// default, as the other axes.
     #[serde(default)]
     #[cfg_attr(feature = "ts-export", ts(type = "\"all\" | \"none\" | Array<string>"))]
     pub time_zones: SeriesTimeZones,
@@ -192,8 +194,13 @@ impl Default for RecurrenceCapabilities {
 /// holds canonical tzdata names in exact case, and it is the adapter's own
 /// statement: Exchange's is generated from CLDR by `cargo xtask
 /// windows-zones`, so the host names no provider (decision 97a). What one
-/// server of a provider does not know is not in it; that is said when a save
-/// meets it (stage 7).
+/// server of a provider does not know is not in it; stage 7 is to say so
+/// when a save meets it.
+///
+/// UTC is no zone (`cal_core::series_clock_zone` reads every UTC name as
+/// none) and is never listed: ask only for a named zone. A series in UTC
+/// is stored by every calendar that stores a repeat rule (26a; Exchange
+/// writes it without a zone).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SeriesTimeZones {
     /// Every zone (`"all"`).
@@ -208,9 +215,10 @@ pub enum SeriesTimeZones {
 
 impl SeriesTimeZones {
     /// Whether a series in this calendar can repeat on `zone`, a canonical
-    /// tzdata name in exact case. The caller canonicalizes: a list names a
-    /// place tzdata merged with another city (Oslo with Berlin, 25b) by the
-    /// city it points to, as the editors store it.
+    /// tzdata name in exact case that is not a UTC name. The caller
+    /// canonicalizes: a list names a place tzdata merged with another city
+    /// (Oslo with Berlin, 25b) by the city it points to, as the editors store
+    /// it. A UTC name is no zone and not asked here (see the type).
     pub fn stores(&self, zone: &str) -> bool {
         match self {
             Self::Every => true,

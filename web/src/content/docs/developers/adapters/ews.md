@@ -350,8 +350,10 @@ the iCalendar reader):
   release-49 and tzdata 2026f. `cargo xtask windows-zones` writes the list
   with the table, and `--check` and a test in the plugin crate hold it to
   the table. The host reads it as the plugin's own statement and names no
-  provider. What one server does not know is not in it; a save says so
-  (stage 7).
+  provider. UTC is no zone and is not listed; Exchange stores a UTC series
+  without one. What one server does not know is not in it either; stage 7
+  is to say so on a save. Until then such a series goes out without a zone,
+  as the bullet above says.
 - **Writing.** An all-day series writes no zone (`cal_core::written_series_zone`).
   A zone makes Exchange move an all-day series to that zone's midnights and
   stretch it over more days (live test). Any other series' stored zone goes

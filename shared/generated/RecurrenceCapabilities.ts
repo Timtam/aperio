@@ -72,7 +72,9 @@ deletions_in_steps: boolean,
  * The time zones a series in this calendar can repeat on
  * (DESIGN-series-time-zone.md, stage 6, decision 97a): every zone, none
  * (the calendar stores no zone, as the phone's own calendars), or only
- * the listed ones. The editors mark the others in the zone list and do
- * not offer them (22a). Every zone by default, as the other axes.
+ * the listed ones. UTC is no zone and is in no list: a calendar that
+ * stores a repeat rule stores a series in UTC (26a). The zone picker of
+ * stage 11 is to mark the others and not offer them (22a). Every zone by
+ * default, as the other axes.
  */
 time_zones: "all" | "none" | Array<string>, };

@@ -439,8 +439,8 @@ des Dokuments hinzu; sie stehen in den Abschnitten unten:
 - Die Exchange-Stufe kommt vor die Editoren, damit ein Wechsel nie still
   verpufft.
 
-Vier weitere Entscheidungen traf Toni am 21. November 2026, als der Bogen wieder
-aufgenommen wurde:
+Fünf weitere Entscheidungen traf Toni am 21. November 2026, als der Bogen wieder
+aufgenommen wurde (97a später am Tag, zu Stufe 6):
 
 - **93b — streng in der Reihenfolge der Stufenliste.** Kein vorgezogener
   Reparatur-Teil mit vorübergehenden Abweichungen (Felder einer zonenlosen Serie
@@ -460,15 +460,17 @@ aufgenommen wurde:
   Hilfe warnt; ohne es erschienen sie im anderen Halbjahr doppelt.
 - **96a — erst neue Zeitzonendaten.** Vor den Stufen 6 und 11 wird tzdata
   2025b abgelöst (32a). Welcher Weg, entscheidet eine eigene Recherche.
-- **97a — eine Liste im Manifest** (Stufe 6, am selben Tag). Ein Kalender
+- **97a — eine Liste im Manifest** (Stufe 6). Ein Kalender
   sagt in seinem Manifest, welche Zonen eine Serie bei ihm haben kann:
   `"all"`, `"none"` oder eine Liste kanonischer tzdata-Namen
   (`recurrence.time_zones`). Die Liste ist die Aussage des Adapters; der
   Kern kennt nur Listen und keinen Anbieter. Die Exchange-Liste erzeugt
   `cargo xtask windows-zones` aus derselben CLDR-Tabelle, aus der der
-  Adapter schreibt. Was ein einzelner Server nicht kennt (Tonis Exchange
-  kennt die drei neuen kanadischen Kennungen nicht), steht nicht darin;
-  das sagt Stufe 7 beim Speichern. Verworfen: ein Regelname, den der Kern
+  Adapter schreibt. UTC ist keine Zone und steht in keiner Liste; eine
+  Serie in UTC speichert jeder Kalender, der eine Regel speichert (26a).
+  Was ein einzelner Server nicht kennt (Tonis Exchange kennt die drei
+  neuen kanadischen Kennungen nicht), steht nicht darin; das soll Stufe 7
+  beim Speichern sagen. Verworfen: ein Regelname, den der Kern
   auflöst (dann kennte der Kern einen Microsoft-Begriff), und eine Liste,
   die der Adapter zur Laufzeit je Server meldet (ein neuer Plugin-Aufruf
   mit Zwischenspeicher; ohne Netz wüsste der Editor es erst später).
