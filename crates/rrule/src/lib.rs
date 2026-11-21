@@ -92,6 +92,11 @@
 #![forbid(unsafe_code)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+// The fork carries no serde support: the feature is declared only so
+// upstream's cfg(feature = "serde") lines stay as they are (see SOURCE).
+#[cfg(feature = "serde")]
+compile_error!("Aperio's rrule fork has no serde support; leave the `serde` feature off");
+
 mod core;
 mod error;
 mod iter;

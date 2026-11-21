@@ -3169,31 +3169,22 @@ impl DayZone {
     /// reaches it twice, and an hour later where a change skips it, as a
     /// series' occurrence is pushed past the gap.
     pub(crate) fn instant_of(&self, local: NaiveDateTime) -> Option<DateTime<Utc>> {
-        let at = |local: NaiveDateTime| match self {
-            Self::Tz(tz) => tz
-                .from_local_datetime(&local)
-                .earliest()
-                .map(|l| l.with_timezone(&Utc)),
-            Self::Rules(rules) => rules.instant_of(local),
-        };
-        at(local).or_else(|| at(local + chrono::Duration::hours(1)))
+        match self {
+            Self::Tz(tz) => tz.to_utc(local, cal_core::WallPolicy::EarlierElseHourLater),
+            Self::Rules(rules) => rules.instant_of(local).or_else(|| {
+                rules.instant_of(local.checked_add_signed(chrono::Duration::hours(1))?)
+            }),
+        }
     }
 }
 
 /// Midnight on `day` in a chrono zone, the first hour after it where a
-/// change skips it.
+/// change skips it: cal-core's `WallPolicy::EarlierElseHourLater`.
 pub(crate) fn local_midnight_in<Z: TimeZone>(
     day: chrono::NaiveDate,
     zone: &Z,
 ) -> Option<DateTime<Utc>> {
-    let midnight = day.and_hms_opt(0, 0, 0)?;
-    zone.from_local_datetime(&midnight)
-        .earliest()
-        .or_else(|| {
-            zone.from_local_datetime(&(midnight + chrono::Duration::hours(1)))
-                .earliest()
-        })
-        .map(|l| l.with_timezone(&Utc))
+    cal_core::WallPolicy::EarlierElseHourLater.resolve(zone, day.and_hms_opt(0, 0, 0)?)
 }
 
 /// One boundary's zone from its id and definition: the CLDR table first (as
@@ -9011,6 +9002,21 @@ mod tests {
             zone(Some(fixed("-PT14H")), None),
             Some("Pacific/Kiritimati")
         );
+
+        // The series' own first start decides too (decision 232 with tzdata
+        // 2026f): a fixed -06:00 or -07:00 clock first used in December 2025
+        // is Regina's or Mazatlan's, not Edmonton's or Vancouver's, which ran
+        // another offset then.
+        let winter = utc("2025-12-01T15:00:00Z");
+        let fixed_since_winter = |bias: &str| {
+            series_zone(
+                &master(Some(fixed(bias)), "Customized Time Zone"),
+                winter,
+                || None,
+            )
+        };
+        assert_eq!(fixed_since_winter("PT6H"), Some("America/Regina"));
+        assert_eq!(fixed_since_winter("PT7H"), Some("America/Mazatlan"));
 
         // +00:00 throughout is no zone, whatever the device runs.
         assert_eq!(zone(Some(fixed("PT0S")), Some("Africa/Abidjan")), None);

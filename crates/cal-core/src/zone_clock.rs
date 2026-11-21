@@ -153,22 +153,33 @@ pub enum ClockMatch {
 }
 
 /// The zone that runs `clock` through the [`clock_window`] of a series whose
-/// first start is `first_start`, by the order in the module's documentation.
-/// `device` is the device's own zone, in any spelling tzdata knows; `None`, or
-/// a name it does not know, skips that step.
+/// first start is `first_start`, and that reads the clock's offset AT that
+/// first start, by the order in the module's documentation. `device` is the
+/// device's own zone, in any spelling tzdata knows; `None`, or a name it does
+/// not know, skips that step.
+///
+/// The first start counts because a series repeats on its first start's wall
+/// time: a zone that runs the clock only from the window on would place every
+/// later occurrence an hour off. A fixed UTC-06:00 definition first used in
+/// December 2025 is America/Regina's clock, not America/Edmonton's, which was
+/// on -07:00 then and keeps -06:00 only from 2026 (tzdata 2026c).
 pub fn zone_with_clock(
     clock: &impl Clock,
     first_start: DateTime<Utc>,
     device: Option<&str>,
 ) -> ClockMatch {
     let window = clock_window(first_start);
+    let at_start = clock.offset_at(first_start);
     let utc = |_: DateTime<Utc>| -> Option<i32> { Some(0) };
-    if first_clock_difference(clock, &utc, window).is_none() {
+    if at_start == Some(0) && first_clock_difference(clock, &utc, window).is_none() {
         return ClockMatch::Utc;
     }
     let runs = |zone: &str| {
-        cal_zone::Zone::named(zone)
-            .is_some_and(|tz| first_clock_difference(clock, &TzClock(tz), window).is_none())
+        cal_zone::Zone::named(zone).is_some_and(|tz| {
+            let tz = TzClock(tz);
+            tz.offset_at(first_start) == at_start
+                && first_clock_difference(clock, &tz, window).is_none()
+        })
     };
     candidates(device)
         .find(|zone| runs(zone))
@@ -309,6 +320,41 @@ mod tests {
                 clock_window(from)
             ),
             None
+        );
+    }
+
+    /// A series repeats on its first start's wall time, so the zone must read
+    /// the clock's offset there too, not only over the window. Alberta and
+    /// British Columbia stopped changing in 2026 and their new Windows ids
+    /// sort first, but they ran another clock in the winter of 2025.
+    #[test]
+    fn the_zone_also_reads_the_clocks_offset_at_the_first_start() {
+        let winter_2025 = utc("2025-12-01T15:00:00Z");
+        assert_eq!(
+            zone_with_clock(&fixed(-6 * 3600), winter_2025, None),
+            ClockMatch::Zone("America/Regina")
+        );
+        assert_eq!(
+            zone_with_clock(&fixed(-7 * 3600), winter_2025, None),
+            ClockMatch::Zone("America/Mazatlan")
+        );
+        // A series first starting after Edmonton's last change: Edmonton's
+        // clock throughout, and Alberta Standard Time's row comes first.
+        assert_eq!(
+            zone_with_clock(&fixed(-6 * 3600), utc("2026-12-01T15:00:00Z"), None),
+            ClockMatch::Zone("America/Edmonton")
+        );
+        // UTC from the window on, but not at the first start: not UTC.
+        let utc_later = |at: DateTime<Utc>| -> Option<i32> {
+            Some(if at < utc("2026-01-01T00:00:00Z") {
+                3600
+            } else {
+                0
+            })
+        };
+        assert_ne!(
+            zone_with_clock(&utc_later, winter_2025, None),
+            ClockMatch::Utc
         );
     }
 

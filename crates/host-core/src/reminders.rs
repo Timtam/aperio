@@ -1114,7 +1114,18 @@ fn latest_past_moment(
     all_day: bool,
     now: DateTime<Utc>,
 ) -> Option<DateTime<Utc>> {
+    // An all-day occurrence's day begins at the device's midnight, read on
+    // the operating system's clock, which can be an hour from the bundled
+    // data's: never ring it the evening before.
+    let on_device = |moment: DateTime<Utc>| {
+        if all_day {
+            all_day_midnight_on(moment, &Local)
+        } else {
+            moment
+        }
+    };
     let Some(rec) = recurrence else {
+        let first = on_device(first);
         return (first <= now).then_some(first);
     };
     for days in [2, 31, APP_START_LOOKBACK_DAYS] {
@@ -1129,6 +1140,7 @@ fn latest_past_moment(
             now + ChronoDuration::seconds(1),
         )
         .into_iter()
+        .map(on_device)
         .filter(|occurrence| *occurrence <= now)
         .max();
         if latest.is_some() {
@@ -1155,7 +1167,7 @@ where
     let local = moment.with_timezone(zone);
     match (kind, all_day) {
         (ItemKind::Event, false) => moment.to_rfc3339(),
-        (ItemKind::Event, true) => local.format("%Y-%m-%d").to_string(),
+        (ItemKind::Event, true) => all_day_date(moment, zone).format("%Y-%m-%d").to_string(),
         (ItemKind::Task, _) => local.format("%Y-%m-%dT%H:%M:%S").to_string(),
     }
 }
@@ -2419,9 +2431,10 @@ fn all_day_trigger_time(
         ReminderKind::RelativeToEnd { minutes_before } => {
             // The end's day, as whole days after the start's: an occurrence's
             // length can be off by the hour a clock change adds or takes, and
-            // only the end's local date counts here, so noon of that day is
-            // the reference. An all-day appointment covers at least its start
-            // day, however its end is stored.
+            // only the end's local date counts here, so that day's midnight is
+            // the reference, read as the nearest midnight like the start. An
+            // all-day appointment covers at least its start day, however its
+            // end is stored.
             let days = whole_days_of((occ_end? - occ_start).num_minutes()).max(1);
             // A calendar default counts in whole days from the end, at least
             // one: it rings on the appointment's last day, never after it.
@@ -2429,10 +2442,7 @@ fn all_day_trigger_time(
                 AllDayReading::WholeDays => end_default_days(*minutes_before) * MINUTES_PER_DAY,
                 AllDayReading::Exact => *minutes_before,
             };
-            (
-                occ_start + ChronoDuration::days(days) + ChronoDuration::hours(12),
-                minutes,
-            )
+            (occ_start + ChronoDuration::days(days), minutes)
         }
         ReminderKind::Absolute { at } => return Some(*at),
         ReminderKind::AppStart | ReminderKind::Email { .. } => return None,
@@ -2486,7 +2496,7 @@ fn all_day_fire_instant<Tz: TimeZone>(
     reading: AllDayReading,
     tz: &Tz,
 ) -> Option<DateTime<Utc>> {
-    let event_day = occ_start.with_timezone(tz).date_naive();
+    let event_day = all_day_date(occ_start, tz);
     let naive = if minutes % MINUTES_PER_DAY == 0 {
         NaiveDateTime::new(
             event_day - ChronoDuration::days(minutes / MINUTES_PER_DAY),
@@ -2503,13 +2513,30 @@ fn all_day_fire_instant<Tz: TimeZone>(
             ),
         }
     };
-    tz.from_local_datetime(&naive)
-        .earliest()
-        .or_else(|| {
-            tz.from_local_datetime(&(naive + ChronoDuration::hours(1)))
-                .earliest()
-        })
-        .map(|local| local.with_timezone(&Utc))
+    cal_core::WallPolicy::EarlierElseHourLater.resolve(tz, naive)
+}
+
+/// The day an all-day occurrence names on `tz`: the date of its NEAREST
+/// midnight, within the half day `SAME_DAY_MS` allows. The occurrences are
+/// expanded on the device's zone from the tzdata Aperio bundles
+/// (`device_clock`), while `tz` is usually `chrono::Local`, the operating
+/// system's data; where the two differ by an hour (Vancouver from
+/// 2026-11-01 on a phone whose tzdata is older than 2026b), the occurrence
+/// sits an hour off its midnight there, and its plain date would be the day
+/// before.
+fn all_day_date<Tz: TimeZone>(occ_start: DateTime<Utc>, tz: &Tz) -> NaiveDate {
+    (occ_start + ChronoDuration::hours(12))
+        .with_timezone(tz)
+        .date_naive()
+}
+
+/// The instant an all-day occurrence's day begins on `tz`: the midnight of
+/// [`all_day_date`]. Where `tz` is the operating system's clock and the
+/// occurrence came from the bundled data, the two can be an hour apart.
+fn all_day_midnight_on<Tz: TimeZone>(occ_start: DateTime<Utc>, tz: &Tz) -> DateTime<Utc> {
+    cal_core::WallPolicy::EarlierElseHourLater
+        .resolve(tz, all_day_date(occ_start, tz).and_time(NaiveTime::MIN))
+        .unwrap_or(occ_start)
 }
 
 /// The day-carryover time-of-day that anchors all-day / birthday reminders,
@@ -4510,6 +4537,51 @@ mod tests {
         let ws = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
         let we = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
         assert!(tk_triggers(&[task], ws, we).is_empty());
+    }
+
+    /// The occurrences come from the bundled tzdata, the day is read on the
+    /// operating system's clock. An hour between the two must not move the
+    /// day either way: Vancouver from 2026-11-01 stays on -07:00 in tzdata
+    /// 2026f, while a phone with older data still falls back to -08:00.
+    #[test]
+    fn an_hour_between_the_bundled_and_the_os_clock_keeps_the_day() {
+        let monday = NaiveDate::from_ymd_opt(2026, 11, 2).unwrap();
+        let nine = NaiveTime::from_hms_opt(9, 0, 0).unwrap();
+        let os_behind = chrono::FixedOffset::west_opt(8 * 3600).unwrap();
+        let os_ahead = chrono::FixedOffset::west_opt(6 * 3600).unwrap();
+        // Monday's midnight on the bundled -07:00 clock.
+        let occ_start = Utc.with_ymd_and_hms(2026, 11, 2, 7, 0, 0).unwrap();
+        for os in [os_behind, os_ahead] {
+            let at = all_day_fire_instant(occ_start, 0, nine, AllDayReading::WholeDays, &os)
+                .expect("09:00 exists");
+            assert_eq!(at.with_timezone(&os).date_naive(), monday, "{os}");
+            assert_eq!(at.with_timezone(&os).time(), nine, "{os}");
+            assert_eq!(all_day_date(occ_start, &os), monday, "{os}");
+            assert_eq!(
+                app_start_key(ItemKind::Event, true, occ_start, &os),
+                "2026-11-02",
+                "{os}"
+            );
+            assert_eq!(
+                all_day_midnight_on(occ_start, &os)
+                    .with_timezone(&os)
+                    .naive_local(),
+                monday.and_time(NaiveTime::MIN),
+                "{os}"
+            );
+        }
+        // "1 day before the end" of a one-day appointment rings on its day.
+        let end = occ_start + ChronoDuration::days(1);
+        let at = all_day_trigger_time(
+            occ_start,
+            Some(end),
+            &ReminderKind::RelativeToEnd {
+                minutes_before: MINUTES_PER_DAY,
+            },
+            nine,
+            AllDayReading::WholeDays,
+        );
+        assert!(at.is_some());
     }
 
     #[test]

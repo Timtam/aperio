@@ -999,8 +999,9 @@ fn datetime_to_utc(
             match dt {
                 icalendar::CalendarDateTime::Utc(u) => (u, false, None),
                 icalendar::CalendarDateTime::WithTimezone { date_time, tzid } => {
-                    let resolved = resolve_with_tzid(date_time, &tzid, zones)
-                        .unwrap_or_else(|| Utc.from_utc_datetime(&date_time));
+                    let resolved =
+                        resolve_with_tzid(date_time, &tzid, zones, cal_core::WallPolicy::Rfc5545)
+                            .unwrap_or_else(|| Utc.from_utc_datetime(&date_time));
                     let named = if cal_core::Zone::named(&tzid).is_some() {
                         tzid
                     } else {
@@ -1084,17 +1085,21 @@ fn naive_date_to_utc(d: NaiveDate) -> DateTime<Utc> {
 
 /// The instant a wall-clock time names in the zone `tzid`: a tzdata name in
 /// exact case, a Windows id through the CLDR table, or else a zone the body
-/// defines. A wall time the zone skips or shows twice has none
-/// (`WallPolicy::Strict`), and the body is then not asked.
+/// defines. A wall time the zone skips or shows twice is read by `policy`:
+/// the readers take RFC 5545's (section 3.3.5: a repeated time's first
+/// instant, a skipped one with the offset from before the change);
+/// [`mint_recurrence_id`] takes `Strict`, so a slot it cannot name exactly
+/// is refused.
 fn resolve_with_tzid(
     naive: NaiveDateTime,
     tzid: &str,
     zones: &ZoneDefinitions,
+    policy: cal_core::WallPolicy,
 ) -> Option<DateTime<Utc>> {
     let tz = cal_core::Zone::named(tzid)
         .or_else(|| cal_core::Zone::named(cal_core::windows_zone::tzdata_for_windows(tzid)?));
     match tz {
-        Some(tz) => tz.to_utc(naive, cal_core::WallPolicy::Strict),
+        Some(tz) => tz.to_utc(naive, policy),
         None => zones.resolve(tzid, naive),
     }
 }
@@ -1144,8 +1149,10 @@ fn collect_exdates(ev: &icalendar::Event, zones: &ZoneDefinitions) -> Vec<DateTi
                 // Naive date-time: resolve in the EXDATE's TZID when present,
                 // else read as UTC (the floating-DTSTART convention).
                 out.push(
-                    tzid.and_then(|tz| resolve_with_tzid(naive, tz, zones))
-                        .unwrap_or_else(|| Utc.from_utc_datetime(&naive)),
+                    tzid.and_then(|tz| {
+                        resolve_with_tzid(naive, tz, zones, cal_core::WallPolicy::Rfc5545)
+                    })
+                    .unwrap_or_else(|| Utc.from_utc_datetime(&naive)),
                 );
             } else if let Ok(d) = NaiveDate::parse_from_str(trimmed, "%Y%m%d") {
                 out.push(naive_date_to_utc(d));
@@ -1630,7 +1637,8 @@ pub fn mint_recurrence_id(
             let tz = cal_core::Zone::named(&tzid)
                 .ok_or_else(|| SlotRefusal::UnknownZone(tzid.clone()))?;
             let naive = tz.wall(slot);
-            if resolve_with_tzid(naive, &tzid, &ZoneDefinitions::default()) != Some(slot) {
+            let strict = cal_core::WallPolicy::Strict;
+            if resolve_with_tzid(naive, &tzid, &ZoneDefinitions::default(), strict) != Some(slot) {
                 return Err(SlotRefusal::AmbiguousLocalTime);
             }
             format!(
@@ -2411,6 +2419,45 @@ END:VCALENDAR\r
         assert!(!ical.contains("VTIMEZONE"), "no VTIMEZONE:\n{ical}");
         assert!(!ical.contains("TZID="), "no TZID:\n{ical}");
         assert!(ical.contains("DTSTART;VALUE=DATE:"), "DATE start:\n{ical}");
+    }
+
+    /// RFC 5545 section 3.3.5: a wall time the clock skips is read with the
+    /// offset from before the change, one it shows twice as its first
+    /// instant. Read as UTC, as before, the spring event ended before it
+    /// began and the autumn one had no length.
+    #[test]
+    fn a_wall_time_in_a_clock_change_reads_as_rfc_5545_says() {
+        let event = |start: &str, end: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nBEGIN:VEVENT\r\n\
+                 UID:gap@aperio\r\nSUMMARY:Change\r\n\
+                 DTSTART;TZID=Europe/Berlin:{start}\r\nDTEND;TZID=Europe/Berlin:{end}\r\n\
+                 RRULE:FREQ=DAILY;COUNT=2\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            )
+        };
+        let utc = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
+        let spring = parse_calendar_data(&event("20260329T023000", "20260329T033000"), "c")
+            .unwrap()
+            .remove(0);
+        assert_eq!(spring.start, utc("2026-03-29T01:30:00Z"));
+        assert_eq!(spring.end, utc("2026-03-29T01:30:00Z"));
+        let autumn = parse_calendar_data(&event("20261025T023000", "20261025T033000"), "c")
+            .unwrap()
+            .remove(0);
+        assert_eq!(autumn.start, utc("2026-10-25T00:30:00Z"));
+        assert_eq!(autumn.end, utc("2026-10-25T02:30:00Z"));
+        // Written back by Aperio and read again, both stay where they are.
+        for ev in [spring, autumn] {
+            let again = parse_calendar_data(&event_to_ical(&ev), "c")
+                .unwrap()
+                .remove(0);
+            assert_eq!(
+                (again.start, again.end),
+                (ev.start, ev.end),
+                "{}",
+                event_to_ical(&ev)
+            );
+        }
     }
 
     #[test]

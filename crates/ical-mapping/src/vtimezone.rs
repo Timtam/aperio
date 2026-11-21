@@ -108,8 +108,17 @@ pub fn vtimezone_for(tzid: &str, ref_year: i32) -> Option<String> {
         }
         // The event's own year changes the clock, though the year before had
         // no pair of changes: no single offset is right, so every real
-        // transition is written.
+        // transition is written. Where the year before had none at all, a
+        // STANDARD at its offset comes first, so an event before the first
+        // change still has an onset at or before it (Africa/Cairo in 2023).
         _ if !year_transitions(tz, ref_year)?.is_empty() => {
+            if transitions.is_empty() {
+                let info = tz.offset_info(utc_midnight(base_year)?);
+                out.push_str(&fixed_standard(
+                    info.offset.local_minus_utc(),
+                    &info.abbreviation,
+                ));
+            }
             out.push_str(&explicit_observances(
                 tz,
                 base_year,
@@ -123,19 +132,24 @@ pub fn vtimezone_for(tzid: &str, ref_year: i32) -> Option<String> {
         // offset or abbreviation for the event.
         _ => {
             let info = tz.offset_info(midyear(ref_year)?);
-            let off = info.offset.local_minus_utc();
-            let name = info.abbreviation;
-            out.push_str("BEGIN:STANDARD\r\n");
-            out.push_str(&format!("TZOFFSETFROM:{}\r\n", fmt_offset(off)));
-            out.push_str(&format!("TZOFFSETTO:{}\r\n", fmt_offset(off)));
-            out.push_str(&format!("TZNAME:{name}\r\n"));
-            out.push_str("DTSTART:19700101T000000\r\n");
-            out.push_str("END:STANDARD\r\n");
+            out.push_str(&fixed_standard(
+                info.offset.local_minus_utc(),
+                &info.abbreviation,
+            ));
         }
     }
 
     out.push_str("END:VTIMEZONE\r\n");
     Some(out)
+}
+
+/// One STANDARD observance at a fixed offset from 1970 on.
+fn fixed_standard(offset: i32, name: &str) -> String {
+    format!(
+        "BEGIN:STANDARD\r\nTZOFFSETFROM:{0}\r\nTZOFFSETTO:{0}\r\nTZNAME:{name}\r\n\
+         DTSTART:19700101T000000\r\nEND:STANDARD\r\n",
+        fmt_offset(offset)
+    )
 }
 
 /// How many years forward from the event an irregular zone's explicit
@@ -501,6 +515,22 @@ mod tests {
         assert!(vtz.contains("TZOFFSETTO:-0700"), "{vtz}");
         assert!(vtz.contains("TZOFFSETTO:-0800"), "{vtz}");
         assert!(!vtz.contains("RRULE"), "{vtz}");
+    }
+
+    #[test]
+    fn a_clock_change_in_the_events_own_year_keeps_an_onset_before_it() {
+        // Egypt had no change in 2022 and brought daylight saving back on
+        // 2023-04-28: an event in February 2023 needs an onset before it.
+        let vtz = vtimezone_for("Africa/Cairo", 2023).expect("Cairo resolves");
+        let onsets: Vec<&str> = vtz
+            .lines()
+            .filter_map(|l| l.trim_end().strip_prefix("DTSTART:"))
+            .collect();
+        assert!(onsets.iter().any(|d| *d <= "20230101T000000"), "{vtz}");
+        assert!(vtz.contains("TZOFFSETTO:+0300"), "{vtz}");
+        let first = sub(&vtz, "STANDARD").expect("a STANDARD first");
+        assert_eq!(line(first, "TZOFFSETTO:"), Some("+0200"));
+        assert_eq!(line(first, "DTSTART:"), Some("19700101T000000"));
     }
 
     #[test]

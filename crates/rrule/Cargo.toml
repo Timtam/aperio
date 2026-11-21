@@ -26,7 +26,8 @@ default = []
 by-easter = []
 
 # Declared, and empty, so upstream's `cfg(feature = "serde")` lines keep
-# compiling unchanged. Never turned on: the fork carries no serde support.
+# compiling unchanged. Turning it on stops the build with a compile_error!
+# (src/lib.rs): the fork carries no serde support.
 serde = []
 
 # Allows EXRULE's to be used in the `RRuleSet`.
