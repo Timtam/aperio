@@ -1059,9 +1059,13 @@ Vorschläge sind nicht aufgenommen.
       Blättern rechnete `FormScrollView` den Tastaturabstand ohne den
       Abstand des Blatts vom Bildschirmrand, ein Streifen lag hinter der
       Tastatur; jetzt vom Fensterrand aus. Speichern und Senden sitzen in der
-      Kopfzeile (`useActionHeader`). Für den geschobenen Feedback-Bildschirm
-      war die Rechnung schon richtig; warum VoiceOver dort bei offener
-      Tastatur nicht weiterscrollt, ist nicht geklärt.
+      Kopfzeile (`useActionHeader`).
+      ↳ Build 75 (Toni): der Streifen-Fix allein half nicht; hinter dem
+      letzten sichtbaren Feld springt VoiceOver in die Tastatur, Apples
+      Kontakte scrollt dagegen weiter. Ursache: die verkürzte Fläche legt die
+      nächsten Felder auf dem Bildschirm unter das Tastaturfenster. Jetzt wie
+      in UIKit: volle Höhe, React Native setzt den verdeckten Teil als
+      Einzug (`automaticallyAdjustKeyboardInsets`).
 - [ ] **Serien ohne Zeitzone reparierbar machen** (Toni, 2026-11-19): Eine
       iCloud-Serie steht seit der Zeitumstellung eine Stunde zu früh, auch im
       Kalender des iPhones. Sie ist also ohne Zone (in UTC) gespeichert.
