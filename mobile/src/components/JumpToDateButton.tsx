@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Platform, Pressable, StyleSheet, Text } from 'react-native';
 import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 
+import { fromAndroidDialogDay, toAndroidDialogDay } from '../intl/dateTimeField';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
 import { AppDialog } from './AppDialog';
@@ -59,11 +60,12 @@ export function JumpToDateButton({
             mode="date"
             display="default"
             presentation="dialog"
-            value={value}
+            // The dialog reads and answers a day in UTC (intl/dateTimeField).
+            value={toAndroidDialogDay(value)}
             positiveButton={{ label: t('mobile.jumpToDateAction') }}
             negativeButton={{ label: t('mobile.cancel') }}
             onValueChange={(_, date) => {
-              onSelect(date);
+              onSelect(fromAndroidDialogDay(date));
               setOpen(false);
             }}
             onDismiss={() => setOpen(false)}
