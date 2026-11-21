@@ -1024,6 +1024,9 @@ Vorschläge sind nicht aufgenommen.
       (DESIGN-series-time-zone.md, Stufen 8 bis 14, noch nicht gebaut); bis
       dahin im Kalender des iPhones neu speichern. Vorher prüfen: wie viele
       Serien ohne Zone in Tonis Daten liegen.
+      ↳ Geprüft 2026-11-21: drei von 89 Serien mit Uhrzeit, alle CalDAV, alle
+      mit Kennungen im Apple-Stil; Aperios eigene Serien tragen alle eine Zone.
+      Der Bogen läuft wieder, streng nach Stufenliste (93b bis 96a im Entwurf).
 
 - [ ] **Google: was ein nicht gewährter Scope trägt, zeigen oder verbergen.**
       Seit Entscheidung 281 fragt eine Anmeldung mit Aperios eigener
@@ -1481,7 +1484,7 @@ Vorschläge sind nicht aufgenommen.
       abzuschwächen. Am 2026-10-11 wieder: neben einem laufenden cargo test 11
       Fehlschläge in quickAddOfferCalendar, EventDialog.prefillRelease und
       TaskDialog.assignees, einzeln alle grün.
-- [ ] **Ältere „ab hier“-Tests zonenunabhängig machen.** Einige ältere
+- [x] **Ältere „ab hier“-Tests zonenunabhängig machen.** Einige ältere
       Editor-Tests schlagen auf Rechnern westlich von UTC-8 fehl (Anchorage,
       Honolulu). Sie tippen feste Daten ('2026-07-07') oder erwarten Tage, die
       in Berlin berechnet sind. Betroffen sind
@@ -1491,7 +1494,11 @@ Vorschläge sind nicht aufgenommen.
       die neueren Tests auf dayOn() bzw. die Uhr der Maschine umgestellt und
       per PowerShell in sechs Zonen grün geprüft werden. Produktcode bleibt
       unverändert.
-- [ ] **Tests zum Verschieben ganzer Serien zonenunabhängig machen.** Zwei
+      ↳ Erledigt 2026-11-21: fünf Tests in EventDialog.thisAndFuture, zwei in
+      EventGroupCarryDialog.future; alle waren Testfehler (sie nahmen an, dass
+      07:00Z auf dem Rechner derselbe Tag ist). Grün in acht Zonen von
+      Honolulu bis Kiritimati.
+- [x] **Tests zum Verschieben ganzer Serien zonenunabhängig machen.** Zwei
       Tests in src/state/moveActions.test.ts schlagen je nach Zeitzone fehl,
       auch auf main: 'a new time of day keeps the days…' (Anchorage, Honolulu,
       Auckland) und 'moves a UTC end bound with a new time of day'
@@ -1501,6 +1508,10 @@ Vorschläge sind nicht aufgenommen.
       (shared/recurrence.ts) klären, ob Test oder Code falsch ist. Dann die
       Erwartungen auf die Geräte- bzw. Serienuhr umstellen und die Datei per
       PowerShell in sieben Zonen prüfen.
+      ↳ Erledigt 2026-11-21: der Test war falsch, nicht der Code. Eine Serie
+      ohne Zone wiederholt sich auf UTC, und moveSeries liest das Verschieben
+      auf derselben Uhr; die Erwartungen stehen jetzt auf der Serien-Uhr und
+      dem Ablegezeitpunkt. Grün in acht Zonen.
 - [x] **„Wiederholt sich nicht“ erreicht Google und Microsoft 365 nicht.**
       Setzt man eine Google- oder Microsoft-365-Serie auf „wiederholt sich
       nicht“, erreicht das den Server nie. Die Serie kommt beim nächsten

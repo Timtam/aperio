@@ -172,6 +172,16 @@ const SUCCESSOR = { ...ANCHOR, title: 'Wochenplanung', starts_at: MOVED.start };
 
 const calls = (command: string) => invokeMock.mock.calls.filter((call) => call[0] === command);
 
+/**
+ * The day `iso` is on by this machine's clock, as the dialog names it in
+ * either language. The instants named here are 08:00 UTC in mid-August: still
+ * the day before in Honolulu, that day from Anchorage east to Kiritimati.
+ */
+const augustDay = (iso: string) => {
+  const day = new Date(iso).getDate();
+  return new RegExp(`\\b${day}\\. August 2026|August ${day}, 2026`);
+};
+
 afterEach(() => {
   document.body.innerHTML = '';
   invokeMock.mockClear();
@@ -348,7 +358,7 @@ describe('EventGroupCarryDialog → a copy whose split fails half way', () => {
     const said = await screen.findByText(/möglicherweise doppelt|may show twice/);
 
     expect(said.textContent).toMatch(/Privat/);
-    expect(said.textContent).toMatch(/24\. August 2026|August 24, 2026/);
+    expect(said.textContent).toMatch(augustDay(CUT));
     expect(calls('delete_event')).toHaveLength(0);
     // Written: its new part joins the new group, and nothing offers to write
     // it again — that would put the new series there twice.
@@ -369,11 +379,12 @@ describe('EventGroupCarryDialog → a copy whose split fails half way', () => {
 
   it("names a copy's deleted occurrences its cut brought back and could not delete again (253)", async () => {
     copyOnFile.current = SPLIT_COPY;
-    truncateBack.current = ['2026-08-17T08:00:00Z'];
+    const back = '2026-08-17T08:00:00Z';
+    truncateBack.current = [back];
     await carry();
     const said = await screen.findByText(/zurückgebracht|brought back/);
     expect(said.textContent).toMatch(/Privat/);
-    expect(said.textContent).toMatch(/17\. August 2026|August 17, 2026/);
+    expect(said.textContent).toMatch(augustDay(back));
   });
 
   it('does not offer a copy again whose new part could not be deleted', async () => {
