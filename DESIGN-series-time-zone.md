@@ -110,9 +110,9 @@ keinen, dort ist die Wahl Tonis Sache.
     Tonis Exchange-Server kennt sie noch nicht (Live-Test Zonen, 21. November
     2026, Programm `ews-zones`): von seinen 140 Kennungen ist keine der drei
     dabei, und eine Testserie mit einer davon lehnt er mit `ErrorTimeZone`
-    ab. Aperio fragt die Liste des Servers (`GetServerTimeZones`) und schreibt
-    eine Serie in diesen Zonen dort ohne Zone, mit einer Warnung im
-    Protokoll; dem Nutzer sagt das erst Stufe 7. Pacific, Mountain und
+    ab. Aperio fragt die Liste des Servers (`GetServerTimeZones`) und lehnt
+    eine Serie in diesen Zonen dort mit Grund ab (98a, Stufe 7); bis dahin
+    ging sie still ohne Zone hinaus. Pacific, Mountain und
     Central Standard Time laufen auf dem Server bis Oktober 2031 wie Los
     Angeles, Denver und Chicago, so wie Aperio sie liest.
   - chrono-Typen bleiben überall; `chrono::Local` liest für die Geräte-Uhr
@@ -151,8 +151,8 @@ keinen, dort ist die Wahl Tonis Sache.
   Windows-Namen, den er nicht kennt, mit `ErrorTimeZone` ab, und das ganze
   Speichern scheitert. Der Adapter fragt deshalb pro Konto einmal, welche Namen
   der Server kennt (`GetServerTimeZones`), und schreibt nur diese. Eine Zone,
-  deren Name der Server nicht kennt, geht ohne Zone raus; Stufe 7 sagt es der
-  Person.
+  deren Name der Server nicht kennt, ging ohne Zone hinaus; seit Stufe 7
+  lehnt Aperio das Speichern mit Grund ab (98a).
 - **42a — ganztägige Serien erst nach einem zweiten Test.** Eine ganztägige
   Serie mit Zone verschiebt Exchange auf die Tagesgrenzen der Zone. Welche Regel
   eine ganztägige Serie auf ihrem Tag lässt, klärt ein zweiter kurzer
@@ -439,8 +439,8 @@ des Dokuments hinzu; sie stehen in den Abschnitten unten:
 - Die Exchange-Stufe kommt vor die Editoren, damit ein Wechsel nie still
   verpufft.
 
-Fünf weitere Entscheidungen traf Toni am 21. November 2026, als der Bogen wieder
-aufgenommen wurde (97a später am Tag, zu Stufe 6):
+Sieben weitere Entscheidungen traf Toni am 21. November 2026, als der Bogen
+wieder aufgenommen wurde (97a bis 99a später am Tag, zu den Stufen 6 und 7):
 
 - **93b — streng in der Reihenfolge der Stufenliste.** Kein vorgezogener
   Reparatur-Teil mit vorübergehenden Abweichungen (Felder einer zonenlosen Serie
@@ -469,11 +469,32 @@ aufgenommen wurde (97a später am Tag, zu Stufe 6):
   Adapter schreibt. UTC ist keine Zone und steht in keiner Liste; eine
   Serie in UTC speichert jeder Kalender, der eine Regel speichert (26a).
   Was ein einzelner Server nicht kennt (Tonis Exchange kennt die drei
-  neuen kanadischen Kennungen nicht), steht nicht darin; das soll Stufe 7
-  beim Speichern sagen. Verworfen: ein Regelname, den der Kern
+  neuen kanadischen Kennungen nicht), steht nicht darin; das sagt Stufe 7
+  beim Speichern (98a). Verworfen: ein Regelname, den der Kern
   auflöst (dann kennte der Kern einen Microsoft-Begriff), und eine Liste,
   die der Adapter zur Laufzeit je Server meldet (ein neuer Plugin-Aufruf
   mit Zwischenspeicher; ohne Netz wüsste der Editor es erst später).
+- **98a — eine Zone, die der Kalender nicht speichern kann, lehnt das
+  Speichern ab** (Stufe 7). Kann Exchange die Zone einer Serie nicht
+  speichern (keine Windows-Kennung in CLDR, eine Kennung mit anderer Uhr,
+  oder dieser Server kennt die Kennung nicht), wird nichts geschrieben, und
+  die Meldung nennt die Stadt: „Dieser Kalender kann die Zeitzone Vancouver
+  für eine Serie nicht speichern. Ohne sie würde die Serie bei der
+  Zeitumstellung verrutschen, deshalb wurde nichts gespeichert.“ Bisher ging
+  sie still ohne Zone hinaus und lief auf UTC. Eine Änderung, die die Zone
+  gar nicht schreibt (der Titel, eine Erinnerung), speichert weiter, ebenso
+  eine Änderung an einer Serie, deren Kopie auf dem Server schon auf dieser
+  Zone wiederholt: Exchange behält dann seine eigene Fassung.
+  Verworfen: auf UTC speichern und danach sagen, und Kopieren ablehnen,
+  sonst auf UTC speichern.
+- **99a — ein Wechsel auf UTC schreibt die Zone „UTC“** (Stufe 7). Ein
+  Update ohne Zone lässt Exchange die alte Zone stehen (Runde 1). Wechselt
+  eine Exchange-Serie mit Zone auf UTC, schreibt Aperio deshalb die
+  Windows-Zone `UTC` ausdrücklich, wie einen anderen Zonenwechsel, und der
+  Picker kann UTC auch bei Exchange anbieten. Eine neue Serie in UTC
+  schreibt weiter keine Zone (26a). Verworfen: den Wechsel mit Grund
+  ablehnen. Der Live-Test vor dem Merge hat es an Tonis Server bestätigt
+  (Stufe 7).
 
 Geprüft vorab (2026-11-21, Tonis Desktop-Daten nur lesend): Von 89 Serien mit
 Uhrzeit im Zwischenspeicher haben drei keine Zone, alle bei CalDAV und alle mit
@@ -920,11 +941,10 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   schrieb Exchange für fünf der 18 UTC-Namen (`UTC`, `Etc/UTC`, `Etc/GMT`,
   `Etc/Universal`, `Etc/Zulu`) `Id="UTC"`. Ab Stufe 4 schreiben alle UTC-Namen
   keine Zone (26a); ein Anlegen ohne Zone ist laut Microsoft-Dokumentation UTC.
-- **Exchange:** Erst messen, was ein Update ohne StartTimeZone mit einer Serie
-  macht, die eine Zone hat. Lässt sich das Feld entfernen, entfernt ein Wechsel
-  auf UTC es. Sonst steht „UTC (ohne Sommerzeit)“ in einer Exchange-Serie mit
-  Zone markiert in der Liste: „UTC (ohne Sommerzeit) (Exchange kann die Zone
-  dieser Serie nicht entfernen)“, und lässt sich nicht wählen.
+- **Exchange:** Ein Update ohne StartTimeZone lässt einer Serie ihre Zone
+  (Runde 1). Ein Wechsel auf UTC schreibt deshalb seit Stufe 7 die
+  Windows-Zone `UTC` ausdrücklich (99a), und „UTC (ohne Sommerzeit)“ ist auch
+  in einer Exchange-Serie mit Zone wählbar.
 - **Zonen, die Exchange nicht speichern kann,** sind nach 22a markiert und
   nicht wählbar. Seit Stufe 4 sind es vier:
   - Antarctica/Troll, für das CLDR keinen Windows-Namen hat;
@@ -1074,7 +1094,8 @@ Handy im selben PR.
      zusammengelegter Ort schreibt den Namen seines Ziels (25b). Vor dem ersten
      Speichern einer Serie mit Zone fragt der Adapter den Server einmal, welche
      Namen er kennt (41a). Einen Namen, den er nicht kennt, bekommt er nicht:
-     Die Serie geht ohne Zone raus, und das Protokoll nennt sie. Kann der
+     Seit Stufe 7 lehnt Aperio das Speichern mit Grund ab (98a); vorher ging
+     die Serie ohne Zone hinaus, und nur das Protokoll nannte sie. Kann der
      Server nicht gefragt werden, gehen die CLDR-Namen raus, und das nächste
      Speichern fragt erneut.
    - Eine ganztägige Serie schreibt nie eine Zone (46a). Die Regel steht im Kern
@@ -1286,7 +1307,26 @@ Handy im selben PR.
    Formular-Modell und den Auswahldialogen (Stufen 10 und 11).
 7. **Exchange sagt, was es nicht speichern kann** — `fix(ews): keep what Exchange can store, and say when it cannot`.
    Nach der Messung aus Stufe 4, und vor den Editoren, damit ein Wechsel auf UTC
-   oder eine nicht speicherbare Zone nie still verpufft.
+   oder eine nicht speicherbare Zone nie still verpufft. Gebaut (2026-11-21):
+   98a als `cal_core::WriteRefusal::SeriesZoneNotStorable` (Detail: die
+   kanonische Zone und ein Wort fürs Protokoll, `no-windows-zone`,
+   `other-clock`, `not-on-server`); beim Anlegen immer, beim Ändern nur,
+   wo die Zone neu hinausginge (nicht, wo die Kopie des Servers schon auf
+   ihr wiederholt). Beide Oberflächen lesen die Zone als ihre Stadt
+   aus der Weltliste des Kerns (`zoneCityText`). Kopieren und Verschieben
+   nach Exchange legen an und werden so mit der Zone im Grund abgelehnt.
+   99a: Ändert Aperio eine Serie, deren Kopie auf dem Server auf einer
+   benannten Zone wiederholt, auf UTC (oder auf keine Zone), schreibt der
+   Adapter zuerst `StartTimeZone`/`EndTimeZone` mit `Id="UTC"`, danach
+   Beginn und Ende auf der neuen Uhr (240) und die Regel (241). Nur am
+   Serienkopf, und nur mit der Kopie des Servers. Jedes Ändern einer Serie
+   mit Uhrzeit fragt dafür die Zonenliste des Servers; kennt er `UTC`
+   nicht, lehnt 98a ab. Live-Test Zonen-UTC (22. November 2026, Tonis Server,
+   Programm `ews-zones utc` über Aperios eigenen Adapter): Der Server kennt
+   `UTC`. Eine Serie in Berlin, vier Dienstage ab dem 20. Oktober um 10:00,
+   stand vorher um 08:00 und nach der Zeitumstellung um 09:00 UTC; nach dem
+   Wechsel speichert Exchange Beginn- und Endzone `UTC`, und alle vier Termine
+   stehen um 08:00 UTC. Die Serie wiederholt sich also auf UTC.
 8. **Datum, Uhrzeit und Regel auf einer Serien-Uhr** — `feat(shared): dates, times and repeat rules on a series clock`.
    Umrechnung mit Lücke und Doppelstunde, Formularfelder mit Uhr, Regel-Ableitung
    aus dem Tages-Schlüssel, WKST, UNTIL. Noch unsichtbar. Fixture

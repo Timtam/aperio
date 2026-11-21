@@ -88,6 +88,24 @@ export function listedZoneLabels(): readonly ListedZone[] {
   return labels;
 }
 
+/**
+ * A zone as a sentence names it: its city, with the area of a three-part id
+ * ("Vancouver", "Indianapolis (Indiana)"), from the core's world list. A
+ * zone the list does not hold, or a surface that has not bound the list (a
+ * test), reads as its name, never as a guess.
+ */
+export function zoneCityText(zone: string): string {
+  let listed: readonly ListedZone[];
+  try {
+    listed = listedZoneLabels();
+  } catch {
+    return zone;
+  }
+  const hit = listed.find((entry) => entry.zone === zone);
+  if (!hit) return zone;
+  return hit.area === null ? hit.city : `${hit.city} (${hit.area})`;
+}
+
 /** A region's name in this surface's language. */
 export function zoneRegionName(region: ZoneRegion, t: Translate): string {
   return t(`dialogs.seriesTimeZone.region.${region}`);

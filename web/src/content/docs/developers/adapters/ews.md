@@ -339,9 +339,13 @@ the iCalendar reader):
   know (`ErrorTimeZone`, and the whole save fails); Exchange 2019 does not know
   `Sao Tome Standard Time`, nor, in November 2026, CLDR release-49's
   `British Columbia`, `Alberta` and `Manitoba Standard Time` (live test). The adapter asks each server once
-  (`GetServerTimeZones`) and writes only ids it knows. An unknown one goes out
-  without a zone and is logged. An update without a zone keeps the series' old
-  zone in Exchange, so an update to an unknown zone leaves the old one there.
+  (`GetServerTimeZones`) and writes only ids it knows. A zone with an id the
+  server does not know, like one CLDR names no id for or an id on another
+  clock, refuses the save by name (`series-zone-not-storable: <zone>
+  <reason>`, decision 98a): written without a zone, the series would stand
+  on UTC, and an update without a zone keeps the series' old zone in
+  Exchange. An update that writes no zone (a title, a reminder) still
+  saves.
   If the server cannot be asked, or its answer cannot be read, the CLDR ids are
   written and the next save asks again.
 - **Zones the manifest names.** The manifest lists the zones Exchange can
@@ -351,9 +355,15 @@ the iCalendar reader):
   with the table, and `--check` and a test in the plugin crate hold it to
   the table. The host reads it as the plugin's own statement and names no
   provider. UTC is no zone and is not listed; Exchange stores a UTC series
-  without one. What one server does not know is not in it either; stage 7
-  is to say so on a save. Until then such a series goes out without a zone,
-  as the bullet above says.
+  without one. What one server does not know is not in it either; a save
+  refuses it, as the bullet above says.
+- **Switching to UTC.** An update without a zone leaves a series its zone
+  (live round 1). So a series master whose server copy repeats on a named
+  zone and that an edit puts on UTC, or on no zone, gets Exchange's own
+  `UTC` zone written first, then its slot on the new clock and its rule
+  (decision 99a). A new series in UTC still writes no zone (26a), and an
+  edit without the server's copy writes as before. A server whose zone list
+  lacks `UTC` refuses the switch by name.
 - **Writing.** An all-day series writes no zone (`cal_core::written_series_zone`).
   A zone makes Exchange move an all-day series to that zone's midnights and
   stretch it over more days (live test). Any other series' stored zone goes
@@ -501,7 +511,8 @@ the iCalendar reader):
   a custom zone's day moved on its definition's midnight lands as one day
   (the 8a live test, on an item created through EWS with a definition). An
   item with a custom zone from an iPhone or an invitation is unmeasured.
-- **Zones Exchange cannot store** are written without a zone: CLDR has no id
+- **Zones Exchange cannot store** refuse the write by name (decision 98a;
+  until then they were written without a zone): CLDR has no id
   for them (`Antarctica/Troll`, and the POSIX-style `EST5EDT`, `CST6CDT`,
   `MST7MDT` and `PST8PDT`, zones of their own since tzdata 2026d, which
   Aperio follows: DESIGN-series-time-zone.md, 32a), or the id runs another clock in the five

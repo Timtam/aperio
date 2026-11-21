@@ -1018,7 +1018,10 @@ impl CalendarFeature for EwsAdapter {
     }
 
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
-        let zones = if Self::writes_a_zone(event.recurrence.as_ref(), event.all_day) {
+        // Every timed series asks, not only one with a zone: a series switched
+        // to UTC writes Exchange's own `UTC` zone (decision 99a), which a
+        // server may not list.
+        let zones = if event.recurrence.is_some() && !event.all_day {
             self.server_zones().await
         } else {
             None
@@ -2958,7 +2961,7 @@ mod occurrence_cancellation_tests {
 mod server_zone_tests {
     //! Decision 41a through the adapter: the server is asked once which
     //! Windows zones it knows, only when a series with a zone is written, and
-    //! an id it does not know goes out without a zone.
+    //! an id it does not know refuses the write by name (decision 98a).
     use super::*;
     use cal_core::EventRecurrence;
     use chrono::{DateTime, Utc};
@@ -3018,8 +3021,11 @@ mod server_zone_tests {
         }
     }
 
+    /// The server is asked once, before the first series with a zone, and
+    /// an id it does not know refuses that create by name (decision 98a):
+    /// nothing goes out for it.
     #[tokio::test]
-    async fn the_server_is_asked_once_and_unknown_ids_go_out_without_a_zone() {
+    async fn the_server_is_asked_once_and_an_unknown_id_refuses_the_create() {
         let mut server = Server::new_async().await;
         let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
         let seen = Arc::clone(&requests);
@@ -3052,10 +3058,17 @@ mod server_zone_tests {
             ("Sao Tome", Some("Africa/Sao_Tome")),
             ("Berlin again", Some("Europe/Berlin")),
         ] {
-            adapter
-                .create_event("FA|FCK", event(title, tzid))
-                .await
-                .unwrap_or_else(|err| panic!("create {title}: {err:?}"));
+            let created = adapter.create_event("FA|FCK", event(title, tzid)).await;
+            if title == "Sao Tome" {
+                let err = created.expect_err("Sao Tome is refused");
+                assert!(
+                    err.to_string()
+                        .contains("series-zone-not-storable: Africa/Sao_Tome not-on-server"),
+                    "{err}"
+                );
+            } else {
+                created.unwrap_or_else(|err| panic!("create {title}: {err:?}"));
+            }
         }
 
         let requests = requests.lock().unwrap();
@@ -3077,17 +3090,12 @@ mod server_zone_tests {
             .collect();
         assert_eq!(
             kinds,
-            ["Single", "zones", "Berlin", "Sao Tome", "Berlin again"],
-            "asked once, before the first series with a zone"
+            ["Single", "zones", "Berlin", "Berlin again"],
+            "asked once, before the first series with a zone; Sao Tome not sent"
         );
         let start = r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#;
         assert!(requests[2].contains(start), "Berlin: {}", requests[2]);
-        assert!(requests[4].contains(start), "Berlin again: {}", requests[4]);
-        assert!(
-            !requests[3].contains("TimeZone"),
-            "Sao Tome goes out without a zone: {}",
-            requests[3]
-        );
+        assert!(requests[3].contains(start), "Berlin again: {}", requests[3]);
     }
 
     /// Serves each zone request from `zones(how many were asked before)` and
@@ -3154,7 +3162,8 @@ mod server_zone_tests {
     }
 
     /// A zone request that fails is not kept: the save writes CLDR's id, and
-    /// the next save asks again and follows the answer.
+    /// the next save asks again and follows the answer, which here refuses
+    /// it (decision 98a) and keeps refusing without asking a third time.
     #[tokio::test]
     async fn a_failed_zone_request_is_asked_again_on_the_next_save() {
         let mut server = Server::new_async().await;
@@ -3172,15 +3181,19 @@ mod server_zone_tests {
         })
         .await;
         let adapter = EwsAdapter::new(server.url(), alice());
+        let mut refused = Vec::new();
         for _ in 0..3 {
-            adapter
-                .create_event("FA|FCK", event("Sao Tome", Some("Africa/Sao_Tome")))
-                .await
-                .expect("create");
+            refused.push(
+                adapter
+                    .create_event("FA|FCK", event("Sao Tome", Some("Africa/Sao_Tome")))
+                    .await
+                    .is_err(),
+            );
         }
+        assert_eq!(refused, [false, true, true]);
         assert_eq!(
             shapes(&requests.lock().unwrap()),
-            ["zones", "with id", "zones", "no zone", "no zone"]
+            ["zones", "with id", "zones"]
         );
     }
 

@@ -3584,6 +3584,13 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **Exchange sagt, was es nicht speichern kann (Zeitzonen-Auswahl, Stufe 7,
+  2026-11-21, 98a, 99a):** Eine Zone, die Exchange oder dieser Server nicht
+  speichern kann, lehnt das Speichern mit dem Namen der Stadt ab, statt die
+  Serie still auf UTC zu legen; eine Änderung, die die Zone nicht schreibt,
+  speichert weiter. Ein Wechsel einer Serie mit Zone auf UTC schreibt die
+  Windows-Zone `UTC` ausdrücklich, weil ein Update ohne Zone die alte stehen
+  lässt.
   ✅ **Ganztägige Serien wiederholen sich an Kalendertagen** (48a, erledigt
   2026-09-20). Welche Uhr eine Serie liest, sagt jetzt der Kern
   (`cal_core::expansion_clock`, Tabelle `seriesClock.json`): eine ganztägige

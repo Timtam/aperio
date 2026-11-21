@@ -35,11 +35,13 @@
 //! any spelling of a zone writes that zone's id, `Asia/Calcutta` as
 //! `India Standard Time`, and a merged place its target's (25b).
 //!
-//! A zone Exchange cannot store is written without one (22a): CLDR has no id
-//! for it, CLDR's id runs another clock than the zone in the five years after
-//! the pinned release, or the server does not know the id (41a). A server
-//! refuses an id it does not know with `ErrorTimeZone`, and the whole save
-//! fails; Exchange 2019 does not know `Sao Tome Standard Time`.
+//! A zone Exchange cannot store (22a) refuses the write by name, where the
+//! zone would go out and the server does not already hold it (decision 98a):
+//! CLDR has no id for it, CLDR's id runs another clock than the zone in the
+//! five years after the pinned release, or the server does not know the id
+//! (41a). A server refuses an id it does not know with `ErrorTimeZone`, and
+//! the whole save fails; Exchange 2019 does not know `Sao Tome Standard
+//! Time`. Written without a zone, as before 98a, the series stood on UTC.
 //!
 //! ## The translation id
 //!
@@ -126,7 +128,7 @@ pub enum WindowsZoneWrite {
     /// No zone: none is stored, a UTC name, or a name tzdata does not know. The
     /// series repeats in UTC.
     NoZone,
-    /// A zone Exchange cannot store, written without one.
+    /// A zone Exchange cannot store; the write is refused by name (98a).
     NotStorable {
         zone: &'static str,
         reason: NotStorable,
@@ -143,6 +145,25 @@ pub enum NotStorable {
     OtherClock { windows: &'static str },
     /// The server does not know CLDR's id for it, and would refuse the save.
     NotOnServer { windows: &'static str },
+}
+
+impl NotStorable {
+    /// The machine word the refusal carries for the log
+    /// ([`cal_core::WriteRefusal::SeriesZoneNotStorable`]).
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::NoWindowsZone => "no-windows-zone",
+            Self::OtherClock { .. } => "other-clock",
+            Self::NotOnServer { .. } => "not-on-server",
+        }
+    }
+
+    /// The refusal of a write that would store `zone`, a canonical tzdata
+    /// name, for this reason (decision 98a): its message carries the zone and
+    /// this word.
+    pub fn refusal(self, zone: &str) -> String {
+        cal_core::WriteRefusal::SeriesZoneNotStorable.message(&format!("{zone} {}", self.token()))
+    }
 }
 
 /// The Windows zone ids one Exchange server knows, from `GetServerTimeZones`,
