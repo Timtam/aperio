@@ -190,7 +190,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # Reads a zone's TZif data for cal-zone. Built WITHOUT any database feature
 # (no tz-system, no tzdb-*): jiff never looks for a zone database of its own,
 # cal-zone hands it the bundled bytes. `tz-fat` only makes lookups faster.
-jiff = { version = "1.0.1", default-features = false, features = ["std", "tz-fat"] }
+jiff = { version = "1.0.2", default-features = false, features = ["std", "tz-fat"] }
 # The IANA tzdata release Aperio ships (2026f in 1.0.0). Pinned EXACTLY: a
 # bump is a tzdata update and goes with `cargo xtask tz-list` and
 # `cargo xtask windows-zones`.
