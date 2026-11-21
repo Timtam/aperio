@@ -661,13 +661,20 @@ describe('moving a whole series (dragged with the whole-series scope)', () => {
     const occ = occurrenceOf(master, '2026-07-06T07:00:00.000Z');
     expect(await moveEventToSlot(occ, localKey(occ.start), 10 * 60 + 30, 'series')).toBe(true);
     const row = written();
-    // Same weekday; the UTC end bound moves by as much as the start did.
+    // The same day on the device. The series has no zone, so its rule is read
+    // on UTC, and takes the UTC weekday of 10:30 on that day: Monday 07:00 UTC
+    // is Sunday evening in Anchorage and Honolulu, and 10:30 on a Monday in
+    // Auckland or Kiritimati is still Sunday in UTC. The UTC end bound moves by
+    // as much as the start did.
+    const dropped = new Date(occ.start);
+    dropped.setHours(10, 30, 0, 0);
+    const weekday = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][dropped.getUTCDay()];
     const moved = Date.parse(row.start) - Date.parse(master.start);
     const until = new Date(Date.parse('2026-08-31T23:59:59.000Z') + moved)
       .toISOString()
       .replace(/[-:]/g, '')
       .replace(/\.\d{3}/, '');
-    expect(row.recurrence.rrule).toBe(`FREQ=WEEKLY;BYDAY=MO;UNTIL=${until}`);
+    expect(row.recurrence.rrule).toBe(`FREQ=WEEKLY;BYDAY=${weekday};UNTIL=${until}`);
     expect(localKey(row.start)).toBe(localKey(master.start));
     expect([new Date(row.start).getHours(), new Date(row.start).getMinutes()]).toEqual([10, 30]);
     const exception = new Date(row.recurrence.exceptions[0]);
@@ -744,9 +751,11 @@ describe('moving a whole series (dragged with the whole-series scope)', () => {
     } as unknown as CalendarEvent;
     serving(bounded);
     const occ = occurrenceOf(bounded, '2026-07-06T07:00:00.000Z');
+    // An hour later, on the day the device shows that hour on: in Anchorage
+    // 07:00 UTC is 23:00 on Sunday and 08:00 UTC is midnight on Monday.
     const dropped = new Date('2026-07-06T08:00:00.000Z');
     const minute = dropped.getHours() * 60 + dropped.getMinutes();
-    expect(await moveEventToSlot(occ, localKey(occ.start), minute, 'series')).toBe(true);
+    expect(await moveEventToSlot(occ, localKey(dropped.toISOString()), minute, 'series')).toBe(true);
     // The last Monday stays in: the bound moved by the same hour.
     expect(written().recurrence.rrule).toBe('FREQ=WEEKLY;BYDAY=MO;UNTIL=20260831T080000Z');
   });

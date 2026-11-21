@@ -271,10 +271,11 @@ describe('EventDialog → "this and all following" at the first occurrence', () 
     save();
     await waitFor(() => expect(calls('update_event')).toHaveLength(1));
 
-    // The time field is read on this machine's clock: the series' own day at
-    // 10:30 there, and the excluded Monday moved by as much.
+    // The time field is read on this machine's clock: the day the form shows
+    // for the series' start, at 10:30 there, and the excluded Monday moved by
+    // as much.
     const sent = (calls('update_event')[0][1] as { event: CalendarEvent }).event;
-    expect(sent.start).toBe(new Date(2026, 5, 15, 10, 30).toISOString());
+    expect(sent.start).toBe(new Date(`${dayOn(SERIES.start)}T10:30`).toISOString());
     const moved = Date.parse(sent.start) - Date.parse(SERIES.start);
     expect(sent.recurrence?.exceptions).toEqual([
       new Date(Date.parse('2026-07-13T07:00:00.000Z') + moved).toISOString(),
@@ -467,7 +468,10 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     const said = await screen.findByText(/möglicherweise doppelt|may show twice/);
 
     expect(said.textContent).toMatch(/Teamrunde/);
-    expect(said.textContent).toMatch(/6\. Juli 2026|July 6, 2026/);
+    // The cut's day as the views show it, on this machine's clock: 5 July
+    // west of UTC-7.
+    const cutDay = new Date(JULY.start).getDate();
+    expect(said.textContent).toMatch(new RegExp(`(^| )${cutDay}[.] Juli 2026|July ${cutDay}, 2026`));
     expect(said.textContent).toMatch(/network: connection reset/);
     await waitFor(() => expect(document.activeElement).toBe(said));
     expect(calls('delete_event')).toHaveLength(0);
@@ -499,7 +503,10 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     save();
     const said = await screen.findByText(/zurückgebracht|brought back/);
     expect(said.textContent).toMatch(/Teamrunde/);
-    expect(said.textContent).toMatch(/22\. Juni 2026|June 22, 2026/);
+    // The day as the views show it, on this machine's clock: 21 June west of
+    // UTC-7.
+    const backDay = new Date('2026-06-22T07:00:00Z').getDate();
+    expect(said.textContent).toMatch(new RegExp(`(^| )${backDay}[.] Juni 2026|June ${backDay}, 2026`));
     await waitFor(() => expect(document.activeElement).toBe(said));
     expect(onClose).not.toHaveBeenCalled();
 
@@ -681,9 +688,10 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     save();
     await waitFor(() => expect(calls('create_event')).toHaveLength(1));
 
-    // Read on this machine's clock, as the field is.
+    // Read on this machine's clock, as the field is: the day it shows for the
+    // occurrence, at 10:30.
     const tail = (calls('create_event')[0][1] as { request: CalendarEvent }).request;
-    expect(tail.start).toBe(new Date(2026, 6, 6, 10, 30).toISOString());
+    expect(tail.start).toBe(new Date(`${dayOn(JULY.start)}T10:30`).toISOString());
     const moved = Date.parse(tail.start) - Date.parse(JULY.start);
     expect(moved).not.toBe(0);
     expect(tail.recurrence?.exceptions).toEqual([
@@ -724,7 +732,7 @@ describe('EventDialog → deleted occurrences follow "this and all following" (1
     onFile.series = series;
     await open(occurrenceOf(series, '2026-07-06T07:00:00.000Z'));
     fireEvent.change(screen.getByLabelText(/^beginnt am$|^start date$|^startdatum$/i), {
-      target: { value: '2026-07-07' },
+      target: { value: dayOn('2026-07-06T07:00:00.000Z', 1) },
     });
     save();
     await waitFor(() => expect(calls('create_event')).toHaveLength(1));
