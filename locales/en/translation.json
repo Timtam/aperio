@@ -653,6 +653,18 @@
         "feedback": "Feedback"
       },
       "logs": {
+        "formLab": {
+          "heading": "VoiceOver and keyboard (test)",
+          "hint": "Test build only: fixes for swiping with the keyboard open, to compare. Turn one on, swipe to the end of a form with the keyboard open, then send the logs. Takes effect at once; a form that is open picks it up when opened again.",
+          "container": "Form as an ordered container",
+          "focusFollows": "Focus follows above the keyboard",
+          "resignOnLeave": "Keyboard closes when leaving the field",
+          "windowGestures": "Three-finger swipe at the window",
+          "windowNormal": "As before",
+          "windowNarrow": "Left and right only",
+          "windowOff": "Off, back to iOS",
+          "log": "Log what happens"
+        },
         "hint": "Aperio keeps a rolling log file to help diagnose problems. Choose how much detail to record, view the latest lines, or export the log to send for support.",
         "levelHeading": "Detail level",
         "levelLabel": "Log level",
