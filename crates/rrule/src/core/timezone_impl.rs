@@ -1,3 +1,4 @@
+// Modified for Aperio (see SOURCE).
 use chrono::{FixedOffset, Local, Offset, TimeZone, Utc};
 
 use super::Tz;
@@ -20,12 +21,12 @@ impl From<Local> for Tz {
 
 impl From<Utc> for Tz {
     fn from(_tz: Utc) -> Self {
-        Self::Tz(chrono_tz::UTC)
+        Self::UTC
     }
 }
 
-impl From<chrono_tz::Tz> for Tz {
-    fn from(tz: chrono_tz::Tz) -> Self {
+impl From<cal_zone::Zone> for Tz {
+    fn from(tz: cal_zone::Zone) -> Self {
         Self::Tz(tz)
     }
 }
@@ -51,7 +52,7 @@ impl std::fmt::Display for Tz {
 #[derive(Clone, Copy)]
 pub enum RRuleOffset {
     Local(FixedOffset),
-    Tz(<chrono_tz::Tz as TimeZone>::Offset),
+    Tz(cal_zone::ZonedOffset),
 }
 
 impl std::fmt::Debug for RRuleOffset {
@@ -87,7 +88,7 @@ impl TimeZone for Tz {
     fn from_offset(offset: &Self::Offset) -> Self {
         match offset {
             RRuleOffset::Local(offset) => Self::Local(Local::from_offset(offset)),
-            RRuleOffset::Tz(offset) => Self::Tz(chrono_tz::Tz::from_offset(offset)),
+            RRuleOffset::Tz(offset) => Self::Tz(offset.zone()),
         }
     }
 

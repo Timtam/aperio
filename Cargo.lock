@@ -112,7 +112,7 @@ dependencies = [
  "mockito",
  "quick-xml 0.36.2",
  "reqwest 0.12.28",
- "rrule",
+ "rrule 0.14.0-aperio.1",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -3084,14 +3084,13 @@ dependencies = [
  "builtin-oauth",
  "cal-core",
  "chrono",
- "chrono-tz",
  "dirs 5.0.1",
  "iana-time-zone",
  "mockito",
  "plugin-core",
  "regex",
  "reqwest 0.12.28",
- "rrule",
+ "rrule 0.14.0-aperio.1",
  "rusqlite",
  "serde",
  "serde_json",
@@ -5636,6 +5635,21 @@ dependencies = [
 [[package]]
 name = "rrule"
 version = "0.14.0-aperio.1"
+dependencies = [
+ "cal-zone",
+ "chrono",
+ "chrono-tz",
+ "log",
+ "regex",
+ "rrule 0.14.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rrule"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "720acfb4980b9d8a6a430f6d7a11933e701ebbeba5eee39cc9d8c5f932aaff74"
 dependencies = [
  "chrono",
  "chrono-tz",

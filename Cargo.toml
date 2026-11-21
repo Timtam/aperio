@@ -140,6 +140,7 @@ type_complexity = "allow"
 # Aperio internal crates
 aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
+cal-zone = { path = "crates/cal-zone" }
 ical-mapping = { path = "crates/ical-mapping" }
 cal-core-wasm = { path = "crates/cal-core-wasm" }
 builtin-oauth = { path = "crates/builtin-oauth" }

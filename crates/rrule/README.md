@@ -75,9 +75,10 @@ You should read the [security docs](https://github.com/fmeringdal/rust-rrule/blo
 All dates are limited to the range or years +/-262_000[^1] because of [Chrono][chrono] limits.
 See [Chrono's limits for more info](https://github.com/chronotope/chrono#limitations).
 
-Supported timezones are limited to by the timezones that [Chrono-Tz][chrono-tz] supports.
-This is equivalent to the IANA database.
-See [Chrono-Tz's limits for more info](https://github.com/chronotope/chrono-tz/#limiting-the-timezone-table-to-zones-of-interest).
+Aperio's fork: zones come from Aperio's `cal-zone` crate, which reads the IANA
+tzdata bundled with [jiff-tzdb][jiff-tzdb] through [jiff][jiff]; no system zone
+database is asked. `Tz::named` takes tzdata's own names in exact case. See
+SOURCE for what the fork changes.
 
 ### Validation Limits
 
@@ -115,7 +116,8 @@ The code in this project is licensed under the [MIT](LICENSE-MIT) or [Apache 2.0
 All contributions to this project will be similarly licensed.
 
 [chrono]: https://github.com/chronotope/chrono
-[chrono-tz]: https://github.com/chronotope/chrono-tz/
+[jiff]: https://github.com/BurntSushi/jiff
+[jiff-tzdb]: https://crates.io/crates/jiff-tzdb
 [ical_spec]: https://icalendar.org/iCalendar-RFC-5545/3-3-10-recurrence-rule.html
 [dtstart_property]: https://icalendar.org/iCalendar-RFC-5545/3-8-2-4-date-time-start.html
 

@@ -1,3 +1,4 @@
+// Modified for Aperio (see SOURCE).
 use crate::core::Tz;
 use crate::tests::common::{test_recurring_rrule, ymd_hms};
 use crate::{Frequency, NWeekday, RRule, RRuleSet, Weekday};
@@ -3779,9 +3780,9 @@ fn week_start_interval_su() {
 fn test_timezones_weekly() {
     use chrono::Weekday::Sat;
 
-    const LOS_ANGELES: Tz = Tz::America__Los_Angeles;
-    const NEW_YORK: Tz = Tz::America__New_York;
-    const BERLIN: Tz = Tz::Europe__Berlin;
+    let los_angeles = Tz::named("America/Los_Angeles").unwrap();
+    let new_york = Tz::named("America/New_York").unwrap();
+    let berlin = Tz::named("Europe/Berlin").unwrap();
 
     let rrule = RRule::default()
         .count(2)
@@ -3798,7 +3799,7 @@ fn test_timezones_weekly() {
         .freq(Frequency::Weekly)
         .by_weekday(vec![NWeekday::Every(Sat)]);
     let rrule_set = rrule
-        .build(NEW_YORK.with_ymd_and_hms(2021, 1, 1, 9, 0, 0).unwrap())
+        .build(new_york.with_ymd_and_hms(2021, 1, 1, 9, 0, 0).unwrap())
         .unwrap();
     for o in &rrule_set {
         assert_eq!(o.weekday(), Sat);
@@ -3810,7 +3811,7 @@ fn test_timezones_weekly() {
         .freq(Frequency::Weekly)
         .by_weekday(vec![NWeekday::Every(Sat)]);
     let rrule_set = rrule
-        .build(BERLIN.with_ymd_and_hms(2021, 1, 1, 9, 0, 0).unwrap())
+        .build(berlin.with_ymd_and_hms(2021, 1, 1, 9, 0, 0).unwrap())
         .unwrap();
     for o in &rrule_set {
         assert_eq!(o.weekday(), Sat);
@@ -3822,7 +3823,7 @@ fn test_timezones_weekly() {
         .freq(Frequency::Weekly)
         .by_weekday(vec![NWeekday::Every(Sat)]);
     let rrule_set = rrule
-        .build(LOS_ANGELES.with_ymd_and_hms(2021, 1, 1, 9, 0, 0).unwrap())
+        .build(los_angeles.with_ymd_and_hms(2021, 1, 1, 9, 0, 0).unwrap())
         .unwrap();
     for o in &rrule_set {
         assert_eq!(o.weekday(), Sat);

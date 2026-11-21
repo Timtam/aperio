@@ -1860,9 +1860,7 @@ fn occurrence_triggers(
 fn device_clock() -> RruleTz {
     iana_time_zone::get_timezone()
         .ok()
-        .and_then(|name| cal_core::canonical_zone(&name).map(str::to_string))
-        .and_then(|canonical| canonical.parse::<chrono_tz::Tz>().ok())
-        .map(RruleTz::Tz)
+        .and_then(|name| cal_core::canonical_zone(&name).and_then(RruleTz::named))
         .unwrap_or(RruleTz::Local(Local))
 }
 
@@ -1950,12 +1948,12 @@ fn expand_occurrences(
     // untrimmed, that is not a UTC name. Anything else repeats in UTC rather
     // than dropping the series.
     let zone = match cal_core::series_clock_zone(tzid).and_then(cal_core::canonical_zone) {
-        Some(canonical) => match canonical.parse::<chrono_tz::Tz>() {
-            Ok(tz) => RruleTz::Tz(tz),
-            Err(_) => {
+        Some(canonical) => match RruleTz::named(canonical) {
+            Some(tz) => tz,
+            None => {
                 warn!(
                     tzid = %canonical,
-                    "a zone the core resolves is unknown to chrono-tz; expanding reminders in UTC",
+                    "a zone the core resolves has no bundled tzdata; expanding reminders in UTC",
                 );
                 RruleTz::UTC
             }
@@ -3798,30 +3796,31 @@ mod tests {
     /// an instant, a trip to another zone rang it again.
     #[test]
     fn a_wall_clock_moment_is_remembered_as_the_wall_clock_reads() {
-        use chrono_tz::Europe::{Berlin, London};
-        let nine = |zone: chrono_tz::Tz| {
+        let berlin = RruleTz::named("Europe/Berlin").expect("bundled");
+        let london = RruleTz::named("Europe/London").expect("bundled");
+        let nine = |zone: RruleTz| {
             zone.with_ymd_and_hms(2026, 11, 7, 9, 0, 0)
                 .unwrap()
                 .with_timezone(&Utc)
         };
-        let (in_berlin, in_london) = (nine(Berlin), nine(London));
+        let (in_berlin, in_london) = (nine(berlin), nine(london));
         assert_ne!(in_berlin, in_london);
         assert_eq!(
-            app_start_key(ItemKind::Task, false, in_berlin, &Berlin),
-            app_start_key(ItemKind::Task, false, in_london, &London),
+            app_start_key(ItemKind::Task, false, in_berlin, &berlin),
+            app_start_key(ItemKind::Task, false, in_london, &london),
         );
-        let midnight = |zone: chrono_tz::Tz| {
+        let midnight = |zone: RruleTz| {
             zone.with_ymd_and_hms(2026, 11, 7, 0, 0, 0)
                 .unwrap()
                 .with_timezone(&Utc)
         };
         assert_eq!(
-            app_start_key(ItemKind::Event, true, midnight(Berlin), &Berlin),
-            app_start_key(ItemKind::Event, true, midnight(London), &London),
+            app_start_key(ItemKind::Event, true, midnight(berlin), &berlin),
+            app_start_key(ItemKind::Event, true, midnight(london), &london),
         );
         // A timed event is an instant wherever the device is.
         assert_eq!(
-            app_start_key(ItemKind::Event, false, in_berlin, &London),
+            app_start_key(ItemKind::Event, false, in_berlin, &london),
             in_berlin.to_rfc3339()
         );
     }
@@ -4024,7 +4023,7 @@ mod tests {
     /// — the reminder then rings on a day the calendar does not show it.
     #[test]
     fn an_all_day_series_stays_on_its_weekday_across_a_clock_change() {
-        let berlin = RruleTz::Tz(chrono_tz::Europe::Berlin);
+        let berlin = RruleTz::named("Europe/Berlin").expect("bundled");
         // Monday 2026-10-19 in Berlin begins at 22:00 UTC the day before
         // (summer time); the change to winter time is on the 25th.
         let start = Utc.with_ymd_and_hms(2026, 10, 18, 22, 0, 0).unwrap();
@@ -4040,7 +4039,7 @@ mod tests {
         );
         let days: Vec<NaiveDate> = occurrences
             .iter()
-            .map(|o| o.with_timezone(&chrono_tz::Europe::Berlin).date_naive())
+            .map(|o| o.with_timezone(&berlin).date_naive())
             .collect();
         assert_eq!(
             days,
@@ -4055,7 +4054,7 @@ mod tests {
         assert!(
             occurrences
                 .iter()
-                .all(|o| o.with_timezone(&chrono_tz::Europe::Berlin).time()
+                .all(|o| o.with_timezone(&berlin).time()
                     == NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
             "{occurrences:?}",
         );
@@ -4066,7 +4065,7 @@ mod tests {
     /// midnight in Berlin, and a date the rrule crate refused outright.
     #[test]
     fn an_all_day_series_ends_on_the_day_its_until_names() {
-        let berlin = RruleTz::Tz(chrono_tz::Europe::Berlin);
+        let berlin = RruleTz::named("Europe/Berlin").expect("bundled");
         // Tuesday 29 December 2026 in Berlin begins at 23:00 UTC the day before.
         let start = Utc.with_ymd_and_hms(2026, 12, 28, 23, 0, 0).unwrap();
         for rule in [
@@ -4085,7 +4084,7 @@ mod tests {
                 Utc.with_ymd_and_hms(2027, 1, 31, 0, 0, 0).unwrap(),
             )
             .iter()
-            .map(|o| o.with_timezone(&chrono_tz::Europe::Berlin).date_naive())
+            .map(|o| o.with_timezone(&berlin).date_naive())
             .collect();
             assert_eq!(
                 days,
@@ -4113,7 +4112,7 @@ mod tests {
     /// first occurrence, which is all a bound the crate refused left.
     #[test]
     fn an_all_day_series_ends_on_its_day_when_a_clock_change_skips_the_bound() {
-        let nuuk = RruleTz::Tz(chrono_tz::America::Nuuk);
+        let nuuk = RruleTz::named("America/Nuuk").expect("bundled");
         // Thursday 26 March 2026 begins at 02:00 UTC in Nuuk.
         let start = Utc.with_ymd_and_hms(2026, 3, 26, 2, 0, 0).unwrap();
         let days: Vec<NaiveDate> = expand_occurrences(
@@ -4127,7 +4126,7 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 4, 30, 0, 0, 0).unwrap(),
         )
         .iter()
-        .map(|o| o.with_timezone(&chrono_tz::America::Nuuk).date_naive())
+        .map(|o| o.with_timezone(&nuuk).date_naive())
         .collect();
         assert_eq!(
             days,
@@ -4151,7 +4150,7 @@ mod tests {
     /// and compared as instants the cancelled day would come back.
     #[test]
     fn an_all_day_exception_cancels_the_day_whatever_instant_it_names() {
-        let berlin = RruleTz::Tz(chrono_tz::Europe::Berlin);
+        let berlin = RruleTz::named("Europe/Berlin").expect("bundled");
         let start = Utc.with_ymd_and_hms(2026, 6, 7, 22, 0, 0).unwrap();
         let occurrences = expand_occurrences(
             start,
@@ -4166,7 +4165,7 @@ mod tests {
         );
         let days: Vec<NaiveDate> = occurrences
             .iter()
-            .map(|o| o.with_timezone(&chrono_tz::Europe::Berlin).date_naive())
+            .map(|o| o.with_timezone(&berlin).date_naive())
             .collect();
         assert_eq!(
             days,
@@ -5572,10 +5571,7 @@ mod tests {
                         .expect("the table names the machine's zone")
                         .to_string()
                 });
-            RruleTz::Tz(
-                name.parse::<chrono_tz::Tz>()
-                    .unwrap_or_else(|_| panic!("chrono-tz knows {name}")),
-            )
+            RruleTz::named(&name).unwrap_or_else(|| panic!("the bundled tzdata knows {name}"))
         }
 
         fn instant(v: &Value) -> DateTime<Utc> {
@@ -5698,7 +5694,7 @@ mod tests {
     // ── Occurrences for the Live Activity plan ────────────────────────────
 
     fn berlin_sink(from: DateTime<Utc>, to: DateTime<Utc>) -> OccurrenceSink {
-        OccurrenceSink::on_clock(from, to, RruleTz::Tz(chrono_tz::Europe::Berlin))
+        OccurrenceSink::on_clock(from, to, RruleTz::named("Europe/Berlin").expect("bundled"))
     }
 
     #[test]

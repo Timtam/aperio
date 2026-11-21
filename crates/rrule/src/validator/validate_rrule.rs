@@ -1,3 +1,4 @@
+// Modified for Aperio (see SOURCE).
 use std::ops::RangeInclusive;
 
 use crate::{Frequency, NWeekday, RRule, Tz, Unvalidated};
@@ -623,8 +624,8 @@ mod tests {
 
         let tests = [
             t(Tz::UTC, Tz::LOCAL),
-            t(Tz::Europe__Berlin, Tz::LOCAL),
-            t(Tz::LOCAL, Tz::Europe__Berlin),
+            t(Tz::named("Europe/Berlin").unwrap(), Tz::LOCAL),
+            t(Tz::LOCAL, Tz::named("Europe/Berlin").unwrap()),
         ];
 
         for (start_date, until) in tests {

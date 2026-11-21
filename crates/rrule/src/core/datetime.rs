@@ -1,3 +1,4 @@
+// Modified for Aperio (see SOURCE).
 use super::timezone::Tz;
 use chrono::{Datelike, Duration, NaiveTime, Timelike};
 
@@ -37,7 +38,7 @@ pub(crate) fn datetime_to_ical_format(dt: &chrono::DateTime<Tz>) -> String {
     match tz {
         Tz::Local(_) => {}
         Tz::Tz(tz) => match tz {
-            chrono_tz::UTC => {
+            cal_zone::Zone::UTC => {
                 tz_postfix = "Z".to_string();
             }
             tz => {

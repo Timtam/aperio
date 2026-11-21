@@ -28,3 +28,14 @@ src/lib.rs: drops #![deny(clippy::all)] (the workspace's -D warnings covers
   #![warn(missing_docs)] (71 undocumented error variants and fields).
 src/core/rrule.rs: clippy useless_borrows_in_formatting (two format! args).
 src/iter/counter_date.rs: clippy manual_contains.
+src/core/timezone.rs: Tz::Tz holds a cal_zone::Zone instead of a
+  chrono_tz::Tz (still Copy); the 594 named constants are gone, Tz::UTC
+  (a const) and Tz::named (tzdata's name in exact case) replace them.
+src/core/timezone_impl.rs: From<Utc> gives Tz::UTC, From<cal_zone::Zone>
+  replaces From<chrono_tz::Tz>, RRuleOffset::Tz holds cal_zone::ZonedOffset.
+src/core/datetime.rs: only Zone::UTC writes `Z` (as chrono_tz::UTC did).
+src/parser/datetime.rs: parse_timezone through Tz::named; the test zone is
+  a function (Tz::named is no const fn).
+src/parser/mod.rs, src/tests/rrule.rs, src/iter/utils.rs,
+src/validator/validate_rrule.rs: test zones by name instead of constants.
+README.md: where the zones come from.

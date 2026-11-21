@@ -1,14 +1,11 @@
-use std::str::FromStr;
-
+// Modified for Aperio (see SOURCE).
 use super::{regex::ParsedDateString, ParseError};
 use crate::{core::Tz, NWeekday};
 use chrono::{NaiveDate, TimeZone, Weekday};
 
-/// Attempts to convert a `str` to a `chrono_tz::Tz`.
+/// Attempts to convert a `str` to a `Tz`: tzdata's name in exact case.
 pub(crate) fn parse_timezone(tz: &str) -> Result<Tz, ParseError> {
-    chrono_tz::Tz::from_str(tz)
-        .map_err(|_| ParseError::InvalidTimezone(tz.into()))
-        .map(Tz::Tz)
+    Tz::named(tz).ok_or_else(|| ParseError::InvalidTimezone(tz.into()))
 }
 
 /// Convert a datetime string and a timezone to a `chrono::DateTime<Tz>`.
@@ -140,7 +137,9 @@ pub(crate) fn parse_weekdays(val: &str) -> Result<Vec<NWeekday>, ParseError> {
 mod tests {
     use super::*;
 
-    const US_PACIFIC: Tz = Tz::US__Pacific;
+    fn us_pacific() -> Tz {
+        Tz::named("US/Pacific").unwrap()
+    }
 
     #[test]
     fn parses_valid_nweekdays() {
@@ -221,12 +220,12 @@ mod tests {
             ),
             (
                 "19970902T090000",
-                Some(US_PACIFIC),
-                US_PACIFIC.with_ymd_and_hms(1997, 9, 2, 9, 0, 0).unwrap(),
+                Some(us_pacific()),
+                us_pacific().with_ymd_and_hms(1997, 9, 2, 9, 0, 0).unwrap(),
             ),
             (
                 "19970902T090000Z",
-                Some(US_PACIFIC),
+                Some(us_pacific()),
                 // Timezone is overwritten by the zulu specified in the datetime string
                 Tz::UTC.with_ymd_and_hms(1997, 9, 2, 9, 0, 0).unwrap(),
             ),
@@ -244,7 +243,7 @@ mod tests {
             ("", None),
             ("TZID=America/New_York:19970902T090000", None),
             ("19970902T09", None),
-            ("19970902T09", Some(US_PACIFIC)),
+            ("19970902T09", Some(us_pacific())),
         ];
 
         for (datetime_str, timezone) in tests {
