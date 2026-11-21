@@ -470,16 +470,62 @@ mod tests {
         assert_eq!(
             unstorable,
             [
-                "America/Edmonton",
-                "America/Inuvik",
                 "America/Scoresbysund",
-                "America/Vancouver",
-                "America/Winnipeg",
                 "Antarctica/Casey",
                 "Antarctica/Troll",
                 "Antarctica/Vostok",
             ]
         );
+    }
+
+    /// CLDR release-49: British Columbia, Alberta (with Inuvik) and Manitoba
+    /// kept their summer offsets from 2026-11-01 (tzdata 2026b-2026e) and got
+    /// Windows ids of their own, read and written both ways.
+    #[test]
+    fn the_canadian_zones_that_stopped_changing_have_ids_of_their_own() {
+        for (zone, windows) in [
+            ("America/Vancouver", "British Columbia Standard Time"),
+            ("America/Edmonton", "Alberta Standard Time"),
+            ("America/Inuvik", "Alberta Standard Time"),
+            ("America/Winnipeg", "Manitoba Standard Time"),
+        ] {
+            assert_eq!(
+                windows_zone_for(Some(zone), None),
+                WindowsZoneWrite::Id(windows),
+                "{zone}"
+            );
+        }
+        for (windows, zone) in [
+            ("British Columbia Standard Time", "America/Vancouver"),
+            ("Alberta Standard Time", "America/Edmonton"),
+            ("Manitoba Standard Time", "America/Winnipeg"),
+        ] {
+            assert_eq!(
+                read_windows_zone(windows),
+                WindowsZoneRead::Zone(zone),
+                "{windows}"
+            );
+        }
+    }
+
+    /// The POSIX-style names are zones of their own since tzdata 2026d, and
+    /// CLDR maps no Windows id to them: a series stored under one goes to
+    /// Exchange without a zone, as tzdata reads it (Toni, 2026-11-21).
+    #[test]
+    fn a_posix_style_zone_has_no_windows_id() {
+        for zone in ["EST5EDT", "CST6CDT", "MST7MDT", "PST8PDT"] {
+            assert!(
+                matches!(
+                    windows_zone_for(Some(zone), None),
+                    WindowsZoneWrite::NotStorable {
+                        reason: NotStorable::NoWindowsZone,
+                        ..
+                    }
+                ),
+                "{zone}: {:?}",
+                windows_zone_for(Some(zone), None)
+            );
+        }
     }
 
     #[test]

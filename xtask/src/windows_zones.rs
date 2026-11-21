@@ -77,6 +77,10 @@ const READ_MUST_HAVE: &[(&str, &str)] = &[
     ("FLE Standard Time", "Europe/Kyiv"),
     ("Greenwich Standard Time", "Africa/Abidjan"),
     ("UTC", "Etc/UTC"),
+    // CLDR release-49: the Canadian zones that stopped changing in 2026.
+    ("British Columbia Standard Time", "America/Vancouver"),
+    ("Alberta Standard Time", "America/Edmonton"),
+    ("Manitoba Standard Time", "America/Winnipeg"),
 ];
 
 /// Writing rows every generation must hold, by name.
@@ -89,6 +93,10 @@ const WRITE_MUST_HAVE: &[(&str, &str)] = &[
     ("Asia/Beirut", "Middle East Standard Time"),
     ("Pacific/Kanton", "UTC+13"),
     ("Etc/GMT-1", "W. Central Africa Standard Time"),
+    ("America/Vancouver", "British Columbia Standard Time"),
+    ("America/Edmonton", "Alberta Standard Time"),
+    ("America/Inuvik", "Alberta Standard Time"),
+    ("America/Winnipeg", "Manitoba Standard Time"),
 ];
 
 /// `windows-zones` — generate `windows_zones.rs` for the EWS adapter.

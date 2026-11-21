@@ -271,10 +271,10 @@ mod tests {
     #[test]
     fn the_window_is_five_years_from_the_guard_or_a_later_start() {
         let from = utc("2026-01-01T00:00:00Z");
-        assert_eq!(crate::windows_zone::CLOCKS_COMPARED_FROM, (2026, 3, 17));
+        assert_eq!(crate::windows_zone::CLOCKS_COMPARED_FROM, (2026, 10, 21));
         assert_eq!(
             clock_window(from),
-            (utc("2026-03-17T00:00:00Z"), utc("2031-03-17T00:00:00Z"))
+            (utc("2026-10-21T00:00:00Z"), utc("2031-10-21T00:00:00Z"))
         );
         assert_eq!(
             clock_window(utc("2017-03-06T08:00:00Z")),
@@ -296,6 +296,15 @@ mod tests {
         assert_eq!(
             first_clock_difference(
                 &berlin_late_in(2031),
+                &tz("Europe/Berlin"),
+                clock_window(from)
+            )
+            .map(|d| d.at),
+            Some(utc("2031-03-30T01:00:00Z"))
+        );
+        assert_eq!(
+            first_clock_difference(
+                &berlin_late_in(2032),
                 &tz("Europe/Berlin"),
                 clock_window(from)
             ),
