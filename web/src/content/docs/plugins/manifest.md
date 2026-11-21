@@ -41,7 +41,7 @@ reads it to discover the plugin before loading any code.
 | `name` | string | ✅ | Human-readable display name. |
 | `version` | string | ✅ | Plugin version (semver). |
 | `plugin_type` | string | ✅ | `"adapter"` for every provider surface, or `"notification"`. There is no per-surface type — what a plugin does is its `capabilities`. |
-| `capabilities` | string[] | ✅ | Which feature surfaces the plugin fills: any combination of `"calendar"`, `"tasks"`, `"contacts"`, `"sync"`, `"videoconference"`. Must match the non-null pointers in the vtable exactly; the host checks at load time. An adapter that declares none is rejected. |
+| `capabilities` | string[] | ✅ | Which feature surfaces the plugin fills: any combination of `"calendar"`, `"tasks"`, `"contacts"`, `"sync"`, `"videoconference"`. Must match the non-null pointers in the vtable exactly; the host checks at load time. An adapter that declares none is rejected. A family a new version stops declaring loses its cached data and sync state for every account at the next start (the user's names and colours for its containers stay); a plugin that is missing or does not load keeps everything. |
 | `abi_version` | number | ✅ | The ABI the plugin was built against (current: `4`). Must be in the range the host supports — 3 to 4 today, and never above the host's own. See [ABI versions and how to migrate](/plugins/abi-versions/). |
 | `min_app_version` | string | ✅ | Lowest app version that can load this plugin. |
 | `author` | string | ✅ | Author/maintainer. |

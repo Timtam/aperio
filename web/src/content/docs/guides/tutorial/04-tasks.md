@@ -70,8 +70,8 @@ your day or week, and work through them.
 
 > **"In progress" & providers:** Only providers with a real intermediate
 > status store **In progress**: **local** lists, **Apple Reminders / CalDAV**
-> (`IN-PROCESS`) and **Exchange**. **Google Tasks,
-> Vikunja and Todoist** only know *open / done* — setting a task there to
+> (`IN-PROCESS`), **Exchange** and **Vikunja** (as its percentage done).
+> **Google Tasks and Todoist** only know *open / done* — setting a task there to
 > *In progress* falls back to *open* on the next sync. For those providers the
 > automatic **schedule-to-today** that a started task would otherwise trigger
 > is skipped too (it can't be remembered as "started" anyway). **Manual**
@@ -329,8 +329,8 @@ so there you get a single choice with "Nobody" as its first option: picking
 someone replaces the previous person instead of putting a second one beside
 them, which would be dropped on save. Move a task with several people to a list
 that holds one and the **first** stays — visible in the editor before you save.
-On lists without assignment (local, Google, Exchange) the field is not
-shown at all.
+Only Vikunja and Todoist lists carry assignees; everywhere else the field is
+not shown at all.
 
 ### Letting Aperio assign you automatically
 

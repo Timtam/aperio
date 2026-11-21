@@ -76,8 +76,9 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 
 > **„In Arbeit" & Anbieter:** Den Status **In Arbeit** speichern nur Anbieter
 > mit einem echten Zwischenstatus: **lokale** Listen, **Apple Erinnerungen /
-> CalDAV** (`IN-PROCESS`) und **Exchange**. **Google
-> Tasks, Vikunja und Todoist** kennen nur *offen / erledigt* – setzt du dort
+> CalDAV** (`IN-PROCESS`), **Exchange** und **Vikunja** (über den
+> Fortschritt in Prozent). **Google Tasks und Todoist** kennen nur *offen /
+> erledigt* – setzt du dort
 > eine Aufgabe auf *In Arbeit*, fällt sie beim nächsten Abgleich wieder auf
 > *Offen* zurück. Bei diesen Anbietern unterbleibt deshalb auch das
 > automatische **Einplanen auf heute**, das eine begonnene Aufgabe sonst
@@ -366,8 +367,9 @@ viele – du siehst die gewählten Personen als Liste und fügst weitere hinzu.
 „Niemand" als erster Möglichkeit: eine neue Wahl ersetzt die alte, statt eine
 zweite Person danebenzustellen, die beim Speichern verloren ginge. Verschiebst
 du eine Aufgabe mit mehreren Personen in eine Liste, die nur eine hält, bleibt
-die **erste** übrig – sichtbar im Editor, bevor du speicherst. Auf Listen ohne
-Zuweisung (lokal, Google, Exchange) erscheint das Feld gar nicht.
+die **erste** übrig – sichtbar im Editor, bevor du speicherst. Zuweisungen
+kennen nur Listen von Vikunja und Todoist; überall sonst erscheint das Feld gar
+nicht.
 
 ### Aperio dich automatisch zuweisen lassen
 

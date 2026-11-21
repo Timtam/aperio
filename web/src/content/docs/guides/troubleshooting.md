@@ -195,9 +195,9 @@ Microsoft is retiring Microsoft To Do: it announced in November 2026 that the
 To Do apps stop working on June 30, 2027. Aperio no longer connects to it, so
 the task lists of a Microsoft account disappear from the sidebar after the
 update. Your tasks are still at Microsoft until then. The account's calendars
-and contacts stay as they were. To keep working on those tasks in Aperio, move
-them to a local list or to a provider that keeps tasks (Exchange, CalDAV,
-Google, Todoist or Vikunja).
+and contacts stay as they were. To keep working on those tasks in Aperio,
+create them again in a local list or with a provider that keeps tasks
+(Exchange, CalDAV, Google, Todoist or Vikunja).
 
 ## A task's time shifted, once
 

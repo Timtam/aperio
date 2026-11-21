@@ -1592,7 +1592,7 @@ export function TaskDialog({
             });
           } catch (err) {
             // Its save stood in part with the status — a later step of it
-            // (Vikunja's assignees, Todoist's close) was turned away: the
+            // (Vikunja's assignees, Google's move) was turned away: the
             // family still follows, every write attempted, as on a
             // check-off; saving again could not, the status being set
             // (review round 17 of #128).
@@ -2368,11 +2368,11 @@ export function TaskDialog({
         <DescriptionLinks text={form.description} />
 
         {/* Hide the recurrence editor entirely for providers that can't
-            store a recurrence at all (Google Tasks, Todoist, and CalDAV /
-            EWS until their task recurrence lands) — offering it would just
-            drop the rule silently on save. Providers that DO support it
-            (local, Vikunja) show it, with the finer
-            `recurrence` caps greying out individual unsupported shapes. */}
+            store a recurrence at all (Google Tasks, Todoist) — offering it
+            would just drop the rule silently on save. Providers that DO
+            support it (local, CalDAV, Exchange, Vikunja) show it, with the
+            finer `recurrence` caps greying out individual unsupported
+            shapes. */}
         {canRecur(listForSections) && (
           <TaskRecurrenceSelector
             value={form.recurrence}

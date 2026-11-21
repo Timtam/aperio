@@ -216,7 +216,7 @@ Microsoft stellt Microsoft To Do ein: Im November 2026 wurde angekündigt, dass
 die To-Do-Apps am 30. Juni 2027 aufhören zu funktionieren. Aperio bindet To Do
 nicht mehr an, deshalb verschwinden die Aufgabenlisten eines Microsoft-Kontos
 nach dem Update aus der Seitenleiste. Deine Aufgaben liegen bis dahin weiter
-bei Microsoft. Kalender und Kontakte des Kontos bleiben wie sie waren. Wenn du
+bei Microsoft. Kalender und Kontakte des Kontos bleiben, wie sie waren. Wenn du
 an diesen Aufgaben in Aperio weiterarbeiten willst, lege sie in einer lokalen
 Liste an oder bei einem Anbieter, der Aufgaben führt (Exchange, CalDAV,
 Google, Todoist oder Vikunja).

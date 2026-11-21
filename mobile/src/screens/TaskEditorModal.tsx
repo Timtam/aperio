@@ -1169,7 +1169,7 @@ export default function TaskEditorModal({
           saved = await root();
         } catch (err) {
           // Its save stood in part with the status — a later step of it
-          // (Vikunja's assignees, Todoist's close) was turned away: the
+          // (Vikunja's assignees, Google's move) was turned away: the
           // family still follows, as on a check-off; saving again could not,
           // the status being set (review round 17 of #128). Mirrors the
           // desktop.

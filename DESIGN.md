@@ -4969,6 +4969,25 @@ Wenn ein Gerät ein neues Plugin installiert, wird dies über das Event Log an a
 
 Nativ gebundelte Plugins werden nie über das Event Log kommuniziert – sie sind auf allen Instanzen immer vorhanden.
 
+**Wenn ein geladener Adapter eine Familie nicht mehr anbietet** (Toni,
+2026-11-21). Beim Start fragt der Kern für jedes Konto, dessen Adapter geladen
+ist, welche Familien der Adapter anbietet (Kalender, Aufgaben, Kontakte).
+Bietet er eine nicht mehr an, etwa weil eine neue Fassung seines Plugins sie
+nicht mehr deklariert, verwirft der Kern deren zwischengespeicherte Zeilen
+samt Suchzeilen und ihren Sync-Zustand mit Tokens und Fehlern. Sonst blieben
+sie für immer stehen: nie mehr gelistet, also nie ersetzt, als Suchtreffer
+ohne Ziel und als Konto, das nach jeder Aktualisierung als fehlerhaft
+angesagt wird. Fehlt der Adapter ganz (Plugin entfernt, abgeschaltet oder
+nicht ladbar, Zugangsdaten auf diesem Gerät nicht vorhanden, Registrierung
+unterwegs gescheitert), bleibt alles erhalten, wie bei „Plugin fehlt“ oben.
+Geräte-interne Konten (lokaler Speicher, Gerätekalender) sind ausgenommen:
+ihre Hosts registrieren sie zu einem eigenen Zeitpunkt. Was der Nutzer für
+einen Container festgelegt hat (Namen, Farben, Einstellungen), ist kein
+Zwischenspeicher und bleibt, wie beim Löschen eines Kontos. Die Regel ist
+adapter-neutral: keine Migration pro Adapter. Code:
+`host_core::cache::drop_unserved_caches`, von beiden Hosts nach dem
+Bootstrap der Registry aufgerufen.
+
 ### 20.9 Plugin-Updates
 
 Plugin-Updates werden manuell eingespielt (analog zur Installation). Der Plugin-Manager erkennt anhand der `id`, dass es sich um ein Update handelt, und bietet einen Bestätigungs-Dialog:
