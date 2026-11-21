@@ -758,7 +758,18 @@ pub fn recurrence_to_rrule(r: &RecurrenceObject) -> Option<String> {
 /// Inverse: parse an RRULE body into Graph's structured form.
 /// Returns `Err(Protocol)` when the rule uses features Graph can't
 /// represent — e.g. BYSETPOS without a known BYDAY pattern.
-pub fn rrule_to_recurrence(rrule: &str, start: DateTime<Utc>) -> GraphResult<RecurrenceObject> {
+///
+/// `first_day` is the day the series starts on, on the clock Graph reads the
+/// range in ([`series_recurrence`]): the range's `startDate`, and the
+/// weekday, day of the month and month a rule without BYDAY, BYMONTHDAY or
+/// BYMONTH takes. `end_day` is the day a cut ends on, where the rule has an
+/// `UNTIL` ([`cut_end_day`]); without one the `endDate` is the `UNTIL`'s own
+/// date.
+pub fn rrule_to_recurrence(
+    rrule: &str,
+    first_day: NaiveDate,
+    end_day: Option<NaiveDate>,
+) -> GraphResult<RecurrenceObject> {
     let parts: std::collections::HashMap<String, String> = rrule
         .split(';')
         .filter_map(|p| {
@@ -792,8 +803,10 @@ pub fn rrule_to_recurrence(rrule: &str, start: DateTime<Utc>) -> GraphResult<Rec
                 pattern.days_of_week = byday.split(',').filter_map(rrule_day_to_name).collect();
             }
             if pattern.days_of_week.is_empty() {
-                // Default to the weekday of `start`.
-                pattern.days_of_week.push(weekday_to_name(start.weekday()));
+                // Default to the weekday the series starts on.
+                pattern
+                    .days_of_week
+                    .push(weekday_to_name(first_day.weekday()));
             }
         }
         "MONTHLY" => {
@@ -807,7 +820,7 @@ pub fn rrule_to_recurrence(rrule: &str, start: DateTime<Utc>) -> GraphResult<Rec
                 ));
             } else {
                 pattern.kind = "absoluteMonthly".into();
-                pattern.day_of_month = Some(start.day());
+                pattern.day_of_month = Some(first_day.day());
             }
         }
         "YEARLY" => {
@@ -815,11 +828,11 @@ pub fn rrule_to_recurrence(rrule: &str, start: DateTime<Utc>) -> GraphResult<Rec
             pattern.month = parts
                 .get("BYMONTH")
                 .and_then(|s| s.parse().ok())
-                .or(Some(start.month()));
+                .or(Some(first_day.month()));
             pattern.day_of_month = parts
                 .get("BYMONTHDAY")
                 .and_then(|s| s.parse().ok())
-                .or(Some(start.day()));
+                .or(Some(first_day.day()));
         }
         other => {
             return Err(GraphError::Protocol(format!("unsupported FREQ: {other}")));
@@ -828,17 +841,20 @@ pub fn rrule_to_recurrence(rrule: &str, start: DateTime<Utc>) -> GraphResult<Rec
 
     let mut range = RecurrenceRange {
         kind: "noEnd".into(),
-        start_date: Some(start.format("%Y-%m-%d").to_string()),
+        start_date: Some(first_day.format("%Y-%m-%d").to_string()),
         end_date: None,
         number_of_occurrences: None,
     };
     if let Some(until) = parts.get("UNTIL") {
-        // RFC 5545: compact UTC date-time. Graph wants YYYY-MM-DD.
-        if let Some(date_part) = until.get(..8) {
-            if let Ok(d) = NaiveDate::parse_from_str(date_part, "%Y%m%d") {
-                range.kind = "endDate".into();
-                range.end_date = Some(d.format("%Y-%m-%d").to_string());
-            }
+        // RFC 5545: compact UTC date-time. Graph wants YYYY-MM-DD: a cut's
+        // day where there is one, else the UNTIL's own digits, the day the
+        // repeat field wrote (`…T235959Z`).
+        let own_day = until
+            .get(..8)
+            .and_then(|digits| NaiveDate::parse_from_str(digits, "%Y%m%d").ok());
+        if let Some(day) = end_day.or(own_day) {
+            range.kind = "endDate".into();
+            range.end_date = Some(day.format("%Y-%m-%d").to_string());
         }
     } else if let Some(count) = parts.get("COUNT").and_then(|s| s.parse().ok()) {
         range.kind = "numbered".into();
@@ -981,6 +997,11 @@ pub struct GraphDateTimeWrite {
 }
 
 pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
+    new_event_to_body_in(new, &Local)
+}
+
+/// [`new_event_to_body`] on a given device clock, so tests can pin one.
+fn new_event_to_body_in<D: TimeZone>(new: &NewEvent, device: &D) -> GraphResult<EventWriteBody> {
     // The core's rule: an all-day series hands Graph no zone (decision 46a).
     let tzid = cal_core::written_series_zone(
         new.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
@@ -993,8 +1014,8 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
             content_type: "text".into(),
             content: c,
         }),
-        start: write_datetime(new.start, new.all_day, tzid),
-        end: write_datetime(new.end, new.all_day, tzid),
+        start: write_datetime_in(new.start, new.all_day, tzid, device),
+        end: write_datetime_in(new.end, new.all_day, tzid, device),
         is_all_day: new.all_day,
         location: new
             .location
@@ -1003,7 +1024,14 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
         is_reminder_on: reminder_minutes.is_some(),
         reminder_minutes_before_start: reminder_minutes,
         recurrence: match new.recurrence.as_ref() {
-            Some(r) => Some(Some(rrule_to_recurrence(&r.rrule, new.start)?)),
+            Some(r) => Some(Some(series_recurrence(
+                &r.rrule,
+                new.start,
+                new.all_day,
+                tzid,
+                false,
+                device,
+            )?)),
             None => None,
         },
         attendees: Some(attendees_to_write(&new.attendees, new.send_invitations))
@@ -1013,6 +1041,11 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
 }
 
 pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
+    event_to_body_in(ev, &Local)
+}
+
+/// [`event_to_body`] on a given device clock, so tests can pin one.
+fn event_to_body_in<D: TimeZone>(ev: &Event, device: &D) -> GraphResult<EventWriteBody> {
     // The core's rule: an all-day series hands Graph no zone (decision 46a).
     let tzid = cal_core::written_series_zone(
         ev.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
@@ -1025,8 +1058,8 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
             content_type: "text".into(),
             content: c,
         }),
-        start: write_datetime(ev.start, ev.all_day, tzid),
-        end: write_datetime(ev.end, ev.all_day, tzid),
+        start: write_datetime_in(ev.start, ev.all_day, tzid, device),
+        end: write_datetime_in(ev.end, ev.all_day, tzid, device),
         is_all_day: ev.all_day,
         location: ev
             .location
@@ -1035,7 +1068,14 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
         is_reminder_on: reminder_minutes.is_some(),
         reminder_minutes_before_start: reminder_minutes,
         recurrence: match ev.recurrence.as_ref() {
-            Some(r) => Some(Some(rrule_to_recurrence(&r.rrule, ev.start)?)),
+            Some(r) => Some(Some(series_recurrence(
+                &r.rrule,
+                ev.start,
+                ev.all_day,
+                tzid,
+                ev.truncate_tail_overrides,
+                device,
+            )?)),
             // The repeat removed (decision 280): Graph's delete value. A
             // missing pattern alone says nothing — a series whose pattern
             // Aperio could not read has none either.
@@ -1054,7 +1094,31 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
     })
 }
 
-fn write_datetime(when: DateTime<Utc>, all_day: bool, tzid: Option<&str>) -> GraphDateTimeWrite {
+/// The zone a timed series' boundaries and repeat range are written in: its
+/// stored zone where tzdata names it in exact case, sent as the IANA name
+/// (Graph accepts those). `None` for an all-day series (decision 46a; its
+/// `tzid` is `None` already) and where there is no such zone: that series is
+/// written in UTC.
+fn written_zone(all_day: bool, tzid: Option<&str>) -> Option<(&str, cal_core::Zone)> {
+    if all_day {
+        return None;
+    }
+    tzid.and_then(|name| cal_core::Zone::named(name).map(|zone| (name, zone)))
+}
+
+/// The calendar day an all-day boundary names: Aperio keeps it as the
+/// device's midnight of that day.
+fn device_day<D: TimeZone>(when: DateTime<Utc>, device: &D) -> NaiveDate {
+    when.with_timezone(device).date_naive()
+}
+
+/// A boundary as Graph gets it, on a given device clock.
+fn write_datetime_in<D: TimeZone>(
+    when: DateTime<Utc>,
+    all_day: bool,
+    tzid: Option<&str>,
+    device: &D,
+) -> GraphDateTimeWrite {
     if all_day {
         // For all-day events Graph still expects a `dateTime` (not a
         // `date`) at 00:00:00 in the given zone. The DAY must be the
@@ -1063,13 +1127,12 @@ fn write_datetime(when: DateTime<Utc>, all_day: bool, tzid: Option<&str>) -> Gra
         // boundary instants are local midnights expressed in UTC). The
         // internal end is already exclusive, as Graph requires.
         GraphDateTimeWrite {
-            date_time: when
-                .with_timezone(&Local)
+            date_time: device_day(when, device)
                 .format("%Y-%m-%dT00:00:00")
                 .to_string(),
             time_zone: "UTC".into(),
         }
-    } else if let Some((name, tz)) = tzid.and_then(|t| cal_core::Zone::named(t).map(|tz| (t, tz))) {
+    } else if let Some((name, tz)) = written_zone(all_day, tzid) {
         // A zoned recurring master: send the LOCAL wall-clock + its IANA zone so
         // Graph expands the series DST-correctly on its side (Graph accepts IANA
         // names). A one-off is an exact instant, so it stays on the UTC branch.
@@ -1083,6 +1146,77 @@ fn write_datetime(when: DateTime<Utc>, all_day: bool, tzid: Option<&str>) -> Gra
             time_zone: "UTC".into(),
         }
     }
+}
+
+/// The repeat Graph gets for a series, its dates read on the clock its start
+/// is written on.
+///
+/// Aperio writes no `recurrenceTimeZone`, so Graph reads the range's dates on
+/// the clock of the event's start, and its `startDate` must be the start's
+/// own date. The range therefore starts on the day [`write_datetime_in`]
+/// writes the start on: an all-day series on the device's day (48a), a zoned
+/// one on its zone's, anything else on UTC's; a rule without BYDAY,
+/// BYMONTHDAY or BYMONTH takes its weekday, day and month from that day. Read
+/// off the UTC instant, as before, it was the day before for a series east of
+/// UTC that starts up to the zone's distance from UTC after midnight (00:30 in
+/// Berlin) and for every all-day series there, and the day after for an
+/// evening series west of UTC (20:00 in New York). The same date error
+/// Exchange had before PR 8a (DESIGN-series-time-zone.md, stage 5).
+fn series_recurrence<D: TimeZone>(
+    rrule: &str,
+    start: DateTime<Utc>,
+    all_day: bool,
+    tzid: Option<&str>,
+    cut: bool,
+    device: &D,
+) -> GraphResult<RecurrenceObject> {
+    let zone = written_zone(all_day, tzid).map(|(_, zone)| zone);
+    let first_day = match zone {
+        _ if all_day => device_day(start, device),
+        Some(zone) => zone.wall(start).date(),
+        None => start.date_naive(),
+    };
+    let end_day = if cut && !all_day {
+        cut_end_day(rrule, start, zone.unwrap_or(cal_core::Zone::UTC))?
+    } else {
+        None
+    };
+    rrule_to_recurrence(rrule, first_day, end_day)
+}
+
+/// The day a cut ends the old series on (decision 235), or `None` where the
+/// rule's own `UNTIL` date stands.
+///
+/// A cut ("this and all following", which sets `truncate_tail_overrides`)
+/// ends the old series with an `UNTIL` one second before the occurrence it is
+/// cut at. Graph keeps a series' end as a date on the series' clock, and
+/// Exchange, the store behind it, counts that date whole (live round 10a), so
+/// the `UNTIL`'s UTC date mostly kept the cut's day in both series. The end is
+/// the last day whose occurrence, at the master's wall time on `clock`,
+/// starts at or before the `UNTIL` ([`cal_core::last_day_through`]), as the
+/// Exchange adapter writes it. Whether Graph counts the end date the same
+/// way is not measured (TODO.md). An all-day cut already names the day before
+/// as a date, and an end the user typed keeps the day typed: neither is a
+/// cut of a timed series.
+fn cut_end_day(
+    rrule: &str,
+    start: DateTime<Utc>,
+    clock: cal_core::Zone,
+) -> GraphResult<Option<NaiveDate>> {
+    let Some(until) = cal_core::utc_until(rrule) else {
+        return Ok(None);
+    };
+    let time = clock.wall(start).time();
+    cal_core::last_day_through(
+        until,
+        time,
+        |when| Some(clock.wall(when)),
+        |wall| clock.to_utc(wall, cal_core::WallPolicy::EarlierElseHourLater),
+    )
+    .map(Some)
+    .ok_or_else(|| {
+        GraphError::Protocol(cal_core::WriteRefusal::DayZoneUnreadable.message("no-wall"))
+    })
 }
 
 fn first_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
@@ -1287,7 +1421,7 @@ mod tests {
     /// the previous day for users east of UTC.
     #[test]
     fn write_datetime_all_day_uses_local_day_at_midnight() {
-        let w = write_datetime(local_midnight(2026, 6, 10), true, None);
+        let w = write_datetime_in(local_midnight(2026, 6, 10), true, None, &Local);
         assert_eq!(w.date_time, "2026-06-10T00:00:00");
         assert_eq!(w.time_zone, "UTC");
     }
@@ -1307,7 +1441,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
         );
         // …and writing it back emits the same wire day.
-        let back = write_datetime(instant, true, None);
+        let back = write_datetime_in(instant, true, None, &Local);
         assert_eq!(back.date_time, "2026-06-10T00:00:00");
     }
 
@@ -1590,7 +1724,7 @@ mod tests {
         assert!(rule.contains("FREQ=DAILY"));
         assert!(rule.contains("INTERVAL=2"));
         // Round-trip: parse back.
-        let recur = rrule_to_recurrence(&rule, ev.start).unwrap();
+        let recur = rrule_to_recurrence(&rule, ev.start.date_naive(), None).unwrap();
         assert_eq!(recur.pattern.kind, "daily");
         assert_eq!(recur.pattern.interval, 2);
         assert_eq!(recur.range.kind, "noEnd");
@@ -1615,7 +1749,7 @@ mod tests {
         assert!(rule.contains("FREQ=WEEKLY"));
         assert!(rule.contains("BYDAY=MO,WE"));
         assert!(rule.contains("COUNT=10"));
-        let recur = rrule_to_recurrence(&rule, ev.start).unwrap();
+        let recur = rrule_to_recurrence(&rule, ev.start.date_naive(), None).unwrap();
         assert_eq!(recur.pattern.kind, "weekly");
         assert_eq!(recur.pattern.days_of_week, vec!["monday", "wednesday"]);
         assert_eq!(recur.range.number_of_occurrences, Some(10));
@@ -1760,7 +1894,8 @@ mod tests {
         // of silently dropping the rule.
         let err = rrule_to_recurrence(
             "FREQ=MONTHLY;BYDAY=WE;BYSETPOS=-1",
-            Utc.with_ymd_and_hms(2026, 5, 27, 10, 0, 0).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 5, 27).unwrap(),
+            None,
         )
         .unwrap_err();
         assert!(matches!(err, GraphError::Protocol(_)));
@@ -1839,5 +1974,251 @@ mod tests {
         new.send_invitations = false;
         let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
         assert!(json.get("attendees").is_none());
+    }
+}
+
+/// Stage 5 of DESIGN-series-time-zone.md: a series' repeat range and its
+/// default days are read on the clock its start is written on, and a cut ends
+/// on the series' clock.
+#[cfg(test)]
+mod series_clock_tests {
+    use super::*;
+    use chrono::{Duration, FixedOffset};
+
+    fn at(s: &str) -> DateTime<Utc> {
+        s.parse().expect("an instant")
+    }
+
+    fn device(hours: i32) -> FixedOffset {
+        FixedOffset::east_opt(hours * 3600).expect("an offset")
+    }
+
+    fn series(start: &str, all_day: bool, rrule: &str, tzid: Option<&str>) -> NewEvent {
+        let start = at(start);
+        NewEvent {
+            organized_elsewhere: false,
+            organizer: None,
+            title: "Series".into(),
+            description: None,
+            location: None,
+            start,
+            end: start
+                + if all_day {
+                    Duration::days(1)
+                } else {
+                    Duration::hours(1)
+                },
+            all_day,
+            recurrence: Some(EventRecurrence {
+                rrule: rrule.into(),
+                exceptions: Vec::new(),
+                tzid: tzid.map(str::to_string),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            uid_to_keep: None,
+            keeps_invitation: false,
+        }
+    }
+
+    /// The body Graph gets for a new series, on a device `hours` from UTC.
+    /// Graph requires the range to start on the date of the start; every case
+    /// holds that.
+    fn written(new: &NewEvent, hours: i32) -> serde_json::Value {
+        let json =
+            serde_json::to_value(new_event_to_body_in(new, &device(hours)).unwrap()).unwrap();
+        let start = json["start"]["dateTime"].as_str().expect("a start");
+        assert_eq!(
+            json["recurrence"]["range"]["startDate"].as_str(),
+            start.get(..10),
+            "the range starts on the date of the start"
+        );
+        json
+    }
+
+    /// An existing series cut at an occurrence: what "this and all
+    /// following" writes for the old one.
+    fn cut(start: &str, rrule: &str, tzid: Option<&str>) -> Event {
+        let raw = r#"{
+            "id": "ev",
+            "start": { "dateTime": "2026-01-01T00:00:00", "timeZone": "UTC" },
+            "end":   { "dateTime": "2026-01-01T01:00:00", "timeZone": "UTC" },
+            "isAllDay": false
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let mut ev = map_event(entry, "primary").unwrap().unwrap();
+        ev.start = at(start);
+        ev.end = ev.start + Duration::hours(1);
+        ev.recurrence = Some(EventRecurrence {
+            rrule: rrule.into(),
+            exceptions: Vec::new(),
+            tzid: tzid.map(str::to_string),
+        });
+        ev.truncate_tail_overrides = true;
+        ev
+    }
+
+    fn end_date(ev: &Event) -> serde_json::Value {
+        let json = serde_json::to_value(event_to_body_in(ev, &device(0)).unwrap()).unwrap();
+        json["recurrence"]["range"]["endDate"].clone()
+    }
+
+    /// Monday 2 November 2026, 00:30 in Berlin, is Sunday 23:30 UTC: the UTC
+    /// date started the range on the Sunday and repeated on Sundays.
+    #[test]
+    fn a_series_after_midnight_east_of_utc_starts_on_its_own_day() {
+        let json = written(
+            &series(
+                "2026-11-01T23:30:00Z",
+                false,
+                "FREQ=WEEKLY",
+                Some("Europe/Berlin"),
+            ),
+            0,
+        );
+        assert_eq!(json["start"]["dateTime"], "2026-11-02T00:30:00");
+        assert_eq!(json["recurrence"]["range"]["startDate"], "2026-11-02");
+        assert_eq!(json["recurrence"]["pattern"]["daysOfWeek"][0], "monday");
+    }
+
+    /// Monday 2 November 2026, 20:00 in New York, is Tuesday 01:00 UTC.
+    #[test]
+    fn an_evening_series_west_of_utc_starts_on_its_own_day() {
+        let json = written(
+            &series(
+                "2026-11-03T01:00:00Z",
+                false,
+                "FREQ=WEEKLY",
+                Some("America/New_York"),
+            ),
+            0,
+        );
+        assert_eq!(json["start"]["dateTime"], "2026-11-02T20:00:00");
+        assert_eq!(json["recurrence"]["range"]["startDate"], "2026-11-02");
+        assert_eq!(json["recurrence"]["pattern"]["daysOfWeek"][0], "monday");
+    }
+
+    /// 31 December 2026, 20:00 in New York, is 1 January 2027 in UTC: the day
+    /// of the month and the month come from the series' own day.
+    #[test]
+    fn monthly_and_yearly_take_their_day_on_the_series_clock() {
+        let start = "2027-01-01T01:00:00Z";
+        let json = written(
+            &series(start, false, "FREQ=MONTHLY", Some("America/New_York")),
+            0,
+        );
+        assert_eq!(json["recurrence"]["range"]["startDate"], "2026-12-31");
+        assert_eq!(json["recurrence"]["pattern"]["dayOfMonth"], 31);
+
+        let json = written(
+            &series(start, false, "FREQ=YEARLY", Some("America/New_York")),
+            0,
+        );
+        assert_eq!(json["recurrence"]["pattern"]["month"], 12);
+        assert_eq!(json["recurrence"]["pattern"]["dayOfMonth"], 31);
+    }
+
+    /// An all-day series writes its days as the device names them (48a) and
+    /// no zone (46a), whatever zone it stores: its range starts on that day.
+    /// The device's midnight of Monday 2 November two hours east of UTC is
+    /// Sunday 22:00 UTC.
+    #[test]
+    fn an_all_day_series_starts_on_the_device_day() {
+        for tzid in [None, Some("Europe/Berlin")] {
+            let json = written(
+                &series("2026-11-01T22:00:00Z", true, "FREQ=WEEKLY", tzid),
+                2,
+            );
+            assert_eq!(json["start"]["dateTime"], "2026-11-02T00:00:00");
+            assert_eq!(json["start"]["timeZone"], "UTC");
+            assert_eq!(json["recurrence"]["range"]["startDate"], "2026-11-02");
+            assert_eq!(json["recurrence"]["pattern"]["daysOfWeek"][0], "monday");
+        }
+    }
+
+    /// A timed series without a zone tzdata names in exact case is written in
+    /// UTC, and its range reads the UTC day, as before.
+    #[test]
+    fn a_series_without_a_zone_stays_on_utc() {
+        for tzid in [None, Some("UTC"), Some("europe/berlin")] {
+            let json = written(
+                &series("2026-11-01T23:30:00Z", false, "FREQ=WEEKLY", tzid),
+                2,
+            );
+            assert_eq!(json["start"]["timeZone"], "UTC");
+            assert_eq!(json["recurrence"]["range"]["startDate"], "2026-11-01");
+            assert_eq!(json["recurrence"]["pattern"]["daysOfWeek"][0], "sunday");
+        }
+    }
+
+    /// A cut at Monday 16 November, 10:00 in Berlin (09:00 UTC), ends the old
+    /// series on the Sunday before. The date of the UNTIL, the Monday, kept
+    /// the day of the cut in both series.
+    #[test]
+    fn a_cut_ends_on_the_day_before_on_the_series_clock() {
+        let ev = cut(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;UNTIL=20261116T085959Z",
+            Some("Europe/Berlin"),
+        );
+        assert_eq!(end_date(&ev), "2026-11-15");
+    }
+
+    /// West of UTC the UNTIL of an evening cut is already the next UTC day:
+    /// Monday 16 November, 20:00 in New York, is Tuesday 01:00 UTC. Its date
+    /// kept two days twice.
+    #[test]
+    fn an_evening_cut_west_of_utc_ends_on_the_day_before() {
+        let ev = cut(
+            "2026-11-03T01:00:00Z",
+            "FREQ=DAILY;UNTIL=20261117T005959Z",
+            Some("America/New_York"),
+        );
+        assert_eq!(end_date(&ev), "2026-11-15");
+    }
+
+    /// A daily 02:30 series in Berlin cut on 28 March 2027, when the clock
+    /// skips from 02:00 to 03:00: that day's occurrence stands at 03:30, past
+    /// the gap (01:30 UTC), so the UNTIL a second before it ends on the 27th.
+    #[test]
+    fn a_cut_on_a_day_the_clock_skips_the_time_ends_the_day_before() {
+        let ev = cut(
+            "2027-03-20T01:30:00Z",
+            "FREQ=DAILY;UNTIL=20270328T012959Z",
+            Some("Europe/Berlin"),
+        );
+        assert_eq!(end_date(&ev), "2027-03-27");
+    }
+
+    /// A series without a zone is cut on the days of UTC.
+    #[test]
+    fn a_cut_without_a_zone_ends_on_the_utc_day_before() {
+        let ev = cut(
+            "2026-11-02T09:00:00Z",
+            "FREQ=WEEKLY;UNTIL=20261116T085959Z",
+            None,
+        );
+        assert_eq!(end_date(&ev), "2026-11-15");
+    }
+
+    /// An end the user typed keeps its day, and so does an all-day cut, which
+    /// already names the day before as a date.
+    #[test]
+    fn an_end_that_is_no_cut_keeps_its_own_date() {
+        let mut ev = cut(
+            "2026-11-03T01:00:00Z",
+            "FREQ=WEEKLY;UNTIL=20261130T235959Z",
+            Some("America/New_York"),
+        );
+        ev.truncate_tail_overrides = false;
+        assert_eq!(end_date(&ev), "2026-11-30");
+
+        let mut ev = cut("2026-11-02T00:00:00Z", "FREQ=DAILY;UNTIL=20261115", None);
+        ev.all_day = true;
+        assert_eq!(end_date(&ev), "2026-11-15");
     }
 }
