@@ -1,0 +1,22 @@
+# Zones come from cal_zone::Zone, over the tzdata bundled with jiff-tzdb, and
+# from nowhere else. jiff is built without any database feature, so these
+# lookups would find nothing today; they are listed so that no code starts
+# asking jiff (or, through a feature some other crate turns on, the operating
+# system) for a zone. cal-zone itself only hands jiff TZif bytes
+# (jiff::tz::TimeZone::tzif). CI also checks that only cal-zone depends on
+# jiff directly.
+disallowed-methods = [
+    { path = "jiff::tz::db", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::tz::TimeZone::get", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::tz::TimeZone::system", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::tz::TimeZone::try_system", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::tz::TimeZoneDatabase::from_env", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::tz::TimeZoneDatabase::from_dir", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::tz::TimeZoneDatabase::from_concatenated_path", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::tz::TimeZoneDatabase::bundled", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::ZonedDateTime::now", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::ZonedDateTime::in_tz", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::Timestamp::in_tz", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::civil::DateTime::in_tz", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::civil::Date::in_tz", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+]
