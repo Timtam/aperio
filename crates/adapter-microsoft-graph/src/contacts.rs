@@ -1,8 +1,8 @@
 //! Microsoft Graph Contacts client — Phase 10i.
 //!
 //! Wraps the REST endpoints under `/me/contactFolders` and `/me/people`
-//! through the same `ApiState` plumbing the Calendar and Tasks modules
-//! use, so a 401 on any contact call triggers the shared
+//! through the same `ApiState` plumbing the calendar code uses, so a
+//! 401 on any contact call triggers the shared
 //! token-refresh dance rather than carrying bespoke code per surface.
 //!
 //! ## Surface mapping (cal-core ↔ Graph)

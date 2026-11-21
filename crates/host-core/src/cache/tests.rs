@@ -562,37 +562,6 @@ fn prune_account_wipes_cached_sections() {
 }
 
 #[test]
-fn delta_deletes_list_task_by_full_composite_id() {
-    let store = setup();
-    // Graph To Do-style ids: `{list}|{task}`. `native_id` derives to the
-    // list (everything before `|`), which is shared across the list's
-    // tasks — so a per-resource deletion can't match by native id and
-    // must carry the full composite id instead.
-    store
-        .replace_list_tasks(ACC, LIST, &[task("list-1|t1"), task("list-1|t2")])
-        .unwrap();
-    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 2);
-
-    store
-        .apply_tasks_delta(
-            ACC,
-            LIST,
-            &Delta {
-                changes: Vec::new(),
-                deletions: vec!["list-1|t1".into()],
-                new_token: Some("d2".into()),
-            },
-        )
-        .unwrap();
-
-    // Only t1 is gone — the shared native_id ("list-1") must NOT have
-    // taken t2 down with it.
-    let rows = store.read_tasks(ACC, LIST).unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].id, "list-1|t2");
-}
-
-#[test]
 fn contacts_roundtrip_and_delta() {
     let store = setup();
     store
@@ -3256,4 +3225,329 @@ fn a_full_resync_keeps_the_last_success() {
         .unwrap();
     let errors = store.refresh_errors().unwrap();
     assert!(errors[0].errors[0].last_success_at.is_some());
+}
+
+// ── Families an account's adapter no longer serves (drop_unserved_caches) ──
+
+/// A contacts adapter the tests below only register, never call.
+struct RegisteredContacts;
+
+#[async_trait]
+impl Adapter for RegisteredContacts {
+    async fn authenticate(&self, _c: Credentials) -> cal_core::Result<AuthToken> {
+        Err(cal_core::Error::Unsupported("test fake".into()))
+    }
+    fn capabilities(&self) -> &[Capability] {
+        &[]
+    }
+}
+
+#[async_trait]
+impl cal_core::ContactsFeature for RegisteredContacts {
+    async fn list_contact_lists(&self) -> cal_core::Result<Vec<ContactList>> {
+        unreachable!("only registered")
+    }
+    async fn get_contacts(&self, _list_id: &str) -> cal_core::Result<Vec<Contact>> {
+        unreachable!("only registered")
+    }
+    async fn search_contacts(&self, _query: &str) -> cal_core::Result<Vec<Contact>> {
+        unreachable!("only registered")
+    }
+    async fn create_contact(
+        &self,
+        _list_id: &str,
+        _contact: cal_core::NewContact,
+    ) -> cal_core::Result<Contact> {
+        unreachable!("only registered")
+    }
+    async fn update_contact(&self, _contact: Contact) -> cal_core::Result<Contact> {
+        unreachable!("only registered")
+    }
+    async fn delete_contact(&self, _contact_id: &str) -> cal_core::Result<()> {
+        unreachable!("only registered")
+    }
+}
+
+const BOOK: &str = "book-1";
+
+fn bare_registry() -> crate::registry::AdapterRegistry {
+    crate::registry::AdapterRegistry::new(
+        Arc::new(plugin_core::PluginManager::new("0.1.0")),
+        Arc::new(sync_engine::test_support::FakeSecrets::default()),
+    )
+}
+
+/// Something cached in every family, a task-list error recorded the way a
+/// failed listing records one, and a name the user gave the task list.
+fn seed_every_family(store: &CacheStore) {
+    store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
+    store
+        .replace_calendar_events(ACC, CAL, range(8, 18), &[event("e1", 8, 9)])
+        .unwrap();
+    store.replace_task_lists(ACC, &[task_list(LIST)]).unwrap();
+    store.replace_list_tasks(ACC, LIST, &[task("t1")]).unwrap();
+    store
+        .replace_sections(ACC, LIST, &[section("s1", 0)])
+        .unwrap();
+    store
+        .replace_contact_lists(ACC, &[contact_list(BOOK)])
+        .unwrap();
+    store
+        .replace_list_contacts(ACC, BOOK, &[contact("c1")])
+        .unwrap();
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::TaskLists,
+            "",
+            &cal_core::Error::Network("down".into()),
+            Attempt::Forced { generation: 0 },
+        )
+        .unwrap();
+    store
+        .db
+        .with_conn(|c| {
+            c.execute(
+                "INSERT INTO container_name_overrides (container_id, kind, name, updated_at)
+                 VALUES (?1, 'task_list', 'Mine', '2026-01-01T00:00:00Z')",
+                params![LIST],
+            )
+        })
+        .unwrap();
+}
+
+fn count(store: &CacheStore, sql: &str) -> i64 {
+    store
+        .db
+        .with_conn(|c| c.query_row(sql, [], |r| r.get::<_, i64>(0)))
+        .unwrap()
+}
+
+fn accounts_of(store: &CacheStore) -> Vec<crate::accounts::Account> {
+    let shared = store.db.shared();
+    crate::accounts::AccountsRepo::new(&shared).list().unwrap()
+}
+
+#[test]
+fn an_adapter_that_stops_serving_tasks_loses_their_cache() {
+    let store = setup();
+    seed_every_family(&store);
+    assert!(!store.refresh_errors().unwrap().is_empty(), "seeded error");
+    // The account's adapter is loaded and serves calendars and contacts, but
+    // no longer tasks: a new version of its plugin stopped declaring them.
+    let registry = bare_registry();
+    registry.register_host_adapter(
+        ACC,
+        Some(Arc::new(PartialBootstrapAdapter {
+            changes: vec![],
+            unfetched: vec![],
+        })),
+        None,
+    );
+    registry.register_host_contacts(ACC, Arc::new(RegisteredContacts));
+
+    let dropped = super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap();
+
+    assert_eq!(dropped, 1, "only the task family");
+    assert!(store.read_task_lists(ACC).unwrap().is_empty());
+    assert!(store.read_tasks(ACC, LIST).unwrap().is_empty());
+    assert!(store.read_sections(ACC, LIST).unwrap().is_empty());
+    assert_eq!(
+        count(&store, "SELECT COUNT(*) FROM cache_tasks_fts"),
+        0,
+        "no search hits"
+    );
+    assert_eq!(
+        count(
+            &store,
+            "SELECT COUNT(*) FROM cache_sync_state
+              WHERE scope IN ('task_lists', 'tasks', 'sections')"
+        ),
+        0,
+        "no task sync state, tokens or errors"
+    );
+    assert!(
+        store.refresh_errors().unwrap().is_empty(),
+        "the old task error no longer names the account as failing"
+    );
+    // What the adapter still serves is untouched.
+    assert_eq!(store.read_calendars(ACC).unwrap().len(), 1);
+    assert_eq!(store.read_events(ACC, CAL, wide()).unwrap().len(), 1);
+    assert_eq!(store.read_contacts(ACC, BOOK).unwrap().len(), 1);
+    // What the user set is not cache.
+    assert_eq!(
+        count(&store, "SELECT COUNT(*) FROM container_name_overrides"),
+        1,
+        "the user's name for the list stays"
+    );
+    // Nothing left to drop on the next start.
+    assert_eq!(
+        super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap(),
+        0
+    );
+}
+
+#[test]
+fn an_account_without_its_adapter_keeps_its_cache() {
+    let store = setup();
+    seed_every_family(&store);
+    // No adapter at all: its plugin is gone, switched off or not loading.
+    let registry = bare_registry();
+
+    let dropped = super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap();
+
+    assert_eq!(dropped, 0);
+    assert_eq!(store.read_task_lists(ACC).unwrap().len(), 1);
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 1);
+    assert_eq!(store.read_calendars(ACC).unwrap().len(), 1);
+    assert_eq!(store.read_contacts(ACC, BOOK).unwrap().len(), 1);
+    assert!(!store.refresh_errors().unwrap().is_empty(), "error kept");
+}
+
+fn calendar_adapter() -> Arc<PartialBootstrapAdapter> {
+    Arc::new(PartialBootstrapAdapter {
+        changes: vec![],
+        unfetched: vec![],
+    })
+}
+
+fn tasks_adapter() -> Arc<SectionAdapter> {
+    Arc::new(SectionAdapter {
+        sections: vec![],
+        calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    })
+}
+
+#[test]
+fn an_adapter_that_stops_serving_calendars_loses_their_cache() {
+    let store = setup();
+    seed_every_family(&store);
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Events,
+            CAL,
+            &cal_core::Error::Network("down".into()),
+            Attempt::Forced { generation: 0 },
+        )
+        .unwrap();
+    assert!(count(&store, "SELECT COUNT(*) FROM cache_events_fts") > 0);
+    let registry = bare_registry();
+    registry.register_host_adapter(ACC, None, Some(tasks_adapter()));
+    registry.register_host_contacts(ACC, Arc::new(RegisteredContacts));
+
+    let dropped = super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap();
+
+    assert_eq!(dropped, 1, "only the calendar family");
+    assert!(store.read_calendars(ACC).unwrap().is_empty());
+    assert!(store.read_events(ACC, CAL, wide()).unwrap().is_empty());
+    assert_eq!(
+        count(&store, "SELECT COUNT(*) FROM cache_events"),
+        0,
+        "no event rows"
+    );
+    assert_eq!(
+        count(&store, "SELECT COUNT(*) FROM cache_events_fts"),
+        0,
+        "no event search rows"
+    );
+    assert_eq!(
+        count(
+            &store,
+            "SELECT COUNT(*) FROM cache_sync_state WHERE scope IN ('calendars', 'events')"
+        ),
+        0,
+        "no calendar sync state"
+    );
+    assert_eq!(store.read_task_lists(ACC).unwrap().len(), 1);
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 1);
+    assert_eq!(store.read_contacts(ACC, BOOK).unwrap().len(), 1);
+}
+
+#[test]
+fn an_adapter_that_stops_serving_contacts_loses_their_cache() {
+    let store = setup();
+    seed_every_family(&store);
+    store
+        .mark_failure(
+            ACC,
+            SyncScope::Contacts,
+            BOOK,
+            &cal_core::Error::Network("down".into()),
+            Attempt::Forced { generation: 0 },
+        )
+        .unwrap();
+    let registry = bare_registry();
+    registry.register_host_adapter(ACC, Some(calendar_adapter()), Some(tasks_adapter()));
+
+    let dropped = super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap();
+
+    assert_eq!(dropped, 1, "only the contact family");
+    assert!(store.read_contacts(ACC, BOOK).unwrap().is_empty());
+    assert!(store.read_contact_lists(ACC).unwrap().is_empty());
+    assert_eq!(
+        count(
+            &store,
+            "SELECT COUNT(*) FROM cache_sync_state WHERE scope IN ('contact_lists', 'contacts')"
+        ),
+        0,
+        "no contact sync state"
+    );
+    assert_eq!(store.read_calendars(ACC).unwrap().len(), 1);
+    assert_eq!(store.read_events(ACC, CAL, wide()).unwrap().len(), 1);
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 1);
+}
+
+#[test]
+fn a_host_internal_account_keeps_its_cache_whatever_is_registered() {
+    let store = setup();
+    // The device calendar registers its surfaces from the host, at its own
+    // moment: what is registered at startup says nothing about what it serves.
+    store
+        .db
+        .with_conn(|c| {
+            c.execute(
+                "UPDATE accounts SET adapter_kind = 'device_calendar' WHERE id = ?1",
+                params![ACC],
+            )
+        })
+        .unwrap();
+    seed_every_family(&store);
+    let registry = bare_registry();
+    registry.register_host_adapter(ACC, Some(calendar_adapter()), None);
+
+    let dropped = super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap();
+
+    assert_eq!(dropped, 0);
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 1);
+    assert_eq!(store.read_contacts(ACC, BOOK).unwrap().len(), 1);
+}
+
+#[test]
+fn a_registration_that_fails_part_way_keeps_the_cache() {
+    let store = setup();
+    seed_every_family(&store);
+    let registry = bare_registry();
+    // The plugin declares calendars and tasks; its calendar surface opened,
+    // its tasks surface did not.
+    let failed = registry.place_for_tests(ACC, || {
+        registry.register_host_adapter(ACC, Some(calendar_adapter()), None);
+        Err::<(), _>(crate::registry::RegistryError::Construct(
+            "plugin doesn't expose the TasksFeature surface".into(),
+        ))
+    });
+    assert!(failed.is_err());
+    assert_eq!(
+        registry.served_families(ACC),
+        None,
+        "a failed registration leaves no adapter behind"
+    );
+
+    let dropped = super::drop_unserved_caches(&store, &registry, &accounts_of(&store)).unwrap();
+
+    assert_eq!(dropped, 0);
+    assert_eq!(store.read_calendars(ACC).unwrap().len(), 1);
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 1);
+    assert_eq!(store.read_contacts(ACC, BOOK).unwrap().len(), 1);
+    assert!(!store.refresh_errors().unwrap().is_empty(), "error kept");
 }

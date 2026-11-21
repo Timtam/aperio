@@ -4,9 +4,8 @@
  * Which task-organisation features a `tasks`-capable adapter can
  * faithfully round-trip. Declared (optionally) in `plugin.json` so
  * the task UI can show / grey-out the right affordances — e.g.
- * Vikunja and Todoist nest their projects, Microsoft To Do and
- * Google Tasks keep flat lists; Todoist groups tasks into sections,
- * the others don't.
+ * Vikunja and Todoist nest their projects, Google Tasks keeps flat
+ * lists; Todoist groups tasks into sections, the others don't.
  *
  * Defaults track what cal-core models *natively* rather than the
  * richest backend: a backend that omits the block (or a field) is

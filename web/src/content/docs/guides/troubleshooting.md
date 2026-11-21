@@ -189,6 +189,16 @@ permission stands:
 The line is read again when you open the screen and when you come back to
 the app, so a change made in the system settings shows on the way back.
 
+## My Microsoft To Do lists are gone
+
+Microsoft is retiring Microsoft To Do: it announced in November 2026 that the
+To Do apps stop working on June 30, 2027. Aperio no longer connects to it, so
+the task lists of a Microsoft account disappear from the sidebar after the
+update. Your tasks are still at Microsoft until then. The account's calendars
+and contacts stay as they were. To keep working on those tasks in Aperio,
+create them again in a local list or with a provider that keeps tasks
+(Exchange, CalDAV, Google, Todoist or Vikunja).
+
 ## A task's time shifted, once
 
 Tasks with a **time of day** on a **CalDAV** account (iCloud Reminders,
@@ -202,11 +212,9 @@ created with a time therefore shift **once**, by exactly that offset — a 09:00
 task reads as 11:00 in central Europe. Correct it once and it stays put. Tasks
 created in another program were wrong before and are right now.
 
-Two more things are fixed with it: a task whose time carries a **time zone** (how
+One more thing is fixed with it: a task whose time carries a **time zone** (how
 Thunderbird, Tasks.org and Nextcloud write it) did not merely lose its time here,
-it lost its **whole day** and sat undated in the backlog. And a task from
-**Microsoft To Do**, created by someone in their own time zone, could show up a
-day early.
+it lost its **whole day** and sat undated in the backlog.
 
 ## A recurring appointment is an hour off after the clocks change
 

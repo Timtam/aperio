@@ -683,7 +683,7 @@ export default function TaskEditorModal({
     [taskLists, form.listId],
   );
   const canRecur = caps?.task_recurrence ?? true;
-  // Google Tasks, Microsoft To Do and Exchange keep whole days: the write is
+  // Google Tasks and Exchange keep whole days: the write is
   // accepted, the server drops the time, and the next refresh returns a task
   // with no time and no error. Do not offer what cannot survive the trip.
   const canSetTime = caps?.task_time_of_day ?? true;
@@ -1169,7 +1169,7 @@ export default function TaskEditorModal({
           saved = await root();
         } catch (err) {
           // Its save stood in part with the status — a later step of it
-          // (Vikunja's assignees, Graph's extension) was turned away: the
+          // (Vikunja's assignees, Google's move) was turned away: the
           // family still follows, as on a check-off; saving again could not,
           // the status being set (review round 17 of #128). Mirrors the
           // desktop.

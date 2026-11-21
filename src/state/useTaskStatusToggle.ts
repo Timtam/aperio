@@ -117,7 +117,7 @@ export function useTaskStatusActions(): TaskStatusActions {
       const rootFailure = outcome.failed.find((f) => f.taskId === task.id);
       if (rootFailure && writeStatusLanded(rootFailure.err)) {
         // Its own save stood in part with the status — a later step of it
-        // (Vikunja's assignees, Graph's extension) was turned away: the task
+        // (Vikunja's assignees, Google's move) was turned away: the task
         // did change. Said as the leftover, never "could not change"
         // (decision 277), as `writeFailureSentence` does — and what of the
         // family did not take after it, as the editor says it (review round

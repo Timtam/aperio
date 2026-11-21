@@ -210,6 +210,17 @@ Die Zeile wird neu gelesen, wenn du den Bildschirm öffnest und wenn du zur App
 zurückkehrst. Eine Änderung in den Systemeinstellungen siehst du also auf dem
 Rückweg.
 
+## Meine Microsoft-To-Do-Listen sind verschwunden
+
+Microsoft stellt Microsoft To Do ein: Im November 2026 wurde angekündigt, dass
+die To-Do-Apps am 30. Juni 2027 aufhören zu funktionieren. Aperio bindet To Do
+nicht mehr an, deshalb verschwinden die Aufgabenlisten eines Microsoft-Kontos
+nach dem Update aus der Seitenleiste. Deine Aufgaben liegen bis dahin weiter
+bei Microsoft. Kalender und Kontakte des Kontos bleiben, wie sie waren. Wenn du
+an diesen Aufgaben in Aperio weiterarbeiten willst, lege sie in einer lokalen
+Liste an oder bei einem Anbieter, der Aufgaben führt (Exchange, CalDAV,
+Google, Todoist oder Vikunja).
+
 ## Eine Aufgabenzeit hat sich einmalig verschoben
 
 Aufgaben mit einer **Uhrzeit** auf einem **CalDAV**-Konto (iCloud Erinnerungen,
@@ -225,11 +236,10 @@ Mitteleuropa danach auf 11:00. Korrigiere sie einmal, danach bleibt sie stehen.
 Aufgaben, die in einem anderen Programm angelegt wurden, waren bisher falsch und
 sind jetzt richtig.
 
-Zwei weitere Dinge sind damit behoben: eine Aufgabe, deren Uhrzeit eine
+Eine weitere Sache ist damit behoben: eine Aufgabe, deren Uhrzeit eine
 **Zeitzone** mitbringt (so schreiben es Thunderbird, Tasks.org und Nextcloud),
 verlor bei uns nicht nur die Uhrzeit, sondern den **ganzen Tag** und lag ohne
-Datum im Backlog. Und eine Aufgabe aus **Microsoft To Do**, die jemand in seiner
-eigenen Zeitzone angelegt hat, konnte bei uns einen Tag zu früh erscheinen.
+Datum im Backlog.
 
 ## Eine Terminserie steht nach der Zeitumstellung eine Stunde daneben
 

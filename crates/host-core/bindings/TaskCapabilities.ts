@@ -16,8 +16,7 @@ nested_projects: boolean,
 subtasks: boolean, 
 /**
  * Maximum subtask nesting depth. `None` = unlimited. Backends
- * that only do one level (Google Tasks, Microsoft "steps") set
- * `Some(1)`.
+ * that only do one level (Google Tasks) set `Some(1)`.
  */
 max_subtask_depth: number | null, 
 /**
@@ -48,8 +47,8 @@ task_recurrence: boolean,
  * this `false`: an `in_progress` write collapses to `open` on
  * read-back, so the UI skips the auto-schedule-to-today a "started"
  * task would otherwise trigger (a status that can't stick shouldn't
- * move the date). Defaults `true` — cal-core-native: local, CalDAV,
- * Exchange and Microsoft To Do all keep it.
+ * move the date). Defaults `true` — cal-core-native: local, CalDAV
+ * and Exchange all keep it.
  */
 supports_in_progress: boolean, 
 /**
@@ -83,8 +82,8 @@ reschedule_single_occurrence: boolean,
  *
  * False where the backend keeps whole days and normalises anything finer
  * away: Google Tasks documents that only date information is recorded,
- * Microsoft To Do resets the time component to midnight, and an Exchange
- * task's dates are specified as a local date whose time MUST be midnight.
+ * and an Exchange task's dates are specified as a local date whose time
+ * MUST be midnight.
  *
  * It is declared because the loss is otherwise SILENT. The editor offered
  * a time, the write succeeded, the server dropped it, and the next refresh
@@ -124,9 +123,8 @@ delete_lists: boolean,
 /**
  * The adapter can manage a list's membership/sharing (the sidebar's
  * "manage members" entry + the members dialog). Vikunja + Todoist
- * opt in; flat/personal backends (local, Google Tasks, MS To Do)
- * leave it `false` so the UI doesn't offer a control they can't
- * fulfil.
+ * opt in; flat/personal backends (local, Google Tasks) leave it
+ * `false` so the UI doesn't offer a control they can't fulfil.
  */
 manageable: boolean, 
 /**

@@ -897,7 +897,7 @@ Aperio/
 │   ├── plugin-sdk/                   # Rust-SDK für Plugin-Entwickler
 │   ├── sync-core/                    # Sync-Adapter-Trait & Event-Log-Typen
 │   ├── adapter-google/           # Google Calendar + Tasks + Contacts (nativ gebundelt)
-│   ├── adapter-microsoft-graph/  # Outlook + MS To Do + Contacts (nativ gebundelt)
+│   ├── adapter-microsoft-graph/  # Outlook-Kalender + Contacts (nativ gebundelt)
 │   ├── adapter-ews/              # Exchange on-premise (Kalender + Tasks + Contacts, nativ gebundelt)
 │   ├── adapter-caldav/           # CalDAV + CardDAV, inkl. iCloud (nativ gebundelt)
 │   ├── adapter-ical/             # .ics-Dateien (nativ gebundelt)
@@ -1002,7 +1002,7 @@ Ein Adapter implementiert immer das `Adapter`-Basis-Trait plus eine beliebige Ko
 |---|---|---|
 | `adapter-caldav` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
 | `adapter-google` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
-| `adapter-microsoft-graph` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
+| `adapter-microsoft-graph` | `Adapter`, `CalendarFeature`, `ContactsFeature` | `["calendar", "contacts"]` |
 | `adapter-ews` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
 | `adapter-ical` | `Adapter`, `CalendarFeature` | `["calendar"]` |
 | `adapter-local` | `Adapter`, `CalendarFeature`, `TasksFeature` | `["calendar", "tasks"]` |
@@ -1095,7 +1095,6 @@ Termine werden in der Farbe des zugehörigen Kalenders, Aufgaben in der Farbe de
 | Adapter | Native Farb-API | Verhalten |
 |---|---|---|
 | **Google Tasks** | ❌ Nein | Farbe wird manuell in der App vergeben |
-| **Microsoft To Do** | ❌ Nein | Farbe wird manuell in der App vergeben |
 | **CalDAV/VTODO** | Wie der zugehörige Kalender | Aufgabenliste teilt den Container mit dem Kalender |
 | **EWS Tasks** | ❌ Nein | Farbe wird manuell in der App vergeben |
 | **Vikunja** | ✅ Ja – `hex_color` pro Projekt | Farbe wird direkt übernommen; in der App überschreibbar |
@@ -1768,8 +1767,8 @@ pub struct TaskList {
 
     /// Wenn die Liste in einem aufgabenfähigen Kalender lebt (CalDAV/VTODO,
     /// lokaler Kalender), zeigt dieser Hinweis auf den Kalender. Bei
-    /// eigenständigen Aufgabenlisten (Google Tasks, Microsoft To Do, Vikunja,
-    /// Todoist) ist das Feld `None`.
+    /// eigenständigen Aufgabenlisten (Google Tasks, Vikunja, Todoist) ist das
+    /// Feld `None`.
     pub embedded_in_calendar: Option<String>,
 }
 ```
@@ -1779,7 +1778,6 @@ Das Verhältnis Kalender ↔ Aufgabenliste ist je nach Anbieter unterschiedlich:
 | Anbieter | Kalender und Aufgabenliste sind … |
 |---|---|
 | **Google** | Getrennte Entitäten – jede mit eigener ID |
-| **Microsoft Graph** | Getrennte Entitäten (Outlook-Kalender vs. To-Do-Listen) |
 | **CalDAV / iCloud** | Eine VTODO-Aufgabenliste lebt **in einem Kalender** (gleicher Container, geteilte URL) |
 | **EWS** | Getrennte Entitäten |
 | **Vikunja** | Kein Kalender vorhanden – nur Aufgabenlisten (= Vikunja-Projekte) |
@@ -1971,14 +1969,18 @@ Todoist ist ein kommerzieller, weit verbreiteter Aufgabendienst mit REST-API. Ca
 
 | Adapter | Aufgaben-API | Unteraufgaben | Sync |
 |---|---|---|---|
-| **Google** | Google Tasks API | ❌ | Bidirektional |
-| **Microsoft Graph** | Microsoft To Do API | ✅ (`checklistItems`) | Bidirektional |
+| **Google** | Google Tasks API | ✅ (eine Ebene, `parent`) | Bidirektional |
 | **CalDAV / iCloud** | VTODO RFC 5545 | ⚠️ RELATED-TO | Bidirektional |
 | **EWS** | EWS Task-Items | ❌ | Bidirektional |
 | **iCal (.ics)** | VTODO lesend | – | Nur lesend |
 | **Vikunja** | Vikunja REST API | ✅ Nativ | Bidirektional |
 | **Todoist** | Todoist REST API v2 | ✅ (`parent_id`) | Bidirektional |
 | **Lokal** | Keine externe API | ✅ Via `parent_id` | – (Event Log) |
+
+Microsoft Graph liefert seit 2026-11 keine Aufgaben mehr: Microsoft hat To Do
+abgekündigt (Apps enden am 2027-06-30, die Graph-API folgt später), und Aperio
+hat die Anbindung gestrichen (Toni, 2026-11-21). Ein Microsoft-Konto bringt
+Kalender und Kontakte.
 
 #### Datums-Felder-Mapping je Adapter
 
@@ -1987,8 +1989,7 @@ Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ opt
 | Adapter | Externe Felder | Mapping |
 |---|---|---|
 | **CalDAV / VTODO** | `DTSTART`, `DUE` | `DTSTART` ↔ `scheduled_*`, `DUE` ↔ `deadline_*`. Beide Richtungen mit optionalem UTC-DATE-TIME. Round-trip ist verlustfrei. |
-| **Microsoft Graph** | `startDateTime`, `dueDateTime` | `startDateTime` ↔ `scheduled_*`, `dueDateTime` ↔ `deadline_*`. Round-trip ist verlustfrei. |
-| **EWS Tasks** | `StartDate`, `DueDate` | Analog Microsoft Graph: `StartDate` ↔ `scheduled_*`, `DueDate` ↔ `deadline_*`. |
+| **EWS Tasks** | `StartDate`, `DueDate` | `StartDate` ↔ `scheduled_*`, `DueDate` ↔ `deadline_*`. |
 | **Google Tasks** | nur `due` | **One-Way-Drift möglich.** Schreiben: zuerst `scheduled_date` → `due`; ist nur `deadline_date` gesetzt, geht das stattdessen raus. Lesen: Google's `due` landet immer in `scheduled_date`. Folge: eine Aperio-Aufgabe mit `deadline_date` (ohne `scheduled_date`) landet in Google als `due` und kommt beim nächsten Sync als `scheduled_date` zurück — die "by"-Semantik geht beim Round-trip verloren. Akzeptiert als Trade-off, weil Google Tasks keine zwei Slots kennt. |
 | **iCal (.ics)** | `DTSTART`, `DUE` (lesend) | Wie CalDAV, aber read-only. |
 | **Vikunja / Todoist** | jeweiliges Schema | TBD beim Implementierungs-Commit; vermutlich analog Google (ein einziges Datums-Feld → `scheduled_date`). |
@@ -2002,17 +2003,18 @@ Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ opt
 |---|---|---|---|---|
 | **Vikunja** | ✅ Ja | `…/tasks/{id}/assignees` (PUT / `bulk` / DELETE / GET), Schlüssel `user_id` | v1 `GET /projects/{id}/projectusers?s=`, v2 `GET /projects/{id}/users/search?q=` (Token-Recht „users search“ unter Projects, 130) | Ja |
 | **Todoist** | ✅ Begrenzt | `assignee_id` (nur geteilte Projekte) | `GET /projects/{id}/collaborators` | **Nein, nur 1** |
-| **MS To Do** | ❌ Nein | — (Graph-`todoTask` hat kein Zuweisungsfeld) | — | — |
 | **MS Planner** | ✅ Ja (eigener Adapter) | `assignments` (AAD-GUID), Scope `Tasks.ReadWrite` — **kein** Admin-Consent | `GET /groups/{id}/members` (Group-Scope, Admin-Consent) | Ja |
 
-**Wichtig:** Microsoft **To Do** kann Zuweisung über die API nicht — das kollaborative Microsoft-Pendant ist **Planner** (eigener Adapter; hier zunächst _out of scope_).
+**Wichtig:** Microsofts Aufgaben mit Zuweisung liegen in **Planner** (eigener Adapter; hier zunächst _out of scope_).
 
 > **Korrektur (2026-09-06, gegen Microsofts eigene Docs-Quelle geprüft).** Die
 > Zeile oben nannte lange `Group.ReadWrite.All` als Consent für Planner, und
 > daraus wurde „schwergewichtiger Adapter". Das stimmt so nicht: der delegierte
 > Scope für die **gesamte** Planner-CRUD-Fläche in Graph **v1.0** ist
-> `Tasks.ReadWrite` — derselbe, den `adapter-microsoft-graph` für To Do schon
-> anfordert (`auth.rs:63`) — und er ist `AdminConsentRequired: No`.
+> `Tasks.ReadWrite` — und er ist `AdminConsentRequired: No`. Den hatte
+> `adapter-microsoft-graph` für To Do angefordert; mit To Do ist er 2026-11
+> weggefallen. Ein Planner-Adapter müsste ihn wieder anfordern, und jedes
+> Microsoft-Konto müsste dann neu zustimmen.
 > `Group.*.All` steht nur in der Spalte „higher privileged".
 >
 > Ein Group-Scope (Admin-Consent: **ja**) wird erst für den **beliebigen
@@ -2025,8 +2027,9 @@ Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ opt
 > Die echten Hürden liegen woanders: **nur Arbeits-/Schulkonten** (private
 > Microsoft-Konten sind auf jedem Planner-Endpunkt „Not supported"), **nur
 > Basic-Pläne** (Premium liegt in Dataverse), **kein Delta in v1.0** (Polling),
-> und `plannerTask` nimmt **keine open extensions** — der `com.aperio.extras`-
-> Beutel hätte dort kein Zuhause. Details siehe Recherche-Notiz.
+> und `plannerTask` nimmt **keine open extensions** — ein `com.aperio.extras`-
+> Beutel, wie ihn die To-Do-Anbindung als Open Extension schrieb, hätte dort kein
+> Zuhause. Details siehe Recherche-Notiz.
 
 **Datenmodell.** Ein einheitlicher, mehrwertiger Typ:
 
@@ -2038,7 +2041,7 @@ Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ opt
 
 **Eigen-Identität („ich").** Um „mir / anderen / niemandem zugewiesen" zu unterscheiden, liefert jeder Adapter `current_user() -> Option<TaskUser>` (Vikunja `GET /user`); die Identität wird beim Verbinden einmal geholt und am Account abgelegt.
 
-**Capability.** ✅ Pro Adapter im Plugin-Manifest deklariert (`task_assignment: none | single | multiple`, `plugin-core/src/manifest.rs`); das UI blendet den Picker aus, wo nicht unterstützt (lokal, MS To Do), und schaltet bei Todoist auf Einfach-Auswahl. Default ist `none` — ein Manifest, das schweigt, wird nicht mit einer Fähigkeit beliehen, deren Scheitern unsichtbar ist (dieselbe Regel wie `task_span`). `single` ist ein **eigenes** Control, kein kleineres: Desktop eine Auswahl mit „Niemand" als erster Möglichkeit, Mobile eine Radiogruppe; eine neue Wahl **ersetzt** die alte. Beim Listenwechsel kappen beide Editoren auf die **erste** Person — dieselbe, die auch der Adapter behält. Die Regel liegt einmal in `shared/taskAssignment.ts`. Bis dahin hing der Picker an `members.length > 0`, also an einer Netzwerkantwort statt an dem, was die Quelle halten kann: Todoist bot Mehrfachauswahl an, der Adapter verwarf die zweite Person beim Schreiben, und das Speichern meldete Erfolg (d5ab891e).
+**Capability.** ✅ Pro Adapter im Plugin-Manifest deklariert (`task_assignment: none | single | multiple`, `plugin-core/src/manifest.rs`); das UI blendet den Picker aus, wo nicht unterstützt (lokal, Google), und schaltet bei Todoist auf Einfach-Auswahl. Default ist `none` — ein Manifest, das schweigt, wird nicht mit einer Fähigkeit beliehen, deren Scheitern unsichtbar ist (dieselbe Regel wie `task_span`). `single` ist ein **eigenes** Control, kein kleineres: Desktop eine Auswahl mit „Niemand" als erster Möglichkeit, Mobile eine Radiogruppe; eine neue Wahl **ersetzt** die alte. Beim Listenwechsel kappen beide Editoren auf die **erste** Person — dieselbe, die auch der Adapter behält. Die Regel liegt einmal in `shared/taskAssignment.ts`. Bis dahin hing der Picker an `members.length > 0`, also an einer Netzwerkantwort statt an dem, was die Quelle halten kann: Todoist bot Mehrfachauswahl an, der Adapter verwarf die zweite Person beim Schreiben, und das Speichern meldete Erfolg (d5ab891e).
 
 **Wem eine Aufgabe gehört — die Regel liegt im Kern.** „Ist das meine Aufgabe?"
 beantworten drei Stellen: der Erinnerungs-Planer (klingelt sie?), der
@@ -2079,7 +2082,7 @@ Ergänzend zur Zuweisung: Mitglieder einer Liste / eines Projekts direkt aus Ape
 | Person finden | `GET /users?s=` (existierendes Konto; add per **Username**) | keine Suche — Einladung per **roher E-Mail** |
 | Teams | ✅ `/projects/{id}/teams` (gleiche Verben) | — |
 
-**Kernunterschied:** Vikunja = sofortige Freigabe an **bestehende Nutzer** mit **Rechtestufen** (+ Teams); Todoist = **E-Mail-Einladung mit Annahme-Flow**, ohne Rollen. (Vikunja-Eigenheit: **PUT = anlegen, POST = ändern**.) MS Planner/To Do bleiben _out of scope_.
+**Kernunterschied:** Vikunja = sofortige Freigabe an **bestehende Nutzer** mit **Rechtestufen** (+ Teams); Todoist = **E-Mail-Einladung mit Annahme-Flow**, ohne Rollen. (Vikunja-Eigenheit: **PUT = anlegen, POST = ändern**.) MS Planner bleibt _out of scope_.
 
 **Datenmodell.**
 - `MemberRight`: `Read | Write | Admin` (Vikunja 0/1/2).
@@ -2099,7 +2102,7 @@ Ergänzend zur Zuweisung: Mitglieder einer Liste / eines Projekts direkt aus Ape
 
 Sichtbar nur, wenn der Adapter der Liste Mitgliederverwaltung kann (lokale Listen / nicht verwaltbare Backends blenden ihn aus).
 
-**Capability.** Pro Adapter im Manifest (`tasks.manageable` + `tasks.member_add_by: search | email`). `manageable` gated das Sidebar-„Mitglieder"-Menü (Vikunja + Todoist = true; lokal/Google/MS To Do = false), `member_add_by` schaltet den Dialog zwischen User-Suche (Vikunja) und E-Mail-Einladung (Todoist). Rollen + Pending sind datengetrieben (`right = null` ⇒ kein Dropdown, `pending` ⇒ Badge).
+**Capability.** Pro Adapter im Manifest (`tasks.manageable` + `tasks.member_add_by: search | email`). `manageable` gated das Sidebar-„Mitglieder"-Menü (Vikunja + Todoist = true; lokal/Google = false), `member_add_by` schaltet den Dialog zwischen User-Suche (Vikunja) und E-Mail-Einladung (Todoist). Rollen + Pending sind datengetrieben (`right = null` ⇒ kein Dropdown, `pending` ⇒ Badge).
 
 **Phasen.** ✅ (1) Vikunja end-to-end: Modell + Trait/FFI + Adapter (Shares lesen, add/remove/set_right, User-Suche) + Mitglieder-Dialog mit Rechten. (1b) Teams. ✅ (2) Todoist: `collaborators` + `collaborator_states`, `share_project`/`delete_collaborator` (Sync-API v9), Pending-Zustand; UI auf E-Mail-Einladung ohne Rollen. Mitgliedschaft schlüsselt auf der **E-Mail** (was `delete_collaborator` braucht), `right = None`. _Out of scope:_ MS; instanzweite Nutzer-/Team-Administration (nur projekt-/listenbezogene Freigabe).
 
@@ -2290,7 +2293,6 @@ Die obigen Felder kennt kein externer Provider nativ. Für **geteilte Listen** i
 | Vikunja, Todoist, Google | **sichtbarer „managed block"** im Beschreibungsfeld |
 | CalDAV | `X-APERIO-EXTRAS`-Property (unsichtbar) |
 | EWS | Extended MAPI Property (unsichtbar) |
-| Microsoft Graph | Open Extension (unsichtbar) |
 
 **Sichtbarer Block** (nur Plaintext-Provider ohne Custom-Property-Kanal) — am Ende der Beschreibung, mit zweisprachiger Warnung und base64-Payload (HTML-sicher gegen Vikunjas Rich-Text-Editor):
 
@@ -2318,7 +2320,7 @@ aperio:1:<base64(json)>
 2. Datenmodell — `anchor`/`placement`/`fixed_dates`/`resurface_date`/`series_id` durch alle Schichten (DB-Migration, Event-Log, TS).
 3. Spawner — Backlog-Placement, resurface, Fixed-Dates, `series_id`-Idempotenz, Lauf für externe Listen.
 4. Frontend — „Zukünftig"-Gruppe, Backlog-Filter, Recurrence-Selector-Knöpfe.
-5. Kanäle — Vikunja (sichtbar) zuerst; dann CalDAV X-Props, EWS Extended Props, Graph Open Extension.
+5. Kanäle — Vikunja (sichtbar) zuerst; dann CalDAV X-Props, EWS Extended Props (die Graph Open Extension für To-Do-Aufgaben fiel 2026-11 mit To Do weg).
 
 ---
 
@@ -2357,12 +2359,12 @@ Jede Verbindung wird **separat und unabhängig** konfiguriert. Derselbe Adapter 
 
 Das gilt analog für alle anderen Adapter – mehrere Google-Accounts, mehrere iCloud-Accounts, mehrere EWS-Quellen, mehrere CalDAV-Server, mehrere Vikunja-Instanzen, mehrere Todoist-Konten etc. sind alle gleichzeitig verbindbar. Jede Verbindung erscheint im Filter-Panel als eigenständiger Eintrag mit eigenem Namen und eigener Farbe.
 
-Für Google, Microsoft und iCloud gilt dasselbe Prinzip – Kalender, Aufgaben und Kontakte teilen das OAuth2-Token:
+Für Google, Microsoft und iCloud gilt dasselbe Prinzip – Kalender, Aufgaben (wo vorhanden) und Kontakte teilen das OAuth2-Token:
 
 | Adapter | Kalender-API | Aufgaben-API | Kontakte-API | Authentifizierung |
 |---|---|---|---|---|
 | `adapter-google` | Google Calendar API | Google Tasks API | Google People API | Selbes OAuth2-Token |
-| `adapter-microsoft-graph` | Microsoft Graph Calendar | Microsoft To Do API | Microsoft Graph Contacts | Selbes OAuth2-Token |
+| `adapter-microsoft-graph` | Microsoft Graph Calendar | — (To Do 2026-11 gestrichen) | Microsoft Graph Contacts | Selbes OAuth2-Token |
 | `adapter-caldav` | CalDAV RFC 4791 | VTODO via CalDAV | CardDAV RFC 6352 | Selbe Zugangsdaten |
 | `adapter-ews` | EWS Calendar | EWS Tasks | EWS Contacts | Selbe Zugangsdaten |
 
@@ -2680,7 +2682,7 @@ Wo die Kalender-API eigene Erinnerungsdaten mitliefert, werden diese direkt übe
 - **Speichern:** Ein neu gebautes VEVENT gibt jeden Hinweis, den das Lesen nicht zeigte, als Text des Servers zurück, wie es Einladungen schon taten. Einen sichtbaren Hinweis an diesem Zeitpunkt ohne Ort (so schrieb Aperio den stummen bis 2026-11 zurück, das iPhone zeigte ihn „Zum Ereigniszeitpunkt“) schreibt es wieder als stummen.
 - **iCloud:** Jedes Schreiben, das den Inhalt eines Termins sendet, setzt den stummen Hinweis in jedes VEVENT, das weder ihn noch einen von Apple als Standard markierten Hinweis trägt. Das iPhone zeigt dann genau die Erinnerungen aus Aperio, bei einem Termin ohne Erinnerung keine (Entscheidung Toni, 2026-11-08: nur iCloud, auch ohne Erinnerung, bei jedem Speichern; bestehende Termine heilen beim nächsten Speichern). Andere CalDAV-Server bekommen ihn nicht.
 
-Analog dazu werden Aufgaben-Erinnerungen mit den jeweiligen Aufgaben-APIs synchronisiert, wo sie unterstützt werden (Google Tasks, Microsoft To Do, VTODO mit `VALARM`, Vikunja `reminders`, Todoist `due.datetime` – siehe Abschnitt 9.7 für Adapter-Details).
+Analog dazu werden Aufgaben-Erinnerungen mit den jeweiligen Aufgaben-APIs synchronisiert, wo sie unterstützt werden (Google Tasks, VTODO mit `VALARM`, Vikunja `reminders`, Todoist `due.datetime` – siehe Abschnitt 9.7 für Adapter-Details).
 
 > **Hinweis:** API-seitige Erinnerungen steuern in der Regel den Versand von E-Mail-Benachrichtigungen durch den Anbieter (z.B. Google sendet eine E-Mail). Die lokalen Push-Benachrichtigungen (Abschnitt 14.3) werden davon unabhängig durch die App selbst ausgelöst.
 
@@ -3403,7 +3405,7 @@ Jede API liefert Mechanismen, um nur tatsächlich geänderte Daten abzurufen und
 | API | Pull-Mechanismus | Push-Konfliktschutz |
 |---|---|---|
 | **Google Calendar / Tasks / People** | `syncToken` – nur Änderungen seit letztem Sync | `ETag` – `412 Precondition Failed` bei Konflikt |
-| **Microsoft Graph (Calendar, To Do, Contacts)** | `deltaToken` – nur Änderungen seit letztem Sync | `ETag` – `412 Precondition Failed` bei Konflikt |
+| **Microsoft Graph (Calendar, Contacts)** | `deltaToken` – nur Änderungen seit letztem Sync | `ETag` – `412 Precondition Failed` bei Konflikt |
 | **CalDAV / CardDAV / iCloud** | `CTag` (Kollektion) + `ETag` (Eintrag) | `ETag` – `412 Precondition Failed` bei Konflikt |
 | **EWS (Calendar, Tasks, Contacts)** | `SyncFolderItems` mit `SyncState` | Timestamp-basiert |
 | **Vikunja** | Polling mit `updated`-Timestamp pro Liste | Timestamp-basiert; bei Konflikt: erneutes Lesen + Merge |
@@ -4967,6 +4969,25 @@ Wenn ein Gerät ein neues Plugin installiert, wird dies über das Event Log an a
 
 Nativ gebundelte Plugins werden nie über das Event Log kommuniziert – sie sind auf allen Instanzen immer vorhanden.
 
+**Wenn ein geladener Adapter eine Familie nicht mehr anbietet** (Toni,
+2026-11-21). Beim Start fragt der Kern für jedes Konto, dessen Adapter geladen
+ist, welche Familien der Adapter anbietet (Kalender, Aufgaben, Kontakte).
+Bietet er eine nicht mehr an, etwa weil eine neue Fassung seines Plugins sie
+nicht mehr deklariert, verwirft der Kern deren zwischengespeicherte Zeilen
+samt Suchzeilen und ihren Sync-Zustand mit Tokens und Fehlern. Sonst blieben
+sie für immer stehen: nie mehr gelistet, also nie ersetzt, als Suchtreffer
+ohne Ziel und als Konto, das nach jeder Aktualisierung als fehlerhaft
+angesagt wird. Fehlt der Adapter ganz (Plugin entfernt, abgeschaltet oder
+nicht ladbar, Zugangsdaten auf diesem Gerät nicht vorhanden, Registrierung
+unterwegs gescheitert), bleibt alles erhalten, wie bei „Plugin fehlt“ oben.
+Geräte-interne Konten (lokaler Speicher, Gerätekalender) sind ausgenommen:
+ihre Hosts registrieren sie zu einem eigenen Zeitpunkt. Was der Nutzer für
+einen Container festgelegt hat (Namen, Farben, Einstellungen), ist kein
+Zwischenspeicher und bleibt, wie beim Löschen eines Kontos. Die Regel ist
+adapter-neutral: keine Migration pro Adapter. Code:
+`host_core::cache::drop_unserved_caches`, von beiden Hosts nach dem
+Bootstrap der Registry aufgerufen.
+
 ### 20.9 Plugin-Updates
 
 Plugin-Updates werden manuell eingespielt (analog zur Installation). Der Plugin-Manager erkennt anhand der `id`, dass es sich um ein Update handelt, und bietet einen Bestätigungs-Dialog:
@@ -5274,7 +5295,7 @@ Aperio/
 │   │── # Kalender- und Aufgaben-Adapter (nativ gebundelt)
 │   ├── adapter-google/                # Google Calendar API v3 + Google Tasks
 │   │   └── src/lib.rs
-│   ├── adapter-microsoft-graph/       # Outlook / Exchange Online + MS To Do
+│   ├── adapter-microsoft-graph/       # Outlook / Exchange Online (Kalender + Kontakte)
 │   │   └── src/lib.rs
 │   ├── adapter-ews/                   # Exchange on-premise (SOAP/EWS)
 │   │   └── src/

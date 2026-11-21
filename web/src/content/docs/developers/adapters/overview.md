@@ -21,8 +21,8 @@ affordances a backend can't fulfil.
 | `ContactsFeature` | address books + contacts |
 
 A "tasks-only" provider like Todoist or Vikunja declares only `["tasks"]`;
-a full provider like Google or Microsoft Graph declares calendars, tasks
-and contacts.
+a full provider like Google or Exchange declares calendars, tasks and
+contacts.
 
 ## How the host reads data: full vs. delta vs. range
 
@@ -311,7 +311,7 @@ them through `cal_core` and never writes the token text itself.
 | [Local store](/developers/adapters/local/) | `adapter-local` | calendars, tasks, contacts | host SQLite (source of truth) |
 | [CalDAV / iCloud](/developers/adapters/caldav/) | `adapter-caldav` | calendars, tasks, contacts | CalDAV / CardDAV |
 | [Google](/developers/adapters/google/) | `adapter-google` | calendars, tasks, contacts | Google REST APIs (OAuth2) |
-| [Microsoft Graph](/developers/adapters/microsoft/) | `adapter-microsoft-graph` | calendars, tasks, contacts | Microsoft Graph (OAuth2) |
+| [Microsoft Graph](/developers/adapters/microsoft/) | `adapter-microsoft-graph` | calendars, contacts | Microsoft Graph (OAuth2) |
 | [Exchange (EWS)](/developers/adapters/ews/) | `adapter-ews` | calendars, tasks, contacts | Exchange Web Services (SOAP) |
 | [Vikunja](/developers/adapters/vikunja/) | `adapter-vikunja` | tasks | Vikunja REST API |
 | [Todoist](/developers/adapters/todoist/) | `adapter-todoist` | tasks | Todoist REST v2 (+ Sync API) |
