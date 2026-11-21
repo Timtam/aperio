@@ -90,6 +90,49 @@ keinen, dort ist die Wahl Tonis Sache.
   UTC+05:00; für Indien tippt man „+5:30“.
 - **32a — tzdata 2025b.** Stufe 3 wird mit den Zeitzonendaten aus chrono-tz
   gebaut. Die Aktualität der Daten ist eine eigene Aufgabe (siehe „Risiken“).
+- **Abgelöst am 2026-11-21: jiff und die mitgelieferte tzdata 2026f.**
+  chrono-tz ist nicht mehr gepflegt und blieb bei 2025b. Toni hat entschieden:
+  - Alle Zonen kommen aus der neuen Kiste `cal-zone`: jiff 1.0 liest die
+    tzdata, die jiff-tzdb mitliefert (genau `=1.0.0`, tzdata 2026f). Nur diese
+    Daten, nie die Zonendatenbank des Betriebssystems; jiff hat dafür kein
+    Feature an. `cal_core::Zone` ist ein Copy-Griff auf einen tzdata-Namen in
+    exakter Schreibweise und eine chrono-Zone.
+  - rrule ist als `crates/rrule` abgezweigt (0.14.0-aperio.1) und wiederholt
+    auf diesen Zonen; chrono-tz ist ganz aus dem Abhängigkeitsgraphen.
+  - Die vier POSIX-Namen EST5EDT, CST6CDT, MST7MDT und PST8PDT folgen tzdata:
+    seit 2026d eigene Zonen, nie in der Liste, und ohne Windows-Kennung (eine
+    Serie unter einem davon geht ohne Zone an Exchange).
+  - `cargo xtask tz-list` liest die Namen aus jiff-tzdb und Verweise samt Art
+    aus `backward` und `etcetera`, die mit `version`, `LICENSE` und `SOURCE`
+    (sha256) in `crates/cal-core/tzdata/` festgehalten sind.
+  - Die Exchange-Tabelle kommt aus CLDR release-49: British Columbia, Alberta
+    und Manitoba Standard Time für Vancouver, Edmonton/Inuvik und Winnipeg.
+    Tonis Exchange-Server kennt sie noch nicht (Live-Test Zonen, 21. November
+    2026, Programm `ews-zones`): von seinen 140 Kennungen ist keine der drei
+    dabei, und eine Testserie mit einer davon lehnt er mit `ErrorTimeZone`
+    ab. Aperio fragt die Liste des Servers (`GetServerTimeZones`) und schreibt
+    eine Serie in diesen Zonen dort ohne Zone, mit einer Warnung im
+    Protokoll; dem Nutzer sagt das erst Stufe 7. Pacific, Mountain und
+    Central Standard Time laufen auf dem Server bis Oktober 2031 wie Los
+    Angeles, Denver und Chicago, so wie Aperio sie liest.
+  - chrono-Typen bleiben überall; `chrono::Local` liest für die Geräte-Uhr
+    weiter die Daten des Betriebssystems.
+  - Ein wöchentlicher Lauf (`zone-data-watch.yml`) meldet in einem Issue, wenn
+    IANA, jiff-tzdb/jiff, CLDRs windowsZones oder rrule weiterziehen. Eine
+    neue IANA-Version, die jiff-tzdb noch nicht mitliefert, steht dort als
+    „jiff-tzdb noch nicht da: warten oder Notweg“, ohne roten Lauf. Notweg,
+    wenn eine Umstellung zu nah ist: jiff-tzdb aus der neuen Version selbst
+    bauen und per `[patch.crates-io]` einsetzen, dann `tz-list` und
+    `windows-zones`. Einen geprüften rrule-Stand trägt man in
+    crates/rrule/SOURCE unter `reviewed` ein. GitHub schaltet den Zeitplan
+    nach 60 Tagen ohne Aktivität im Repository ab; dann läuft er nur von
+    Hand wieder an.
+  - Eine Zone, die Exchange selbst definiert (232), muss die Uhr auch zum
+    ersten Beginn der Serie lesen, nicht nur im Prüffenster: eine feste
+    -06:00 seit Dezember 2025 ist Regina, nicht Edmonton.
+  - Ganztägige Erinnerungen lesen den Tag als Datum der nächsten
+    Mitternacht (±12 h), weil die Vorkommen aus der mitgelieferten tzdata
+    kommen und `chrono::Local` die des Betriebssystems liest.
 - **Vorlese-Form F.** Der Versatz lautet „UTC−04:00“ mit echtem Minuszeichen
   (U+2212); Toni hat die Formen mit NVDA und VoiceOver verglichen.
 - **38a — Live-Test vor dem Merge von Stufe 4.** Stufe 4 schreibt für 170
@@ -613,7 +656,7 @@ Alte Namen findet die Suche unter dem Namen, den die Liste ihnen gibt („Kiev�
 „Kyiv, Europa, UTC+03:00 (auch Kiev)“. Zusammengelegte Orte und andere
 Schreibweisen heißen dabei nach ihrem letzten Teil („auch Oslo“), außer der
 letzte Teil ist die Stadt selbst („auch Asia/Istanbul“). Alle anderen alten Namen
-heißen mit ihrer ganzen Id („auch US/Pacific“, „auch CST6CDT“), weil ihr letzter
+heißen mit ihrer ganzen Id („auch US/Pacific“, „auch US/Central“), weil ihr letzter
 Teil allein nichts sagt.
 
 Die Zählzeile sagt „Eine Zeitzone“ oder „12 Zeitzonen“. Bei keinem Treffer sagt
@@ -935,6 +978,10 @@ Wochentag-Frage beantworten.
 
 ## Stufenliste
 
+Die Stufen beschreiben den Stand, mit dem sie gebaut wurden (chrono-tz,
+tzdata 2025b, CLDR release-48-2). Für die Zonendaten gilt seit 2026-11-21 die
+Entscheidung unter 32a.
+
 Jede Stufe ist ein eigener PR. Wo die Oberfläche berührt wird, kommen Desktop und
 Handy im selben PR.
 
@@ -1238,27 +1285,26 @@ Handy im selben PR.
 
 ## Risiken
 
-- **Zwei Zonen-Datenbanken.** Der Versatz kommt aus chrono-tz, Anzeige und
-  Aufklappen aus Intl des Geräts. Für Zonen, die sich seit der chrono-tz-Version
-  geändert haben, können Versatz im Eintrag und Uhrzeit in den Feldern
-  auseinanderliegen.
+- **Zwei Zonen-Datenbanken.** Der Versatz kommt aus Aperios tzdata (jiff-tzdb,
+  2026f), Anzeige und Aufklappen aus Intl des Geräts, und die Geräte-Uhr
+  (`chrono::Local`: der Rückfall der Erinnerungen, das schwebende UNTIL in
+  rrule, die Ganztags-Mitternächte der Adapter) aus der Datenbank des
+  Betriebssystems. Für Zonen, deren Regeln sich zwischen den Datenständen
+  unterscheiden, können Versatz im Eintrag, Uhrzeit in den Feldern und
+  Erinnerung auseinanderliegen.
   - V8 meldet alte Namen wie `Asia/Calcutta`.
-  - Die tzdata in Node (2026b) ist neuer als die in chrono-tz (2025b).
+  - Seit 2026f ist Aperios tzdata neuer als die vieler Geräte: Casablanca und
+    El Aaiun ab 20.09.2026, Vancouver, Edmonton, Inuvik und Winnipeg ab
+    01.11.2026, Havanna vom 01.11.2026 bis 14.03.2027 und Chisinau lesen dort anders, bis
+    das Gerät nachzieht.
   - Eine Zone, die neuer ist als Aperios tzdata, wiederholt sich nach UTC, bis
-    chrono-tz aktualisiert ist.
-- **Zeitzonendaten hinter der Wirklichkeit (32a).** chrono-tz 0.10.4 enthält
-  tzdata 2025b, und eine neuere Version gibt es nicht. Neuere tzdata-Versionen
-  ändern:
-  - Casablanca und El Aaiun: ab 20. September 2026 dauerhaft UTC+00:00;
-  - Vancouver, Edmonton und Inuvik: ab 1. November 2026 keine Rückstellung mehr;
-  - Chisinau: die Umstellung eine Stunde später.
-
-  Für diese Zonen zeigen die Liste und die Erinnerungen danach den alten
-  Versatz, während ein Gerät mit aktuellen Daten richtig anzeigt. In der
-  Fixture liegt kein Beginn auf diesen Tagen. Die Normalzeit und den Platz
-  dieser Zonen in der Liste hält sie nur fest, wo beide Datenstände
-  übereinstimmen, denn die Normalzeit liest das Jahr ab heute und reicht über
-  diese Tage. Wie Aperio aktuelle Daten bekommt, ist eine eigene Aufgabe.
+    jiff-tzdb aktualisiert ist; der wöchentliche Lauf meldet eine neue
+    IANA-Version.
+- **Zeitzonendaten hinter der Wirklichkeit (32a).** Gelöst am 2026-11-21 mit
+  jiff-tzdb (tzdata 2026f), siehe die Entscheidung unter 32a. Ein
+  jiff-tzdb-Update ist eine bewusste Änderung (`=1.0.0`) und lässt
+  `tz-list --check` und `windows-zones --check` rot werden, bis beide neu
+  erzeugt sind.
 - **Erinnerungen folgen der Kern-Regel (26a).** Für zwei gespeicherte
   Schreibweisen ändern sie sich:
   - „europe/berlin“ erinnert jetzt nach Berlin statt nach UTC.
@@ -1266,8 +1312,10 @@ Handy im selben PR.
 
   Beides zeigen die Ansichten schon so.
 - **Adapter lesen Zonennamen in exakter Schreibweise.** CalDAV und Microsoft 365
-  geben den gespeicherten Namen direkt an chrono-tz, das Groß- und
-  Kleinschreibung unterscheidet. Eine Serie mit „europe/berlin“ wiederholt sich
+  geben den gespeicherten Namen direkt an `cal_core::Zone::named`, das wie
+  zuvor chrono-tz Groß- und Kleinschreibung unterscheidet (jiffs eigene
+  Suche täte das nicht, kennte aber `Factory` und `Etc/Unknown`; deshalb
+  fragt Aperio sie nie). Eine Serie mit „europe/berlin“ wiederholt sich
   in Ansichten und Erinnerungen nach Berlin. CalDAV liest und schreibt ihren
   Beginn aber als UTC-Zeit, und Microsoft 365 schreibt sie als UTC. Das war
   schon vor Stufe 2 so. Behoben ist es erst, wenn die Adapter die Kern-Regel
@@ -1335,9 +1383,9 @@ Handy im selben PR.
   - ein Monatsraster mit 55 Serien braucht dafür etwa 0,1 % seiner Zeit.
 
   Die Kosten auf dem Handy sind ungemessen.
-- **Erzeugte Tabellen.** Die Generatoren hängen daran, dass chrono-tz seine
-  Quelldaten mitliefert und die CLDR-Datei eingecheckt ist; ein Update lässt
-  `--check` laut scheitern.
+- **Erzeugte Tabellen.** Die Generatoren hängen an jiff-tzdb und den
+  eingecheckten tzdata- und CLDR-Dateien (je mit sha256 in `SOURCE`); ein
+  Update lässt `--check` laut scheitern.
 
 ## Ungeprüft
 
@@ -1410,9 +1458,12 @@ Handy im selben PR.
   zusätzlichen ersten Termin zeigen.
 - Ob das Aufklappen mit rrule.js und die Passung im Kern für gezählte Wochentage
   und negative Monatstage übereinstimmen.
-- Abweichungen zwischen chrono-tz und den Intl-Daten der Handys. WebView2 152
-  und Edge 154 stimmen überein; Node 24 (tzdata 2026b) weicht für Vancouver ab
+- Abweichungen zwischen Aperios tzdata (2026f) und den Intl-Daten der Handys
+  und Browser. Gemessen war nur der alte Stand: WebView2 152 und Edge 154
+  stimmten mit 2025b überein; Node 24 (tzdata 2026b) wich für Vancouver ab
   1. November 2026 und für Chisinau ab.
+- Ob iCloud und Google VTIMEZONEs mit Zahlen-TZNAME (`+04`) und Dublins
+  vertauschten Bezeichnungen annehmen.
 - Größenzuwachs der iOS-App und was der Aufruf der Versätze für 312 Zonen auf
   einem Handy kostet. Gemessen sind die Android-Bibliothek (mit einem Prototyp)
   und WebAssembly (Stufe 3).

@@ -11,6 +11,6 @@ export type ZoneAlias = {
 name: string, 
 /**
  * How the list names it: `Oslo` for a merged or alternate place,
- * the whole name otherwise (`US/Pacific`, `CST6CDT`).
+ * the whole name otherwise (`US/Pacific`, `US/Central`).
  */
 label: string, kind: NameKind, };

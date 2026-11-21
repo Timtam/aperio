@@ -77,11 +77,11 @@ pub mod windows_zone;
 pub mod write_leftover;
 pub mod write_refusal;
 // Which tzdata zone runs a clock a provider defines by its rules; it reads
-// offsets, so it is behind the `zones` feature with chrono-tz.
+// offsets, so it is behind the `zones` feature with cal-zone.
 #[cfg(feature = "zones")]
 pub mod zone_clock;
 // The names and the search are in every build; the offsets are behind the
-// `zones` feature, which pulls in chrono-tz.
+// `zones` feature, which pulls in cal-zone (jiff and the bundled tzdata).
 pub mod zone_list;
 // Anti-silence, as for `collation` above: without the feature the offsets and
 // their fixture rows are compiled out, and a green run would have run none.
@@ -230,8 +230,15 @@ pub use write_leftover::WriteLeftover;
 pub use write_refusal::{BusyDetail, SeriesRewrite, WriteRefusal};
 #[cfg(feature = "zones")]
 pub use zone_clock::{
-    clock_window, first_clock_difference, zone_with_clock, Clock, ClockDifference, ClockMatch,
-    TzClock, CLOCK_WINDOW_MONTHS,
+    clock_window, first_clock_difference, zone_of, zone_with_clock, Clock, ClockDifference,
+    ClockMatch, TzClock, CLOCK_WINDOW_MONTHS,
+};
+// The zones themselves, for every crate that reads one: one door, so adapters
+// ask only for the core. cal_zone::ZonedOffset (the chrono offset of a Zone)
+// is not re-exported under its name: `ZoneOffset` here is the zone list's.
+#[cfg(feature = "zones")]
+pub use cal_zone::{
+    tzdata_version, OffsetChange, OffsetInfo, Reading, UnknownZone, WallPolicy, Zone, COVERED_YEARS,
 };
 pub use zone_list::{
     listed_zone_labels, zone_choice, zone_choice_json, zone_labels_json, zone_search,

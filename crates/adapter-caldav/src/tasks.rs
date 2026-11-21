@@ -1077,12 +1077,12 @@ fn raw_local_time(value: Option<DatePerhapsTime>) -> Option<NaiveTime> {
     }
 }
 
-/// A naive wall-clock time read in a named IANA zone. `None` for a zone name
-/// chrono-tz does not know (Windows-style names, or a server's invention) and
-/// for a local time that does not exist there (the hour a DST jump skips).
+/// A naive wall-clock time read in a named IANA zone. `None` for a name that
+/// is not tzdata's own in exact case (Windows-style names, or a server's
+/// invention) and for a local time the zone skips or shows twice
+/// (`WallPolicy::Strict`).
 fn resolve_in_zone(naive: NaiveDateTime, tzid: &str) -> Option<DateTime<Utc>> {
-    let tz: chrono_tz::Tz = tzid.parse().ok()?;
-    Some(tz.from_local_datetime(&naive).single()?.with_timezone(&Utc))
+    cal_core::Zone::named(tzid)?.to_utc(naive, cal_core::WallPolicy::Strict)
 }
 
 fn parse_compact_utc(s: &str) -> Option<DateTime<Utc>> {
@@ -1996,7 +1996,7 @@ END:VCALENDAR</c:calendar-data>
         // neither branch of the old string parser, so the task arrived with no
         // date at all — not a wrong time, no day. Midday keeps the assertion
         // true at every offset a test machine might run at.
-        let berlin = chrono_tz::Europe::Berlin;
+        let berlin = cal_core::Zone::named("Europe/Berlin").expect("a bundled zone");
         let naive = NaiveDate::from_ymd_opt(2026, 8, 12)
             .unwrap()
             .and_hms_opt(12, 0, 0)

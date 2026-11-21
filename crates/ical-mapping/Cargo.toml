@@ -14,9 +14,10 @@ description = "iCalendar text to Aperio's events and back — the mapping CalDAV
 test-fixtures = []
 
 [dependencies]
-cal-core.workspace = true
+# `zones`: TZIDs are read and VTIMEZONEs written from cal_core::Zone (the
+# tzdata bundled with jiff-tzdb).
+cal-core = { workspace = true, features = ["zones"] }
 chrono.workspace = true
-chrono-tz.workspace = true
 icalendar.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

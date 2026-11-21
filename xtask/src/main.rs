@@ -126,28 +126,30 @@ Tasks:
   tz-list [--check]
         Regenerate crates/cal-core/src/series_clock/zone_names.rs — every
         tzdata name, the zone each link resolves to, and the zones outside
-        Etc/ — from the tzdata sources chrono-tz ships. Run it after a
-        chrono-tz update. xtask compiles cal-core, which includes that file:
+        Etc/ — from the names jiff-tzdb bundles and the tzdata files pinned in
+        crates/cal-core/tzdata/ (backward, etcetera, version; release and
+        sha256 in tzdata/SOURCE). Run it after a jiff-tzdb bump or a new pin.
+        xtask compiles cal-core, which includes that file:
         if it is missing or broken, restore it first with
         `git restore --source origin/main -- crates/cal-core/src/series_clock/zone_names.rs`.
 
         --check   generate in memory and compare, changing nothing. For CI, so
                   the core never resolves zone names from another tzdata
-                  release than the one host-core and the adapters parse with.
+                  release than the one its zones are read from.
 
   windows-zones [--check]
         Regenerate crates/cal-core/src/windows_zone/table.rs — the Windows
         time-zone ids Exchange and Outlook's files speak — from the CLDR
         windowsZones.xml pinned in crates/cal-core/cldr/ (release, date and sha256 in
         cldr/SOURCE). Names resolve through cal_core, so run tz-list first after
-        a chrono-tz update. Zones CLDR has no Windows id for, and zones whose
+        a jiff-tzdb bump. Zones CLDR has no Windows id for, and zones whose
         Windows id runs another clock in the five years after the release, are
         listed and never written. To update CLDR, take windowsZones.xml and
         LICENSE from one release tag, write that tag, its publication date,
         both URLs and the XML's sha256 into SOURCE, then run this.
 
         --check   generate in memory and compare, changing nothing. For CI, so a
-                  CLDR or chrono-tz update is a red build until the table is
+                  CLDR or tzdata update is a red build until the table is
                   regenerated.
 
   ui-embedded <binary> [--dist <dir>]
@@ -651,23 +653,26 @@ const TZ_MUST_HAVE: &[&str] = &[
 ];
 
 /// `tz-list` — generate the zone names `cal_core::series_clock` resolves, from
-/// the tzdata chrono-tz ships.
+/// the tzdata jiff-tzdb bundles.
 ///
-/// # Why a table, and why from chrono-tz
+/// # Why a table, and where it comes from
 ///
 /// The core answers which stored names a series repeats on. That needs every
 /// tzdata name and the zone each link points at, and no offsets, so the core
-/// carries a generated table instead of a chrono-tz dependency twelve adapter
-/// repositories would compile. chrono-tz stays the source because host-core
-/// and the adapters parse zones with it: every zone the core resolves a name
-/// to is then one they can parse, from the same tzdata release.
+/// carries a generated table instead of a tzdata dependency twelve adapter
+/// repositories and the WebAssembly module would compile. The names are the
+/// ones jiff-tzdb bundles, because cal-zone reads every zone from that data:
+/// every zone the core resolves a name to is then one cal-zone knows, from the
+/// same release.
 ///
-/// `chrono_tz::Tz::name()` of a link is the link's own name, so the link
-/// targets come from the tz source files the crate ships beside its manifest.
-/// What those files declare is checked against the zones chrono-tz was built
-/// with, and the UTC rule's premise — that the names resolving to `Etc/UTC` or
-/// `Etc/GMT` are exactly the clocks that always read UTC — against chrono-tz's
-/// own offsets.
+/// jiff-tzdb holds TZif data by name but says nothing about which names are
+/// links, so the links and their kinds come from tzdata's `backward` and
+/// `etcetera`, pinned in `crates/cal-core/tzdata` with their sha256. Every
+/// other bundled name is a zone. What the pinned files declare is checked
+/// against the bundled data: the release, every name, every link's bytes
+/// against its target's, and the UTC rule's premise — that the names
+/// resolving to `Etc/UTC` or `Etc/GMT` are exactly the clocks that always read
+/// UTC — against cal-zone's own offsets.
 fn tz_list(args: &[String]) -> Result<String, String> {
     let mut check = false;
     for arg in args {
@@ -683,17 +688,20 @@ fn tz_list(args: &[String]) -> Result<String, String> {
             .as_str()
             .ok_or("`cargo metadata` printed no workspace_root")?,
     );
-    let (crate_version, tz_dir) = chrono_tz_source(&meta)?;
-    let sources = read_tz_dir(&tz_dir)?;
-    let news_path = tz_dir.join("NEWS");
-    let news = fs::read_to_string(&news_path)
-        .map_err(|e| format!("reading {}: {e}", news_path.display()))?;
-    let (zones, links) = read_tz_sources(&sources)?;
+    let crate_version = jiff_tzdb_version(&meta)?;
+    let pinned = read_pinned_tzdata(&root)?;
+    let (declared_zones, links) = read_tz_sources(&pinned.sources)?;
+    let bundled = bundled_names()?;
+    let zones: BTreeSet<String> = bundled
+        .iter()
+        .filter(|name| !links.contains_key(*name))
+        .cloned()
+        .collect();
     let names = zone_table(&zones, &links)?;
-    agrees_with_chrono_tz(&names, &news)?;
+    agrees_with_jiff_tzdb(&names, &declared_zones, &bundled, &pinned.version)?;
     let fresh = render_zone_names(&names, &crate_version);
     let listed = names.iter().filter(|(n, t, _)| is_listed(n, t)).count();
-    let tzdata = chrono_tz::IANA_TZDB_VERSION;
+    let tzdata = jiff_tzdb::VERSION;
 
     let target = root.join(ZONE_NAMES);
     if check {
@@ -708,8 +716,8 @@ fn tz_list(args: &[String]) -> Result<String, String> {
                 names.len(),
             )),
             Some(drift) => Err(format!(
-                "{ZONE_NAMES} does not match the tzdata chrono-tz {crate_version} ships:\n\
-                 {drift}\n\nRun `cargo xtask tz-list` and commit the result."
+                "{ZONE_NAMES} does not match the tzdata jiff-tzdb {crate_version} bundles and \
+                 {TZDATA_DIR} pins:\n{drift}\n\nRun `cargo xtask tz-list` and commit the result."
             )),
         };
     }
@@ -726,65 +734,167 @@ fn tz_list(args: &[String]) -> Result<String, String> {
         )
     })?;
     Ok(format!(
-        "{ZONE_NAMES}: {} names, {listed} listed zones, from chrono-tz {crate_version} \
-         (tzdata {tzdata}).",
+        "{ZONE_NAMES}: {} names, {listed} listed zones, from jiff-tzdb {crate_version} \
+         (tzdata {tzdata}) and {TZDATA_DIR}.",
         names.len(),
     ))
 }
 
-/// The chrono-tz package in the dependency graph: its version, and the `tz`
-/// directory beside its manifest. Two versions in the graph is an error — which
-/// one's names the core should carry is not this task's guess to make.
-fn chrono_tz_source(meta: &serde_json::Value) -> Result<(String, PathBuf), String> {
-    let found: Vec<(&str, &str)> = meta["packages"]
+/// Where the pinned tzdata files live, relative to the workspace root.
+const TZDATA_DIR: &str = "crates/cal-core/tzdata";
+
+/// Bundled names that are no zone: tzdata's placeholder for a machine whose
+/// zone was never set. Each must be bundled, so a removal is noticed by name.
+const NOT_NAMES: &[&str] = &["Factory"];
+
+/// The jiff-tzdb package in the dependency graph: its version. Two versions
+/// in the graph is an error — which one's names the core should carry is not
+/// this task's guess to make.
+fn jiff_tzdb_version(meta: &serde_json::Value) -> Result<String, String> {
+    let found: Vec<&str> = meta["packages"]
         .as_array()
         .ok_or("`cargo metadata` printed no packages")?
         .iter()
-        .filter(|p| p["name"] == "chrono-tz")
-        .filter_map(|p| Some((p["version"].as_str()?, p["manifest_path"].as_str()?)))
+        .filter(|p| p["name"] == "jiff-tzdb")
+        .filter_map(|p| p["version"].as_str())
         .collect();
     match found.as_slice() {
-        [(version, manifest)] => {
-            let dir = Path::new(manifest)
-                .parent()
-                .ok_or_else(|| format!("{manifest} has no parent directory"))?
-                .join("tz");
-            Ok((version.to_string(), dir))
-        }
+        [version] => Ok(version.to_string()),
         [] => Err(
-            "`cargo metadata` lists no chrono-tz package, and the zone names are read from \
-             the tzdata it ships"
+            "`cargo metadata` lists no jiff-tzdb package, and the zone names are the ones it \
+             bundles"
                 .to_string(),
         ),
         many => Err(format!(
-            "`cargo metadata` lists chrono-tz {}: with more than one version, which tzdata \
+            "`cargo metadata` lists jiff-tzdb {}: with more than one version, which tzdata \
              the core should carry is ambiguous",
-            many.iter().map(|(v, _)| *v).collect::<Vec<_>>().join(", "),
+            many.join(", "),
         )),
     }
 }
 
-/// Every tzdata source file in `dir`, by name. `NEWS` and `LICENSE` are not
-/// data; every other file is read, so a file chrono-tz starts to ship is not
-/// skipped in silence.
-fn read_tz_dir(dir: &Path) -> Result<Vec<(String, String)>, String> {
-    let mut out = Vec::new();
-    let entries = fs::read_dir(dir).map_err(|e| format!("reading {}: {e}", dir.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("reading {}: {e}", dir.display()))?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if !entry.path().is_file() || !name.chars().any(|c| c.is_ascii_lowercase()) {
+/// Every bundled name but [`NOT_NAMES`], once each.
+fn bundled_names() -> Result<BTreeSet<String>, String> {
+    let all: BTreeSet<String> = jiff_tzdb::available().map(str::to_string).collect();
+    let mut problems = Vec::new();
+    for name in NOT_NAMES {
+        if !all.contains(*name) {
+            problems.push(format!(
+                "{name} is no longer bundled: drop it from NOT_NAMES"
+            ));
+        }
+    }
+    if problems.is_empty() {
+        Ok(all
+            .into_iter()
+            .filter(|name| !NOT_NAMES.contains(&name.as_str()))
+            .collect())
+    } else {
+        Err(problems.join("\n"))
+    }
+}
+
+/// The pinned tzdata: `backward` and `etcetera` as sources, and the release
+/// `version` names.
+struct PinnedTzdata {
+    sources: Vec<(String, String)>,
+    version: String,
+}
+
+/// The files `tzdata/SOURCE` pins, each checked against its sha256 with CRLF
+/// read as LF, so a checkout that turned the line endings still matches.
+fn read_pinned_tzdata(root: &Path) -> Result<PinnedTzdata, String> {
+    let dir = root.join(TZDATA_DIR);
+    let read = |name: &str| {
+        fs::read_to_string(dir.join(name))
+            .map(|text| text.replace("\r\n", "\n"))
+            .map_err(|e| format!("reading {TZDATA_DIR}/{name}: {e}"))
+    };
+    let pins = read_tzdata_source(&read("SOURCE")?)?;
+    let mut problems = Vec::new();
+    let mut files = BTreeMap::new();
+    for (file, key) in [
+        ("backward", "backward-sha256"),
+        ("etcetera", "etcetera-sha256"),
+        ("version", "version-sha256"),
+        ("LICENSE", "licence-sha256"),
+    ] {
+        let text = read(file)?;
+        let have = windows_zones::sha256_hex(text.as_bytes());
+        if pins.get(key) != Some(&have) {
+            problems.push(format!(
+                "{TZDATA_DIR}/{file} has sha256 {have}, but SOURCE pins {}",
+                pins.get(key).map_or("nothing", String::as_str)
+            ));
+        }
+        files.insert(file, text);
+    }
+    if !problems.is_empty() {
+        return Err(format!(
+            "the pinned tzdata files do not match {TZDATA_DIR}/SOURCE:\n  {}\n\nTake backward, \
+             etcetera, version and LICENSE from one release tarball and write their sha256 \
+             into SOURCE; never edit the files.",
+            problems.join("\n  ")
+        ));
+    }
+    let version = files["version"].trim().to_string();
+    if Some(&version) != pins.get("release") {
+        return Err(format!(
+            "{TZDATA_DIR}/version names {version}, but SOURCE pins release {}",
+            pins.get("release").map_or("nothing", String::as_str)
+        ));
+    }
+    Ok(PinnedTzdata {
+        sources: ["backward", "etcetera"]
+            .iter()
+            .map(|file| (file.to_string(), files[file].clone()))
+            .collect(),
+        version,
+    })
+}
+
+/// `tzdata/SOURCE`: `key = value` lines, comments and blank lines; unknown or
+/// repeated keys are refused.
+fn read_tzdata_source(text: &str) -> Result<BTreeMap<String, String>, String> {
+    const KEYS: &[&str] = &[
+        "release",
+        "published",
+        "url",
+        "tarball-sha256",
+        "backward-sha256",
+        "etcetera-sha256",
+        "version-sha256",
+        "licence-sha256",
+    ];
+    let mut values = BTreeMap::new();
+    for (at, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let text = fs::read_to_string(entry.path())
-            .map_err(|e| format!("reading {}: {e}", entry.path().display()))?;
-        out.push((name, text));
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("{TZDATA_DIR}/SOURCE:{}: not `key = value`: {line}", at + 1))?;
+        let key = key.trim();
+        if !KEYS.contains(&key) {
+            return Err(format!(
+                "{TZDATA_DIR}/SOURCE:{}: unknown key `{key}`",
+                at + 1
+            ));
+        }
+        if values
+            .insert(key.to_string(), value.trim().to_ascii_lowercase())
+            .is_some()
+        {
+            return Err(format!("{TZDATA_DIR}/SOURCE:{}: `{key}` twice", at + 1));
+        }
     }
-    out.sort();
-    if out.is_empty() {
-        return Err(format!("{} holds no tzdata source files", dir.display()));
+    for key in KEYS {
+        if !values.contains_key(*key) {
+            return Err(format!("{TZDATA_DIR}/SOURCE has no `{key}`"));
+        }
     }
-    Ok(out)
+    Ok(values)
 }
 
 /// The sections of tzdata's `backward` file, by the first line of their
@@ -981,33 +1091,65 @@ fn zone_table(zones: &BTreeSet<String>, links: &Links) -> Result<Vec<NameRow>, S
     }
 }
 
-/// The names read agree with the zones chrono-tz was built with, from the
-/// same release, and the UTC rule's premise holds on chrono-tz's own offsets.
-fn agrees_with_chrono_tz(names: &[NameRow], news: &str) -> Result<(), String> {
+/// The names read agree with the data jiff-tzdb bundles, from the same
+/// release, and the UTC rule's premise holds on cal-zone's own offsets.
+/// Every problem is listed, by name.
+fn agrees_with_jiff_tzdb(
+    names: &[NameRow],
+    declared_zones: &BTreeSet<String>,
+    bundled: &BTreeSet<String>,
+    pinned_release: &str,
+) -> Result<(), String> {
     let mut problems = Vec::new();
 
-    let release = news
-        .lines()
-        .find_map(|line| line.strip_prefix("Release "))
-        .and_then(|rest| rest.split_whitespace().next());
-    if release != Some(chrono_tz::IANA_TZDB_VERSION) {
+    let bundled_release = jiff_tzdb::VERSION;
+    if pinned_release != bundled_release || cal_core::tzdata_version() != bundled_release {
         problems.push(format!(
-            "chrono-tz was built from tzdata {}, but the NEWS beside the files read names {}",
-            chrono_tz::IANA_TZDB_VERSION,
-            release.unwrap_or("no release"),
+            "jiff-tzdb bundles tzdata {bundled_release} (cal-zone reads {}), but {TZDATA_DIR} \
+             pins {pinned_release}",
+            cal_core::tzdata_version(),
         ));
     }
 
-    let read: BTreeSet<&str> = names.iter().map(|(name, _, _)| name.as_str()).collect();
-    let built: BTreeSet<&str> = chrono_tz::TZ_VARIANTS.iter().map(|tz| tz.name()).collect();
-    for name in read.difference(&built) {
-        problems.push(format!(
-            "{name} is in the files, but chrono-tz has no such zone"
-        ));
+    let read: BTreeMap<&str, &str> = names
+        .iter()
+        .map(|(name, target, _)| (name.as_str(), target.as_str()))
+        .collect();
+    for zone in declared_zones {
+        if !bundled.contains(zone) {
+            problems.push(format!(
+                "{zone} is a Zone in the pinned files, but jiff-tzdb bundles no such name"
+            ));
+        }
     }
-    for name in built.difference(&read) {
+    for (name, target) in &read {
+        if !bundled.contains(*name) {
+            problems.push(format!(
+                "{name} links to {target}, but jiff-tzdb bundles no such name"
+            ));
+        }
+    }
+
+    // Bytes, both ways: a link carries its target's data, and two names with
+    // the same data resolve to the same zone. This catches a pinned file that
+    // does not fit the bundled release in either direction.
+    let bytes = |name: &str| jiff_tzdb::get(name).map(|(_, data)| data);
+    let mut by_bytes: BTreeMap<&[u8], BTreeSet<&str>> = BTreeMap::new();
+    for (name, target) in &read {
+        let (Some(own), Some(theirs)) = (bytes(name), bytes(target)) else {
+            continue;
+        };
+        if name != target && own != theirs {
+            problems.push(format!(
+                "{name} links to {target}, but the bundled data of the two differ"
+            ));
+        }
+        by_bytes.entry(own).or_default().insert(target);
+    }
+    for targets in by_bytes.values().filter(|targets| targets.len() > 1) {
         problems.push(format!(
-            "{name} is a chrono-tz zone the files read do not declare"
+            "{} carry the same bundled data, but none links to another",
+            targets.iter().copied().collect::<Vec<_>>().join(", ")
         ));
     }
 
@@ -1016,10 +1158,10 @@ fn agrees_with_chrono_tz(names: &[NameRow], news: &str) -> Result<(), String> {
         .filter(|(_, target, _)| target == "Etc/UTC" || target == "Etc/GMT")
         .map(|(name, _, _)| name.as_str())
         .collect();
-    let measured: BTreeSet<&str> = chrono_tz::TZ_VARIANTS
+    let measured: BTreeSet<&str> = names
         .iter()
-        .filter(|tz| keeps_utc(**tz))
-        .map(|tz| tz.name())
+        .map(|(name, _, _)| name.as_str())
+        .filter(|name| cal_core::Zone::named(name).is_some_and(keeps_utc))
         .collect();
     if linked != measured {
         problems.push(format!(
@@ -1030,9 +1172,14 @@ fn agrees_with_chrono_tz(names: &[NameRow], news: &str) -> Result<(), String> {
             measured.iter().copied().collect::<Vec<_>>().join(", "),
         ));
     }
+    for (name, _, _) in names {
+        if cal_core::Zone::named(name).is_none() {
+            problems.push(format!("{name} does not parse as a bundled zone"));
+        }
+    }
 
     for name in TZ_MUST_HAVE {
-        if !read.contains(name) {
+        if !read.contains_key(name) {
             problems.push(format!("{name} is missing"));
         }
     }
@@ -1051,13 +1198,12 @@ fn agrees_with_chrono_tz(names: &[NameRow], news: &str) -> Result<(), String> {
 /// 2099. Before about 1900 every place kept its local mean time, so a zone that
 /// only has offset zero today (Africa/Abidjan) fails at the first sample, and a
 /// zone with daylight saving fails in its first summer.
-fn keeps_utc(tz: chrono_tz::Tz) -> bool {
-    use chrono::{Offset, TimeZone};
+fn keeps_utc(zone: cal_core::Zone) -> bool {
     (1800..2100).all(|year| {
         (1..=12).all(|month| {
             chrono::NaiveDate::from_ymd_opt(year, month, 15)
                 .and_then(|day| day.and_hms_opt(12, 0, 0))
-                .is_some_and(|at| tz.offset_from_utc_datetime(&at).fix().local_minus_utc() == 0)
+                .is_some_and(|at| zone.offset_at(at.and_utc()).local_minus_utc() == 0)
         })
     })
 }
@@ -1073,9 +1219,10 @@ fn is_listed(name: &str, target: &str) -> bool {
 /// The generated Rust file. One entry per line, so a tzdata update reads as a
 /// diff of the names it touched.
 fn render_zone_names(names: &[NameRow], crate_version: &str) -> String {
-    let tzdata = chrono_tz::IANA_TZDB_VERSION;
+    let tzdata = jiff_tzdb::VERSION;
     let mut out = format!(
-        "// @generated by `cargo xtask tz-list` from chrono-tz {crate_version} (IANA tzdata {tzdata}).\n\
+        "// @generated by `cargo xtask tz-list` from jiff-tzdb {crate_version} (IANA tzdata {tzdata})\n\
+         // and {TZDATA_DIR} (backward, etcetera).\n\
          // Do not edit: run the task and commit what it writes. See ../series_clock.rs.\n\
          \n\
          use super::NameKind::{{self, *}};\n\
@@ -2091,7 +2238,7 @@ Link\tEurope/Berlin\t\tEurope/Oslo\t# merged in 2022
             read.names.get("Europe/Oslo"),
             Some(&("Europe/Berlin".to_string(), "MergedZoneTab".to_string()))
         );
-        assert_eq!(read.tzdata.as_deref(), Some(chrono_tz::IANA_TZDB_VERSION));
+        assert_eq!(read.tzdata.as_deref(), Some(jiff_tzdb::VERSION));
         assert_eq!(
             read.listed.iter().map(String::as_str).collect::<Vec<_>>(),
             ["Europe/Berlin"]

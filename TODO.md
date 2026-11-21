@@ -418,12 +418,11 @@ Siehe DESIGN §4.2.
   früh; (2) der Bogen beginnt mit dem Ausrollen, der Motor (rrule-Kiste oder
   eigene Regel) wird erst nach dem Pin mit gemessener WASM-Größe gewählt.
   - **Offen:** CalDAV und Graph geben den gespeicherten Namen weiter direkt an
-    chrono-tz, das nur die exakte Schreibweise kennt. Eine Serie mit
-    „europe/berlin“ schreiben sie als UTC-Zeit. Das bestand schon vorher.
+    `cal_core::Zone::named`, das nur die exakte Schreibweise kennt. Eine Serie
+    mit „europe/berlin“ schreiben sie als UTC-Zeit. Das bestand schon vorher.
 
-  🚩 **Aktualität der Zeitzonendaten** (32a): Marokko ab 20.09.2026, Vancouver,
-  Edmonton und Inuvik ab 01.11.2026, Chisinau stellt eine Stunde später um.
-  Eigene Aufgabe.
+  ↳ **Aktualität der Zeitzonendaten** (32a): erledigt am 2026-11-21, jiff 1.0
+  mit jiff-tzdb (tzdata 2026f), siehe B14 unter „✔ Erledigt“.
   - 🚩 Die Gästelisten-Regel (71a, `keep_attendees`) hat dieselbe Falle wie
     oben: Gast entfernt, gespeichert, vor der Aktualisierung wieder
     hinzugefügt — das Hinzufügen wird nicht geschrieben. Gegen den Grund von
@@ -1421,28 +1420,39 @@ Vorschläge sind nicht aufgenommen.
       stehen.
 - [ ] **Zonennamen in CalDAV und Microsoft 365 über den Kern auflösen.**
       CalDAV und Microsoft 365 geben gespeicherte Zonennamen weiter direkt an
-      chrono-tz, das Groß- und Kleinschreibung unterscheidet. Betroffen sind
-      crates/ical-mapping/src/mapping.rs (resolve_with_tzid ~990,
-      RECURRENCE-ID ~1510, zoned_datetime ~1537), crates/adapter-caldav/src/tasks.rs
-      (resolve_in_zone ~1063), crates/ical-mapping/src/vtimezone.rs ~43 und
-      crates/adapter-microsoft-graph/src/mapping.rs (write_datetime ~1043). Eine Serie mit „europe/berlin“ wiederholt sich in Aperio nach
-      Berlin, wird aber als UTC gelesen bzw. geschrieben. Wie bei Google und
-      EWS über `cal_core::series_clock_zone`/`canonical_zone` auflösen, mit
-      der kanonischen Zone rechnen und die gespeicherte Schreibweise senden.
-      Dazu Tests mit Kleinschreibung, dann DESIGN-series-time-zone.md
-      („Risiken“) und den TODO.md-Eintrag (~2004) nachziehen.
-- [ ] **Zeitzonendaten (tzdata) aktuell halten — Recherche.** Aperio baut
-      weiter mit chrono-tz 0.10.4 (tzdata 2025b, Cargo.lock), ohne Patch oder
-      Ersatz. Damit fehlen Marokko (dauerhaft +00 seit 20.09.2026), Vancouver,
-      Edmonton und Inuvik (ab 01.11.2026) sowie Chisinau, und die Erinnerungen
-      in crates/host-core/src/reminders.rs klingeln dort eine Stunde daneben.
-      Deshalb lässt Googles Neuanlage einer Serie eine Stunde zwischen
-      Aperios Stelle und Googles Termin zu (269).
-      Zu tun (32a, TODO.md ~2037): drei Wege untersuchen, nämlich chrono-tz
-      mit neuerem tz-Verzeichnis oder [patch], jiff/jiff-tzdb und die
-      OS-Datenbank zur Laufzeit. Für jeden Aufwand, Binärgröße, Folgen für
-      `cargo xtask tz-list --check` und eine CI-Prüfung gegen die neueste
-      IANA-Version ermitteln, dann Toni mit a/b-Fragen entscheiden lassen.
+      `cal_core::Zone::named`, das wie zuvor chrono-tz Groß- und
+      Kleinschreibung unterscheidet. Betroffen sind
+      crates/ical-mapping/src/mapping.rs (resolve_with_tzid,
+      mint_recurrence_id, zoned_datetime über `vtimezone::writable_zone`),
+      crates/adapter-caldav/src/tasks.rs (resolve_in_zone),
+      crates/ical-mapping/src/vtimezone.rs (writable_zone) und
+      crates/adapter-microsoft-graph/src/mapping.rs (to_utc, write_datetime).
+      Eine Serie mit „europe/berlin“ wiederholt sich in Aperio nach Berlin,
+      wird aber als UTC gelesen bzw. geschrieben. Wie bei Google und EWS über
+      `cal_core::zone_of` (bzw. `series_clock_zone`/`canonical_zone`)
+      auflösen, mit der kanonischen Zone rechnen und die gespeicherte
+      Schreibweise senden; zoned_datetime und vtimezone_for müssen dabei EINE
+      Regel behalten. Nie jiffs eigene Suche nehmen: sie kennt `Factory` und
+      `Etc/Unknown`. Dazu Tests mit Kleinschreibung, dann
+      DESIGN-series-time-zone.md („Risiken“) nachziehen.
+- [ ] **iCal: RECURRENCE-ID mit Windows-TZID wird abgelehnt.**
+      `mint_recurrence_id` (crates/ical-mapping/src/mapping.rs) verlangt einen
+      tzdata-Namen und lehnt eine Windows-Kennung mit `UnknownZone` ab,
+      obwohl der Leser sie über die CLDR-Tabelle auflöst. Beim Wechsel auf
+      jiff bewusst so gelassen (Parität).
+- [ ] **Microsoft 365: eine Zeit in einer Umstellungslücke lässt den ganzen
+      Termin scheitern.** `GraphDateTime::to_utc`
+      (crates/adapter-microsoft-graph/src/mapping.rs) meldet für eine Wanduhr
+      in einer Lücke oder Überlappung einen Protokollfehler („ambiguous local
+      time“), und der ganze Termin fällt aus dem Abruf. Beim Wechsel auf jiff
+      bewusst so gelassen (Parität).
+- [ ] **EWS: Zonenkennung einmal getrimmt, einmal nicht.** `boundary_zone`
+      (crates/adapter-ews/src/mapping.rs) gibt die ungetrimmte Kennung an die
+      CLDR-Tabelle (`read_windows_zone`), die getrimmte an tzdata
+      (`tzdata_own_zone`); `id_names_a_clock` trimmt für beide. Eine Kennung
+      mit Leerzeichen kann so die Definition daneben verlieren, ohne dass der
+      Leser sie über die Tabelle findet. Beim Wechsel auf jiff bewusst so
+      gelassen (Parität).
 - [ ] **EWS-Ordnerzustand bei einem Fehler behalten.** In
       crates/adapter-ews/src/lib.rs nehmen `refresh_and_read_events` (~410)
       und `refresh_events_delta` (~610) den Ordnerzustand mit
@@ -4907,6 +4917,28 @@ leer); ohne Merker meldet die Brücke „noch nie gefragt“, und die Kernregel
   sagt sie nach 0,5 s „Lädt …“.
 
 #### B14 · Folgeaufgaben aus Prüfungen und Nebenbefunden — erledigte Punkte
+
+- [x] **Zeitzonendaten (tzdata) aktuell halten.** Erledigt am 2026-11-21
+      (Toni: „Gleich auf jiff“, „Nur mitgeliefert“, „rrule abzweigen“, POSIX
+      „Wie tzdata“, CLDR 49 „Ja, mit Live-Test“). Alle Zonen kommen aus
+      crates/cal-zone: jiff 1.0 über die von jiff-tzdb =1.0.0 mitgelieferte
+      tzdata 2026f, nie aus dem Betriebssystem; rrule ist als crates/rrule
+      abgezweigt, chrono-tz ganz aus dem Build. `cargo xtask tz-list` liest
+      die Namen aus jiff-tzdb und `backward`/`etcetera` aus
+      crates/cal-core/tzdata (mit sha256 in SOURCE); die Exchange-Tabelle
+      kommt aus CLDR release-49 (British Columbia, Alberta, Manitoba Standard
+      Time). CI prüft, dass chrono-tz nicht zurückkommt, dass jiff keine
+      System-Datenbank liest und nur cal-zone jiff kennt;
+      .github/workflows/zone-data-watch.yml meldet wöchentlich neue IANA-,
+      jiff-tzdb-, CLDR- und rrule-Stände in einem Issue (IANA vor
+      jiff-tzdb als „warten oder Notweg“, ohne roten Lauf).
+- [x] **iCal: eine Zeit in einer Umstellungslücke wurde als UTC gelesen.**
+      crates/ical-mapping/src/mapping.rs `resolve_with_tzid` las ein
+      DTSTART/DTEND/RECURRENCE-ID oder EXDATE mit bekannter TZID in einer
+      Lücke oder Überlappung als UTC-Wanduhr (Berlin 25.10.2026 02:30 wurde
+      02:30Z). Behoben 2026-11-21 im jiff-Zweig nach der Prüfrunde: die
+      Leser nehmen `WallPolicy::Rfc5545` (erste Lesung, Lücke mit dem
+      Versatz davor), `mint_recurrence_id` prüft weiter streng.
 
 - [x] **Desktop-Mitzieh-Dialog: Ein Durchlauf nach dem Schließen schließt
       den nächsten Dialog.** In src/components/EventGroupCarryDialog.tsx

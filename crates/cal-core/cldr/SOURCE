@@ -5,8 +5,9 @@
 # crates/cal-core/src/windows_zone/table.rs. The XML's own version
 # attributes (typeVersion="2021a", otherVersion="7e11800") were never updated
 # upstream, so the release tag is the version. The file's last data change is
-# CLDR commit c33a1f0a23 (2025-04-10, "Update CLDR data to TZDB 2025b"), and it
-# is byte-identical from release-48 to release-49-alpha2.
+# CLDR commit c4bb2c199c (2026-10-09, "CLDR-19827 Update Windows zones"): it
+# adds British Columbia, Alberta and Manitoba Standard Time for the Canadian
+# zones that stopped changing their clocks in 2026 (tzdata 2026b-2026e).
 #
 # The clock guard compares every zone with its Windows zone for five years from
 # `published`.
@@ -16,8 +17,8 @@
 # URLs and the XML's sha256 here, run `cargo xtask windows-zones`, and commit
 # all of it together.
 
-release = release-48-2
-published = 2026-03-17
-url = https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/common/supplemental/windowsZones.xml
-licence = https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/LICENSE
-sha256 = 9cf3db6a31fb382fee21b70be6feba1e82766b0fcd06e6261fb7936a73e537ff
+release = release-49
+published = 2026-10-21
+url = https://raw.githubusercontent.com/unicode-org/cldr/release-49/common/supplemental/windowsZones.xml
+licence = https://raw.githubusercontent.com/unicode-org/cldr/release-49/LICENSE
+sha256 = 5f902f94106a396cb7774f0b0e1ca4dfecb686494045350c0b4935d378e3913b

@@ -11,9 +11,10 @@
 //! words in its own language.
 //!
 //! Everything here but [`zone_offsets`] works without tzdata's rules, so it is
-//! in every build, WebAssembly included. The offsets need chrono-tz and sit
-//! behind the `zones` feature: the native bindings already link chrono-tz, the
-//! desktop's WebAssembly module would grow by about 879 KB.
+//! in every build, WebAssembly included. The offsets need cal-zone (jiff and
+//! the tzdata bundled with jiff-tzdb) and sit behind the `zones` feature, which
+//! the native bindings switch on and the desktop's WebAssembly module leaves
+//! off.
 //!
 //! The core reads no clock and no device zone: the instant an offset is asked
 //! for, "today", and the device's zone name are all parameters.
@@ -220,7 +221,7 @@ pub struct ZoneAlias {
     /// The tzdata name, `Europe/Oslo`.
     pub name: String,
     /// How the list names it: `Oslo` for a merged or alternate place,
-    /// the whole name otherwise (`US/Pacific`, `CST6CDT`).
+    /// the whole name otherwise (`US/Pacific`, `US/Central`).
     pub label: String,
     pub kind: NameKind,
 }
@@ -707,25 +708,21 @@ pub fn zone_choice_json(input_json: &str) -> Result<String, serde_json::Error> {
 ///
 /// The standard offset is the smallest offset in the 365 days from `today`,
 /// sampled every 15 days and on the 365th (decision 29a). It is read from total offsets only —
-/// never from chrono-tz's split into base and daylight saving, which tzdata
-/// writes differently between its data forms (Dublin, Casablanca) — so Dublin
-/// sits at +00:00 beside London, and every series sees the same order.
+/// never from a daylight-saving flag, which tzdata writes differently between
+/// its data forms (Dublin, Casablanca; the bundled data is the rearguard form)
+/// — so Dublin sits at +00:00 beside London, and every series sees the same
+/// order.
 #[cfg(feature = "zones")]
 pub fn zone_offsets(question: &ZoneOffsetsQuestion) -> ZoneOffsets {
-    use chrono::{Offset, TimeDelta, TimeZone};
+    use chrono::TimeDelta;
 
     let listed = series_clock::listed_zones();
     let zones: Vec<ListedOffset> = listed
         .iter()
         .map(|name| {
-            let tz: chrono_tz::Tz = name
-                .parse()
-                .unwrap_or_else(|_| panic!("the listed zone {name} is a chrono-tz zone"));
-            let offset_at = |instant: DateTime<Utc>| {
-                tz.offset_from_utc_datetime(&instant.naive_utc())
-                    .fix()
-                    .local_minus_utc()
-            };
+            let tz = cal_zone::Zone::named(name)
+                .unwrap_or_else(|| panic!("the listed zone {name} is a bundled tzdata zone"));
+            let offset_at = |instant: DateTime<Utc>| tz.offset_at(instant).local_minus_utc();
             let standard = (0..=24)
                 .map(|k| 15 * k)
                 .chain(std::iter::once(365))
@@ -865,14 +862,21 @@ mod table {
 
     #[cfg(feature = "zones")]
     #[test]
-    fn the_table_is_chrono_tz_s_release_in_its_own_spelling() {
-        assert_eq!(series_clock::TZDATA_VERSION, chrono_tz::IANA_TZDB_VERSION);
-        for zone in series_clock::listed_zones() {
-            assert!(
-                zone.parse::<chrono_tz::Tz>().is_ok(),
-                "{zone} is not a chrono-tz zone"
-            );
+    fn the_table_is_the_bundled_release_in_its_own_spelling() {
+        // The generated names and the data the zones are read from are one
+        // tzdata release, and every name and target is a bundled zone in
+        // exactly this spelling. jiff's own lookups ignore case, so only
+        // cal-zone's exact-case match can prove the spelling.
+        assert_eq!(series_clock::TZDATA_VERSION, cal_zone::tzdata_version());
+        for (name, target, _) in series_clock::names() {
+            for spelling in [*name, *target] {
+                let zone = cal_zone::Zone::named(spelling)
+                    .unwrap_or_else(|| panic!("{spelling} is not a bundled zone"));
+                assert_eq!(zone.name(), spelling);
+            }
         }
+        // One name per bundled zone: "UTC" is the table's too.
+        assert_eq!(series_clock::names().len(), cal_zone::Zone::all().count());
     }
 }
 

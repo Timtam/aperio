@@ -43,9 +43,13 @@
 //!
 //! ## The translation id
 //!
-//! Events the host caches were translated with one table and one reading rule.
-//! [`translation_id`] names both: the generated table's `TABLE_ID`, which the
-//! generator derives from the table's rows, and [`READ_RULE`], which is bumped
+//! Events the host caches were translated with one table, one tzdata release,
+//! one clock-guard window and one reading rule. [`translation_id`] names all
+//! four: the generated table's `TABLE_ID`, which the generator derives from
+//! the table's rows; its `TZDATA_VERSION` and `CLOCKS_COMPARED_FROM`, because
+//! a series on a zone Exchange defines in full is matched to a tzdata zone by
+//! its clock (decision 232), and new data or a new window can match another
+//! zone without any row changing; and [`READ_RULE`], which is bumped
 //! by hand whenever the way an id becomes a series' zone changes outside the
 //! table — here in [`read_series_zone`], or in the read path of `mapping.rs` —
 //! or a cached item otherwise turns into a different event.
@@ -62,7 +66,8 @@ use chrono::{DateTime, Utc};
 use crate::zone_definition::{ZoneDefinition, ZoneRules};
 
 use cal_core::windows_zone::{
-    folded, lookup, OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES, ZONE_WINDOWS,
+    folded, lookup, CLOCKS_COMPARED_FROM, OTHER_CLOCK, TABLE_ID, UNMAPPED, WINDOWS_ZONES,
+    ZONE_WINDOWS,
 };
 
 /// The reading rule's version. Bump it when an id read from Exchange becomes
@@ -90,10 +95,11 @@ pub const READ_RULE: u32 = 6;
 /// The end zone Exchange stores for a series created without a zone.
 const NO_ZONE_END: &str = "tzone://Microsoft/Utc";
 
-/// Which translation cached events were made with: the table's rows and the
-/// reading rule.
+/// Which translation cached events were made with: the table's rows, the
+/// tzdata release and clock-guard window behind them, and the reading rule.
 pub fn translation_id() -> String {
-    format!("{TABLE_ID}.{READ_RULE}")
+    let (y, m, d) = CLOCKS_COMPARED_FROM;
+    format!("{TABLE_ID}.{TZDATA_VERSION}.{y:04}{m:02}{d:02}.{READ_RULE}")
 }
 
 /// What a Windows zone id read from Exchange means for a series.
@@ -213,9 +219,11 @@ fn read_tzdata_name(id: &str) -> WindowsZoneRead {
 /// clock. A definition that reads +00:00 throughout is no zone; one that
 /// cannot be read, or that no zone runs, is [`WindowsZoneRead::Unknown`].
 ///
-/// Remembered per definition, window and device zone: the reminder scan reads
-/// every cached item again every few minutes, and the comparison walks five
-/// years of days per candidate zone.
+/// Remembered per definition, first start and device zone: the reminder scan
+/// reads every cached item again every few minutes, and the comparison walks
+/// five years of days per candidate zone. The first start is part of the
+/// answer, not only of the window: the zone must read the definition's
+/// offset at it.
 pub fn read_series_definition(
     definition: &ZoneDefinition,
     first_start: DateTime<Utc>,
@@ -223,14 +231,13 @@ pub fn read_series_definition(
 ) -> WindowsZoneRead {
     type Key = (ZoneDefinition, DateTime<Utc>, Option<String>);
     static READ: OnceLock<Mutex<HashMap<Key, WindowsZoneRead>>> = OnceLock::new();
-    let window = cal_core::clock_window(first_start);
-    let key = (definition.clone(), window.0, device.map(str::to_string));
+    let key = (definition.clone(), first_start, device.map(str::to_string));
     let read = READ.get_or_init(Default::default);
     if let Some(known) = read.lock().ok().and_then(|known| known.get(&key).copied()) {
         return known;
     }
     let answer = match ZoneRules::try_from(definition) {
-        Ok(rules) => match cal_core::zone_with_clock(&rules, window.0, device) {
+        Ok(rules) => match cal_core::zone_with_clock(&rules, first_start, device) {
             cal_core::ClockMatch::Zone(zone) => WindowsZoneRead::Zone(zone),
             cal_core::ClockMatch::Utc => WindowsZoneRead::Utc,
             cal_core::ClockMatch::NoZone => WindowsZoneRead::Unknown,
@@ -449,7 +456,15 @@ mod tests {
 
     #[test]
     fn the_translation_id_names_the_table_and_the_reading_rule() {
-        assert_eq!(translation_id(), format!("{TABLE_ID}.{READ_RULE}"));
+        let (y, m, d) = CLOCKS_COMPARED_FROM;
+        assert_eq!(
+            translation_id(),
+            format!("{TABLE_ID}.{TZDATA_VERSION}.{y:04}{m:02}{d:02}.{READ_RULE}")
+        );
+        assert_eq!(
+            translation_id(),
+            format!("{TABLE_ID}.2026f.20261021.{READ_RULE}")
+        );
         assert_eq!(TABLE_ID.len(), 16);
         assert!(TABLE_ID.bytes().all(|b| b.is_ascii_hexdigit()));
     }
@@ -476,6 +491,56 @@ mod tests {
                 "Antarctica/Vostok",
             ]
         );
+    }
+
+    /// CLDR release-49: British Columbia, Alberta (with Inuvik) and Manitoba
+    /// kept their summer offsets from 2026-11-01 (tzdata 2026b-2026e) and got
+    /// Windows ids of their own, read and written both ways.
+    #[test]
+    fn the_canadian_zones_that_stopped_changing_have_ids_of_their_own() {
+        for (zone, windows) in [
+            ("America/Vancouver", "British Columbia Standard Time"),
+            ("America/Edmonton", "Alberta Standard Time"),
+            ("America/Inuvik", "Alberta Standard Time"),
+            ("America/Winnipeg", "Manitoba Standard Time"),
+        ] {
+            assert_eq!(
+                windows_zone_for(Some(zone), None),
+                WindowsZoneWrite::Id(windows),
+                "{zone}"
+            );
+        }
+        for (windows, zone) in [
+            ("British Columbia Standard Time", "America/Vancouver"),
+            ("Alberta Standard Time", "America/Edmonton"),
+            ("Manitoba Standard Time", "America/Winnipeg"),
+        ] {
+            assert_eq!(
+                read_windows_zone(windows),
+                WindowsZoneRead::Zone(zone),
+                "{windows}"
+            );
+        }
+    }
+
+    /// The POSIX-style names are zones of their own since tzdata 2026d, and
+    /// CLDR maps no Windows id to them: a series stored under one goes to
+    /// Exchange without a zone, as tzdata reads it (Toni, 2026-11-21).
+    #[test]
+    fn a_posix_style_zone_has_no_windows_id() {
+        for zone in ["EST5EDT", "CST6CDT", "MST7MDT", "PST8PDT"] {
+            assert!(
+                matches!(
+                    windows_zone_for(Some(zone), None),
+                    WindowsZoneWrite::NotStorable {
+                        reason: NotStorable::NoWindowsZone,
+                        ..
+                    }
+                ),
+                "{zone}: {:?}",
+                windows_zone_for(Some(zone), None)
+            );
+        }
     }
 
     #[test]

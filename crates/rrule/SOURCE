@@ -1,0 +1,48 @@
+# rrule, vendored from crates.io and forked for Aperio.
+#
+# Why a fork: upstream's zones are chrono-tz's, which is unmaintained and
+# carries tzdata 2025b; Aperio's zones come from cal-zone (the tzdata bundled
+# with jiff-tzdb). Nothing else is meant to change. Fixes from upstream are
+# ported by hand; the weekly zone-data watch reports a new upstream release.
+
+upstream = https://github.com/fmeringdal/rust-rrule
+commit = 3843456f739d399cfbeff81288c36a66e8e38b83
+# The newest upstream release looked at, ported or declined. The weekly
+# zone-data watch reports a release newer than this; after porting its fixes
+# by hand, or deciding they do not apply, write its version here.
+reviewed = rrule 0.14.0
+path-in-vcs = rrule
+crates-io = rrule 0.14.0
+crate-sha256 = 720acfb4980b9d8a6a430f6d7a11933e701ebbeba5eee39cc9d8c5f932aaff74
+license = MIT OR Apache-2.0
+licence-files = LICENSE-MIT, LICENSE-APACHE (the upstream root at that commit; the .crate ships none)
+
+# Left out of the import: src/bin (the cli-tool binary), examples/, the
+# features cli-tool and serde's dependencies (serde_with, orig_serde,
+# serde_json). The feature `serde` stays declared and empty.
+#
+# The import commit holds src/ byte-identical to the .crate's src/ without
+# src/bin. To check it, unpack rrule-0.14.0.crate (sha256 above) and compare:
+#   tar -xzf rrule-0.14.0.crate && diff -r rrule-0.14.0/src <this crate>/src
+# at that commit; only src/bin differs.
+
+# Modified files, one line each. Each says so in its first line.
+src/lib.rs: drops #![deny(clippy::all)] (the workspace's -D warnings covers
+  it, and a crate-level deny overrode the workspace's lint choices) and
+  #![warn(missing_docs)] (71 undocumented error variants and fields).
+src/core/rrule.rs: clippy useless_borrows_in_formatting (two format! args).
+src/iter/counter_date.rs: clippy manual_contains.
+src/core/timezone.rs: Tz::Tz holds a cal_zone::Zone instead of a
+  chrono_tz::Tz (still Copy); the 594 named constants are gone, Tz::UTC
+  (a const) and Tz::named (tzdata's name in exact case) replace them.
+src/core/timezone_impl.rs: From<Utc> gives Tz::UTC, From<cal_zone::Zone>
+  replaces From<chrono_tz::Tz>, RRuleOffset::Tz holds cal_zone::ZonedOffset.
+src/core/datetime.rs: only Zone::UTC writes `Z` (as chrono_tz::UTC did).
+src/parser/datetime.rs: parse_timezone through Tz::named; the test zone is
+  a function (Tz::named is no const fn).
+src/parser/mod.rs, src/tests/rrule.rs, src/iter/utils.rs,
+src/validator/validate_rrule.rs: test zones by name instead of constants.
+README.md: where the zones come from (and a first-line marker).
+src/lib.rs (again): the `serde` feature stops the build with a compile_error!.
+tests/aperio_zones.rs: new, Aperio's own cases for the zones (gap, fold,
+  the midnight drop, BYSETPOS, UTC versus Etc/UTC).

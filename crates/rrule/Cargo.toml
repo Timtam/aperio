@@ -1,0 +1,37 @@
+[package]
+name = "rrule"
+# Upstream's 0.14.0, forked: see SOURCE. Never published from here.
+version = "0.14.0-aperio.1"
+publish = false
+edition = "2021"
+rust-version.workspace = true
+authors = ["Fredrik Meringdal", "Ralph Bisschops <ralph.bisschops.dev@gmail.com>"]
+license = "MIT OR Apache-2.0"
+description = "A pure Rust implementation of recurrence rules as defined in the iCalendar RFC (Aperio's fork of rrule 0.14.0)."
+readme = "README.md"
+
+[dependencies]
+chrono.workspace = true
+# The zones: the IANA tzdata bundled with jiff-tzdb, instead of chrono-tz.
+cal-zone.workspace = true
+log = "0.4.25"
+regex = { version = "1.11.1", default-features = false, features = ["perf", "std"] }
+# Upstream's major version; the workspace pins thiserror 1.
+thiserror = "2.0.11"
+
+[features]
+default = []
+
+# Allows the enabling of the `by_easter` field and `BYEASTER` parser.
+by-easter = []
+
+# Declared, and empty, so upstream's `cfg(feature = "serde")` lines keep
+# compiling unchanged. Turning it on stops the build with a compile_error!
+# (src/lib.rs): the fork carries no serde support.
+serde = []
+
+# Allows EXRULE's to be used in the `RRuleSet`.
+exrule = []
+
+[lints]
+workspace = true

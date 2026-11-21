@@ -3581,7 +3581,7 @@ mod tests {
     #[tokio::test]
     async fn an_all_day_exception_renamed_in_auckland_keeps_its_slot() {
         use std::sync::{Arc, Mutex};
-        let auckland = chrono_tz::Pacific::Auckland;
+        let auckland = crate::test_zone("Pacific/Auckland");
         let mut server = Server::new_async().await;
         let series = r#"<?xml version="1.0"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
@@ -4892,7 +4892,9 @@ mod tests {
         // The day as this device names it: its local midnight of July 20.
         let day = crate::mapping::all_day_anchor(
             "2026-07-20T10:00:00Z".parse().unwrap(),
-            Some(&crate::mapping::DayZone::Tz(chrono_tz::Pacific::Honolulu)),
+            Some(&crate::mapping::DayZone::Tz(crate::test_zone(
+                "Pacific/Honolulu",
+            ))),
         );
         delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), day, false)
             .await
@@ -4908,7 +4910,7 @@ mod tests {
     #[tokio::test]
     async fn an_all_day_day_in_auckland_s_summer_is_the_day_itself() {
         use chrono::TimeZone;
-        let auckland = chrono_tz::Pacific::Auckland;
+        let auckland = crate::test_zone("Pacific/Auckland");
         let midnight = |index: i64| -> DateTime<Utc> {
             let day = chrono::NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()
                 + chrono::Duration::days(index - 1);

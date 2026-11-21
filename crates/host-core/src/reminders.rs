@@ -1114,7 +1114,18 @@ fn latest_past_moment(
     all_day: bool,
     now: DateTime<Utc>,
 ) -> Option<DateTime<Utc>> {
+    // An all-day occurrence's day begins at the device's midnight, read on
+    // the operating system's clock, which can be an hour from the bundled
+    // data's: never ring it the evening before.
+    let on_device = |moment: DateTime<Utc>| {
+        if all_day {
+            all_day_midnight_on(moment, &Local)
+        } else {
+            moment
+        }
+    };
     let Some(rec) = recurrence else {
+        let first = on_device(first);
         return (first <= now).then_some(first);
     };
     for days in [2, 31, APP_START_LOOKBACK_DAYS] {
@@ -1129,6 +1140,7 @@ fn latest_past_moment(
             now + ChronoDuration::seconds(1),
         )
         .into_iter()
+        .map(on_device)
         .filter(|occurrence| *occurrence <= now)
         .max();
         if latest.is_some() {
@@ -1155,7 +1167,7 @@ where
     let local = moment.with_timezone(zone);
     match (kind, all_day) {
         (ItemKind::Event, false) => moment.to_rfc3339(),
-        (ItemKind::Event, true) => local.format("%Y-%m-%d").to_string(),
+        (ItemKind::Event, true) => all_day_date(moment, zone).format("%Y-%m-%d").to_string(),
         (ItemKind::Task, _) => local.format("%Y-%m-%dT%H:%M:%S").to_string(),
     }
 }
@@ -1860,8 +1872,7 @@ fn occurrence_triggers(
 fn device_clock() -> RruleTz {
     iana_time_zone::get_timezone()
         .ok()
-        .and_then(|name| cal_core::canonical_zone(&name).map(str::to_string))
-        .and_then(|canonical| canonical.parse::<chrono_tz::Tz>().ok())
+        .and_then(|name| cal_core::zone_of(&name))
         .map(RruleTz::Tz)
         .unwrap_or(RruleTz::Local(Local))
 }
@@ -1950,12 +1961,12 @@ fn expand_occurrences(
     // untrimmed, that is not a UTC name. Anything else repeats in UTC rather
     // than dropping the series.
     let zone = match cal_core::series_clock_zone(tzid).and_then(cal_core::canonical_zone) {
-        Some(canonical) => match canonical.parse::<chrono_tz::Tz>() {
-            Ok(tz) => RruleTz::Tz(tz),
-            Err(_) => {
+        Some(canonical) => match RruleTz::named(canonical) {
+            Some(tz) => tz,
+            None => {
                 warn!(
                     tzid = %canonical,
-                    "a zone the core resolves is unknown to chrono-tz; expanding reminders in UTC",
+                    "a zone the core resolves has no bundled tzdata; expanding reminders in UTC",
                 );
                 RruleTz::UTC
             }
@@ -2420,9 +2431,10 @@ fn all_day_trigger_time(
         ReminderKind::RelativeToEnd { minutes_before } => {
             // The end's day, as whole days after the start's: an occurrence's
             // length can be off by the hour a clock change adds or takes, and
-            // only the end's local date counts here, so noon of that day is
-            // the reference. An all-day appointment covers at least its start
-            // day, however its end is stored.
+            // only the end's local date counts here, so that day's midnight is
+            // the reference, read as the nearest midnight like the start. An
+            // all-day appointment covers at least its start day, however its
+            // end is stored.
             let days = whole_days_of((occ_end? - occ_start).num_minutes()).max(1);
             // A calendar default counts in whole days from the end, at least
             // one: it rings on the appointment's last day, never after it.
@@ -2430,10 +2442,7 @@ fn all_day_trigger_time(
                 AllDayReading::WholeDays => end_default_days(*minutes_before) * MINUTES_PER_DAY,
                 AllDayReading::Exact => *minutes_before,
             };
-            (
-                occ_start + ChronoDuration::days(days) + ChronoDuration::hours(12),
-                minutes,
-            )
+            (occ_start + ChronoDuration::days(days), minutes)
         }
         ReminderKind::Absolute { at } => return Some(*at),
         ReminderKind::AppStart | ReminderKind::Email { .. } => return None,
@@ -2487,7 +2496,7 @@ fn all_day_fire_instant<Tz: TimeZone>(
     reading: AllDayReading,
     tz: &Tz,
 ) -> Option<DateTime<Utc>> {
-    let event_day = occ_start.with_timezone(tz).date_naive();
+    let event_day = all_day_date(occ_start, tz);
     let naive = if minutes % MINUTES_PER_DAY == 0 {
         NaiveDateTime::new(
             event_day - ChronoDuration::days(minutes / MINUTES_PER_DAY),
@@ -2504,13 +2513,30 @@ fn all_day_fire_instant<Tz: TimeZone>(
             ),
         }
     };
-    tz.from_local_datetime(&naive)
-        .earliest()
-        .or_else(|| {
-            tz.from_local_datetime(&(naive + ChronoDuration::hours(1)))
-                .earliest()
-        })
-        .map(|local| local.with_timezone(&Utc))
+    cal_core::WallPolicy::EarlierElseHourLater.resolve(tz, naive)
+}
+
+/// The day an all-day occurrence names on `tz`: the date of its NEAREST
+/// midnight, within the half day `SAME_DAY_MS` allows. The occurrences are
+/// expanded on the device's zone from the tzdata Aperio bundles
+/// (`device_clock`), while `tz` is usually `chrono::Local`, the operating
+/// system's data; where the two differ by an hour (Vancouver from
+/// 2026-11-01 on a phone whose tzdata is older than 2026b), the occurrence
+/// sits an hour off its midnight there, and its plain date would be the day
+/// before.
+fn all_day_date<Tz: TimeZone>(occ_start: DateTime<Utc>, tz: &Tz) -> NaiveDate {
+    (occ_start + ChronoDuration::hours(12))
+        .with_timezone(tz)
+        .date_naive()
+}
+
+/// The instant an all-day occurrence's day begins on `tz`: the midnight of
+/// [`all_day_date`]. Where `tz` is the operating system's clock and the
+/// occurrence came from the bundled data, the two can be an hour apart.
+fn all_day_midnight_on<Tz: TimeZone>(occ_start: DateTime<Utc>, tz: &Tz) -> DateTime<Utc> {
+    cal_core::WallPolicy::EarlierElseHourLater
+        .resolve(tz, all_day_date(occ_start, tz).and_time(NaiveTime::MIN))
+        .unwrap_or(occ_start)
 }
 
 /// The day-carryover time-of-day that anchors all-day / birthday reminders,
@@ -3798,30 +3824,31 @@ mod tests {
     /// an instant, a trip to another zone rang it again.
     #[test]
     fn a_wall_clock_moment_is_remembered_as_the_wall_clock_reads() {
-        use chrono_tz::Europe::{Berlin, London};
-        let nine = |zone: chrono_tz::Tz| {
+        let berlin = RruleTz::named("Europe/Berlin").expect("bundled");
+        let london = RruleTz::named("Europe/London").expect("bundled");
+        let nine = |zone: RruleTz| {
             zone.with_ymd_and_hms(2026, 11, 7, 9, 0, 0)
                 .unwrap()
                 .with_timezone(&Utc)
         };
-        let (in_berlin, in_london) = (nine(Berlin), nine(London));
+        let (in_berlin, in_london) = (nine(berlin), nine(london));
         assert_ne!(in_berlin, in_london);
         assert_eq!(
-            app_start_key(ItemKind::Task, false, in_berlin, &Berlin),
-            app_start_key(ItemKind::Task, false, in_london, &London),
+            app_start_key(ItemKind::Task, false, in_berlin, &berlin),
+            app_start_key(ItemKind::Task, false, in_london, &london),
         );
-        let midnight = |zone: chrono_tz::Tz| {
+        let midnight = |zone: RruleTz| {
             zone.with_ymd_and_hms(2026, 11, 7, 0, 0, 0)
                 .unwrap()
                 .with_timezone(&Utc)
         };
         assert_eq!(
-            app_start_key(ItemKind::Event, true, midnight(Berlin), &Berlin),
-            app_start_key(ItemKind::Event, true, midnight(London), &London),
+            app_start_key(ItemKind::Event, true, midnight(berlin), &berlin),
+            app_start_key(ItemKind::Event, true, midnight(london), &london),
         );
         // A timed event is an instant wherever the device is.
         assert_eq!(
-            app_start_key(ItemKind::Event, false, in_berlin, &London),
+            app_start_key(ItemKind::Event, false, in_berlin, &london),
             in_berlin.to_rfc3339()
         );
     }
@@ -4024,7 +4051,7 @@ mod tests {
     /// — the reminder then rings on a day the calendar does not show it.
     #[test]
     fn an_all_day_series_stays_on_its_weekday_across_a_clock_change() {
-        let berlin = RruleTz::Tz(chrono_tz::Europe::Berlin);
+        let berlin = RruleTz::named("Europe/Berlin").expect("bundled");
         // Monday 2026-10-19 in Berlin begins at 22:00 UTC the day before
         // (summer time); the change to winter time is on the 25th.
         let start = Utc.with_ymd_and_hms(2026, 10, 18, 22, 0, 0).unwrap();
@@ -4040,7 +4067,7 @@ mod tests {
         );
         let days: Vec<NaiveDate> = occurrences
             .iter()
-            .map(|o| o.with_timezone(&chrono_tz::Europe::Berlin).date_naive())
+            .map(|o| o.with_timezone(&berlin).date_naive())
             .collect();
         assert_eq!(
             days,
@@ -4055,7 +4082,7 @@ mod tests {
         assert!(
             occurrences
                 .iter()
-                .all(|o| o.with_timezone(&chrono_tz::Europe::Berlin).time()
+                .all(|o| o.with_timezone(&berlin).time()
                     == NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
             "{occurrences:?}",
         );
@@ -4066,7 +4093,7 @@ mod tests {
     /// midnight in Berlin, and a date the rrule crate refused outright.
     #[test]
     fn an_all_day_series_ends_on_the_day_its_until_names() {
-        let berlin = RruleTz::Tz(chrono_tz::Europe::Berlin);
+        let berlin = RruleTz::named("Europe/Berlin").expect("bundled");
         // Tuesday 29 December 2026 in Berlin begins at 23:00 UTC the day before.
         let start = Utc.with_ymd_and_hms(2026, 12, 28, 23, 0, 0).unwrap();
         for rule in [
@@ -4085,7 +4112,7 @@ mod tests {
                 Utc.with_ymd_and_hms(2027, 1, 31, 0, 0, 0).unwrap(),
             )
             .iter()
-            .map(|o| o.with_timezone(&chrono_tz::Europe::Berlin).date_naive())
+            .map(|o| o.with_timezone(&berlin).date_naive())
             .collect();
             assert_eq!(
                 days,
@@ -4113,7 +4140,7 @@ mod tests {
     /// first occurrence, which is all a bound the crate refused left.
     #[test]
     fn an_all_day_series_ends_on_its_day_when_a_clock_change_skips_the_bound() {
-        let nuuk = RruleTz::Tz(chrono_tz::America::Nuuk);
+        let nuuk = RruleTz::named("America/Nuuk").expect("bundled");
         // Thursday 26 March 2026 begins at 02:00 UTC in Nuuk.
         let start = Utc.with_ymd_and_hms(2026, 3, 26, 2, 0, 0).unwrap();
         let days: Vec<NaiveDate> = expand_occurrences(
@@ -4127,7 +4154,7 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 4, 30, 0, 0, 0).unwrap(),
         )
         .iter()
-        .map(|o| o.with_timezone(&chrono_tz::America::Nuuk).date_naive())
+        .map(|o| o.with_timezone(&nuuk).date_naive())
         .collect();
         assert_eq!(
             days,
@@ -4151,7 +4178,7 @@ mod tests {
     /// and compared as instants the cancelled day would come back.
     #[test]
     fn an_all_day_exception_cancels_the_day_whatever_instant_it_names() {
-        let berlin = RruleTz::Tz(chrono_tz::Europe::Berlin);
+        let berlin = RruleTz::named("Europe/Berlin").expect("bundled");
         let start = Utc.with_ymd_and_hms(2026, 6, 7, 22, 0, 0).unwrap();
         let occurrences = expand_occurrences(
             start,
@@ -4166,7 +4193,7 @@ mod tests {
         );
         let days: Vec<NaiveDate> = occurrences
             .iter()
-            .map(|o| o.with_timezone(&chrono_tz::Europe::Berlin).date_naive())
+            .map(|o| o.with_timezone(&berlin).date_naive())
             .collect();
         assert_eq!(
             days,
@@ -4510,6 +4537,51 @@ mod tests {
         let ws = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
         let we = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
         assert!(tk_triggers(&[task], ws, we).is_empty());
+    }
+
+    /// The occurrences come from the bundled tzdata, the day is read on the
+    /// operating system's clock. An hour between the two must not move the
+    /// day either way: Vancouver from 2026-11-01 stays on -07:00 in tzdata
+    /// 2026f, while a phone with older data still falls back to -08:00.
+    #[test]
+    fn an_hour_between_the_bundled_and_the_os_clock_keeps_the_day() {
+        let monday = NaiveDate::from_ymd_opt(2026, 11, 2).unwrap();
+        let nine = NaiveTime::from_hms_opt(9, 0, 0).unwrap();
+        let os_behind = chrono::FixedOffset::west_opt(8 * 3600).unwrap();
+        let os_ahead = chrono::FixedOffset::west_opt(6 * 3600).unwrap();
+        // Monday's midnight on the bundled -07:00 clock.
+        let occ_start = Utc.with_ymd_and_hms(2026, 11, 2, 7, 0, 0).unwrap();
+        for os in [os_behind, os_ahead] {
+            let at = all_day_fire_instant(occ_start, 0, nine, AllDayReading::WholeDays, &os)
+                .expect("09:00 exists");
+            assert_eq!(at.with_timezone(&os).date_naive(), monday, "{os}");
+            assert_eq!(at.with_timezone(&os).time(), nine, "{os}");
+            assert_eq!(all_day_date(occ_start, &os), monday, "{os}");
+            assert_eq!(
+                app_start_key(ItemKind::Event, true, occ_start, &os),
+                "2026-11-02",
+                "{os}"
+            );
+            assert_eq!(
+                all_day_midnight_on(occ_start, &os)
+                    .with_timezone(&os)
+                    .naive_local(),
+                monday.and_time(NaiveTime::MIN),
+                "{os}"
+            );
+        }
+        // "1 day before the end" of a one-day appointment rings on its day.
+        let end = occ_start + ChronoDuration::days(1);
+        let at = all_day_trigger_time(
+            occ_start,
+            Some(end),
+            &ReminderKind::RelativeToEnd {
+                minutes_before: MINUTES_PER_DAY,
+            },
+            nine,
+            AllDayReading::WholeDays,
+        );
+        assert!(at.is_some());
     }
 
     #[test]
@@ -5572,10 +5644,7 @@ mod tests {
                         .expect("the table names the machine's zone")
                         .to_string()
                 });
-            RruleTz::Tz(
-                name.parse::<chrono_tz::Tz>()
-                    .unwrap_or_else(|_| panic!("chrono-tz knows {name}")),
-            )
+            RruleTz::named(&name).unwrap_or_else(|| panic!("the bundled tzdata knows {name}"))
         }
 
         fn instant(v: &Value) -> DateTime<Utc> {
@@ -5698,7 +5767,7 @@ mod tests {
     // ── Occurrences for the Live Activity plan ────────────────────────────
 
     fn berlin_sink(from: DateTime<Utc>, to: DateTime<Utc>) -> OccurrenceSink {
-        OccurrenceSink::on_clock(from, to, RruleTz::Tz(chrono_tz::Europe::Berlin))
+        OccurrenceSink::on_clock(from, to, RruleTz::named("Europe/Berlin").expect("bundled"))
     }
 
     #[test]

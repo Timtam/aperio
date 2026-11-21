@@ -48,9 +48,9 @@ url = "2"
 # in every build of this crate through `url` -> `idna`, so the adapter
 # repositories compile nothing new.
 icu_normalizer.workspace = true
-# The offsets of the world zone list (src/zone_list.rs, `zone_offsets`), behind
-# the `zones` feature below.
-chrono-tz = { workspace = true, optional = true }
+# Zones with their offsets (src/zone_list.rs `zone_offsets`, src/zone_clock.rs,
+# and the re-exported cal_zone types), behind the `zones` feature below.
+cal-zone = { workspace = true, optional = true }
 
 
 [dev-dependencies]
@@ -75,11 +75,9 @@ ts-export = ["dep:ts-rs"]
 # Text ordering for the frontends. See the comment on the dependency
 # above, and DESIGN §4.4.
 collation = ["dep:icu_collator", "dep:icu_locale_core"]
-# The offsets of the world zone list, from chrono-tz's tzdata. OFF by default,
-# and off in WebAssembly: chrono-tz costs the desktop's module about 879 KB.
-# The phone's binding and the desktop host switch it on; both already link
-# chrono-tz through host-core, so only the list's own code is new there (a
-# prototype with the fold and the search: about 21.6 KB on arm64, see
-# DESIGN-series-time-zone.md, stage 3). The names and the search need none of
-# it and stay on.
-zones = ["dep:chrono-tz"]
+# Zones with their offsets, from cal-zone: jiff and the tzdata bundled with
+# jiff-tzdb (about 207 KB of data). OFF by default, and off in WebAssembly,
+# where CI checks that neither jiff nor jiff-tzdb reaches the module. The
+# phone's binding, the desktop host and every adapter that reads a zone switch
+# it on. The names and the search need none of it and stay on.
+zones = ["dep:cal-zone"]

@@ -47,7 +47,7 @@
 //! A clock no zone runs is [`ClockMatch::NoZone`]: the caller says so, and the
 //! series repeats as it did before.
 
-use chrono::{DateTime, Duration, Months, NaiveDate, NaiveTime, Offset, TimeZone, Utc};
+use chrono::{DateTime, Duration, Months, NaiveDate, NaiveTime, Utc};
 
 /// How long a window of comparison runs: five years, as the zone table's clock
 /// guard looks ahead.
@@ -65,19 +65,26 @@ impl<F: Fn(DateTime<Utc>) -> Option<i32>> Clock for F {
     }
 }
 
-/// A tzdata zone as a [`Clock`].
+/// A tzdata zone as a [`Clock`]: the total offset, always `Some`. It never
+/// says `None`, not even outside the years the bundled data covers (it
+/// answers as at the nearer edge there), because a clock that cannot say
+/// agrees with another that cannot, and two zones would then "agree".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TzClock(pub chrono_tz::Tz);
+pub struct TzClock(pub cal_zone::Zone);
 
 impl Clock for TzClock {
     fn offset_at(&self, at: DateTime<Utc>) -> Option<i32> {
-        Some(
-            self.0
-                .offset_from_utc_datetime(&at.naive_utc())
-                .fix()
-                .local_minus_utc(),
-        )
+        Some(self.0.offset_at(at).local_minus_utc())
     }
+}
+
+/// The zone a STORED name reads as, by [`crate::canonical_zone`]'s rule:
+/// ASCII case folded, links resolved to their target, nothing trimmed.
+/// "europe/berlin" gives Europe/Berlin, "US/Eastern" America/New_York, "UTC"
+/// Etc/UTC. `None` wherever `canonical_zone` is `None`; never Factory or
+/// Etc/Unknown, which the generated table does not hold.
+pub fn zone_of(name: &str) -> Option<cal_zone::Zone> {
+    crate::canonical_zone(name).and_then(cal_zone::Zone::named)
 }
 
 /// Where two clocks first read different offsets.
@@ -146,22 +153,33 @@ pub enum ClockMatch {
 }
 
 /// The zone that runs `clock` through the [`clock_window`] of a series whose
-/// first start is `first_start`, by the order in the module's documentation.
-/// `device` is the device's own zone, in any spelling tzdata knows; `None`, or
-/// a name it does not know, skips that step.
+/// first start is `first_start`, and that reads the clock's offset AT that
+/// first start, by the order in the module's documentation. `device` is the
+/// device's own zone, in any spelling tzdata knows; `None`, or a name it does
+/// not know, skips that step.
+///
+/// The first start counts because a series repeats on its first start's wall
+/// time: a zone that runs the clock only from the window on would place every
+/// later occurrence an hour off. A fixed UTC-06:00 definition first used in
+/// December 2025 is America/Regina's clock, not America/Edmonton's, which was
+/// on -07:00 then and keeps -06:00 only from 2026 (tzdata 2026c).
 pub fn zone_with_clock(
     clock: &impl Clock,
     first_start: DateTime<Utc>,
     device: Option<&str>,
 ) -> ClockMatch {
     let window = clock_window(first_start);
+    let at_start = clock.offset_at(first_start);
     let utc = |_: DateTime<Utc>| -> Option<i32> { Some(0) };
-    if first_clock_difference(clock, &utc, window).is_none() {
+    if at_start == Some(0) && first_clock_difference(clock, &utc, window).is_none() {
         return ClockMatch::Utc;
     }
     let runs = |zone: &str| {
-        zone.parse::<chrono_tz::Tz>()
-            .is_ok_and(|tz| first_clock_difference(clock, &TzClock(tz), window).is_none())
+        cal_zone::Zone::named(zone).is_some_and(|tz| {
+            let tz = TzClock(tz);
+            tz.offset_at(first_start) == at_start
+                && first_clock_difference(clock, &tz, window).is_none()
+        })
     };
     candidates(device)
         .find(|zone| runs(zone))
@@ -188,6 +206,7 @@ fn candidates(device: Option<&str>) -> impl Iterator<Item = &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     fn utc(s: &str) -> DateTime<Utc> {
         s.parse().unwrap()
@@ -263,10 +282,10 @@ mod tests {
     #[test]
     fn the_window_is_five_years_from_the_guard_or_a_later_start() {
         let from = utc("2026-01-01T00:00:00Z");
-        assert_eq!(crate::windows_zone::CLOCKS_COMPARED_FROM, (2026, 3, 17));
+        assert_eq!(crate::windows_zone::CLOCKS_COMPARED_FROM, (2026, 10, 21));
         assert_eq!(
             clock_window(from),
-            (utc("2026-03-17T00:00:00Z"), utc("2031-03-17T00:00:00Z"))
+            (utc("2026-10-21T00:00:00Z"), utc("2031-10-21T00:00:00Z"))
         );
         assert_eq!(
             clock_window(utc("2017-03-06T08:00:00Z")),
@@ -290,8 +309,52 @@ mod tests {
                 &berlin_late_in(2031),
                 &tz("Europe/Berlin"),
                 clock_window(from)
+            )
+            .map(|d| d.at),
+            Some(utc("2031-03-30T01:00:00Z"))
+        );
+        assert_eq!(
+            first_clock_difference(
+                &berlin_late_in(2032),
+                &tz("Europe/Berlin"),
+                clock_window(from)
             ),
             None
+        );
+    }
+
+    /// A series repeats on its first start's wall time, so the zone must read
+    /// the clock's offset there too, not only over the window. Alberta and
+    /// British Columbia stopped changing in 2026 and their new Windows ids
+    /// sort first, but they ran another clock in the winter of 2025.
+    #[test]
+    fn the_zone_also_reads_the_clocks_offset_at_the_first_start() {
+        let winter_2025 = utc("2025-12-01T15:00:00Z");
+        assert_eq!(
+            zone_with_clock(&fixed(-6 * 3600), winter_2025, None),
+            ClockMatch::Zone("America/Regina")
+        );
+        assert_eq!(
+            zone_with_clock(&fixed(-7 * 3600), winter_2025, None),
+            ClockMatch::Zone("America/Mazatlan")
+        );
+        // A series first starting after Edmonton's last change: Edmonton's
+        // clock throughout, and Alberta Standard Time's row comes first.
+        assert_eq!(
+            zone_with_clock(&fixed(-6 * 3600), utc("2026-12-01T15:00:00Z"), None),
+            ClockMatch::Zone("America/Edmonton")
+        );
+        // UTC from the window on, but not at the first start: not UTC.
+        let utc_later = |at: DateTime<Utc>| -> Option<i32> {
+            Some(if at < utc("2026-01-01T00:00:00Z") {
+                3600
+            } else {
+                0
+            })
+        };
+        assert_ne!(
+            zone_with_clock(&utc_later, winter_2025, None),
+            ClockMatch::Utc
         );
     }
 

@@ -18,11 +18,11 @@ plugin-core.workspace = true
 # `cargo_metadata` crate: three fields are needed, and a build tool earns its
 # dependencies the same way anything else does.
 serde_json.workspace = true
-# `tz-list` reads the tzdata chrono-tz ships, and checks what it generates
-# against the zones and offsets chrono-tz was built with: the release host-core
-# and the adapters parse zones with.
+# `tz-list` reads the names jiff-tzdb bundles (and its release), and checks
+# what it generates against that data and cal-zone's offsets, through cal-core:
+# the release every zone in Aperio is read from.
 chrono.workspace = true
-chrono-tz.workspace = true
+jiff-tzdb.workspace = true
 # `windows-zones` resolves every name in the CLDR windowsZones file through
 # cal_core — the rule the EWS adapter asks at runtime — reads the file with the
 # XML reader the adapters already use, and checks it against its pinned sha256.

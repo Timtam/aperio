@@ -1,9 +1,9 @@
 //! The world zone list's offsets for the desktop.
 //!
 //! The names, the search and where a stored zone stands come from the core
-//! through WebAssembly (`src/wasm/coreRules.ts`). The offsets need chrono-tz,
-//! which that module leaves out — it would grow by about 879 KB — while this
-//! binary links it already through host-core. The list asks for them when it
+//! through WebAssembly (`src/wasm/coreRules.ts`). The offsets need the zones
+//! (cal-zone: jiff and the tzdata bundled with jiff-tzdb), which that module
+//! leaves out, while this binary links them already through host-core. The list asks for them when it
 //! opens and when the series' start changes, never while it renders, so an IPC
 //! round trip costs nothing that matters.
 

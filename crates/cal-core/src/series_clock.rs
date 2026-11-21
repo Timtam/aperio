@@ -20,15 +20,18 @@
 //!   `Etc/GMT+8` is a zone.
 //!
 //! The names are generated into `series_clock/zone_names.rs` by
-//! `cargo xtask tz-list` from the tzdata chrono-tz ships, rather than read
-//! through a chrono-tz dependency here: this crate needs names and links, not
-//! offsets, and twelve adapter repositories compile it. host-core and the
-//! adapters use that same chrono-tz, so every zone [`canonical_zone`] returns
-//! is one chrono-tz can parse, from the same tzdata release. chrono-tz knows
-//! names in their exact case only: a Rust caller that parses a series' zone
-//! resolves it through [`canonical_zone`] first, as host-core's reminders do.
-//! The CalDAV and Graph adapters still parse the stored spelling
-//! (DESIGN-series-time-zone.md, "Risiken").
+//! `cargo xtask tz-list` from the names jiff-tzdb bundles and the `backward`
+//! and `etcetera` files pinned in `tzdata/`, rather than read through a zone
+//! dependency here: this crate needs names and links, not offsets, and twelve
+//! adapter repositories and the WebAssembly module compile it. Every zone
+//! reads its offsets from that same bundled release (`cal_core::Zone`, behind
+//! the `zones` feature), so every zone [`canonical_zone`] returns is one
+//! `Zone::named` knows. `Zone::named` takes names in their exact case only (and
+//! jiff's own lookup, which ignores case, would also take `Factory` and
+//! `Etc/Unknown`): a Rust caller that reads a stored series' zone resolves it
+//! through [`canonical_zone`] first — `cal_core::zone_of` does both — as
+//! host-core's reminders do. The CalDAV and Graph adapters still parse the
+//! stored spelling (DESIGN-series-time-zone.md, "Risiken").
 //!
 //! Pinned row by row in `tests/fixtures/seriesClock.json`; the `contract`
 //! module below reads it, and so do the phone's door tests in cal-ffi and the
@@ -101,9 +104,9 @@ pub(crate) fn listed_position(zone: &str) -> Option<usize> {
 ///
 /// The stored spelling comes back unchanged, so a surface keeps handing Intl
 /// the name it has always handed it; only the question "is this a zone" is
-/// answered here. A caller that parses the zone with chrono-tz, which knows
-/// names in their exact case only, resolves it through [`canonical_zone`]
-/// first.
+/// answered here. A caller that reads the zone with `cal_core::Zone`, which
+/// knows names in their exact case only, resolves it through
+/// [`canonical_zone`] first (`cal_core::zone_of`).
 pub fn series_clock_zone(tzid: Option<&str>) -> Option<&str> {
     let tzid = tzid?;
     match canonical_zone(tzid)? {
@@ -178,7 +181,7 @@ impl ExpansionClock {
 /// The zones outside `Etc/` with a region part, in tzdata's spelling and in
 /// the order the names sort with ASCII case folded — the zones a series' zone
 /// is chosen from. The region part keeps out the POSIX-style names such as
-/// `EST5EDT`, which tzdata 2026d turns from links back into zones.
+/// `EST5EDT`, which tzdata 2026d turned from links back into zones.
 pub fn listed_zones() -> &'static [&'static str] {
     zone_names::LISTED
 }

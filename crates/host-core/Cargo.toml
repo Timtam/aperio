@@ -16,7 +16,9 @@ aperio-db.workspace = true
 # restore decodes it here so the wrap happens in one place rather than two.
 base64 = "0.22"
 builtin-oauth.workspace = true
-cal-core.workspace = true
+# `zones`: the device's zone by the core's name rule (cal_core::zone_of) for
+# the reminder expansion.
+cal-core = { workspace = true, features = ["zones"] }
 adapter-local.workspace = true
 # The device adapter is not called from here — the mobile host holds the typed
 # adapter — but `builtin_adapters` reads its manifest to learn the kind name,
@@ -44,8 +46,9 @@ regex.workspace = true
 # Content-addressing for the custom-sound importer (sound_assets::import_sound):
 # files are stored as `<sha256>.<ext>` so identical audio dedupes.
 sha2.workspace = true
-# RRULE expansion for the reminder trigger enumeration (host_core::reminders).
-chrono-tz.workspace = true
+# RRULE expansion for the reminder trigger enumeration (host_core::reminders),
+# on cal-zone's zones through Aperio's rrule fork; iana-time-zone names the
+# device's zone.
 iana-time-zone.workspace = true
 rrule.workspace = true
 # The event_log cluster: onboarding reads the pending dir via tokio::fs; the

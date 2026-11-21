@@ -3,7 +3,7 @@
   "why": "The views, the reminders and the stamp on a new series each decided on their own which names are a zone. The views took every name but `UTC`; the reminders trimmed the name and knew it only in its exact case; a series Exchange stored as `Etc/UTC` took the zoned path in the views. One rule in the core answers all three, and a frontend that is not JavaScript.",
   "decidedBy": "DESIGN-series-time-zone.md, section \"UTC und Anbieter\", and the decisions of 2026-09-14: a name counts only if tzdata knows it (ASCII case ignored, nothing trimmed) and it is not one of the eighteen names tzdata gives UTC. Everything else repeats on UTC, in the views and in the reminders alike. The answers are chosen, not measured: the rule replaces three different ones.",
   "writtenBy": [
-    "By hand, from the tzdata chrono-tz 0.10.4 ships (release 2025b): the files `backward` and `etcetera` for the links, the zone files for the zones."
+    "By hand, from tzdata 2025b as chrono-tz 0.10.4 shipped it: the files `backward` and `etcetera` for the links, the zone files for the zones. Checked again against tzdata 2026f (jiff-tzdb 1.0.0 and the pinned `backward` and `etcetera`): no row changes, and no row names one of the POSIX-style names 2026d made zones of their own."
   ],
   "readBy": [
     "crates/cal-core/src/series_clock.rs (the `contract` test module)",
@@ -54,7 +54,7 @@
     { "tzid": "+00:00", "zone": null, "note": "What V8 reports for a device set to GMT. An offset is not a tzdata name." },
     { "tzid": "+05:30", "zone": null, "note": "Intl accepts an offset as a zone, and would repeat the series on +05:30, a weekday apart near midnight, while the reminders read UTC. Not a tzdata name, so UTC for both." },
     { "tzid": "Etc/Unknown", "zone": null, "note": "What V8 reports when it cannot read the device's zone." },
-    { "tzid": "Factory", "zone": null, "note": "tzdata's placeholder zone is not in the files chrono-tz ships." },
+    { "tzid": "Factory", "zone": null, "note": "tzdata's placeholder zone: jiff-tzdb bundles it, and tz-list leaves it out of the names." },
     { "tzid": "Z", "zone": null, "note": "The UTC designator of a date-time is not a zone name." },
     { "tzid": "IST", "zone": null, "note": "An abbreviation, and an ambiguous one." },
     { "tzid": "Etc/GMT+13", "zone": null, "note": "tzdata's fixed offsets run from Etc/GMT-14 to Etc/GMT+12." },
@@ -109,7 +109,7 @@
     { "name": "Europe/Berlin ", "canonical": null, "note": "Nothing is trimmed." },
     { "name": "Etc/GMT+13", "canonical": null, "note": "Outside tzdata's fixed offsets." },
     { "name": "Etc/Unknown", "canonical": null, "note": "Not a tzdata name." },
-    { "name": "Factory", "canonical": null, "note": "Not in the files chrono-tz ships." },
+    { "name": "Factory", "canonical": null, "note": "Bundled by jiff-tzdb, left out by tz-list." },
     { "name": "+00:00", "canonical": null, "note": "An offset is not a name." },
     { "name": "W. Europe Standard Time", "canonical": null, "note": "A Windows zone name." },
     { "name": "Mars/Olympus", "canonical": null, "note": "An invented name." },

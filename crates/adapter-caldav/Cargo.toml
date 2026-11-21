@@ -10,9 +10,9 @@ description = "Aperio CalDAV adapter — RFC 4791 calendar + RFC 6352 contacts c
 
 [dependencies]
 async-trait.workspace = true
-cal-core.workspace = true
+# `zones`: a task's TZID is read with cal_core::Zone.
+cal-core = { workspace = true, features = ["zones"] }
 chrono.workspace = true
-chrono-tz.workspace = true
 icalendar.workspace = true
 ical-mapping.workspace = true
 quick-xml.workspace = true

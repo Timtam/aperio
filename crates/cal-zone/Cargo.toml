@@ -1,0 +1,22 @@
+[package]
+name = "cal-zone"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — time zones from the IANA tzdata release bundled with jiff-tzdb, as Copy chrono zones."
+
+[dependencies]
+chrono.workspace = true
+# Reads a zone's TZif data. No database feature is on: this crate hands jiff
+# the bytes itself (TimeZone::tzif), so no system zone database is ever asked.
+jiff.workspace = true
+# The tzdata release itself. Pinned exactly in the workspace: a jiff-tzdb bump
+# is a tzdata bump, and `cargo xtask tz-list --check` turns red until the
+# generated names follow it.
+jiff-tzdb.workspace = true
+
+[lints]
+workspace = true
