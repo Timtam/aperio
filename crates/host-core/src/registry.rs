@@ -101,6 +101,16 @@ pub trait DeviceLocalRead: Send + Sync {
 }
 
 /// Process-wide registry of all non-local adapter instances.
+/// The data families one account's loaded adapter serves (see
+/// [`AdapterRegistry::served_families`]). Meetings have no cache of their
+/// own, so they are not a family here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServedFamilies {
+    pub calendars: bool,
+    pub tasks: bool,
+    pub contacts: bool,
+}
+
 pub struct AdapterRegistry {
     /// External adapters with CalendarFeature, keyed by account_id.
     external_cal: RwLock<HashMap<String, Arc<dyn CalendarFeature>>>,
@@ -568,6 +578,38 @@ impl AdapterRegistry {
                 .read()
                 .expect("registry vc poison")
                 .contains_key(account_id)
+    }
+
+    /// Which data families the loaded adapter of `account_id` serves, or
+    /// `None` when the account has no adapter at all: its plugin is missing,
+    /// switched off or did not open (credentials absent on this device).
+    ///
+    /// Read off the adapter maps, which a registration fills from the
+    /// plugin's declared capabilities and nothing else. So an adapter that
+    /// stops declaring a family — a new version of its plugin — shows up
+    /// here as a family it no longer serves, while an account whose adapter
+    /// is simply not there says nothing about what it would serve.
+    pub fn served_families(&self, account_id: &str) -> Option<ServedFamilies> {
+        if !self.has_adapter(account_id) {
+            return None;
+        }
+        Some(ServedFamilies {
+            calendars: self
+                .external_cal
+                .read()
+                .expect("registry cal poison")
+                .contains_key(account_id),
+            tasks: self
+                .external_tasks
+                .read()
+                .expect("registry tasks poison")
+                .contains_key(account_id),
+            contacts: self
+                .external_contacts
+                .read()
+                .expect("registry contacts poison")
+                .contains_key(account_id),
+        })
     }
 
     /// Register a single account at runtime. Used by

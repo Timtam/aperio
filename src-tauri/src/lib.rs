@@ -226,6 +226,24 @@ pub fn run() {
         }
     };
 
+    // The cache of a family an account's adapter no longer serves (a plugin
+    // update that dropped it) would otherwise stay forever: never listed, so
+    // never replaced, and still found by search and named as failing. Same
+    // moment and same shared code as the phone. Best-effort, retried next boot.
+    {
+        let shared = db.shared();
+        match accounts::AccountsRepo::new(&shared).list() {
+            Ok(accts) => {
+                if let Err(err) = cache::drop_unserved_caches(&cache_store, &registry, &accts) {
+                    tracing::warn!(%err, "dropping unserved caches failed; will retry next boot");
+                }
+            }
+            Err(err) => {
+                tracing::warn!(?err, "dropping unserved caches: couldn't list accounts");
+            }
+        }
+    }
+
     // One-time heal for the EWS cursor-desync bug: older builds let the
     // reminder scan's `get_events` drain advance + persist the EWS
     // SyncFolderItems cookie independently of the host's, so a later delta

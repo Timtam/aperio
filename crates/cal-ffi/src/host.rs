@@ -2315,6 +2315,25 @@ impl Host {
             }
         }
 
+        // The cache of a family an account's adapter no longer serves (a plugin
+        // update that dropped it), discarded as on the desktop (lib.rs), with
+        // the same shared code. Best-effort, retried next boot.
+        {
+            let shared = db.shared();
+            match AccountsRepo::new(&shared).list() {
+                Ok(accts) => {
+                    if let Err(err) =
+                        host_core::cache::drop_unserved_caches(&cache, &registry, &accts)
+                    {
+                        tracing::warn!(%err, "dropping unserved caches failed; will retry next boot");
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(?err, "dropping unserved caches: couldn't list accounts")
+                }
+            }
+        }
+
         let cache_observer = Arc::new(BridgeCacheObserver::new());
         let cache_refresher = CacheRefresher::new(
             Arc::clone(&registry),
