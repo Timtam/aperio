@@ -67,4 +67,14 @@ until: boolean,
  * a shape the source restricts, and a provider that takes every deletion
  * with the series itself — RFC 5545 — writes it in one request.
  */
-deletions_in_steps: boolean, };
+deletions_in_steps: boolean, 
+/**
+ * The time zones a series in this calendar can repeat on
+ * (DESIGN-series-time-zone.md, stage 6, decision 97a): every zone, none
+ * (the calendar stores no zone, as the phone's own calendars), or only
+ * the listed ones. UTC is no zone and is in no list: a calendar that
+ * stores a repeat rule stores a series in UTC (26a). The zone picker of
+ * stage 11 is to mark the others and not offer them (22a). Every zone by
+ * default, as the other axes.
+ */
+time_zones: "all" | "none" | Array<string>, };

@@ -196,10 +196,12 @@ fn local_task_capabilities() -> TaskCapabilities {
     }
 }
 
-/// Resolve an account's task capabilities from its plugin manifest.
-/// Mirrors `recurrence_caps_for_account` in `calendars.rs`: the local
-/// store reports its own capabilities; accounts whose plugin we can't
-/// resolve fall back to the permissive cal-core-native default.
+/// Resolve an account's task capabilities from its plugin manifest: the
+/// local store reports its own capabilities; accounts whose plugin we can't
+/// resolve fall back to the permissive cal-core-native default. Unlike
+/// `host_core::builtin_adapters::recurrence_capabilities_for_account`, the
+/// built-in manifests are not asked: besides the local store, the only one
+/// is the phone's own calendar, which has no account on the desktop.
 fn task_caps_for_account(
     account_id: &str,
     account_kinds: &std::collections::HashMap<String, AdapterKind>,

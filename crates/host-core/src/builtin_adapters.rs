@@ -301,6 +301,40 @@ pub fn reminder_capabilities_for_account(
         .unwrap_or_default()
 }
 
+/// The recurrence shapes and series time zones the calendars of one account
+/// keep ([`PluginManifest::recurrence`]), read as
+/// [`reminder_capabilities_for_account`] reads reminders: the built-in store's
+/// own manifest for [`crate::registry::LOCAL_ID`], the built-in manifests next
+/// (the device adapter), then the plugin that serves the account's kind. One
+/// answer for both hosts (DESIGN-series-time-zone.md, stage 6). The phone
+/// asked only the loaded plugins before, so its own calendars, which are
+/// linked rather than loaded, reported every zone.
+///
+/// An account whose adapter is not known gets full support, unlike a
+/// reminder: a missing manifest must not take away options the source may
+/// well store.
+pub fn recurrence_capabilities_for_account(
+    manager: &plugin_core::PluginManager,
+    account_id: &str,
+    account_kinds: &std::collections::HashMap<String, crate::accounts::AdapterKind>,
+) -> plugin_core::RecurrenceCapabilities {
+    if account_id == crate::registry::LOCAL_ID {
+        return local_manifest().recurrence.clone();
+    }
+    let Some(kind) = account_kinds.get(account_id) else {
+        return plugin_core::RecurrenceCapabilities::default();
+    };
+    for manifest in builtin_manifests() {
+        if manifest.adapter_kind.as_deref() == Some(kind.as_str()) {
+            return manifest.recurrence.clone();
+        }
+    }
+    manager
+        .plugin_for_adapter_kind(kind.as_str())
+        .map(|p| p.manifest.recurrence.clone())
+        .unwrap_or_default()
+}
+
 /// Whether at most one account of `adapter_kind` may exist in this database
 /// ([`PluginManifest::single_instance`]), asked of whatever declares the kind
 /// as its OWN.
@@ -434,6 +468,37 @@ mod tests {
         let google = PluginManifest::from_bytes(adapter_google_plugin::MANIFEST)
             .expect("the Google manifest parses");
         assert!(!google.reminders.after_start);
+    }
+
+    /// Stage 6 of DESIGN-series-time-zone.md: the phone's own calendars store
+    /// no series zone, the local store and an account no manifest declares
+    /// store every zone. The device adapter is linked, not loaded, so the
+    /// built-in manifests are asked before the plugins, as for reminders.
+    #[test]
+    fn series_time_zones_come_from_the_built_in_manifests_first() {
+        let manager = plugin_core::PluginManager::new("0.1.0");
+        let kinds = std::collections::HashMap::from([(
+            "phone".to_string(),
+            AdapterKind::new(AdapterKind::DEVICE_CALENDAR),
+        )]);
+        let zones = |account: &str| {
+            recurrence_capabilities_for_account(&manager, account, &kinds).time_zones
+        };
+        assert_eq!(zones("phone"), plugin_core::SeriesTimeZones::NoZone);
+        assert_eq!(
+            zones(crate::registry::LOCAL_ID),
+            plugin_core::SeriesTimeZones::Every
+        );
+        assert_eq!(zones("unknown"), plugin_core::SeriesTimeZones::Every);
+        // The rest of the device calendar's recurrence block stays the default.
+        let phone = recurrence_capabilities_for_account(&manager, "phone", &kinds);
+        assert_eq!(
+            plugin_core::RecurrenceCapabilities {
+                time_zones: plugin_core::SeriesTimeZones::Every,
+                ..phone
+            },
+            plugin_core::RecurrenceCapabilities::default()
+        );
     }
 
     /// A plugin whose library will not open still names its own accounts.

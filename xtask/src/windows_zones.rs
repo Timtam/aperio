@@ -34,6 +34,15 @@
 //! and ends between two whole hours goes unseen. The comparison is the core's
 //! (`cal_core::first_clock_difference`), the one the EWS adapter matches a
 //! zone Exchange defines in full by (decision 279).
+//!
+//! # The Exchange manifest's zone list
+//!
+//! The zones the table writes are the zones Exchange can store for a series,
+//! and the Exchange plugin says so in its manifest (`recurrence.time_zones`,
+//! decision 97a): the task writes that list into
+//! `crates/adapter-ews-plugin/plugin.json` too, and `--check` holds it to the
+//! table. The host reads it as the plugin's own statement and names no
+//! provider.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -51,6 +60,10 @@ const CLDR_DIR: &str = "crates/cal-core/cldr";
 
 /// Where the task writes, relative to the workspace root.
 const WINDOWS_ZONES: &str = "crates/cal-core/src/windows_zone/table.rs";
+
+/// The Exchange plugin's manifest, whose `recurrence.time_zones` the task
+/// writes, relative to the workspace root.
+const EWS_MANIFEST: &str = "crates/adapter-ews-plugin/plugin.json";
 
 /// How long the clock guard looks ahead of the pinned release's publication.
 const CLOCK_MONTHS: u32 = 60;
@@ -151,19 +164,33 @@ pub(crate) fn windows_zones(args: &[String]) -> Result<String, String> {
     );
 
     let target = root.join(WINDOWS_ZONES);
+    let manifest_target = root.join(EWS_MANIFEST);
+    let manifest_have = fs::read_to_string(&manifest_target)
+        .map_err(|e| format!("reading {EWS_MANIFEST}: {e}"))?
+        .replace("\r\n", "\n");
+    let stored: Vec<&str> = tables.write.keys().copied().collect();
+    let manifest_fresh = render_manifest_zones(&manifest_have, &stored)?;
     if check {
         let have = match fs::read_to_string(&target) {
             Ok(text) => text.replace("\r\n", "\n"),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => return Err(format!("reading {}: {e}", target.display())),
         };
-        return match describe_windows_drift(&have, &fresh) {
-            None => Ok(format!("{WINDOWS_ZONES} is current — {summary}.")),
-            Some(drift) => Err(format!(
+        if let Some(drift) = describe_windows_drift(&have, &fresh) {
+            return Err(format!(
                 "{WINDOWS_ZONES} does not match {CLDR_DIR}:\n{drift}\n\n\
                  Run `cargo xtask windows-zones` and commit the result."
-            )),
-        };
+            ));
+        }
+        if let Some(drift) = describe_manifest_drift(&manifest_have, &stored) {
+            return Err(format!(
+                "{EWS_MANIFEST} does not list the zones {WINDOWS_ZONES} writes:\n{drift}\n\n\
+                 Run `cargo xtask windows-zones` and commit the result."
+            ));
+        }
+        return Ok(format!(
+            "{WINDOWS_ZONES} and {EWS_MANIFEST} are current — {summary}."
+        ));
     }
 
     if let Some(parent) = target.parent() {
@@ -171,16 +198,113 @@ pub(crate) fn windows_zones(args: &[String]) -> Result<String, String> {
     }
     // Written beside the table and moved over it, as `tz-list` does: a write
     // that fails halfway must not leave a table the adapter cannot build with.
-    let staging = target.with_extension("rs.tmp");
-    fs::write(&staging, &fresh).map_err(|e| format!("writing {}: {e}", staging.display()))?;
-    fs::rename(&staging, &target).map_err(|e| {
+    replace_file(&target, &fresh)?;
+    replace_file(&manifest_target, &manifest_fresh)?;
+    Ok(format!("{WINDOWS_ZONES} and {EWS_MANIFEST}: {summary}."))
+}
+
+/// Write `text` beside `target` and move it over, so a write that fails
+/// halfway leaves the old file.
+fn replace_file(target: &std::path::Path, text: &str) -> Result<(), String> {
+    let staging = target.with_extension("tmp");
+    fs::write(&staging, text).map_err(|e| format!("writing {}: {e}", staging.display()))?;
+    fs::rename(&staging, target).map_err(|e| {
         format!(
             "moving {} over {}: {e}",
             staging.display(),
             target.display()
         )
-    })?;
-    Ok(format!("{WINDOWS_ZONES}: {summary}."))
+    })
+}
+
+/// The opening of the manifest's top-level `recurrence` block, and of its
+/// `time_zones` list, as `plugin.json` is indented.
+const RECURRENCE_BLOCK: &str = "\n  \"recurrence\": {\n";
+const ZONES_KEY: &str = "\n    \"time_zones\": [";
+const ZONES_CLOSE: &str = "\n    ]";
+const BLOCK_CLOSE: &str = "\n  }";
+
+/// Where the `time_zones` list of the manifest's top-level `recurrence`
+/// block sits: the byte after its `[` and the byte of the line holding its
+/// `]`. The key is written once by hand; the task keeps its contents.
+fn manifest_zones_span(manifest: &str) -> Result<(usize, usize), String> {
+    let missing = || {
+        format!(
+            "{EWS_MANIFEST} has no `\"time_zones\": [` line in its top-level `recurrence` \
+             block (two spaces in, the list's key four): add `\"time_zones\": [\\n    ]` \
+             there once, and the task fills it"
+        )
+    };
+    let block = manifest.find(RECURRENCE_BLOCK).ok_or_else(missing)?;
+    let block_end = block
+        + RECURRENCE_BLOCK.len()
+        + manifest[block + RECURRENCE_BLOCK.len()..]
+            .find(BLOCK_CLOSE)
+            .ok_or_else(missing)?;
+    let key = block
+        + manifest[block..block_end]
+            .find(ZONES_KEY)
+            .ok_or_else(missing)?;
+    let start = key + ZONES_KEY.len();
+    let end = start
+        + manifest[start..block_end]
+            .find(ZONES_CLOSE)
+            .ok_or_else(missing)?;
+    Ok((start, end))
+}
+
+/// The manifest with its `recurrence.time_zones` listing `zones`, one per
+/// line, in the order given. Everything else stays as it is written.
+fn render_manifest_zones(manifest: &str, zones: &[&str]) -> Result<String, String> {
+    let (start, end) = manifest_zones_span(manifest)?;
+    let mut list = String::new();
+    for (i, zone) in zones.iter().enumerate() {
+        list.push_str("\n      \"");
+        list.push_str(zone);
+        list.push('"');
+        if i + 1 < zones.len() {
+            list.push(',');
+        }
+    }
+    let fresh = format!("{}{list}{}", &manifest[..start], &manifest[end..]);
+    serde_json::from_str::<serde_json::Value>(&fresh)
+        .map_err(|e| format!("{EWS_MANIFEST} would not parse with the zone list: {e}"))?;
+    Ok(fresh)
+}
+
+/// What the manifest's `recurrence.time_zones` lacks and holds beyond
+/// `zones`, by name; `None` when it is the list the task would write.
+fn describe_manifest_drift(manifest: &str, zones: &[&str]) -> Option<String> {
+    let Ok(fresh) = render_manifest_zones(manifest, zones) else {
+        return Some("  the `time_zones` list is missing".to_string());
+    };
+    if fresh == manifest {
+        return None;
+    }
+    let listed: BTreeSet<String> = manifest_zones_span(manifest)
+        .map(|(start, end)| {
+            manifest[start..end]
+                .split(',')
+                .map(|name| name.trim().trim_matches('"').to_string())
+                .filter(|name| !name.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut lines = Vec::new();
+    for zone in zones {
+        if !listed.contains(*zone) {
+            lines.push(format!("  missing: {zone}"));
+        }
+    }
+    for zone in &listed {
+        if !zones.contains(&zone.as_str()) {
+            lines.push(format!("  extra:   {zone}"));
+        }
+    }
+    if lines.is_empty() {
+        lines.push("  the same zones, written in another order or layout".to_string());
+    }
+    Some(lines.join("\n"))
 }
 
 /// What `cldr/SOURCE` pins.
@@ -908,6 +1032,60 @@ fn describe_windows_drift(have: &str, fresh: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A manifest shaped like the Exchange plugin's: a top-level `recurrence`
+    /// block with the key, and a task block whose own `recurrence` the task
+    /// must not touch.
+    const MANIFEST: &str = "{\n  \"id\": \"x\",\n  \"recurrence\": {\n    \"deletions_in_steps\": true,\n    \"time_zones\": [\n    ]\n  },\n  \"tasks\": {\n    \"recurrence\": {\n      \"interval_frequencies\": [\n        \"daily\"\n      ]\n    }\n  }\n}\n";
+
+    #[test]
+    fn the_manifest_list_goes_into_the_top_level_recurrence_block() {
+        let fresh = render_manifest_zones(MANIFEST, &["Asia/Tokyo", "Europe/Berlin"]).unwrap();
+        assert!(fresh.contains(
+            "    \"time_zones\": [\n      \"Asia/Tokyo\",\n      \"Europe/Berlin\"\n    ]\n  },\n"
+        ));
+        assert!(fresh.ends_with(&MANIFEST[MANIFEST.find("  \"tasks\"").unwrap()..]));
+        // Writing it again changes nothing, and the check finds no drift.
+        assert_eq!(
+            render_manifest_zones(&fresh, &["Asia/Tokyo", "Europe/Berlin"]).unwrap(),
+            fresh
+        );
+        assert_eq!(
+            describe_manifest_drift(&fresh, &["Asia/Tokyo", "Europe/Berlin"]),
+            None
+        );
+        // An empty list stays valid JSON.
+        let empty = render_manifest_zones(&fresh, &[]).unwrap();
+        assert!(empty.contains("    \"time_zones\": [\n    ]\n"));
+    }
+
+    #[test]
+    fn manifest_drift_names_the_zones_by_name() {
+        let fresh = render_manifest_zones(MANIFEST, &["Asia/Tokyo", "Europe/Berlin"]).unwrap();
+        let drift = describe_manifest_drift(&fresh, &["Europe/Berlin", "Europe/Paris"]).unwrap();
+        assert!(drift.contains("missing: Europe/Paris"), "{drift}");
+        assert!(drift.contains("extra:   Asia/Tokyo"), "{drift}");
+        let reordered = render_manifest_zones(MANIFEST, &["Europe/Berlin", "Asia/Tokyo"]).unwrap();
+        assert!(
+            describe_manifest_drift(&reordered, &["Asia/Tokyo", "Europe/Berlin"])
+                .unwrap()
+                .contains("another order")
+        );
+    }
+
+    #[test]
+    fn a_manifest_without_the_key_is_refused_by_name() {
+        let without = MANIFEST.replace(
+            "    \"deletions_in_steps\": true,\n    \"time_zones\": [\n    ]\n",
+            "    \"deletions_in_steps\": true\n",
+        );
+        let err = render_manifest_zones(&without, &["Asia/Tokyo"]).unwrap_err();
+        assert!(err.contains("\"time_zones\": ["), "{err}");
+        assert_eq!(
+            describe_manifest_drift(&without, &["Asia/Tokyo"]).as_deref(),
+            Some("  the `time_zones` list is missing")
+        );
+    }
 
     fn xml(rows: &[(&str, &str, &str)]) -> String {
         let rows: String = rows

@@ -344,6 +344,16 @@ the iCalendar reader):
   zone in Exchange, so an update to an unknown zone leaves the old one there.
   If the server cannot be asked, or its answer cannot be read, the CLDR ids are
   written and the next save asks again.
+- **Zones the manifest names.** The manifest lists the zones Exchange can
+  store for a series (`recurrence.time_zones`, decision 97a): every
+  canonical tzdata zone the table writes with a Windows id, 334 with CLDR
+  release-49 and tzdata 2026f. `cargo xtask windows-zones` writes the list
+  with the table, and `--check` and a test in the plugin crate hold it to
+  the table. The host reads it as the plugin's own statement and names no
+  provider. UTC is no zone and is not listed; Exchange stores a UTC series
+  without one. What one server does not know is not in it either; stage 7
+  is to say so on a save. Until then such a series goes out without a zone,
+  as the bullet above says.
 - **Writing.** An all-day series writes no zone (`cal_core::written_series_zone`).
   A zone makes Exchange move an all-day series to that zone's midnights and
   stretch it over more days (live test). Any other series' stored zone goes

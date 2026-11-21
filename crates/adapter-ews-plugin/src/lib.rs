@@ -735,6 +735,55 @@ mod tests {
             .expect("plugin.json parses and its account schema validates")
     }
 
+    /// Decision 97a: the zones the manifest says Exchange stores for a series
+    /// are exactly the zones the adapter writes with a Windows id, over every
+    /// zone tzdata names; `cargo xtask windows-zones` writes both. Of the
+    /// listed zones, the four the design names are left out (22a).
+    #[test]
+    fn the_manifest_lists_the_zones_the_adapter_writes() {
+        use adapter_ews::windows_tz::{windows_zone_for, WindowsZoneWrite};
+        use plugin_sdk::cal_core;
+        use plugin_sdk::plugin_core::SeriesTimeZones;
+        use std::collections::BTreeSet;
+
+        let manifest = manifest();
+        let SeriesTimeZones::Only(listed) = &manifest.recurrence.time_zones else {
+            panic!("Exchange stores only some zones");
+        };
+        let listed: BTreeSet<&str> = listed.iter().map(String::as_str).collect();
+        let written: BTreeSet<&str> = cal_core::Zone::all()
+            .filter_map(|zone| cal_core::canonical_zone(zone.name()))
+            .filter(|zone| matches!(windows_zone_for(Some(zone), None), WindowsZoneWrite::Id(_)))
+            .collect();
+        assert_eq!(listed, written);
+        for zone in &listed {
+            assert_eq!(
+                cal_core::canonical_zone(zone),
+                Some(*zone),
+                "{zone} is canonical"
+            );
+        }
+        let left_out: BTreeSet<&str> = cal_core::listed_zones()
+            .iter()
+            .copied()
+            .filter(|zone| !manifest.recurrence.time_zones.stores(zone))
+            .collect();
+        assert_eq!(
+            left_out,
+            BTreeSet::from([
+                "America/Scoresbysund",
+                "Antarctica/Casey",
+                "Antarctica/Troll",
+                "Antarctica/Vostok"
+            ])
+        );
+        assert_eq!(
+            manifest.tasks.recurrence.time_zones,
+            SeriesTimeZones::Every,
+            "a task's repeat names no zone"
+        );
+    }
+
     #[test]
     fn a_new_series_deletes_its_occurrences_in_steps_and_tasks_do_not() {
         // Exchange creates a series without its deleted occurrences, and the

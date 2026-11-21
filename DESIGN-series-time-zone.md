@@ -1,6 +1,6 @@
 # Zeitzone einer Serie — Entwurf
 
-Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), Stufe 5 (Exchange mit PR 8a, Microsoft 365 am 2026-11-21); die Stufen 6 bis 14 werden in der Reihenfolge der Stufenliste gebaut (93b).**
+Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), Stufe 5 (Exchange mit PR 8a, Microsoft 365 am 2026-11-21) und Stufe 6 (2026-11-21); die Stufen 7 bis 14 werden in der Reihenfolge der Stufenliste gebaut (93b).**
 Toni hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b,
 14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a, 38a
 bis 43b, 46a bis 49a, 51a bis 53a, 57a, 58a, 61a, 62b, 63a und 64a, dazu die Vorlese-Form F). Die Planung lief in zwei
@@ -439,8 +439,8 @@ des Dokuments hinzu; sie stehen in den Abschnitten unten:
 - Die Exchange-Stufe kommt vor die Editoren, damit ein Wechsel nie still
   verpufft.
 
-Vier weitere Entscheidungen traf Toni am 21. November 2026, als der Bogen wieder
-aufgenommen wurde:
+Fünf weitere Entscheidungen traf Toni am 21. November 2026, als der Bogen wieder
+aufgenommen wurde (97a später am Tag, zu Stufe 6):
 
 - **93b — streng in der Reihenfolge der Stufenliste.** Kein vorgezogener
   Reparatur-Teil mit vorübergehenden Abweichungen (Felder einer zonenlosen Serie
@@ -460,6 +460,20 @@ aufgenommen wurde:
   Hilfe warnt; ohne es erschienen sie im anderen Halbjahr doppelt.
 - **96a — erst neue Zeitzonendaten.** Vor den Stufen 6 und 11 wird tzdata
   2025b abgelöst (32a). Welcher Weg, entscheidet eine eigene Recherche.
+- **97a — eine Liste im Manifest** (Stufe 6). Ein Kalender
+  sagt in seinem Manifest, welche Zonen eine Serie bei ihm haben kann:
+  `"all"`, `"none"` oder eine Liste kanonischer tzdata-Namen
+  (`recurrence.time_zones`). Die Liste ist die Aussage des Adapters; der
+  Kern kennt nur Listen und keinen Anbieter. Die Exchange-Liste erzeugt
+  `cargo xtask windows-zones` aus derselben CLDR-Tabelle, aus der der
+  Adapter schreibt. UTC ist keine Zone und steht in keiner Liste; eine
+  Serie in UTC speichert jeder Kalender, der eine Regel speichert (26a).
+  Was ein einzelner Server nicht kennt (Tonis Exchange kennt die drei
+  neuen kanadischen Kennungen nicht), steht nicht darin; das soll Stufe 7
+  beim Speichern sagen. Verworfen: ein Regelname, den der Kern
+  auflöst (dann kennte der Kern einen Microsoft-Begriff), und eine Liste,
+  die der Adapter zur Laufzeit je Server meldet (ein neuer Plugin-Aufruf
+  mit Zwischenspeicher; ohne Netz wüsste der Editor es erst später).
 
 Geprüft vorab (2026-11-21, Tonis Desktop-Daten nur lesend): Von 89 Serien mit
 Uhrzeit im Zwischenspeicher haben drei keine Zone, alle bei CalDAV und alle mit
@@ -1258,9 +1272,18 @@ Handy im selben PR.
    schon mit falschem Starttag geschrieben hat, bleiben, wie sie sind (231):
    einmal verschieben und Wochentag oder Tag in der Wiederholung neu wählen.
 6. **Kalender melden, welche Zonen sie speichern** — `feat(plugin-core): calendars declare which series time zones they can store`.
-   `time_zones`: alle, keine (Handy-Kalender) oder nur bestimmte (Exchange). Das
-   Handy muss dafür auch die eingebauten Manifeste lesen; ob der Desktop sie
-   genauso liest, wird vorher geprüft.
+   Gebaut (2026-11-21, 97a): `recurrence.time_zones` im Manifest ist
+   `"all"` (Vorgabe), `"none"` (Handy-Kalender) oder eine Liste (Exchange:
+   334 kanonische Zonen, die die CLDR-Tabelle mit einer Windows-Kennung
+   schreibt; von den 312 gelisteten fehlen Troll, Scoresbysund, Casey und
+   Vostok). `cargo xtask windows-zones` schreibt die Liste mit der Tabelle,
+   `--check` und ein Test halten sie dazu. Desktop und Handy fragen dieselbe
+   Regel (`host_core::builtin_adapters::recurrence_capabilities_for_account`):
+   erst die eingebauten Manifeste, dann die geladenen Plugins. Das Handy
+   fragte vorher nur die Plugins; seine eigenen Kalender meldeten deshalb
+   jede Zone. Die Antwort steht in der Kalenderzeile
+   (`recurrence_capabilities`); die Editoren lesen sie mit dem
+   Formular-Modell und den Auswahldialogen (Stufen 10 und 11).
 7. **Exchange sagt, was es nicht speichern kann** — `fix(ews): keep what Exchange can store, and say when it cannot`.
    Nach der Messung aus Stufe 4, und vor den Editoren, damit ein Wechsel auf UTC
    oder eine nicht speicherbare Zone nie still verpufft.
@@ -1458,8 +1481,6 @@ Handy im selben PR.
   gespeicherte Uhrzeit behält (siehe Stufe 4, „Gemessen“). Ungeprüft ist auch, ob Exchanges eigene
   Zeitzonen-Regeln denen von Windows gleichen, an denen der Uhr-Wächter über die
   Standardzonen gemessen ist.
-- Ob der Desktop die eingebauten Manifeste für die Wiederholungs-Fähigkeiten
-  genauso liest wie das Handy (src-tauri commands/calendars.rs).
 - Wie Microsoft 365 recurrenceTimeZone nach Stufe 5 beim Zurücklesen behandelt,
   und ob es das Enddatum einer Serie wie Exchange ganz auf deren Uhr zählt.
 - Ob Google und Microsoft 365 alle 312 kanonischen Namen annehmen und

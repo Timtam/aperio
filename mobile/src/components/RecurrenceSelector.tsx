@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { DEFAULT_RECURRENCE_CAPABILITIES } from '@aperio/shared';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import {
@@ -35,7 +36,7 @@ import { SelectFieldButton } from './SelectFieldButton';
 // backend can't store — an unsupported frequency / interval / weekday picker /
 // monthly mode / end-mode is dropped from the picker rather than offered then
 // silently lost on save. (The desktop greys them out; on mobile, hiding keeps a
-// screen-reader pass short.) Absent → full RFC-5545 (FULL_CAPS).
+// screen-reader pass short.) Absent → full RFC-5545 (DEFAULT_RECURRENCE_CAPABILITIES).
 
 const WEEKDAYS: { rrule: string; key: string }[] = [
   { rrule: 'MO', key: 'mon' },
@@ -46,20 +47,6 @@ const WEEKDAYS: { rrule: string; key: string }[] = [
   { rrule: 'SA', key: 'sat' },
   { rrule: 'SU', key: 'sun' },
 ];
-
-/** Permissive fallback when no `capabilities` prop is supplied — every axis
- *  supported. Mirrors `plugin_core::RecurrenceCapabilities::default`. */
-const FULL_CAPS: RecurrenceCapabilities = {
-  frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
-  interval_frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
-  relative_monthly: true,
-  relative_yearly: true,
-  weekly_byday: true,
-  monthly_day_of_month: true,
-  count: true,
-  until: true,
-  deletions_in_steps: false,
-};
 
 /** Lowercase a selector `Freq` to the wire `RecurrenceFreq`; `NONE` → null. */
 function freqKey(freq: Freq): RecurrenceFreq | null {
@@ -99,7 +86,7 @@ export function RecurrenceSelector({
 }) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const caps = capabilities ?? FULL_CAPS;
+  const caps = capabilities ?? DEFAULT_RECURRENCE_CAPABILITIES;
   const startKey = start ? start.toDateString() : '';
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const startDate = useMemo(() => start ?? new Date(), [startKey]);
