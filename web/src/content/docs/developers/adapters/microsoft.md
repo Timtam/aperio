@@ -74,9 +74,12 @@ flow and token refresh; the adapter sends a `Bearer` token.
   that clock, as Exchange does, is not measured. The cut is dormant today,
   like `clear_recurrence`, because the adapter reads no series masters.
 - **Relative patterns are not written.** `rrule_to_recurrence` has no
-  `relativeMonthly` or `relativeYearly`: a rule with BYSETPOS is refused,
-  but an ordinal BYDAY (`BYDAY=2SU`) goes out as `absoluteMonthly` on the
-  start's day (TODO.md). Reading drops both patterns to no recurrence.
+  `relativeMonthly` or `relativeYearly`. Only a monthly rule with BYDAY and
+  BYSETPOS and no BYMONTHDAY is refused. Any other relative rule goes out as
+  an absolute pattern on the start's day: an ordinal BYDAY (`BYDAY=2SU`) as
+  `absoluteMonthly`, a yearly rule with BYDAY, with or without BYSETPOS, as
+  `absoluteYearly`, and a BYSETPOS beside BYMONTHDAY is dropped (TODO.md).
+  Reading drops both relative patterns to no recurrence.
 
 - **Graph always notifies.** Attendees in the body of a create or an update
   are mailed, and deleting a meeting on the organizer's calendar sends its

@@ -1,6 +1,6 @@
 # Zeitzone einer Serie — Entwurf
 
-Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), von Stufe 5 der Exchange-Teil (PR 8a); die Stufen 5 (Microsoft 365) bis 14 werden ab 2026-11-21 in der Reihenfolge der Stufenliste gebaut (93b).**
+Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), Stufe 5 (Exchange mit PR 8a, Microsoft 365 am 2026-11-21); die Stufen 6 bis 14 werden in der Reihenfolge der Stufenliste gebaut (93b).**
 Toni hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b,
 14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a, 38a
 bis 43b, 46a bis 49a, 51a bis 53a, 57a, 58a, 61a, 62b, 63a und 64a, dazu die Vorlese-Form F). Die Planung lief in zwei

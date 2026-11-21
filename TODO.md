@@ -646,9 +646,12 @@ Siehe DESIGN §4.2.
   `recurrenceTimeZone` beim Zurücklesen nennt.
   🚩 **Microsoft 365: „jeden 2. Sonntag“ wird „jeden 14.“** (gefunden bei
   Stufe 5, älter): `rrule_to_recurrence` kennt beim Schreiben keine relative
-  Monats- oder Jahresregel. `BYDAY=2SU` ohne `BYSETPOS` geht still als
-  `absoluteMonthly` auf den Tag des Beginns, `BYMONTH=3;BYDAY=1FR` als
-  `absoluteYearly`. Das Manifest erlaubt beides (`relative_monthly` und
+  Monats- oder Jahresregel. Abgelehnt wird nur eine Monatsregel mit `BYDAY`
+  und `BYSETPOS` ohne `BYMONTHDAY`. `BYDAY=2SU` geht still als
+  `absoluteMonthly` auf den Tag des Beginns, eine Jahresregel mit `BYDAY`
+  (`BYMONTH=3;BYDAY=1FR`, auch mit `BYSETPOS`, etwa „letzter Werktag im
+  März“) als `absoluteYearly`; ein `BYSETPOS` neben `BYMONTHDAY` fällt weg.
+  Das Manifest erlaubt beides (`relative_monthly` und
   `relative_yearly` stehen auf dem Standard), also bietet der Editor es an.
   Entweder `relativeMonthly`/`relativeYearly` mit `index` schreiben und lesen
   oder beides im Manifest abschalten.
