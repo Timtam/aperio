@@ -2,14 +2,14 @@ import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
 
-// A Cancel button for a modal screen's header-left — the first element a
-// screen-reader user reaches, so they can back out of an editor without swiping
-// through the whole form (the back-swipe works too, but isn't discoverable).
-// Wire via navigation.setOptions({ headerLeft: () => <HeaderCancelButton … /> }).
-// `disabled` while the screen may not be left (a write runs): it stays in
-// place and says it is unavailable.
+// A text button for a modal screen's header: Cancel on the left (the first
+// element a screen-reader user reaches, so they can back out of an editor
+// without swiping through the whole form; useCancelHeader), Save or Send on
+// the right (always on screen, so neither the keyboard nor a long form keeps
+// it out of reach; useActionHeader). `disabled` while it may not be used: it
+// stays in place and says it is unavailable.
 
-export function HeaderCancelButton({
+export function HeaderTextButton({
   label,
   onPress,
   disabled = false,

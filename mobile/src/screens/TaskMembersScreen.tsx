@@ -315,7 +315,7 @@ export default function TaskMembersScreen({
       )}
 
       <View style={styles.addSection}>
-        <Text style={styles.label}>{t('dialogs.taskMembers.addLabel')}</Text>
+        <Text style={styles.label} aria-hidden>{t('dialogs.taskMembers.addLabel')}</Text>
         <View style={styles.addRow}>
           <TextInput
             ref={inputRef}

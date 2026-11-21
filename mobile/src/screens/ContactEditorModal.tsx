@@ -39,6 +39,7 @@ import { CloseOnlyNotice } from '../components/CloseOnlyNotice';
 import { ContactLabelButton } from '../components/ContactLabelButton';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
+import { useActionHeader } from '../components/useActionHeader';
 import { SelectFieldButton } from '../components/SelectFieldButton';
 import { formatLocalDate } from '../intl/dateTimeField';
 import { useListFocusManager } from '../a11y/useListFocusManager';
@@ -566,6 +567,17 @@ export default function ContactEditorModal({
     [],
   );
 
+  // Save in the header, always on screen: below the fold, with the keyboard
+  // open, VoiceOver did not scroll down to it (useActionHeader). Not for a
+  // contact shown read-only.
+  const saveFromHeader = useCallback(() => void save(), [save]);
+  useActionHeader(
+    navigation,
+    notice == null && !viewOnly
+      ? { label: t('mobile.save'), onPress: saveFromHeader, disabled: busy }
+      : null,
+  );
+
   if (notice != null) {
     return <CloseOnlyNotice sentence={notice} onClose={closeNotice} />;
   }
@@ -890,8 +902,8 @@ export default function ContactEditorModal({
               <Text style={styles.addressHeading} accessibilityRole="header">
                 {`${t('dialogs.contact.addressesLabel')} ${i + 1}`}
               </Text>
-              <Text style={styles.subLabel}>
-                {t('dialogs.contact.addressLabel')}
+              <Text style={styles.subLabel} aria-hidden>
+                {t('dialogs.contact.channelLabelField')}
               </Text>
               <TextInput
                 ref={addressFocus.registerRow(i)}
@@ -899,11 +911,11 @@ export default function ContactEditorModal({
                 value={addr.label}
                 onChangeText={(v) => updateAddress(i, 'label', v)}
                 placeholder={t('dialogs.contact.addressLabelHome')}
-                accessibilityLabel={`${t('dialogs.contact.addressLabel')}, ${t('dialogs.contact.addressesLabel')} ${i + 1}`}
+                accessibilityLabel={`${t('dialogs.contact.channelLabelField')}, ${t('dialogs.contact.addressesLabel')} ${i + 1}`}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              <Text style={styles.subLabel}>
+              <Text style={styles.subLabel} aria-hidden>
                 {t('dialogs.contact.addressStreet')}
               </Text>
               <TextInput
@@ -913,7 +925,7 @@ export default function ContactEditorModal({
                 accessibilityLabel={t('dialogs.contact.addressStreet')}
                 multiline
               />
-              <Text style={styles.subLabel}>
+              <Text style={styles.subLabel} aria-hidden>
                 {t('dialogs.contact.addressCity')}
               </Text>
               <TextInput
@@ -922,7 +934,7 @@ export default function ContactEditorModal({
                 onChangeText={(v) => updateAddress(i, 'city', v)}
                 accessibilityLabel={t('dialogs.contact.addressCity')}
               />
-              <Text style={styles.subLabel}>
+              <Text style={styles.subLabel} aria-hidden>
                 {t('dialogs.contact.addressRegion')}
               </Text>
               <TextInput
@@ -931,7 +943,7 @@ export default function ContactEditorModal({
                 onChangeText={(v) => updateAddress(i, 'region', v)}
                 accessibilityLabel={t('dialogs.contact.addressRegion')}
               />
-              <Text style={styles.subLabel}>
+              <Text style={styles.subLabel} aria-hidden>
                 {t('dialogs.contact.addressPostalCode')}
               </Text>
               <TextInput
@@ -942,7 +954,7 @@ export default function ContactEditorModal({
                 autoCapitalize="characters"
                 autoCorrect={false}
               />
-              <Text style={styles.subLabel}>
+              <Text style={styles.subLabel} aria-hidden>
                 {t('dialogs.contact.addressCountry')}
               </Text>
               <TextInput
@@ -1004,22 +1016,6 @@ export default function ContactEditorModal({
         />
       )}
 
-      {!viewOnly && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: busy }}
-          accessibilityLabel={t('mobile.save')}
-          disabled={busy}
-          onPress={() => void save()}
-          style={({ pressed }) => [
-            styles.primaryButton,
-            pressed && styles.primaryPressed,
-            busy && styles.primaryDisabled,
-          ]}
-        >
-          <Text style={styles.primaryButtonText}>{t('mobile.save')}</Text>
-        </Pressable>
-      )}
     </FormScrollView>
   );
 }
@@ -1166,13 +1162,20 @@ function Field({
   const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
+      {/* Every field here names itself (a text field with this label, the
+          date button, "Geburtstag hinzufügen"), so the visible label is
+          hidden from both readers: one stop per field. */}
+      <Text style={styles.label} aria-hidden>
+        {label}
+      </Text>
+      {children}
+      {/* After the control: with the label hidden, a hint before it would be
+          read before the field has a name. */}
       {hint != null && (
         <Text style={styles.hint} accessibilityRole="text">
           {hint}
         </Text>
       )}
-      {children}
     </View>
   );
 }
@@ -1266,15 +1269,6 @@ const makeStyles = (c: ThemeColors) =>
     },
     addButtonText: { fontSize: 15, fontWeight: '600', color: c.link },
     pressed: { opacity: 0.7 },
-    primaryButton: {
-      paddingVertical: 14,
-      borderRadius: 10,
-      backgroundColor: c.accent,
-      alignItems: 'center',
-    },
-    primaryPressed: { backgroundColor: c.accentPressed },
-    primaryDisabled: { backgroundColor: c.accentDisabled },
-    primaryButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
     error: { fontSize: 15, fontWeight: '600', color: c.danger },
     readOnlyBanner: {
       fontSize: 14,

@@ -183,7 +183,7 @@ export default function ColorLabelsScreen() {
         labels.map((label, index) =>
           editingId === label.id ? (
             <View key={label.id} style={styles.field}>
-              <Text style={styles.label}>
+              <Text style={styles.label} aria-hidden>
                 {t('dialogs.colorLabels.renameLabel', { name: label.name })}
               </Text>
               <TextInput
@@ -196,7 +196,7 @@ export default function ColorLabelsScreen() {
                 editable={!busy}
                 autoFocus
               />
-              <Text style={styles.label}>
+              <Text style={styles.label} aria-hidden>
                 {t('dialogs.colorLabels.colorLabel', { name: label.name })}
               </Text>
               <View style={styles.hexRow}>
@@ -339,7 +339,7 @@ export default function ColorLabelsScreen() {
       <Text style={styles.heading} accessibilityRole="header">
         {t('dialogs.colorLabels.newHeading')}
       </Text>
-      <Text style={styles.label}>{t('dialogs.colorLabels.fields.name')}</Text>
+      <Text style={styles.label} aria-hidden>{t('dialogs.colorLabels.fields.name')}</Text>
       <TextInput
         style={styles.input}
         value={newName}
@@ -348,7 +348,7 @@ export default function ColorLabelsScreen() {
         editable={!busy}
         autoCapitalize="sentences"
       />
-      <Text style={styles.label}>{t('dialogs.colorLabels.fields.color')}</Text>
+      <Text style={styles.label} aria-hidden>{t('dialogs.colorLabels.fields.color')}</Text>
       <View style={styles.hexRow}>
         <TextInput
           style={[styles.input, styles.hexInput]}

@@ -914,7 +914,7 @@ export default function TasksScreen({
       </View>
 
       <View style={styles.groupByBar}>
-        <Text style={styles.groupByLabel} importantForAccessibility="no">
+        <Text style={styles.groupByLabel} aria-hidden>
           {t('views.tasks.groupBy.label')}
         </Text>
         {(['state', 'list'] as const).map((mode) => {

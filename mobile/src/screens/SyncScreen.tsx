@@ -579,7 +579,7 @@ export default function SyncScreen() {
           <Text style={styles.hint} accessibilityRole="text">
             {t('dialogs.settings.sync.adoptRemoteE2eHint')}
           </Text>
-          <Text style={styles.label}>
+          <Text style={styles.label} aria-hidden>
             {t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel')}
           </Text>
           <TextInput
@@ -703,7 +703,7 @@ export default function SyncScreen() {
               <Text style={styles.hint} accessibilityRole="text">
                 {t('dialogs.settings.sync.passphraseChangeHint')}
               </Text>
-              <Text style={styles.label}>{t('dialogs.settings.sync.passphraseChangeOld')}</Text>
+              <Text style={styles.label} aria-hidden>{t('dialogs.settings.sync.passphraseChangeOld')}</Text>
               <TextInput
                 style={styles.input}
                 value={changeOldPp}
@@ -713,7 +713,7 @@ export default function SyncScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              <Text style={styles.label}>{t('dialogs.settings.sync.passphraseChangeNew')}</Text>
+              <Text style={styles.label} aria-hidden>{t('dialogs.settings.sync.passphraseChangeNew')}</Text>
               <TextInput
                 style={styles.input}
                 value={changeNewPp}
@@ -746,7 +746,7 @@ export default function SyncScreen() {
               <Text style={styles.hint} accessibilityRole="text">
                 {t('dialogs.settings.sync.disableE2eHint')}
               </Text>
-              <Text style={styles.label}>{t('dialogs.settings.sync.passphraseChangeOld')}</Text>
+              <Text style={styles.label} aria-hidden>{t('dialogs.settings.sync.passphraseChangeOld')}</Text>
               <TextInput
                 style={styles.input}
                 value={disablePp}
@@ -783,7 +783,7 @@ export default function SyncScreen() {
             <Text style={styles.warning} accessibilityRole="text">
               {t('dialogs.settings.sync.e2eIrreversibleWarning')}
             </Text>
-            <Text style={styles.label}>{t('dialogs.settings.sync.e2ePassphrase')}</Text>
+            <Text style={styles.label} aria-hidden>{t('dialogs.settings.sync.e2ePassphrase')}</Text>
             <TextInput
               style={styles.input}
               value={e2ePassphrase}

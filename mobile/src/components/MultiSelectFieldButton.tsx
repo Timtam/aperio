@@ -45,7 +45,9 @@ export function MultiSelectFieldButton<T extends string | number>({
 
   return (
     <View style={styles.field}>
-      <Text style={styles.legend} importantForAccessibility="no">
+      {/* The button names itself; aria-hidden hides the legend from both
+          readers (iOS ignores importantForAccessibility). */}
+      <Text style={styles.legend} aria-hidden>
         {label}
       </Text>
       <Pressable

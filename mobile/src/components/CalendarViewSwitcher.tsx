@@ -1,8 +1,8 @@
-import { SegmentedControl } from '@expo/ui/community/segmented-control';
 import { useTranslation } from 'react-i18next';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import type { CalendarViewKind } from './calendarViews';
+import { NamedSegmentedControl } from './NamedSegmentedControl';
 
 // Day ⇄ Week ⇄ Month ⇄ Agenda ⇄ Year view switch — the mobile analogue of the
 // desktop toolbar's view switcher (sibling calendar views, not separate tabs).
@@ -11,10 +11,11 @@ import type { CalendarViewKind } from './calendarViews';
 // VoiceOver/TalkBack get native segmented-control semantics. Selecting the
 // already-active view is a no-op.
 //
-// Its name: on iOS on the control itself (@expo/ui 58's `accessibilityLabel`,
-// a SwiftUI label). A label on the plain wrapper View never reached VoiceOver,
-// since iOS reads no label from a view that is not an accessibility element.
-// Android has no label on the control, and keeps the wrapper's.
+// Its name: on iOS the control is a named container, which VoiceOver speaks as
+// focus enters it (NamedSegmentedControl.ios.tsx). A label on the plain
+// wrapper View never reached VoiceOver, since iOS reads no label from a view
+// that is not an accessibility element. Android has no name on the control,
+// and keeps the wrapper's.
 
 export type { CalendarViewKind };
 
@@ -42,12 +43,12 @@ export function CalendarViewSwitcher({
       accessibilityLabel={Platform.OS === 'android' ? t('toolbar.viewSwitch') : undefined}
       style={styles.row}
     >
-      <SegmentedControl
-        accessibilityLabel={t('toolbar.viewSwitch')}
+      <NamedSegmentedControl
+        name={t('toolbar.viewSwitch')}
         values={options.map((o) => o.label)}
         selectedIndex={selectedIndex}
-        onChange={(e) => {
-          const opt = options[e.nativeEvent.selectedSegmentIndex];
+        onSelect={(index) => {
+          const opt = options[index];
           if (opt && opt.key !== active) onSelect(opt.key);
         }}
       />

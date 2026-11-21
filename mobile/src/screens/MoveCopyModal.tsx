@@ -489,7 +489,7 @@ function MoveCopyScreen({
       )}
       {sectionsManageable && sectionDraft !== null && (
         <View style={styles.field}>
-          <Text style={styles.legend}>{t('dialogs.task.section.nameField')}</Text>
+          <Text style={styles.legend} aria-hidden>{t('dialogs.task.section.nameField')}</Text>
           <TextInput
             style={styles.input}
             value={sectionDraft}

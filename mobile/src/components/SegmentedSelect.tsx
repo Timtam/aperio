@@ -1,7 +1,7 @@
-import { SegmentedControl } from '@expo/ui/community/segmented-control';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { NamedSegmentedControl } from './NamedSegmentedControl';
 
 export interface SegmentedOption<T extends string | number> {
   value: T;
@@ -9,18 +9,18 @@ export interface SegmentedOption<T extends string | number> {
 }
 
 /**
- * Native single-select for SMALL, fixed option sets (task status, priority, the
- * calendar view switch). A thin wrapper over @expo/ui's SegmentedControl, which
- * renders a real UISegmentedControl (SwiftUI Picker, .segmented) on iOS and a
- * Material SingleChoiceSegmentedButtonRow on Android — so VoiceOver/TalkBack get
- * genuinely native segmented-control semantics instead of RN's synthesized
- * "radio button" text. For long or variable option lists use {@link RadioGroup}
- * instead: a segmented control can only hold a handful of segments.
+ * Native single-select for SMALL, fixed option sets (task priority and effort,
+ * the move/copy choices). A thin wrapper over {@link NamedSegmentedControl}: a
+ * real UISegmentedControl on iOS and a Material SingleChoiceSegmentedButtonRow
+ * on Android, so VoiceOver/TalkBack get genuinely native segmented-control
+ * semantics instead of RN's synthesized "radio button" text. For long or
+ * variable option lists use {@link RadioGroup} instead: a segmented control can
+ * only hold a handful of segments.
  *
- * On iOS the legend is the control's own name (@expo/ui 58's
- * `accessibilityLabel`, a SwiftUI label), and the visible legend is hidden from
- * VoiceOver so it is not read twice. Android's control takes no label, so there
- * the legend Text stays a stop of its own before it (as in RadioGroup).
+ * Its name: on iOS the control carries the legend as a named container, which
+ * VoiceOver speaks as focus enters it, so the visible legend is hidden from
+ * VoiceOver and the field is one stop. Android's control takes no name, so
+ * there the legend Text stays a stop of its own before it (as in RadioGroup).
  * Selection is mapped by index (robust against two options sharing a label).
  */
 export function SegmentedSelect<T extends string | number>({
@@ -44,12 +44,12 @@ export function SegmentedSelect<T extends string | number>({
       <Text style={styles.legend} aria-hidden={Platform.OS === 'ios'}>
         {label}
       </Text>
-      <SegmentedControl
-        accessibilityLabel={label}
+      <NamedSegmentedControl
+        name={label}
         values={options.map((o) => o.label)}
         selectedIndex={selectedIndex}
-        onChange={(e) => {
-          const opt = options[e.nativeEvent.selectedSegmentIndex];
+        onSelect={(index) => {
+          const opt = options[index];
           if (opt) onChange(opt.value);
         }}
       />

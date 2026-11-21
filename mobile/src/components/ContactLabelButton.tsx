@@ -105,6 +105,8 @@ export function ContactLabelButton({
         >
           <RadioGroup
             label={t('dialogs.contact.channelLabelField')}
+            // The dialog's title is the same word.
+            hideLegend
             value={choice}
             options={options}
             onChange={setChoice}

@@ -613,7 +613,7 @@ function AllDayFields({
       )}
       {ownTime && (
         <View style={styles.amountField}>
-          <Text style={styles.label}>{t('reminders.clockLabel')}</Text>
+          <Text style={styles.label} aria-hidden>{t('reminders.clockLabel')}</Text>
           <TextInput
             style={styles.input}
             value={clockDraft}
@@ -661,7 +661,7 @@ function WholeNumberField({
   }, [value]);
   return (
     <View style={styles.amountField}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.label} aria-hidden>{label}</Text>
       <TextInput
         style={styles.input}
         value={draft}
@@ -739,7 +739,7 @@ function AbsoluteFields({
   const rowPrefix = t('reminders.rowLabel', { n: position });
   return (
     <View style={styles.field}>
-      <Text style={styles.label}>{t('reminders.absoluteAtLabel')}</Text>
+      <Text style={styles.label} aria-hidden>{t('reminders.absoluteAtLabel')}</Text>
       <TextInput
         style={styles.input}
         value={date}

@@ -1622,7 +1622,7 @@ export function CalendarDayList({
     const join = joinAction(ev, t);
     const actions: MenuAction[] = [
       ...(join ? [join.action] : []),
-      { name: 'activate', label: t('mobile.editTaskLabel') },
+      { name: 'activate', label: t('dialogs.event.editTitle') },
       { name: 'moveCopy', label: t('mobile.moveCopy') },
       // The entry point to event groups. It sits with the non-destructive
       // verbs because it is a statement ABOUT the event, not something done to

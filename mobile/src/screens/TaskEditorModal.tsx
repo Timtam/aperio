@@ -93,6 +93,7 @@ import { SwitchRow } from '../components/SwitchRow';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { CloseOnlyNotice } from '../components/CloseOnlyNotice';
 import { useCancelHeader } from '../components/useCancelHeader';
+import { useActionHeader } from '../components/useActionHeader';
 import { formatLocalDate, formatLocalTime } from '../intl/dateTimeField';
 import { useShowHiddenTaskListTargets } from '../settings/hiddenTargets';
 import { currentUserForList } from '../state/currentUser';
@@ -290,6 +291,11 @@ export default function TaskEditorModal({
   const [createdTask, setCreatedTask] = useState<Task | null>(null);
   const taskId = taskIdParam ?? createdTask?.id;
   const [loading, setLoading] = useState(taskIdParam != null);
+  // A save in flight: the header Save stays in reach after a press, so a
+  // second press must not write the task twice; Cancel and the swipe wait for
+  // it too, as in the event editor (decision 210).
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   // The selected list's assignable member pool + the connected account's own id
   // ("me"), for the assignee picker. Both empty/null for local lists and
@@ -365,6 +371,7 @@ export default function TaskEditorModal({
   const closeNotice = useCallback(() => navigation.goBack(), [navigation]);
   useCancelHeader(navigation, 'mobile.cancel', {
     close: notice != null ? closeNotice : undefined,
+    writing: saving,
   });
 
   // Every dismissal (Save, Cancel, header back, swipe) bumps the data version so
@@ -1317,6 +1324,26 @@ export default function TaskEditorModal({
     showNotice,
   ]);
 
+  // Save in the header, always on screen: below the fold, with the keyboard
+  // open, VoiceOver did not scroll down to it (useActionHeader).
+  const saveFromHeader = useCallback(async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await save();
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }, [save]);
+  useActionHeader(
+    navigation,
+    notice == null
+      ? { label: t('mobile.save'), onPress: saveFromHeader, disabled: blocked || saving }
+      : null,
+  );
+
   if (notice != null) {
     return <CloseOnlyNotice sentence={notice} onClose={closeNotice} />;
   }
@@ -1338,7 +1365,7 @@ export default function TaskEditorModal({
       )}
 
       <View style={styles.field}>
-        <Text style={styles.legend}>{t('dialogs.task.fields.title')}</Text>
+        <Text style={styles.legend} aria-hidden>{t('dialogs.task.fields.title')}</Text>
         <TitleField
           ref={titleRef}
           style={styles.input}
@@ -1509,7 +1536,7 @@ export default function TaskEditorModal({
       )}
 
       <View style={styles.field}>
-        <Text style={styles.legend}>{t('dialogs.task.fields.description')}</Text>
+        <Text style={styles.legend} aria-hidden>{t('dialogs.task.fields.description')}</Text>
         <TextInput
           style={[styles.input, styles.multiline]}
           value={form.description}
@@ -1702,30 +1729,6 @@ export default function TaskEditorModal({
         </View>
       )}
 
-      <View style={styles.buttons}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('mobile.save')}
-          accessibilityState={{ disabled: blocked }}
-          disabled={blocked}
-          onPress={() => void save()}
-          style={({ pressed }) => [
-            styles.button,
-            pressed && styles.buttonPressed,
-            blocked && styles.buttonDisabled,
-          ]}
-        >
-          <Text style={styles.buttonText}>{t('mobile.save')}</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('mobile.cancel')}
-          onPress={() => navigation.goBack()}
-          style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
-        >
-          <Text style={styles.ghostButtonText}>{t('mobile.cancel')}</Text>
-        </Pressable>
-      </View>
     </FormScrollView>
   );
 }
@@ -1808,7 +1811,11 @@ function DateTimeField({
   // strings, so save()/toStored() are unchanged — only the input UI differs.
   return (
     <View style={styles.field} ref={fieldRef}>
-      <Text style={styles.legend}>{legend}</Text>
+      {/* A heading, not a duplicate: it introduces the block's day, time and
+          hint, and the rotor jumps between the blocks of a long editor. */}
+      <Text style={styles.legend} accessibilityRole="header">
+        {legend}
+      </Text>
       {hint !== '' && (
         <Text style={styles.hint} accessibilityRole="text">
           {hint}
@@ -1982,17 +1989,6 @@ const makeStyles = (c: ThemeColors) =>
     draftTitle: { flex: 1, fontSize: 16, color: c.textPrimary },
     subtaskAddRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
     subtaskInput: { flex: 1 },
-    buttons: { flexDirection: 'row', gap: 10, marginTop: 8 },
-    button: {
-      paddingVertical: 14,
-      paddingHorizontal: 18,
-      borderRadius: 10,
-      backgroundColor: c.accent,
-      alignItems: 'center',
-    },
-    buttonPressed: { backgroundColor: c.accentPressed },
-    buttonDisabled: { opacity: 0.5 },
-    buttonText: { fontSize: 17, fontWeight: '700', color: c.textOnAccent },
     ghostButton: {
       paddingVertical: 14,
       paddingHorizontal: 18,

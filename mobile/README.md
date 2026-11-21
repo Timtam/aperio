@@ -57,6 +57,11 @@ cycle. Expo SDK 58 generates a `SceneDelegate` and starts React Native in
   whenever Android recreates the activity, which would open the tap again. It
   takes the link from the activity's launch intent once per launch
   (`CalFfi.takeLaunchLink`, the rules of the file import's launch intent).
+- **Named segmented controls.** @expo/ui 58's `accessibilityLabel` on a
+  segmented control is not spoken: it lands on the control's own node, which
+  VoiceOver never focuses. `NamedSegmentedControl.ios.tsx` builds the Picker
+  itself and marks it `.accessibilityElement(children: .contain)` before the
+  label, so VoiceOver speaks the name as focus enters the control.
 - **VoiceOver interruptions.** React Native 0.88 posts a layout change to
   VoiceOver for every changed text, which cuts announcements. 0.89 skips text
   in hidden subtrees; `patches/react-native+0.88.1.patch` backports that

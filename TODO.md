@@ -1025,13 +1025,26 @@ Vorschläge sind nicht aufgenommen.
       (4) ein Versuch mit dem nativen Picker und Switch von @expo/ui (beide
       jetzt mit Namen), nur übernehmen, wenn VoiceOver sie per Wischen
       erreicht.
+      ↳ Teil gebaut (Toni, 2026-11-21, nach Build 74): doppelte Stopps weg
+      (sichtbare Beschriftung `aria-hidden`, wo das Feld denselben Namen
+      trägt; fünf Stellen waren nur für Android versteckt), Segment-Umschalter
+      auf iOS als benannter Container (`NamedSegmentedControl`), Blocktitel
+      „Geplant für“/„Fällig“/„Teilnehmer“ als Überschriften, Speichern/Senden
+      als Kopfzeilen-Knopf (noch Pressable, siehe (2)).
+- [ ] **Magic Tap und waagerechtes Drei-Finger-Wischen nur, wo ein Bildschirm
+      sie nutzt** (Recherche 2026-11-21, bestätigt): `A11yGesturesModule.swift`
+      meldet beide am Fenster immer als erledigt, auch wo kein Bildschirm eine
+      Aktion angemeldet hat. Das schluckt außerhalb des Kalenders das
+      System-Magic-Tap (Musik Play/Pause) und die Rückmeldung am Rand. Braucht
+      eine native Markierung „aktive Route hat eine Aktion, Sperre aus“, neu
+      gesetzt bei Navigation, Sperre und An-/Abmelden.
 - [ ] **SDK-58-Risiken beobachten:** die Farbe der Statusleiste bei fest
       hellem oder dunklem Design (react-native-screens #5137, offen); die
       Polsterung der Tab-Wurzeln auf größenveränderbaren iPhones (iPhone Duo,
       Leiste als Seitenschiene); Pressables in der Kopfzeile unter
       react-native-screens 4.30. (`BGTaskScheduler.submit` meldet Xcode 27.1
       nicht als veraltet: Build 73, 2026-11-20.)
-- [ ] **Feedback-Formular am Handy: bei offener Tastatur nicht bis „Senden“
+- [x] **Feedback-Formular am Handy: bei offener Tastatur nicht bis „Senden“
       wischbar** (Toni, 2026-11-19, Build 72, VoiceOver): Steht der Fokus in
       einem Textfeld und die Tastatur ist offen, erreicht Wischen nach rechts
       den Senden-Knopf nicht; nur Drei-Finger-Blättern hilft. Toni hat es nur
@@ -1042,6 +1055,14 @@ Vorschläge sind nicht aufgenommen.
       „Synchronisation“ (gleicher Stapel, gleiche Hülle) und in einem Editor;
       dann die Ursache (Polsterhöhe, Rahmen der ScrollView unter der
       Tastatur) beheben, nicht nur den Knopf versetzen.
+      ↳ Gebaut (2026-11-21): Mit Build 74 traf es auch den Aufgaben-Editor
+      (Priorität/Aufwand bei neuer Aufgabe, nur mit offener Tastatur). In
+      Blättern rechnete `FormScrollView` den Tastaturabstand ohne den
+      Abstand des Blatts vom Bildschirmrand, ein Streifen lag hinter der
+      Tastatur; jetzt vom Fensterrand aus. Speichern und Senden sitzen in der
+      Kopfzeile (`useActionHeader`). Für den geschobenen Feedback-Bildschirm
+      war die Rechnung schon richtig; warum VoiceOver dort bei offener
+      Tastatur nicht weiterscrollt, ist nicht geklärt.
 - [ ] **Serien ohne Zeitzone reparierbar machen** (Toni, 2026-11-19): Eine
       iCloud-Serie steht seit der Zeitumstellung eine Stunde zu früh, auch im
       Kalender des iPhones. Sie ist also ohne Zone (in UTC) gespeichert.

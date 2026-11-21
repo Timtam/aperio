@@ -307,7 +307,7 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
 
   return (
     <>
-      <Text style={styles.label} nativeID="sync-device-name-label">
+      <Text style={styles.label} aria-hidden nativeID="sync-device-name-label">
         {t('dialogs.settings.sync.deviceName')}
       </Text>
       <TextInput

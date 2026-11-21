@@ -858,7 +858,7 @@ export default function DayStartReviewModal({
           ) : null}
         </Text>
         {meta != null && (
-          <Text style={styles.rowMeta} importantForAccessibility="no">
+          <Text style={styles.rowMeta} aria-hidden>
             {meta}
           </Text>
         )}

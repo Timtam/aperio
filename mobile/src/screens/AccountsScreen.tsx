@@ -1392,7 +1392,7 @@ export default function AccountsScreen() {
         busy={submitting}
       >
         <View style={styles.field}>
-          <Text style={styles.label}>{t('dialogs.accounts.nameLabel')}</Text>
+          <Text style={styles.label} aria-hidden>{t('dialogs.accounts.nameLabel')}</Text>
           <TextInput
             ref={nameInput}
             style={styles.input}

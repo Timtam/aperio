@@ -1695,6 +1695,7 @@
         "colorLabel": "Farb-Label"
       },
       "attendees": {
+        "inputLabel": "Neuer Teilnehmer, Name oder E-Mail",
         "placeholder": "Name oder E-Mail eingeben …",
         "popupLabel": "Kontaktvorschläge",
         "chipsLabel": "Aktuelle Teilnehmer",

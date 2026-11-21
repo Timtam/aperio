@@ -359,7 +359,7 @@ export function SyncTargetSchemaForm({
       )}
 
       <View style={styles.field}>
-        <Text style={styles.label}>
+        <Text style={styles.label} aria-hidden>
           {t('dialogs.settings.sync.deviceName')}
         </Text>
         <TextInput
@@ -373,7 +373,7 @@ export function SyncTargetSchemaForm({
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>
+        <Text style={styles.label} aria-hidden>
           {t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel')}
         </Text>
         <TextInput
@@ -389,7 +389,7 @@ export function SyncTargetSchemaForm({
           )}
           accessibilityHint={t('dialogs.settings.sync.connectEmptyReveal')}
         />
-        <Text style={styles.hint}>
+        <Text style={styles.hint} aria-hidden>
           {t('dialogs.settings.sync.connectEmptyReveal')}
         </Text>
       </View>

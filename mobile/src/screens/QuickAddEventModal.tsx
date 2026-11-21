@@ -282,7 +282,7 @@ export default function QuickAddEventModal({
       )}
 
       <View style={styles.field}>
-        <Text style={styles.legend}>{t('dialogs.event.fields.title')}</Text>
+        <Text style={styles.legend} aria-hidden>{t('dialogs.event.fields.title')}</Text>
         <TitleField
           ref={titleRef}
           style={styles.input}
