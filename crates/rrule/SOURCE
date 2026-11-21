@@ -23,3 +23,8 @@ licence-files = LICENSE-MIT, LICENSE-APACHE (the upstream root at that commit; t
 # at that commit; only src/bin differs.
 
 # Modified files, one line each. Each says so in its first line.
+src/lib.rs: drops #![deny(clippy::all)] (the workspace's -D warnings covers
+  it, and a crate-level deny overrode the workspace's lint choices) and
+  #![warn(missing_docs)] (71 undocumented error variants and fields).
+src/core/rrule.rs: clippy useless_borrows_in_formatting (two format! args).
+src/iter/counter_date.rs: clippy manual_contains.

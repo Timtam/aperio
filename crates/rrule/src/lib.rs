@@ -1,3 +1,4 @@
+// Modified for Aperio (see SOURCE).
 //! A performant rust implementation of recurrence rules as defined in the [iCalendar RFC](https://datatracker.ietf.org/doc/html/rfc5545).
 //!
 //! This crate provides [`RRuleSet`] for working with recurrence rules. It has a collection of `DTSTART`, `RRULE`s, `EXRULE`s, `RDATE`s and `EXDATE`s. Both the `RRULE` and `EXRULE`
@@ -89,8 +90,6 @@
 //!
 
 #![forbid(unsafe_code)]
-#![deny(clippy::all)]
-#![warn(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod core;
