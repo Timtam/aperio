@@ -951,7 +951,7 @@ fn parse_iso_duration_to_minutes_before(raw: &str) -> Option<i64> {
 
 /// Pull DTSTART and DTEND into UTC. Several shapes are possible:
 ///   - DATE-TIME with explicit UTC ("Z" suffix) — most common
-///   - DATE-TIME with a TZID — converted to UTC via chrono-tz
+///   - DATE-TIME with a TZID — converted to UTC via cal_core::Zone
 ///     (icalendar already does this when it can; we accept naive
 ///     and assume UTC as a last-resort fallback)
 ///   - DATE without time — all-day event; we anchor at 00:00 UTC
@@ -1001,11 +1001,12 @@ fn datetime_to_utc(
                 icalendar::CalendarDateTime::WithTimezone { date_time, tzid } => {
                     let resolved = resolve_with_tzid(date_time, &tzid, zones)
                         .unwrap_or_else(|| Utc.from_utc_datetime(&date_time));
-                    let named = match tzid.parse::<chrono_tz::Tz>() {
-                        Ok(_) => tzid,
-                        Err(_) => cal_core::windows_zone::tzdata_for_windows(&tzid)
+                    let named = if cal_core::Zone::named(&tzid).is_some() {
+                        tzid
+                    } else {
+                        cal_core::windows_zone::tzdata_for_windows(&tzid)
                             .map(str::to_string)
-                            .unwrap_or(tzid),
+                            .unwrap_or(tzid)
                     };
                     (resolved, false, Some(named))
                 }
@@ -1081,24 +1082,19 @@ fn naive_date_to_utc(d: NaiveDate) -> DateTime<Utc> {
         .unwrap_or_else(|| Utc.from_utc_datetime(&midnight))
 }
 
-/// The instant a wall-clock time names in the zone `tzid`: a tzdata name, a
-/// Windows id through the CLDR table, or else a zone the body defines.
+/// The instant a wall-clock time names in the zone `tzid`: a tzdata name in
+/// exact case, a Windows id through the CLDR table, or else a zone the body
+/// defines. A wall time the zone skips or shows twice has none
+/// (`WallPolicy::Strict`), and the body is then not asked.
 fn resolve_with_tzid(
     naive: NaiveDateTime,
     tzid: &str,
     zones: &ZoneDefinitions,
 ) -> Option<DateTime<Utc>> {
-    use chrono_tz::Tz;
-    let tz: Option<Tz> = tzid.parse().ok().or_else(|| {
-        cal_core::windows_zone::tzdata_for_windows(tzid)?
-            .parse()
-            .ok()
-    });
+    let tz = cal_core::Zone::named(tzid)
+        .or_else(|| cal_core::Zone::named(cal_core::windows_zone::tzdata_for_windows(tzid)?));
     match tz {
-        Some(tz) => {
-            let local = tz.from_local_datetime(&naive).single()?;
-            Some(local.with_timezone(&Utc))
-        }
+        Some(tz) => tz.to_utc(naive, cal_core::WallPolicy::Strict),
         None => zones.resolve(tzid, naive),
     }
 }
@@ -1398,9 +1394,10 @@ fn apply_common(
         // it takes the bare-UTC `else` branch: `vtimezone_for` emits no VTIMEZONE
         // for UTC, so writing `DTSTART;TZID=UTC` would be an undefined reference
         // (the very RFC 5545 §3.6.5 violation this path exists to avoid).
+        let ref_year = event.start.year();
         match (
-            zoned_datetime(event.start, tzid),
-            zoned_datetime(event.end, tzid),
+            zoned_datetime(event.start, tzid, ref_year),
+            zoned_datetime(event.end, tzid, ref_year),
         ) {
             (Some(start), Some(end)) => {
                 ical_ev.starts(start);
@@ -1630,10 +1627,9 @@ pub fn mint_recurrence_id(
             format!("RECURRENCE-ID;VALUE=DATE:{}", day.format("%Y%m%d"))
         }
         SlotForm::Zoned(tzid) => {
-            let tz: chrono_tz::Tz = tzid
-                .parse()
-                .map_err(|_| SlotRefusal::UnknownZone(tzid.clone()))?;
-            let naive = slot.with_timezone(&tz).naive_local();
+            let tz = cal_core::Zone::named(&tzid)
+                .ok_or_else(|| SlotRefusal::UnknownZone(tzid.clone()))?;
+            let naive = tz.wall(slot);
             if resolve_with_tzid(naive, &tzid, &ZoneDefinitions::default()) != Some(slot) {
                 return Err(SlotRefusal::AmbiguousLocalTime);
             }
@@ -1655,13 +1651,14 @@ pub fn format_utc_compact(dt: DateTime<Utc>) -> String {
 
 /// A `DTSTART`/`DTEND` value carrying its IANA zone (`;TZID=<zone>:<local
 /// wall-clock>`), so a zoned recurring master round-trips with its zone intact.
-/// Returns `None` for a zone `chrono-tz` can't resolve, so the caller can fall
-/// back to a plain UTC instant rather than emit a broken property.
-fn zoned_datetime(instant: DateTime<Utc>, tzid: &str) -> Option<DatePerhapsTime> {
-    let tz: chrono_tz::Tz = tzid.parse().ok()?;
+/// Returns `None` for a zone [`crate::vtimezone::writable_zone`] refuses — the
+/// same zones `vtimezone_for` writes no definition for — so the caller falls
+/// back to a plain UTC instant rather than emit a TZID nothing defines.
+fn zoned_datetime(instant: DateTime<Utc>, tzid: &str, ref_year: i32) -> Option<DatePerhapsTime> {
+    let tz = crate::vtimezone::writable_zone(tzid, ref_year)?;
     Some(DatePerhapsTime::DateTime(
         icalendar::CalendarDateTime::WithTimezone {
-            date_time: instant.with_timezone(&tz).naive_local(),
+            date_time: tz.wall(instant),
             tzid: tzid.to_string(),
         },
     ))
@@ -2414,6 +2411,41 @@ END:VCALENDAR\r
         assert!(!ical.contains("VTIMEZONE"), "no VTIMEZONE:\n{ical}");
         assert!(!ical.contains("TZID="), "no TZID:\n{ical}");
         assert!(ical.contains("DTSTART;VALUE=DATE:"), "DATE start:\n{ical}");
+    }
+
+    #[test]
+    fn a_series_beyond_the_bundled_years_writes_bare_utc() {
+        // Near the end of the years the bundled tzdata covers, no VTIMEZONE
+        // can be written, so no TZID is either: the bare-UTC path.
+        let body = "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VEVENT
+UID:far@aperio
+SUMMARY:Far
+DTSTART;TZID=Europe/Berlin:99950520T170000
+DTEND;TZID=Europe/Berlin:99950520T173000
+RRULE:FREQ=DAILY;COUNT=2
+END:VEVENT
+END:VCALENDAR
+";
+        let ev = parse_calendar_data(body, "cal-1").unwrap().remove(0);
+        assert_eq!(
+            ev.recurrence.as_ref().unwrap().tzid.as_deref(),
+            Some("Europe/Berlin")
+        );
+        let ical = event_to_ical(&ev);
+        assert!(
+            !ical.contains("VTIMEZONE"),
+            "no VTIMEZONE:
+{ical}"
+        );
+        assert!(
+            !ical.contains("TZID="),
+            "no TZID:
+{ical}"
+        );
+        assert!(ical.contains("DTSTART:99950520T150000Z"), "{ical}");
     }
 
     #[test]

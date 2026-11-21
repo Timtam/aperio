@@ -3290,7 +3290,6 @@ version = "0.2.0"
 dependencies = [
  "cal-core",
  "chrono",
- "chrono-tz",
  "icalendar",
  "serde_json",
  "thiserror 1.0.69",

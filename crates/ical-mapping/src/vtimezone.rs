@@ -7,20 +7,26 @@
 //! recurring event with a `COUNT` bound (it can't resolve the zone to compute the
 //! Nth occurrence), so a "repeat 2×" event silently lost its rule.
 //!
-//! We emit a `VTIMEZONE` derived from `chrono-tz`'s ACTUAL transitions — not a
-//! hand-rolled table. `chrono-tz` doesn't expose its transition list publicly
-//! (the `TimeSpans` trait is private), so we probe the offset across a year and
-//! binary-search the exact transition instants. A zone whose onsets follow a
+//! We emit a `VTIMEZONE` derived from the zone's ACTUAL transitions — not a
+//! hand-rolled table — as cal_core::Zone reads them from the tzdata bundled
+//! with jiff-tzdb: every change of the total offset, with tzdata's
+//! daylight-saving flag and abbreviation for it. A zone whose onsets follow a
 //! fixed yearly Gregorian rule (Berlin, New York, Sydney, …) gets the compact
-//! DAYLIGHT + STANDARD yearly RRULEs Apple/Thunderbird emit. A zone whose onsets
-//! DON'T (the Ramadan-tracking zones Africa/Casablanca, Asia/Gaza, … whose
-//! transitions drift ~11 days/year; America/Santiago's varying week) gets each
-//! real transition emitted explicitly across the event's window — a single
-//! yearly rule would place the onset weeks off and shift events by an hour on
-//! strict clients. Zones without DST get a single fixed STANDARD.
+//! DAYLIGHT + STANDARD yearly RRULEs Apple/Thunderbird emit. A zone whose
+//! onsets DON'T (Ramadan-tracking Asia/Gaza, whose transitions drift ~11
+//! days/year; America/Santiago's varying week; Africa/Casablanca, which tracked
+//! Ramadan until it stayed on +00 from 2026-09-20) gets each real transition
+//! emitted explicitly across the event's window — a single yearly rule would
+//! place the onset weeks off and shift events by an hour on strict clients.
+//! Zones without DST get a single fixed STANDARD.
+//!
+//! The bundled data is tzdata's rearguard form, so the labels are the
+//! conventional ones: Europe/Dublin's winter GMT is its STANDARD and its summer
+//! IST its DAYLIGHT. Numeric abbreviations are written as tzdata writes them
+//! (`TZNAME:+04`).
 
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone};
-use chrono_tz::{OffsetComponents, OffsetName, Tz};
+use cal_core::Zone;
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone, Utc};
 
 /// A detected offset change: the first UTC instant on the new offset, plus the
 /// offsets on either side and the new side's DST flag + abbreviation.
@@ -33,14 +39,32 @@ struct Transition {
     to_name: String,
 }
 
-/// A `VTIMEZONE` block (CRLF-terminated iCalendar lines, no trailing CRLF) for
-/// `tzid`, or `None` for UTC / an unresolvable zone (a bare-UTC `DTSTART` needs
-/// none). `ref_year` is the event's start year.
-pub fn vtimezone_for(tzid: &str, ref_year: i32) -> Option<String> {
+/// The zone a `TZID` is written with, or `None` where none may be: "UTC" in
+/// any case (a bare-UTC value needs no definition), a name that is not
+/// tzdata's own in exact case, or an event so far out that the definition's
+/// years (the one before the event to [`IRREGULAR_HORIZON_YEARS`] after it,
+/// and the next) leave the years the bundled data covers. ONE predicate for
+/// `zoned_datetime` (mapping.rs) and [`vtimezone_for`]: a `TZID` written
+/// without its `VTIMEZONE` breaks RFC 5545 §3.6.5, and iCloud then drops a
+/// `COUNT` rule.
+pub(crate) fn writable_zone(tzid: &str, ref_year: i32) -> Option<Zone> {
     if tzid.eq_ignore_ascii_case("UTC") {
         return None;
     }
-    let tz: Tz = tzid.parse().ok()?;
+    let years = cal_core::COVERED_YEARS;
+    let first = ref_year.checked_sub(1)?;
+    let last = ref_year.checked_add(IRREGULAR_HORIZON_YEARS + 1)?;
+    if !years.contains(&first) || !years.contains(&last) {
+        return None;
+    }
+    Zone::named(tzid)
+}
+
+/// A `VTIMEZONE` block (CRLF-terminated iCalendar lines, no trailing CRLF) for
+/// `tzid`, or `None` where [`writable_zone`] refuses it (a bare-UTC `DTSTART`
+/// needs none). `ref_year` is the event's start year.
+pub fn vtimezone_for(tzid: &str, ref_year: i32) -> Option<String> {
+    let tz = writable_zone(tzid, ref_year)?;
 
     // Anchor the observance onsets to the year BEFORE the event. A VTIMEZONE
     // observance applies from its `DTSTART` onward, so a strict client (iCloud)
@@ -51,7 +75,7 @@ pub fn vtimezone_for(tzid: &str, ref_year: i32) -> Option<String> {
     // event's year, and (for a fixed-rule zone) the yearly RRULE still extends
     // forward. (Apple anchors Europe/Berlin at 19810329 for the same reason.)
     let base_year = ref_year - 1;
-    let transitions = year_transitions(&tz, base_year)?;
+    let transitions = year_transitions(tz, base_year)?;
 
     // The current rule = the latest STANDARD-onset and DAYLIGHT-onset transitions
     // in the base year.
@@ -71,21 +95,36 @@ pub fn vtimezone_for(tzid: &str, ref_year: i32) -> Option<String> {
         // a single yearly rule would resolve the wrong offset, so emit each real
         // transition explicitly across the event's window instead.
         (Some(std_t), Some(dst_t)) => {
-            if rule_is_stable(&tz, base_year) {
+            if rule_is_stable(tz, base_year) {
                 out.push_str(&sub_component("DAYLIGHT", dst_t));
                 out.push_str(&sub_component("STANDARD", std_t));
             } else {
                 out.push_str(&explicit_observances(
-                    &tz,
+                    tz,
                     base_year,
                     ref_year + IRREGULAR_HORIZON_YEARS,
                 ));
             }
         }
-        // No DST change in the year → a single fixed STANDARD at the base offset.
+        // The event's own year changes the clock, though the year before had
+        // no pair of changes: no single offset is right, so every real
+        // transition is written.
+        _ if !year_transitions(tz, ref_year)?.is_empty() => {
+            out.push_str(&explicit_observances(
+                tz,
+                base_year,
+                ref_year + IRREGULAR_HORIZON_YEARS,
+            ));
+        }
+        // No clock change in the event's year → a single fixed STANDARD, read
+        // in the event's OWN year: the year before may still have changed the
+        // clock once (America/Vancouver into its last daylight saving in
+        // March 2026), and its midyear reading would then name the wrong
+        // offset or abbreviation for the event.
         _ => {
-            let off = total_offset(&tz, midyear(base_year)?);
-            let name = abbreviation(&tz, midyear(base_year)?);
+            let info = tz.offset_info(midyear(ref_year)?);
+            let off = info.offset.local_minus_utc();
+            let name = info.abbreviation;
             out.push_str("BEGIN:STANDARD\r\n");
             out.push_str(&format!("TZOFFSETFROM:{}\r\n", fmt_offset(off)));
             out.push_str(&format!("TZOFFSETTO:{}\r\n", fmt_offset(off)));
@@ -142,7 +181,7 @@ fn sub_component(kind: &str, t: &Transition) -> String {
 /// by a single `RRULE`). Every transition in the window resolves to its true
 /// offset; the anchor guarantee holds because the window starts in the year
 /// before the event.
-fn explicit_observances(tz: &Tz, from_year: i32, to_year: i32) -> String {
+fn explicit_observances(tz: Zone, from_year: i32, to_year: i32) -> String {
     let mut out = String::new();
     for year in from_year..=to_year {
         let Some(transitions) = year_transitions(tz, year) else {
@@ -162,11 +201,12 @@ fn explicit_observances(tz: &Tz, from_year: i32, to_year: i32) -> String {
 /// single `FREQ=YEARLY;BYMONTH;BYDAY` observance reproduces. Samples several
 /// consecutive years from `base_year`; stable iff every sampled year has the
 /// SAME set of `(is_dst, month, ordinal, weekday)` transition keys. Fails for
-/// zones whose onsets drift (Ramadan-tracking Africa/Casablanca, Asia/Gaza),
+/// zones whose onsets drift (Ramadan-tracking Asia/Gaza, Africa/Casablanca
+/// until 2026),
 /// vary by a week (America/Santiago), or key off a fixed day-of-month (whose
 /// weekday ordinal moves year to year) — all of which then take the explicit
 /// path.
-fn rule_is_stable(tz: &Tz, base_year: i32) -> bool {
+fn rule_is_stable(tz: Zone, base_year: i32) -> bool {
     const SAMPLE_YEARS: i32 = 6;
     let key_for = |year: i32| -> Option<Vec<(bool, u32, i32, &'static str)>> {
         let mut keys: Vec<_> = year_transitions(tz, year)?
@@ -189,66 +229,33 @@ fn rule_is_stable(tz: &Tz, base_year: i32) -> bool {
     ((base_year + 1)..=(base_year + SAMPLE_YEARS)).all(|y| key_for(y).as_ref() == Some(&reference))
 }
 
-/// Every offset transition inside `year` (UTC), earliest first. Probes day by day
-/// and binary-searches the exact minute of each change.
-fn year_transitions(tz: &Tz, year: i32) -> Option<Vec<Transition>> {
-    let mut out = Vec::new();
-    let mut day = NaiveDate::from_ymd_opt(year, 1, 1)?.and_hms_opt(0, 0, 0)?;
-    let end = NaiveDate::from_ymd_opt(year + 1, 1, 1)?.and_hms_opt(0, 0, 0)?;
-    let mut prev = total_offset(tz, day);
-    while day < end {
-        let next = day + Duration::days(1);
-        let next_off = total_offset(tz, next);
-        if next_off != prev {
-            // Narrow [day, next] to the first instant carrying the new offset.
-            // Bisect on WHOLE seconds (`Duration / 2` would land on fractional
-            // seconds and leave `DTSTART` at e.g. `T020028`); IANA transitions
-            // sit on a whole second, so this converges exactly onto it.
-            let (mut lo, mut hi) = (day, next);
-            while (hi - lo).num_seconds() > 1 {
-                let mid = lo + Duration::seconds((hi - lo).num_seconds() / 2);
-                if total_offset(tz, mid) == prev {
-                    lo = mid;
-                } else {
-                    hi = mid;
-                }
-            }
-            out.push(Transition {
-                at_utc: hi,
-                from_total: prev,
-                to_total: next_off,
-                to_is_dst: is_dst(tz, hi),
-                to_name: abbreviation(tz, hi),
-            });
-            prev = next_off;
-        }
-        day = next;
-    }
-    Some(out)
+/// Every change of the total offset inside `year` (UTC), earliest first: the
+/// window is (Jan 1 00:00Z, next Jan 1 00:00Z]. A transition that changes only
+/// the abbreviation or the daylight-saving flag is no clock change and is not
+/// listed (cal_core::Zone::offset_changes).
+fn year_transitions(tz: Zone, year: i32) -> Option<Vec<Transition>> {
+    let start = utc_midnight(year)?;
+    let end = utc_midnight(year.checked_add(1)?)?;
+    Some(
+        tz.offset_changes(start)
+            .take_while(|c| c.at <= end)
+            .map(|c| Transition {
+                at_utc: c.at.naive_utc(),
+                from_total: c.from.local_minus_utc(),
+                to_total: c.to.local_minus_utc(),
+                to_is_dst: c.dst,
+                to_name: c.abbreviation,
+            })
+            .collect(),
+    )
 }
 
-fn total_offset(tz: &Tz, utc: NaiveDateTime) -> i32 {
-    let off = tz.offset_from_utc_datetime(&utc);
-    (off.base_utc_offset() + off.dst_offset()).num_seconds() as i32
+fn utc_midnight(year: i32) -> Option<DateTime<Utc>> {
+    Utc.with_ymd_and_hms(year, 1, 1, 0, 0, 0).single()
 }
 
-fn is_dst(tz: &Tz, utc: NaiveDateTime) -> bool {
-    tz.offset_from_utc_datetime(&utc).dst_offset().num_seconds() != 0
-}
-
-fn abbreviation(tz: &Tz, utc: NaiveDateTime) -> String {
-    // chrono-tz 0.10 returns `Option<&str>`: a zone can have no abbreviation at
-    // all (several do — the numeric-offset ones). The empty string is what an
-    // absent TZNAME means to the caller, which writes the property only when it
-    // has something to write.
-    tz.offset_from_utc_datetime(&utc)
-        .abbreviation()
-        .unwrap_or_default()
-        .to_string()
-}
-
-fn midyear(year: i32) -> Option<NaiveDateTime> {
-    NaiveDate::from_ymd_opt(year, 7, 1)?.and_hms_opt(0, 0, 0)
+fn midyear(year: i32) -> Option<DateTime<Utc>> {
+    Utc.with_ymd_and_hms(year, 7, 1, 0, 0, 0).single()
 }
 
 /// `+0100` / `-0500` from a whole-second offset (rounded to the minute).
@@ -402,20 +409,21 @@ mod tests {
     #[test]
     fn fixed_rule_zones_are_detected_as_stable() {
         // Ordinary DST zones follow a fixed yearly Gregorian rule.
-        assert!(rule_is_stable(&"Europe/Berlin".parse().unwrap(), 2025));
-        assert!(rule_is_stable(&"America/New_York".parse().unwrap(), 2025));
-        assert!(rule_is_stable(&"Australia/Sydney".parse().unwrap(), 2025));
+        assert!(rule_is_stable("Europe/Berlin".parse().unwrap(), 2025));
+        assert!(rule_is_stable("America/New_York".parse().unwrap(), 2025));
+        assert!(rule_is_stable("Australia/Sydney".parse().unwrap(), 2025));
     }
 
     #[test]
     fn ramadan_zone_uses_explicit_observances_not_a_yearly_rule() {
-        // Africa/Casablanca's DST tracks Ramadan (onsets drift ~11 days/year), so
-        // a single FREQ=YEARLY;BYDAY rule would place the transition weeks off and
-        // shift events by an hour. It must be detected as unstable and emitted as
+        // Africa/Casablanca's clock tracked Ramadan until 2026 (onsets drift ~11
+        // days/year) and stays on +00 from 2026-09-20, so a single
+        // FREQ=YEARLY;BYDAY rule would place the transition weeks off and shift
+        // events by an hour. It must be detected as unstable and emitted as
         // explicit per-transition observances (no RRULE) across the event window.
-        let tz: Tz = "Africa/Casablanca".parse().unwrap();
+        let tz: Zone = "Africa/Casablanca".parse().unwrap();
         assert!(
-            !rule_is_stable(&tz, 2025),
+            !rule_is_stable(tz, 2025),
             "Casablanca is not a fixed-rule zone"
         );
 
@@ -440,6 +448,98 @@ mod tests {
         // +00 (Ramadan start) are both represented.
         assert!(vtz.contains("TZOFFSETTO:+0100"), "{vtz}");
         assert!(vtz.contains("TZOFFSETTO:+0000"), "{vtz}");
+    }
+
+    #[test]
+    fn dublins_daylight_is_its_summer_from_rearguard_data() {
+        // tzdata's main form calls Ireland's winter GMT the daylight-saving
+        // time (a negative save); the bundled rearguard data calls it
+        // standard. Offsets and instants are the same either way.
+        let vtz = vtimezone_for("Europe/Dublin", 2026).expect("Dublin resolves");
+        let daylight = sub(&vtz, "DAYLIGHT").expect("has DAYLIGHT");
+        assert_eq!(line(daylight, "TZOFFSETFROM:"), Some("+0000"));
+        assert_eq!(line(daylight, "TZOFFSETTO:"), Some("+0100"));
+        assert_eq!(line(daylight, "TZNAME:"), Some("IST"));
+        assert_eq!(
+            line(daylight, "RRULE:"),
+            Some("FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU")
+        );
+        let standard = sub(&vtz, "STANDARD").expect("has STANDARD");
+        assert_eq!(line(standard, "TZOFFSETTO:"), Some("+0000"));
+        assert_eq!(line(standard, "TZNAME:"), Some("GMT"));
+        assert_eq!(
+            line(standard, "RRULE:"),
+            Some("FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU")
+        );
+    }
+
+    #[test]
+    fn a_numeric_abbreviation_is_written_as_tzdata_writes_it() {
+        // chrono-tz had no abbreviation for Dubai and an empty TZNAME was
+        // written; the bundled data says +04.
+        let vtz = vtimezone_for("Asia/Dubai", 2026).expect("Dubai resolves");
+        let std = sub(&vtz, "STANDARD").expect("has STANDARD");
+        assert_eq!(line(std, "TZOFFSETTO:"), Some("+0400"));
+        assert_eq!(line(std, "TZNAME:"), Some("+04"));
+        assert!(vtz.lines().all(|l| l.trim_end() != "TZNAME:"), "{vtz}");
+    }
+
+    #[test]
+    fn vancouver_after_its_last_daylight_saving_reads_its_own_year() {
+        // tzdata 2026b: British Columbia sprang forward on 2026-03-08 and stays
+        // on -07 (MST) from 2026-11-01. The year before a 2027 event changed
+        // the clock once, into PDT; the definition is read in 2027 itself.
+        let vtz = vtimezone_for("America/Vancouver", 2027).expect("Vancouver resolves");
+        assert!(sub(&vtz, "DAYLIGHT").is_none(), "{vtz}");
+        let std = sub(&vtz, "STANDARD").expect("has STANDARD");
+        assert_eq!(line(std, "TZOFFSETFROM:"), Some("-0700"));
+        assert_eq!(line(std, "TZOFFSETTO:"), Some("-0700"));
+        assert_eq!(line(std, "TZNAME:"), Some("MST"));
+        assert_eq!(vtz.matches("BEGIN:STANDARD").count(), 1, "{vtz}");
+        // A 2026 event still sees 2026's spring change.
+        let vtz = vtimezone_for("America/Vancouver", 2026).expect("Vancouver resolves");
+        assert!(vtz.contains("TZOFFSETTO:-0700"), "{vtz}");
+        assert!(vtz.contains("TZOFFSETTO:-0800"), "{vtz}");
+        assert!(!vtz.contains("RRULE"), "{vtz}");
+    }
+
+    #[test]
+    fn a_zone_is_written_with_its_definition_or_not_at_all() {
+        // One predicate decides both: a TZID never goes out without its
+        // VTIMEZONE, at the edge of the years the bundled data covers too.
+        let (first, last) = (
+            *cal_core::COVERED_YEARS.start(),
+            *cal_core::COVERED_YEARS.end(),
+        );
+        for year in [
+            first - 1,
+            first,
+            first + 1,
+            2026,
+            last - 11,
+            last - 10,
+            last,
+        ] {
+            for tzid in [
+                "Europe/Berlin",
+                "Etc/UTC",
+                "UTC",
+                "europe/berlin",
+                "Factory",
+            ] {
+                assert_eq!(
+                    writable_zone(tzid, year).is_some(),
+                    vtimezone_for(tzid, year).is_some(),
+                    "{tzid} {year}"
+                );
+            }
+        }
+        assert!(writable_zone("Europe/Berlin", last - 11).is_some());
+        assert!(writable_zone("Europe/Berlin", last - 10).is_none());
+        assert!(writable_zone("Europe/Berlin", first + 1).is_some());
+        assert!(writable_zone("Europe/Berlin", first).is_none());
+        assert!(writable_zone("UTC", 2026).is_none());
+        assert!(writable_zone("Etc/UTC", 2026).is_some());
     }
 
     #[test]
