@@ -268,6 +268,12 @@ describe('a series zone the calendar cannot store (decision 98a)', () => {
       'dieser Kalender kann die Zeitzone Vancouver für eine Serie nicht speichern',
     );
     expect(writeNeverLanded(desktop)).toBe(true);
+    // The phone's move, copy and carry screens say it through
+    // writeErrorMessage, with the city too, never a bare placeholder.
+    for (const err of [desktop, phone]) {
+      expect(writeErrorMessage(err, t)).toBe(eventWriteErrorMessage(err, t));
+      expect(writeErrorMessage(err, t)).not.toContain('{{');
+    }
   });
 
   it('reads a zone the world list does not hold as its name', () => {

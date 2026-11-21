@@ -1018,7 +1018,10 @@ impl CalendarFeature for EwsAdapter {
     }
 
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
-        let zones = if Self::writes_a_zone(event.recurrence.as_ref(), event.all_day) {
+        // Every timed series asks, not only one with a zone: a series switched
+        // to UTC writes Exchange's own `UTC` zone (decision 99a), which a
+        // server may not list.
+        let zones = if event.recurrence.is_some() && !event.all_day {
             self.server_zones().await
         } else {
             None

@@ -7,6 +7,7 @@ import {
   eventWriteRefusal,
   exceptionsLossOf,
   isProviderBusy,
+  refusalVars,
   saysBusy,
 } from './eventWriteError';
 
@@ -102,7 +103,8 @@ export function writeErrorMessage(err: unknown, t: Translate): string {
   if (eventWriteLeftover(err)) return eventWriteErrorMessage(err, t);
   const refusal = eventWriteRefusal(err);
   if (refusal?.refusal === 'deletions-not-kept') return eventWriteErrorMessage(err, t);
-  return refusal ? t(refusal.key, { detail: refusal.detail }) : errorMessage(err);
+  // `refusalVars`: a zone a calendar cannot store is read out as its city (98a).
+  return refusal ? t(refusal.key, refusalVars(refusal)) : errorMessage(err);
 }
 
 /**

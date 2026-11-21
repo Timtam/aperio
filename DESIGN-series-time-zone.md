@@ -482,7 +482,9 @@ wieder aufgenommen wurde (97a bis 99a später am Tag, zu den Stufen 6 und 7):
   für eine Serie nicht speichern. Ohne sie würde die Serie bei der
   Zeitumstellung verrutschen, deshalb wurde nichts gespeichert.“ Bisher ging
   sie still ohne Zone hinaus und lief auf UTC. Eine Änderung, die die Zone
-  gar nicht schreibt (der Titel, eine Erinnerung), speichert weiter.
+  gar nicht schreibt (der Titel, eine Erinnerung), speichert weiter, ebenso
+  eine Änderung an einer Serie, deren Kopie auf dem Server schon auf dieser
+  Zone wiederholt: Exchange behält dann seine eigene Fassung.
   Verworfen: auf UTC speichern und danach sagen, und Kopieren ablehnen,
   sonst auf UTC speichern.
 - **99a — ein Wechsel auf UTC schreibt die Zone „UTC“** (Stufe 7). Ein
@@ -1309,14 +1311,16 @@ Handy im selben PR.
    98a als `cal_core::WriteRefusal::SeriesZoneNotStorable` (Detail: die
    kanonische Zone und ein Wort fürs Protokoll, `no-windows-zone`,
    `other-clock`, `not-on-server`); beim Anlegen immer, beim Ändern nur,
-   wo die Zone hinausginge. Beide Oberflächen lesen die Zone als ihre Stadt
+   wo die Zone neu hinausginge (nicht, wo die Kopie des Servers schon auf
+   ihr wiederholt). Beide Oberflächen lesen die Zone als ihre Stadt
    aus der Weltliste des Kerns (`zoneCityText`). Kopieren und Verschieben
    nach Exchange legen an und werden so mit der Zone im Grund abgelehnt.
    99a: Ändert Aperio eine Serie, deren Kopie auf dem Server auf einer
    benannten Zone wiederholt, auf UTC (oder auf keine Zone), schreibt der
    Adapter zuerst `StartTimeZone`/`EndTimeZone` mit `Id="UTC"`, danach
    Beginn und Ende auf der neuen Uhr (240) und die Regel (241). Nur am
-   Serienkopf, und nur mit der Kopie des Servers; kennt der Server `UTC`
+   Serienkopf, und nur mit der Kopie des Servers. Jedes Ändern einer Serie
+   mit Uhrzeit fragt dafür die Zonenliste des Servers; kennt er `UTC`
    nicht, lehnt 98a ab. Der Live-Test dazu (`ews-zones utc`) steht aus.
 8. **Datum, Uhrzeit und Regel auf einer Serien-Uhr** — `feat(shared): dates, times and repeat rules on a series clock`.
    Umrechnung mit Lücke und Doppelstunde, Formularfelder mit Uhr, Regel-Ableitung

@@ -2142,6 +2142,13 @@ pub(crate) fn new_event_to_calendar_item_xml_in<D: TimeZone>(
     Ok(out)
 }
 
+/// The canonical zone a series repeats on, or `None` for UTC, none, or a
+/// name tzdata does not know (`cal_core::series_clock_zone`).
+fn series_zone_of(event: &Event) -> Option<&'static str> {
+    cal_core::series_clock_zone(event.recurrence.as_ref().and_then(|r| r.tzid.as_deref()))
+        .and_then(cal_core::canonical_zone)
+}
+
 /// Exchange's own UTC zone, written where a series that repeated on a zone is
 /// switched to UTC (decision 99a). The read side takes it for no zone.
 const UTC_WINDOWS_ZONE: &str = "UTC";
@@ -2554,11 +2561,16 @@ pub(crate) fn plan_update_in<D: TimeZone>(
         !keeps_definition && (rule_changed || touches(EventField::AllDay) || slot_changed);
     // A zone Exchange cannot store, where it would go out, refuses the whole
     // update (decision 98a) instead of leaving the series on the zone the
-    // server holds or on UTC. An edit that writes no zone — the title, a
-    // reminder — still saves.
+    // server holds or on UTC. Not where the server's copy already repeats on
+    // that zone: Exchange holds it in its own form (an id this server does
+    // not list, a definition, 232, or tzdata's name, 236), nothing goes out
+    // for it, and Exchange keeps it, as before. An edit that writes no zone —
+    // the title, a reminder — saves anyway.
     if zone_goes_out {
         if let crate::windows_tz::WindowsZoneWrite::NotStorable { zone, reason } = zone_write {
-            return Err(EwsError::Protocol(reason.refusal(zone)));
+            if !before.is_some_and(|server| series_zone_of(server) == Some(zone)) {
+                return Err(EwsError::Protocol(reason.refusal(zone)));
+            }
         }
     }
     // A series that repeated on a zone and is switched to UTC gets Exchange's
@@ -2572,13 +2584,7 @@ pub(crate) fn plan_update_in<D: TimeZone>(
         && matches!(zone_write, crate::windows_tz::WindowsZoneWrite::NoZone)
         && !landed.all_day
         && rule_of.recurrence.is_some()
-        && before.is_some_and(|server| {
-            !server.all_day
-                && cal_core::series_clock_zone(
-                    server.recurrence.as_ref().and_then(|r| r.tzid.as_deref()),
-                )
-                .is_some()
-        });
+        && before.is_some_and(|server| !server.all_day && series_zone_of(server).is_some());
     if to_utc
         && server_zones.is_some_and(|known| !known.is_empty() && !known.knows(UTC_WINDOWS_ZONE))
     {
@@ -10590,35 +10596,43 @@ mod tests {
         assert!(!xml.contains("TimeZone"), "{xml}");
     }
 
-    /// An edit that writes no zone saves whatever zone the series stores
-    /// (decision 98a refuses only a zone that would go out): a new title on a
-    /// series in a zone Exchange cannot store writes the title alone.
+    /// Decision 98a refuses only a zone that would go out new: an edit of a
+    /// series whose server copy already repeats on a zone Exchange cannot
+    /// store saves, a new title or a move alike, and writes no zone, so
+    /// Exchange keeps its own (as before). Switching a series to such a zone,
+    /// or moving one without the server's copy, is refused by name.
     #[test]
-    fn an_edit_that_writes_no_zone_saves_a_series_in_an_unstorable_zone() {
-        let before = zoned_master(Some("Antarctica/Troll"));
-        let mut edit = before.clone();
-        edit.title = "Renamed".into();
-        let (set, _) =
-            event_to_update_field_xml_on(&edit, Some(&before), None, EventIdKind::RecurringMaster)
-                .expect("a title alone saves");
+    fn only_a_new_unstorable_zone_is_refused() {
+        let troll = zoned_master(Some("Antarctica/Troll"));
+        let refusal = cal_core::WriteRefusal::SeriesZoneNotStorable
+            .message("Antarctica/Troll no-windows-zone");
+        let update = |edit: &Event, before: Option<&Event>| {
+            event_to_update_field_xml_on(edit, before, None, EventIdKind::RecurringMaster)
+        };
+
+        let mut renamed = troll.clone();
+        renamed.title = "Renamed".into();
+        let (set, _) = update(&renamed, Some(&troll)).expect("a title alone saves");
         assert!(set.contains("Renamed"), "{set}");
         assert!(!set.contains("TimeZone"), "{set}");
-        // Moving it writes the zone, and is refused.
-        let mut moved = before.clone();
+
+        let mut moved = troll.clone();
         moved.start += chrono::Duration::hours(1);
         moved.end += chrono::Duration::hours(1);
-        match event_to_update_field_xml_on(
-            &moved,
-            Some(&before),
-            None,
-            EventIdKind::RecurringMaster,
-        ) {
-            Err(EwsError::Protocol(message)) => assert_eq!(
-                message,
-                cal_core::WriteRefusal::SeriesZoneNotStorable
-                    .message("Antarctica/Troll no-windows-zone")
-            ),
-            other => panic!("{other:?}"),
+        let (set, _) = update(&moved, Some(&troll)).expect("a move saves");
+        assert!(set.contains("calendar:Start\""), "{set}");
+        assert!(!set.contains("TimeZone"), "{set}");
+
+        // Without the server's copy nothing says the zone is the server's.
+        match update(&moved, None) {
+            Err(EwsError::Protocol(message)) => assert_eq!(message, refusal),
+            other => panic!("blind move: {other:?}"),
+        }
+        // A series switched to the zone is refused.
+        let berlin = zoned_master(Some("Europe/Berlin"));
+        match update(&troll, Some(&berlin)) {
+            Err(EwsError::Protocol(message)) => assert_eq!(message, refusal),
+            other => panic!("switch: {other:?}"),
         }
     }
 

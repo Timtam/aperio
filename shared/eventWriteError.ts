@@ -506,7 +506,7 @@ function refusalSentence(
  * canonical zone name and a word for the log, `America/Vancouver
  * not-on-server`; a screen reader reads "Vancouver", not the slashes.
  */
-function refusalVars(refusal: { refusal: WriteRefusal; detail: string }): {
+export function refusalVars(refusal: { refusal: WriteRefusal; detail: string }): {
   detail: string;
   city?: string;
 } {

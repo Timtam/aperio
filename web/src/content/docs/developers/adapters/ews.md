@@ -511,7 +511,8 @@ the iCalendar reader):
   a custom zone's day moved on its definition's midnight lands as one day
   (the 8a live test, on an item created through EWS with a definition). An
   item with a custom zone from an iPhone or an invitation is unmeasured.
-- **Zones Exchange cannot store** are written without a zone: CLDR has no id
+- **Zones Exchange cannot store** refuse the write by name (decision 98a;
+  until then they were written without a zone): CLDR has no id
   for them (`Antarctica/Troll`, and the POSIX-style `EST5EDT`, `CST6CDT`,
   `MST7MDT` and `PST8PDT`, zones of their own since tzdata 2026d, which
   Aperio follows: DESIGN-series-time-zone.md, 32a), or the id runs another clock in the five
