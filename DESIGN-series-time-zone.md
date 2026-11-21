@@ -1,6 +1,6 @@
 # Zeitzone einer Serie — Entwurf
 
-Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), von Stufe 5 der Exchange-Teil (PR 8a); die Stufen 5 (Microsoft 365) bis 14 werden ab 2026-11-21 in der Reihenfolge der Stufenliste gebaut (93b).**
+Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), Stufe 5 (Exchange mit PR 8a, Microsoft 365 am 2026-11-21); die Stufen 6 bis 14 werden in der Reihenfolge der Stufenliste gebaut (93b).**
 Toni hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b,
 14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a, 38a
 bis 43b, 46a bis 49a, 51a bis 53a, 57a, 58a, 61a, 62b, 63a und 64a, dazu die Vorlese-Form F). Die Planung lief in zwei
@@ -937,9 +937,10 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
   Beginn und Ende, die Zone oder das Muster einer Serie neu, fragt Aperio
   vorher, was dabei verloren ginge: einzeln geänderte Vorkommen und gelöschte,
   die es nicht wieder zuordnen kann; die übrigen gelöschten löscht es danach
-  wieder (243, 246-253). **Microsoft 365** leitet Start- und Enddatum und die
-  Standard-Tage weiter aus dem UTC-Datum ab und muss sie auf der Uhr der Serie
-  lesen, bevor die Editoren Beginn und UNTIL auf diese Uhr stellen.
+  wieder (243, 246-253). **Microsoft 365** liest seit Stufe 5 Start- und
+  Enddatum und die Standard-Tage auf der Uhr, auf der der Beginn geschrieben
+  wird: ganztägig der Tag des Geräts, mit Zone der Tag dieser Zone, sonst
+  UTC.
 - **Handy-Kalender** speichern keine Regel; die Auswahl ist dort nicht da.
 
 ### Nach dem Speichern
@@ -1242,11 +1243,20 @@ Handy im selben PR.
      L1b).
 5. **Exchange und Microsoft 365 lesen Serien-Daten auf der Uhr der Serie** — `fix(ews, graph): read a series' dates on its own clock when writing`.
    Der Exchange-Teil ist mit PR 8a gebaut, zusammen mit 47a (57a), und im
-   Live-Test 8a gemessen. Offen ist
-   Microsoft 365; danach messen, wie es recurrenceTimeZone beim Zurücklesen
-   behandelt. Serien, die Aperio schon mit falschem Starttag geschrieben hat,
-   bleiben, wie sie sind (231): einmal verschieben und Wochentag oder Tag in
-   der Wiederholung neu wählen.
+   Live-Test 8a gemessen. Der Microsoft-365-Teil ist gebaut (2026-11-21):
+   Aperio schreibt kein `recurrenceTimeZone`, also liest Graph die Daten
+   der Regel auf der Uhr des Beginns, und `startDate` muss dessen Datum
+   sein. Die Regel beginnt deshalb an dem Tag, an dem der Beginn
+   geschrieben wird: ganztägig am Tag des Geräts, mit Zone am Tag dieser
+   Zone, sonst am UTC-Tag; Standard-Wochentag, -Tag und -Monat kommen von
+   diesem Tag. Ein Schnitt endet wie bei Exchange am letzten Tag, dessen
+   Vorkommen spätestens zum `UNTIL` beginnt (`cal_core::last_day_through`).
+   Ungemessen (Toni, 2026-11-21: messen, sobald ein Microsoft-Konto zum
+   Testen da ist), ob Graph das Enddatum wie Exchange ganz auf der Uhr der
+   Serie zählt und wie es recurrenceTimeZone beim Zurücklesen nennt. Der
+   Schnitt ruht, bis der Adapter Serienköpfe liest. Serien, die Aperio
+   schon mit falschem Starttag geschrieben hat, bleiben, wie sie sind (231):
+   einmal verschieben und Wochentag oder Tag in der Wiederholung neu wählen.
 6. **Kalender melden, welche Zonen sie speichern** — `feat(plugin-core): calendars declare which series time zones they can store`.
    `time_zones`: alle, keine (Handy-Kalender) oder nur bestimmte (Exchange). Das
    Handy muss dafür auch die eingebauten Manifeste lesen; ob der Desktop sie
@@ -1450,7 +1460,8 @@ Handy im selben PR.
   Standardzonen gemessen ist.
 - Ob der Desktop die eingebauten Manifeste für die Wiederholungs-Fähigkeiten
   genauso liest wie das Handy (src-tauri commands/calendars.rs).
-- Wie Microsoft 365 recurrenceTimeZone nach Stufe 5 beim Zurücklesen behandelt.
+- Wie Microsoft 365 recurrenceTimeZone nach Stufe 5 beim Zurücklesen behandelt,
+  und ob es das Enddatum einer Serie wie Exchange ganz auf deren Uhr zählt.
 - Ob Google und Microsoft 365 alle 312 kanonischen Namen annehmen und
   zurückgeben, besonders umbenannte (Europe/Kyiv, America/Ciudad_Juarez); ob iCloud
   TZIDs mit erzeugten VTIMEZONEs behält.

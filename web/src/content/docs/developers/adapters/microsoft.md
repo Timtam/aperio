@@ -59,6 +59,28 @@ flow and token refresh; the adapter sends a `Bearer` token.
   row repeats and `guard_update` never sets the flag for a Microsoft 365
   event. It takes effect once the adapter reads series masters.
 
+- **A series' dates on its own clock** (DESIGN-series-time-zone.md, stage
+  5). The adapter writes no `recurrenceTimeZone`, so Graph reads a repeat
+  range on the clock of the event's start, and `startDate` must be the
+  start's date. The range therefore starts on the day the start is written
+  on: an all-day series on the device's day, a zoned one on its zone's,
+  anything else on UTC's. A rule without BYDAY, BYMONTHDAY or BYMONTH takes
+  its weekday, day and month from that day. Read off the UTC instant, as
+  before, the range and its default weekday of a Berlin series at 00:30 were
+  a day early, and those of a New York series at 20:00 a day late. A cut (`truncate_tail_overrides`) ends on the last day
+  whose occurrence starts at or before the `UNTIL`, on the series' clock
+  (`cal_core::last_day_through`), as the Exchange adapter does; an `UNTIL`
+  the user typed keeps its date. Whether Graph counts the end date whole on
+  that clock, as Exchange does, is not measured. The cut is dormant today,
+  like `clear_recurrence`, because the adapter reads no series masters.
+- **Relative patterns are not written.** `rrule_to_recurrence` has no
+  `relativeMonthly` or `relativeYearly`. Only a monthly rule with BYDAY and
+  BYSETPOS and no BYMONTHDAY is refused. Any other relative rule goes out as
+  an absolute pattern on the start's day: an ordinal BYDAY (`BYDAY=2SU`) as
+  `absoluteMonthly`, a yearly rule with BYDAY, with or without BYSETPOS, as
+  `absoluteYearly`, and a BYSETPOS beside BYMONTHDAY is dropped (TODO.md).
+  Reading drops both relative patterns to no recurrence.
+
 - **Graph always notifies.** Attendees in the body of a create or an update
   are mailed, and deleting a meeting on the organizer's calendar sends its
   cancellation (Microsoft's documentation; not measured live). Its calendars

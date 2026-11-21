@@ -638,11 +638,23 @@ Siehe DESIGN §4.2.
   neu wählen; eine wöchentliche Serie ohne gewählten Wochentag trägt in der
   Regel den Wochentag davor (für Montag: Sonntag), eine zweiwöchentliche kann
   eine Woche verrutscht sein.
-  🚩 **Microsoft 365: derselbe Datumsfehler** (235): eigener PR. Dazu gehört
-  das Enddatum eines Schnitts: Graph schreibt die Ziffern des `UNTIL` und
-  liest `…T235959Z` zurück wie Exchange; `cal_core::last_day_through` (257)
-  ist dafür da. Ob Graph das Enddatum inklusive und auf welcher Uhr zählt,
-  ist ungemessen.
+  🚩 **Microsoft 365: wie Graph das Enddatum zählt** (Toni, 2026-11-21:
+  messen, sobald ein Microsoft-Konto zum Testen da ist). Aperio nimmt an, dass
+  Graph es wie Exchange als ganzen Tag auf der Uhr der Serie zählt. Wichtig
+  wird es erst, wenn der Adapter Serienköpfe liest; bis dahin schneidet
+  Aperio keine Microsoft-365-Serie. Dabei auch messen, wie Graph
+  `recurrenceTimeZone` beim Zurücklesen nennt.
+  🚩 **Microsoft 365: „jeden 2. Sonntag“ wird „jeden 14.“** (gefunden bei
+  Stufe 5, älter): `rrule_to_recurrence` kennt beim Schreiben keine relative
+  Monats- oder Jahresregel. Abgelehnt wird nur eine Monatsregel mit `BYDAY`
+  und `BYSETPOS` ohne `BYMONTHDAY`. `BYDAY=2SU` geht still als
+  `absoluteMonthly` auf den Tag des Beginns, eine Jahresregel mit `BYDAY`
+  (`BYMONTH=3;BYDAY=1FR`, auch mit `BYSETPOS`, etwa „letzter Werktag im
+  März“) als `absoluteYearly`; ein `BYSETPOS` neben `BYMONTHDAY` fällt weg.
+  Das Manifest erlaubt beides (`relative_monthly` und
+  `relative_yearly` stehen auf dem Standard), also bietet der Editor es an.
+  Entweder `relativeMonthly`/`relativeYearly` mit `index` schreiben und lesen
+  oder beides im Manifest abschalten.
   🚩 **Zonen-Picker und dieselbe Uhrzeit** (Stufen 11 und 12): Paris statt
   Berlin heißt bei Exchange „Romance Standard Time“ statt „W. Europe Standard
   Time“ und zählt deshalb als andere Uhr: Aperio schreibt Beginn und Ende
@@ -4439,6 +4451,18 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
     Handy zugleich (#125); Live-Runde 10b bestanden (alle zehn Schritte, auch
     ein Schnitt am Tag der Umstellung auf Sommerzeit). Ungemessen: ein Schnitt
     am Tag der Umstellung auf Winterzeit.
+
+    ✅ **Microsoft 365: derselbe Datumsfehler** (235, Stufe 5, 2026-11-21):
+    Graph las Startdatum, Standard-Wochentag, Monatstag und Monat einer
+    Serie aus dem UTC-Datum ihres Beginns. Eine Serie in Berlin um 00:30 und
+    jede ganztägige Serie östlich von UTC bekamen so Startdatum und
+    Wochentag einen Tag zu früh, eine Serie in New York um 20:00 einen Tag zu
+    spät; Graph verlangt aber das Datum des Beginns. Jetzt beginnt die Regel an dem Tag, an dem Aperio den Beginn
+    schreibt: ganztägig am Tag des Geräts, mit Zone am Tag dieser Zone, sonst
+    am UTC-Tag. Ein Schnitt endet wie bei Exchange am letzten Tag, dessen
+    Vorkommen spätestens zum `UNTIL` beginnt (`cal_core::last_day_through`);
+    ein selbst gewähltes Ende bleibt. Der Schnitt ruht, bis der Adapter
+    Serienköpfe liest. Wie Graph das Enddatum zählt, steht oben als 🚩.
 
     ✅ **Die Zone zuerst** (Zonen-PR, 2026-10-10, Entscheidungen 240-245): Eine
     neue Zone behält die gespeicherte Uhrzeit (Runde 1, B2), also wanderte jedes
