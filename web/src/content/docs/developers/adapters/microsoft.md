@@ -2,10 +2,11 @@
 title: "Microsoft Graph"
 ---
 
-**Crate:** `adapter-microsoft-graph` · **Capabilities:** calendars, tasks, contacts
+**Crate:** `adapter-microsoft-graph` · **Capabilities:** calendars, contacts
 
-The modern Microsoft API for Outlook/Microsoft 365 — calendars + events,
-Microsoft To Do (`todoTask`), and Outlook contacts.
+The modern Microsoft API for Outlook/Microsoft 365 — calendars + events and
+Outlook contacts. Microsoft To Do tasks were dropped in November 2026, when
+Microsoft announced To Do's retirement; a Microsoft account brings no tasks.
 
 ## Authentication
 
@@ -24,8 +25,8 @@ flow and token refresh; the adapter sends a `Bearer` token.
   differs per instance, so it is an event's `ical_uid` only for a
   `singleInstance`; `uid`, which a series shares, wins where Graph sends it
   (unmeasured whether the default property set carries it).
-- **Delta:** `/calendarView/delta`, `/todoTask` delta, and contacts delta,
-  each with the same `410/invalid token → full resync` rule.
+- **Delta:** `/calendarView/delta` and contacts delta, each with the same
+  `410/invalid token → full resync` rule.
 
 ## Quirks
 
@@ -35,12 +36,6 @@ flow and token refresh; the adapter sends a `Bearer` token.
   "recurring master missing from a future view" class of bug doesn't apply
   here — but each range needs its own fetch (no master reuse across
   months).
-- **MS To Do has no assignment.** Task assignment is a *Planner* concept,
-  which is a separate, heavier surface and out of scope.
-- **MS To Do has no subtasks either.** Its `checklistItems` are plain
-  strings without a usable write API and don't map onto task→task
-  parents, so the plugin manifest declares `subtasks: false` and the
-  editors never offer subtasks on a Graph list.
 - **The organizer answers "organizer".** Graph lists the organizer among the
   attendees with `status.response` "organizer"; the adapter drops that row by
   its response. `isOrganizer` says whether the signed-in user organizes the
@@ -76,11 +71,7 @@ flow and token refresh; the adapter sends a `Bearer` token.
   request that writes nothing (the reads, `getSchedule` through
   `post_query_json`, and the token endpoint). A write answered 503 may have
   been carried out, so it stays unsure. The wait Graph names is only logged.
-  An update whose read of the current event is busy sends no PATCH. A task's
-  Aperio-Extras extension is written in place (`PATCH`, a `POST` only where
-  it is missing), never deleted and created again: a create that failed after
-  the delete took the task's recurrence with it. A failure of that write
-  after the task's own PATCH is `GraphError::PartlySaved` (277). A busy
+  An update whose read of the current event is busy sends no PATCH. A busy
   DELETE after a landed `/cancel` counts as done, as a 404 does: the meeting
   is cancelled and off the calendar. Any other failure of that DELETE goes
   through `after_landed`: the cancellation reached every attendee, so it never

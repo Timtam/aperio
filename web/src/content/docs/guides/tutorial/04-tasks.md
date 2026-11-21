@@ -42,7 +42,7 @@ your day or week, and work through them.
   shown — in the task list a finished task displays *“Completed: <date>”*
   in place of its due date, and the editor shows a *“Completed on”* line.
   It syncs both ways with every provider (Apple Reminders, Google, Vikunja,
-  Microsoft To Do, Exchange, Todoist).
+  Exchange, Todoist).
 - **Edit:** Open it with `Enter` or a **double-click**. A single mouse click
   only **selects/focuses** the task, so you can pick one without the editor
   popping open.
@@ -66,11 +66,11 @@ your day or week, and work through them.
 > **Google Tasks**, which has no priority field of its own — a priority you set
 > on a Google task isn't stored on Google's side and reads back as *Medium*
 > after the next sync. Local lists, Apple Reminders / CalDAV, Exchange,
-> Microsoft To Do, Vikunja and Todoist all keep it.
+> Vikunja and Todoist all keep it.
 
 > **"In progress" & providers:** Only providers with a real intermediate
 > status store **In progress**: **local** lists, **Apple Reminders / CalDAV**
-> (`IN-PROCESS`), **Exchange** and **Microsoft To Do**. **Google Tasks,
+> (`IN-PROCESS`) and **Exchange**. **Google Tasks,
 > Vikunja and Todoist** only know *open / done* — setting a task there to
 > *In progress* falls back to *open* on the next sync. For those providers the
 > automatic **schedule-to-today** that a started task would otherwise trigger
@@ -252,7 +252,7 @@ check off a recurring task, Aperio automatically creates the next due date.
 > offered there.
 >
 > **Times of day & providers:** not every service can store a **time** on a
-> task. **Google Tasks**, **Microsoft To Do** and **Exchange** keep whole days:
+> task. **Google Tasks** and **Exchange** keep whole days:
 > a time used to be accepted, dropped by the server, and silently gone after the
 > next refresh. In those lists the editor no longer offers a time at all, and
 > says why. Drag a task onto the hour grid there and the **day** is taken — and
@@ -261,8 +261,8 @@ check off a recurring task, Aperio automatically creates the next due date.
 > **Recurrence & providers:** Whether — and how much of — a recurrence can be
 > stored depends on the provider. The editor only appears where the list can
 > store it, and **greys out individual fields the provider can't do** (rather
-> than dropping them silently on save). **Local** lists, **Microsoft To Do**
-> and **Apple Reminders / CalDAV** (`RRULE` in the VTODO) support full
+> than dropping them silently on save). **Local** lists and **Apple
+> Reminders / CalDAV** (`RRULE` in the VTODO) support full
 > recurrence; **Exchange** too — only without a **yearly interval** (yearly
 > works as "every year" but not "every 2 years"). **Vikunja** stores simple
 > repeats — *daily*/*weekly* (with an interval, e.g. "every 2 weeks") and
@@ -312,7 +312,7 @@ daily/weekly/monthly interval. Two examples:
 > Todoist, Google Tasks) the extra data rides a small **managed block**
 > appended to the task's description, marked *"⚙ Aperio · please don't edit"*:
 > leave it untouched — Aperio strips it back out so your description stays
-> clean. On **CalDAV, Exchange and Microsoft To Do** it rides an invisible
+> clean. On **CalDAV and Exchange** it rides an invisible
 > custom property instead, so nothing shows in the description at all.
 
 ## Members and assignments
@@ -329,7 +329,7 @@ so there you get a single choice with "Nobody" as its first option: picking
 someone replaces the previous person instead of putting a second one beside
 them, which would be dropped on save. Move a task with several people to a list
 that holds one and the **first** stays — visible in the editor before you save.
-On lists without assignment (local, Microsoft To Do, Google) the field is not
+On lists without assignment (local, Google, Exchange) the field is not
 shown at all.
 
 ### Letting Aperio assign you automatically

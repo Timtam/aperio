@@ -17,7 +17,7 @@ du Konten und legst bei Bedarf lokale Kalender an.
 |---|---|---|
 | **Google** | Anmeldung im Browser (OAuth) | Kalender, Aufgaben, Kontakte |
 | **iCloud / CalDAV** | Benutzername + **app-spezifisches Passwort** | Kalender, Aufgaben, Kontakte |
-| **Outlook / Microsoft 365** | Anmeldung im Browser (OAuth) | Kalender, Aufgaben, Kontakte |
+| **Outlook / Microsoft 365** | Anmeldung im Browser (OAuth) | Kalender, Kontakte |
 | **Exchange (EWS)** | Benutzername + Passwort | Kalender, Aufgaben, Kontakte |
 | **Vikunja** | API-Token + Server-Adresse | nur Aufgaben |
 | **Todoist** | API-Token | nur Aufgaben |

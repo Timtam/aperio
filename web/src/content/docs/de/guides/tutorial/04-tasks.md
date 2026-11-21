@@ -45,7 +45,7 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
   erledigte Aufgabe *„Erledigt: <Datum>“* anstelle ihres Fälligkeitsdatums,
   im Editor erscheint eine Zeile *„Erledigt am“*. Es wird mit jedem Anbieter
   in beide Richtungen synchronisiert (Apple Erinnerungen, Google, Vikunja,
-  Microsoft To Do, Exchange, Todoist).
+  Exchange, Todoist).
 - **Bearbeiten:** mit `Eingabe` oder per **Doppelklick** öffnen. Ein einfacher
   Mausklick **markiert/fokussiert** die Aufgabe nur, sodass du sie auswählen
   kannst, ohne dass der Editor aufspringt.
@@ -71,12 +71,12 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > Aufgabe – außer **Google Tasks**, das kein eigenes Prioritätsfeld hat: Eine
 > Priorität, die du an einer Google-Aufgabe setzt, wird auf Google-Seite nicht
 > gespeichert und erscheint nach der nächsten Synchronisation wieder als
-> *Mittel*. Lokale Listen, Apple Erinnerungen / CalDAV, Exchange, Microsoft
-> To Do, Vikunja und Todoist behalten sie.
+> *Mittel*. Lokale Listen, Apple Erinnerungen / CalDAV, Exchange, Vikunja und
+> Todoist behalten sie.
 
 > **„In Arbeit" & Anbieter:** Den Status **In Arbeit** speichern nur Anbieter
 > mit einem echten Zwischenstatus: **lokale** Listen, **Apple Erinnerungen /
-> CalDAV** (`IN-PROCESS`), **Exchange** und **Microsoft To Do**. **Google
+> CalDAV** (`IN-PROCESS`) und **Exchange**. **Google
 > Tasks, Vikunja und Todoist** kennen nur *offen / erledigt* – setzt du dort
 > eine Aufgabe auf *In Arbeit*, fällt sie beim nächsten Abgleich wieder auf
 > *Offen* zurück. Bei diesen Anbietern unterbleibt deshalb auch das
@@ -281,7 +281,7 @@ Aperio automatisch die nächste Fälligkeit.
 > dafür, also wird es gar nicht erst angeboten.
 >
 > **Uhrzeiten & Anbieter:** Nicht jeder Dienst kann an einer Aufgabe eine
-> **Uhrzeit** speichern. **Google Tasks**, **Microsoft To Do** und **Exchange**
+> **Uhrzeit** speichern. **Google Tasks** und **Exchange**
 > kennen nur ganze Tage: eine Uhrzeit wurde bisher angenommen, vom Server
 > verworfen und war nach der nächsten Aktualisierung stillschweigend weg. In
 > solchen Listen bietet der Editor jetzt **gar keine Uhrzeit** mehr an und sagt
@@ -292,8 +292,8 @@ Aperio automatisch die nächste Fälligkeit.
 > gespeichert werden kann, hängt vom Anbieter ab. Der Editor erscheint nur
 > dort, wo die Liste sie auch speichern kann, und **blendet einzelne Felder
 > aus, die der Anbieter nicht kann** (statt sie beim Speichern still zu
-> verwerfen). **Lokale** Listen, **Microsoft To Do** und **Apple
-> Erinnerungen / CalDAV** (`RRULE` im VTODO) unterstützen die volle
+> verwerfen). **Lokale** Listen und **Apple Erinnerungen / CalDAV**
+> (`RRULE` im VTODO) unterstützen die volle
 > Wiederholung; **Exchange** ebenfalls – nur ohne **Jahres-Intervall**
 > (jährlich geht als „jedes Jahr", aber nicht „alle 2 Jahre"). **Vikunja**
 > speichert einfache Wiederholungen – *täglich*/*wöchentlich* (mit Intervall,
@@ -347,7 +347,7 @@ des täglichen/wöchentlichen/monatlichen Intervalls. Zwei Beispiele:
 > die Zusatzinfo in einem kleinen **verwalteten Block** am Ende der
 > Beschreibung mit, gekennzeichnet mit *„⚙ Aperio · bitte nicht bearbeiten"*:
 > Lass ihn unangetastet – Aperio entfernt ihn beim Lesen wieder, sodass deine
-> Beschreibung sauber bleibt. Bei **CalDAV, Exchange und Microsoft To Do**
+> Beschreibung sauber bleibt. Bei **CalDAV und Exchange**
 > reist sie stattdessen in einer unsichtbaren benutzerdefinierten Eigenschaft
 > mit, sodass in der Beschreibung gar nichts erscheint.
 
@@ -367,7 +367,7 @@ viele – du siehst die gewählten Personen als Liste und fügst weitere hinzu.
 zweite Person danebenzustellen, die beim Speichern verloren ginge. Verschiebst
 du eine Aufgabe mit mehreren Personen in eine Liste, die nur eine hält, bleibt
 die **erste** übrig – sichtbar im Editor, bevor du speicherst. Auf Listen ohne
-Zuweisung (lokal, Microsoft To Do, Google) erscheint das Feld gar nicht.
+Zuweisung (lokal, Google, Exchange) erscheint das Feld gar nicht.
 
 ### Aperio dich automatisch zuweisen lassen
 

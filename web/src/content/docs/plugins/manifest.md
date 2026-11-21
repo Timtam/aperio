@@ -72,7 +72,7 @@ claiming them wrongly costs more than missing them.
 | `subtasks` | Tasks can carry subtasks. |
 | `move_between_projects` | A task can move to a different list. |
 | `task_span` | The source can store the END of a task's planned block, so a task can occupy a span in the calendar. Default `false` — opted into, because only the local store, CalDAV (`DURATION`), Vikunja (`end_date`) and Todoist (`duration`) have anywhere to put one. |
-| `task_time_of_day` | The source stores a TIME on a task's dates, not just the day. Default `true`. Set `false` where the backend keeps whole days and drops anything finer without complaining (Google Tasks, Microsoft To Do, Exchange) — the editor then leaves the time control out instead of losing the value on the round trip. |
+| `task_time_of_day` | The source stores a TIME on a task's dates, not just the day. Default `true`. Set `false` where the backend keeps whole days and drops anything finer without complaining (Google Tasks, Exchange) — the editor then leaves the time control out instead of losing the value on the round trip. |
 | `create_lists` / `delete_lists` | The adapter can create/delete task lists at the source. |
 | `manageable` | The adapter supports managing list membership/sharing (shows the "manage members" UI). |
 | `member_add_by` | How members are added when `manageable`: `"search"` (directory search, e.g. Vikunja) or `"email"` (raw-email invite, e.g. Todoist). |
