@@ -1,6 +1,6 @@
 # Zeitzone einer Serie — Entwurf
 
-Status: **entschieden; Stufen 1 bis 3 gebaut (#72, #73, #74), Stufe 4 in Arbeit.**
+Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), von Stufe 5 der Exchange-Teil (PR 8a); die Stufen 5 (Microsoft 365) bis 14 werden ab 2026-11-21 in der Reihenfolge der Stufenliste gebaut (93b).**
 Toni hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b,
 14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a, 38a
 bis 43b, 46a bis 49a, 51a bis 53a, 57a, 58a, 61a, 62b, 63a und 64a, dazu die Vorlese-Form F). Die Planung lief in zwei
@@ -395,6 +395,34 @@ des Dokuments hinzu; sie stehen in den Abschnitten unten:
   angeklickt wurden).
 - Die Exchange-Stufe kommt vor die Editoren, damit ein Wechsel nie still
   verpufft.
+
+Vier weitere Entscheidungen traf Toni am 21. November 2026, als der Bogen wieder
+aufgenommen wurde:
+
+- **93b — streng in der Reihenfolge der Stufenliste.** Kein vorgezogener
+  Reparatur-Teil mit vorübergehenden Abweichungen (Felder einer zonenlosen Serie
+  auf der Geräte-Uhr, Ablehnung statt Wochentag-Frage). Davor kommen die
+  zonen-anfälligen Tests und die neuen Zeitzonendaten (96a).
+- **94a — Löschungen wandern bei jedem Zonenwechsel mit.** Wechselt eine
+  gespeicherte Serie ihre Zone, wandert jede Ausnahme, die einen Termin streicht,
+  zum neuen Zeitpunkt ihres Vorkommens, auch wenn keine Wochentag-Frage kommt.
+  Eine Ausnahme ohne Wirkung bleibt wörtlich (wie im Abschnitt zur Wochentag-
+  Frage). Sonst kämen Löschungen im anderen Sommerzeit-Halbjahr nach einer
+  Reparatur zurück. Die Zuordnung von alt zu neu liefert die Kern-Regel aus
+  Stufe 9.
+- **95a — geänderte Vorkommen bei CalDAV wandern mit.** Einzeln geänderte
+  Termine einer CalDAV-Serie (RECURRENCE-ID) werden bei einem Zonenwechsel auf den
+  neuen Zeitpunkt ihres Vorkommens umgeschrieben, bevor der Wechsel den Server
+  erreicht, mit derselben Zuordnung wie 94a. Das ergänzt 16b, das sonst nur in der
+  Hilfe warnt; ohne es erschienen sie im anderen Halbjahr doppelt.
+- **96a — erst neue Zeitzonendaten.** Vor den Stufen 6 und 11 wird tzdata
+  2025b abgelöst (32a). Welcher Weg, entscheidet eine eigene Recherche.
+
+Geprüft vorab (2026-11-21, Tonis Desktop-Daten nur lesend): Von 89 Serien mit
+Uhrzeit im Zwischenspeicher haben drei keine Zone, alle bei CalDAV und alle mit
+Kennungen im Apple-Stil, also außerhalb von Aperio angelegt. Alle elf Serien, die
+Aperio selbst bei CalDAV angelegt hat, tragen eine Zone. Ein heute noch
+laufender Aperio-Weg, der Serien ohne Zone schreibt, ist damit nicht zu sehen.
 
 ## Was es löst
 
