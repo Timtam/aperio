@@ -3,7 +3,9 @@
 # lookups would find nothing today; they are listed so that no code starts
 # asking jiff (or, through a feature some other crate turns on, the operating
 # system) for a zone. cal-zone itself only hands jiff TZif bytes
-# (jiff::tz::TimeZone::tzif). CI also checks that only cal-zone depends on
+# (jiff::tz::TimeZone::tzif). The parsers that look a zone name up in
+# jiff::tz::db() are listed too; FromStr for jiff::ZonedDateTime cannot be
+# listed by path and is left to the CI check that only cal-zone depends on
 # jiff directly.
 disallowed-methods = [
     { path = "jiff::tz::db", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
@@ -19,4 +21,7 @@ disallowed-methods = [
     { path = "jiff::Timestamp::in_tz", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
     { path = "jiff::civil::DateTime::in_tz", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
     { path = "jiff::civil::Date::in_tz", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::ZonedDateTime::strptime", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::fmt::temporal::DateTimeParser::parse_zoned_datetime", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
+    { path = "jiff::fmt::strtime::BrokenDownTime::to_zoned_datetime", reason = "zones come from cal_zone::Zone (bundled jiff-tzdb only)" },
 ]

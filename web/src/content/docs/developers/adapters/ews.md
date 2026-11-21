@@ -487,7 +487,9 @@ the iCalendar reader):
   (the 8a live test, on an item created through EWS with a definition). An
   item with a custom zone from an iPhone or an invitation is unmeasured.
 - **Zones Exchange cannot store** are written without a zone: CLDR has no id
-  for them (`Antarctica/Troll`), or the id runs another clock in the five
+  for them (`Antarctica/Troll`, and the POSIX-style `EST5EDT`, `CST6CDT`,
+  `MST7MDT` and `PST8PDT`, zones of their own since tzdata 2026d, which
+  Aperio follows: DESIGN-series-time-zone.md, 32a), or the id runs another clock in the five
   years after the pinned release (`America/Scoresbysund`, `Antarctica/Casey`,
   `Antarctica/Vostok`). The generator's clock guard finds these; the table
   lists them.

@@ -110,7 +110,21 @@ keinen, dort ist die Wahl Tonis Sache.
   - chrono-Typen bleiben überall; `chrono::Local` liest für die Geräte-Uhr
     weiter die Daten des Betriebssystems.
   - Ein wöchentlicher Lauf (`zone-data-watch.yml`) meldet in einem Issue, wenn
-    IANA, jiff-tzdb/jiff, CLDRs windowsZones oder rrule weiterziehen.
+    IANA, jiff-tzdb/jiff, CLDRs windowsZones oder rrule weiterziehen. Eine
+    neue IANA-Version, die jiff-tzdb noch nicht mitliefert, steht dort als
+    „jiff-tzdb noch nicht da: warten oder Notweg“, ohne roten Lauf. Notweg,
+    wenn eine Umstellung zu nah ist: jiff-tzdb aus der neuen Version selbst
+    bauen und per `[patch.crates-io]` einsetzen, dann `tz-list` und
+    `windows-zones`. Einen geprüften rrule-Stand trägt man in
+    crates/rrule/SOURCE unter `reviewed` ein. GitHub schaltet den Zeitplan
+    nach 60 Tagen ohne Aktivität im Repository ab; dann läuft er nur von
+    Hand wieder an.
+  - Eine Zone, die Exchange selbst definiert (232), muss die Uhr auch zum
+    ersten Beginn der Serie lesen, nicht nur im Prüffenster: eine feste
+    -06:00 seit Dezember 2025 ist Regina, nicht Edmonton.
+  - Ganztägige Erinnerungen lesen den Tag als Datum der nächsten
+    Mitternacht (±12 h), weil die Vorkommen aus der mitgelieferten tzdata
+    kommen und `chrono::Local` die des Betriebssystems liest.
 - **Vorlese-Form F.** Der Versatz lautet „UTC−04:00“ mit echtem Minuszeichen
   (U+2212); Toni hat die Formen mit NVDA und VoiceOver verglichen.
 - **38a — Live-Test vor dem Merge von Stufe 4.** Stufe 4 schreibt für 170
@@ -606,7 +620,7 @@ Alte Namen findet die Suche unter dem Namen, den die Liste ihnen gibt („Kiev�
 „Kyiv, Europa, UTC+03:00 (auch Kiev)“. Zusammengelegte Orte und andere
 Schreibweisen heißen dabei nach ihrem letzten Teil („auch Oslo“), außer der
 letzte Teil ist die Stadt selbst („auch Asia/Istanbul“). Alle anderen alten Namen
-heißen mit ihrer ganzen Id („auch US/Pacific“, „auch CST6CDT“), weil ihr letzter
+heißen mit ihrer ganzen Id („auch US/Pacific“, „auch US/Central“), weil ihr letzter
 Teil allein nichts sagt.
 
 Die Zählzeile sagt „Eine Zeitzone“ oder „12 Zeitzonen“. Bei keinem Treffer sagt
@@ -928,6 +942,10 @@ Wochentag-Frage beantworten.
 
 ## Stufenliste
 
+Die Stufen beschreiben den Stand, mit dem sie gebaut wurden (chrono-tz,
+tzdata 2025b, CLDR release-48-2). Für die Zonendaten gilt seit 2026-11-21 die
+Entscheidung unter 32a.
+
 Jede Stufe ist ein eigener PR. Wo die Oberfläche berührt wird, kommen Desktop und
 Handy im selben PR.
 
@@ -1241,7 +1259,7 @@ Handy im selben PR.
   - V8 meldet alte Namen wie `Asia/Calcutta`.
   - Seit 2026f ist Aperios tzdata neuer als die vieler Geräte: Casablanca und
     El Aaiun ab 20.09.2026, Vancouver, Edmonton, Inuvik und Winnipeg ab
-    01.11.2026, Havanna bis 07.11.2027 und Chisinau lesen dort anders, bis
+    01.11.2026, Havanna vom 01.11.2026 bis 14.03.2027 und Chisinau lesen dort anders, bis
     das Gerät nachzieht.
   - Eine Zone, die neuer ist als Aperios tzdata, wiederholt sich nach UTC, bis
     jiff-tzdb aktualisiert ist; der wöchentliche Lauf meldet eine neue

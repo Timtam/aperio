@@ -20,7 +20,7 @@
 //! occurrence (269): a deleted slot with no occurrence there, after a second
 //! listing, is skipped and logged (207, 266). An occurrence counts as the one
 //! at a slot when it starts there, or at most an hour off — what an outdated
-//! zone table can put between Aperio's slot and Google's (tzdata 2025b) — and
+//! zone table can put between Aperio's slot and Google's — and
 //! never past half the way to its neighbours.
 
 use std::collections::HashSet;

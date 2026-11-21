@@ -1432,13 +1432,6 @@ Vorschläge sind nicht aufgenommen.
       Regel behalten. Nie jiffs eigene Suche nehmen: sie kennt `Factory` und
       `Etc/Unknown`. Dazu Tests mit Kleinschreibung, dann
       DESIGN-series-time-zone.md („Risiken“) nachziehen.
-- [ ] **iCal: eine Zeit in einer Umstellungslücke wird als UTC gelesen.**
-      crates/ical-mapping/src/mapping.rs `resolve_with_tzid` gibt für ein
-      DTSTART/DTEND/RECURRENCE-ID oder EXDATE mit bekannter TZID in einer
-      Lücke oder Überlappung `None` zurück, ohne die VTIMEZONE der Datei zu
-      fragen; `datetime_to_utc` und `collect_exdates` lesen die Wanduhr dann
-      als UTC (Berlin 25.10.2026 02:30 wird 02:30Z, eine bis zwei Stunden
-      daneben). Beim Wechsel auf jiff bewusst so gelassen (Parität).
 - [ ] **iCal: RECURRENCE-ID mit Windows-TZID wird abgelehnt.**
       `mint_recurrence_id` (crates/ical-mapping/src/mapping.rs) verlangt einen
       tzdata-Namen und lehnt eine Windows-Kennung mit `UnknownZone` ab,
@@ -4926,7 +4919,15 @@ leer); ohne Merker meldet die Brücke „noch nie gefragt“, und die Kernregel
       Time). CI prüft, dass chrono-tz nicht zurückkommt, dass jiff keine
       System-Datenbank liest und nur cal-zone jiff kennt;
       .github/workflows/zone-data-watch.yml meldet wöchentlich neue IANA-,
-      jiff-tzdb-, CLDR- und rrule-Stände in einem Issue.
+      jiff-tzdb-, CLDR- und rrule-Stände in einem Issue (IANA vor
+      jiff-tzdb als „warten oder Notweg“, ohne roten Lauf).
+- [x] **iCal: eine Zeit in einer Umstellungslücke wurde als UTC gelesen.**
+      crates/ical-mapping/src/mapping.rs `resolve_with_tzid` las ein
+      DTSTART/DTEND/RECURRENCE-ID oder EXDATE mit bekannter TZID in einer
+      Lücke oder Überlappung als UTC-Wanduhr (Berlin 25.10.2026 02:30 wurde
+      02:30Z). Behoben 2026-11-21 im jiff-Zweig nach der Prüfrunde: die
+      Leser nehmen `WallPolicy::Rfc5545` (erste Lesung, Lücke mit dem
+      Versatz davor), `mint_recurrence_id` prüft weiter streng.
 
 - [x] **Desktop-Mitzieh-Dialog: Ein Durchlauf nach dem Schließen schließt
       den nächsten Dialog.** In src/components/EventGroupCarryDialog.tsx

@@ -7,6 +7,10 @@
 
 upstream = https://github.com/fmeringdal/rust-rrule
 commit = 3843456f739d399cfbeff81288c36a66e8e38b83
+# The newest upstream release looked at, ported or declined. The weekly
+# zone-data watch reports a release newer than this; after porting its fixes
+# by hand, or deciding they do not apply, write its version here.
+reviewed = rrule 0.14.0
 path-in-vcs = rrule
 crates-io = rrule 0.14.0
 crate-sha256 = 720acfb4980b9d8a6a430f6d7a11933e701ebbeba5eee39cc9d8c5f932aaff74
@@ -38,6 +42,7 @@ src/parser/datetime.rs: parse_timezone through Tz::named; the test zone is
   a function (Tz::named is no const fn).
 src/parser/mod.rs, src/tests/rrule.rs, src/iter/utils.rs,
 src/validator/validate_rrule.rs: test zones by name instead of constants.
-README.md: where the zones come from.
+README.md: where the zones come from (and a first-line marker).
+src/lib.rs (again): the `serde` feature stops the build with a compile_error!.
 tests/aperio_zones.rs: new, Aperio's own cases for the zones (gap, fold,
   the midnight drop, BYSETPOS, UTC versus Etc/UTC).

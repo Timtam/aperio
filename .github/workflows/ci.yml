@@ -75,6 +75,11 @@ jobs:
               - 'locales/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
+              # The workspace's clippy configuration: its disallowed-methods
+              # list keeps every crate off jiff's own zone database. A commit
+              # that weakens it, or breaks its TOML, must run clippy.
+              - 'clippy.toml'
+              - '.clippy.toml'
               - 'rust-toolchain*'
               - '.cargo/**'
               - '.github/workflows/ci.yml'

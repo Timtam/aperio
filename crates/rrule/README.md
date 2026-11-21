@@ -1,3 +1,4 @@
+<!-- Modified for Aperio (see SOURCE). -->
 <h1 align="center">RRule.rs</h1>
 <p align="center">A pure and efficient Rust implementation of recurrence rules as defined in the iCalendar RFC.</p>
 <p align="center">
