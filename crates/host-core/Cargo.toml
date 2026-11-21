@@ -16,7 +16,9 @@ aperio-db.workspace = true
 # restore decodes it here so the wrap happens in one place rather than two.
 base64 = "0.22"
 builtin-oauth.workspace = true
-cal-core.workspace = true
+# `zones`: the device's zone by the core's name rule (cal_core::zone_of) for
+# the reminder expansion.
+cal-core = { workspace = true, features = ["zones"] }
 adapter-local.workspace = true
 # The device adapter is not called from here — the mobile host holds the typed
 # adapter — but `builtin_adapters` reads its manifest to learn the kind name,

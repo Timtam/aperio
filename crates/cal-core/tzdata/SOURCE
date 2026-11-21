@@ -1,0 +1,25 @@
+# The IANA tzdata files the zone names are generated from, pinned.
+#
+# `cargo xtask tz-list` reads this file, checks backward, etcetera, version and
+# LICENSE against their sha256 (reading CRLF as LF), and checks that `version`
+# names the release jiff-tzdb bundles. The names themselves are jiff-tzdb's;
+# these files say which of them are links, to what, and of what kind
+# (backward's sections), and which are zones of their own. They come from
+# tzdata's MAIN-format release tarball: the names and links IANA publishes.
+# A link and its target carry the same bytes in either format, and tz-list
+# checks that too.
+#
+# Never edit these files by hand. To update: take the four files from one
+# release tarball (the one jiff-tzdb bundles), write that release, its date,
+# the tarball's URL and sha256 and each file's sha256 here, run
+# `cargo xtask tz-list` and `cargo xtask windows-zones`, and commit all of it
+# together.
+
+release = 2026f
+published = 2026-10-27
+url = https://data.iana.org/time-zones/releases/tzdata2026f.tar.gz
+tarball-sha256 = 01b4a91cec5167ed48c11e8ab78f2048cead78ce94b0cafcad0ae8c5a3044d3d
+backward-sha256 = b8296b9ef1ece72d813878132c0f17e2c52b26af6004eeb9c37d049b64cd9401
+etcetera-sha256 = 7281f095b42c13c4ae36b8bcba884e81dbb38127221fc1d9805c4dbf852487db
+version-sha256 = 9f9a9e6bfd18cd6a0a4d65764931072577edcbb731981a068ef52bba6615b1de
+licence-sha256 = 0613408568889f5739e5ae252b722a2659c02002839ad970a63dc5e9174b27cf

@@ -1860,7 +1860,8 @@ fn occurrence_triggers(
 fn device_clock() -> RruleTz {
     iana_time_zone::get_timezone()
         .ok()
-        .and_then(|name| cal_core::canonical_zone(&name).and_then(RruleTz::named))
+        .and_then(|name| cal_core::zone_of(&name))
+        .map(RruleTz::Tz)
         .unwrap_or(RruleTz::Local(Local))
 }
 

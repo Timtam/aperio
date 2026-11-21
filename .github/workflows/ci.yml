@@ -269,20 +269,23 @@ jobs:
         run: cargo xtask ts-types --check
 
       # The zone names `cal_core::series_clock` resolves are generated from the
-      # tzdata chrono-tz ships, and the file names the chrono-tz version. Any
-      # chrono-tz update, with or without new tzdata, is a red build here until
-      # `cargo xtask tz-list` is rerun and committed, so the core never reads
-      # names from another release than host-core and the adapters parse with.
-      - name: Zone names are generated from chrono-tz
+      # names jiff-tzdb bundles and the tzdata files pinned in
+      # crates/cal-core/tzdata (backward, etcetera, version, with their sha256),
+      # and the file names the jiff-tzdb version. jiff-tzdb is pinned exactly
+      # (=1.0.0), so a bump is a deliberate Cargo.toml edit; it, or a new pinned
+      # file, is a red build here until `cargo xtask tz-list` is rerun and
+      # committed, so the core never reads names from another release than the
+      # one every zone is read from (cal-zone).
+      - name: Zone names are generated from jiff-tzdb and the pinned tzdata
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: cargo xtask tz-list --check
 
       # The Exchange zone table is generated from the CLDR windowsZones file
-      # pinned in the EWS adapter, with every name resolved through cal_core and
-      # a clock guard from chrono-tz. It runs after tz-list, so a stale
-      # zone_names.rs is reported there rather than as drift here. A CLDR pin or
-      # chrono-tz update is a red build until `cargo xtask windows-zones` is
-      # rerun and committed.
+      # pinned in crates/cal-core/cldr, with every name resolved through cal_core
+      # and a clock guard on cal-zone's offsets. It runs after tz-list, so a
+      # stale zone_names.rs is reported there rather than as drift here. A CLDR
+      # pin or a jiff-tzdb bump is a red build until `cargo xtask windows-zones`
+      # is rerun and committed.
       - name: Exchange zone table is generated from CLDR
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: cargo xtask windows-zones --check

@@ -29,6 +29,13 @@
 //!     mirroring CalDAV / Google / Graph
 
 pub mod api;
+
+/// A bundled tzdata zone by name, for tests: cal-zone's zones are no
+/// constants.
+#[cfg(test)]
+pub(crate) fn test_zone(name: &str) -> cal_core::Zone {
+    cal_core::Zone::named(name).unwrap_or_else(|| panic!("{name} is a bundled zone"))
+}
 pub mod auth;
 pub mod autodiscover;
 pub mod contacts;
@@ -4286,7 +4293,7 @@ mod server_zone_tests {
         // The instant of `local` on day `index` (1 = 22 March) in Berlin, as
         // Exchange places it: a skipped wall time an hour later.
         fn on_day(index: u32, local: &str) -> DateTime<Utc> {
-            let berlin = chrono_tz::Europe::Berlin;
+            let berlin = crate::test_zone("Europe/Berlin");
             let day = chrono::NaiveDate::from_ymd_opt(2027, 3, 22).unwrap()
                 + chrono::Duration::days(i64::from(index) - 1);
             let naive = day.and_time(chrono::NaiveTime::parse_from_str(local, "%H:%M").unwrap());

@@ -100,12 +100,12 @@ pub(crate) fn windows_zones(args: &[String]) -> Result<String, String> {
             other => return Err(format!("unknown argument `{other}`\n\n{USAGE}")),
         }
     }
-    if cal_core::TZDATA_VERSION != chrono_tz::IANA_TZDB_VERSION {
+    if cal_core::TZDATA_VERSION != cal_core::tzdata_version() {
         return Err(format!(
-            "cal-core resolves names from tzdata {}, but chrono-tz is built from {}: \
+            "cal-core resolves names from tzdata {}, but jiff-tzdb bundles {}: \
              run `cargo xtask tz-list` first",
             cal_core::TZDATA_VERSION,
-            chrono_tz::IANA_TZDB_VERSION,
+            cal_core::tzdata_version(),
         ));
     }
 
@@ -220,7 +220,7 @@ fn read_source(text: &str) -> Result<Source, String> {
     })
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -372,9 +372,8 @@ fn read_map_zones(xml: &str) -> Result<Vec<MapZone>, String> {
 
 /// Every canonical tzdata zone the core knows that is not a UTC name.
 fn canonical_zones() -> BTreeSet<&'static str> {
-    chrono_tz::TZ_VARIANTS
-        .iter()
-        .filter_map(|tz| cal_core::canonical_zone(tz.name()))
+    cal_core::Zone::all()
+        .filter_map(|zone| cal_core::canonical_zone(zone.name()))
         .filter(|zone| cal_core::series_clock_zone(Some(zone)).is_some())
         .collect()
 }
@@ -575,8 +574,9 @@ fn first_difference(
         return None;
     }
     let parse = |name: &str| {
-        name.parse::<chrono_tz::Tz>()
-            .unwrap_or_else(|_| panic!("{name} is a zone cal-core resolved, so chrono-tz knows it"))
+        cal_core::Zone::named(name).unwrap_or_else(|| {
+            panic!("{name} is a zone cal-core resolved, so jiff-tzdb bundles it")
+        })
     };
     let (zone, windows) = (
         cal_core::TzClock(parse(zone)),

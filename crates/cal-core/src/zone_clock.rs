@@ -47,7 +47,7 @@
 //! A clock no zone runs is [`ClockMatch::NoZone`]: the caller says so, and the
 //! series repeats as it did before.
 
-use chrono::{DateTime, Duration, Months, NaiveDate, NaiveTime, Offset, TimeZone, Utc};
+use chrono::{DateTime, Duration, Months, NaiveDate, NaiveTime, Utc};
 
 /// How long a window of comparison runs: five years, as the zone table's clock
 /// guard looks ahead.
@@ -65,19 +65,26 @@ impl<F: Fn(DateTime<Utc>) -> Option<i32>> Clock for F {
     }
 }
 
-/// A tzdata zone as a [`Clock`].
+/// A tzdata zone as a [`Clock`]: the total offset, always `Some`. It never
+/// says `None`, not even outside the years the bundled data covers (it
+/// answers as at the nearer edge there), because a clock that cannot say
+/// agrees with another that cannot, and two zones would then "agree".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TzClock(pub chrono_tz::Tz);
+pub struct TzClock(pub cal_zone::Zone);
 
 impl Clock for TzClock {
     fn offset_at(&self, at: DateTime<Utc>) -> Option<i32> {
-        Some(
-            self.0
-                .offset_from_utc_datetime(&at.naive_utc())
-                .fix()
-                .local_minus_utc(),
-        )
+        Some(self.0.offset_at(at).local_minus_utc())
     }
+}
+
+/// The zone a STORED name reads as, by [`crate::canonical_zone`]'s rule:
+/// ASCII case folded, links resolved to their target, nothing trimmed.
+/// "europe/berlin" gives Europe/Berlin, "US/Eastern" America/New_York, "UTC"
+/// Etc/UTC. `None` wherever `canonical_zone` is `None`; never Factory or
+/// Etc/Unknown, which the generated table does not hold.
+pub fn zone_of(name: &str) -> Option<cal_zone::Zone> {
+    crate::canonical_zone(name).and_then(cal_zone::Zone::named)
 }
 
 /// Where two clocks first read different offsets.
@@ -160,8 +167,8 @@ pub fn zone_with_clock(
         return ClockMatch::Utc;
     }
     let runs = |zone: &str| {
-        zone.parse::<chrono_tz::Tz>()
-            .is_ok_and(|tz| first_clock_difference(clock, &TzClock(tz), window).is_none())
+        cal_zone::Zone::named(zone)
+            .is_some_and(|tz| first_clock_difference(clock, &TzClock(tz), window).is_none())
     };
     candidates(device)
         .find(|zone| runs(zone))
@@ -188,6 +195,7 @@ fn candidates(device: Option<&str>) -> impl Iterator<Item = &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     fn utc(s: &str) -> DateTime<Utc> {
         s.parse().unwrap()

@@ -470,7 +470,11 @@ mod tests {
         assert_eq!(
             unstorable,
             [
+                "America/Edmonton",
+                "America/Inuvik",
                 "America/Scoresbysund",
+                "America/Vancouver",
+                "America/Winnipeg",
                 "Antarctica/Casey",
                 "Antarctica/Troll",
                 "Antarctica/Vostok",

@@ -2085,7 +2085,7 @@ pub(crate) fn new_event_to_calendar_item_xml_in<D: TimeZone>(
     // creates it without a zone, so Exchange stores it in UTC
     // ([`all_day_boundary`] in UTC). Timed events write the instant verbatim.
     let (wire_start, wire_end) = if event.all_day {
-        let utc = DayZone::Tz(chrono_tz::UTC);
+        let utc = DayZone::Tz(cal_core::Zone::UTC);
         (
             all_day_boundary(event.start, Some(&utc), device)?,
             all_day_boundary(event.end, Some(&utc), device)?,
@@ -2997,7 +2997,17 @@ fn id_names_a_clock(id: Option<&str>) -> bool {
     };
     id.eq_ignore_ascii_case("tzone://Microsoft/Utc")
         || !matches!(read_windows_zone(id), WindowsZoneRead::Unknown)
-        || id.parse::<chrono_tz::Tz>().is_ok()
+        || tzdata_own_zone(id).is_some()
+}
+
+/// An id that is tzdata's own name (236): exact case, links kept as
+/// themselves, the id trimmed. ONE predicate for [`id_names_a_clock`] and
+/// [`boundary_zone`]: if they differed, a definition would be dropped while
+/// the name beside it could not be read. Never `cal_core::zone_of`, which
+/// folds case and follows links and would change which items keep Exchange's
+/// own definition.
+fn tzdata_own_zone(id: &str) -> Option<cal_core::Zone> {
+    cal_core::Zone::named(id.trim())
 }
 
 /// Re-anchor an all-day boundary read from EWS at LOCAL midnight of the
@@ -3133,7 +3143,7 @@ pub(crate) fn names_override(
 /// custom zone such as `Customized Time Zone`, decision 232).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DayZone {
-    Tz(chrono_tz::Tz),
+    Tz(cal_core::Zone),
     Rules(std::sync::Arc<crate::zone_definition::ZoneRules>),
 }
 
@@ -3141,7 +3151,7 @@ impl DayZone {
     /// The wall time at an instant; `None` where a definition cannot say.
     pub(crate) fn wall(&self, when: DateTime<Utc>) -> Option<NaiveDateTime> {
         match self {
-            Self::Tz(tz) => Some(when.with_timezone(tz).naive_local()),
+            Self::Tz(tz) => Some(tz.wall(when)),
             Self::Rules(rules) => rules.wall(when),
         }
     }
@@ -3196,11 +3206,11 @@ fn boundary_zone(
 ) -> Option<DayZone> {
     use crate::windows_tz::{read_windows_zone, WindowsZoneRead};
     match id.map(read_windows_zone) {
-        Some(WindowsZoneRead::Zone(zone)) => return zone.parse().ok().map(DayZone::Tz),
-        Some(WindowsZoneRead::Utc) => return Some(DayZone::Tz(chrono_tz::UTC)),
+        Some(WindowsZoneRead::Zone(zone)) => return cal_core::Zone::named(zone).map(DayZone::Tz),
+        Some(WindowsZoneRead::Utc) => return Some(DayZone::Tz(cal_core::Zone::UTC)),
         Some(WindowsZoneRead::Unknown) | None => {}
     }
-    if let Some(tz) = id.and_then(|id| id.trim().parse::<chrono_tz::Tz>().ok()) {
+    if let Some(tz) = id.and_then(tzdata_own_zone) {
         return Some(DayZone::Tz(tz));
     }
     let definition = definition?;
@@ -3258,7 +3268,7 @@ fn made_without_zone(item: &ParsedItem) -> bool {
 /// `None` where Exchange names none Aperio can read.
 pub(crate) fn all_day_zone(item: &ParsedItem) -> Option<DayZone> {
     if made_without_zone(item) {
-        return Some(DayZone::Tz(chrono_tz::UTC));
+        return Some(DayZone::Tz(cal_core::Zone::UTC));
     }
     boundary_zone(
         item.start_time_zone.as_deref(),
@@ -3271,7 +3281,7 @@ pub(crate) fn all_day_zone(item: &ParsedItem) -> Option<DayZone> {
 /// boundary in its own, decision 233), else the start's.
 pub(crate) fn all_day_end_zone(item: &ParsedItem) -> Option<DayZone> {
     if made_without_zone(item) {
-        return Some(DayZone::Tz(chrono_tz::UTC));
+        return Some(DayZone::Tz(cal_core::Zone::UTC));
     }
     if item.end_time_zone.is_none() && item.end_zone_definition.is_none() {
         return all_day_zone(item);
@@ -3303,8 +3313,8 @@ impl StoredZones {
     /// An item Exchange stores in UTC, as Aperio creates every item.
     pub(crate) fn utc() -> Self {
         Self {
-            start: Some(DayZone::Tz(chrono_tz::UTC)),
-            end: Some(DayZone::Tz(chrono_tz::UTC)),
+            start: Some(DayZone::Tz(cal_core::Zone::UTC)),
+            end: Some(DayZone::Tz(cal_core::Zone::UTC)),
         }
     }
 }
@@ -3368,8 +3378,7 @@ fn written_clock(
     written?;
     let tzid = cal_core::written_series_zone(recurrence.and_then(|r| r.tzid.as_deref()), all_day);
     cal_core::series_clock_zone(tzid)
-        .and_then(cal_core::canonical_zone)
-        .and_then(|zone| zone.parse::<chrono_tz::Tz>().ok())
+        .and_then(cal_core::zone_of)
         .map(DayZone::Tz)
 }
 
@@ -6023,7 +6032,7 @@ mod tests {
                 let today = format!(
                     "<t:{tag}>{}</t:{tag}>",
                     format_ews_datetime(
-                        local_midnight_in(device_day(when, &Local), &chrono_tz::UTC).unwrap()
+                        local_midnight_in(device_day(when, &Local), &cal_core::Zone::UTC).unwrap()
                     )
                 );
                 let prototype = format!("<t:{tag}>{}</t:{tag}>", format_ews_datetime(when));
@@ -6872,9 +6881,9 @@ mod tests {
                             .iter()
                             .any(|b| b.contains(r#"FieldURI="calendar:StartTimeZone""#));
                         let rule_clock = if clock_moved {
-                            DayZone::Tz(chrono_tz::Europe::Berlin)
+                            DayZone::Tz(crate::test_zone("Europe/Berlin"))
                         } else {
-                            DayZone::Tz(chrono_tz::UTC)
+                            DayZone::Tz(cal_core::Zone::UTC)
                         };
                         for block in with {
                             // The second exception, on purpose: a slot written
@@ -7152,7 +7161,7 @@ mod tests {
                 &w_europe_zones(),
                 None,
                 EventIdKind::RecurringMaster,
-                &chrono_tz::Europe::Berlin,
+                &crate::test_zone("Europe/Berlin"),
             )
             .unwrap();
             let written: Vec<String> = field_uris(&set)
@@ -7587,7 +7596,7 @@ mod tests {
             &w_europe_zones(),
             None,
             EventIdKind::RecurringMaster,
-            &chrono_tz::Europe::Berlin,
+            &crate::test_zone("Europe/Berlin"),
         )
         .unwrap();
         assert_eq!(
@@ -8965,9 +8974,9 @@ mod tests {
                 device.map(str::to_string)
             })
         };
-        let runs_the_clock_of = |zone: &str, other: chrono_tz::Tz| {
+        let runs_the_clock_of = |zone: &str, other: cal_core::Zone| {
             cal_core::first_clock_difference(
-                &cal_core::TzClock(zone.parse().unwrap()),
+                &cal_core::TzClock(crate::test_zone(zone)),
                 &cal_core::TzClock(other),
                 cal_core::clock_window(start),
             )
@@ -8995,7 +9004,7 @@ mod tests {
         // The custom zone measured on Exchange 2019: UTC+03:00 all year.
         let plus_three = zone(Some(fixed("-PT3H")), None).expect("+03:00 is a zone's clock");
         assert!(
-            runs_the_clock_of(plus_three, chrono_tz::Europe::Moscow),
+            runs_the_clock_of(plus_three, crate::test_zone("Europe/Moscow")),
             "{plus_three}"
         );
         assert_eq!(
@@ -9028,7 +9037,7 @@ mod tests {
             .tzid
             .expect("a zone runs the definition's clock");
         assert!(
-            runs_the_clock_of(&tzid, chrono_tz::Europe::Berlin),
+            runs_the_clock_of(&tzid, crate::test_zone("Europe/Berlin")),
             "{tzid}"
         );
     }
@@ -9270,12 +9279,12 @@ mod tests {
     fn an_all_day_item_in_a_zone_named_by_tzdata_reads_its_day() {
         let item = all_day_item(Some("Europe/Berlin"), Some("Europe/Berlin"));
         let zone = all_day_zone(&item);
-        assert_eq!(zone, Some(DayZone::Tz(chrono_tz::Europe::Berlin)));
+        assert_eq!(zone, Some(DayZone::Tz(crate::test_zone("Europe/Berlin"))));
         // Berlin's midnight of 12 October reads as that day on any device.
         for device in [
-            chrono_tz::Europe::Berlin,
-            chrono_tz::Asia::Tokyo,
-            chrono_tz::Pacific::Honolulu,
+            crate::test_zone("Europe/Berlin"),
+            crate::test_zone("Asia/Tokyo"),
+            crate::test_zone("Pacific/Honolulu"),
         ] {
             let anchored = all_day_anchor_in(utc("2026-10-11T22:00:00Z"), zone.as_ref(), &device);
             assert_eq!(
@@ -9308,7 +9317,7 @@ mod tests {
         assert!(matches!(zone, Some(DayZone::Rules(_))));
         // The end has no zone of its own and reads in the start's.
         assert_eq!(all_day_end_zone(&item), zone);
-        let device = chrono_tz::Europe::Berlin;
+        let device = crate::test_zone("Europe/Berlin");
         let day = |d: &str| local_midnight_in(d.parse().unwrap(), &device).unwrap();
         // Midnight of 12 October at +14 is 10:00Z on the 11th.
         assert_eq!(
@@ -9339,13 +9348,13 @@ mod tests {
         let item = all_day_item(Some("Tokyo Standard Time"), Some("Hawaiian Standard Time"));
         assert_eq!(
             all_day_zone(&item),
-            Some(DayZone::Tz(chrono_tz::Asia::Tokyo))
+            Some(DayZone::Tz(crate::test_zone("Asia/Tokyo")))
         );
         assert_eq!(
             all_day_end_zone(&item),
-            Some(DayZone::Tz(chrono_tz::Pacific::Honolulu))
+            Some(DayZone::Tz(crate::test_zone("Pacific/Honolulu")))
         );
-        let device = chrono_tz::Europe::Berlin;
+        let device = crate::test_zone("Europe/Berlin");
         // Honolulu's midnight of 20 October: read in Tokyo it is the 21st.
         let end = utc("2026-10-20T10:00:00Z");
         assert_eq!(
@@ -9363,7 +9372,7 @@ mod tests {
         );
         assert_eq!(
             all_day_end_zone(&made_without),
-            Some(DayZone::Tz(chrono_tz::UTC))
+            Some(DayZone::Tz(cal_core::Zone::UTC))
         );
     }
 
@@ -9436,7 +9445,7 @@ mod tests {
     /// single changes' ids now name the day itself.
     #[test]
     fn an_all_day_series_is_read_in_its_own_zone() {
-        let auckland = chrono_tz::Pacific::Auckland;
+        let auckland = crate::test_zone("Pacific/Auckland");
         let slot: DateTime<Utc> = "2027-01-14T11:00:00Z".parse().unwrap();
         let day = chrono::NaiveDate::from_ymd_opt(2027, 1, 15).unwrap();
         let local_midnight = Local
@@ -9486,7 +9495,7 @@ mod tests {
         // A series made without a zone reads its UTC midnights in UTC.
         item.start_time_zone = Some("Greenwich Standard Time".into());
         item.end_time_zone = Some("tzone://Microsoft/Utc".into());
-        assert_eq!(all_day_zone(&item), Some(DayZone::Tz(chrono_tz::UTC)));
+        assert_eq!(all_day_zone(&item), Some(DayZone::Tz(cal_core::Zone::UTC)));
         // No zone Aperio can read: the day is sampled, as before.
         item.start_time_zone = None;
         item.end_time_zone = None;
@@ -10369,7 +10378,7 @@ mod tests {
         &xml[start..end]
     }
 
-    fn all_day_new(device: &chrono_tz::Tz, rrule: &str) -> NewEvent {
+    fn all_day_new(device: &cal_core::Zone, rrule: &str) -> NewEvent {
         let mut ev = new_event_min("Monday");
         ev.all_day = true;
         ev.start = midnight_on("2026-10-19", device);
@@ -10387,13 +10396,12 @@ mod tests {
     /// the series started there (live round 3, R3-6).
     #[test]
     fn an_all_day_series_starts_on_the_day_it_names() {
-        use chrono_tz::{America, Asia, Europe, Pacific};
         for device in [
-            Europe::Berlin,
-            Asia::Tokyo,
-            Pacific::Auckland,
-            Pacific::Honolulu,
-            America::New_York,
+            crate::test_zone("Europe/Berlin"),
+            crate::test_zone("Asia/Tokyo"),
+            crate::test_zone("Pacific/Auckland"),
+            crate::test_zone("Pacific/Honolulu"),
+            crate::test_zone("America/New_York"),
         ] {
             let create = |rrule: &str| {
                 new_event_to_calendar_item_xml_in(&all_day_new(&device, rrule), None, &device)
@@ -10424,7 +10432,7 @@ mod tests {
     /// Berlin is Sunday in UTC, Monday 20:00 in New York is Tuesday in UTC.
     #[test]
     fn a_zoned_series_starts_on_its_wall_clock_day() {
-        let device = chrono_tz::Europe::Berlin;
+        let device = crate::test_zone("Europe/Berlin");
         for (tzid, start) in [
             ("Europe/Berlin", "2026-10-18T22:30:00Z"),
             ("America/New_York", "2026-10-20T00:00:00Z"),
@@ -10458,7 +10466,8 @@ mod tests {
             exceptions: Vec::new(),
             tzid: None,
         });
-        let xml = new_event_to_calendar_item_xml_in(&ev, None, &chrono_tz::Europe::Berlin).unwrap();
+        let xml = new_event_to_calendar_item_xml_in(&ev, None, &crate::test_zone("Europe/Berlin"))
+            .unwrap();
         assert_eq!(element(&xml, "StartDate"), "2026-10-18");
         assert_eq!(element(&xml, "DaysOfWeek"), "Sunday");
         assert!(!xml.contains("TimeZone"), "{xml}");
@@ -10478,8 +10487,12 @@ mod tests {
             exceptions: Vec::new(),
             tzid: Some("Asia/Tokyo".into()),
         });
-        let xml = new_event_to_calendar_item_xml_in(&ev, Some(&server), &chrono_tz::Europe::Berlin)
-            .unwrap();
+        let xml = new_event_to_calendar_item_xml_in(
+            &ev,
+            Some(&server),
+            &crate::test_zone("Europe/Berlin"),
+        )
+        .unwrap();
         assert!(!xml.contains("TimeZone"), "{xml}");
         assert_eq!(element(&xml, "StartDate"), "2026-10-18");
         assert_eq!(element(&xml, "DaysOfWeek"), "Sunday");
@@ -10487,8 +10500,8 @@ mod tests {
 
     fn w_europe_zones() -> StoredZones {
         StoredZones {
-            start: Some(DayZone::Tz(chrono_tz::Europe::Berlin)),
-            end: Some(DayZone::Tz(chrono_tz::Europe::Berlin)),
+            start: Some(DayZone::Tz(crate::test_zone("Europe/Berlin"))),
+            end: Some(DayZone::Tz(crate::test_zone("Europe/Berlin"))),
         }
     }
 
@@ -10505,7 +10518,7 @@ mod tests {
         }
     }
 
-    fn all_day_master(device: &chrono_tz::Tz, rrule: &str) -> Event {
+    fn all_day_master(device: &cal_core::Zone, rrule: &str) -> Event {
         let mut ev = zoned_master(None);
         ev.all_day = true;
         ev.start = midnight_on("2026-10-19", device);
@@ -10523,8 +10536,11 @@ mod tests {
     /// the right StartDate.
     #[test]
     fn a_rule_only_edit_of_an_all_day_series_starts_on_its_day() {
-        use chrono_tz::{Asia, Europe, Pacific};
-        for device in [Europe::Berlin, Asia::Tokyo, Pacific::Auckland] {
+        for device in [
+            crate::test_zone("Europe/Berlin"),
+            crate::test_zone("Asia/Tokyo"),
+            crate::test_zone("Pacific/Auckland"),
+        ] {
             let before = all_day_master(&device, "FREQ=WEEKLY;BYDAY=MO");
             let mut edit = before.clone();
             edit.recurrence.as_mut().unwrap().rrule = "FREQ=DAILY;COUNT=4".into();
@@ -10550,7 +10566,7 @@ mod tests {
     /// Berlin is Sunday in UTC.
     #[test]
     fn a_rule_only_edit_of_a_zoned_series_starts_on_the_stored_zones_day() {
-        let device = chrono_tz::Asia::Tokyo;
+        let device = crate::test_zone("Asia/Tokyo");
         let mut before = zoned_master(Some("Europe/Berlin"));
         before.start = "2026-10-18T22:30:00Z".parse().unwrap();
         before.end = "2026-10-18T23:00:00Z".parse().unwrap();
@@ -10575,7 +10591,7 @@ mod tests {
     /// too. A series without a zone keeps the UTC day.
     #[test]
     fn a_blind_update_of_a_zoned_series_starts_on_its_written_zones_day() {
-        let device = chrono_tz::Pacific::Honolulu;
+        let device = crate::test_zone("Pacific/Honolulu");
         for (tzid, day, weekday) in [
             (Some("Europe/Berlin"), "2026-10-19", "Monday"),
             (None, "2026-10-18", "Sunday"),
@@ -10607,12 +10623,11 @@ mod tests {
     /// the comparison build the rule on the same first day.
     #[test]
     fn a_title_only_save_of_an_all_day_series_writes_no_rule() {
-        use chrono_tz::{Asia, Europe, Pacific};
         for device in [
-            Europe::Berlin,
-            Asia::Tokyo,
-            Pacific::Auckland,
-            Pacific::Honolulu,
+            crate::test_zone("Europe/Berlin"),
+            crate::test_zone("Asia/Tokyo"),
+            crate::test_zone("Pacific/Auckland"),
+            crate::test_zone("Pacific/Honolulu"),
         ] {
             for stored in [w_europe_zones(), StoredZones::utc()] {
                 let before = all_day_master(&device, "FREQ=WEEKLY");
@@ -10642,7 +10657,7 @@ mod tests {
     /// day: Sunday for an all-day series on Monday 2 November.
     #[test]
     fn flipping_all_day_takes_a_kept_rule_to_the_new_first_day() {
-        let device = chrono_tz::Europe::Berlin;
+        let device = crate::test_zone("Europe/Berlin");
         let monday = midnight_on("2026-11-02", &device);
         let mut timed = zoned_master(None);
         timed.recurrence.as_mut().unwrap().rrule = "FREQ=DAILY".into();
@@ -10669,7 +10684,7 @@ mod tests {
         }
     }
 
-    fn moved_single(device: &chrono_tz::Tz) -> (Event, Event) {
+    fn moved_single(device: &cal_core::Zone) -> (Event, Event) {
         let mut before = zoned_master(None);
         before.recurrence = None;
         before.all_day = true;
@@ -10690,49 +10705,63 @@ mod tests {
     /// zone (233). Stored in UTC, the bytes are what Aperio always wrote.
     #[test]
     fn an_all_day_day_moves_on_the_stored_zones_midnights() {
-        use chrono_tz::{Asia, Europe, Pacific};
-        let zones = |start: chrono_tz::Tz, end: chrono_tz::Tz| StoredZones {
+        let zones = |start: cal_core::Zone, end: cal_core::Zone| StoredZones {
             start: Some(DayZone::Tz(start)),
             end: Some(DayZone::Tz(end)),
         };
         let cases = [
             // Measured good live (R3-3): W. Europe, Berlin device.
             (
-                Europe::Berlin,
-                zones(Europe::Berlin, Europe::Berlin),
+                crate::test_zone("Europe/Berlin"),
+                zones(
+                    crate::test_zone("Europe/Berlin"),
+                    crate::test_zone("Europe/Berlin"),
+                ),
                 "2026-10-19T22:00:00Z",
                 "2026-10-20T22:00:00Z",
             ),
             // The Tokyo item edited in Berlin.
             (
-                Europe::Berlin,
-                zones(Asia::Tokyo, Asia::Tokyo),
+                crate::test_zone("Europe/Berlin"),
+                zones(
+                    crate::test_zone("Asia/Tokyo"),
+                    crate::test_zone("Asia/Tokyo"),
+                ),
                 "2026-10-19T15:00:00Z",
                 "2026-10-20T15:00:00Z",
             ),
             // Devices far from the stored zone.
             (
-                Pacific::Auckland,
-                zones(Europe::Berlin, Europe::Berlin),
+                crate::test_zone("Pacific/Auckland"),
+                zones(
+                    crate::test_zone("Europe/Berlin"),
+                    crate::test_zone("Europe/Berlin"),
+                ),
                 "2026-10-19T22:00:00Z",
                 "2026-10-20T22:00:00Z",
             ),
             (
-                Pacific::Honolulu,
-                zones(Europe::Berlin, Europe::Berlin),
+                crate::test_zone("Pacific/Honolulu"),
+                zones(
+                    crate::test_zone("Europe/Berlin"),
+                    crate::test_zone("Europe/Berlin"),
+                ),
                 "2026-10-19T22:00:00Z",
                 "2026-10-20T22:00:00Z",
             ),
             // Two zones: each boundary on its own (233).
             (
-                Europe::Berlin,
-                zones(Asia::Tokyo, Pacific::Honolulu),
+                crate::test_zone("Europe/Berlin"),
+                zones(
+                    crate::test_zone("Asia/Tokyo"),
+                    crate::test_zone("Pacific/Honolulu"),
+                ),
                 "2026-10-19T15:00:00Z",
                 "2026-10-21T10:00:00Z",
             ),
             // Stored in UTC: unchanged bytes.
             (
-                Europe::Berlin,
+                crate::test_zone("Europe/Berlin"),
                 StoredZones::utc(),
                 "2026-10-20T00:00:00Z",
                 "2026-10-21T00:00:00Z",
@@ -10757,7 +10786,7 @@ mod tests {
     /// A zone Exchange defines in full moves the day as its named twin does.
     #[test]
     fn an_all_day_day_in_a_custom_zone_moves_on_its_definitions_midnights() {
-        let device = chrono_tz::Europe::Berlin;
+        let device = crate::test_zone("Europe/Berlin");
         let rules =
             crate::zone_definition::ZoneRules::try_from(&crate::zone_definition::tests::w_europe())
                 .unwrap();
@@ -10787,7 +10816,7 @@ mod tests {
     /// midnights too (decision 235).
     #[test]
     fn a_timed_appointment_made_all_day_lands_on_the_stored_zones_midnights() {
-        let device = chrono_tz::Europe::Berlin;
+        let device = crate::test_zone("Europe/Berlin");
         let mut before = zoned_master(None);
         before.recurrence = None;
         before.start = "2026-10-19T08:00:00Z".parse().unwrap();
@@ -10816,7 +10845,7 @@ mod tests {
     /// by name; a save that leaves the day alone still goes out.
     #[test]
     fn an_all_day_day_in_an_unknown_zone_is_refused_and_a_title_is_not() {
-        let device = chrono_tz::Europe::Berlin;
+        let device = crate::test_zone("Europe/Berlin");
         let unknown = StoredZones::default();
         let (before, edit) = moved_single(&device);
         let err = event_to_update_field_xml_in(
@@ -10880,7 +10909,7 @@ mod tests {
             stored,
             None,
             kind,
-            &chrono_tz::Europe::Berlin,
+            &crate::test_zone("Europe/Berlin"),
         )
         .unwrap()
     }
@@ -11049,7 +11078,7 @@ mod tests {
         // `a_zone_definition_lands_on_its_own_boundary` parses), or beside an
         // end that cannot be read: still only the rule.
         let start = defined.start.clone();
-        for end in [Some(DayZone::Tz(chrono_tz::Europe::Berlin)), None] {
+        for end in [Some(DayZone::Tz(crate::test_zone("Europe/Berlin"))), None] {
             let mixed = StoredZones {
                 start: start.clone(),
                 end: end.clone(),
@@ -11061,7 +11090,7 @@ mod tests {
         // An end on another clock is not kept: the zone goes out.
         let far_end = StoredZones {
             start,
-            end: Some(DayZone::Tz(chrono_tz::Asia::Tokyo)),
+            end: Some(DayZone::Tz(crate::test_zone("Asia/Tokyo"))),
         };
         let plan = planned(&longer, &before, &far_end, EventIdKind::RecurringMaster);
         assert_eq!(zone_fields(&plan.set), 2, "{}", plan.set);
@@ -11154,7 +11183,7 @@ mod tests {
             stored,
             None,
             kind,
-            &chrono_tz::Europe::Berlin,
+            &crate::test_zone("Europe/Berlin"),
         )
         .unwrap()
     }
@@ -11176,8 +11205,8 @@ mod tests {
 
     fn new_york_zones() -> StoredZones {
         StoredZones {
-            start: Some(DayZone::Tz(chrono_tz::America::New_York)),
-            end: Some(DayZone::Tz(chrono_tz::America::New_York)),
+            start: Some(DayZone::Tz(crate::test_zone("America/New_York"))),
+            end: Some(DayZone::Tz(crate::test_zone("America/New_York"))),
         }
     }
 
@@ -11341,7 +11370,7 @@ mod tests {
             let (set, _) = saved(&edit, &before, stored, EventIdKind::RecurringMaster);
             assert_eq!(element(&set, "EndDate"), "2026-11-04", "{label}: {set}");
         }
-        let device = chrono_tz::Europe::Berlin;
+        let device = crate::test_zone("Europe/Berlin");
         let before = all_day_master(&device, "FREQ=DAILY;COUNT=6");
         let edit = ended(&before, "20261021", true);
         let (set, _) = saved(&edit, &before, &berlin, EventIdKind::RecurringMaster);
@@ -11390,7 +11419,7 @@ mod tests {
             &StoredZones::default(),
             None,
             EventIdKind::RecurringMaster,
-            &chrono_tz::Europe::Berlin,
+            &crate::test_zone("Europe/Berlin"),
         )
         .unwrap_err();
         let EwsError::Protocol(message) = err else {
@@ -11575,8 +11604,8 @@ mod tests {
         // another zone (the zone-rewrite shape) and a zone Aperio cannot read.
         // The rule is unchanged, so nothing is written but the title.
         let end_in_utc = StoredZones {
-            start: Some(DayZone::Tz(chrono_tz::Europe::Berlin)),
-            end: Some(DayZone::Tz(chrono_tz::UTC)),
+            start: Some(DayZone::Tz(crate::test_zone("Europe/Berlin"))),
+            end: Some(DayZone::Tz(cal_core::Zone::UTC)),
         };
         for zones in [w_europe_zones(), end_in_utc, StoredZones::default()] {
             let mut renamed = reordered.clone();
@@ -11780,7 +11809,7 @@ mod tests {
                     &stored,
                     None,
                     EventIdKind::RecurringMaster,
-                    &chrono_tz::Europe::Berlin,
+                    &crate::test_zone("Europe/Berlin"),
                 )
                 .unwrap();
                 assert_eq!(
@@ -11815,7 +11844,7 @@ mod tests {
             &w_europe_zones(),
             None,
             EventIdKind::RecurringMaster,
-            &chrono_tz::Europe::Berlin,
+            &crate::test_zone("Europe/Berlin"),
         )
         .unwrap();
         assert_eq!(field_uris(&set), [&ZONE[..], &SLOT[..]].concat(), "{set}");
@@ -11838,7 +11867,7 @@ mod tests {
             &StoredZones::default(),
             None,
             EventIdKind::RecurringMaster,
-            &chrono_tz::Pacific::Honolulu,
+            &crate::test_zone("Pacific/Honolulu"),
         )
         .unwrap();
         let uris = field_uris(&set);
@@ -11870,7 +11899,7 @@ mod tests {
                     &w_europe_zones(),
                     None,
                     EventIdKind::RecurringMaster,
-                    &chrono_tz::Europe::Berlin,
+                    &crate::test_zone("Europe/Berlin"),
                 )
                 .is_err(),
                 "{server_rule}"
@@ -11891,7 +11920,7 @@ mod tests {
         let mut daily = before.clone();
         daily.recurrence.as_mut().unwrap().rrule = "FREQ=DAILY;COUNT=4".into();
         let stored = StoredZones {
-            end: Some(DayZone::Tz(chrono_tz::UTC)),
+            end: Some(DayZone::Tz(cal_core::Zone::UTC)),
             ..w_europe_zones()
         };
         let (set, _) = saved(&daily, &before, &stored, EventIdKind::RecurringMaster);
@@ -11938,7 +11967,7 @@ mod tests {
         for stored in [
             w_europe_zones(),
             StoredZones {
-                end: Some(DayZone::Tz(chrono_tz::UTC)),
+                end: Some(DayZone::Tz(cal_core::Zone::UTC)),
                 ..w_europe_zones()
             },
         ] {
@@ -11948,7 +11977,7 @@ mod tests {
                 &stored,
                 None,
                 EventIdKind::RecurringMaster,
-                &chrono_tz::Europe::Berlin,
+                &crate::test_zone("Europe/Berlin"),
             )
             .unwrap();
             assert_eq!(field_uris(&set), ["item:Subject"], "{stored:?}: {set}");
@@ -12022,7 +12051,7 @@ mod tests {
             &StoredZones::utc(),
             None,
             EventIdKind::RecurringMaster,
-            &chrono_tz::Europe::Berlin,
+            &crate::test_zone("Europe/Berlin"),
         )
         .unwrap();
         assert_eq!(
@@ -12066,7 +12095,7 @@ mod tests {
             &StoredZones::utc(),
             None,
             EventIdKind::RecurringMaster,
-            &chrono_tz::Europe::Berlin,
+            &crate::test_zone("Europe/Berlin"),
         )
         .unwrap();
         assert!(!set.contains("TimeZone"), "{set}");
