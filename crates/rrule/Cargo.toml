@@ -19,13 +19,6 @@ regex = { version = "1.11.1", default-features = false, features = ["perf", "std
 # Upstream's major version; the workspace pins thiserror 1.
 thiserror = "2.0.11"
 
-[dev-dependencies]
-# TEMPORARY: tests/differential_upstream.rs runs this fork against the
-# registry release it was forked from, which still repeats on chrono-tz's
-# zones. Both leave together with chrono-tz.
-rrule_upstream = { package = "rrule", version = "=0.14.0" }
-chrono-tz.workspace = true
-
 [features]
 default = []
 

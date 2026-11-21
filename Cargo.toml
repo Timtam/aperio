@@ -187,7 +187,6 @@ serde_json = "1"
 
 # Datum & Zeit
 chrono = { version = "0.4", features = ["serde"] }
-chrono-tz = "0.10"
 # Reads a zone's TZif data for cal-zone. Built WITHOUT any database feature
 # (no tz-system, no tzdb-*): jiff never looks for a zone database of its own,
 # cal-zone hands it the bundled bytes. `tz-fat` only makes lookups faster.

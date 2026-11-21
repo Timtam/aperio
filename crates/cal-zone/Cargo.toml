@@ -18,11 +18,5 @@ jiff.workspace = true
 # generated names follow it.
 jiff-tzdb.workspace = true
 
-[dev-dependencies]
-# TEMPORARY: the differential suite in tests/parity_chrono_tz.rs proves this
-# crate reads every zone as chrono-tz 0.10.4 did, apart from the named tzdata
-# changes between 2025b and 2026f. It leaves with chrono-tz.
-chrono-tz.workspace = true
-
 [lints]
 workspace = true

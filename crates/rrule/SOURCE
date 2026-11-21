@@ -39,3 +39,5 @@ src/parser/datetime.rs: parse_timezone through Tz::named; the test zone is
 src/parser/mod.rs, src/tests/rrule.rs, src/iter/utils.rs,
 src/validator/validate_rrule.rs: test zones by name instead of constants.
 README.md: where the zones come from.
+tests/aperio_zones.rs: new, Aperio's own cases for the zones (gap, fold,
+  the midnight drop, BYSETPOS, UTC versus Etc/UTC).

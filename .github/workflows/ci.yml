@@ -254,6 +254,18 @@ jobs:
           cargo check -p cal-core --features zones
           cargo check -p plugin-core
           cargo check -p plugin-sdk
+          # The zones, and every crate that reads one through cal-core's
+          # `zones`: within one workspace build a forgotten `features =
+          # ["zones"]` compiles anyway, and fails only in an adapter
+          # repository of its own.
+          cargo check -p cal-zone
+          cargo check -p rrule
+          cargo check -p ical-mapping
+          cargo check -p adapter-caldav
+          cargo check -p adapter-google
+          cargo check -p adapter-microsoft-graph
+          cargo check -p adapter-ews
+          cargo check -p host-core
 
       # The frontends parse `shared/generated/`, which is produced from the
       # Rust types rather than mirrored by hand. A Rust field that never
@@ -290,21 +302,76 @@ jobs:
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: cargo xtask windows-zones --check
 
-      # chrono-tz stays out of the desktop's WebAssembly door: it would grow the
-      # module by about 879 KB, and the zone list's offsets come from the host
-      # there. A `zones` feature switched on anywhere in cal-core-wasm's graph
-      # would pull it in without a sound, so the graph is asked. The first line
-      # is the control: it fails if the question is asked of the wrong graph.
-      - name: chrono-tz stays out of the WebAssembly door
+      # The zones stay out of the desktop's WebAssembly door: the zone list's
+      # offsets come from the host there, and jiff with its bundled tzdata
+      # (about 207 KB of data) would only grow the module. A `zones` feature
+      # switched on anywhere in cal-core-wasm's graph would pull them in
+      # without a sound, so the graph is asked, package by package. The first
+      # line is the control: it fails if the question is asked of the wrong
+      # graph.
+      - name: The zones stay out of the WebAssembly door
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: |
           cargo tree -p cal-core-wasm --target wasm32-unknown-unknown -e normal -i cal-core > /dev/null
-          if out=$(cargo tree -p cal-core-wasm --target wasm32-unknown-unknown -e normal -i chrono-tz 2>&1); then
-            echo "chrono-tz is in the WebAssembly door's dependency graph:"
-            echo "$out"
+          for pkg in jiff jiff-tzdb cal-zone rrule chrono-tz; do
+            if out=$(cargo tree -p cal-core-wasm --target wasm32-unknown-unknown -e normal -i "$pkg" 2>&1); then
+              echo "$pkg is in the WebAssembly door's dependency graph:"
+              echo "$out"
+              exit 1
+            fi
+            echo "$out" | grep -q "did not match any packages" || { echo "$out"; exit 1; }
+          done
+
+      # chrono-tz (unmaintained, tzdata 2025b) left the build on 2026-11-21:
+      # every zone is cal-zone's. The lockfile is the whole graph, every
+      # target and dev-dependency included; `cargo tree` is the control that
+      # the question is asked of a real graph.
+      - name: chrono-tz has left the build
+        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
+        run: |
+          if grep -n -x 'name = "chrono-tz"' Cargo.lock; then
+            echo "chrono-tz is back in Cargo.lock"
             exit 1
           fi
-          echo "$out" | grep -q "did not match any packages"
+          out=$(cargo tree --workspace --target all -e all -i chrono-tz 2>&1 || true)
+          echo "$out" | grep -q "did not match any packages" || { echo "$out"; exit 1; }
+
+      # jiff reads zones only from the bytes cal-zone hands it. Its default
+      # features would make it look for the operating system's zone database
+      # (tz-system, tzdb-zoneinfo, tzdb-concatenated) or bundle its own copy;
+      # a crate that turned one on would bring that into the binary although
+      # cal-zone never asks it. The `std` line is the control.
+      - name: jiff reads no system time zone database
+        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
+        run: |
+          features=$(cargo tree --workspace --target all -e features -i jiff --prefix none)
+          echo "$features" | grep -q 'jiff feature "std"' || { echo "$features"; exit 1; }
+          for f in tz-system tzdb-zoneinfo tzdb-concatenated tzdb-bundle-platform tzdb-bundle-always static static-tz; do
+            if echo "$features" | grep -q "jiff feature \"$f\""; then
+              echo "jiff feature $f is on:"
+              echo "$features"
+              exit 1
+            fi
+          done
+
+      # Only cal-zone reads zone data: it is the one crate that depends on
+      # jiff, and xtask the only other one that reads jiff-tzdb (its names
+      # and release, for tz-list). Everything else asks cal_core::Zone, so
+      # the rules stay in one place and clippy.toml's database ban cannot be
+      # walked around through a direct dependency.
+      - name: Only cal-zone depends on jiff
+        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
+        run: |
+          direct() {
+            cargo tree --workspace --target all -e normal,build,dev -i "$1" --depth 1 --prefix none \
+              | tail -n +2 | sed -E 's/ v[0-9].*//' | sort -u | tr '\n' ' '
+          }
+          jiff=$(direct jiff)
+          tzdb=$(direct jiff-tzdb)
+          echo "jiff: $jiff"
+          echo "jiff-tzdb: $tzdb"
+          [ "$jiff" = "cal-zone " ] || { echo "only cal-zone may depend on jiff"; exit 1; }
+          [ "$tzdb" = "cal-zone xtask " ] || { echo "only cal-zone and xtask may depend on jiff-tzdb"; exit 1; }
 
   # The Rust host, the UniFFI bindings generated from it, and the Kotlin + Swift
   # bridges agree about every method and its arity. Deliberately its own job
