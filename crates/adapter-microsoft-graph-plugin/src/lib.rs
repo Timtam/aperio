@@ -32,15 +32,11 @@ use std::os::raw::{c_char, c_void};
 use adapter_microsoft_graph::{MicrosoftGraphAdapter, TokenSet, DEFAULT_AUTHORITY};
 use chrono::{DateTime, Utc};
 use plugin_sdk::cal_core::adapter::{Capability, Credentials as CalCredentials};
-use plugin_sdk::cal_core::types::{
-    AttendeeStatus, ContactPhoto, DateRange, NewContact, NewEvent, NewTask,
-};
-use plugin_sdk::cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
+use plugin_sdk::cal_core::types::{AttendeeStatus, ContactPhoto, DateRange, NewContact, NewEvent};
+use plugin_sdk::cal_core::{CalendarFeature, ContactsFeature};
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
-use plugin_sdk::plugin_core::vtables::{
-    AdapterVtable, CalendarVtable, ContactsVtable, TasksVtable,
-};
+use plugin_sdk::plugin_core::vtables::{AdapterVtable, CalendarVtable, ContactsVtable};
 use plugin_sdk::{decode_args, ok_response, open_instance_with, PluginInstance};
 use serde::Deserialize;
 
@@ -306,133 +302,6 @@ unsafe extern "C" fn ffi_rename_calendar(
     })
 }
 
-// ── TasksFeature ───────────────────────────────────────────
-
-unsafe extern "C" fn ffi_list_task_lists(
-    h: *mut c_void,
-    _a: *const u8,
-    _l: usize,
-) -> PluginCallResult {
-    dispatch(h, |p| async move { p.list_task_lists().await })
-}
-
-unsafe extern "C" fn ffi_get_tasks(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let list_id: String = match decode_args(a, l) {
-        Ok(v) => v,
-        Err(r) => return r,
-    };
-    dispatch(h, move |p| async move { p.get_tasks(&list_id).await })
-}
-
-#[derive(Debug, Deserialize)]
-struct GetTasksDeltaArgs {
-    list_id: String,
-    since_token: Option<String>,
-}
-
-unsafe extern "C" fn ffi_get_tasks_delta(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
-    let args: GetTasksDeltaArgs = match decode_args(a, l) {
-        Ok(v) => v,
-        Err(r) => return r,
-    };
-    dispatch(h, move |p| async move {
-        p.get_tasks_delta(&args.list_id, args.since_token.as_deref())
-            .await
-    })
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateTaskArgs {
-    list_id: String,
-    task: NewTask,
-}
-
-unsafe extern "C" fn ffi_create_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: CreateTaskArgs = match decode_args(a, l) {
-        Ok(v) => v,
-        Err(r) => return r,
-    };
-    dispatch(h, move |p| async move {
-        p.create_task(&args.list_id, args.task).await
-    })
-}
-
-unsafe extern "C" fn ffi_update_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let task: plugin_sdk::cal_core::Task = match decode_args(a, l) {
-        Ok(v) => v,
-        Err(r) => return r,
-    };
-    dispatch(h, move |p| async move { p.update_task(task).await })
-}
-
-unsafe extern "C" fn ffi_delete_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let task_id: String = match decode_args(a, l) {
-        Ok(v) => v,
-        Err(r) => return r,
-    };
-    dispatch_unit(h, move |p| async move { p.delete_task(&task_id).await })
-}
-
-#[derive(Debug, Deserialize)]
-struct RenameTaskListArgs {
-    list_id: String,
-    new_name: String,
-}
-
-unsafe extern "C" fn ffi_rename_task_list(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
-    let args: RenameTaskListArgs = match decode_args(a, l) {
-        Ok(v) => v,
-        Err(r) => return r,
-    };
-    dispatch_unit(h, move |p| async move {
-        p.rename_task_list(&args.list_id, &args.new_name).await
-    })
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateTaskListArgs {
-    name: String,
-    parent_id: Option<String>,
-}
-
-unsafe extern "C" fn ffi_create_task_list(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
-    let args: CreateTaskListArgs = match decode_args(a, l) {
-        Ok(v) => v,
-        Err(r) => return r,
-    };
-    dispatch(h, move |p| async move {
-        p.create_task_list(&args.name, args.parent_id.as_deref())
-            .await
-    })
-}
-
-unsafe extern "C" fn ffi_delete_task_list(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
-    let list_id: String = match decode_args(a, l) {
-        Ok(v) => v,
-        Err(r) => return r,
-    };
-    dispatch_unit(
-        h,
-        move |p| async move { p.delete_task_list(&list_id).await },
-    )
-}
-
 // ── ContactsFeature ────────────────────────────────────────
 
 unsafe extern "C" fn ffi_list_contact_lists(
@@ -658,21 +527,6 @@ pub static CALENDAR_VTABLE: CalendarVtable = CalendarVtable {
     ..CalendarVtable::empty()
 };
 
-pub static TASKS_VTABLE: TasksVtable = TasksVtable {
-    authenticate: Some(ffi_authenticate),
-    capabilities: Some(ffi_capabilities),
-    list_task_lists: Some(ffi_list_task_lists),
-    get_tasks: Some(ffi_get_tasks),
-    create_task: Some(ffi_create_task),
-    update_task: Some(ffi_update_task),
-    delete_task: Some(ffi_delete_task),
-    rename_task_list: Some(ffi_rename_task_list),
-    create_task_list: Some(ffi_create_task_list),
-    delete_task_list: Some(ffi_delete_task_list),
-    get_tasks_delta: Some(ffi_get_tasks_delta),
-    ..TasksVtable::empty()
-};
-
 pub static CONTACTS_VTABLE: ContactsVtable = ContactsVtable {
     authenticate: Some(ffi_authenticate),
     capabilities: Some(ffi_capabilities),
@@ -693,7 +547,6 @@ pub static CONTACTS_VTABLE: ContactsVtable = ContactsVtable {
 
 pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
     calendar: &CALENDAR_VTABLE,
-    tasks: &TASKS_VTABLE,
     contacts: &CONTACTS_VTABLE,
     ..AdapterVtable::empty()
 };

@@ -728,10 +728,9 @@ Siehe DESIGN §4.2.
 - [ ] **Editoren bieten an, was verloren geht.** Relative
   Aufgaben-Erinnerungen überleben nur bei lokalen Listen: Exchange schreibt
   nur die erste feste Erinnerung oder „Bei Fälligkeit“ (221, relativ 0; seit
-  2026-11-08 als Erinnerung ohne eigenen Zeitpunkt), To Do nur die erste
-  feste, CalDAV-Aufgaben, Google Tasks, Vikunja, Todoist und die
-  iPhone-Erinnerungen (Gerätekonto) gar keine. Bei To Do gilt das auch für
-  „Bei Fälligkeit“. „Nach Fälligkeit“ (222) zeigen beide Editoren, bieten es
+  2026-11-08 als Erinnerung ohne eigenen Zeitpunkt), CalDAV-Aufgaben,
+  Google Tasks, Vikunja, Todoist und die iPhone-Erinnerungen (Gerätekonto)
+  gar keine. „Nach Fälligkeit“ (222) zeigen beide Editoren, bieten es
   aber nicht neu an, weil eine Aufgabenliste keine Fähigkeit dafür nennt; die
   lokale Liste könnte es speichern. Beide
   Aufgaben-Editoren bieten trotzdem jede Art an, auch „Beim nächsten
@@ -865,8 +864,8 @@ gewollt (dieselben 700 ms) und kommt nach der Ansage.
   (`adapter-local`) und den Geräte-Adapter. Jeder andere Aufgaben-Adapter,
   Vikunja eingeschlossen, wird nur über die Plugin-Schnittstelle erreicht, und
   heute geht dort ein nacktes `Task` hinüber (Shim in `plugin-core`,
-  `ffi_update_task` der sechs Aufgaben-Plugins: CalDAV, EWS, Google, Graph,
-  Todoist, Vikunja). Ohne neue Argumentform oder eigenen Eintrag in der
+  `ffi_update_task` der fünf Aufgaben-Plugins: CalDAV, EWS, Google, Todoist,
+  Vikunja). Ohne neue Argumentform oder eigenen Eintrag in der
   Vtable käme die vorige Zeile dort nie an; dazu gehört die Frage nach der
   ABI-Version (`ABI_VERSION` heute 4, `ABI_VERSION_MIN` 3).
 
@@ -1627,6 +1626,14 @@ Vorschläge sind nicht aufgenommen.
       Troubleshooting/FAQ sowie den Kontoformular-Text (plugin.json von
       adapter-caldav-plugin, Locales) prüfen. Danach Docs-Build und
       check:links.
+- [ ] **Microsoft To Do gestrichen: Nacharbeiten außerhalb des Repos**
+      (Toni, 2026-11-21; Microsoft stellt To Do ein, Apps enden am
+      2027-06-30). Sobald ein Build ohne To Do ausgeliefert ist: in der
+      Entra-App-Registrierung des eingebauten Microsoft-Clients unter „API
+      permissions“ `Tasks.ReadWrite` entfernen (bestehende Konten melden
+      sich ohne neue Zustimmung weiter an). Store-Einträge bei Google Play
+      und App Store Connect (Beschreibung, Stichwörter, Neuigkeiten) sowie
+      die GitHub-Beschreibung auf „To Do“ prüfen.
 
 ## 🟡 C. Bewusste Deferrals (dokumentiert, niedrigere Priorität)
 
@@ -4008,7 +4015,7 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
       gespeichert“. Unteraufgaben-Entwürfe: der Editor bearbeitet danach
       die angelegte Aufgabe, Speichern schreibt ihre Felder und legt die
       übrigen Entwürfe an (Toni, 2026-10-24). Vikunja (Zuständige),
-      Todoist (Abschließen), Graph (Erweiterung) und Exchange
+      Todoist (Abschließen) und Exchange
       (Herauslösen, Kontaktfoto ersetzen) laufen über
       `Error::after_landed` denselben Weg; das Foto eines neuen Kontakts
       bleibt bei Graph und Exchange wie bei Google verschluckt. Der volle Wunsch („Editor
@@ -4020,7 +4027,7 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
       gescheiterten Entwürfen die angelegte Aufgabe; „ohne Foto angelegt“ über `has_photo`; ein beim
       Verschieben stehengebliebenes Original wird mit seiner Liste oder
       seinem Kalender benannt (277). Exchange, Graph, Vikunja und Todoist
-      sind gebaut. Am Handy ohne Testläufer zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
+      sind gebaut (Graphs Aufgaben-Schritt fiel 2026-11 mit To Do weg). Am Handy ohne Testläufer zu prüfen: eine Liste umbenennen, einen Kontakt speichern, ein Konto
       prüfen und die Verfügbarkeit abfragen, während der Anbieter ausgelastet
       ist (VoiceOver sagt den Satz an); eine zum Teil gespeicherte Aufgabe
       schließt den Editor; im Tagesstart behält ein Sammelknopf den Fokus,

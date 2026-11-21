@@ -60,9 +60,9 @@ describe('capability predicates', () => {
   });
 
   it('in-progress support defaults to true and respects the flag', () => {
-    // cal-core-native default (local / CalDAV / Exchange / Graph keep it)
+    // Default (local / CalDAV / Exchange keep it; Vikunja declares it)
     expect(canStoreInProgress(list('a', 'acc'))).toBe(true);
-    // Backends with only open/done (Google Tasks / Vikunja / Todoist)
+    // Backends with only open/done (Google Tasks / Todoist)
     expect(
       canStoreInProgress(
         list('a', 'acc', null, { supports_in_progress: false }),
@@ -71,9 +71,9 @@ describe('capability predicates', () => {
   });
 
   it('recurrence support defaults to true and respects the flag', () => {
-    // Default (local / Microsoft To Do / Vikunja store recurrence)
+    // Default (local / CalDAV / Exchange / Vikunja store recurrence)
     expect(canRecur(list('a', 'acc'))).toBe(true);
-    // Backends that drop it (Google Tasks / Todoist / CalDAV / EWS)
+    // Backends that drop it (Google Tasks / Todoist)
     expect(canRecur(list('a', 'acc', null, { task_recurrence: false }))).toBe(
       false,
     );

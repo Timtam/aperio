@@ -2315,6 +2315,25 @@ impl Host {
             }
         }
 
+        // The cache of a family an account's adapter no longer serves (a plugin
+        // update that dropped it), discarded as on the desktop (lib.rs), with
+        // the same shared code. Best-effort, retried next boot.
+        {
+            let shared = db.shared();
+            match AccountsRepo::new(&shared).list() {
+                Ok(accts) => {
+                    if let Err(err) =
+                        host_core::cache::drop_unserved_caches(&cache, &registry, &accts)
+                    {
+                        tracing::warn!(%err, "dropping unserved caches failed; will retry next boot");
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(?err, "dropping unserved caches: couldn't list accounts")
+                }
+            }
+        }
+
         let cache_observer = Arc::new(BridgeCacheObserver::new());
         let cache_refresher = CacheRefresher::new(
             Arc::clone(&registry),
@@ -12652,6 +12671,77 @@ mod tests {
                 ["configured"],
             true,
             "the local sync target should be restored on reopen",
+        );
+    }
+
+    /// Opening the host discards the cache of a family an account's loaded
+    /// adapter does not serve, after the registry came up: an iCal feed serves
+    /// calendars only, so task rows cached for it (a plugin that stopped
+    /// declaring tasks leaves exactly these) go, and its calendars stay.
+    #[test]
+    fn opening_discards_the_cache_of_a_family_the_adapter_does_not_serve() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir
+            .path()
+            .join("aperio.sqlite")
+            .to_string_lossy()
+            .into_owned();
+        let count = |host: &Host, sql: &str| -> i64 {
+            host.db
+                .with_conn(|c| c.query_row(sql, [], |r| r.get::<_, i64>(0)))
+                .unwrap()
+        };
+        {
+            let host = Host::open(
+                db_path.clone(),
+                Arc::new(FakeKeychain::default()) as Arc<dyn KeychainBridge>,
+            )
+            .unwrap();
+            host.db
+                .with_conn(|c| {
+                    c.execute_batch(
+                        "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                           VALUES ('feed', 'ical', 'Feed', '{\"feed_url\":\"https://example.invalid/feed.ics\"}',
+                                   '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+                         INSERT INTO cache_calendars (account_id, id, payload, cached_at)
+                           VALUES ('feed', 'cal-1', '{}', '2026-01-01T00:00:00Z');
+                         INSERT INTO cache_task_lists (account_id, id, payload, cached_at)
+                           VALUES ('feed', 'list-1', '{}', '2026-01-01T00:00:00Z');
+                         INSERT INTO cache_sync_state (account_id, scope, container_id, last_error)
+                           VALUES ('feed', 'task_lists', '', 'down');",
+                    )
+                })
+                .unwrap();
+        }
+
+        let host = Host::open(
+            db_path,
+            Arc::new(FakeKeychain::default()) as Arc<dyn KeychainBridge>,
+        )
+        .unwrap();
+        assert_eq!(
+            count(
+                &host,
+                "SELECT COUNT(*) FROM cache_task_lists WHERE account_id = 'feed'"
+            ),
+            0,
+            "the task cache of a calendar-only adapter is gone"
+        );
+        assert_eq!(
+            count(
+                &host,
+                "SELECT COUNT(*) FROM cache_sync_state WHERE account_id = 'feed' AND scope = 'task_lists'"
+            ),
+            0,
+            "and its old error with it"
+        );
+        assert_eq!(
+            count(
+                &host,
+                "SELECT COUNT(*) FROM cache_calendars WHERE account_id = 'feed'"
+            ),
+            1,
+            "what it serves stays"
         );
     }
 

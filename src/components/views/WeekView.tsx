@@ -893,7 +893,7 @@ export function WeekView() {
         tasks.find((row) => row.id === payload.task.id) ?? payload.task;
       void (async () => {
         try {
-          // Google Tasks, Microsoft To Do and Exchange keep whole days. Writing
+          // Google Tasks and Exchange keep whole days. Writing
           // the minute there succeeds and the value is gone by the next refresh,
           // so the drop takes the DAY — which those sources can hold — and says
           // that is what happened rather than announcing a time that will not

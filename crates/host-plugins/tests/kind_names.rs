@@ -10,7 +10,7 @@
 //! LISTING a picker is built from. A row is drawn whether or not its plugin is
 //! currently loadable, and it is drawn for a reader who hears it rather than
 //! glancing at it, so "microsoft_graph" is not an acceptable answer while the
-//! manifest that says "Microsoft (Outlook / To Do)" is still in memory.
+//! manifest that says "Microsoft 365 / Outlook" is still in memory.
 
 use plugin_core::manager::PluginManager;
 

@@ -179,9 +179,8 @@ impl Default for RecurrenceCapabilities {
 /// Which task-organisation features a `tasks`-capable adapter can
 /// faithfully round-trip. Declared (optionally) in `plugin.json` so
 /// the task UI can show / grey-out the right affordances — e.g.
-/// Vikunja and Todoist nest their projects, Microsoft To Do and
-/// Google Tasks keep flat lists; Todoist groups tasks into sections,
-/// the others don't.
+/// Vikunja and Todoist nest their projects, Google Tasks keeps flat
+/// lists; Todoist groups tasks into sections, the others don't.
 ///
 /// Defaults track what cal-core models *natively* rather than the
 /// richest backend: a backend that omits the block (or a field) is
@@ -220,8 +219,7 @@ pub struct TaskCapabilities {
     #[serde(default = "yes")]
     pub subtasks: bool,
     /// Maximum subtask nesting depth. `None` = unlimited. Backends
-    /// that only do one level (Google Tasks, Microsoft "steps") set
-    /// `Some(1)`.
+    /// that only do one level (Google Tasks) set `Some(1)`.
     #[serde(default)]
     pub max_subtask_depth: Option<u32>,
     /// Tasks can be grouped into sections within a container
@@ -247,8 +245,8 @@ pub struct TaskCapabilities {
     /// this `false`: an `in_progress` write collapses to `open` on
     /// read-back, so the UI skips the auto-schedule-to-today a "started"
     /// task would otherwise trigger (a status that can't stick shouldn't
-    /// move the date). Defaults `true` — cal-core-native: local, CalDAV,
-    /// Exchange and Microsoft To Do all keep it.
+    /// move the date). Defaults `true` — cal-core-native: local, CalDAV
+    /// and Exchange all keep it.
     #[serde(default = "yes")]
     pub supports_in_progress: bool,
     /// A task can be moved to a different container. Todoist defers
@@ -279,8 +277,8 @@ pub struct TaskCapabilities {
     ///
     /// False where the backend keeps whole days and normalises anything finer
     /// away: Google Tasks documents that only date information is recorded,
-    /// Microsoft To Do resets the time component to midnight, and an Exchange
-    /// task's dates are specified as a local date whose time MUST be midnight.
+    /// and an Exchange task's dates are specified as a local date whose time
+    /// MUST be midnight.
     ///
     /// It is declared because the loss is otherwise SILENT. The editor offered
     /// a time, the write succeeded, the server dropped it, and the next refresh
@@ -316,9 +314,8 @@ pub struct TaskCapabilities {
     pub delete_lists: bool,
     /// The adapter can manage a list's membership/sharing (the sidebar's
     /// "manage members" entry + the members dialog). Vikunja + Todoist
-    /// opt in; flat/personal backends (local, Google Tasks, MS To Do)
-    /// leave it `false` so the UI doesn't offer a control they can't
-    /// fulfil.
+    /// opt in; flat/personal backends (local, Google Tasks) leave it
+    /// `false` so the UI doesn't offer a control they can't fulfil.
     #[serde(default)]
     pub manageable: bool,
     /// How members are added when `manageable`: by user-directory search

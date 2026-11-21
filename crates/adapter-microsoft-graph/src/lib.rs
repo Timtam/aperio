@@ -26,8 +26,7 @@ use async_trait::async_trait;
 use cal_core::{
     Adapter, AttendeeStatus, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact,
     ContactList, ContactPhoto, ContactsFeature, ContainerColor, Credentials as CoreCredentials,
-    DateRange, Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask,
-    Result as CoreResult, Task, TaskList, TasksFeature,
+    DateRange, Error as CoreError, Event, FreeBusy, NewContact, NewEvent, Result as CoreResult,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -59,10 +58,6 @@ pub struct MicrosoftGraphAdapter {
     state: ApiState,
     capabilities: Vec<Capability>,
     calendars_cache: Mutex<Option<(Vec<Calendar>, chrono::DateTime<chrono::Utc>)>>,
-    /// Same 5-minute TTL cache pattern as `calendars_cache`, applied
-    /// to `/me/todo/lists` so the sidebar's task-list column doesn't
-    /// re-fetch on every navigation.
-    task_lists_cache: Mutex<Option<(Vec<TaskList>, chrono::DateTime<chrono::Utc>)>>,
     /// Listing cache for `/me/contactFolders` + the Suggested
     /// People sentinel. Single entry — `list_contact_lists`
     /// returns the full set in one call.
@@ -85,18 +80,13 @@ impl MicrosoftGraphAdapter {
             .expect("reqwest client");
         Self {
             state: ApiState::new(tokens, client_id, auth::token_url(&authority), http),
-            // Phase 6e.1 + 6e.2 added Calendar + Tasks; Phase 10i
-            // adds Contacts. Declaring all three lets the registry
-            // wire the single adapter Arc under every feature
-            // surface, so the OAuth token state + listing caches
-            // stay coherent across reads.
-            capabilities: vec![
-                Capability::Calendar,
-                Capability::Tasks,
-                Capability::Contacts,
-            ],
+            // Calendars (Phase 6e.1) and contacts (Phase 10i). Declaring
+            // both lets the registry wire the single adapter Arc under each
+            // feature surface, so the OAuth token state + listing caches
+            // stay coherent across reads. Microsoft To Do tasks were dropped
+            // in 2026-11, when Microsoft announced To Do's retirement.
+            capabilities: vec![Capability::Calendar, Capability::Contacts],
             calendars_cache: Mutex::new(None),
-            task_lists_cache: Mutex::new(None),
             contact_lists_cache: Mutex::new(None),
             contacts_cache: Mutex::new(HashMap::new()),
             listing_ttl: chrono::Duration::minutes(5),
@@ -180,17 +170,6 @@ impl MicrosoftGraphAdapter {
         }
     }
 
-    async fn cached_task_lists(&self) -> Option<Vec<TaskList>> {
-        let guard = self.task_lists_cache.lock().await;
-        let (items, ts) = guard.as_ref()?;
-        let age = chrono::Utc::now().signed_duration_since(*ts);
-        if age >= chrono::Duration::zero() && age < self.listing_ttl {
-            Some(items.clone())
-        } else {
-            None
-        }
-    }
-
     async fn cached_contact_lists(&self) -> Option<Vec<ContactList>> {
         let guard = self.contact_lists_cache.lock().await;
         let (items, ts) = guard.as_ref()?;
@@ -222,23 +201,6 @@ impl MicrosoftGraphAdapter {
         range: DateRange,
     ) -> CoreResult<ChangeSet<Event>> {
         let delta = api::initial_events_delta(&self.state, calendar_id, range.start, range.end)
-            .await
-            .map_err(to_core_error)?;
-        Ok(ChangeSet {
-            changes: delta.changes,
-            deletions: Vec::new(),
-            new_token: delta.new_token,
-            full_resync: true,
-            complete: false,
-            unfetched: Vec::new(),
-        })
-    }
-
-    /// Bootstrap To Do delta as a `full_resync` ChangeSet: every task in
-    /// the list plus the initial `@odata.deltaLink`. Used on the no-token
-    /// and 410-expired recovery paths.
-    async fn full_tasks_changeset(&self, list_id: &str) -> CoreResult<ChangeSet<Task>> {
-        let delta = api::initial_tasks_delta(&self.state, list_id)
             .await
             .map_err(to_core_error)?;
         Ok(ChangeSet {
@@ -462,102 +424,6 @@ impl CalendarFeature for MicrosoftGraphAdapter {
         Err(CoreError::Unsupported(
             "Microsoft Graph per-occurrence delete lands in a follow-up commit".into(),
         ))
-    }
-}
-
-#[async_trait]
-impl TasksFeature for MicrosoftGraphAdapter {
-    async fn list_task_lists(&self) -> CoreResult<Vec<TaskList>> {
-        if let Some(cached) = self.cached_task_lists().await {
-            return Ok(cached);
-        }
-        let fresh = api::list_task_lists(&self.state)
-            .await
-            .map_err(to_core_error)?;
-        *self.task_lists_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
-        Ok(fresh)
-    }
-
-    async fn get_tasks(&self, list_id: &str) -> CoreResult<Vec<Task>> {
-        api::get_tasks(&self.state, list_id)
-            .await
-            .map_err(to_core_error)
-    }
-
-    /// Host-driven incremental task read (CACHE-8) via Microsoft To Do's
-    /// `tasks/delta`. Same delta-link contract as `get_events_delta`, but
-    /// tasks aren't windowed so there's no range. Removed tasks come back
-    /// as `@removed` tombstones, emitted as their full `{list}|{task}`
-    /// cal-core id. A `410 Gone` re-bootstraps a full sync.
-    async fn get_tasks_delta(
-        &self,
-        list_id: &str,
-        since_token: Option<&str>,
-    ) -> CoreResult<ChangeSet<Task>> {
-        let Some(delta_link) = since_token else {
-            return self.full_tasks_changeset(list_id).await;
-        };
-        match api::follow_tasks_delta(&self.state, delta_link, list_id).await {
-            Ok(delta) => Ok(ChangeSet {
-                changes: delta.changes,
-                deletions: delta.deletions,
-                new_token: delta.new_token,
-                full_resync: false,
-                complete: false,
-                unfetched: Vec::new(),
-            }),
-            Err(GraphError::Http { status: 410, .. }) => {
-                tracing::warn!(
-                    target: "adapter_microsoft_graph",
-                    list = %list_id,
-                    "Graph To Do delta link expired (410); doing a full re-sync",
-                );
-                self.full_tasks_changeset(list_id).await
-            }
-            Err(err) => Err(to_core_error(err)),
-        }
-    }
-
-    async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
-        api::create_task(&self.state, list_id, task)
-            .await
-            .map_err(to_core_error)
-    }
-
-    async fn update_task(&self, task: Task) -> CoreResult<Task> {
-        api::update_task(&self.state, &task)
-            .await
-            .map_err(to_core_error)
-    }
-
-    async fn delete_task(&self, task_id: &str) -> CoreResult<()> {
-        api::delete_task(&self.state, task_id)
-            .await
-            .map_err(to_core_error)
-    }
-
-    async fn rename_task_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
-        api::rename_task_list(&self.state, list_id, new_name)
-            .await
-            .map_err(to_core_error)?;
-        *self.task_lists_cache.lock().await = None;
-        Ok(())
-    }
-
-    async fn create_task_list(&self, name: &str, parent_id: Option<&str>) -> CoreResult<TaskList> {
-        let created = api::create_task_list(&self.state, name, parent_id)
-            .await
-            .map_err(to_core_error)?;
-        *self.task_lists_cache.lock().await = None;
-        Ok(created)
-    }
-
-    async fn delete_task_list(&self, list_id: &str) -> CoreResult<()> {
-        api::delete_task_list(&self.state, list_id)
-            .await
-            .map_err(to_core_error)?;
-        *self.task_lists_cache.lock().await = None;
-        Ok(())
     }
 }
 
@@ -831,12 +697,6 @@ fn to_core_error(err: GraphError) -> CoreError {
         } => {
             tracing::debug!(detail = detail.word(), ?retry_after, "graph is busy");
             CoreError::provider_busy(detail)
-        }
-        // A later step failed after an earlier one landed (decision 277):
-        // never a refusal, by the core's rule.
-        PartlySaved { step, cause } => {
-            tracing::debug!(step, %cause, "graph saved the change in part");
-            to_core_error(*cause).after_landed(step)
         }
         Http { status, message } => match status {
             401 | 403 => CoreError::Authentication(message),
@@ -1374,123 +1234,6 @@ mod delta_tests {
 
         let cs = adapter_for(&server)
             .get_events_delta("cal-1", range(), Some(&stale))
-            .await
-            .unwrap();
-        assert!(cs.full_resync);
-        assert_eq!(cs.changes.len(), 1);
-        assert_eq!(cs.new_token.as_deref(), Some(fresh.as_str()));
-    }
-
-    fn one_task_with_delta_link(link: &str) -> String {
-        r##"{
-          "value": [
-            {"id":"T1","title":"Buy milk","importance":"normal","status":"notStarted"}
-          ],
-          "@odata.deltaLink": "DELTA_LINK"
-        }"##
-        .replace("DELTA_LINK", link)
-    }
-
-    #[tokio::test]
-    async fn no_token_does_full_tasks_resync() {
-        let mut server = Server::new_async().await;
-        let link = format!(
-            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT1",
-            server.url()
-        );
-        server
-            .mock(
-                "GET",
-                Matcher::Regex(r"^/me/todo/lists/LIST/tasks/delta".to_string()),
-            )
-            .with_status(200)
-            .with_body(one_task_with_delta_link(&link))
-            .create_async()
-            .await;
-
-        let cs = adapter_for(&server)
-            .get_tasks_delta("LIST", None)
-            .await
-            .unwrap();
-        assert!(cs.full_resync);
-        assert_eq!(
-            cs.changes.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
-            ["LIST|T1"]
-        );
-        assert!(cs.deletions.is_empty());
-        assert_eq!(cs.new_token.as_deref(), Some(link.as_str()));
-    }
-
-    #[tokio::test]
-    async fn token_does_incremental_tasks_with_changes_and_removals() {
-        let mut server = Server::new_async().await;
-        let prev = format!(
-            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT1",
-            server.url()
-        );
-        let next = format!(
-            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT2",
-            server.url()
-        );
-        let body = r##"{
-          "value": [
-            {"id":"T1","title":"Buy oat milk","importance":"normal","status":"notStarted"},
-            {"id":"T2","@removed":{"reason":"deleted"}}
-          ],
-          "@odata.deltaLink": "NEXT_LINK"
-        }"##
-        .replace("NEXT_LINK", &next);
-        server
-            .mock("GET", Matcher::Regex(r"deltatoken=DT1".to_string()))
-            .with_status(200)
-            .with_body(body)
-            .create_async()
-            .await;
-
-        let cs = adapter_for(&server)
-            .get_tasks_delta("LIST", Some(&prev))
-            .await
-            .unwrap();
-        assert!(!cs.full_resync);
-        assert_eq!(
-            cs.changes.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
-            ["LIST|T1"]
-        );
-        assert_eq!(cs.deletions, vec!["LIST|T2".to_string()]);
-        assert_eq!(cs.new_token.as_deref(), Some(next.as_str()));
-    }
-
-    #[tokio::test]
-    async fn expired_tasks_link_410_falls_back_to_full_resync() {
-        let mut server = Server::new_async().await;
-        let stale = format!(
-            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=STALE",
-            server.url()
-        );
-        let fresh = format!(
-            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT3",
-            server.url()
-        );
-        // Incremental call with the stale link → 410.
-        server
-            .mock("GET", Matcher::Regex(r"deltatoken=STALE".to_string()))
-            .with_status(410)
-            .with_body(r#"{"error":{"code":"syncStateNotFound"}}"#)
-            .create_async()
-            .await;
-        // Recovery: a fresh full tasks delta (no $deltatoken on the URL).
-        server
-            .mock(
-                "GET",
-                Matcher::Regex(r"^/me/todo/lists/LIST/tasks/delta$".to_string()),
-            )
-            .with_status(200)
-            .with_body(one_task_with_delta_link(&fresh))
-            .create_async()
-            .await;
-
-        let cs = adapter_for(&server)
-            .get_tasks_delta("LIST", Some(&stale))
             .await
             .unwrap();
         assert!(cs.full_resync);

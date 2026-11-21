@@ -17,7 +17,7 @@ and, if you like, create local calendars.
 |---|---|---|
 | **Google** | Browser sign-in (OAuth) | Calendars, tasks, contacts |
 | **iCloud / CalDAV** | Username + **app-specific password** | Calendars, tasks, contacts |
-| **Outlook / Microsoft 365** | Browser sign-in (OAuth) | Calendars, tasks, contacts |
+| **Microsoft 365 / Outlook** | Browser sign-in (OAuth) | Calendars, contacts |
 | **Exchange (EWS)** | Username + password | Calendars, tasks, contacts |
 | **Vikunja** | API token + server address | Tasks only |
 | **Todoist** | API token | Tasks only |

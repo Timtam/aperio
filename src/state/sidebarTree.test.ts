@@ -90,7 +90,7 @@ describe('buildSidebarTree', () => {
   it('groups calendars and task lists under their owning account', () => {
     const accounts = [
       makeAccount(LOCAL_ACCOUNT_ID, 'Local'),
-      makeAccount('outlook', 'Outlook', 'microsoft_graph'),
+      makeAccount('outlook', 'Outlook', 'ews'),
     ];
     const calendars = [
       makeCalendar('cal-1', 'My Calendar', LOCAL_ACCOUNT_ID, '#1e88e5'),
@@ -121,20 +121,20 @@ describe('buildSidebarTree', () => {
   });
 
   it('omits sections that have no children', () => {
-    // EWS-style: calendar-only account with no task lists.
+    // A Microsoft 365 account: calendars and no task lists.
     const tree = buildSidebarTree({
       accounts: [
         makeAccount(LOCAL_ACCOUNT_ID, 'Local'),
-        makeAccount('ews', 'Exchange', 'ews'),
+        makeAccount('m365', 'Microsoft 365', 'microsoft_graph'),
       ],
-      calendars: [makeCalendar('c1', 'Cal', 'ews')],
+      calendars: [makeCalendar('c1', 'Cal', 'm365')],
       taskLists: [],
       selectedCalendarIds: new Set(),
       selectedTaskListIds: new Set(),
     });
-    const ews = tree.find((n) => n.accountId === 'ews')!;
-    expect(ews.children).toHaveLength(1);
-    expect(ews.children[0].kind).toBe('calendars');
+    const m365 = tree.find((n) => n.accountId === 'm365')!;
+    expect(m365.children).toHaveLength(1);
+    expect(m365.children[0].kind).toBe('calendars');
   });
 
   it('marks an empty account so the UI can render a hint', () => {

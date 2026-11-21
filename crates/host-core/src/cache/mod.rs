@@ -131,6 +131,55 @@ pub fn reconcile_cache_generation(
     Ok(reset)
 }
 
+/// Discard the cached data of every family an account's loaded adapter no
+/// longer serves: its rows and its sync state, tokens and errors included.
+///
+/// An adapter can drop a family — a new version of its plugin that stops
+/// declaring tasks, say — and nothing else would ever clear what the cache
+/// holds for it. The refreshers walk only the registered surfaces, so the
+/// rows are never listed again and never replaced: they would turn up as
+/// search hits that open nothing, and a sync error recorded for them before
+/// would be read out as a failing account after every refresh, for good.
+///
+/// Only an account whose adapter IS loaded is judged. One without an adapter
+/// (its plugin removed, switched off or not loading, its credentials absent on
+/// this device) keeps everything: its adapter may come back, and nothing says
+/// what it would serve. Host-internal accounts (the local store, the device
+/// calendar) are left to their hosts, which register their surfaces at their
+/// own moment. What the user set for a container (names, colours, prefs) is
+/// not cache and stays, as it does when an account is deleted.
+///
+/// Both hosts call this at startup, after the registry's bootstrap. Returns
+/// the number of families discarded across all accounts.
+pub fn drop_unserved_caches(
+    cache: &CacheStore,
+    registry: &crate::registry::AdapterRegistry,
+    accounts: &[crate::accounts::Account],
+) -> Result<usize, String> {
+    let mut dropped = 0;
+    for acc in accounts {
+        if acc.adapter_kind.is_host_internal() {
+            continue;
+        }
+        let Some(served) = registry.served_families(&acc.id) else {
+            continue;
+        };
+        for family in cache
+            .drop_unserved_families(&acc.id, served)
+            .map_err(|e| e.to_string())?
+        {
+            info!(
+                target: "aperio::cache",
+                account_id = %acc.id,
+                family,
+                "discarded the cache of a family the account's adapter no longer serves",
+            );
+            dropped += 1;
+        }
+    }
+    Ok(dropped)
+}
+
 pub use observer::{CacheObserver, CacheRefreshStatus, FailingAccount, PassOutcome};
 pub use refresh::{CacheRefresher, Forcing, PREF_CACHE_LAST_REFRESHED_AT};
 pub use series::{series_rows, SeriesReach, SeriesRows};
@@ -1425,9 +1474,9 @@ impl CacheStore {
     /// ChangeKey suffix on every edit, so a plain upsert would leave the
     /// pre-edit `item|ckA` row alongside the fresh `item|ckB` and show the
     /// task twice. Purging the native group first collapses them. For
-    /// stable-id adapters (device reminders, Vikunja, Google, Todoist,
-    /// Graph) native_id == id, so this is exactly the row a plain upsert
-    /// would have replaced.
+    /// stable-id adapters (device reminders, Vikunja, Google, Todoist)
+    /// native_id == id, so this is exactly the row a plain upsert would have
+    /// replaced.
     ///
     /// Creates deliberately do NOT go through here: a created row's id may
     /// not match the id the READ path later assigns the same task (CalDAV's
@@ -2061,6 +2110,63 @@ impl CacheStore {
         })
     }
 
+    /// Drop every cached row and sync-state row of the families `served`
+    /// says the account's adapter does not provide (see
+    /// [`drop_unserved_caches`]). Returns the families that had something to
+    /// drop, so a family that was never cached costs no log line.
+    pub fn drop_unserved_families(
+        &self,
+        account: &str,
+        served: crate::registry::ServedFamilies,
+    ) -> DbResult<Vec<&'static str>> {
+        // Children before their containers, as in `prune_account`.
+        let families: [(&'static str, bool, &[&str], &[SyncScope]); 3] = [
+            (
+                "calendars",
+                served.calendars,
+                &["cache_events", "cache_calendars"],
+                &[SyncScope::Events, SyncScope::Calendars],
+            ),
+            (
+                "tasks",
+                served.tasks,
+                &["cache_tasks", "cache_sections", "cache_task_lists"],
+                &[SyncScope::Tasks, SyncScope::Sections, SyncScope::TaskLists],
+            ),
+            (
+                "contacts",
+                served.contacts,
+                &["cache_contacts", "cache_contact_lists"],
+                &[SyncScope::Contacts, SyncScope::ContactLists],
+            ),
+        ];
+        self.db.with_tx(|tx| {
+            let mut dropped = Vec::new();
+            for (family, is_served, tables, scopes) in families {
+                if is_served {
+                    continue;
+                }
+                let mut rows = 0;
+                for table in tables {
+                    rows += tx.execute(
+                        &format!("DELETE FROM {table} WHERE account_id = ?1"),
+                        params![account],
+                    )?;
+                }
+                for scope in scopes {
+                    rows += tx.execute(
+                        "DELETE FROM cache_sync_state WHERE account_id = ?1 AND scope = ?2",
+                        params![account, scope.as_str()],
+                    )?;
+                }
+                if rows > 0 {
+                    dropped.push(family);
+                }
+            }
+            Ok(dropped)
+        })
+    }
+
     /// Housekeeping: drop cached events for `calendar` that fall entirely
     /// outside `keep` (end ≤ keep.start or start ≥ keep.end). Used when
     /// the rolling window slides forward.
@@ -2262,16 +2368,13 @@ impl CacheStore {
                native_id = excluded.native_id,
                payload = excluded.payload, cached_at = excluded.cached_at"
         );
-        // A delta deletion matches either the provider-native id (CalDAV
-        // href, EWS ItemId — `native_id`) OR the full cal-core id. The
-        // latter covers composite ids whose `native_id` derives to the
-        // *container* rather than the resource: Graph To Do tasks are
-        // `{list}|{task}`, so `native_id` is the list and can't single out
-        // one task — the adapter emits the full `{list}|{task}` id, which
-        // matches the `id` column directly.
+        // A delta deletion names the provider-native id (the CalDAV href; a
+        // plain id where the cal-core id is the native one), which is what
+        // `native_id` holds — so one deletion also takes every composite id
+        // minted from the same resource.
         let del = format!(
             "DELETE FROM {table}
-             WHERE account_id = ?1 AND list_id = ?2 AND (native_id = ?3 OR id = ?3)"
+             WHERE account_id = ?1 AND list_id = ?2 AND native_id = ?3"
         );
         self.db.with_tx(|tx| {
             let mut changed = !delta.changes.is_empty();

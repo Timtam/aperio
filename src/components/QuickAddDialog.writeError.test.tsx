@@ -69,7 +69,7 @@ describe('QuickAddDialog → a create that failed', () => {
   });
 
   it('only closes once the appointment stands without one of its steps', async () => {
-    failure.next = { code: 'network', message: 'partly-saved: extension' };
+    failure.next = { code: 'network', message: 'partly-saved: reply' };
     const onClose = vi.fn();
     await createAppointment(onClose);
     const note = await screen.findByText(/nur zum Teil gespeichert/);
