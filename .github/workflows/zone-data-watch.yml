@@ -1,0 +1,151 @@
+name: Zone data watch
+
+# Once a week: has anything Aperio's zones are built from moved on?
+#
+# - IANA tzdata: the latest release against crates/cal-core/tzdata/version,
+#   and its backward and etcetera against the sha256 pinned in tzdata/SOURCE.
+# - jiff-tzdb and jiff: the newest crates.io release against Cargo.lock.
+#   jiff-tzdb carries the tzdata (pinned exactly, =1.0.0); bumping it is the
+#   way to new tzdata.
+# - CLDR windowsZones.xml: the file at the latest CLDR release against the
+#   sha256 pinned in crates/cal-core/cldr/SOURCE.
+# - rrule: the newest crates.io release against the one crates/rrule was
+#   forked from, so upstream fixes can be ported by hand.
+#
+# Each finding is a line in the run's summary. Anything to act on (a newer
+# jiff-tzdb or jiff, a changed windowsZones.xml, a new rrule) opens ONE issue
+# or updates the open one, and fails the run. IANA ahead of jiff-tzdb is only
+# a warning: nothing can be done until jiff-tzdb publishes it.
+#
+# Its own workflow, not part of ci.yml: no paths filter applies, and it needs
+# no secrets (the token is the run's own). Version lookups read crates.io's
+# sparse index directly, which sends no client data and is exact, where
+# `cargo search` ranks by relevance.
+
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_TITLE: 'Zone data has moved on (IANA tzdata, jiff-tzdb, CLDR, rrule)'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare the pinned zone data with the latest releases
+        run: |
+          set -euo pipefail
+          findings=()
+          actionable=()
+
+          note() { findings+=("$1"); echo "$1"; }
+          act() { actionable+=("$1"); note "$1"; }
+
+          # sha256 of a file with CRLF read as LF, as the xtask generators do.
+          lf_sha() { tr -d '\r' < "$1" | sha256sum | cut -d' ' -f1; }
+          pinned() { sed -n "s/^$2 *= *//p" "$1" | tr -d '\r' | head -n1; }
+          # The newest non-yanked version of a crate in the sparse index.
+          newest() {
+            curl -fsSL "https://index.crates.io/$1" \
+              | jq -r 'select(.yanked == false) | .vers' \
+              | grep -v -- '-' | sort -V | tail -n1
+          }
+          locked() {
+            awk -v name="$1" '$0 == "name = \"" name "\"" { getline; gsub(/version = |"/, ""); print }' Cargo.lock | sort -V | tail -n1
+          }
+
+          work=$(mktemp -d)
+
+          # IANA tzdata.
+          iana=$(curl -fsSL https://data.iana.org/time-zones/tzdb/version | tr -d '\r\n')
+          ours=$(tr -d '\r\n' < crates/cal-core/tzdata/version)
+          if [ "$iana" = "$ours" ]; then
+            note "IANA tzdata: $iana, as pinned."
+            for f in backward etcetera; do
+              curl -fsSL "https://data.iana.org/time-zones/tzdb/$f" -o "$work/$f"
+              want=$(pinned crates/cal-core/tzdata/SOURCE "$f-sha256")
+              have=$(lf_sha "$work/$f")
+              if [ "$have" != "$want" ]; then
+                note "IANA tzdata $iana: $f differs from the pinned copy (sha256 $have, pinned $want)."
+              fi
+            done
+          else
+            note "IANA tzdata: $iana is out; Aperio pins $ours (jiff-tzdb follows IANA with a delay)."
+            echo "::warning::IANA tzdata $iana is out; Aperio bundles $ours."
+          fi
+
+          # jiff-tzdb and jiff.
+          for crate in jiff-tzdb:ji/ff/jiff-tzdb jiff:ji/ff/jiff; do
+            name=${crate%%:*}
+            latest=$(newest "${crate#*:}")
+            have=$(locked "$name")
+            if [ "$latest" = "$have" ]; then
+              note "$name: $have, the newest release."
+            else
+              act "$name: $latest is out; Cargo.lock has $have."
+            fi
+          done
+
+          # CLDR windowsZones.xml at the latest release.
+          tag=$(gh api repos/unicode-org/cldr/releases/latest --jq .tag_name)
+          release=$(pinned crates/cal-core/cldr/SOURCE release)
+          want=$(pinned crates/cal-core/cldr/SOURCE sha256)
+          curl -fsSL "https://raw.githubusercontent.com/unicode-org/cldr/$tag/common/supplemental/windowsZones.xml" -o "$work/windowsZones.xml"
+          have=$(lf_sha "$work/windowsZones.xml")
+          if [ "$have" = "$want" ]; then
+            if [ "$tag" = "$release" ]; then
+              note "CLDR: $tag, as pinned."
+            else
+              note "CLDR: $tag is out (pinned $release), windowsZones.xml unchanged."
+            fi
+          else
+            act "CLDR: windowsZones.xml at $tag differs from the pinned $release (sha256 $have, pinned $want)."
+          fi
+
+          # rrule upstream.
+          forked=$(sed -n 's/^crates-io = rrule *//p' crates/rrule/SOURCE | tr -d '\r')
+          latest=$(newest rr/ul/rrule)
+          if [ "$latest" = "$forked" ]; then
+            note "rrule: $forked, the release crates/rrule was forked from, is the newest."
+          else
+            act "rrule: $latest is out; crates/rrule was forked from $forked (port fixes by hand)."
+          fi
+
+          {
+            echo "## Zone data"
+            for line in "${findings[@]}"; do echo "- $line"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ ${#actionable[@]} -eq 0 ]; then
+            exit 0
+          fi
+
+          {
+            echo "The weekly zone data watch found something to act on ($(date -u +%Y-%m-%d), run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}):"
+            echo
+            for line in "${actionable[@]}"; do echo "- $line"; done
+            echo
+            echo "Everything it looked at:"
+            echo
+            for line in "${findings[@]}"; do echo "- $line"; done
+            echo
+            echo "How to update: DESIGN-series-time-zone.md (32a), crates/cal-core/tzdata/SOURCE, crates/cal-core/cldr/SOURCE and crates/rrule/SOURCE."
+          } > "$work/body.md"
+
+          number=$(gh issue list --repo "${{ github.repository }}" --state open --search "\"$ISSUE_TITLE\" in:title" --json number,title \
+            --jq ".[] | select(.title == \"$ISSUE_TITLE\") | .number" | head -n1)
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "${{ github.repository }}" --body-file "$work/body.md"
+            echo "Updated issue #$number."
+          else
+            gh issue create --repo "${{ github.repository }}" --title "$ISSUE_TITLE" --body-file "$work/body.md"
+          fi
+          exit 1
