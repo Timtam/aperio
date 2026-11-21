@@ -1,4 +1,4 @@
-//! Smoke test for the Microsoft Graph plugin (ABI v2).
+//! Smoke test for the Microsoft Graph plugin.
 
 use std::sync::Arc;
 
@@ -16,11 +16,7 @@ fn manifest() -> PluginManifest {
         name: "Aperio Microsoft 365".into(),
         version: "0.1.0".into(),
         plugin_type: PluginType::Adapter,
-        capabilities: vec![
-            Capability::Calendar,
-            Capability::Tasks,
-            Capability::Contacts,
-        ],
+        capabilities: vec![Capability::Calendar, Capability::Contacts],
         abi_version: ABI_VERSION,
         min_app_version: "0.1.0".into(),
         author: Some("Aperio Contributors".into()),
@@ -66,15 +62,15 @@ fn open_one(manager: &PluginManager, access: &str) -> Arc<plugin_sdk::plugin_cor
 }
 
 #[test]
-fn graph_plugin_exposes_all_three_surfaces() {
+fn graph_plugin_exposes_calendars_and_contacts_only() {
     let manager = register();
     let inst = open_one(&manager, "eyJ.first");
     let _cal: Arc<FfiCalendarAdapter> =
         Arc::new(FfiCalendarAdapter::new(inst.clone()).expect("calendar slot present"));
-    let _tasks: Arc<FfiTasksAdapter> =
-        Arc::new(FfiTasksAdapter::new(inst.clone()).expect("tasks slot present"));
     let _contacts: Arc<FfiContactsAdapter> =
-        Arc::new(FfiContactsAdapter::new(inst).expect("contacts slot present"));
+        Arc::new(FfiContactsAdapter::new(inst.clone()).expect("contacts slot present"));
+    // Microsoft To Do was dropped (2026-11): no tasks slot.
+    assert!(FfiTasksAdapter::new(inst).is_none(), "no tasks slot");
 }
 
 #[test]
@@ -87,8 +83,11 @@ fn multiple_outlook_accounts_get_distinct_handles() {
 
 #[test]
 fn manifest_capabilities_match_vtable() {
-    let m = manifest();
+    // The shipped plugin.json, not the hand-built copy above: it is what the
+    // host reads, so it is what has to agree with the vtable.
+    let m = PluginManifest::from_bytes(adapter_microsoft_graph_plugin::MANIFEST)
+        .expect("plugin.json parses");
     assert!(m.has_capability(&Capability::Calendar));
-    assert!(m.has_capability(&Capability::Tasks));
+    assert!(!m.has_capability(&Capability::Tasks));
     assert!(m.has_capability(&Capability::Contacts));
 }

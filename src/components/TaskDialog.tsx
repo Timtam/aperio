@@ -626,7 +626,7 @@ export function TaskDialog({
   // all. Cross-list moves are gated on the *source* list's
   // move_between_projects (Todoist locks it).
   const listForSections = taskLists.find((l) => l.id === form.listId);
-  // Google Tasks, Microsoft To Do and Exchange keep whole days: the write goes
+  // Google Tasks and Exchange keep whole days: the write goes
   // through, the server drops the time, and the next refresh returns a task
   // with no time and no error. Ask the adapter rather than offering a control
   // whose value cannot survive.
@@ -1592,7 +1592,7 @@ export function TaskDialog({
             });
           } catch (err) {
             // Its save stood in part with the status — a later step of it
-            // (Vikunja's assignees, Graph's extension) was turned away: the
+            // (Vikunja's assignees, Todoist's close) was turned away: the
             // family still follows, every write attempted, as on a
             // check-off; saving again could not, the status being set
             // (review round 17 of #128).
@@ -2371,7 +2371,7 @@ export function TaskDialog({
             store a recurrence at all (Google Tasks, Todoist, and CalDAV /
             EWS until their task recurrence lands) — offering it would just
             drop the rule silently on save. Providers that DO support it
-            (local, Microsoft To Do, Vikunja) show it, with the finer
+            (local, Vikunja) show it, with the finer
             `recurrence` caps greying out individual unsupported shapes. */}
         {canRecur(listForSections) && (
           <TaskRecurrenceSelector

@@ -60,9 +60,9 @@ export function canRecur(list: TaskList | undefined): boolean {
 /**
  * Can a task in `list` carry a TIME OF DAY, or only a day?
  *
- * Google Tasks records only date information, Microsoft To Do normalises the
- * time component to midnight, and an Exchange task's dates must be midnight.
- * All three accepted the write and dropped the value, so the time vanished on
+ * Google Tasks records only date information, and an Exchange task's dates
+ * must be midnight. Both accepted the write and dropped the value, so the time
+ * vanished on
  * the next refresh with nothing anywhere to say why. The editor asks first and
  * leaves the control out where the answer is no.
  */

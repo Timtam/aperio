@@ -943,7 +943,7 @@ pub async fn update_task(
 
         // Cross-list move involving an external adapter — works
         // across providers too (Google Tasks → Todoist, iCloud
-        // CalDAV-VTODO → Microsoft To Do, etc.). The new task
+        // CalDAV-VTODO → Exchange, etc.). The new task
         // gets a fresh adapter-assigned id; the frontend's
         // dataVersion bump on dialog-close forces a refetch that
         // surfaces the new id naturally without any caller

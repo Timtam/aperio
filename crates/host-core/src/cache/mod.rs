@@ -1474,9 +1474,9 @@ impl CacheStore {
     /// ChangeKey suffix on every edit, so a plain upsert would leave the
     /// pre-edit `item|ckA` row alongside the fresh `item|ckB` and show the
     /// task twice. Purging the native group first collapses them. For
-    /// stable-id adapters (device reminders, Vikunja, Google, Todoist,
-    /// Graph) native_id == id, so this is exactly the row a plain upsert
-    /// would have replaced.
+    /// stable-id adapters (device reminders, Vikunja, Google, Todoist)
+    /// native_id == id, so this is exactly the row a plain upsert would have
+    /// replaced.
     ///
     /// Creates deliberately do NOT go through here: a created row's id may
     /// not match the id the READ path later assigns the same task (CalDAV's
@@ -2368,16 +2368,13 @@ impl CacheStore {
                native_id = excluded.native_id,
                payload = excluded.payload, cached_at = excluded.cached_at"
         );
-        // A delta deletion matches either the provider-native id (CalDAV
-        // href, EWS ItemId — `native_id`) OR the full cal-core id. The
-        // latter covers composite ids whose `native_id` derives to the
-        // *container* rather than the resource: Graph To Do tasks are
-        // `{list}|{task}`, so `native_id` is the list and can't single out
-        // one task — the adapter emits the full `{list}|{task}` id, which
-        // matches the `id` column directly.
+        // A delta deletion names the provider-native id (the CalDAV href; a
+        // plain id where the cal-core id is the native one), which is what
+        // `native_id` holds — so one deletion also takes every composite id
+        // minted from the same resource.
         let del = format!(
             "DELETE FROM {table}
-             WHERE account_id = ?1 AND list_id = ?2 AND (native_id = ?3 OR id = ?3)"
+             WHERE account_id = ?1 AND list_id = ?2 AND native_id = ?3"
         );
         self.db.with_tx(|tx| {
             let mut changed = !delta.changes.is_empty();

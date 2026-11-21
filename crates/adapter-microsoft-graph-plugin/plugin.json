@@ -3,27 +3,21 @@
   "name": "Aperio Microsoft 365",
   "version": "0.1.0",
   "plugin_type": "adapter",
-  "capabilities": ["calendar", "tasks", "contacts"],
+  "capabilities": ["calendar", "contacts"],
   "abi_version": 4,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
-  "description": "Bundled Microsoft Graph adapter — Outlook calendars, Microsoft To Do tasks and Outlook contacts (Microsoft 365 / Exchange Online).",
+  "description": "Bundled Microsoft Graph adapter — Outlook calendars and Outlook contacts (Microsoft 365 / Exchange Online).",
   "adapter_kind": "microsoft_graph",
   "kind_names": {
     "microsoft_graph": {
-      "name": "Microsoft (Outlook / To Do)",
+      "name": "Microsoft 365 / Outlook",
       "name_key": "kind.microsoft_graph.name",
       "short_name": "Microsoft 365",
       "short_name_key": "kind.microsoft_graph.short"
     }
   },
   "signed": false,
-  "tasks": {
-    "task_time_of_day": false,
-    "subtasks": false,
-    "create_lists": true,
-    "delete_lists": true
-  },
   "account": {
     "fields": [
       {
@@ -57,7 +51,7 @@
       "account.authority.label": "Account type",
       "account.client_id.hint": "From the Azure portal (Entra ID → App registrations → your app → Application (client) ID). Register the app as type \"Public client/native (mobile & desktop)\" with redirect URI \"http://localhost\". It looks like 12345678-1234-1234-1234-123456789abc.",
       "account.client_id.label": "Microsoft Application (Client) ID",
-      "kind.microsoft_graph.name": "Microsoft (Outlook / To Do)",
+      "kind.microsoft_graph.name": "Microsoft 365 / Outlook",
       "kind.microsoft_graph.short": "Microsoft 365"
     },
     "de": {
@@ -65,7 +59,7 @@
       "account.authority.label": "Konto-Typ",
       "account.client_id.hint": "Aus dem Azure-Portal (Entra ID → App registrations → deine App → Application (client) ID). Lege die App als Typ „Public client/native (mobile & desktop)\" an, Redirect-URI auf „http://localhost\". Sie sieht aus wie 12345678-1234-1234-1234-123456789abc.",
       "account.client_id.label": "Microsoft Application (Client) ID",
-      "kind.microsoft_graph.name": "Microsoft (Outlook / To Do)",
+      "kind.microsoft_graph.name": "Microsoft 365 / Outlook",
       "kind.microsoft_graph.short": "Microsoft 365"
     }
   }

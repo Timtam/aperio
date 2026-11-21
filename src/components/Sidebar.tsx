@@ -759,7 +759,7 @@ export function Sidebar({
         }
         // Manage who the list is shared with — only where the adapter
         // declares membership management (Vikunja, Todoist). Local lists
-        // and flat backends (Google Tasks, MS To Do) have no membership
+        // and flat backends (Google Tasks) have no membership
         // concept, so they never offer the entry.
         const taskCaps = taskLists.find(
           (l) => l.id === leaf.containerId,

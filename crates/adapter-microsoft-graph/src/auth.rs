@@ -39,11 +39,6 @@ pub const DEFAULT_AUTHORITY: &str = "common";
 ///
 ///   - `Calendars.ReadWrite` — full read/write on the user's
 ///     calendars + events
-///   - `Tasks.ReadWrite` — full read/write on the user's Microsoft
-///     To Do task lists + tasks (Phase 6e.2). Surfaces the
-///     `/me/todo/lists` endpoint family. Microsoft consolidated all
-///     task scenarios under To Do; the legacy Outlook-tasks endpoint
-///     was deprecated in 2020.
 ///   - `Contacts.ReadWrite` — Phase 10i. Full read/write on the
 ///     user's Outlook contact folders + items. Surfaces the
 ///     `/me/contactFolders` and `/me/contacts` endpoint families.
@@ -60,7 +55,7 @@ pub const DEFAULT_AUTHORITY: &str = "common";
 ///   - `openid` / `profile` / `email` — Graph requires at least one
 ///     OpenID Connect scope to issue an id_token; without it
 ///     consent works but some user-info endpoints return 403
-pub const SCOPES: &str = "Calendars.ReadWrite Tasks.ReadWrite Contacts.ReadWrite People.Read \
+pub const SCOPES: &str = "Calendars.ReadWrite Contacts.ReadWrite People.Read \
      offline_access openid profile email";
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(300);

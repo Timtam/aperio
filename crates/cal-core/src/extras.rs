@@ -6,7 +6,7 @@
 //! This module implements the **visible managed-block** channel used for
 //! plain-text description fields (Vikunja / Todoist / Google); the same
 //! JSON payload also feeds the invisible custom-property channels (CalDAV
-//! `X-`property, EWS extended property, Microsoft Graph open extension).
+//! `X-`property, EWS extended property).
 //!
 //! The block is appended to the description with a bilingual "don't edit"
 //! warning and a base64 payload — base64 keeps the JSON safe from a
@@ -174,7 +174,7 @@ pub fn embed(description: Option<&str>, extras: &AperioExtras) -> Option<String>
 
 /// Encode the bag as the bare `aperio:<v>:<base64>` payload line — the value
 /// for an invisible custom-property channel (CalDAV `X-` property, EWS
-/// extended property, Graph open extension). `None` for an empty bag, so the
+/// extended property). `None` for an empty bag, so the
 /// caller can omit the property entirely.
 pub fn encode_payload(extras: &AperioExtras) -> Option<String> {
     if extras.is_empty() {
