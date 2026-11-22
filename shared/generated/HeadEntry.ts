@@ -8,7 +8,22 @@ import type { ZoneRefusal } from "./ZoneRefusal";
  */
 export type HeadEntry = { kind: HeadKind, choice: ZoneChoice, 
 /**
- * Why the row cannot be chosen; the device's own row is never refused by
- * the device, and "Aktuell" never.
+ * Why the row cannot be chosen: `calendar` where the calendar cannot
+ * store its zone, else `device` where this device refuses it ("Aktuell"
+ * by its stored spelling). The device's own row is never refused by the
+ * device. A stored name tzdata does not know is never refused: it says
+ * its own reason, and keeping it changes nothing.
  */
-refusal: ZoneRefusal | null, };
+refusal: ZoneRefusal | null, 
+/**
+ * Whether the row says the zone the series stores: "Aktuell" always, the
+ * device's row where "Aktuell" is left out for it or where it keeps the
+ * series' zone, the UTC row for a series on UTC. Also where the row is
+ * refused: it still says which zone the series is on.
+ */
+current: boolean, 
+/**
+ * Whether choosing the row keeps the series' zone as it is spelled
+ * (120a), so it rewrites nothing.
+ */
+keeps: boolean, };

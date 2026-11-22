@@ -143,9 +143,20 @@ pub enum HeadKind {
 pub struct HeadEntry {
     pub kind: HeadKind,
     pub choice: ZoneChoice,
-    /// Why the row cannot be chosen; the device's own row is never refused by
-    /// the device, and "Aktuell" never.
+    /// Why the row cannot be chosen: `calendar` where the calendar cannot
+    /// store its zone, else `device` where this device refuses it ("Aktuell"
+    /// by its stored spelling). The device's own row is never refused by the
+    /// device. A stored name tzdata does not know is never refused: it says
+    /// its own reason, and keeping it changes nothing.
     pub refusal: Option<ZoneRefusal>,
+    /// Whether the row says the zone the series stores: "Aktuell" always, the
+    /// device's row where "Aktuell" is left out for it or where it keeps the
+    /// series' zone, the UTC row for a series on UTC. Also where the row is
+    /// refused: it still says which zone the series is on.
+    pub current: bool,
+    /// Whether choosing the row keeps the series' zone as it is spelled
+    /// (120a), so it rewrites nothing.
+    pub keeps: bool,
 }
 
 /// The question [`zone_groups`] answers.
@@ -191,6 +202,12 @@ pub struct ZoneGroups {
     pub head: Vec<HeadEntry>,
     /// By listed position: why each zone cannot be chosen, for city hits.
     pub refused: Vec<Option<ZoneRefusal>>,
+    /// The listed position whose city and group keep the series' zone as it
+    /// is spelled (120a): the stored zone's, where the calendar stores it and
+    /// this device can use its stored spelling. That city hit is then not
+    /// refused for the device, though its listed name may be. `null` where no
+    /// listed entry keeps it.
+    pub kept: Option<usize>,
 }
 
 #[cfg(feature = "zones")]
@@ -328,14 +345,14 @@ mod compute {
         let stored_position = listed_at(&choice_of(question.stored.as_deref(), true));
         // The series' own zone is kept in its stored spelling (120a): the
         // calendar must store its zone, and the device use that spelling.
-        let stored_choosable = question.stored.as_deref().is_some_and(|stored| {
-            stored_position.is_some_and(|position| {
-                question.calendar_zones.stores(listed[position])
-                    && !question
-                        .unusable
-                        .iter()
-                        .any(|name| name.eq_ignore_ascii_case(stored))
-            })
+        let stored_unusable = question.stored.as_deref().is_some_and(|stored| {
+            question
+                .unusable
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(stored))
+        });
+        let kept = stored_position.filter(|position| {
+            question.calendar_zones.stores(listed[*position]) && !stored_unusable
         });
 
         let unusable: BTreeSet<&str> = question.unusable.iter().map(String::as_str).collect();
@@ -369,8 +386,8 @@ mod compute {
                 members.sort_by_cached_key(|position| rank_key(*position, &labels, &counts));
                 let rules = &rules[members[0]];
                 let in_group = |position: &usize| members.contains(position);
-                let stored = stored_position
-                    .filter(|position| stored_choosable && in_group(position))
+                let stored = kept
+                    .filter(|position| in_group(position))
                     .map(|position| GroupPick {
                         position,
                         source: PickSource::Stored,
@@ -448,6 +465,7 @@ mod compute {
         // row would say it again: the same listed zone, or the same name. A
         // device name tzdata does not know has no row, so it hides nothing.
         let stored = choice_of(question.stored.as_deref(), false);
+        let on_utc = matches!(stored, ZoneChoice::Utc);
         let same_as_device = match (&stored, &device) {
             (ZoneChoice::Listed { position }, Some(ZoneChoice::Listed { position: own })) => {
                 position == own
@@ -459,20 +477,46 @@ mod compute {
                 .zip(question.device.as_deref())
                 .is_some_and(|(stored, device)| stored.eq_ignore_ascii_case(device)),
         };
+        // "Aktuell" is marked as the zone's other rows are: where the calendar
+        // cannot store it, else where this device refuses its stored
+        // spelling. A name tzdata does not know says its own reason instead.
+        let current_refusal = match &stored {
+            ZoneChoice::Listed { position } => Some(listed[*position]),
+            ZoneChoice::NotListed { canonical, .. } => Some(canonical.as_str()),
+            ZoneChoice::Utc | ZoneChoice::Unreadable { .. } => None,
+        }
+        .and_then(|canonical| {
+            if !question.calendar_zones.stores(canonical) {
+                Some(ZoneRefusal::Calendar)
+            } else if stored_unusable {
+                Some(ZoneRefusal::Device)
+            } else {
+                None
+            }
+        });
         let mut head = Vec::new();
-        if !matches!(stored, ZoneChoice::Utc) && !same_as_device {
+        if !on_utc && !same_as_device {
             head.push(HeadEntry {
                 kind: HeadKind::Current,
                 choice: stored,
-                refusal: None,
+                refusal: current_refusal,
+                current: true,
+                keeps: current_refusal.is_none(),
             });
         }
+        // The device's row keeps the series' zone where it is the kept listed
+        // zone, or, outside the list, the same name, stored by the calendar.
         match device {
-            Some(choice @ ZoneChoice::Listed { position }) => head.push(HeadEntry {
-                kind: HeadKind::Device,
-                choice,
-                refusal: refused[position],
-            }),
+            Some(choice @ ZoneChoice::Listed { position }) => {
+                let keeps = kept == Some(position);
+                head.push(HeadEntry {
+                    kind: HeadKind::Device,
+                    choice,
+                    refusal: refused[position],
+                    current: same_as_device || keeps,
+                    keeps,
+                });
+            }
             Some(choice @ ZoneChoice::NotListed { .. }) => {
                 let refusal = match &choice {
                     ZoneChoice::NotListed { canonical, .. }
@@ -486,6 +530,8 @@ mod compute {
                     kind: HeadKind::Device,
                     choice,
                     refusal,
+                    current: same_as_device,
+                    keeps: same_as_device && refusal.is_none() && !stored_unusable,
                 });
             }
             _ => {}
@@ -494,6 +540,8 @@ mod compute {
             kind: HeadKind::Utc,
             choice: ZoneChoice::Utc,
             refusal: None,
+            current: on_utc,
+            keeps: on_utc,
         });
 
         ZoneGroups {
@@ -503,6 +551,7 @@ mod compute {
             order,
             head,
             refused,
+            kept,
         }
     }
 

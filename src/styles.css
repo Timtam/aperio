@@ -5460,6 +5460,47 @@ button[aria-disabled='true'] {
   }
 }
 
+/* ── Series time zone picker (stage 11) ─────────────────────────────────── */
+
+.zone-picker__count {
+  margin: var(--space-1) 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-muted);
+}
+
+.zone-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.zone-picker__option {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.zone-picker__option--marked {
+  background: var(--color-bg-elevated);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.zone-picker__option--refused {
+  color: var(--color-fg-muted);
+  cursor: default;
+}
+
+@media (forced-colors: active) {
+  .zone-picker__option--marked {
+    box-shadow: none;
+    outline: 2px solid Highlight;
+  }
+}
+
 /* ── Title suggestions (the two editors' title field) ───────────────────── */
 
 /*

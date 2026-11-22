@@ -705,6 +705,62 @@ bestätigt**:
   ein Kalender Zonen speichert (`SeriesTimeZones`, 97a), steht dafür im
   Kern; plugin-core führt es unter dem alten Pfad weiter.
 
+Toni hat am 2026-11-22 abends für die Stufen 11 und 12 entschieden, nach den
+Desktop-Messungen und einer Bestandsaufnahme beider Editoren:
+
+- **130a — die Auswahl heißt „Zeitzone der Serie“, ihr Suchfeld „Zeitzone
+  suchen“ und ihre Liste „Zeitzonen“.**
+- **131a — Pos1 und Ende springen in der Liste** zum ersten und letzten
+  Eintrag, wie Bild hoch und runter um zehn; im Suchfeld bewegen sie den
+  Cursor nicht.
+- **132a — eine Ablehnung des Kalenders nennt keinen Anbieter:** „(dieser
+  Kalender kann diese Zeitzone nicht speichern)“, bei einer Gruppe „(dieser
+  Kalender kann keine dieser Zeitzonen speichern)“, „(dieses Gerät kann keine
+  dieser Zeitzonen verwenden)“. Die Liste ist die Aussage des Adapters
+  (97a), und der Kern kennt keinen Anbieter.
+- **133a — die Handy-Teile entstehen auf main;** Tonis SDK-58-Zweig (#178)
+  bekommt main danach hineingemergt, nie umgeschrieben.
+- **134a — das Wiederholungs-Feld auf dem Desktop rechnet still um und sagt
+  es einmal:** Jeder Pfeil schickt eine Änderung (gemessen); schaltet sie die
+  Wiederholung an oder aus, wechseln die Felder still die Uhr, und gesagt
+  wird es einmal, wenn das Feld verlassen wird und sich an „Wiederholung an
+  oder aus“ seit dem Betreten etwas geändert hat. Auf dem Handy, wo ein
+  Tippen einmal wählt, nach dem Schließen der Auswahl.
+- **135a — scheitert beim Öffnen von „diesen und alle folgenden“ das Laden
+  der Serie,** öffnet der Editor mit „Die Serie konnte nicht geladen werden.
+  Versuche es noch einmal, oder bearbeite nur diesen Termin.“ und lehnt das
+  Speichern ab; die Felder fallen nie auf die Uhr des Geräts zurück.
+- **136a — ein importierter Termin (ICS) zählt wie ein gespeicherter:** Die
+  Zone der Datei gilt, die Felder stehen auf ihrer Uhr, ein Zonenwechsel
+  behält die Zeitpunkte.
+- **137a — nach einem Zonenwechsel bietet Aperio bis Stufe 13 nicht an, die
+  Kopien einer Termingruppe mitzunehmen;** das Angebot schriebe Beginn und
+  Ende ohne Zone und Regel, und die Kopien könnten um eine Stunde oder einen
+  Tag verrutschen.
+- **138a — die Wochentag-Frage spricht aus, was mit den Terminen geschieht**
+  (die alten Texte waren Toni unklar): Titel „Welcher Wochentag soll
+  gelten?“, Nachricht „In {Uhr} fällt der Beginn auf {Tag}, {Uhrzeit}; die
+  Regel sagt {Tage}.“, Knöpfe „Zeitzone nicht ändern“, „{Tage}, wie die Regel
+  sagt (Termine rücken einen Tag vor)“ beziehungsweise „(… zurück)“ und
+  „{Tage}, wo die Termine jetzt liegen“. „Zeitzone nicht ändern“ steht
+  zuerst und hat den Fokus; Tab geht vorwärts zu den Antworten.
+- **139a — eine gewählte Zone bleibt, wenn der Kalender wechselt:** Kann der
+  neue Kalender sie nicht speichern, steht das nach der Endzeit, und
+  Speichern wird mit diesem Grund abgelehnt, bis eine andere Zone oder ein
+  anderer Kalender gewählt ist.
+
+Technisch, aus der Bestandsaufnahme und ohne eigene Frage: Wer die Zone wählt,
+die schon gilt (die Zeile „Aktuell“, ihre Stadt oder ihre Gruppe), ändert
+nichts, nicht einmal die Schreibweise (120a). Die Auswahl kommt zuerst allein
+(Stufe 11), der Knopf mit der Wahl und der Frage danach (Stufe 12). Jeder Satz
+nach der Endzeit ist ein eigenes Lesefeld (`ReadOnlyText`). Wird die
+Wiederholung wieder angeschaltet, kommt die gewählte Zone zurück. Ein
+Speichern der ganzen Serie rechnet auf der Serie nach der Antwort (Beginn,
+Regel, Ausnahmen, neue Zone), nicht auf der alten. Die Frage nach verlorenen
+Ausnahmen wird auf dem Handy im Editor selbst gezeigt. Das Serienende auf der
+Uhr der Serie (107b, 108b, 114b) kommt als eigener, letzter Schritt von Stufe
+12, mit der Live-Runde an Tonis Server.
+
 ## Was es löst
 
 **Aperio sagt, auf welcher Uhr eine Serie läuft.** Eine zonenlose Serie steht
@@ -848,8 +904,8 @@ Zonen (119b bis 129a). Was dieser Abschnitt über Einträge sagt, gilt für
 die Suche nach Städten, für die Zeilen über der Liste und für markierte
 Städte; die Zählzeile ohne Suche sagt „62 Gruppen“ (122b).
 
-**313 Einträge:** 312 kanonische Zonen ohne `Etc/*` und ein UTC-Eintrag. Ein
-Eintrag lautet „Stadt, Region, UTC±hh:mm“, zum Beispiel „Berlin, Europa,
+**313 Städte-Einträge** (die Suche, seit 118a): 312 kanonische Zonen ohne
+`Etc/*` und ein UTC-Eintrag. Ein Eintrag lautet „Stadt, Region, UTC±hh:mm“, zum Beispiel „Berlin, Europa,
 UTC+02:00“. Dreistufige Namen lauten „Indianapolis (Indiana), Amerika,
 UTC−04:00“. Das Minus ist das echte Minuszeichen U+2212 (Form F). Die Stadt ist
 der letzte Teil der Id mit `_` als Leerzeichen; Namen ohne Schrägstrich wie
@@ -859,10 +915,9 @@ der letzte Teil der Id mit `_` als Leerzeichen; Namen ohne Schrägstrich wie
 Kyiv); nur die Region steht in der Sprache der Oberfläche. „Wien“ findet deshalb
 nichts.
 
-**Der Versatz** wird in Rust für den aktuellen Beginn im Formular berechnet und
-neu erfragt, wenn sich der Beginn ändert. Jede Antwort gehört zu dem Beginn, für
-den sie erfragt wurde; bis sie kommt, bleibt die letzte Beschriftung stehen, ohne
-Antwort steht der Eintrag ohne Versatz.
+**Der Versatz** wird im Kern für den aktuellen Beginn im Formular berechnet und
+neu erfragt, wenn sich der Beginn ändert; seit 129a antwortet er auf beiden
+Oberflächen sofort. Gruppen sagen ihre Uhr ab heute (128a).
 
 **Der UTC-Eintrag** heißt „UTC (ohne Sommerzeit)“. Er passt auch zu GMT,
 `Etc/UTC` und Zulu.
@@ -1001,7 +1056,8 @@ repariert. Eine Serie, die wirklich UTC meint (Regel „sonntags“, Beginn Sonn
 23:30 UTC), bekommt mit „wie in der Regel“ den Beginn Sonntag 00:30 Berlin, mit
 „wie sie jetzt fallen“ Montag 00:30 Berlin mit der Regel „montags“.
 
-**Wortlaut.**
+**Wortlaut** (seit 138a gilt der neue Wortlaut dort; der alte folgt zum
+Vergleich).
 - Titel: „An welchen Tagen soll sich die Serie wiederholen?“
 - Nachricht: „In {neue Uhr} beginnt die Serie am {Beginn neu}, in {alte Uhr} am
   {Beginn alt}. Ihre Wiederholungsregel nennt {Tage}. {Passung}“. {Passung} ist
@@ -1689,8 +1745,24 @@ Handy im selben PR.
     Rangliste, `shared/zoneList.ts` mit den Wortlauten (119b, 125a, 126a) und
     `writtenZone` für 117a. Zeilen in `timeZoneFilter.json`: groups,
     groupMains, groupOrder, groupSearch, head; geprüft mit einer eigenen
-    Lesung der TZif-Daten aus jiff-tzdb. Die Dialoge selbst folgen nach den
-    Messungen.
+    Lesung der TZif-Daten aus jiff-tzdb.
+    Gebaut (Dialoge, 2026-11-22, ohne Handy-Build nach Tonis Auftrag):
+    `shared/zonePicker.ts` legt die Zeilen für beide Oberflächen aus
+    (`zonePickerList`: Zeilen über der Liste, Gruppen, Städte, Markierungen
+    nach 132a, und was eine Wahl tut: eine Zone, das Gerät in seiner
+    Schreibweise, oder nichts, wenn sie schon gilt). Desktop
+    `SeriesZonePicker` (verschachtelter Dialog, Suchfeld als Combobox wie die
+    Teilnehmer-Auswahl, 130a, 131a, die Zählzeile nach der Tipppause und nie
+    über einer Wahl), Handy `ZonePickerDialog` (eigener Dialog im Bildschirm
+    des Editors, Zeilen als Auswahl-Knöpfe, die Wahl erst nach dem Schließen).
+    Noch an keinen Knopf gebunden: das kommt mit Stufe 12. Die Prüfung ergab:
+    Auch für die Zeilen über der Liste entscheidet der Kern alles (128a). Er
+    sagt, ob eine Zeile markiert ist (zuerst der Kalender, dann die
+    gespeicherte Schreibweise; auch „Aktuell“, auch für eine Zone außerhalb
+    der Liste wie EST5EDT). Er sagt, ob sie die geltende Zone nennt (die
+    Zeile des Geräts, wo „Aktuell“ für sie wegfällt, auch markiert). Und er
+    sagt, ob ihre Wahl nichts ändert, dazu welche Stadt der Liste die Zone
+    behält (`kept`).
 12. **Die Editoren** — `feat(editors): times typed on the series clock, and the weekday question`.
     Beschriftungen, Hinweis, Auswahl, Wochentag-Frage, „diesen und alle folgenden“
     lädt auf dem Desktop die ganze Serie beim Öffnen (21a), Hilfe und Fehlersuche.
@@ -1742,9 +1814,9 @@ Handy im selben PR.
   schon vor Stufe 2 so. Behoben ist es erst, wenn die Adapter die Kern-Regel
   fragen.
 - **Versatz-Ansagen.** Toni hat die Form „UTC−04:00“ mit echtem Minuszeichen
-  gewählt (Vorlese-Vergleich mit NVDA und VoiceOver, 15. September 2026). Wie
-  313 ähnliche Einträge in einer langen Liste klingen, ist erst mit den Dialogen
-  aus Stufe 11 zu hören. Die Form steckt in einem Übersetzungsschlüssel und lässt
+  gewählt (Vorlese-Vergleich mit NVDA und VoiceOver, 15. September 2026). Mit
+  NVDA ist die Liste der Gruppen gemessen (2026-11-22, „Gemessen“); mit
+  VoiceOver und TalkBack noch nicht. Die Form steckt in einem Übersetzungsschlüssel und lässt
   sich ohne Rust ändern.
 - **Ausnahmen gegen die Regel im Formular.** Ob eine Ausnahme einen Termin
   streicht, prüft Aperio gegen Regel, Uhr und Ausnahmen, wie sie gerade im
@@ -1796,8 +1868,9 @@ Handy im selben PR.
   der blinde Fleck der Schutzregel (105a): Ein echtes Ende genau um 19:00 New
   York (im Sommer 20:00) liest weiter als Zeitpunkt.
 - **Lange Listen auf dem Handy.** Virtualisierte Listen können Zeilen vor dem
-  Wischen verbergen; alle 313 Zeilen zu zeichnen kann auf alten Android-Geräten
-  langsam sein.
+  Wischen verbergen; der Handy-Dialog zeichnet deshalb alle Zeilen (ohne Suche
+  65, mit einer Stadtsuche bis zu 313), was auf alten Android-Geräten langsam
+  sein kann.
 - **Große Editor-Stufe ohne Handy-Tests.** Stufe 12 berührt zwei große Editoren.
   Die Parität ruht darauf, dass die Logik in shared liegt und dort getestet ist.
 - **Microsoft 365.** Eine dort mit Zone angelegte Serie lässt sich danach in
@@ -1854,6 +1927,10 @@ Fenster von Aperio.
 - iOS: ob eine Ansage nach dem Schließen eines Dialogs gehört wird. Android: ob
   das Öffnen einen Moment später mit TalkBack funktioniert. Ob Listenzeilen per
   Wischen erreichbar bleiben.
+- Der Handy-Dialog der Auswahl (Stufe 11) als Ganzes, gebaut ohne Build: ob
+  das Suchfeld den ersten Fokus bekommt, ob VoiceOver die Zählzeile nach der
+  Pause und TalkBack sie aus der Live-Region sagt, wie die 65 Zeilen beim
+  Wischen klingen, und ob die Wahl nach dem Schließen ankommt.
 - Welche Zonen-Namen Intl auf Android 7 bis 10 und iOS 16.4 wirklich ablehnt.
   Für Android ist es aus AOSP-Dateien abgeleitet (Stufe 3), für iOS unbekannt.
 - Welche Gerätezone iOS und Android für UTC, Indien und die Ukraine melden.
