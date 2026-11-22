@@ -22,14 +22,18 @@ const de = i18n.getFixedT('de');
 const TODAY = '2026-11-22T12:00:00Z';
 const START = '2026-11-22T23:30:00Z';
 const day = (iso: string) => iso;
+const LISTED = listedZoneLabels().map((label) => label.zone);
 
+/** The rows as a surface lays them out. Without `unusable`, the names this
+ *  runtime refuses, read as the surfaces read them (`unusableZones`); with it,
+ *  another device's, such as old Android's. */
 function rows(
   query: string,
   {
     stored = null,
     device = 'Europe/Berlin',
     calendar = 'all',
-    unusable = [],
+    unusable = unusableZones(LISTED, stored),
   }: {
     stored?: string | null;
     device?: string | null;
@@ -96,10 +100,15 @@ describe('the rows above the list', () => {
       text: 'Dieses Gerät: EST5EDT (nicht in Aperios Liste)',
       pick: { kind: 'zone', zone: 'EST5EDT' },
     });
+    // The surfaces count this spelling as one the device refuses; the row
+    // still gives its own reason alone, and keeping it stays a choice.
+    expect(unusableZones(LISTED, 'Pacific Standard Time')).toContain('Pacific Standard Time');
     const unreadable = rows('', { stored: 'Pacific Standard Time' });
-    expect(row(unreadable, 'head-current').text).toBe(
-      'Aktuell: Pacific Standard Time (Aperio kann diese Zeitzone nicht lesen; die Serie wiederholt sich nach UTC)',
-    );
+    expect(row(unreadable, 'head-current')).toMatchObject({
+      text: 'Aktuell: Pacific Standard Time (Aperio kann diese Zeitzone nicht lesen; die Serie wiederholt sich nach UTC)',
+      selectable: true,
+      pick: { kind: 'unchanged' },
+    });
   });
 });
 
@@ -180,13 +189,40 @@ describe('marked rows', () => {
   });
 
   it('say why a city cannot be chosen', () => {
-    const calendar = listedZoneLabels()
-      .map((label) => label.zone)
-      .filter((zone) => zone !== 'Europe/Vienna');
+    const calendar = LISTED.filter((zone) => zone !== 'Europe/Vienna');
     const list = rows('vienna', { calendar });
     expect(list.rows[0]).toMatchObject({
       text: 'Vienna, Europa, UTC+01:00 (dieser Kalender kann diese Zeitzone nicht speichern)',
       selectable: false,
+    });
+  });
+
+  it("keep the calendar's refusal on the zone in effect, as its group does", () => {
+    // The series stores Vienna; the calendar it moved to cannot.
+    const options = { stored: 'Europe/Vienna', calendar: LISTED.filter((zone) => zone !== 'Europe/Vienna') };
+    expect(rows('vienna', options).rows[0]).toMatchObject({
+      text: 'Vienna, Europa, UTC+01:00 (dieser Kalender kann diese Zeitzone nicht speichern)',
+      selectable: false,
+      current: false,
+    });
+    const empty = rows('', options);
+    expect(row(empty, 'head-current')).toMatchObject({
+      text: 'Aktuell: Vienna, Europa, UTC+01:00 (dieser Kalender kann diese Zeitzone nicht speichern)',
+      selectable: false,
+    });
+    // The group names only cities it can store (127a), and moves to the device's.
+    const group = groupWith(empty, 'Berlin');
+    expect(group.text).not.toContain('Vienna');
+    expect(group).toMatchObject({ selectable: true, current: false });
+    expect(group.pick).toEqual({ kind: 'zone', zone: 'Europe/Berlin' });
+  });
+
+  it("never keeps the device's own zone where the calendar refuses it", () => {
+    const options = { stored: 'Europe/Berlin', calendar: LISTED.filter((zone) => zone !== 'Europe/Berlin') };
+    expect(row(rows('', options), 'head-device')).toMatchObject({
+      text: 'Dieses Gerät: Berlin, Europa, UTC+01:00 (dieser Kalender kann diese Zeitzone nicht speichern)',
+      selectable: false,
+      current: false,
     });
   });
 });
