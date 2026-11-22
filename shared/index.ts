@@ -56,6 +56,7 @@ export * from './calendarSelection';
 export * from './eventKey';
 export * from './eventDateTime';
 export * from './clockFields';
+export * from './seriesZoneForm';
 export * from './accountSchema';
 export * from './deviceAccess';
 export * from './refreshErrors';
