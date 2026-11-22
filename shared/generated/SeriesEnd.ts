@@ -20,6 +20,8 @@ at: string | null,
 /**
  * The last day the end reaches on the clock (108b): the bound's day, or
  * the day before where that day's first occurrence starts after the
- * bound.
+ * bound, read where the occurrence stands (past a gap that skips its
+ * time, at the earlier reading in a fold). For a rule that repeats by
+ * the hour or faster, the bound's day.
  */
 endDay: string, };
