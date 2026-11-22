@@ -151,6 +151,7 @@ describe('eventOccurrences contract (views)', () => {
       'a-summer-cut-at-midnight-utc-stays-a-cut',
       'an-hourly-series-keeps-its-end-an-instant',
       'an-until-before-the-start',
+      'a-cut-in-the-spring-gap',
     ]) {
       expect(names, `table lost ${n}`).toContain(n);
     }

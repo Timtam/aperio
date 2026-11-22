@@ -91,6 +91,14 @@ export function expandEvent<E extends RecurringEventLike>(
     console.warn('failed to expand RRULE', event.recurrence.rrule, err);
     return [event];
   }
+  // The views iterate in the clock's wall time; the end's own instant is the
+  // last one an occurrence may start at. They differ around a clock change:
+  // a cut at an occurrence the spring change pushes past its gap ends one
+  // second before it, a wall time after the occurrence's nominal one, and the
+  // cut occurrence stood in the old series as well as in the new. The
+  // reminders cap at the same instant.
+  const cap = endCap(event.recurrence.rrule, facts, byDay ? tzid : null);
+  if (cap !== null) occurrences = occurrences.filter((d) => d.getTime() <= cap);
   if (occurrences.length === 0) {
     return [];
   }
@@ -480,6 +488,16 @@ function readEnd(rruleBody: string, facts: EndFacts, deviceZone: string | null):
   if (endReadings.size >= 2000) endReadings.clear();
   endReadings.set(key, reading);
   return reading;
+}
+
+/** The last instant a series' end lets an occurrence start at, in ms: the
+ *  core's `at` (`cal_core::read_series_end`). `null` without one. */
+function endCap(rruleBody: string, facts: EndFacts, deviceZone: string | null): number | null {
+  if (!/UNTIL=/i.test(rruleBody)) return null;
+  const at = readEnd(rruleBody, facts, deviceZone)?.at;
+  if (at === null || at === undefined) return null;
+  const ms = Date.parse(at);
+  return Number.isNaN(ms) ? null : ms;
 }
 
 /** `YYYY-MM-DDTHH:MM:SS`, with or without `Z`, as an RRULE's UTC date-time. */
@@ -1307,12 +1325,20 @@ export function lastOccurrenceDayKey(event: RecurringEventLike): string | null {
   // occurrence on a timed bound's own day fell out by the zone's offset, while
   // the calendar showed both. Outside the `try`, as for `occurrenceCount`: an
   // unreadable rule comes back `null`, and a missing series-clock door throws.
-  const rule = wallRule({ ...event, recurrence: { ...event.recurrence, rrule: body } })?.rule;
-  if (!rule) return null;
+  const built = wallRule({ ...event, recurrence: { ...event.recurrence, rrule: body } });
+  if (!built) return null;
+  const { rule, zone } = built;
+  const facts = endFacts(event);
+  const cap = endCap(body, facts, readsCalendarDays(event) ? zone : null);
   try {
     const until = rule.options.until;
     if (!until) return null;
-    const last = rule.before(until, true);
+    let last = rule.before(until, true);
+    // Capped at the end's own instant, as `expandEvent` caps (a cut at an
+    // occurrence pushed past a spring gap).
+    while (last && cap !== null && (zone ? wallToReal(last, zone) : last).getTime() > cap) {
+      last = rule.before(last, false);
+    }
     if (!last) return null;
     // Both readings land on the same digits: a zoned rule answers in wall
     // clock, which already IS the series' clock, and a rule without a zone

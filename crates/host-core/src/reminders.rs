@@ -5633,6 +5633,7 @@ mod tests {
             "a-cut-at-midnight-utc-stays-a-cut",
             "a-summer-cut-at-midnight-utc-stays-a-cut",
             "an-hourly-series-keeps-its-end-an-instant",
+            "a-cut-in-the-spring-gap",
             "a-moved-occurrence-stands-in-for-its-slot",
             "a-cancelled-occurrence-removes-its-slot",
             "a-moved-occurrence-of-a-zoned-series-after-the-change",
