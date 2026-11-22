@@ -240,15 +240,15 @@ describe('the end of a rule (UNTIL)', () => {
     );
   });
 
-  it('is never written from half a date', () => {
-    for (const until of ['2026-11-3', '2026-1-5', '2026-11']) {
+  it('is never written from half a date, and keeps the end there was', () => {
+    for (const until of ['2026-11-3', '2026-1-5', '2026-11', '']) {
       const rebuilt = buildRRule({ ...base, freq: 'DAILY', endMode: 'UNTIL', until });
       expect(rebuilt).toBe('FREQ=DAILY');
       const fromStored = buildRRule({
-        ...parseRRule('FREQ=DAILY;UNTIL=20261130T235959Z'),
+        ...parseRRule('FREQ=DAILY;UNTIL=20261104T235958Z'),
         until,
       });
-      expect(fromStored).toBe('FREQ=DAILY');
+      expect(fromStored).toBe('FREQ=DAILY;UNTIL=20261104T235958Z');
     }
   });
 

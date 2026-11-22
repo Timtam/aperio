@@ -163,6 +163,23 @@ export function RecurrenceSelector({
     }
   };
 
+  // The end date keeps its own draft for the same reason. WebView2 reports
+  // `''` while a date input's segments name no date: a segment cleared, or
+  // the 31st typed over 30 November on the way to 31 December. Bound to the
+  // rule, that wrote no end at all: the control read "never", and the field
+  // vanished under the keyboard focus. Only a whole date goes up to the
+  // rule; on blur an unfinished one shows the rule's date again.
+  const [untilDraft, setUntilDraft] = useState(rule.until);
+  useEffect(() => {
+    setUntilDraft(rule.until);
+  }, [rule.until]);
+  const commitUntil = (text: string) => {
+    setUntilDraft(text);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      update({ ...rule, until: text });
+    }
+  };
+
   // Locale-aware weekday / month names for the option labels — reuse
   // the browser's Intl rather than carrying a full weekday/month
   // dictionary in the i18n files (the app already leans on Intl for
@@ -373,8 +390,9 @@ export function RecurrenceSelector({
               </span>
               <input
                 type="date"
-                value={rule.until}
-                onChange={(e) => update({ ...rule, until: e.target.value })}
+                value={untilDraft}
+                onChange={(e) => commitUntil(e.target.value)}
+                onBlur={() => setUntilDraft(rule.until)}
               />
             </label>
           )}

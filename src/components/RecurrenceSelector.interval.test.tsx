@@ -71,3 +71,43 @@ describe('RecurrenceSelector end', () => {
     expect(onChange).toHaveBeenLastCalledWith('FREQ=DAILY;UNTIL=20261111T235959Z');
   });
 });
+
+// WebView2 reports '' while a date input's segments name no date (a segment
+// cleared, an invalid day on the way to another month). Bound to the rule,
+// that wrote no end: the control read "never" and the field vanished under
+// the keyboard focus.
+describe('RecurrenceSelector end date', () => {
+  const renderEnd = (onChange = vi.fn()) => {
+    render(
+      <RecurrenceSelector
+        value="FREQ=DAILY;UNTIL=20261104T235958Z"
+        onChange={onChange}
+        startDay="2026-11-01"
+      />,
+    );
+    return onChange;
+  };
+  const dateInput = () => document.querySelector('input[type="date"]') as HTMLInputElement;
+
+  it('keeps the end and the field while the date is unfinished', () => {
+    const onChange = renderEnd();
+    fireEvent.change(dateInput(), { target: { value: '' } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(dateInput()).not.toBeNull();
+    expect(dateInput().value).toBe('');
+  });
+
+  it('writes a whole date once it stands there', () => {
+    const onChange = renderEnd();
+    fireEvent.change(dateInput(), { target: { value: '' } });
+    fireEvent.change(dateInput(), { target: { value: '2026-12-31' } });
+    expect(onChange).toHaveBeenLastCalledWith('FREQ=DAILY;UNTIL=20261231T235959Z');
+  });
+
+  it('shows the end again when left unfinished', () => {
+    renderEnd();
+    fireEvent.change(dateInput(), { target: { value: '' } });
+    fireEvent.blur(dateInput());
+    expect(dateInput().value).toBe('2026-11-04');
+  });
+});

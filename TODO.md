@@ -1000,6 +1000,14 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Speichern prüft nicht, ob das Ende einer Wiederholung vor ihrem Beginn
+      liegt** (Prüfung von Stufe 8, Schritt 4, 2026-11-22): Wer bei einer neuen
+      Serie „bis Datum“ wählt und danach den Beginn hinter dieses Datum legt,
+      speichert eine Serie ohne einen einzigen Termin; das vorgelegte Datum
+      (110b) und ein getipptes wandern bei einer neuen Serie nicht mit dem
+      Beginn. Gehört zur Speicherfunktion des Formular-Modells (Stufe 10):
+      ablehnen mit Grund, oder das Ende mitnehmen wie bei einer gespeicherten
+      Serie (`movedTailRule`).
 - [ ] **iOS mit Xcode 27 bauen, bis April 2027** (Apple-Mail zu Build 72,
       2026-11-17, ITMS-90725): Ab April 2027 nimmt App Store Connect nur
       noch Builds mit dem iOS-27-SDK an. Aperio baut mit dem iOS-26.4-SDK,

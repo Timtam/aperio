@@ -301,8 +301,9 @@ export function buildRRule(p: ParsedRule): string | null {
     out.push(`COUNT=${p.count}`);
   } else if (p.endMode === 'UNTIL') {
     const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(p.until);
-    if (p.untilText !== '' && untilDayOf(p.untilText) === p.until) {
-      // Nobody changed the end: it goes back as it came.
+    if (p.untilText !== '' && (untilDayOf(p.untilText) === p.until || !day)) {
+      // Nobody changed the end, or what stands in the field is no whole date
+      // yet: the end goes back as it came, rather than none at all.
       out.push(`UNTIL=${p.untilText}`);
     } else if (day) {
       // RFC 5545 wants a basic-format UTC timestamp. End-of-day so the

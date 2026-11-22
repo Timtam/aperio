@@ -305,13 +305,24 @@ export function RecurrenceSelector({
           {rule.endMode === 'UNTIL' && (
             // A date picker like the start's, which hands over whole dates
             // only: a text field wrote the rule on every keystroke, and half a
-            // date became an end no reader could parse.
-            <DateTimeFieldButton
-              label={t('dialogs.event.recurrence.untilLabel')}
-              mode="date"
-              value={rule.until}
-              onChange={(until) => update({ ...rule, until })}
-            />
+            // date became an end no reader could parse. The visible caption is
+            // folded into the button's own label and hidden from the screen
+            // reader, as the editor's date fields do, so it is one swipe stop.
+            <View style={styles.field}>
+              <Text
+                style={styles.label}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              >
+                {t('dialogs.event.recurrence.untilLabel')}
+              </Text>
+              <DateTimeFieldButton
+                label={t('dialogs.event.recurrence.untilLabel')}
+                mode="date"
+                value={rule.until}
+                onChange={(until) => update({ ...rule, until })}
+              />
+            </View>
           )}
         </>
       )}
