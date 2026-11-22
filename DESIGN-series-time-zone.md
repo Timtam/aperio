@@ -788,7 +788,11 @@ neuen Uhr, ausgehend von den aktuellen Werten im Formular, also bleiben Änderun
 von vorher erhalten. Angesagt wird: „Zeitzone der Serie: New York. Die Serie
 beginnt zum selben Zeitpunkt: Sonntag, 13. September, 18:30 bis 19:30 auf dieser
 Uhr.“ Ein Hin- und Rückwechsel mit denselben Antworten ergibt genau die
-Ausgangswerte.
+Ausgangswerte. Gibt es Beginn oder Ende auf der bisherigen Uhr nicht (eine
+Lücke, oder ein halb getippter Wert), haben die Felder keinen Zeitpunkt: Beide
+bleiben wie getippt, wie bei „Wiederholung aus“, und auch beim Zurückwechseln,
+so dass der Fehler auf der Ausgangsuhr wiederkommt. Wird nur einer der beiden
+umgerechnet, läge das Ende auf einem anderen Tag als der Beginn.
 
 ### Die Wochentag-Frage (15a)
 
@@ -1396,9 +1400,11 @@ Handy im selben PR.
    Wechsel auf eine andere Uhr, so dass Hin- und Rückwechsel die
    Ausgangswerte ergeben. Eine getippte Uhrzeit in einer Lücke ist eine
    Antwort mit den Teilen der Meldung. Der Beginn nimmt das Ende um die
-   verstrichene Zeit mit (102a); eine übersprungene Uhrzeit zählt dabei
-   mit dem Versatz vor der Umstellung, wie RFC 5545 sie liest, so dass die
-   Dauer stimmt, sobald der Beginn berichtigt ist. Dazu die Prüfung „gleiche
+   verstrichene Zeit mit (102a), gemessen an den Minuten, die die Felder
+   zeigen; eine übersprungene Uhrzeit zählt dabei mit dem Versatz vor der
+   Umstellung, wie RFC 5545 sie liest, so dass die Dauer stimmt, sobald der
+   Beginn berichtigt ist. Ein Ende in einer Lücke bleibt stehen, bis es
+   jemand ändert. Dazu die Prüfung „gleiche
    Uhr wie das Gerät“ nach kanonischem Namen und die Uhr einer Serie, deren
    Zone dieses Gerät nicht verwenden kann: UTC, mit dem Namen der Zone.
    Noch unsichtbar: Die Editoren lesen das ab den Stufen 10 und 12.
