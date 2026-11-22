@@ -582,6 +582,13 @@ sie:
   gleich; heute weichen sie dort voneinander ab.
 - **116a — 101b gilt auch, wo Adapter nach einem Schnitt aufräumen**
   (CalDAV, Google): Sie fragen dieselbe Kern-Regel.
+- **117a — die Vorbelegung wird kanonisch gespeichert** (Stufe 10, wie der
+  Entwurf es Stufe 10 überlässt): Eine neue Serie bekommt die Gerätezone in
+  tzdatas Schreibweise, `Asia/Kolkata` statt `Asia/Calcutta`, so wie eine
+  gewählte Zone. So ist jede neu geschriebene Zone kanonisch, und die
+  Exchange-Liste (22a) findet sie ohne Umweg. Kann dieses Gerät tzdatas
+  Schreibweise nicht verwenden (alte Zonendaten melden `Europe/Kiev` und
+  lehnen `Europe/Kyiv` ab), bleibt es bei der Schreibweise des Geräts.
 
 Geprüft vorab (2026-11-21, Tonis Desktop-Daten nur lesend): Von 89 Serien mit
 Uhrzeit im Zwischenspeicher haben drei keine Zone, alle bei CalDAV und alle mit
@@ -997,7 +1004,8 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
 - **Anlegen aus dem Editor** stempelt nie die Gerätezone über eine gewählte UTC.
 - **Schreibweise der Gerätezone:** Bis Stufe 10 bekommt eine neue Serie die
   Gerätezone so, wie das Gerät sie schreibt, etwa `Asia/Calcutta` (26a). Stufe 10
-  entscheidet, ob die Vorbelegung kanonisch gespeichert wird.
+  entscheidet, ob die Vorbelegung kanonisch gespeichert wird: ja, vorläufig
+  (117a), sobald die Editoren das Formular-Modell lesen (Stufe 12).
 - **Kopieren und Duplizieren** behalten die Zonen-Entscheidung der Quelle: Eine
   Serie auf „UTC (ohne Sommerzeit)“ bleibt als Kopie auf UTC, statt die
   Gerätezone zu bekommen (gebaut mit PR 8b, 262). Das Verschieben einer ganzen
@@ -1529,6 +1537,32 @@ Handy im selben PR.
     Sichtbarkeit nach der Tabelle, Vorbelegung, Wechsel, Speicherfunktion,
     Rückfall auf UTC für Zonen, die das Gerät ablehnt, Kopieren und Duplizieren
     mit der Zonen-Entscheidung der Quelle.
+    Gebaut (2026-11-22): `shared/seriesZoneForm.ts`, rein, noch von keinem
+    Editor gelesen. `zoneFormView` sagt nach der Tabelle, ob die Auswahl, ein
+    Hinweis oder nichts dasteht und auf welcher Uhr die Felder stehen (UTC
+    mit Namen der Zone, wo das Gerät sie ablehnt). `defaultSeriesZone` ist die
+    Vorbelegung (26a, 22a, 117a). `zoneToSave` und `savedRecurrence` sind die
+    Speicherfunktion, die `editedRecurrence` ablöst: unberührt wörtlich,
+    gewählt kanonisch, UTC ohne Zone, ganztägig hier eingeschaltet ohne Zone,
+    eine gespeicherte ganztägige Serie mit Uhrzeiten die Vorbelegung.
+    `chooseZone` ist der Wechsel: Ein neuer Termin behält die getippten
+    Zeiten, Gespeichertes den Zeitpunkt, und für die Regel fragt es die
+    Kern-Regel aus Stufe 9, gelesen auf der Zone, auf der die Serie
+    wiederholt (auch wo das Gerät sie ablehnt und die Felder auf UTC zeigt);
+    kann keine Antwort geschrieben werden, wird der Wechsel abgelehnt, und
+    nichts ändert sich. `applyClockChange` gibt die Regel, die Ausnahmen und
+    die Felder einer Antwort zurück, das Ende mit derselben Dauer; die
+    Speicherfunktion nimmt die Ausnahmen, die das Formular hält. Felder, die
+    wie getippt mitgenommen werden, fragen den Kern nicht. `fieldsOnView`
+    trägt die Felder bei „Wiederholung aus/an“ mit ihren Zeitpunkten und bei
+    „Ganztägig an/aus“ mit ihren Werten (die Daten bleiben) auf die richtige
+    Uhr; eine gespeicherte ganztägige Serie, die Uhrzeiten bekommt, bekommt
+    die Gerätezone, welche Zone sie auch trug; die Ansicht nennt die
+    Gerätezone, die der Kalender nicht speichern kann (22a),
+    `withAllDay` merkt sich, ob ganztägig hier eingeschaltet wurde, und
+    `unusableZoneRefusal` lehnt geänderte Zeiten oder Regeln bei einer Zone
+    ab, die das Gerät nicht verwenden kann. Kopieren und Duplizieren
+    behielten die Zonen-Entscheidung der Quelle schon (PR 8b, 262).
 11. **Die Auswahldialoge** — `feat(editors): the series time zone picker dialogs`.
     Desktop und Handy. Vorher messen: NVDA im verschachtelten Dialog, VoiceOver
     und TalkBack mit einer langen Liste.
