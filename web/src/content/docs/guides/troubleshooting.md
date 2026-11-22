@@ -244,8 +244,11 @@ an hour off after the clocks change, as described above.
 
 A series that has already lost its zone is not changed on its own: to Aperio it
 looks the same as a series that is meant to run in UTC. To fix an affected
-series, create it again, or set its time zone again in the program it came
-from.
+series, open the whole series and choose the time zone it had under **Series
+time zone**. If Aperio then asks **Which weekday should apply?**, take the days
+as the rule says, where the rule names the days the series was meant for. An
+appointment you had deleted before the time zone was lost is deleted again
+afterwards.
 
 ## An Exchange appointment moved after it became a series
 
@@ -291,11 +294,12 @@ What you can do: "Cancel" leaves the series as it is, and your change stays in
 the editor. "Save anyway" saves it. If a deleted occurrence could not be deleted
 again afterwards, Aperio names its day; then delete it on its own.
 
-In this version you cannot choose a series' time zone yourself. So Aperio asks
-about another time zone only for a series from another program whose end is in
-another time zone than its start, or when the series' time zone was changed
-elsewhere since Aperio last read it; in the second case, open the series again
-once Aperio has refreshed the calendar. On such a series, if something would be
+When you choose another time zone under **Series time zone**, the question
+comes on saving as well, where something would be lost. Without your choice,
+Aperio asks about another time zone only for a series from another program
+whose end is in another time zone than its start, or when the series' time zone
+was changed elsewhere since Aperio last read it; in the second case, open the
+series again once Aperio has refreshed the calendar. On such a series, if something would be
 lost — occurrences changed on their own, or deleted ones Aperio cannot place —,
 the question comes whenever you change its repeat, even only the number of
 appointments or the end; changing or deleting it from a later appointment on is
