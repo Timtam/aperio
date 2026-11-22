@@ -251,6 +251,14 @@ describe('EventDialog → an invitation somebody else organizes', () => {
 
 describe('EventDialog → an invitation opened from the reminder of one occurrence (TODO A5)', () => {
   const THIRD = '2026-11-23T15:00:00.000Z';
+  // The editor shows dates on the device's clock, where 15:00 UTC is the
+  // next day east of UTC+9 (Auckland): the expected days are read there too.
+  const deviceDay = (iso: string) => new Date(iso).getDate();
+  const deviceKey = (iso: string) => {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
 
   async function openShown(event: CalendarEvent, waitFor: RegExp) {
     const { EventDialog } = await import('./EventDialog');
@@ -271,8 +279,8 @@ describe('EventDialog → an invitation opened from the reminder of one occurren
   it("shows that occurrence's day, not the series' first", async () => {
     await openShown(INVITATION, /organisiert jemand anderes|organizes this meeting/i);
     const start = field(/^beginnt am$|^start date$|^startdatum$/i);
-    expect(start.value).toMatch(/23/);
-    expect(start.value).not.toMatch(/\b9\./);
+    expect(start.value).toMatch(new RegExp(`\\b${deviceDay(THIRD)}\\.`));
+    expect(start.value).not.toMatch(new RegExp(`\\b${deviceDay(INVITATION.start)}\\.`));
   });
 
   it('still saves the row the provider has, its times included', async () => {
@@ -296,6 +304,6 @@ describe('EventDialog → an invitation opened from the reminder of one occurren
     await openShown(own, /^beginnt am$|^start date$|^startdatum$/i);
     const start = field(/^beginnt am$|^start date$|^startdatum$/i);
     expect(start.readOnly).toBe(false);
-    expect(start.value).toBe('2026-11-09');
+    expect(start.value).toBe(deviceKey(INVITATION.start));
   });
 });

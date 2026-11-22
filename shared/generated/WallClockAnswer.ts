@@ -30,7 +30,8 @@ second?: number,
  */
 wall?: WallReading, 
 /**
- * For `untilOn`: the instant; `None` where the clock skips the whole day
- * (Samoa, 30 December 2011).
+ * For `untilOn`: the day's last second; the one before the change where
+ * a change skips the day's end; `None` only where the clock skips the
+ * whole day (Samoa, 30 December 2011).
  */
 at?: string, };
