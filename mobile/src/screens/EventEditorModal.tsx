@@ -734,7 +734,10 @@ function EventEditorScreen({
       const moved = fieldsOnView(
         fields,
         nextView,
-        prefillMoveMode(zone, view, nextView, nextAllDay !== allDay),
+        prefillMoveMode(zone, nextView, {
+          allDay: nextAllDay !== allDay,
+          repeatedBefore: !!recurrence?.trim(),
+        }),
       );
       if (nextAllDay) {
         setTimes({ ...times, allDay: true, zone, fields: moved });
@@ -772,7 +775,7 @@ function EventEditorScreen({
       setPrefillNote(note);
       return note;
     },
-    [calendars, calId, t, allDay, zoneForm, view, viewWith, factsWith, fields, times],
+    [calendars, calId, t, allDay, zoneForm, recurrence, viewWith, factsWith, fields, times],
   );
 
   /**

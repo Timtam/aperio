@@ -422,19 +422,24 @@ describe('a title suggestion (prefillMoveMode)', () => {
   const onBerlin = zoneFormView(untouchedNew, facts());
   const onUtc = zoneFormView(untouchedNew, facts({ calendarZones: ['America/New_York'] }));
 
+  const repeating = { allDay: false, repeatedBefore: true };
+
   it('keeps the dates where it changes all-day', () => {
-    expect(prefillMoveMode(untouchedNew, DEVICE_ZONE_VIEW, onBerlin, true)).toBe('values');
+    expect(prefillMoveMode(untouchedNew, onBerlin, { allDay: true, repeatedBefore: false })).toBe('values');
   });
 
   it('keeps the instant where it turns the repeat on, as the repeat field does', () => {
-    expect(prefillMoveMode(untouchedNew, DEVICE_ZONE_VIEW, onUtc, false)).toBe('instants');
+    expect(prefillMoveMode(untouchedNew, onUtc, { allDay: false, repeatedBefore: false })).toBe('instants');
   });
 
-  it('moves as its calendar would where the form already repeats', () => {
+  it('moves as its calendar would where the form already repeats, from a calendar without zones too', () => {
     expect(onUtc.clock).toEqual({ kind: 'series', tzid: null });
-    expect(prefillMoveMode(untouchedNew, onBerlin, onUtc, false)).toBe(calendarMoveMode(untouchedNew, onUtc));
-    expect(prefillMoveMode(untouchedNew, onBerlin, onUtc, false)).toBe('values');
+    expect(prefillMoveMode(untouchedNew, onUtc, repeating)).toBe(calendarMoveMode(untouchedNew, onUtc));
+    expect(prefillMoveMode(untouchedNew, onUtc, repeating)).toBe('values');
+    // A repeating new event in a device calendar stands on the device's clock
+    // (DEVICE_ZONE_VIEW) and still repeats.
+    expect(zoneFormView(untouchedNew, facts({ calendarZones: 'none' }))).toBe(DEVICE_ZONE_VIEW);
     const series = openZoneForm('series', 'Europe/Berlin', false);
-    expect(prefillMoveMode(series, onBerlin, onUtc, false)).toBe('instants');
+    expect(prefillMoveMode(series, onUtc, repeating)).toBe('instants');
   });
 });

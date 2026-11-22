@@ -858,12 +858,10 @@ export function EventDialog({
         const moved = withFieldsMoved(
           prev,
           filled,
-          prefillMoveMode(
-            zoneRef.current.formOf(prev),
-            zoneRef.current.viewOf(prev),
-            zoneRef.current.viewOf(filled),
-            prev.allDay !== fill.all_day,
-          ),
+          prefillMoveMode(zoneRef.current.formOf(prev), zoneRef.current.viewOf(filled), {
+            allDay: prev.allDay !== fill.all_day,
+            repeatedBefore: !!prev.rrule?.trim(),
+          }),
           zoneRef.current.viewOf,
         );
         if (fill.all_day) return moved;
