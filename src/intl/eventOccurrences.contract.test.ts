@@ -145,6 +145,13 @@ describe('eventOccurrences contract (views)', () => {
       'a-series-stored-as-gmt',
       'a-lowercase-utc-name',
       'an-offset-for-a-zone-name',
+      'the-editors-until-on-a-zoned-series-late-in-the-evening',
+      'the-editors-until-on-a-new-york-series-in-the-evening',
+      'a-cut-at-midnight-utc-stays-a-cut',
+      'a-summer-cut-at-midnight-utc-stays-a-cut',
+      'an-hourly-series-keeps-its-end-an-instant',
+      'an-until-before-the-start',
+      'a-cut-in-the-spring-gap',
     ]) {
       expect(names, `table lost ${n}`).toContain(n);
     }

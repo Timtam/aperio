@@ -1914,17 +1914,42 @@ fn expand_occurrences(
 ) -> Vec<DateTime<Utc>> {
     let trimmed = rrule_body.trim();
     let body = trimmed.strip_prefix("RRULE:").unwrap_or(trimmed);
-    // A series of days reads its UNTIL on the device's day clock (201).
     let by_days = matches!(
         cal_core::expansion_clock(all_day, tzid),
         cal_core::ExpansionClock::DeviceDays
     );
-    let on_day_clock;
-    let body = if by_days {
-        on_day_clock = until_on_day_clock(body, &device);
-        on_day_clock.as_str()
+    // How the series' end reads is the core's rule, the answer the views get
+    // (`cal_core::read_series_end`, DESIGN-series-time-zone.md 101b and 105a
+    // to 116a): through a date, an instant, or a wall time on the clock the
+    // series repeats on, a series of days by its digits on this device's days
+    // (201). The rrule crate wants a UTC instant against a zoned start, so the
+    // bound goes in as the last instant at or before it. A device whose zone
+    // cannot be named reads a series of days' digits on chrono's `Local`
+    // instead, which the core cannot know.
+    let device_zone = match &device {
+        RruleTz::Tz(zone) => Some(zone.name()),
+        RruleTz::Local(_) => None,
+    };
+    let rewritten;
+    let body = if by_days && device_zone.is_none() {
+        rewritten = until_on_day_clock(body, &device);
+        rewritten.as_str()
     } else {
-        body
+        let end = cal_core::series_end_on_clock(body, dt_start_utc, all_day, tzid, device_zone)
+            .end
+            .and_then(|end| end.at)
+            .and_then(|at| at.parse::<DateTime<Utc>>().ok());
+        match end {
+            // An end before the start leaves no occurrence at all, as in the
+            // views (112a). The rrule crate refused such a rule, and the
+            // series reminded at a first occurrence no view showed.
+            Some(at) if at < dt_start_utc => return Vec::new(),
+            Some(at) => {
+                rewritten = with_until(body, &at.format("%Y%m%dT%H%M%SZ").to_string());
+                rewritten.as_str()
+            }
+            None => body,
+        }
     };
 
     let unvalidated: RRule<rrule::Unvalidated> = match body.parse() {
@@ -1989,6 +2014,19 @@ fn expand_occurrences(
         end_bound,
         body,
     )
+}
+
+/// `body` with its UNTIL set to `value`, the key spelled as it was.
+fn with_until(body: &str, value: &str) -> String {
+    body.split(';')
+        .map(|part| match part.split_once('=') {
+            Some((key, _)) if key.trim().eq_ignore_ascii_case("UNTIL") => {
+                format!("{}={value}", key.trim())
+            }
+            _ => part.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 /// A series of days' rule with its UNTIL read on the device's day clock, by
@@ -5562,13 +5600,6 @@ mod tests {
         const DIFFERING: &[&str] = &[
             "a-start-with-milliseconds",
             "a-trailing-semicolon",
-            "a-date-only-until-without-a-zone",
-            "a-date-only-until-on-a-zoned-series",
-            "a-date-only-until-on-a-zoned-series-at-one-in-the-morning",
-            "an-until-without-z",
-            "an-until-without-z-on-a-zoned-series",
-            "an-until-without-z-before-the-wall-clock-time",
-            "an-until-before-the-start",
             "an-exception-a-millisecond-off-keeps-the-occurrence",
             "a-daily-series-across-a-change-at-midnight",
             "a-cancelled-series",
@@ -5584,8 +5615,25 @@ mod tests {
         /// `untilOnClock` in the views). And the rows of a single change,
         /// decided on 2026-10-05 (decision 214): cancelled or moved, it takes
         /// its slot out of its series on both (`override_slots` here,
-        /// `expandAll` in the views). Named, like `DIFFERING`.
+        /// `expandAll` in the views). And the rows of a series' end, decided on
+        /// 2026-11-22 (101b, 105a to 116a): both read it through
+        /// `cal_core::read_series_end`, a date and a time without `Z` included,
+        /// and an end before the start leaves nothing on either (112a). Named,
+        /// like `DIFFERING`.
         const AGREEING: &[&str] = &[
+            "a-date-only-until-without-a-zone",
+            "a-date-only-until-on-a-zoned-series",
+            "a-date-only-until-on-a-zoned-series-at-one-in-the-morning",
+            "an-until-without-z",
+            "an-until-without-z-on-a-zoned-series",
+            "an-until-without-z-before-the-wall-clock-time",
+            "an-until-before-the-start",
+            "the-editors-until-on-a-zoned-series-late-in-the-evening",
+            "the-editors-until-on-a-new-york-series-in-the-evening",
+            "a-cut-at-midnight-utc-stays-a-cut",
+            "a-summer-cut-at-midnight-utc-stays-a-cut",
+            "an-hourly-series-keeps-its-end-an-instant",
+            "a-cut-in-the-spring-gap",
             "a-moved-occurrence-stands-in-for-its-slot",
             "a-cancelled-occurrence-removes-its-slot",
             "a-moved-occurrence-of-a-zoned-series-after-the-change",
@@ -5620,7 +5668,7 @@ mod tests {
                 assert!(
                     case.get("reminders").is_none() && case.get("surfacesDiffer").is_none(),
                     "{name} records a reminders answer of its own, but views and reminders \
-                     read it through one rule (decisions 26a, 201, 214)",
+                     read it through one rule (decisions 26a, 201, 214, 101b)",
                 );
             }
         }

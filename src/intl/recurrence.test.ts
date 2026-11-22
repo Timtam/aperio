@@ -19,8 +19,10 @@ import {
   movedSeriesUntil,
   moveSeriesInstant,
   nthOccurrence,
+  movedTailRule,
   occurrenceCount,
   seriesDayKey,
+  shiftSeriesRule,
 } from '@aperio/shared';
 
 function mkEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
@@ -1128,4 +1130,136 @@ describe('an all-day series ends on the day its UNTIL names (201)', () => {
       }
     });
   }
+});
+
+// DESIGN-series-time-zone.md, decision 101b: `…T235959Z` on a zone's clock is
+// "through that date" there, unless a cut wrote it (105a). A cut and a move
+// read an existing end the way the views and the reminders do.
+describe("a series' end on its own clock (101b)", () => {
+  it('lets a cut on the last evening of a New York series end it before that evening', () => {
+    // Daily 20:00 New York, through November 5. Cut at the November 5
+    // occurrence (01:00 UTC on November 6): the end of the UTC day spelled
+    // November 5 23:59:59 UTC, before the cut, so it won and the cut
+    // occurrence stood in both series.
+    const out = truncateRRuleBefore(
+      'FREQ=DAILY;UNTIL=20261105T235959Z',
+      new Date('2026-11-06T01:00:00.000Z'),
+      { tzid: 'America/New_York', start: '2026-11-02T01:00:00Z' },
+    );
+    expect(out).toBe('FREQ=DAILY;UNTIL=20261106T005959Z');
+  });
+
+  it('keeps an earlier end as it was written', () => {
+    expect(
+      truncateRRuleBefore('FREQ=DAILY;UNTIL=20260503T235959Z', new Date('2026-05-10T22:30:00.000Z'), {
+        tzid: 'Europe/Berlin',
+        start: '2026-04-01T22:30:00Z',
+      }),
+    ).toBe('FREQ=DAILY;UNTIL=20260503T235959Z');
+    // A date stays a date; re-spelled through an instant it became the end of
+    // the UTC day.
+    expect(
+      truncateRRuleBefore('FREQ=DAILY;UNTIL=20260503', new Date('2026-05-10T07:00:00.000Z'), {
+        tzid: 'Europe/Berlin',
+        start: '2026-05-01T07:00:00Z',
+      }),
+    ).toBe('FREQ=DAILY;UNTIL=20260503');
+  });
+
+  it('keeps an all-day series ending on the day its end names', () => {
+    // Re-spelled through its instant, the end of October 31 became November 1
+    // east of Greenwich.
+    const out = truncateRRuleBefore(
+      'FREQ=DAILY;UNTIL=20261031T235959Z',
+      new Date(2026, 10, 5),
+      { allDay: true, start: new Date(2026, 9, 1).toISOString() },
+    );
+    expect(out).toBe('FREQ=DAILY;UNTIL=20261031');
+  });
+
+  it('leaves an end through a day to the core when the series moves by days', () => {
+    // The core moves the digits and keeps the spelling.
+    expect(
+      movedSeriesUntil(
+        'FREQ=DAILY;UNTIL=20261105T235959Z',
+        'America/New_York',
+        false,
+        '2026-11-02T01:00:00.000Z',
+        '2026-11-09T01:00:00.000Z',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('writes the end of the day as an instant where the moved time would read it as a cut', () => {
+    // Moved from 20:00 to 19:00 New York, "through November 5" spelled
+    // `…T235959Z` would read as a cut: the second after it is 19:00 there.
+    expect(
+      movedSeriesUntil(
+        'FREQ=DAILY;UNTIL=20261105T235959Z',
+        'America/New_York',
+        false,
+        '2026-11-02T01:00:00.000Z',
+        '2026-11-02T00:00:00.000Z',
+      ),
+    ).toBe('20261106T045959Z');
+  });
+});
+
+// A cut at an occurrence the spring change pushes past its gap: daily 02:30
+// Berlin, cut at 29 March 2026 (03:30 CEST, 01:30 UTC), its end one second
+// before. The views cap at that instant and show 20-28 March.
+describe('a series cut in the spring gap (101b)', () => {
+  const tzid = 'Europe/Berlin';
+  const rrule = 'FREQ=DAILY;UNTIL=20260329T012959Z';
+  const master = mkEvent({
+    start: '2026-03-20T01:30:00.000Z',
+    end: '2026-03-20T02:30:00.000Z',
+    recurrence: { rrule, exceptions: [], tzid },
+  });
+  const window = { start: new Date('2026-03-01T00:00:00.000Z'), end: new Date('2026-05-01T00:00:00.000Z') };
+
+  it('counts and names occurrences as the views show them', () => {
+    expect(expandEvent(master, window)).toHaveLength(9);
+    expect(occurrenceCount({ start: master.start, recurrence: { rrule, tzid } }, 100)).toBe(9);
+    expect(occurrenceCount({ start: '2026-03-25T01:30:00.000Z', recurrence: { rrule, tzid } }, 100)).toBe(4);
+    expect(nthOccurrence({ start: master.start, recurrence: { rrule, tzid } }, 9)).toBe('2026-03-28T01:30:00.000Z');
+    expect(nthOccurrence({ start: master.start, recurrence: { rrule, tzid } }, 10)).toBeNull();
+  });
+
+  for (const days of [1, -1, 7]) {
+    it(`keeps its nine occurrences when moved by ${days} days`, () => {
+      const start = moveSeriesInstant(master.start, tzid, false, days);
+      const until = movedSeriesUntil(rrule, tzid, false, master.start, start);
+      const shifted = shiftSeriesRule(rrule, seriesDayKey(master.start, tzid, false), days, false, until);
+      expect(shifted.outcome).toBe('shifted');
+      if (shifted.outcome !== 'shifted') return;
+      const moved = {
+        ...master,
+        start,
+        end: new Date(Date.parse(start) + 3_600_000).toISOString(),
+        recurrence: { rrule: shifted.rrule, exceptions: [], tzid },
+      };
+      expect(expandEvent(moved, window)).toHaveLength(9);
+    });
+  }
+
+  it('keeps the tail of "this and all following" moved by a day to its four', () => {
+    const from = '2026-03-25T01:30:00.000Z';
+    const moved = movedTailRule({
+      rrule,
+      series: { tzid, all_day: false },
+      from,
+      opened: from,
+      tail: { start: '2026-03-26T01:30:00.000Z', all_day: false },
+    });
+    expect(moved.outcome).toBe('shifted');
+    if (moved.outcome !== 'shifted') return;
+    const tail = {
+      ...master,
+      start: '2026-03-26T01:30:00.000Z',
+      end: '2026-03-26T02:30:00.000Z',
+      recurrence: { rrule: moved.rrule, exceptions: [], tzid },
+    };
+    expect(expandEvent(tail, window)).toHaveLength(4);
+  });
 });

@@ -312,7 +312,7 @@ export function planSeriesSplit<E extends SplittableEvent>(
     recurrence.rrule,
     cutoff,
     occurrencesBefore,
-    { allDay: master.all_day },
+    { allDay: master.all_day, tzid: recurrence.tzid ?? null, start: master.start },
   );
   // The EXDATEs from the cutoff on move to the tail with the occurrences they
   // suppress. Which side the cutoff's OWN slot falls on depends on the plan,
