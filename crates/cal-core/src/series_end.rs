@@ -133,7 +133,7 @@ fn rule_numbers(parts: &[Part], key: &str, own: u32, max: u32) -> Option<Vec<u32
 /// The times of day a rule's occurrences start at on its clock: its
 /// `BYHOUR` × `BYMINUTE` × `BYSECOND`, each part it leaves out taken from the
 /// start. `None` for a part that cannot be read.
-fn rule_times(parts: &[Part], start: NaiveTime) -> Option<Vec<NaiveTime>> {
+pub(crate) fn rule_times(parts: &[Part], start: NaiveTime) -> Option<Vec<NaiveTime>> {
     let hours = rule_numbers(parts, "BYHOUR", start.hour(), 23)?;
     let minutes = rule_numbers(parts, "BYMINUTE", start.minute(), 59)?;
     let seconds = rule_numbers(parts, "BYSECOND", start.second(), 59)?;
