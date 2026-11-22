@@ -2,7 +2,8 @@ import { RRule, rrulestr } from 'rrule';
 
 import { compareMachineStrings } from './ordering';
 import { expansionClock, seriesClockZone, type SeriesExpansionClock } from './seriesClock';
-import { seriesEnd, untilOn, type SeriesEnd } from './wallClock';
+import { seriesEnd, untilOn, wallOf, type SeriesEnd } from './wallClock';
+import type { FieldClock } from './clockFields';
 
 // Event recurrence expansion, shared by desktop + mobile. Generic over a
 // minimal `RecurringEventLike` so it needs neither side's full `CalendarEvent`
@@ -855,6 +856,12 @@ function localDayNumber(iso: string): number {
  * of day, and the length is the edited one; both are counted on the series'
  * clock (`tzid`, or UTC without one). Untouched fields leave the series exactly
  * where it was.
+ *
+ * Whether the time changed, and how many days an untouched time moved, are
+ * read on `fieldClock`, the clock the form's fields stand on: the device's
+ * for the scope picker inside the form, the series' own where the editor puts
+ * the fields there (stage 12 of DESIGN-series-time-zone.md). A time typed on
+ * that clock is a new time even where the device reads it as before.
  */
 export function seriesTimesFromOccurrenceEdit(
   series: { start: string; end: string },
@@ -862,6 +869,7 @@ export function seriesTimesFromOccurrenceEdit(
   occurrence: { start: string; end: string },
   edited: { start: string; end: string },
   allDay: boolean,
+  fieldClock: FieldClock = { kind: 'device' },
 ): { start: string; end: string } {
   const same = (a: string, b: string) => Date.parse(a) === Date.parse(b);
   if (same(edited.start, occurrence.start) && same(edited.end, occurrence.end)) {
@@ -876,23 +884,34 @@ export function seriesTimesFromOccurrenceEdit(
     end.setDate(end.getDate() + localDayNumber(edited.end) - localDayNumber(edited.start));
     return { start: start.toISOString(), end: end.toISOString() };
   }
-  // The form shows the device's clock: the time changed when its reading did.
-  // Compared on the series' clock, an untouched time on a date past a clock
-  // change on the device would read as a new time for every occurrence.
-  const reading = (iso: string) => {
-    const d = new Date(iso);
-    return d.getHours() * 60 + d.getMinutes();
+  // The time changed when its reading on the fields' clock did. Read on
+  // another clock, an untouched time on a date past a clock change there would
+  // read as a new time for every occurrence, and a typed time that clock reads
+  // as before would be lost.
+  const onFields = (iso: string): { day: number; minutes: number } => {
+    if (fieldClock.kind === 'device') {
+      const d = new Date(iso);
+      return { day: localDayNumber(iso), minutes: d.getHours() * 60 + d.getMinutes() };
+    }
+    const wall = wallOf(iso, fieldClock.tzid);
+    const [hours, minutes] = (wall?.time ?? '00:00').split(':').map(Number);
+    return {
+      day: Math.round(Date.parse(wall?.date ?? iso.slice(0, 10)) / DAY_MS),
+      minutes: hours * 60 + minutes,
+    };
   };
-  const timeChanged = reading(edited.start) !== reading(occurrence.start);
+  const editedOn = onFields(edited.start);
+  const occurrenceOn = onFields(occurrence.start);
+  const timeChanged = editedOn.minutes !== occurrenceOn.minutes;
   // An untouched time moves by the dates the user changed, counted on the
-  // device's calendar: on the series' clock a date moved past a clock change
-  // near midnight would count a day too many. A new time counts on the series'
+  // fields' calendar: on another clock a date moved past a clock change near
+  // midnight would count a day too many. A new time counts on the series'
   // clock, where it may land on another day.
   // Past the all-day branch above, this series has a time of day.
   const dayOf = (iso: string) => Date.parse(seriesDayKey(iso, tzid, false)) / DAY_MS;
   const days = timeChanged
     ? Math.round(dayOf(edited.start) - dayOf(occurrence.start))
-    : localDayNumber(edited.start) - localDayNumber(occurrence.start);
+    : editedOn.day - occurrenceOn.day;
   const start = moveSeriesInstant(
     series.start,
     tzid,

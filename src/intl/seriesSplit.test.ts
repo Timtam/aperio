@@ -16,7 +16,8 @@ import {
   planSeriesSplit,
   readSeriesRows,
   ruleFromCut,
-  localTimeZone,
+  defaultSeriesZone,
+  deviceZoneName,
   movedTailRule,
   tailRecurrenceFor,
   TailShiftRefusedError,
@@ -1488,7 +1489,8 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     });
     expect(tail?.exceptions).toEqual([nineOn(27)]);
     // "Ganztägig aus": the series gets the device's zone, as a created one does.
-    expect(tail?.tzid).toBe(localTimeZone());
+    // As a created series gets it: canonically (117a), whatever the runtime reports.
+    expect(tail?.tzid ?? null).toBe(defaultSeriesZone(deviceZoneName(), 'all'));
   });
 
   it('drops a deletion on a day a new rule never meets (188)', () => {

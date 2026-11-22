@@ -49,6 +49,7 @@ import {
   zoneFormView,
   DEVICE_ZONE_VIEW,
   calendarMoveMode,
+  prefillMoveMode,
   storedZoneOf,
   zoneSaveRefusal,
   zoneSentences,
@@ -730,11 +731,7 @@ function EventEditorScreen({
           calendarId: target.kind === 'offer' ? target.id : calId,
         }),
       );
-      const moved = fieldsOnView(
-        fields,
-        nextView,
-        nextAllDay !== allDay ? 'values' : calendarMoveMode(zone, nextView),
-      );
+      const moved = fieldsOnView(fields, nextView, prefillMoveMode(nextAllDay !== allDay));
       if (nextAllDay) {
         setTimes({ ...times, allDay: true, zone, fields: moved });
       } else {
@@ -1461,6 +1458,7 @@ function EventEditorScreen({
         seeded,
         { start, end },
         allDay,
+        fields.clock,
       ).start;
       return { from: original.start, written };
     }
@@ -1473,6 +1471,7 @@ function EventEditorScreen({
     editScope,
     formInstants,
     allDay,
+    fields.clock,
   ]);
   // The rule "this and all following" — or the whole series — writes, shown in
   // the repeat field as it will be saved (decisions 197, 199): moved with a new
@@ -1560,6 +1559,16 @@ function EventEditorScreen({
   };
 
   const save = useCallback(async (acceptsLoss = false) => {
+    // 135a: without its series, "this and all following" has no clock to
+    // stand its fields on, so nothing is written. First, before the title:
+    // nothing was loaded, so the title is empty too, and asking for it would
+    // send the person the wrong way.
+    if (seriesLoadFailed) {
+      const message = t('dialogs.event.seriesLoadFailedOpen');
+      setError(message);
+      AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
+      return;
+    }
     const trimmedTitle = title.trim();
     if (trimmedTitle.length === 0) {
       setError(t('dialogs.event.titleRequired'));
@@ -1580,14 +1589,6 @@ function EventEditorScreen({
         setError(t('fileImport.invitation.stillChecking'));
         return;
       }
-    }
-    // 135a: without its series, "this and all following" has no clock to
-    // stand its fields on, so nothing is written.
-    if (seriesLoadFailed) {
-      const message = t('dialogs.event.seriesLoadFailedOpen');
-      setError(message);
-      AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
-      return;
     }
     // The series' clock: a typed time it skips, changed times of a series
     // whose zone this device cannot use, a zone the calendar cannot store
@@ -2213,6 +2214,7 @@ function EventEditorScreen({
               seededOccurrence,
               { start, end },
               allDay,
+              fields.clock,
             )
           : { start, end };
         // The whole series moves as "this and all following" from its own
@@ -2841,7 +2843,14 @@ function EventEditorScreen({
             <ReadOnlyField label={fieldLabel('endTime')} value={endTime} />
           )}
         </>
-      ) : seriesLoadFailed ? null : (
+      ) : seriesLoadFailed ? (
+        // 135a: the times have no clock to stand on; this says why they are
+        // missing, where they would be, for as long as the editor is open.
+        <ReadOnlyField
+          label={t('dialogs.seriesTimeZone.title')}
+          value={t('dialogs.event.seriesLoadFailedOpen')}
+        />
+      ) : (
         <>
       {/* One switch node for SR (the Pressable carries role + checked + label and
           handles the tap); the inner Switch is the real visual toggle for

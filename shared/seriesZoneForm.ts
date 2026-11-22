@@ -106,11 +106,14 @@ export function calendarZonesOf(
 }
 
 /** Whether `calendarZones` stores `zone`, compared canonically as the core
- *  compares it (`SeriesTimeZones::stores`). UTC is no zone and always fits. */
+ *  compares it (`SeriesTimeZones::stores`). UTC is no zone and always fits,
+ *  under any of its names; so does a name tzdata does not know, which the
+ *  series repeats on as UTC and the adapter judges when it writes. */
 function storesZone(calendarZones: CalendarZones, zone: string | null): boolean {
-  if (zone === null || calendarZones === 'all') return true;
+  const named = seriesClockZone(zone);
+  if (named === null || calendarZones === 'all') return true;
   if (calendarZones === 'none') return false;
-  return calendarZones.includes(canonicalZone(zone) ?? zone);
+  return calendarZones.includes(canonicalZone(named) ?? named);
 }
 
 /** The facts of a form, from what its editor holds. */
@@ -301,6 +304,18 @@ export function storedZoneOf(
 export function calendarMoveMode(form: SeriesZoneForm, next: ZoneFormView): 'instants' | 'values' {
   if (next.clock.kind === 'device') return 'instants';
   return form.editing === 'new' && form.chosen === undefined ? 'values' : 'instants';
+}
+
+/**
+ * How the fields move when a title suggestion fills the form ("Titelvorschläge
+ * füllen die Regel, lassen die Zone aber stehen"): as a switch of all-day
+ * moves them where it changes all-day (the dates stay), else as a repeat
+ * switched on or off does (the instant stays). A calendar the suggestion
+ * brings changes while the form does not repeat yet, on the device's clock,
+ * where the instant stays as well.
+ */
+export function prefillMoveMode(allDayChanges: boolean): 'instants' | 'values' {
+  return allDayChanges ? 'values' : 'instants';
 }
 
 /** What the form shows of the zone, and the clock its fields stand on. */

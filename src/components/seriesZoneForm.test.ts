@@ -382,6 +382,13 @@ describe('a zone the target calendar cannot store (139a)', () => {
     expect(zoneFormView(utc, facts({ calendarZones: exchange, calendarMoved: true })).notStorable).toBeNull();
   });
 
+  it('is not named for UTC under another name, nor for a name tzdata does not know', () => {
+    for (const stored of ['UTC', 'Etc/UTC', 'GMT', 'Pacific Standard Time']) {
+      const form = openZoneForm('series', stored, false);
+      expect(zoneFormView(form, facts({ calendarZones: exchange, calendarMoved: true })).notStorable, stored).toBeNull();
+    }
+  });
+
   it('is named for a chosen zone, which stays', () => {
     const chosen = { ...openZoneForm('new', undefined, false), chosen: 'America/New_York' };
     const view = zoneFormView(chosen, facts({ calendarZones: exchange }));

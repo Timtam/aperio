@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import type { Calendar, CalendarEvent } from '../api/types';
-import { localTimeZone } from '../intl/recurrence';
+import { defaultSeriesZone, deviceZoneName } from '@aperio/shared';
 
 /**
  * Editing a series as a whole keeps the zone it was written in.
@@ -788,7 +788,8 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
       });
     });
     expect(sent.all_day).toBe(false);
-    expect(sent.recurrence?.tzid ?? null).toBe(localTimeZone());
+    // The zone a created series gets: the device's, written canonically (117a).
+    expect(sent.recurrence?.tzid ?? null).toBe(defaultSeriesZone(deviceZoneName(), 'all'));
     expect(sent.recurrence?.exceptions).toEqual([new Date(Date.parse(sent.start) + 7 * 86_400_000).toISOString()]);
   });
 

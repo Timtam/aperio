@@ -157,6 +157,8 @@ import {
   zoneFormView,
   DEVICE_ZONE_VIEW,
   calendarMoveMode,
+  prefillMoveMode,
+  storedZoneOf,
   zoneSaveRefusal,
   zoneSentences,
   zoneToSave,
@@ -856,7 +858,7 @@ export function EventDialog({
         const moved = withFieldsMoved(
           prev,
           filled,
-          prev.allDay !== fill.all_day ? 'values' : 'instants',
+          prefillMoveMode(prev.allDay !== fill.all_day),
           zoneRef.current.viewOf,
         );
         if (fill.all_day) return moved;
@@ -1090,14 +1092,15 @@ export function EventDialog({
     readOnly: fieldsLocked,
   });
   // A row of a series edited as the series, or from here on, is never a new
-  // series: it stands on the series' zone — the loaded series', else the one
-  // the occurrence carries, else UTC, and never the device's (135a).
+  // series: it stands on the series' zone — the loaded series', UTC where it
+  // stores none, else (until it loads) the one the occurrence carries, else
+  // UTC, and never the device's (135a).
   const zoneSeries = isOccurrence ? (wholeSeriesMaster ?? event) : (event ?? imported);
   const zoneStored: string | null | undefined = isOccurrence
-    ? (wholeSeriesMaster?.recurrence?.tzid ?? event?.recurrence?.tzid ?? null)
-    : zoneSeries?.recurrence
-      ? (zoneSeries.recurrence.tzid ?? null)
-      : undefined;
+    ? wholeSeriesMaster
+      ? (wholeSeriesMaster.recurrence?.tzid ?? null)
+      : (event?.recurrence?.tzid ?? null)
+    : storedZoneOf(zoneSeries?.recurrence);
   const zoneOpenedAllDay = zoneSeries?.all_day ?? false;
   const openedCalendarId = isEdit ? (event?.calendar_id ?? null) : null;
   const zoneFormOf = useCallback(
@@ -1166,6 +1169,7 @@ export function EventDialog({
         event,
         { start, end },
         form.allDay,
+        fields.clock,
       ).start;
       return { from: wholeSeriesMaster.start, opened: wholeSeriesMaster.start, written };
     }
@@ -2447,6 +2451,7 @@ export function EventDialog({
                 event,
                 { start, end },
                 form.allDay,
+                fields.clock,
               )
             : { start, end };
           // A row of a series saves the series as loaded: its rule where the

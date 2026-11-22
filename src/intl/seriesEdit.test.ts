@@ -19,6 +19,28 @@ function onDevice(iso: string, days: number): string {
   return when.toISOString();
 }
 
+describe('seriesTimesFromOccurrenceEdit on the series clock (stage 12)', () => {
+  // The fields of "this and all following" and of the whole series stand on
+  // the series' clock: a time is read there, whatever the device reads.
+  const onNewYork = { kind: 'series', tzid: NY } as const;
+  // A weekly series at 10:00 New York from 10 March 2026, when US summer time
+  // has begun and the EU's has not.
+  const first = { start: '2026-03-10T14:00:00.000Z', end: '2026-03-10T15:00:00.000Z' };
+
+  it('takes a typed time the device reads as before', () => {
+    // 31 March 09:00 New York: in Berlin 15:00, as 10 March 10:00 was.
+    const edited = { start: '2026-03-31T13:00:00.000Z', end: '2026-03-31T14:00:00.000Z' };
+    expect(seriesTimesFromOccurrenceEdit(first, NY, first, edited, false, onNewYork)).toEqual(edited);
+  });
+
+  it('keeps the series time when only the date moved on its clock', () => {
+    const winter = { start: '2026-03-03T15:00:00.000Z', end: '2026-03-03T16:00:00.000Z' };
+    // Three weeks on, still 10:00 New York, now in summer time.
+    const edited = { start: '2026-03-24T14:00:00.000Z', end: '2026-03-24T15:00:00.000Z' };
+    expect(seriesTimesFromOccurrenceEdit(winter, NY, winter, edited, false, onNewYork)).toEqual(edited);
+  });
+});
+
 describe('seriesTimesFromOccurrenceEdit', () => {
   it('leaves the series where it is when the fields are untouched', () => {
     expect(seriesTimesFromOccurrenceEdit(SERIES, NY, JULY, JULY, false)).toEqual(SERIES);

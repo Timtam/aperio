@@ -354,6 +354,18 @@ describe('EventDialog → "this and all following" stands on the series clock (2
     );
   });
 
+  it('takes the loaded series on UTC over the zone the row still carries', async () => {
+    deviceInBerlin();
+    // Switched to UTC on another device; the cached row still says New York.
+    onFile.series = { ...NEW_YORK, recurrence: { ...NEW_YORK.recurrence!, tzid: null } };
+    await open(occurrence('America/New_York'), 'this_and_future');
+    await screen.findByLabelText(/^startzeit \(utc\)$/i);
+    expect(input(/^startzeit \(utc\)$/i).value).toBe('13:00');
+    expect(
+      (screen.getByRole('textbox', { name: /^zeitzone der serie$/i }) as HTMLTextAreaElement).value,
+    ).toBe('UTC. Ändern lässt sie sich, wenn du die ganze Serie bearbeitest.');
+  });
+
   it('says a series that cannot be loaded, refuses the save, and never falls back to the device clock', async () => {
     deviceInBerlin();
     onFile.fails = true;
@@ -370,6 +382,38 @@ describe('EventDialog → "this and all following" stands on the series clock (2
     expect((await screen.findByRole('alert')).textContent).toBe(failure);
     expect(calls('create_event')).toHaveLength(0);
     expect(calls('update_event')).toHaveLength(0);
+  });
+
+  it('takes a time typed on the series clock from the first occurrence, though the device reads it as before', async () => {
+    deviceInBerlin();
+    // Tuesdays at 10:00 New York from 10 March 2026, when US summer time has
+    // begun and the EU's has not: 15:00 in Berlin, as 09:00 New York is on
+    // 31 March. On a machine in Berlin the device's reading does not change.
+    const march = {
+      ...NEW_YORK,
+      id: 'ev-mar',
+      start: '2026-03-10T14:00:00.000Z',
+      end: '2026-03-10T15:00:00.000Z',
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=TU', exceptions: [], tzid: 'America/New_York' },
+    } as unknown as CalendarEvent;
+    onFile.series = march;
+    await open(
+      {
+        ...march,
+        id: 'ev-mar@2026-03-10T14:00:00.000Z',
+        series_id: 'ev-mar',
+        occurrence_start: '2026-03-10T14:00:00.000Z',
+      } as unknown as CalendarEvent,
+      'this_and_future',
+    );
+    await screen.findByLabelText(/^startzeit \(new york\)$/i);
+    fireEvent.change(input(/^startdatum \(new york\)$/i), { target: { value: '2026-03-31' } });
+    fireEvent.change(input(/^startzeit \(new york\)$/i), { target: { value: '09:00' } });
+    save();
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+    const sent = (calls('update_event')[0][1] as { event: CalendarEvent }).event;
+    expect(sent.start).toBe('2026-03-31T13:00:00.000Z');
+    expect(sent.end).toBe('2026-03-31T14:00:00.000Z');
   });
 
   it('opens a series that no longer repeats without the failure, and the save says why', async () => {
