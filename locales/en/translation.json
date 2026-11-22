@@ -2439,7 +2439,8 @@
         "startMoved": "Series time zone: {{clock}}. The series now starts on {{start}} on this clock.",
         "repeats": "Repeats {{days}}.",
         "unchanged": "Series time zone not changed: {{entry}}",
-        "refused": "Series time zone not changed: {{reason}}."
+        "refused": "Series time zone not changed: {{reason}}.",
+        "saveStartFirst": "Series time zone not changed: save the changed start first, then choose the time zone."
       }
     },
     "readOnlyField": "{{label}}: {{value}}",

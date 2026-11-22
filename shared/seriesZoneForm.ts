@@ -555,3 +555,24 @@ export function zoneAppliedSeries<
     recurrence: zone === null ? { ...recurrence, tzid: null } : { ...recurrence, tzid: zone },
   };
 }
+
+/**
+ * Whether choosing a zone for a stored series waits for a save: its start was
+ * changed in this session, since the editor opened (`baselineStart`, the
+ * stored start) or since the last zone answer (that answer's start). The core
+ * is asked against the series as stored or answered, and a whole-series save
+ * measures the edit against the answered series (`zoneAppliedSeries`), so a
+ * start moved after the choice moves the rule and the deleted occurrences as
+ * any date move does; one moved before it would be lost in between. The
+ * editor says so instead of asking (predictable rather than half right).
+ * `null` for anything else: a new event, a single event, an import.
+ */
+export function zoneChoiceWaitsForSave(
+  form: SeriesZoneForm,
+  fields: ClockFields,
+  baselineStart: string | null,
+): boolean {
+  if (form.editing !== 'series' || baselineStart === null) return false;
+  const start = fieldInstant(fields.start, fields.clock);
+  return start.kind !== 'at' || Date.parse(start.at) !== Date.parse(baselineStart);
+}

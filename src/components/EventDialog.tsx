@@ -137,7 +137,10 @@ import {
 } from '@aperio/shared';
 import {
   DEVICE_CLOCK,
+  answerMovesStart,
+  applyClockChange,
   calendarZonesOf,
+  chooseZone,
   changeClockField,
   clockFieldGaps,
   clockFieldLabel,
@@ -159,15 +162,27 @@ import {
   calendarMoveMode,
   prefillMoveMode,
   storedZoneOf,
+  zoneChoiceWaitsForSave,
   zoneSaveRefusal,
   zoneSentences,
   zoneToSave,
+  zoneAppliedSeries,
+  zoneChoiceAnnouncement,
+  zoneChoiceEntry,
+  zoneOffsets,
+  zoneRefusedAnnouncement,
+  zoneUnchangedAnnouncement,
+  weekdayQuestion,
+  type ClockChangeAnswer,
   type ClockField,
   type ClockFieldKey,
   type ClockFields,
   type FieldClock,
+  type SeriesClockChange,
   type SeriesZoneForm,
+  type WeekdayQuestionText,
   type ZoneFormView,
+  type ZonePick,
 } from '@aperio/shared';
 import { EventRsvp } from './EventRsvp';
 import { TitleSuggestBox } from './TitleSuggestBox';
@@ -180,7 +195,9 @@ import { Modal } from './Modal';
 import { ReadOnlyText } from './ReadOnlyText';
 import { RecurrenceSelector } from './RecurrenceSelector';
 import { RemindersEditor, type EditableReminder } from './RemindersEditor';
+import { SeriesZonePicker } from './SeriesZonePicker';
 import { SoundPrefField } from './SoundPrefField';
+import { WeekdayQuestionDialog } from './WeekdayQuestionDialog';
 import type { Reminder } from '../api/types';
 
 /**
@@ -323,10 +340,35 @@ interface FormState {
   /** The series' exceptions as a zone change moved them; `null` while they
    *  are the stored ones. */
   exceptions: string[] | null;
+  /** The last answer of the core this session applied for a zone change: its
+   *  start, rule and exceptions. A whole-series save measures the edit
+   *  against the series as it leaves it (`zoneAppliedSeries`, question 12 of
+   *  stage 12), so the answer is never applied twice. `null` while no zone
+   *  was changed with an answer. */
+  zoneAnswer: { start: string; rrule: string; exceptions: string[] } | null;
 }
 
 /** Nothing chosen about the zone yet. */
 const UNTOUCHED_ZONE: FormState['zoneChoice'] = { chosen: undefined, allDayTurnedOn: false };
+
+/** A zone change the core asks about (the weekday question, 15a and 138a),
+ *  waiting for the picker to close and then shown. */
+interface ZoneQuestionAsk {
+  /** The zone chosen, `null` for UTC. */
+  zone: string | null;
+  change: SeriesClockChange;
+  /** The fields on the new clock, before an answer moves them. */
+  fields: ClockFields;
+  /** The series' start and rule before the choice. */
+  start: string;
+  rrule: string | null;
+  /** The zone in effect as the button names it, said when nothing changes. */
+  entry: string;
+  text: WeekdayQuestionText;
+  /** Whether the question shows: only once the picker has closed and the
+   *  focus is back on the zone button. */
+  shown: boolean;
+}
 
 /** Fields holding typed values, no instant: a new event's default slot, or an
  *  all-day event's days. */
@@ -1148,6 +1190,14 @@ export function EventDialog({
   );
   const fieldsRef = useRef(fields);
   fieldsRef.current = fields;
+  // The zone the series repeats on as the form stands, for its rule moved
+  // with a new date and for the words of that rule: the view's where the
+  // fields stand on the series' clock (a zone chosen here included), the
+  // stored one elsewhere — as the phone reads it.
+  const seriesZone =
+    view.choice !== 'none'
+      ? view.zone
+      : ((wholeSeriesMaster ?? event)?.recurrence?.tzid ?? null);
   // Where the rule is moved from and to, read as the save will write it:
   // "this and all following" from the occurrence's place to the form's start;
   // the whole series — which moves the same way from its own start (decision
@@ -1201,7 +1251,7 @@ export function EventDialog({
     try {
       const answer = movedTailRule({
         rrule: form.rrule,
-        series: { tzid: series.recurrence?.tzid, all_day: series.all_day },
+        series: { tzid: seriesZone, all_day: series.all_day },
         from: ruleSetAt ?? ruleFrame.from,
         opened: ruleSetAt ?? ruleFrame.opened,
         tail: { start: ruleFrame.written, all_day: form.allDay },
@@ -1224,6 +1274,7 @@ export function EventDialog({
     wholeSeriesMaster,
     ruleFrame,
     ruleSetAt,
+    seriesZone,
   ]);
   // The repeat rule in words (84a): there are no controls to read in a locked
   // invitation, and an expanded occurrence carries its series' rule. Moved
@@ -1231,22 +1282,28 @@ export function EventDialog({
   const repeatSentence = useMemo(() => {
     if (!event) return '';
     const moved = !locked && shownRule.rrule !== form.rrule;
-    const rrule = (moved ? shownRule.rrule : event.recurrence?.rrule)?.trim();
+    // A zone answer rewrote the rule the form holds: that is the one saved.
+    const answered = !locked && form.zoneAnswer !== null;
+    const rrule = (
+      moved ? shownRule.rrule : answered ? form.rrule : event.recurrence?.rrule
+    )?.trim();
     if (!rrule) return locked ? t('dialogs.event.recurrence.none') : '';
     // In the editable editor only where the controls would show another rule
     // than the one stored: otherwise they say it themselves.
     if (!locked && !pickerMisreadsRule(rrule)) return '';
-    const series = moved
-      ? {
-          ...event,
-          start: ruleFrame?.written ?? event.start,
-          recurrence: event.recurrence && { ...event.recurrence, rrule },
-        }
-      : event;
+    // Read on the zone the series repeats on as the form stands.
+    const series =
+      moved || answered
+        ? {
+            ...event,
+            start: ruleFrame?.written ?? event.start,
+            recurrence: event.recurrence && { ...event.recurrence, rrule, tzid: seriesZone },
+          }
+        : event;
     return recurrenceSummaryText(
       describeRecurrence({
         rrule,
-        start: seriesDayKey(series.start, event.recurrence?.tzid, event.all_day),
+        start: seriesDayKey(series.start, seriesZone, event.all_day),
         last_day: lastOccurrenceDayKey(series),
       }),
       { t, language: i18n.language },
@@ -1256,7 +1313,9 @@ export function EventDialog({
     event,
     shownRule.rrule,
     form.rrule,
+    form.zoneAnswer,
     ruleFrame,
+    seriesZone,
     t,
     i18n.language,
   ]);
@@ -1719,6 +1778,160 @@ export function EventDialog({
     );
     if (said !== null) announce(said);
   }, [deviceZone, i18n.language, t, announce]);
+
+  // Choosing the series' zone (stage 12 of DESIGN-series-time-zone.md, "Die
+  // Zone wechseln"): a button after the repeat block opens the picker; a zone
+  // picked moves the fields, the rule and the exceptions as the core answers,
+  // or asks the weekday question first. Not for a row of a series opened as
+  // the whole series: its fields are that occurrence's, and the series it
+  // saves is moved from them (`seriesTimesFromOccurrenceEdit`) — the scope
+  // prompt opens the series itself instead.
+  const zoneButtonRef = useRef<HTMLButtonElement>(null);
+  const [zonePickerOpen, setZonePickerOpen] = useState(false);
+  const [zoneQuestion, setZoneQuestion] = useState<ZoneQuestionAsk | null>(null);
+  const zoneButtonShown = view.choice === 'picker' && !isOccurrence && !fieldsLocked;
+  /** Today, for the zone groups' clocks: read once per opening. */
+  const zoneToday = useMemo(() => (isOpen ? new Date().toISOString() : ''), [isOpen]);
+  /** The series' start as the fields name it, where the picker's cities show
+   *  their offsets; today where the fields name no instant. */
+  const zoneStartAt = wireInstant(fields.start, fields.clock) ?? zoneToday;
+  // One synchronous call into the core per start instant.
+  const zoneOffsetsAtStart = useMemo(() => {
+    if (!zoneButtonShown || zoneToday === '') return null;
+    try {
+      return zoneOffsets(zoneStartAt, zoneToday);
+    } catch {
+      // Without the core's list there is no entry to name, nor a list to
+      // choose from.
+      return null;
+    }
+  }, [zoneButtonShown, zoneStartAt, zoneToday]);
+  const zoneEntry =
+    zoneOffsetsAtStart === null ? null : zoneChoiceEntry(view.zone, zoneOffsetsAtStart, t);
+  useEffect(() => {
+    if (isOpen) return;
+    setZonePickerOpen(false);
+    setZoneQuestion(null);
+  }, [isOpen]);
+  // The weekday question opens once the picker has closed: the picker's
+  // Modal gives the focus back to the zone button in a microtask after its
+  // commit, so this waits one more, puts the focus there itself, and only
+  // then opens the question — whose Modal then gives the focus back to the
+  // button when it closes (measured with NVDA, "Gemessen").
+  useEffect(() => {
+    if (zonePickerOpen || zoneQuestion === null || zoneQuestion.shown) return;
+    let live = true;
+    queueMicrotask(() => {
+      if (!live) return;
+      zoneButtonRef.current?.focus({ preventScroll: true });
+      setZoneQuestion((ask) => ask && { ...ask, shown: true });
+    });
+    return () => {
+      live = false;
+    };
+  }, [zonePickerOpen, zoneQuestion]);
+
+  /** An answer of the core, carried out: the fields, the rule and the
+   *  exceptions it writes, the zone chosen, and one announcement. The start
+   *  the answer gives is where the rule now stands (question 12 of stage 12),
+   *  so a date moved afterwards moves the rule from there, and only once. */
+  const applyZoneAnswer = (
+    zone: string | null,
+    fieldsOnNewClock: ClockFields,
+    answer: ClockChangeAnswer,
+    before: { start: string; rrule: string | null },
+  ) => {
+    const applied = applyClockChange(fieldsOnNewClock, answer);
+    if (applied === null || answer.outcome !== 'changed') return;
+    setForm((prev) => ({
+      ...prev,
+      fields: applied.fields,
+      rrule: applied.rrule,
+      exceptions: applied.exceptions,
+      zoneChoice: { ...prev.zoneChoice, chosen: zone },
+      zoneAnswer: { start: answer.start, rrule: answer.rrule, exceptions: answer.exceptions },
+    }));
+    setRuleSetAt(answer.start);
+    announce(
+      zoneChoiceAnnouncement({
+        kind: answerMovesStart(answer, before.start) ? 'startMoved' : 'sameInstant',
+        zone,
+        fields: applied.fields,
+        rewritten: applied.rrule !== before.rrule ? applied.rrule : null,
+        language: i18n.language,
+        t,
+      }),
+    );
+  };
+
+  /** A row of the picker was chosen. */
+  const onZonePick = (pick: ZonePick) => {
+    setZonePickerOpen(false);
+    const entry = zoneEntry ?? '';
+    // The zone in effect again — "Aktuell", its city or its group: nothing
+    // changes, not even its spelling (120a, question 2 of stage 12).
+    if (pick.kind === 'unchanged') {
+      announce(zoneUnchangedAnnouncement(entry, t));
+      return;
+    }
+    const current = formRef.current;
+    const shown = fieldsRef.current;
+    const zoneForm = zoneFormOf(current);
+    const storedExceptions = (event?.recurrence ?? imported?.recurrence)?.exceptions ?? [];
+    const result = chooseZone(zoneForm, zoneFactsOf(current), shown, pick.zone, {
+      rrule: current.rrule ?? '',
+      exceptions: current.exceptions ?? storedExceptions,
+    });
+    // No answer can be written (20a): the zone stays, and why is said.
+    if (result.refused !== null) {
+      announce(zoneRefusedAnnouncement(result.refused, pick.zone, t));
+      return;
+    }
+    const { change } = result;
+    const startBefore = fieldInstant(shown.start, shown.clock);
+    if (change === null || startBefore.kind !== 'at') {
+      // A new event keeps its typed times on the new clock; fields that name
+      // no instant move as typed.
+      setForm((prev) => ({
+        ...prev,
+        fields: result.fields,
+        zoneChoice: { ...prev.zoneChoice, chosen: result.form.chosen },
+      }));
+      announce(
+        zoneChoiceAnnouncement({
+          kind: zoneForm.editing === 'new' ? 'typed' : 'sameInstant',
+          zone: pick.zone,
+          fields: result.fields,
+          rewritten: null,
+          language: i18n.language,
+          t,
+        }),
+      );
+      return;
+    }
+    const before = { start: startBefore.at, rrule: current.rrule };
+    if (!change.asks) {
+      applyZoneAnswer(pick.zone, result.fields, change.asNow, before);
+      return;
+    }
+    setZoneQuestion({
+      zone: pick.zone,
+      change,
+      fields: result.fields,
+      start: before.start,
+      rrule: before.rrule,
+      entry,
+      text: weekdayQuestion({
+        change,
+        start: before.start,
+        rrule: current.rrule ?? '',
+        zone: pick.zone,
+        language: i18n.language,
+        t,
+      }),
+      shown: false,
+    });
+  };
 
   // `acceptsLoss` is the loss question's yes, handed to the one submit it
   // starts (decisions 243-253); the form's own submit never carries it, so no
@@ -2438,16 +2651,39 @@ export function EventDialog({
           // from the cut, with its start there and its rule from there on — and
           // the edit is read as a change to it, so an untouched date leaves the
           // series start where it is and an untouched rule stays the series'.
-          const series = wholeFromCut
+          const loadedSeries = wholeFromCut
             ? wholeFromCut.series
             : isOccurrence
               ? await getEventById(seriesId, event.calendar_id)
               : event;
-          if (!series) {
+          if (!loadedSeries) {
             throw new Error(
               t('dialogs.event.seriesLoadFailed', { title: event.title }),
             );
           }
+          // A zone chosen here for the stored series (question 12 of stage
+          // 12): the edit is measured against the series as the zone change
+          // leaves it — the answer's start, rule and exceptions on the new
+          // zone, or, where no answer was needed, its own on the new zone —
+          // so an answer that moved the start is not moved again by the rule
+          // moving with the date, and a date moved after it counts on the
+          // new clock. The zone is the one the save writes.
+          const loadedRecurrence = loadedSeries.recurrence;
+          const series =
+            !wholeFromCut &&
+            !isOccurrence &&
+            form.zoneChoice.chosen !== undefined &&
+            loadedRecurrence?.rrule
+              ? zoneAppliedSeries(
+                  loadedSeries,
+                  form.zoneAnswer ?? {
+                    start: loadedSeries.start,
+                    rrule: loadedRecurrence.rrule,
+                    exceptions: loadedRecurrence.exceptions ?? [],
+                  },
+                  zoneToSave(zoneForm, zoneFactsOf(form)),
+                )
+              : loadedSeries;
           const times = isOccurrence
             ? seriesTimesFromOccurrenceEdit(
                 series,
@@ -2612,10 +2848,18 @@ export function EventDialog({
           // Its "before" is the series at the cut, as the phone's is: the
           // opened row may be an occurrence the provider moved, and offering
           // the copies that move would carry a change nobody made.
-          const carry = () =>
-            wholeFromCut
-              ? offerToCarry(wholeFromCut.series, updated, 'future', wholeFromCut.occIso)
-              : offerToCarry(series, updated);
+          // A save that changed the series' zone offers no carry until stage
+          // 13 (137a): the carry writes start and end without zone and rule,
+          // and the copies could move by an hour or a day.
+          const zoneChanged =
+            form.zoneChoice.chosen !== undefined &&
+            (updated.recurrence?.tzid ?? null) !== (loadedRecurrence?.tzid ?? null);
+          const carry = async () =>
+            zoneChanged
+              ? false
+              : wholeFromCut
+                ? offerToCarry(wholeFromCut.series, updated, 'future', wholeFromCut.occIso)
+                : offerToCarry(loadedSeries, updated);
           // Deleted occurrences the provider brought back and Aperio could not
           // delete again (253): the save stands, and the days are said on
           // screen, focused, before the editor goes on — as after a split
@@ -3606,7 +3850,8 @@ export function EventDialog({
             // is worse than no summary at all.
             <ReadOnlyField
               label={t(
-                shownRule.rrule !== form.rrule
+                // A rule a zone answer rewrote is no longer the stored one.
+                shownRule.rrule !== form.rrule || form.zoneAnswer !== null
                   ? 'dialogs.event.recurrence.movedLabel'
                   : 'dialogs.event.recurrence.storedLabel',
               )}
@@ -3660,6 +3905,34 @@ export function EventDialog({
           />
           </div>
           </>
+        )}
+
+        {/* The series' zone, after the repeat block and before the reminders
+            ("Beschriftung, Hinweis und was man hört"): a button that opens
+            the picker, named with the zone in effect. */}
+        {zoneButtonShown && zoneEntry !== null && (
+          <div className="form__field">
+            <button
+              ref={zoneButtonRef}
+              type="button"
+              className="form__action"
+              aria-haspopup="dialog"
+              onClick={() => {
+                if (submitting) return;
+                // A start changed before the choice would be lost between the
+                // answer and the save: save it first (`zoneChoiceWaitsForSave`).
+                const baseline =
+                  form.zoneAnswer?.start ?? (isEdit && !isOccurrence ? (event?.start ?? null) : null);
+                if (zoneChoiceWaitsForSave(zoneFormOf(form), fields, baseline)) {
+                  announce(t('dialogs.seriesTimeZone.announce.saveStartFirst'));
+                  return;
+                }
+                setZonePickerOpen(true);
+              }}
+            >
+              {t('dialogs.seriesTimeZone.button', { entry: zoneEntry })}
+            </button>
+          </div>
         )}
 
         {/* The series' zone for "this and all following", where the choice
@@ -3823,6 +4096,37 @@ export function EventDialog({
       </form>
     </Modal>
     {waitDialog}
+    {zoneButtonShown && (
+      <SeriesZonePicker
+        isOpen={zonePickerOpen}
+        startAt={zoneStartAt}
+        today={zoneToday}
+        stored={view.zone}
+        deviceZone={deviceZone}
+        calendarZones={calendarZonesOf(calendars.find((c) => c.id === form.calendarId))}
+        onPick={onZonePick}
+        onCancel={() => setZonePickerOpen(false)}
+      />
+    )}
+    {zoneQuestion && (
+      <WeekdayQuestionDialog
+        isOpen={zoneQuestion.shown}
+        question={zoneQuestion.text}
+        onKeep={() => {
+          setZoneQuestion(null);
+          announce(zoneUnchangedAnnouncement(zoneQuestion.entry, t));
+        }}
+        onAnswer={(answer) => {
+          setZoneQuestion(null);
+          applyZoneAnswer(
+            zoneQuestion.zone,
+            zoneQuestion.fields,
+            answer === 'rule' ? zoneQuestion.change.asRule : zoneQuestion.change.asNow,
+            { start: zoneQuestion.start, rrule: zoneQuestion.rrule },
+          );
+        }}
+      />
+    )}
     {event && (
       <DeleteEventConfirm
         event={declineOpen ? event : null}
@@ -3957,6 +4261,7 @@ function formFromImport(imported: ImportedEvent, calendarId: string): FormState 
     attendees: imported.attendees,
     zoneChoice: UNTOUCHED_ZONE,
     exceptions: null,
+    zoneAnswer: null,
   };
 }
 
@@ -3991,6 +4296,7 @@ function buildInitialState(
       attendees: event.attendees ?? [],
       zoneChoice: UNTOUCHED_ZONE,
       exceptions: null,
+      zoneAnswer: null,
     };
   }
 
@@ -4054,5 +4360,6 @@ function buildInitialState(
     attendees: [],
     zoneChoice: UNTOUCHED_ZONE,
     exceptions: null,
+    zoneAnswer: null,
   };
 }

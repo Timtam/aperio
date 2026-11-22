@@ -44,6 +44,7 @@ export function AppDialog({
   confirmDisabled = false,
   destructive = false,
   busy = false,
+  cancelFirst = false,
   input,
   children,
 }: {
@@ -67,6 +68,11 @@ export function AppDialog({
   destructive?: boolean;
   /** Disables every control + blocks dismissal while an action is in flight. */
   busy?: boolean;
+  /** Put Cancel first, after the message and before `children`, for a
+   *  question whose answers are the children and whose first answer is to
+   *  change nothing (the weekday question, 138a). The footer then holds only
+   *  Confirm, if any. */
+  cancelFirst?: boolean;
   /** Optional secure/plain field; when present, initial SR focus lands here. */
   input?: AppDialogInput;
   /** Escape hatch for richer bodies (e.g. a radio choice). */
@@ -83,6 +89,19 @@ export function AppDialog({
   };
 
   const blocked = confirmDisabled || busy;
+
+  const cancelButton = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={cancelLabel}
+      accessibilityState={{ disabled: busy }}
+      disabled={busy}
+      onPress={onCancel}
+      style={({ pressed }) => [styles.ghost, pressed && styles.ghostPressed]}
+    >
+      <Text style={styles.ghostText}>{cancelLabel}</Text>
+    </Pressable>
+  );
 
   return (
     <Modal
@@ -101,7 +120,13 @@ export function AppDialog({
           style={[StyleSheet.absoluteFill, styles.backdrop]}
           onPress={busy ? undefined : onCancel}
         />
-        <View accessibilityViewIsModal style={styles.card}>
+        {/* VoiceOver's escape gesture (two-finger scrub) cancels, as a tap
+            outside and Android's back button already do. */}
+        <View
+          accessibilityViewIsModal
+          onAccessibilityEscape={busy ? undefined : onCancel}
+          style={styles.card}
+        >
           <Text ref={titleRef} style={styles.title} accessibilityRole="header">
             {title}
           </Text>
@@ -115,6 +140,7 @@ export function AppDialog({
                 {message}
               </Text>
             )}
+            {cancelFirst && cancelButton}
             {children}
             {input != null && (
               <TextInput
@@ -135,36 +161,29 @@ export function AppDialog({
               />
             )}
           </ScrollView>
-          <View style={styles.buttons}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={cancelLabel}
-              accessibilityState={{ disabled: busy }}
-              disabled={busy}
-              onPress={onCancel}
-              style={({ pressed }) => [styles.ghost, pressed && styles.ghostPressed]}
-            >
-              <Text style={styles.ghostText}>{cancelLabel}</Text>
-            </Pressable>
-            {confirmLabel != null && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={confirmLabel}
-                accessibilityState={{ disabled: blocked, busy }}
-                disabled={blocked}
-                onPress={onConfirm}
-                style={({ pressed }) => [
-                  destructive ? styles.danger : styles.primary,
-                  pressed && !blocked && styles.confirmPressed,
-                  blocked && styles.confirmDisabled,
-                ]}
-              >
-                <Text style={destructive ? styles.dangerText : styles.primaryText}>
-                  {confirmLabel}
-                </Text>
-              </Pressable>
-            )}
-          </View>
+          {(!cancelFirst || confirmLabel != null) && (
+            <View style={styles.buttons}>
+              {!cancelFirst && cancelButton}
+              {confirmLabel != null && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={confirmLabel}
+                  accessibilityState={{ disabled: blocked, busy }}
+                  disabled={blocked}
+                  onPress={onConfirm}
+                  style={({ pressed }) => [
+                    destructive ? styles.danger : styles.primary,
+                    pressed && !blocked && styles.confirmPressed,
+                    blocked && styles.confirmDisabled,
+                  ]}
+                >
+                  <Text style={destructive ? styles.dangerText : styles.primaryText}>
+                    {confirmLabel}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
         </View>
       </View>
     </Modal>

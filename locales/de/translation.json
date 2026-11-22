@@ -2439,7 +2439,8 @@
         "startMoved": "Zeitzone der Serie: {{clock}}. Die Serie beginnt jetzt am {{start}} auf dieser Uhr.",
         "repeats": "Wiederholt sich {{days}}.",
         "unchanged": "Zeitzone der Serie nicht geändert: {{entry}}",
-        "refused": "Zeitzone der Serie nicht geändert: {{reason}}."
+        "refused": "Zeitzone der Serie nicht geändert: {{reason}}.",
+        "saveStartFirst": "Zeitzone der Serie nicht geändert: Speichere zuerst den geänderten Beginn, dann wähle die Zeitzone."
       }
     },
     "readOnlyField": "{{label}}: {{value}}",

@@ -20,6 +20,7 @@ import {
   zoneFormView,
   zoneEditingFor,
   zoneFacts,
+  zoneChoiceWaitsForSave,
   zoneToSave,
   type ZoneFormFacts,
 } from '@aperio/shared';
@@ -441,5 +442,27 @@ describe('a title suggestion (prefillMoveMode)', () => {
     expect(zoneFormView(untouchedNew, facts({ calendarZones: 'none' }))).toBe(DEVICE_ZONE_VIEW);
     const series = openZoneForm('series', 'Europe/Berlin', false);
     expect(prefillMoveMode(series, onUtc, repeating)).toBe('instants');
+  });
+});
+
+describe('a zone choice after a changed start (zoneChoiceWaitsForSave)', () => {
+  const NY = { kind: 'series', tzid: 'America/New_York' } as const;
+  const stored = '2026-09-14T13:00:00.000Z';
+  const fields = fieldsAt(stored, '2026-09-14T14:00:00.000Z', NY);
+  const series = openZoneForm('series', 'America/New_York', false);
+
+  it('waits for a save where the start of a stored series moved', () => {
+    expect(zoneChoiceWaitsForSave(series, fields, stored)).toBe(false);
+    expect(zoneChoiceWaitsForSave(series, changeClockField(fields, 'startDate', '2026-09-21'), stored)).toBe(true);
+    expect(zoneChoiceWaitsForSave(series, changeClockField(fields, 'startTime', '10:00'), stored)).toBe(true);
+    // Only the end changed: the start is the one the series opened with.
+    expect(zoneChoiceWaitsForSave(series, changeClockField(fields, 'endTime', '11:00'), stored)).toBe(false);
+  });
+
+  it('never waits for a new event, a single event or an import', () => {
+    const moved = changeClockField(fields, 'startDate', '2026-09-21');
+    expect(zoneChoiceWaitsForSave(openZoneForm('new', undefined, false), moved, null)).toBe(false);
+    expect(zoneChoiceWaitsForSave(openZoneForm('single', undefined, false), moved, stored)).toBe(false);
+    expect(zoneChoiceWaitsForSave(series, moved, null)).toBe(false);
   });
 });
