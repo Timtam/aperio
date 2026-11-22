@@ -6,8 +6,10 @@ import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import {
   formatLocalDate,
   formatLocalTime,
+  fromAndroidDialogDay,
   parseLocalDate,
   parseLocalTime,
+  toAndroidDialogDay,
 } from '../intl/dateTimeField';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { AppDialog } from './AppDialog';
@@ -92,11 +94,13 @@ export function DateTimeFieldButton({
             mode={mode}
             display="default"
             presentation="dialog"
-            value={parse(value)}
+            // The date dialog reads and answers a day in UTC; the time
+            // dialog the device's clock (intl/dateTimeField).
+            value={mode === 'date' ? toAndroidDialogDay(parse(value)) : parse(value)}
             positiveButton={{ label: t('mobile.applyAction') }}
             negativeButton={{ label: t('mobile.cancel') }}
             onValueChange={(_, date) => {
-              onChange(format(date));
+              onChange(format(mode === 'date' ? fromAndroidDialogDay(date) : date));
               setOpen(false);
             }}
             onDismiss={() => setOpen(false)}

@@ -1,6 +1,6 @@
 # Zeitzone einer Serie — Entwurf
 
-Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), Stufe 5 (Exchange mit PR 8a, Microsoft 365 am 2026-11-21) und Stufe 6 (2026-11-21); die Stufen 7 bis 14 werden in der Reihenfolge der Stufenliste gebaut (93b).**
+Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), Stufe 5 (Exchange mit PR 8a, Microsoft 365 #182), Stufe 6 (#183) und Stufe 7 (#184); die Stufen 8 bis 14 werden in der Reihenfolge der Stufenliste gebaut (93b), Stufe 8 nach den Entscheidungen 100a bis 103b.**
 Toni hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b,
 14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a, 38a
 bis 43b, 46a bis 49a, 51a bis 53a, 57a, 58a, 61a, 62b, 63a und 64a, dazu die Vorlese-Form F). Die Planung lief in zwei
@@ -495,6 +495,34 @@ wieder aufgenommen wurde (97a bis 99a später am Tag, zu den Stufen 6 und 7):
   schreibt weiter keine Zone (26a). Verworfen: den Wechsel mit Grund
   ablehnen. Der Live-Test vor dem Merge hat es an Tonis Server bestätigt
   (Stufe 7).
+
+Vier Entscheidungen zu Stufe 8 traf Toni am 22. November 2026, nach einer
+Bestandsaufnahme der Editoren, des Kerns und der zwei Messungen:
+
+- **100a — die Wanduhr-Umrechnung ist eine Kern-Regel, und die Zonendaten
+  kommen ins WebAssembly-Modul.** Datum und Uhrzeit auf der Uhr einer Serie
+  in einen Zeitpunkt und zurück (Lücke abgelehnt, Doppelstunde die frühere)
+  rechnet der Kern mit denselben Daten (tzdata 2026f), mit denen die Adapter
+  schreiben. Damit das auf dem Desktop ohne Warten geht, bekommt
+  `cal-core-wasm` die Zonendaten; Stufe 3 hatte sie draußen gelassen. Vorher
+  wird gemessen, wie viel größer das Modul wird, und Toni bekommt die Zahl.
+  Verworfen: eine Kopie mit den Intl-Daten des Geräts (ein getipptes 09:00
+  könnte auf einem Gerät mit alten Daten als 10:00 beim Anbieter ankommen)
+  und die Kern-Regel nur asynchron über den Host (Texte kämen erst, nachdem
+  der Fokus gelandet ist).
+- **101b — ein Ende `…T235959Z` heißt überall „bis zu diesem Datum“.** Nicht
+  nur das Formular, auch Ansichten und Erinnerungen lesen es als Datum; das
+  schließt 255 und den Punkt aus TODO.md. Dafür braucht es eine Schutzregel:
+  Aperios eigener Schnitt schreibt eine Sekunde vor dem Schnitt, und das ist
+  genau `…T235959Z`, wenn das Vorkommen um 00:00 UTC beginnt (New York um
+  19:00, im Sommer 20:00).
+- **102a — das Ende behält die Dauer.** Wandert der Beginn über eine
+  Zeitumstellung, behält das Ende die verstrichene Zeit, wie heute; so landet
+  es nie von selbst in einer Lücke.
+- **103b — der Android-Datumsdialog wird sofort berichtigt.** Er las und
+  beantwortete einen Tag in UTC; östlich von UTC stand der Vortag
+  vorgewählt, westlich kam jedes gewählte Datum einen Tag zu früh zurück
+  (eigener PR vor Stufe 8, am Gerät noch ungeprüft).
 
 Geprüft vorab (2026-11-21, Tonis Desktop-Daten nur lesend): Von 89 Serien mit
 Uhrzeit im Zwischenspeicher haben drei keine Zone, alle bei CalDAV und alle mit
@@ -1477,7 +1505,10 @@ Handy im selben PR.
 - Welche Gerätezone iOS und Android für UTC, Indien und die Ukraine melden.
   Gemessen ist nur WebView2 152: `UTC`, `Asia/Calcutta` und `Europe/Kiev`, für
   eine emulierte Gerätezone `GMT` (ICU) `+00:00`.
-- Ob der Datums-Picker auf dem Handy eine feste Zone annimmt.
+- Ob der Datums-Picker auf dem Handy eine feste Zone annimmt. Aus dem Code
+  (@expo/ui 56): iOS ja (`timeZoneName`), Android nein; die Felder bleiben
+  deshalb Datum und Uhrzeit ohne Zone, und Stufe 8 rechnet außerhalb des
+  Pickers um. Am Gerät ungeprüft.
 - Ob sich die Zone einer Exchange-Serie entfernen lässt. Was ein Update ohne
   Zone, ein unbekannter Name und die Reihenfolge von Beginn, Ende und Zone
   bewirken, hat die erste Runde des Live-Tests an Exchange 2019 gemessen
@@ -1539,7 +1570,10 @@ Handy im selben PR.
 - Größenzuwachs der iOS-App und was der Aufruf der Versätze für 312 Zonen auf
   einem Handy kostet. Gemessen sind die Android-Bibliothek (mit einem Prototyp)
   und WebAssembly (Stufe 3).
-- Ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet.
+- Ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet. Lokal unter
+  Windows ja, wenn `TZ` aus der Umgebung des Prozesses kommt (der Test des
+  Android-Datums lief so in Berlin, New York und Kiritimati); auf den
+  CI-Rechnern noch nicht gelaufen.
   - Auf Windows kam `America/Los_Angeles` aus Git Bash nicht an, weil MSYS Werte
     mit `/` umschreibt.
   - Aus PowerShell beachtet Node sie.

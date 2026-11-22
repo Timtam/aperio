@@ -3584,6 +3584,12 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **Android-Datumsdialog las den Tag in UTC (gefunden bei Stufe 8,
+  2026-11-22, 103b):** Östlich von UTC stand der Vortag vorgewählt, und wer
+  unverändert bestätigte, speicherte ihn; westlich kam jedes gewählte Datum
+  einen Tag zu früh zurück, auch beim Springen zu einem Datum. Jetzt bekommt
+  der Dialog Mitternacht UTC des Tages und liest den UTC-Tag zurück; eine
+  Uhrzeit fährt auf einem Tag ohne Zeitumstellung. iOS war nicht betroffen.
   ↳ **Exchange sagt, was es nicht speichern kann (Zeitzonen-Auswahl, Stufe 7,
   2026-11-21, 98a, 99a):** Eine Zone, die Exchange oder dieser Server nicht
   speichern kann, lehnt das Speichern mit dem Namen der Stadt ab, statt die
