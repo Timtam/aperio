@@ -1,5 +1,5 @@
 {
-  "about": "Dates and times on the clock a series repeats on (cal_core::wall_clock, DESIGN-series-time-zone.md stage 8, decision 100a). Each question is answered with the clock read (the canonical zone, null for UTC) and: wallOf the date, HH:MM time and seconds an instant shows; instantOf how a typed wall time reads (single, fold with the earlier instant and the later one, gap with the offsets before and after, in seconds east of UTC); untilOn the day's last second on the clock: 23:59:59, or the second before the change where one skips the day's end (Nuuk), absent only where the clock skips the whole day (Apia). null for text that names no instant, date or time. Written by hand from tzdata's rules (Berlin, New York, Lord Howe, Apia 2011, Paris LMT +00:09:21) and checked against Node's ICU zone data; the core and both surfaces read this file.",
+  "about": "Dates and times on the clock a series repeats on (cal_core::wall_clock, DESIGN-series-time-zone.md stage 8, decision 100a). Each question is answered with the clock read (the canonical zone, null for UTC) and: wallOf the date, HH:MM time and seconds an instant shows; instantOf how a typed wall time reads (single, fold with the earlier instant and the later one, gap with the offsets before and after, in seconds east of UTC); untilOn the day's last second on the clock: 23:59:59, or the second before the change where one skips the day's end (Nuuk), absent only where the clock skips the whole day (Apia). seriesEnd how a stored UNTIL reads on the clock the series repeats on (its zone, UTC, or for an all-day series the device's): throughDay, instant or wall, the bound as a wall time, the last instant at or before it, and the last day it reaches; …T235959Z on a zone's clock is through that day unless the second after it is one of the rule's times of day, as after a cut (decisions 101b, 105a-116a). null for text that names no instant, date or time. Written by hand from tzdata's rules (Berlin, New York, Lord Howe, Apia 2011, Paris LMT +00:09:21) and checked against Node's ICU zone data; the core and both surfaces read this file.",
   "rows": [
     {
       "name": "wall-berlin-winter",
@@ -393,6 +393,446 @@
         "op": "wallOf",
         "at": "yesterday",
         "tzid": null
+      },
+      "expect": null
+    },
+    {
+      "name": "end-utc-marker-is-an-instant",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261130T235959Z",
+        "start": "2026-11-01T10:00:00Z",
+        "allDay": false,
+        "tzid": null,
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": null,
+        "end": {
+          "reading": "instant",
+          "wall": "2026-11-30T23:59:59",
+          "at": "2026-11-30T23:59:59Z",
+          "endDay": "2026-11-30"
+        }
+      }
+    },
+    {
+      "name": "end-berlin-0030-summer-marker-through-day",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20260503T235959Z",
+        "start": "2026-04-01T22:30:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "throughDay",
+          "wall": "2026-05-03T23:59:59",
+          "at": "2026-05-03T21:59:59Z",
+          "endDay": "2026-05-03"
+        }
+      }
+    },
+    {
+      "name": "end-new-york-2000-winter-marker-through-day",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261105T235959Z",
+        "start": "2026-11-02T01:00:00Z",
+        "allDay": false,
+        "tzid": "America/New_York",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "end": {
+          "reading": "throughDay",
+          "wall": "2026-11-05T23:59:59",
+          "at": "2026-11-06T04:59:59Z",
+          "endDay": "2026-11-05"
+        }
+      }
+    },
+    {
+      "name": "end-new-york-1900-winter-cut-stays-an-instant",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261104T235959Z",
+        "start": "2026-11-03T00:00:00Z",
+        "allDay": false,
+        "tzid": "America/New_York",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-11-04T18:59:59",
+          "at": "2026-11-04T23:59:59Z",
+          "endDay": "2026-11-03"
+        }
+      }
+    },
+    {
+      "name": "end-new-york-2000-summer-cut-stays-an-instant",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20260704T235959Z",
+        "start": "2026-07-01T00:00:00Z",
+        "allDay": false,
+        "tzid": "America/New_York",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-07-04T19:59:59",
+          "at": "2026-07-04T23:59:59Z",
+          "endDay": "2026-07-03"
+        }
+      }
+    },
+    {
+      "name": "end-new-york-1900-summer-marker-through-day",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20260704T235959Z",
+        "start": "2026-06-30T23:00:00Z",
+        "allDay": false,
+        "tzid": "America/New_York",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "end": {
+          "reading": "throughDay",
+          "wall": "2026-07-04T23:59:59",
+          "at": "2026-07-05T03:59:59Z",
+          "endDay": "2026-07-04"
+        }
+      }
+    },
+    {
+      "name": "end-byhour-cut-stays-an-instant",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;BYHOUR=19,21;UNTIL=20261104T235959Z",
+        "start": "2026-11-03T02:00:00Z",
+        "allDay": false,
+        "tzid": "America/New_York",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-11-04T18:59:59",
+          "at": "2026-11-04T23:59:59Z",
+          "endDay": "2026-11-03"
+        }
+      }
+    },
+    {
+      "name": "end-berlin-0100-winter-cut-stays-an-instant",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261130T235959Z",
+        "start": "2026-11-02T00:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-12-01T00:59:59",
+          "at": "2026-11-30T23:59:59Z",
+          "endDay": "2026-11-30"
+        }
+      }
+    },
+    {
+      "name": "end-hourly-marker-stays-an-instant",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=HOURLY;UNTIL=20261130T235959Z",
+        "start": "2026-11-01T10:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-12-01T00:59:59",
+          "at": "2026-11-30T23:59:59Z",
+          "endDay": "2026-11-30"
+        }
+      }
+    },
+    {
+      "name": "end-all-day-marker-by-its-digits",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261231T235959Z",
+        "start": "2026-11-30T23:00:00Z",
+        "allDay": true,
+        "tzid": null,
+        "deviceZone": "Europe/Berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "throughDay",
+          "wall": "2026-12-31T23:59:59",
+          "at": "2026-12-31T22:59:59Z",
+          "endDay": "2026-12-31"
+        }
+      }
+    },
+    {
+      "name": "end-all-day-date-on-new-york-days",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=WEEKLY;UNTIL=20261231",
+        "start": "2026-12-03T05:00:00Z",
+        "allDay": true,
+        "tzid": "Europe/Berlin",
+        "deviceZone": "America/New_York"
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "end": {
+          "reading": "throughDay",
+          "wall": "2026-12-31T23:59:59",
+          "at": "2027-01-01T04:59:59Z",
+          "endDay": "2026-12-31"
+        }
+      }
+    },
+    {
+      "name": "end-all-day-date-time-is-its-wall-time",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261231T120000Z",
+        "start": "2026-11-30T23:00:00Z",
+        "allDay": true,
+        "tzid": null,
+        "deviceZone": "Europe/Berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "wall",
+          "wall": "2026-12-31T12:00:00",
+          "at": "2026-12-31T11:00:00Z",
+          "endDay": "2026-12-31"
+        }
+      }
+    },
+    {
+      "name": "end-new-york-written-by-until-on",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261201T045959Z",
+        "start": "2026-11-02T14:00:00Z",
+        "allDay": false,
+        "tzid": "America/New_York",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-11-30T23:59:59",
+          "at": "2026-12-01T04:59:59Z",
+          "endDay": "2026-11-30"
+        }
+      }
+    },
+    {
+      "name": "end-berlin-cut-head",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261102T075959Z",
+        "start": "2026-10-05T07:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-11-02T08:59:59",
+          "at": "2026-11-02T07:59:59Z",
+          "endDay": "2026-11-01"
+        }
+      }
+    },
+    {
+      "name": "end-lower-case-marker",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20260503t235959z",
+        "start": "2026-04-01T22:30:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "throughDay",
+          "wall": "2026-05-03T23:59:59",
+          "at": "2026-05-03T21:59:59Z",
+          "endDay": "2026-05-03"
+        }
+      }
+    },
+    {
+      "name": "end-date-on-a-timed-zone-series",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261130",
+        "start": "2026-11-02T08:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "throughDay",
+          "wall": "2026-11-30T23:59:59",
+          "at": "2026-11-30T22:59:59Z",
+          "endDay": "2026-11-30"
+        }
+      }
+    },
+    {
+      "name": "end-floating-time-on-the-series-clock",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261130T090000",
+        "start": "2026-11-02T08:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "wall",
+          "wall": "2026-11-30T09:00:00",
+          "at": "2026-11-30T08:00:00Z",
+          "endDay": "2026-11-30"
+        }
+      }
+    },
+    {
+      "name": "end-floating-time-in-a-fold-takes-the-later",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261025T023000",
+        "start": "2026-10-02T07:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "wall",
+          "wall": "2026-10-25T02:30:00",
+          "at": "2026-10-25T01:30:00Z",
+          "endDay": "2026-10-24"
+        }
+      }
+    },
+    {
+      "name": "end-unknown-zone-is-utc",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261104T235959Z",
+        "start": "2026-11-03T00:00:00Z",
+        "allDay": false,
+        "tzid": "Mars/Olympus",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": null,
+        "end": {
+          "reading": "instant",
+          "wall": "2026-11-04T23:59:59",
+          "at": "2026-11-04T23:59:59Z",
+          "endDay": "2026-11-04"
+        }
+      }
+    },
+    {
+      "name": "end-apia-skipped-day",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20111230",
+        "start": "2011-12-01T22:00:00Z",
+        "allDay": false,
+        "tzid": "Pacific/Apia",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Pacific/Apia",
+        "end": {
+          "reading": "throughDay",
+          "wall": "2011-12-30T23:59:59",
+          "at": "2011-12-30T09:59:59Z",
+          "endDay": "2011-12-30"
+        }
+      }
+    },
+    {
+      "name": "end-count-has-none",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;COUNT=5",
+        "start": "2026-11-02T08:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin"
+      }
+    },
+    {
+      "name": "end-unreadable-until-has-none",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=soon",
+        "start": "2026-11-02T08:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin"
+      }
+    },
+    {
+      "name": "end-start-not-an-instant",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261130",
+        "start": "yesterday",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
       },
       "expect": null
     }

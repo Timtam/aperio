@@ -3584,6 +3584,12 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **Wie ein Serienende liest, steht im Kern (Stufe 8, Schritt 5, 2026-11-22,
+  101b, 105a):** `…T235959Z` auf der Uhr einer Zone heißt „bis zu diesem
+  Datum“, außer die Sekunde danach ist eine Uhrzeit der Regel (dann schrieb
+  es ein Schnitt); ein Datum heißt bis zu diesem Tag, eine Uhrzeit ohne Zone
+  gilt auf der Uhr der Serie, ganztägige Serien lesen die Ziffern. Noch
+  liest niemand die Regel; Ansichten und Erinnerungen folgen.
   ↳ **Formularfelder mit Uhr (Stufe 8, Schritt 3, 2026-11-22, 102a):**
   Beginn und Ende stehen als Felder auf der Uhr der Serie oder der des
   Geräts (`shared/clockFields.ts`). Ein Feld, in das niemand tippt, hält

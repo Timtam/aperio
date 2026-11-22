@@ -23,4 +23,22 @@ time: string, tzid: string | null, } | { "op": "untilOn",
 /**
  * `YYYY-MM-DD`.
  */
-date: string, tzid: string | null, };
+date: string, tzid: string | null, } | { "op": "seriesEnd", 
+/**
+ * The series' rule, with or without `RRULE:`.
+ */
+rrule: string, 
+/**
+ * The series' start, an RFC 3339 instant.
+ */
+start: string, 
+/**
+ * Whether the series is all-day: it then repeats on the
+ * device's days (decision 48a).
+ */
+allDay: boolean, tzid: string | null, 
+/**
+ * The device's zone as its runtime reports it, read only for a
+ * series of days; the core reads no clock of its own.
+ */
+deviceZone: string | null, };

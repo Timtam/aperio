@@ -28,9 +28,10 @@
 //! zone and no provider: the adapter knows its stored zones, custom ones
 //! included.
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc};
+use serde::{Deserialize, Serialize};
 
-use crate::rrule_parts::{is_utc_date_time, parse_parts, part};
+use crate::rrule_parts::{is_utc_date_time, parse_freq, parse_parts, part, Freq, Part};
 
 /// The `UNTIL` of `rrule` as an instant, where it is a UTC date-time
 /// (`YYYYMMDDTHHMMSSZ`), the form a cut of a timed series writes. A date (an
@@ -69,10 +70,183 @@ pub fn last_day_through(
     }
 }
 
+/// How a series' `UNTIL` reads (DESIGN-series-time-zone.md, decisions 101b
+/// and 105a to 116a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+#[serde(rename_all = "camelCase")]
+pub enum EndReading {
+    /// Through that date: every occurrence that starts on its day on the
+    /// series' clock, or earlier. A date, a series of days' end of day, and
+    /// `…T235959Z` on a zone's clock where no cut wrote it (101b, 105a).
+    ThroughDay,
+    /// An instant: any other UTC date-time, a cut's bound, every UTC end on
+    /// UTC's clock, and any end of a rule that repeats by the hour or faster
+    /// (109a).
+    Instant,
+    /// A wall time on the series' clock: a date-time without `Z` (115a), or
+    /// the digits of a date-time on a series of days (decision 201).
+    Wall,
+}
+
+/// What a series' `UNTIL` means on the clock the series repeats on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+#[serde(rename_all = "camelCase")]
+pub struct SeriesEnd {
+    pub reading: EndReading,
+    /// The bound as a wall time on the clock, `YYYY-MM-DDTHH:MM:SS`: the views
+    /// iterate a rule in wall time against it.
+    pub wall: String,
+    /// The last instant whose wall time on the clock is the bound or earlier:
+    /// the bound itself for an instant, its later reading where the clock
+    /// shows it twice, the second before a change that skips it. `None` only
+    /// where the clock has no such instant.
+    pub at: Option<String>,
+    /// The last day the end reaches on the clock (108b): the bound's day, or
+    /// the day before where that day's first occurrence starts after the
+    /// bound.
+    pub end_day: String,
+}
+
+/// The `UNTIL` value a rule names, `None` without one or with a `COUNT`,
+/// which ends it instead.
+fn until_value(parts: &[Part]) -> Option<&str> {
+    if part(parts, "COUNT").is_some() {
+        return None;
+    }
+    part(parts, "UNTIL")
+}
+
+/// The numbers of a `BYHOUR`, `BYMINUTE` or `BYSECOND` part; the start's own
+/// where the rule names none. `None` for a part that cannot be read.
+fn rule_numbers(parts: &[Part], key: &str, own: u32, max: u32) -> Option<Vec<u32>> {
+    match part(parts, key) {
+        None => Some(vec![own]),
+        Some(value) => value
+            .split(',')
+            .map(|n| n.trim().parse::<u32>().ok().filter(|n| *n <= max))
+            .collect(),
+    }
+}
+
+/// The times of day a rule's occurrences start at on its clock: its
+/// `BYHOUR` × `BYMINUTE` × `BYSECOND`, each part it leaves out taken from the
+/// start. `None` for a part that cannot be read.
+fn rule_times(parts: &[Part], start: NaiveTime) -> Option<Vec<NaiveTime>> {
+    let hours = rule_numbers(parts, "BYHOUR", start.hour(), 23)?;
+    let minutes = rule_numbers(parts, "BYMINUTE", start.minute(), 59)?;
+    let seconds = rule_numbers(parts, "BYSECOND", start.second(), 59)?;
+    let mut times = Vec::new();
+    for h in &hours {
+        for m in &minutes {
+            for s in &seconds {
+                times.push(NaiveTime::from_hms_opt(*h, *m, *s)?);
+            }
+        }
+    }
+    Some(times)
+}
+
+/// Whether an `UNTIL` value spells the end of a UTC day, `…T235959Z`, in any
+/// case: the bound the repeat field has always written.
+fn spells_end_of_utc_day(value: &str) -> bool {
+    is_utc_date_time(value) && &value[9..15] == "235959"
+}
+
+/// How `rrule`'s `UNTIL` reads for a series whose occurrences start at
+/// `start` on `clock` (its wall time there), or `None` for a rule without an
+/// `UNTIL` (or with a `COUNT`) and for one that cannot be read.
+///
+/// - On a series of days ([`ExpansionClock::DeviceDays`]) the digits as
+///   written (decision 201): a date, or a date-time at 23:59:59, is through
+///   that day; another date-time is that wall time.
+/// - On UTC a UTC date-time is an instant; there it means the same as
+///   through the day.
+/// - On a zone's clock `…T235959Z` is through that date (101b), unless a cut
+///   wrote it (105a): the second after it, read on the clock, is one of the
+///   rule's times of day, as it always is one second before the occurrence a
+///   cut ends before. A rule that repeats by the hour or faster keeps every
+///   end an instant (109a).
+/// - A date is through that day, a date-time without `Z` is that wall time on
+///   the clock (115a), on every clock.
+///
+/// The clock comes as two functions, as for [`last_day_through`]: `wall`
+/// reads an instant on it, `last_at_or_before` gives the last instant whose
+/// wall time is the given one or earlier.
+pub fn read_series_end(
+    rrule: &str,
+    start: NaiveTime,
+    clock: crate::ExpansionClock,
+    wall: impl Fn(DateTime<Utc>) -> NaiveDateTime,
+    last_at_or_before: impl Fn(NaiveDateTime) -> Option<DateTime<Utc>>,
+) -> Option<SeriesEnd> {
+    use crate::ExpansionClock;
+
+    let (_, parts) = parse_parts(rrule).ok()?;
+    let value = until_value(&parts)?;
+    let sub_daily = matches!(
+        part(&parts, "FREQ").and_then(parse_freq),
+        Some(Freq::Hourly | Freq::Minutely | Freq::Secondly)
+    );
+    let times = rule_times(&parts, start)?;
+    let first_time = times.iter().min().copied()?;
+
+    let upper = value.to_ascii_uppercase();
+    let date = NaiveDate::parse_from_str(&upper, "%Y%m%d").ok();
+    let floating = NaiveDateTime::parse_from_str(&upper, "%Y%m%dT%H%M%S").ok();
+    let utc = if is_utc_date_time(value) {
+        NaiveDateTime::parse_from_str(&upper, "%Y%m%dT%H%M%SZ")
+            .ok()
+            .map(|naive| Utc.from_utc_datetime(&naive))
+    } else {
+        None
+    };
+    let end_of = |day: NaiveDate| day.and_hms_opt(23, 59, 59);
+
+    let (reading, bound, instant) = if let Some(day) = date {
+        (EndReading::ThroughDay, end_of(day)?, None)
+    } else if let Some(floating) = floating {
+        (EndReading::Wall, floating, None)
+    } else if let Some(at) = utc {
+        let digits = at.naive_utc();
+        match clock {
+            ExpansionClock::DeviceDays if spells_end_of_utc_day(value) => {
+                (EndReading::ThroughDay, digits, None)
+            }
+            ExpansionClock::DeviceDays => (EndReading::Wall, digits, None),
+            ExpansionClock::Zone
+                if spells_end_of_utc_day(value)
+                    && !sub_daily
+                    && !times.contains(&wall(at + Duration::seconds(1)).time()) =>
+            {
+                (EndReading::ThroughDay, end_of(digits.date())?, None)
+            }
+            _ => (EndReading::Instant, wall(at), Some(at)),
+        }
+    } else {
+        return None;
+    };
+
+    let at = instant.or_else(|| last_at_or_before(bound));
+    let day = bound.date();
+    let end_day = if day.and_time(first_time) <= bound {
+        day
+    } else {
+        day.pred_opt()?
+    };
+    Some(SeriesEnd {
+        reading,
+        wall: bound.format("%Y-%m-%dT%H:%M:%S").to_string(),
+        at: at.map(|at| at.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+        end_day: end_day.format("%Y-%m-%d").to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Duration, FixedOffset};
+    use chrono::FixedOffset;
 
     fn at(s: &str) -> DateTime<Utc> {
         s.parse().expect("an instant")
