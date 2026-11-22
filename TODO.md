@@ -1000,6 +1000,14 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Speichern prüft nicht, ob das Ende einer Wiederholung vor ihrem Beginn
+      liegt** (Prüfung von Stufe 8, Schritt 4, 2026-11-22): Wer bei einer neuen
+      Serie „bis Datum“ wählt und danach den Beginn hinter dieses Datum legt,
+      speichert eine Serie ohne einen einzigen Termin; das vorgelegte Datum
+      (110b) und ein getipptes wandern bei einer neuen Serie nicht mit dem
+      Beginn. Gehört zur Speicherfunktion des Formular-Modells (Stufe 10):
+      ablehnen mit Grund, oder das Ende mitnehmen wie bei einer gespeicherten
+      Serie (`movedTailRule`).
 - [ ] **iOS mit Xcode 27 bauen, bis April 2027** (Apple-Mail zu Build 72,
       2026-11-17, ITMS-90725): Ab April 2027 nimmt App Store Connect nur
       noch Builds mit dem iOS-27-SDK an. Aperio baut mit dem iOS-26.4-SDK,
@@ -3590,6 +3598,15 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   es ein Schnitt); ein Datum heißt bis zu diesem Tag, eine Uhrzeit ohne Zone
   gilt auf der Uhr der Serie, ganztägige Serien lesen die Ziffern. Noch
   liest niemand die Regel; Ansichten und Erinnerungen folgen.
+  ↳ **Das Ende einer Wiederholung bleibt, wie es war (Stufe 8, Schritt 4,
+  2026-11-22, 106a, 110b, 113a):** Wer an der Wiederholung etwas anderes
+  ändert, behält das Ende auf die Sekunde; vorher wurde es als Ende seines
+  UTC-Tages neu geschrieben, und ein Schnitt holte das Vorkommen zurück, vor
+  dem er endete. „Bis Datum“ ließ sich bisher gar nicht wählen (die Auswahl
+  sprang auf „nie“ zurück); jetzt steht der Tag des zehnten Termins darin.
+  Auf dem Handy ist das Feld eine Datumsauswahl statt eines Textfelds, das
+  halbe Daten als Ende schrieb. Aperios Schnitt schreibt nie mehr genau
+  `…T235959Z`.
   ↳ **Formularfelder mit Uhr (Stufe 8, Schritt 3, 2026-11-22, 102a):**
   Beginn und Ende stehen als Felder auf der Uhr der Serie oder der des
   Geräts (`shared/clockFields.ts`). Ein Feld, in das niemand tippt, hält

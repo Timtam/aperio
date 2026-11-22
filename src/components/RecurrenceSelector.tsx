@@ -11,6 +11,7 @@ import {
   parseRRule,
   recurrenceStartDate,
   resolveAgainstDay,
+  withEndMode,
 } from './rrule';
 import type { EndMode, Freq, MonthlyOption, ParsedRule } from './rrule';
 
@@ -159,6 +160,23 @@ export function RecurrenceSelector({
     const n = Number.parseInt(text, 10);
     if (Number.isFinite(n) && n >= 1) {
       update({ ...rule, interval: Math.min(365, n) });
+    }
+  };
+
+  // The end date keeps its own draft for the same reason. WebView2 reports
+  // `''` while a date input's segments name no date: a segment cleared, or
+  // the 31st typed over 30 November on the way to 31 December. Bound to the
+  // rule, that wrote no end at all: the control read "never", and the field
+  // vanished under the keyboard focus. Only a whole date goes up to the
+  // rule; on blur an unfinished one shows the rule's date again.
+  const [untilDraft, setUntilDraft] = useState(rule.until);
+  useEffect(() => {
+    setUntilDraft(rule.until);
+  }, [rule.until]);
+  const commitUntil = (text: string) => {
+    setUntilDraft(text);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      update({ ...rule, until: text });
     }
   };
 
@@ -331,9 +349,7 @@ export function RecurrenceSelector({
             </span>
             <select
               value={rule.endMode}
-              onChange={(e) =>
-                update({ ...rule, endMode: e.target.value as EndMode })
-              }
+              onChange={(e) => update(withEndMode(rule, e.target.value as EndMode, startDay))}
             >
               <option value="NEVER">
                 {t('dialogs.event.recurrence.end.never')}
@@ -374,8 +390,9 @@ export function RecurrenceSelector({
               </span>
               <input
                 type="date"
-                value={rule.until}
-                onChange={(e) => update({ ...rule, until: e.target.value })}
+                value={untilDraft}
+                onChange={(e) => commitUntil(e.target.value)}
+                onBlur={() => setUntilDraft(rule.until)}
               />
             </label>
           )}

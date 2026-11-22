@@ -715,6 +715,17 @@ describe('truncateRRuleBefore', () => {
     expect(out).toBe('FREQ=DAILY;UNTIL=20260510T090000Z');
   });
 
+  it('never spells the end of a UTC day, which reads as "through that date" (101b)', () => {
+    // New York at 19:00 in winter is 00:00 UTC: one second before it is
+    // exactly `…T235959Z`.
+    const out = truncateRRuleBefore('FREQ=DAILY', new Date('2026-11-05T00:00:00.000Z'));
+    expect(out).toBe('FREQ=DAILY;UNTIL=20261104T235958Z');
+    // An earlier end the rule already had stays the end, spelled as before.
+    expect(
+      truncateRRuleBefore('FREQ=DAILY;UNTIL=20261101T235959Z', new Date('2026-11-05T00:00:00.000Z')),
+    ).toBe('FREQ=DAILY;UNTIL=20261101T235959Z');
+  });
+
   it('tolerates a leading RRULE: prefix', () => {
     const out = truncateRRuleBefore(
       'RRULE:FREQ=DAILY',
