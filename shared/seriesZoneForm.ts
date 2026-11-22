@@ -529,3 +529,69 @@ export function fieldsOnView(
   if (same) return fields;
   return keep === 'instants' ? keepingInstants(fields, view.clock) : keepingWallTimes(fields, view.clock);
 }
+
+/**
+ * The series as a zone answer leaves it (question 12 of stage 12): the
+ * answer's start, the end keeping the length the series had, its rule and
+ * exceptions, and the new zone. A whole-series save measures the edit against
+ * this, not the stored series, so the answer is not applied twice: a start the
+ * answer moved to the rule's weekday is the start the edit begins from, and a
+ * date moved after the answer counts on the new clock from there.
+ */
+export function zoneAppliedSeries<
+  E extends {
+    start: string;
+    end: string;
+    recurrence?: { rrule: string; exceptions: string[]; tzid?: string | null } | null;
+  },
+>(series: E, answer: { start: string; rrule: string; exceptions: string[] }, zone: string | null): E {
+  const length = Date.parse(series.end) - Date.parse(series.start);
+  const end = new Date(Date.parse(answer.start) + length).toISOString();
+  const recurrence = { ...(series.recurrence ?? {}), rrule: answer.rrule, exceptions: answer.exceptions };
+  return {
+    ...series,
+    start: answer.start,
+    end,
+    recurrence: zone === null ? { ...recurrence, tzid: null } : { ...recurrence, tzid: zone },
+  };
+}
+
+/**
+ * Why choosing a zone for a stored series waits, or `null` where it may go
+ * ahead. The core is asked against the series as stored or as the last zone
+ * answer left it (`baselineStart`), and a whole-series save measures the edit
+ * against the answered series (`zoneAppliedSeries`), so a change made after
+ * the choice moves the rule and the deleted occurrences as any edit does.
+ * Made before it, part of it would be lost in between, so the editor says so
+ * instead of asking (predictable rather than half right):
+ * - `'start'`: the start was changed in this session, or the series opened
+ *   all-day and now has times ("Speichere zuerst den geänderten Beginn");
+ * - `'times'`: the start or the end names no instant (a time the clock skips,
+ *   half a value), so there is nothing to ask the core about.
+ * `baselineStart` is `null` for anything else (a new event, a single event,
+ * an import), which never waits.
+ */
+export function zoneChoiceWait(
+  form: SeriesZoneForm,
+  fields: ClockFields,
+  baselineStart: string | null,
+): 'start' | 'times' | null {
+  if (form.editing !== 'series' || baselineStart === null) return null;
+  if (form.openedAllDay) return 'start';
+  const start = fieldInstant(fields.start, fields.clock);
+  if (start.kind !== 'at' || fieldInstant(fields.end, fields.clock).kind !== 'at') return 'times';
+  return Date.parse(start.at) === Date.parse(baselineStart) ? null : 'start';
+}
+
+/**
+ * The zone a zone answer was computed on, as a save writes it: the chosen
+ * zone (`writtenZone`, `null` for UTC), or the stored one where nothing was
+ * chosen. The series a whole-series save measures against carries it
+ * (`zoneAppliedSeries`), whatever the save then writes: an all-day series
+ * switched on afterwards writes no zone, but its deletions are read where the
+ * answer put them.
+ */
+export function answeredZone(form: SeriesZoneForm): string | null {
+  if (form.chosen === undefined) return form.stored ?? null;
+  return form.chosen === null ? null : writtenZone(form.chosen);
+}

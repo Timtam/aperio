@@ -270,8 +270,11 @@ eine Stunde daneben, wie oben beschrieben.
 
 Eine Serie, die ihre Zeitzone schon verloren hat, ändert Aperio nicht von
 selbst: Für Aperio sieht sie genauso aus wie eine Serie, die absichtlich in UTC
-geführt wird. Um eine betroffene Serie zu reparieren, lege sie neu an oder
-stelle ihre Zeitzone in dem Programm wieder ein, aus dem sie stammt.
+geführt wird. Um eine betroffene Serie zu reparieren, öffne die ganze Serie und
+wähle unter **Zeitzone der Serie** die Zeitzone, die sie hatte. Fragt Aperio
+dann **Welcher Wochentag soll gelten?**, nimm die Tage, wie die Regel sagt,
+wenn die Regel die Tage nennt, an denen die Serie gemeint war. Ein Termin, den
+du vor dem Verlust der Zeitzone gelöscht hattest, ist danach wieder gelöscht.
 
 ## Ein Exchange-Termin ist verschoben, nachdem er zur Serie wurde
 
@@ -321,12 +324,13 @@ bleibt im Editor stehen. „Trotzdem speichern“ speichert sie. Ließ sich ein
 gelöschtes Vorkommen danach nicht wieder löschen, nennt Aperio seinen Tag; lösche
 es dann einzeln.
 
-Die Zeitzone einer Serie kannst du in dieser Version nicht selbst wählen. Nach
-einer anderen Zeitzone fragt Aperio deshalb nur bei einer Serie aus einem
-anderen Programm, deren Ende in einer anderen Zeitzone steht als ihr Beginn,
-oder wenn die Zeitzone der Serie anderswo geändert wurde, seit Aperio sie
-zuletzt gelesen hat; im zweiten Fall öffne die Serie neu, sobald Aperio den
-Kalender aktualisiert hat. Würde bei einer solchen Serie etwas verloren gehen —
+Wählst du unter **Zeitzone der Serie** eine andere Zeitzone, kommt die Frage
+beim Speichern ebenso, wenn dabei etwas verloren ginge. Ohne deine Wahl fragt
+Aperio nach einer anderen Zeitzone nur bei einer Serie aus einem anderen
+Programm, deren Ende in einer anderen Zeitzone steht als ihr Beginn, oder wenn
+die Zeitzone der Serie anderswo geändert wurde, seit Aperio sie zuletzt gelesen
+hat; im zweiten Fall öffne die Serie neu, sobald Aperio den Kalender
+aktualisiert hat. Würde bei einer solchen Serie etwas verloren gehen —
 einzeln geänderte Vorkommen oder gelöschte, die Aperio nicht zuordnen kann —,
 kommt die Frage, sobald du ihre Wiederholung änderst, auch nur die Anzahl der
 Termine oder ihr Ende; sie ab einem späteren Termin zu ändern oder zu löschen

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import type {
+  ClockChangeAnswer,
   ClockField,
   ClockFieldKey,
   ClockFields,
@@ -23,13 +24,19 @@ import type {
   ImportInto,
   Reminder,
   SeriesZoneForm,
+  WeekdayQuestionText,
+  ZoneChoiceResult,
   ZoneEditing,
   ZoneFormFacts,
   ZoneFormView,
+  ZonePick,
 } from '@aperio/shared';
 import {
+  answerMovesStart,
+  applyClockChange,
   calendarZonesOf,
   changeClockField,
+  chooseZone,
   clockFieldGaps,
   clockFieldLabel,
   DEVICE_CLOCK,
@@ -51,9 +58,18 @@ import {
   calendarMoveMode,
   prefillMoveMode,
   storedZoneOf,
+  zoneChoiceWait,
+  answeredZone,
   zoneSaveRefusal,
   zoneSentences,
   zoneToSave,
+  weekdayQuestion,
+  zoneAppliedSeries,
+  zoneChoiceAnnouncement,
+  zoneChoiceEntry,
+  zoneOffsets,
+  zoneRefusedAnnouncement,
+  zoneUnchangedAnnouncement,
   importEditorPeople,
   importInto,
   importIntoSentence,
@@ -154,6 +170,9 @@ import {
 } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
 import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
+import { ExceptionsLossDialog } from '../components/ExceptionsLossDialog';
+import { WeekdayQuestionDialog, type WeekdayAnswer } from '../components/WeekdayQuestionDialog';
+import { ZonePickerDialog } from '../components/ZonePickerDialog';
 import { useCancelHeader } from '../components/useCancelHeader';
 import {
   addEventExdate,
@@ -191,7 +210,6 @@ import type { RootStackScreenProps } from '../navigation/types';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
-import { showEventScopeDialog } from '../state/eventScopeDialog';
 import { stepWriteWait } from '../state/stepWriteWait';
 import { writeLastUsedCalendar } from '../state/lastUsedCalendar';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
@@ -313,6 +331,11 @@ const SCOPE_TITLE_KEY = {
   this_and_future: 'dialogs.event.editTitleScope.thisAndFuture',
   series: 'dialogs.event.editTitleScope.series',
 } as const;
+
+/** How long after the zone picker or the weekday question is gone what the
+ *  choice did is said: once VoiceOver and TalkBack have begun reading the
+ *  zone button the focus moved back to. */
+const ZONE_SAY_DELAY_MS = 400;
 
 /**
  * A failure that is said on screen, focused, with only Close (decision 210):
@@ -438,6 +461,13 @@ function EventEditorScreen({
   // The save the question was asked about, as it went out: the yes answers
   // that save and no other (the fields stay editable while it is on its way).
   const askedSaveRef = useRef<string | null>(null);
+  // The question itself, shown in this screen (question 15 of stage 12): the
+  // root `EventScopeDialogHost` cannot present over the editor sheet on iOS.
+  const [lossQuestion, setLossQuestion] = useState<{
+    title: string;
+    message: string;
+    confirm: string;
+  } | null>(null);
   const closeNotice = useCallback(() => {
     if (splitNotice == null || leavingNotice.current) return;
     leavingNotice.current = true;
@@ -890,6 +920,14 @@ function EventEditorScreen({
   /** The start the user set the repeat rule at, once they changed it in the
    *  field; `null` while it is the rule the editor was filled with. */
   const [ruleSetAt, setRuleSetAt] = useState<string | null>(null);
+  /** The core's answer a zone choice applied in this session (question 12 of
+   *  stage 12): the whole-series save measures the edit against the series
+   *  as the answer left it (`zoneAppliedSeries`), so the answer is never
+   *  applied a second time. `null` while no answer was applied here. */
+  const [zoneAnswer, setZoneAnswer] = useState<Extract<
+    ClockChangeAnswer,
+    { outcome: 'changed' }
+  > | null>(null);
   // Free-form attendee strings ("Name <email>" / bare email) + whether to send
   // invitations (only meaningful on an external calendar with attendees).
   const [attendees, setAttendees] = useState<string[]>([]);
@@ -1515,18 +1553,24 @@ function EventEditorScreen({
   const repeatSentence = (() => {
     if (!original) return '';
     const moved = !locked && shownRule.rrule !== recurrence;
-    const rule = (moved ? shownRule.rrule : original.recurrence?.rrule)?.trim();
+    // A zone answer rewrote the rule the form holds: that is the one saved,
+    // as the desktop says it.
+    const answered = !locked && zoneAnswer !== null;
+    const rule = (
+      moved ? shownRule.rrule : answered ? recurrence : original.recurrence?.rrule
+    )?.trim();
     if (!rule) return locked ? t('dialogs.event.recurrence.none') : '';
     // In the editable editor only where the controls would show another rule
     // than the one stored (87b): otherwise they say it themselves.
     if (!locked && !pickerMisreadsRule(rule)) return '';
-    const series = moved
-      ? {
-          ...original,
-          start: ruleFrame?.written ?? original.start,
-          recurrence: original.recurrence && { ...original.recurrence, rrule: rule },
-        }
-      : original;
+    const series =
+      moved || answered
+        ? {
+            ...original,
+            start: ruleFrame?.written ?? original.start,
+            recurrence: original.recurrence && { ...original.recurrence, rrule: rule },
+          }
+        : original;
     return recurrenceSummaryText(
       describeRecurrence({
         rrule: rule,
@@ -2202,7 +2246,17 @@ function EventEditorScreen({
         // untouched date leaves the series start where it is.
         // A series rewritten from a cut (decision 118) is read from there: its
         // start is the cut, its rule the one it has from the cut on.
-        const base = wholeFromCut ?? original;
+        // A stored series whose zone was chosen here is read as the core's
+        // answer left it (question 12 of stage 12): the answer's start, rule
+        // and exceptions, and the zone this save writes. A start the answer
+        // moved is the start the edit begins from, and a date moved after it
+        // counts on the new clock from there, so the answer is not applied a
+        // second time below.
+        const base =
+          wholeFromCut ??
+          (zoneAnswer !== null && original.recurrence?.rrule
+            ? zoneAppliedSeries(original, zoneAnswer, answeredZone(zoneForm))
+            : original);
         const seededOccurrence =
           isOccurrence && occurrence != null && base.recurrence != null
             ? {
@@ -2343,16 +2397,24 @@ function EventEditorScreen({
         // all following" that rewrote the whole series asks as what the user
         // chose: each copy is cut at the same point, and one with earlier
         // occurrences keeps them.
+        // Not after a save that changed the series' zone, until stage 13
+        // (137a): the offer would write start and end to the copies without
+        // their zone and rule, and they could slip by an hour or a day.
+        const zoneChanged =
+          zoneForm.chosen !== undefined &&
+          zoneToSave(zoneForm, facts) !== (original.recurrence?.tzid ?? null);
         const carry = () =>
-          wholeFromCut && occurrence != null
-            ? offerToCarry(
-                occurrenceBefore(original, occurrence),
-                updated,
-                'future',
-                occurrence,
-                sent,
-              )
-            : offerToCarry(original, updated, 'series', null, sent);
+          zoneChanged
+            ? Promise.resolve(false)
+            : wholeFromCut && occurrence != null
+              ? offerToCarry(
+                  occurrenceBefore(original, occurrence),
+                  updated,
+                  'future',
+                  occurrence,
+                  sent,
+                )
+              : offerToCarry(original, updated, 'series', null, sent);
         // Deleted occurrences the provider brought back and Aperio could not
         // delete again (253): the save stands, and the days are said on screen,
         // focused, before the editor goes on. Mirrors the desktop.
@@ -2491,26 +2553,12 @@ function EventEditorScreen({
         return;
       }
       // A save that would drop occurrences of the series asks first
-      // (decisions 243-253); nothing was sent.
+      // (decisions 243-253), in this screen; nothing was sent. A zone change
+      // on Exchange comes here too (247).
       const loss = exceptionsLossOf(err);
       if (loss != null && lossAskable && !consentSent && shown.current) {
         askedSaveRef.current = sentSave;
-        const question = exceptionsLossQuestion(loss, trimmedTitle, t);
-        showEventScopeDialog({
-          title: question.title,
-          message: question.message,
-          cancelLabel: t('dialogs.cancel'),
-          options: [
-            {
-              key: 'saveAnyway',
-              label: question.confirm,
-              destructive: true,
-              run: () => {
-                void saveRef.current(true);
-              },
-            },
-          ],
-        });
+        setLossQuestion(exceptionsLossQuestion(loss, trimmedTitle, t));
         return;
       }
       const message = eventWriteErrorMessage(err, t);
@@ -2562,6 +2610,7 @@ function EventEditorScreen({
     times.exceptions,
     seriesZone,
     targetZones,
+    zoneAnswer,
   ]);
   // The question's yes saves again through the save of the latest render.
   saveRef.current = save;
@@ -2682,6 +2731,179 @@ function EventEditorScreen({
     if (said !== null) {
       AccessibilityInfo.announceForAccessibilityWithOptions(said, { queue: true });
     }
+  };
+
+  // The series' zone (stage 12, "Die Zone wechseln"): the button after the
+  // repeat block names the zone in effect with its offset at the series'
+  // start; it opens the picker, and a choice the core asks about opens the
+  // weekday question once the picker is gone. Both are rendered in this
+  // screen: a dialog at the app root does not appear over the editor sheet
+  // on iOS. Mirrors the desktop.
+  const showsZoneButton = !fieldsLocked && view.choice === 'picker';
+  // Today from the phone's clock, once per opening: the picker's order and
+  // the offsets read the year from it.
+  const zoneToday = useMemo(() => new Date().toISOString(), []);
+  // The instant the entry shows its offset at: the series' start as the form
+  // names it, else the stored one.
+  const zoneStartAt = formInstants.start ?? original?.start ?? zoneToday;
+  // Read once per start instant: a synchronous call into the core.
+  const zoneEntryOffsets = useMemo(
+    () => (showsZoneButton ? zoneOffsets(zoneStartAt, zoneToday) : null),
+    [showsZoneButton, zoneStartAt, zoneToday],
+  );
+  const zoneEntry =
+    zoneEntryOffsets === null ? '' : zoneChoiceEntry(view.zone, zoneEntryOffsets, t);
+  const zoneButtonRef = useRef<View | null>(null);
+  const [zonePickerOpen, setZonePickerOpen] = useState(false);
+  /** The weekday question while it is open, with the choice it asks about. */
+  const [weekdayAsk, setWeekdayAsk] = useState<{
+    question: WeekdayQuestionText;
+    result: ZoneChoiceResult;
+    zone: string | null;
+    rule: string;
+    start: string;
+    /** The zone in effect before, as the button named it. */
+    entry: string;
+  } | null>(null);
+  const zoneSayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (zoneSayTimer.current !== null) clearTimeout(zoneSayTimer.current);
+    },
+    [],
+  );
+  /** Once the picker or the question is gone: the focus back on the zone
+   *  button, after the render that relabelled it, and what the choice did,
+   *  said once, queued behind VoiceOver's reading of the button. */
+  const afterZoneDialog = (said: string | null) => {
+    requestAnimationFrame(() => {
+      const tag = findNodeHandle(zoneButtonRef.current);
+      if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+    });
+    if (zoneSayTimer.current !== null) clearTimeout(zoneSayTimer.current);
+    zoneSayTimer.current = null;
+    if (said === null) return;
+    zoneSayTimer.current = setTimeout(() => {
+      zoneSayTimer.current = null;
+      AccessibilityInfo.announceForAccessibilityWithOptions(said, { queue: true });
+    }, ZONE_SAY_DELAY_MS);
+  };
+  /** An answer of the core carried out: the fields with its start, its rule
+   *  and its exceptions, the zone chosen, and the answer kept as the series
+   *  the whole-series save measures against, from its start (question 12). */
+  const applyZoneAnswer = (
+    result: ZoneChoiceResult,
+    answer: ClockChangeAnswer,
+    asked: { zone: string | null; rule: string; start: string; entry: string },
+  ) => {
+    const applied = applyClockChange(result.fields, answer);
+    if (applied === null || answer.outcome !== 'changed') {
+      // Never offered: a refused answer has no button.
+      afterZoneDialog(zoneUnchangedAnnouncement(asked.entry, t));
+      return;
+    }
+    setTimes({
+      ...times,
+      zone: result.form,
+      fields: applied.fields,
+      exceptions: applied.exceptions,
+    });
+    if (applied.rrule !== recurrence) setRecurrence(applied.rrule);
+    setRuleSetAt(answer.start);
+    setZoneAnswer(answer);
+    afterZoneDialog(
+      zoneChoiceAnnouncement({
+        kind: answerMovesStart(answer, asked.start) ? 'startMoved' : 'sameInstant',
+        zone: asked.zone,
+        fields: applied.fields,
+        rewritten: applied.rrule !== asked.rule ? applied.rrule : null,
+        language: i18n.language,
+        t,
+      }),
+    );
+  };
+  /** The picker's choice, once it is gone. */
+  const pickZone = (pick: ZonePick | null) => {
+    setZonePickerOpen(false);
+    if (pick === null) {
+      afterZoneDialog(null);
+      return;
+    }
+    // The zone in effect chosen again changes nothing, not even its spelling
+    // (120a, question 2).
+    if (pick.kind === 'unchanged') {
+      afterZoneDialog(zoneUnchangedAnnouncement(zoneEntry, t));
+      return;
+    }
+    // Asked against the rule, the zone and the exceptions as the form holds
+    // them. The start is the one the series opened with or the last answer
+    // gave (`zoneChoiceWaitsForSave`), so the rule is the form's own, as the
+    // desktop asks.
+    const rule = recurrence ?? '';
+    const exceptions =
+      times.exceptions ??
+      (original?.recurrence ?? imported?.recurrence)?.exceptions ??
+      [];
+    const result = chooseZone(zoneForm, facts, fields, pick.zone, { rrule: rule, exceptions });
+    if (result.refused !== null) {
+      afterZoneDialog(zoneRefusedAnnouncement(result.refused, pick.zone, t));
+      return;
+    }
+    const change = result.change;
+    if (change === null) {
+      // A new event keeps its typed times; fields that name no instant move
+      // as typed.
+      setTimes({ ...times, zone: result.form, fields: result.fields });
+      afterZoneDialog(
+        zoneChoiceAnnouncement({
+          kind: zoneForm.editing === 'new' ? 'typed' : 'sameInstant',
+          zone: pick.zone,
+          fields: result.fields,
+          rewritten: null,
+          language: i18n.language,
+          t,
+        }),
+      );
+      return;
+    }
+    // The core asks only where it read an instant from the fields.
+    const start = formInstants.start ?? '';
+    const asked = { zone: pick.zone, rule, start, entry: zoneEntry };
+    if (!change.asks) {
+      applyZoneAnswer(result, change.asNow, asked);
+      return;
+    }
+    setWeekdayAsk({
+      ...asked,
+      result,
+      question: weekdayQuestion({
+        change,
+        start,
+        rrule: rule,
+        zone: pick.zone,
+        language: i18n.language,
+        t,
+      }),
+    });
+  };
+  /** The weekday question's answer, once it is gone: keeping the zone, the
+   *  back button and a tap outside change nothing. */
+  const answerWeekday = (answer: WeekdayAnswer) => {
+    const asked = weekdayAsk;
+    setWeekdayAsk(null);
+    if (asked === null) return;
+    const change = asked.result.change;
+    if (answer === null || change === null) {
+      afterZoneDialog(zoneUnchangedAnnouncement(asked.entry, t));
+      return;
+    }
+    applyZoneAnswer(asked.result, answer === 'rule' ? change.asRule : change.asNow, asked);
+  };
+  /** The loss question's answer, once it is gone: yes saves the same form
+   *  again with the consent (decisions 243-253). */
+  const answerLoss = (saveAnyway: boolean) => {
+    setLossQuestion(null);
+    if (saveAnyway) void saveRef.current(true);
   };
 
   if (loading) {
@@ -3131,7 +3353,7 @@ function EventEditorScreen({
             // Its own label: the controls below carry `recurrence.label`.
             <ReadOnlyField
               label={t(
-                shownRule.rrule !== recurrence
+                shownRule.rrule !== recurrence || zoneAnswer !== null
                   ? 'dialogs.event.recurrence.movedLabel'
                   : 'dialogs.event.recurrence.storedLabel',
               )}
@@ -3165,6 +3387,69 @@ function EventEditorScreen({
           the reminders. */}
       {!fieldsLocked && seriesHint !== null && (
         <ReadOnlyField label={seriesHint.label} value={seriesHint.value} />
+      )}
+
+      {/* The series' zone, where the choice stands (stage 12): a button like
+          the other select fields, after the repeat block and before the
+          reminders. */}
+      {showsZoneButton && (
+        <View style={styles.field}>
+          {/* Shown; the button says it itself. */}
+          <Text
+            style={styles.label}
+            importantForAccessibility="no"
+            accessibilityElementsHidden
+          >
+            {t('dialogs.seriesTimeZone.title')}
+          </Text>
+          <Pressable
+            ref={zoneButtonRef}
+            accessibilityRole="button"
+            accessibilityLabel={t('dialogs.seriesTimeZone.button', { entry: zoneEntry })}
+            accessibilityHint={t('mobile.selectFieldHint')}
+            onPress={() => {
+              // A start changed before the choice would be lost between the
+              // answer and the save, and times without an instant give the
+              // core nothing to answer: say so instead (`zoneChoiceWait`).
+              // Only a stored series waits; an import is created as it stands.
+              const baseline =
+                editing && original != null && !isOccurrence
+                  ? (zoneAnswer?.start ?? original.start)
+                  : null;
+              const wait = zoneChoiceWait(zoneForm, fields, baseline);
+              if (wait !== null) {
+                afterZoneDialog(
+                  t(
+                    wait === 'start'
+                      ? 'dialogs.seriesTimeZone.announce.saveStartFirst'
+                      : 'dialogs.seriesTimeZone.announce.validTimesFirst',
+                  ),
+                );
+                return;
+              }
+              setZonePickerOpen(true);
+            }}
+            style={({ pressed }) => [styles.selectButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.selectButtonText}>{zoneEntry}</Text>
+          </Pressable>
+        </View>
+      )}
+      {zonePickerOpen && (
+        <ZonePickerDialog
+          startAt={zoneStartAt}
+          today={zoneToday}
+          stored={view.zone}
+          deviceZone={deviceZone}
+          calendarZones={targetZones}
+          onDone={pickZone}
+        />
+      )}
+      {weekdayAsk !== null && (
+        <WeekdayQuestionDialog question={weekdayAsk.question} onDone={answerWeekday} />
+      )}
+      {lossQuestion !== null && (
+        <ExceptionsLossDialog question={lossQuestion} onDone={answerLoss} />
       )}
 
       {/* Reminders — relative-to-start / absolute / app-start, the same editor
@@ -3368,4 +3653,18 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceSubtle,
     },
     error: { fontSize: 15, fontWeight: '600', color: c.danger },
+    // The select fields' button (`SelectFieldButton`), for the zone button.
+    selectButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    selectButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
   });

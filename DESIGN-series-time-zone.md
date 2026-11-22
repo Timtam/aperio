@@ -1795,6 +1795,42 @@ Handy im selben PR.
     Serie“. Ungeprüft auf dem Handy: die Ansage nach dem Schließen der
     Wiederholungs-Auswahl, die Lücken-Meldung (Live-Region auf Android,
     Ansage auf iOS), die Reihenfolge der Lesefelder beim Wischen.
+    Gebaut (Teil 2, Wahl und Wochentag-Frage, 2026-11-22, ohne Handy-Build):
+    Beide Editoren haben den Knopf „Zeitzone der Serie: {Eintrag}“ nach der
+    Wiederholung. Eine Wahl geht über `chooseZone`. Die Wochentag-Frage
+    steht im Wortlaut von 138a (`shared/zoneQuestion.ts`). Auf dem Desktop
+    ist sie ein Dialog mit „Zeitzone nicht ändern“ zuerst und im Fokus; auf
+    dem Handy ist sie ein Dialog im Editor, der Titel zuerst. Ein Speichern
+    der ganzen Serie rechnet auf der Serie nach der Antwort
+    (`zoneAppliedSeries`). Nach einem Zonenwechsel gibt es kein
+    Mitnahme-Angebot (137a). Die Frage nach verlorenen Vorkommen steht auf
+    dem Handy im Editor. Technisch und ohne eigene Frage entschieden:
+    - Wurde der Beginn einer gespeicherten Serie in dieser Sitzung geändert,
+      oder hat eine gespeicherte ganztägige Serie hier Uhrzeiten bekommen,
+      wartet die Wahl auf ein Speichern („Zeitzone der Serie nicht geändert:
+      Speichere zuerst den geänderten Beginn, dann wähle die Zeitzone.“).
+      Nennen Beginn oder Ende keinen Zeitpunkt, sagt sie „… Gib zuerst einen
+      gültigen Beginn und ein gültiges Ende ein.“ (`zoneChoiceWait`). Erst
+      die Zone, dann das Datum geht in einem Schritt. Die andere Reihenfolge
+      verlöre sonst die mitwandernden Löschungen oder die mitwandernde Regel.
+      Ein Import wartet nie; sein Speichern legt an.
+    - Die Wischgeste zum Schließen von VoiceOver bricht jeden Dialog im
+      Handy-Editor ab, wie Tippen daneben und Androids Zurück.
+    - {Tage} sind die Worte der Zusammenfassung ohne Ende („jeden Montag“).
+      Die Nachricht nennt den Beginn mit Datum („Dienstag, 16. Juni,
+      00:30“). „vor“ heißt früher, wie im Beispiel Dienstag zu Montag. Wie
+      weit die Termine rücken, ist der Tag des Beginns auf der alten Uhr
+      weniger seinem Tag auf der neuen, wie der Kern sie nennt: Jeder Termin
+      fällt heute um so viele Tage daneben, und wie die Regel sagt, kehrt er
+      auf ihren Tag zurück, auch wo der Beginn selbst bleibt.
+    - Eine nicht umsetzbare Antwort sagt: „{Tage}, wie die Regel sagt, geht
+      nicht: {Grund}.“ beziehungsweise „Die Tage, wo die Termine jetzt
+      liegen, gehen nicht: {Grund}.“
+    - Ein verschobener Beginn wird angesagt mit „Die Serie beginnt jetzt am
+      {Beginn} auf dieser Uhr.“ und „Wiederholt sich jeden Dienstag.“
+    Ungeprüft auf dem Handy: der Name und der Hinweis des Knopfs, die Frage
+    direkt nach der Auswahl, der Fokus zurück auf den Knopf, die Ansage
+    400 ms danach, die Verlustfrage über dem Editor-Blatt auf iOS.
 13. **Kopien nehmen die Zone mit (23b)** — `feat(groups): carry a series' time zone to its copies`.
     Die Gruppen-Mitnahme im Kern trägt die Zone und ersetzt für einen
     Zonenwechsel die heutige Mitnahme von Beginn und Ende; das Angebot nach dem

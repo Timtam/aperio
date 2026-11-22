@@ -3625,10 +3625,19 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Gerät (Berlin)“, der Lücke am Feld und den Sätzen zur Zone nach der
   Endzeit. „Diesen und alle folgenden“ lädt die Serie beim Öffnen und sagt
   es, wenn das nicht gelingt. Die Handy-Teile sind ohne Build gebaut.
-  Für Teil 2 (Auswahl-Knopf, Wahl, Wochentag-Frage): Der Desktop liest in
-  `shownRule`, `repeatSentence` und beim Umschreiben der ganzen Serie
-  (`tailRecurrenceFor`) noch die gespeicherte Zone; mit einer Wahl müssen
-  sie die gewählte lesen, wie das Handy es schon tut.
+  ↳ **Die Zeitzone wählen, mit der Wochentag-Frage (Stufe 12, Teil 2,
+  2026-11-22, 137a, 138a):** Beide Editoren haben den Knopf „Zeitzone der
+  Serie“; die Wahl hält den Zeitpunkt (ein neuer Termin seine getippten
+  Uhrzeiten), die Wochentag-Frage kommt, wo der Beginn auf der neuen Uhr auf
+  einen anderen Tag fällt und die Regel Tage nennt. Wurde der Beginn einer
+  gespeicherten Serie zuerst geändert, wartet die Wahl auf ein Speichern.
+  Kein Mitnahme-Angebot nach einem Zonenwechsel bis Stufe 13. Die Handy-Teile
+  sind ohne Build gebaut.
+  Offen: Eine Exchange-Serie nennt die Plätze einzeln geänderter Vorkommen
+  unter ihren Ausnahmen. Nach „wie die Regel sagt“ und einem Kalenderwechsel
+  wandert so ein Platz wie eine Löschung mit, und das Vorkommen ist im neuen
+  Kalender gelöscht, statt zu seiner üblichen Zeit wiederzukommen (224). Die
+  Frage an den Kern müsste nur echte Löschungen nennen (`plan.standing`).
   Offen: Ein vom Anbieter einzeln geänderter Termin (ohne eigene Regel), als
   „diesen und alle folgenden“ geöffnet, steht noch auf der Uhr des Geräts
   (21a für solche Termine braucht die Regel der Serie im Formular).

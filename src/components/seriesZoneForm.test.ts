@@ -20,6 +20,7 @@ import {
   zoneFormView,
   zoneEditingFor,
   zoneFacts,
+  zoneChoiceWait,
   zoneToSave,
   type ZoneFormFacts,
 } from '@aperio/shared';
@@ -441,5 +442,38 @@ describe('a title suggestion (prefillMoveMode)', () => {
     expect(zoneFormView(untouchedNew, facts({ calendarZones: 'none' }))).toBe(DEVICE_ZONE_VIEW);
     const series = openZoneForm('series', 'Europe/Berlin', false);
     expect(prefillMoveMode(series, onUtc, repeating)).toBe('instants');
+  });
+});
+
+describe('when a zone choice waits (zoneChoiceWait)', () => {
+  const NY = { kind: 'series', tzid: 'America/New_York' } as const;
+  const stored = '2026-09-14T13:00:00.000Z';
+  const fields = fieldsAt(stored, '2026-09-14T14:00:00.000Z', NY);
+  const series = openZoneForm('series', 'America/New_York', false);
+
+  it('waits for a save where the start of a stored series moved', () => {
+    expect(zoneChoiceWait(series, fields, stored)).toBeNull();
+    expect(zoneChoiceWait(series, changeClockField(fields, 'startDate', '2026-09-21'), stored)).toBe('start');
+    expect(zoneChoiceWait(series, changeClockField(fields, 'startTime', '10:00'), stored)).toBe('start');
+    // Only the end changed: the start is the one the series opened with.
+    expect(zoneChoiceWait(series, changeClockField(fields, 'endTime', '11:00'), stored)).toBeNull();
+  });
+
+  it('waits for a save where a series that opened all-day got times', () => {
+    expect(zoneChoiceWait(openZoneForm('series', null, true), fields, stored)).toBe('start');
+  });
+
+  it('waits for valid times where the start or the end names no instant', () => {
+    // 14 March 2027, 02:30 does not exist in New York.
+    const gapEnd = changeClockField(changeClockField(fields, 'endDate', '2027-03-14'), 'endTime', '02:30');
+    expect(zoneChoiceWait(series, gapEnd, stored)).toBe('times');
+    expect(zoneChoiceWait(series, changeClockField(fields, 'startTime', ''), stored)).toBe('times');
+  });
+
+  it('never waits for a new event, a single event or an import', () => {
+    const moved = changeClockField(fields, 'startDate', '2026-09-21');
+    expect(zoneChoiceWait(openZoneForm('new', undefined, false), moved, null)).toBeNull();
+    expect(zoneChoiceWait(openZoneForm('single', undefined, false), moved, stored)).toBeNull();
+    expect(zoneChoiceWait(series, moved, null)).toBeNull();
   });
 });

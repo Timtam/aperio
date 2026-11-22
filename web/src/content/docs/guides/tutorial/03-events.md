@@ -235,6 +235,34 @@ series' date and time in its time zone:
 - A new series gets your device's time zone. Where the calendar cannot store
   that time zone, the series is on UTC, and a read-only field after the end
   time says so.
+- After the repeat comes the button **Series time zone** with the time zone in
+  effect, such as "Series time zone: Berlin, Europe, UTC+01:00". It opens a
+  list with the search field **Search time zones**. Without a search it shows
+  the current time zone, your device's and UTC at the top, then groups of time
+  zones with the same rules, such as "UTC+01:00, daylight saving time
+  UTC+02:00: Berlin, Paris, Rome and 13 more". A city name finds the city, an offset like
+  "+2" the groups. Where a calendar cannot store a time zone, the list says
+  so.
+- For a new appointment the typed times stay and now apply on the new clock.
+  For a stored series the moment stays, and the fields show it on the new
+  clock. Aperio then says once what applies.
+- Where the start falls on another day on the new clock, and the rule names
+  other days than the start's or the series cannot keep its days on the new
+  clock (monthly on the 31st, for example), Aperio asks **Which weekday should
+  apply?**. The buttons: **Don't change the time zone**, the days as the rule
+  says (where the appointments move to another day, "events move one day
+  earlier" or "later" follows), and the days where the appointments fall now.
+  On the desktop **Don't change the time zone** has the focus, and Escape does
+  the same; on the phone the screen reader reads the title first, and Back, a
+  tap outside and VoiceOver's escape gesture change nothing. Where an answer
+  cannot be carried out, its button is missing, and the question says why.
+- If you changed the start of a stored series, or a stored all-day series got
+  times here, save first; then the time zone can be chosen. The other way
+  round works in one go: the time zone first, then the date. Where the start
+  or the end has no valid time, the button says so instead of opening the
+  list.
+- After a change of time zone, Aperio does not offer to carry the change to
+  the appointment's copies in other calendars; that comes later.
 - Where a time you typed does not exist on that day in the series' time zone,
   because the clocks go forward, Aperio says so at the field. It saves only
   with another time.
@@ -242,8 +270,9 @@ series' date and time in its time zone:
   at the same moment. On the desktop Aperio says so once when you leave the
   repeat field, on the phone when its choice closes.
 - **This occurrence only** and single appointments always stand on your
-  device's clock. **This and all following** stands in the series' time zone,
-  and a read-only field names it. Where Aperio cannot load the series for it,
+  device's clock. **This and all following** stands in the series' time zone;
+  a read-only field names it, and you can change it when you edit the whole
+  series. Where Aperio cannot load the series for it,
   the editor says so and does not save. Try again, or edit this occurrence
   only.
 - When you choose the scope in the editor itself, in the **Apply to** field
@@ -252,10 +281,10 @@ series' date and time in its time zone:
   own, when you open it as **This and all following**.
 - When you give a series a calendar that cannot store its time zone, a
   read-only field after the end time says so, and it saves only with another
-  calendar.
+  time zone or another calendar.
 - Where your device cannot use a series' time zone (older Android versions
   do not know some names), the times are in UTC, and changed times or a
-  changed repeat cannot be saved.
+  changed repeat can be saved only once another time zone is chosen.
 
 > **Single changed or deleted occurrences:** When a whole series moves to
 > another day or time, by dragging it or in the dialog, some single occurrences

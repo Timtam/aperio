@@ -255,6 +255,36 @@ Zeitzone:
 - Eine neue Serie bekommt die Zeitzone deines Geräts. Kann der Kalender diese
   Zeitzone nicht speichern, steht die Serie auf UTC, und ein Lesefeld nach der
   Endzeit sagt es.
+- Nach der Wiederholung steht der Knopf **Zeitzone der Serie** mit der
+  Zeitzone, die gerade gilt, etwa „Zeitzone der Serie: Berlin, Europa,
+  UTC+01:00“. Er öffnet eine Liste mit dem Suchfeld **Zeitzone suchen**. Ohne
+  Suche zeigt sie oben die aktuelle Zeitzone, die deines Geräts und UTC, danach
+  Gruppen von Zeitzonen mit denselben Regeln, etwa „UTC+01:00, Sommerzeit
+  UTC+02:00: Berlin, Paris, Rome und 13 weitere“. Ein Stadtname findet die
+  Stadt, ein Versatz wie „+2“ die Gruppen. Was ein Kalender nicht speichern
+  kann, sagt die Liste dazu.
+- Bei einem neuen Termin bleiben die getippten Uhrzeiten stehen und gelten
+  danach auf der neuen Uhr. Bei einer gespeicherten Serie bleibt der
+  Zeitpunkt, und die Felder zeigen ihn auf der neuen Uhr. Aperio sagt danach
+  einmal, was gilt.
+- Fällt der Beginn auf der neuen Uhr auf einen anderen Tag, und nennt die
+  Regel andere Tage als den des Beginns oder kann die Serie ihre Tage auf der
+  neuen Uhr nicht halten (etwa monatlich am 31.), fragt Aperio **Welcher
+  Wochentag soll gelten?**. Die Knöpfe: **Zeitzone nicht ändern**, die Tage,
+  wie die Regel sagt (rücken die Termine dabei auf einen anderen Tag, steht
+  dahinter „Termine rücken einen Tag vor“ oder „zurück“), und die Tage, wo
+  die Termine jetzt liegen. Am Desktop hat **Zeitzone nicht ändern** den
+  Fokus, und Escape tut dasselbe; am Handy liest der Bildschirmleser zuerst
+  den Titel, und Zurück, Tippen daneben und die Wischgeste von VoiceOver
+  ändern nichts. Lässt sich eine Antwort nicht umsetzen, fehlt ihr Knopf, und
+  die Frage sagt, warum.
+- Hast du den Beginn einer gespeicherten Serie geändert, oder hat eine
+  gespeicherte ganztägige Serie hier Uhrzeiten bekommen, speichere zuerst;
+  danach lässt sich die Zeitzone wählen. Andersherum geht es in einem Schritt:
+  erst die Zeitzone, dann das Datum. Haben Beginn oder Ende keine gültige
+  Uhrzeit, sagt der Knopf das, statt die Liste zu öffnen.
+- Nach einem Wechsel der Zeitzone bietet Aperio nicht an, die Änderung auf die
+  Kopien des Termins in anderen Kalendern mitzunehmen; das kommt später.
 - Gibt es eine getippte Uhrzeit an diesem Tag in der Zeitzone der Serie nicht,
   weil die Uhren vorgestellt werden, sagt Aperio es am Feld. Gespeichert wird
   erst mit einer anderen Uhrzeit.
@@ -263,8 +293,9 @@ Zeitzone:
   du das Feld für die Wiederholung verlässt, am Handy, wenn sich die Auswahl
   schließt.
 - **Nur diesen Termin** und Einzeltermine stehen immer auf der Uhr deines
-  Geräts. **Diesen und alle folgenden** steht in der Zeitzone der Serie, und
-  ein Lesefeld nennt sie. Kann Aperio die Serie dafür nicht laden, sagt der
+  Geräts. **Diesen und alle folgenden** steht in der Zeitzone der Serie; ein
+  Lesefeld nennt sie, und ändern lässt sie sich, wenn du die ganze Serie
+  bearbeitest. Kann Aperio die Serie dafür nicht laden, sagt der
   Editor es und speichert nicht. Versuche es dann noch einmal, oder bearbeite
   nur diesen Termin.
 - Wählst du den Umfang erst im Editor selbst, im Feld **Anwenden auf** (etwa
@@ -272,12 +303,12 @@ Zeitzone:
   die ganze Serie. Ebenso ein Termin, den ein anderes Programm einzeln
   geändert hat, wenn du ihn als **Diesen und alle folgenden** öffnest.
 - Gibst du einer Serie einen Kalender, der ihre Zeitzone nicht speichern kann,
-  sagt ein Lesefeld nach der Endzeit es, und gespeichert wird erst mit einem
-  anderen Kalender.
+  sagt ein Lesefeld nach der Endzeit es, und gespeichert wird erst mit einer
+  anderen Zeitzone oder einem anderen Kalender.
 - Kann dein Gerät die Zeitzone einer Serie nicht verwenden (ältere
   Android-Versionen kennen manche Namen nicht), stehen die Zeiten in UTC, und
-  geänderte Zeiten oder eine geänderte Wiederholung lassen sich nicht
-  speichern.
+  geänderte Zeiten oder eine geänderte Wiederholung lassen sich erst nach der
+  Wahl einer anderen Zeitzone speichern.
 
 > **Einzeln geänderte oder gelöschte Termine:** Verschiebst du eine ganze Serie
 > auf einen anderen Tag oder eine andere Uhrzeit, per Ziehen oder im Dialog,

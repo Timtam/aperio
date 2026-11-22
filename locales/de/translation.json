@@ -1557,7 +1557,8 @@
         "month_end": "Monate sind unterschiedlich lang, ihre Tage würden sich nicht alle gleich verschieben",
         "limited_months": "sie wiederholt sich nur in bestimmten Monaten oder Jahren, und manche Tage würden aus ihnen herausrutschen",
         "leap_day": "die Verschiebung würde über das Februarende gehen, wo Schaltjahre abweichen",
-        "unknown_part": "ihre Wiederholungsregel enthält einen Teil, den Aperio nicht verschieben kann"
+        "unknown_part": "ihre Wiederholungsregel enthält einen Teil, den Aperio nicht verschieben kann",
+        "skipped_time": "der Beginn oder ein gelöschter Termin fiele in die Stunde, die die Uhren in {{clock}} überspringen"
       }
     },
     "editScope": {
@@ -2413,6 +2414,34 @@
         "europe": "Europa",
         "indian": "Indischer Ozean",
         "pacific": "Pazifik"
+      },
+      "button": "Zeitzone der Serie: {{entry}}",
+      "question": {
+        "title": "Welcher Wochentag soll gelten?",
+        "message": "In {{clock}} fällt der Beginn auf {{start}}; die Regel sagt {{days}}.",
+        "ownDays": "ihre eigenen Tage",
+        "keep": "Zeitzone nicht ändern",
+        "asRule": "{{days}}, wie die Regel sagt",
+        "asRuleEarlier_one": "{{days}}, wie die Regel sagt (Termine rücken einen Tag vor)",
+        "asRuleEarlier_other": "{{days}}, wie die Regel sagt (Termine rücken {{count}} Tage vor)",
+        "asRuleLater_one": "{{days}}, wie die Regel sagt (Termine rücken einen Tag zurück)",
+        "asRuleLater_other": "{{days}}, wie die Regel sagt (Termine rücken {{count}} Tage zurück)",
+        "asNow": "{{days}}, wo die Termine jetzt liegen",
+        "refused": {
+          "rule": "{{days}}, wie die Regel sagt, geht nicht: {{reason}}.",
+          "now": "Die Tage, wo die Termine jetzt liegen, gehen nicht: {{reason}}."
+        }
+      },
+      "announce": {
+        "typed": "Zeitzone der Serie: {{clock}}. Die Uhrzeiten bleiben wie getippt und gelten jetzt auf dieser Uhr: {{times}}.",
+        "typedNoTimes": "Zeitzone der Serie: {{clock}}. Die Uhrzeiten bleiben wie getippt und gelten jetzt auf dieser Uhr.",
+        "sameInstant": "Zeitzone der Serie: {{clock}}. Die Serie beginnt zum selben Zeitpunkt: {{times}} auf dieser Uhr.",
+        "startMoved": "Zeitzone der Serie: {{clock}}. Die Serie beginnt jetzt am {{start}} auf dieser Uhr.",
+        "repeats": "Wiederholt sich {{days}}.",
+        "unchanged": "Zeitzone der Serie nicht geändert: {{entry}}",
+        "refused": "Zeitzone der Serie nicht geändert: {{reason}}.",
+        "saveStartFirst": "Zeitzone der Serie nicht geändert: Speichere zuerst den geänderten Beginn, dann wähle die Zeitzone.",
+        "validTimesFirst": "Zeitzone der Serie nicht geändert: Gib zuerst einen gültigen Beginn und ein gültiges Ende ein."
       }
     },
     "readOnlyField": "{{label}}: {{value}}",
