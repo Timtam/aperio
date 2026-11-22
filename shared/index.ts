@@ -58,6 +58,7 @@ export * from './eventDateTime';
 export * from './clockFields';
 export * from './seriesZoneForm';
 export * from './zoneFormText';
+export * from './zoneQuestion';
 export * from './zonePicker';
 export * from './delayedSay';
 export * from './accountSchema';

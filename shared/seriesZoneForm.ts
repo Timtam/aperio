@@ -529,3 +529,29 @@ export function fieldsOnView(
   if (same) return fields;
   return keep === 'instants' ? keepingInstants(fields, view.clock) : keepingWallTimes(fields, view.clock);
 }
+
+/**
+ * The series as a zone answer leaves it (question 12 of stage 12): the
+ * answer's start, the end keeping the length the series had, its rule and
+ * exceptions, and the new zone. A whole-series save measures the edit against
+ * this, not the stored series, so the answer is not applied twice: a start the
+ * answer moved to the rule's weekday is the start the edit begins from, and a
+ * date moved after the answer counts on the new clock from there.
+ */
+export function zoneAppliedSeries<
+  E extends {
+    start: string;
+    end: string;
+    recurrence?: { rrule: string; exceptions: string[]; tzid?: string | null } | null;
+  },
+>(series: E, answer: { start: string; rrule: string; exceptions: string[] }, zone: string | null): E {
+  const length = Date.parse(series.end) - Date.parse(series.start);
+  const end = new Date(Date.parse(answer.start) + length).toISOString();
+  const recurrence = { ...(series.recurrence ?? {}), rrule: answer.rrule, exceptions: answer.exceptions };
+  return {
+    ...series,
+    start: answer.start,
+    end,
+    recurrence: zone === null ? { ...recurrence, tzid: null } : { ...recurrence, tzid: zone },
+  };
+}

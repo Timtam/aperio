@@ -132,6 +132,23 @@ export function recurrenceSummaryText(
   }
 }
 
+/**
+ * Which days a rule repeats on, without its end: „jeden Montag“, „jeden Monat
+ * am 15.“ — the summary's own words for how often and on which days, for a
+ * sentence that names the days alone (the weekday question of
+ * DESIGN-series-time-zone.md). `null` where the rule has no such words.
+ */
+export function recurrenceDaysText(
+  summary: RecurrenceSummary,
+  context: SummaryRenderContext,
+): string | null {
+  if (summary.outcome !== 'described') return null;
+  const every = renderPhrase(summary.every, context);
+  return summary.on
+    ? context.t(`${KEY}.sentence.everyOn`, { every, on: renderPhrase(summary.on, context) })
+    : context.t(`${KEY}.sentence.every`, { every });
+}
+
 /** The rule in words in one call, for a surface that has both at hand. */
 export function recurrenceSentence(
   question: RecurrenceSummaryQuestion,

@@ -70,7 +70,7 @@ export function clockFieldLabel(
 /** The `timeZone` an Intl formatter can take for `zone`: the zone's own name
  *  where this runtime can use it, "UTC" for a series on UTC, and the
  *  runtime's own zone (`undefined`) for a name it refuses. */
-function formatterZone(zone: string | null): string | undefined {
+export function clockIntlZone(zone: string | null): string | undefined {
   const named = seriesClockZone(zone);
   if (named === null) return 'UTC';
   return zoneUsableHere(named) ? named : undefined;
@@ -255,7 +255,7 @@ export function repeatClockAnnouncement(
     ? t('dialogs.event.zone.repeatOnTyped', { clock: now })
     : t('dialogs.event.zone.repeatOn', {
         clock: now,
-        times: clockRangeText(at.start, at.end, language, formatterZone(zone), t),
+        times: clockRangeText(at.start, at.end, language, clockIntlZone(zone), t),
       });
 }
 

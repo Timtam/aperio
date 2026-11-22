@@ -1560,7 +1560,8 @@
         "month_end": "months differ in length, so its days would not all move by the same amount",
         "limited_months": "it repeats only in certain months or years, and some days would move out of them",
         "leap_day": "the move would cross the end of February, where leap years differ",
-        "unknown_part": "its repeat rule has a part Aperio cannot move"
+        "unknown_part": "its repeat rule has a part Aperio cannot move",
+        "skipped_time": "the start or a deleted occurrence would fall in the hour the clocks skip in {{clock}}"
       }
     },
     "editScope": {
@@ -2413,6 +2414,32 @@
         "europe": "Europe",
         "indian": "Indian Ocean",
         "pacific": "Pacific"
+      },
+      "button": "Series time zone: {{entry}}",
+      "question": {
+        "title": "Which weekday should apply?",
+        "message": "In {{clock}} the start falls on {{start}}; the rule says {{days}}.",
+        "ownDays": "its own days",
+        "keep": "Don't change the time zone",
+        "asRule": "{{days}}, as the rule says",
+        "asRuleEarlier_one": "{{days}}, as the rule says (events move one day earlier)",
+        "asRuleEarlier_other": "{{days}}, as the rule says (events move {{count}} days earlier)",
+        "asRuleLater_one": "{{days}}, as the rule says (events move one day later)",
+        "asRuleLater_other": "{{days}}, as the rule says (events move {{count}} days later)",
+        "asNow": "{{days}}, where the events fall now",
+        "refused": {
+          "rule": "{{days}}, as the rule says, is not possible: {{reason}}.",
+          "now": "The days where the events fall now are not possible: {{reason}}."
+        }
+      },
+      "announce": {
+        "typed": "Series time zone: {{clock}}. The times stay as typed and now apply on this clock: {{times}}.",
+        "typedNoTimes": "Series time zone: {{clock}}. The times stay as typed and now apply on this clock.",
+        "sameInstant": "Series time zone: {{clock}}. The series starts at the same moment: {{times}} on this clock.",
+        "startMoved": "Series time zone: {{clock}}. The series now starts on {{start}} on this clock.",
+        "repeats": "Repeats {{days}}.",
+        "unchanged": "Series time zone not changed: {{entry}}",
+        "refused": "Series time zone not changed: {{reason}}."
       }
     },
     "readOnlyField": "{{label}}: {{value}}",
