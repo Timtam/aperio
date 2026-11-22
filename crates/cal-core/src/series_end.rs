@@ -208,7 +208,8 @@ pub fn read_series_end(
         (EndReading::ThroughDay, end_of(day)?, None)
     } else if let Some(floating) = floating {
         (EndReading::Wall, floating, None)
-    } else if let Some(at) = utc {
+    } else {
+        let at = utc?;
         let digits = at.naive_utc();
         match clock {
             ExpansionClock::DeviceDays if spells_end_of_utc_day(value) => {
@@ -224,8 +225,6 @@ pub fn read_series_end(
             }
             _ => (EndReading::Instant, wall(at), Some(at)),
         }
-    } else {
-        return None;
     };
 
     let at = instant.or_else(|| last_at_or_before(bound));
