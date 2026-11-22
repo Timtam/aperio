@@ -583,6 +583,17 @@ pub fn wall_clock(question_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// Changing the clock a series repeats on, as JSON, `null` for a start that
+/// names no instant (cal_core::series_clock_change): the desktop asks the
+/// same rule through WebAssembly.
+#[uniffi::export]
+pub fn series_clock_change(question_json: String) -> Result<String, StoreError> {
+    cal_core::series_clock_change_json(&question_json).map_err(|e| StoreError::InvalidField {
+        field: "series clock change question".into(),
+        detail: e.to_string(),
+    })
+}
+
 /// The parts a repeat rule takes from the day a series starts on, as JSON,
 /// and JSON `null` for a key that names no day (cal_core::day_parts): the
 /// desktop asks the same rule through WebAssembly.
@@ -913,6 +924,29 @@ mod tests {
         }
         match wall_clock("{\"op\":\"teleport\"}".to_string()) {
             Err(StoreError::InvalidField { field, .. }) => assert_eq!(field, "wall clock question"),
+            other => panic!("expected an invalid-field error, got {other:?}"),
+        }
+    }
+
+    /// Every row of the core's clock-change table through the phone's door;
+    /// JSON that is no question at all is the field error the bridge throws.
+    #[test]
+    fn series_clock_change_door_answers_every_contract_row() {
+        const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/seriesClockChange.json");
+        let doc: serde_json::Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let rows = doc["rows"].as_array().expect("rows");
+        assert!(rows.len() > 10, "the contract lost rows");
+        for row in rows {
+            let answer: serde_json::Value = serde_json::from_str(
+                &series_clock_change(row["question"].to_string()).expect("a question"),
+            )
+            .expect("json");
+            assert_eq!(answer, row["expect"], "{}", row["name"]);
+        }
+        match series_clock_change("not json".to_string()) {
+            Err(StoreError::InvalidField { field, .. }) => {
+                assert_eq!(field, "series clock change question")
+            }
             other => panic!("expected an invalid-field error, got {other:?}"),
         }
     }

@@ -123,6 +123,11 @@ Some of the rules that cross today:
   `crates/cal-core/tzdata`.
   The Exchange adapter's Windows zone ids are generated on top of them, from a
   pinned CLDR file, by `cargo xtask windows-zones`.
+  `seriesClockChange` (`cal_core::series_clock_change`, behind `zones`)
+  answers what choosing another zone for a series writes: whether the
+  editors ask which days to keep, and the two answers, "as they fall now"
+  and "as the rule says", each written or refused with a reason. It is a
+  JSON door of its own, pinned by `seriesClockChange.json`.
 
 - **the world zone list**, `cal_core::zone_list`: `zoneLabels`, `zoneSearch`
   and `zoneChoice` give the names, the search and where a stored zone stands.

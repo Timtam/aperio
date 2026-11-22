@@ -65,6 +65,10 @@ mod task_grouping_gate {
 }
 pub mod read_refusal;
 pub mod series_clock;
+// Changing the clock a series repeats on (stage 9): reads tzdata, so behind
+// `zones` with cal-zone.
+#[cfg(feature = "zones")]
+pub mod series_clock_change;
 pub mod series_end;
 pub mod series_shift;
 pub mod step_write;
@@ -163,6 +167,11 @@ pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use series_clock::{
     canonical_zone, expansion_clock, listed_zones, series_clock_zone, written_series_zone,
     ExpansionClock, NameKind, TZDATA_VERSION,
+};
+#[cfg(feature = "zones")]
+pub use series_clock_change::{
+    rule_names_day, series_clock_change, series_clock_change_json, ClockChangeAnswer,
+    ClockChangeQuestion, ClockChangeRefusal, RuleFit, SeriesClockChange,
 };
 pub use series_end::{last_day_through, read_series_end, utc_until, EndReading, SeriesEnd};
 pub use series_shift::{

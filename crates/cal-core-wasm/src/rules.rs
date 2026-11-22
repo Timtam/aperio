@@ -368,6 +368,11 @@ pub fn wall_clock(question_json: &str) -> Result<String, WireError> {
     cal_core::wall_clock_json(question_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::seriesClockChange`].
+pub fn series_clock_change(question_json: &str) -> Result<String, WireError> {
+    cal_core::series_clock_change_json(question_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 /// See [`crate::calendarWeeks`].
 pub fn calendar_weeks(input_json: &str) -> Result<String, WireError> {
     cal_core::calendar_weeks_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))

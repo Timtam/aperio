@@ -30,7 +30,7 @@ use cal_zone::{Reading, WallPolicy, Zone};
 
 /// The clock a series' fields stand on: the zone its stored name names, by
 /// the core's one rule, or UTC.
-fn clock_of(tzid: Option<&str>) -> (Zone, Option<&'static str>) {
+pub(crate) fn clock_of(tzid: Option<&str>) -> (Zone, Option<&'static str>) {
     match crate::series_clock_zone(tzid).and_then(crate::canonical_zone) {
         Some(name) => match Zone::named(name) {
             Some(zone) => (zone, Some(name)),
@@ -292,7 +292,7 @@ pub fn series_end_instant(
 /// The last instant whose wall time on `zone` is `wall` or earlier: `wall`
 /// itself, at its later reading where the clock shows it twice, or the
 /// second before a change that skips it.
-fn last_at_or_before(zone: Zone, wall: NaiveDateTime) -> Option<DateTime<Utc>> {
+pub(crate) fn last_at_or_before(zone: Zone, wall: NaiveDateTime) -> Option<DateTime<Utc>> {
     let on = |offset: chrono::FixedOffset| {
         DateTime::<Utc>::from_naive_utc_and_offset(
             wall - chrono::Duration::seconds(i64::from(offset.local_minus_utc())),

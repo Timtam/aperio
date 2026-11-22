@@ -3611,6 +3611,13 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   lesen und ein Ende, das ein Zeitpunkt ist, als sein Datum schreiben,
   zusammen mit dem Ende-Feld nach 108b. Zwei Teilbauten scheiterten in der
   Prüfung (DESIGN, 107b).
+  ↳ **Die Kern-Regel für den Zonenwechsel (Stufe 9, 2026-11-22, 15a, 20a,
+  24a):** Der Kern sagt, ob nach einer neuen Zone gefragt wird, an welchem Tag
+  der Beginn auf beiden Uhren liegt, zu welcher die Tage der Regel passen, und
+  schreibt beide Antworten („wie sie jetzt fallen“, „wie in der Regel“) samt
+  Ausnahmen und Ende, oder lehnt sie mit Grund ab. Vorher geprüft: Für
+  gezählte Wochentage und Tage vom Monatsende nennt der Kern dieselben Tage
+  wie rrule.js. Noch liest das kein Editor.
   ↳ **„Bis 5. November“ heißt überall bis zum 5. November (Stufe 8, Schritt 6,
   2026-11-22, 101b):** Ansichten, Erinnerungen, Schnitt, Verschieben und der
   Zwischenspeicher lesen ein Serienende über die Kern-Regel. Eine Berliner
