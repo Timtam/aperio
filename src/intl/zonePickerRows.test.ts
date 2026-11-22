@@ -29,9 +29,15 @@ function rows(
     stored = null,
     device = 'Europe/Berlin',
     calendar = 'all',
-  }: { stored?: string | null; device?: string | null; calendar?: 'all' | 'none' | string[] } = {},
+    unusable = [],
+  }: {
+    stored?: string | null;
+    device?: string | null;
+    calendar?: 'all' | 'none' | string[];
+    unusable?: string[];
+  } = {},
 ) {
-  const groups = zoneGroups({ today: TODAY, stored, device, calendar_zones: calendar, unusable: [] });
+  const groups = zoneGroups({ today: TODAY, stored, device, calendar_zones: calendar, unusable });
   return zonePickerList({
     query,
     groups,
@@ -39,6 +45,7 @@ function rows(
     regionNames: zoneRegionNames(de),
     stored,
     device,
+    unusable,
     t: de,
     formatDay: day,
   });
@@ -120,6 +127,41 @@ describe('what choosing a row does', () => {
     const list = rows('kyiv', { stored: 'Europe/Kiev' });
     expect(list.rows).toHaveLength(1);
     expect(list.rows[0]).toMatchObject({ pick: { kind: 'unchanged' }, current: true });
+  });
+
+  it('says the name the UTC entry was found by', () => {
+    expect(rows('gmt').rows.map((r) => r.text)).toEqual(['UTC (ohne Sommerzeit) (auch GMT)']);
+  });
+
+  it('changes a stored spelling this device refuses, from every row naming it', () => {
+    // Old Android in Kyiv: it reports Europe/Kiev and refuses Europe/Kyiv.
+    const options = { stored: 'Europe/Kyiv', device: 'Europe/Kiev', unusable: ['Europe/Kyiv'] };
+    const empty = rows('', options);
+    expect(empty.rows.some((r) => r.key === 'head-current')).toBe(false);
+    expect(row(empty, 'head-device')).toMatchObject({
+      pick: { kind: 'zone', zone: 'Europe/Kiev' },
+      current: false,
+    });
+    expect(groupWith(empty, 'Kyiv').pick).toEqual({ kind: 'zone', zone: 'Europe/Kiev' });
+    const hit = rows('kyiv', options).rows[0];
+    expect(hit).toMatchObject({ pick: { kind: 'zone', zone: 'Europe/Kiev' }, current: false, selectable: true });
+  });
+
+  it('keeps a stored spelling this device can use, though it refuses the listed name', () => {
+    // Old Android in Berlin: Europe/Kiev works, Europe/Kyiv does not.
+    const options = { stored: 'Europe/Kiev', unusable: ['Europe/Kyiv'] };
+    const hit = rows('kyiv', options).rows[0];
+    expect(hit).toMatchObject({ pick: { kind: 'unchanged' }, current: true, selectable: true });
+    expect(hit.text).toBe('Kyiv, Europa, UTC+02:00');
+    expect(row(rows('', options), 'head-current').text).toBe('Aktuell: Europe/Kiev (nicht in Aperios Liste)');
+  });
+
+  it('marks "Aktuell" where this device refuses the stored spelling', () => {
+    const current = row(rows('', { stored: 'Europe/Kyiv', unusable: ['Europe/Kyiv'] }), 'head-current');
+    expect(current).toMatchObject({
+      text: 'Aktuell: Kyiv, Europa, UTC+02:00 (dieses Gerät kann die Zeitzone nicht verwenden)',
+      selectable: false,
+    });
   });
 
   it('stores the city a merged place points to', () => {

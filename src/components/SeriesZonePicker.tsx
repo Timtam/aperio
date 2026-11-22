@@ -92,6 +92,10 @@ export function SeriesZonePicker({
   }, [isOpen, sayCount]);
 
   const calendarKey = JSON.stringify(calendarZones);
+  const unusable = useMemo(
+    () => unusableZones(listedZoneLabels().map((label) => label.zone), stored),
+    [stored],
+  );
   const groups = useMemo(
     () =>
       isOpen
@@ -100,13 +104,10 @@ export function SeriesZonePicker({
             stored,
             device: deviceZone,
             calendar_zones: JSON.parse(calendarKey) as CalendarZones,
-            unusable: unusableZones(
-              listedZoneLabels().map((label) => label.zone),
-              stored,
-            ),
+            unusable,
           })
         : null,
-    [isOpen, today, stored, deviceZone, calendarKey],
+    [isOpen, today, stored, deviceZone, calendarKey, unusable],
   );
   const offsets = useMemo(() => (isOpen ? zoneOffsets(startAt, today) : null), [isOpen, startAt, today]);
   const list = useMemo(() => {
@@ -126,10 +127,11 @@ export function SeriesZonePicker({
       regionNames: zoneRegionNames(t),
       stored,
       device: deviceZone,
+      unusable,
       t,
       formatDay,
     });
-  }, [groups, offsets, query, stored, deviceZone, t, i18n.language]);
+  }, [groups, offsets, query, stored, deviceZone, unusable, t, i18n.language]);
 
   // The count line, once the typing pauses; never for the list as it opens,
   // where it is the search field's description.
@@ -241,8 +243,10 @@ export function SeriesZonePicker({
             role="option"
             aria-selected={index === active}
             aria-disabled={row.selectable ? undefined : true}
-            // Mouse-down, so the choice lands before the search field's blur.
+            // Mouse-down, so the choice lands before the search field's
+            // blur; the main button only, never a right or middle click.
             onMouseDown={(event) => {
+              if (event.button !== 0) return;
               event.preventDefault();
               setActive(index);
               choose(index);

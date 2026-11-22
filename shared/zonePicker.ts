@@ -59,6 +59,8 @@ export interface ZonePickerQuestion {
   stored: string | null;
   /** The device's zone name as the runtime reports it (`deviceZoneName`). */
   device: string | null;
+  /** The names this device refuses, as `zoneGroups` got them (`unusableZones`). */
+  unusable: string[];
   t: Translate;
   /** Writes a `YYYY-MM-DD` day in this surface's language. */
   formatDay: (day: string) => string;
@@ -84,12 +86,19 @@ export function zonePickerList(q: ZonePickerQuestion): ZonePickerList {
         ? position(placed.stored.canonical)
         : null;
   const onUtc = placed.stored.kind === 'utc';
+  // The zone in effect is kept as it is spelled (120a), so only where this
+  // device can use that spelling: a stored Europe/Kyiv on a device that
+  // refuses it is no zone in effect here, and its rows change it, as the
+  // core's group does (to the device's Europe/Kiev).
+  const storedUsable =
+    q.stored === null || !q.unusable.some((name) => name.toLowerCase() === q.stored?.toLowerCase());
+  const keptAt = storedUsable ? storedAt : null;
   const deviceAt = placed.device?.kind === 'listed' ? placed.device.position : null;
   const sameAsStored = (name: string | null) =>
     name !== null && q.stored !== null && name.toLowerCase() === q.stored.toLowerCase();
 
   const zonePick = (at: number): ZonePick =>
-    at === storedAt
+    at === keptAt
       ? UNCHANGED
       : { kind: 'zone', zone: at === deviceAt && q.device !== null ? q.device : labels[at].zone };
   const utcPick: ZonePick = onUtc ? UNCHANGED : { kind: 'zone', zone: null };
@@ -110,7 +119,13 @@ export function zonePickerList(q: ZonePickerQuestion): ZonePickerList {
     const entry = hit.entry;
     switch (entry.kind) {
       case 'utc':
-        rows.push({ key: 'utc', text: zoneEntryText(null, null, t), selectable: true, pick: utcPick, current: onUtc });
+        rows.push({
+          key: 'utc',
+          text: zoneHitText(hit, q.offsets, t, q.groups, q.formatDay),
+          selectable: true,
+          pick: utcPick,
+          current: onUtc,
+        });
         break;
       case 'group': {
         const group = q.groups.groups[entry.group];
@@ -130,13 +145,16 @@ export function zonePickerList(q: ZonePickerQuestion): ZonePickerList {
         break;
       }
       case 'zone': {
-        const refusal = q.groups.refused[entry.position];
+        // The zone in effect, kept in a spelling this device can use, is
+        // no refusal, though the device refuses its listed name.
+        const kept = entry.position === keptAt;
+        const refusal = kept ? null : q.groups.refused[entry.position];
         rows.push({
           key: `zone-${entry.position}`,
           text: marked(zoneHitText(hit, q.offsets, t, q.groups, q.formatDay), refusal, false),
           selectable: refusal === null,
           pick: zonePick(entry.position),
-          current: entry.position === storedAt,
+          current: kept,
         });
         break;
       }
@@ -157,10 +175,16 @@ export function zonePickerList(q: ZonePickerQuestion): ZonePickerList {
                 ? t('dialogs.seriesTimeZone.unreadable', { name: choice.name })
                 : null;
         if (entry === null) return null;
+        // Choosing it changes nothing; where this device refuses its
+        // spelling, the row says so and another zone is the way out.
         return {
           key: 'head-current',
-          text: t('dialogs.seriesTimeZone.headCurrent', { entry }),
-          selectable: true,
+          text: marked(
+            t('dialogs.seriesTimeZone.headCurrent', { entry }),
+            storedUsable ? null : 'device',
+            false,
+          ),
+          selectable: storedUsable,
           pick: UNCHANGED,
           current: true,
         };
@@ -173,8 +197,8 @@ export function zonePickerList(q: ZonePickerQuestion): ZonePickerList {
               ? t('dialogs.seriesTimeZone.notListed', { name: choice.name })
               : null;
         if (entry === null) return null;
-        const here = choice.kind === 'listed' && choice.position === storedAt;
-        const unchanged = here || sameAsStored(q.device);
+        const here = choice.kind === 'listed' && choice.position === keptAt;
+        const unchanged = here || (storedUsable && sameAsStored(q.device));
         return {
           key: 'head-device',
           text: marked(t('dialogs.seriesTimeZone.headDevice', { entry }), head.refusal, false),

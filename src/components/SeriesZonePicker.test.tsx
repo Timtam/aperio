@@ -91,16 +91,25 @@ describe('SeriesZonePicker', () => {
   });
 
   it("chooses the marked row: here the device's zone", () => {
-    const { search, onPick, onSubmit } = open();
+    const { search, onPick } = open();
     fireEvent.keyDown(search, { key: 'ArrowDown' });
-    fireEvent.keyDown(search, { key: 'Enter' });
+    // fireEvent returns false when the handler prevented the default: the
+    // Enter never reaches the editor's form as a submit.
+    expect(fireEvent.keyDown(search, { key: 'Enter' })).toBe(false);
     expect(onPick).toHaveBeenCalledWith({ kind: 'zone', zone: 'Europe/Berlin' });
-    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('keeps Enter from the form even with nothing marked', () => {
+    const { search, onPick } = open();
+    expect(fireEvent.keyDown(search, { key: 'Enter' })).toBe(false);
+    expect(onPick).not.toHaveBeenCalled();
   });
 
   it('chooses a row with the mouse', () => {
     const { onPick, options } = open();
     const london = options().find((option) => option.textContent?.includes('London, Dublin'));
+    fireEvent.mouseDown(london!, { button: 2 });
+    expect(onPick).not.toHaveBeenCalled();
     fireEvent.mouseDown(london!);
     expect(onPick).toHaveBeenCalledWith({ kind: 'zone', zone: 'Europe/London' });
   });

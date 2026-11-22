@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   delayedSay,
@@ -72,6 +73,7 @@ export function ZonePickerDialog({
 }) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput | null>(null);
   const [visible, setVisible] = useState(true);
   const [query, setQuery] = useState('');
@@ -80,12 +82,21 @@ export function ZonePickerDialog({
   const typed = useRef(false);
 
   const sayCount = useMemo(
-    () => delayedSay((text) => AccessibilityInfo.announceForAccessibility(text), COUNT_PAUSE_MS),
+    // Queued, so it never cuts off the row VoiceOver is reading.
+    () =>
+      delayedSay(
+        (text) => AccessibilityInfo.announceForAccessibilityWithOptions(text, { queue: true }),
+        COUNT_PAUSE_MS,
+      ),
     [],
   );
   useEffect(() => () => sayCount.cancel(), [sayCount]);
 
   const calendarKey = JSON.stringify(calendarZones);
+  const unusable = useMemo(
+    () => unusableZones(listedZoneLabels().map((label) => label.zone), stored),
+    [stored],
+  );
   const groups = useMemo(
     () =>
       zoneGroups({
@@ -93,12 +104,9 @@ export function ZonePickerDialog({
         stored,
         device: deviceZone,
         calendar_zones: JSON.parse(calendarKey) as CalendarZones,
-        unusable: unusableZones(
-          listedZoneLabels().map((label) => label.zone),
-          stored,
-        ),
+        unusable,
       }),
-    [today, stored, deviceZone, calendarKey],
+    [today, stored, deviceZone, calendarKey, unusable],
   );
   const offsets = useMemo(() => zoneOffsets(startAt, today), [startAt, today]);
   const list = useMemo(() => {
@@ -117,10 +125,11 @@ export function ZonePickerDialog({
       regionNames: zoneRegionNames(t),
       stored,
       device: deviceZone,
+      unusable,
       t,
       formatDay,
     });
-  }, [groups, offsets, query, stored, deviceZone, t, i18n.language]);
+  }, [groups, offsets, query, stored, deviceZone, unusable, t, i18n.language]);
 
   // iOS hears the count line once the typing pauses; Android reads it from
   // the live region. Never for the list as it opens, where it is the search
@@ -159,9 +168,30 @@ export function ZonePickerDialog({
       onShow={focusSearch}
       onDismiss={Platform.OS === 'ios' ? finish : undefined}
     >
-      <View style={styles.root} accessibilityViewIsModal>
-        <Text style={styles.title} accessibilityRole="header">
-          {t('dialogs.seriesTimeZone.title')}
+      <View
+        style={[styles.root, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12 }]}
+        accessibilityViewIsModal
+        // VoiceOver's two-finger scrub closes it, as „Abbrechen“ does.
+        onAccessibilityEscape={() => close(null)}
+      >
+        <View style={styles.header}>
+          <Text style={styles.title} accessibilityRole="header">
+            {t('dialogs.seriesTimeZone.title')}
+          </Text>
+          {/* At the top, where it is never under the keyboard or after the
+              whole list. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('mobile.cancel')}
+            onPress={() => close(null)}
+            style={({ pressed }) => [styles.cancel, pressed && styles.cancelPressed]}
+          >
+            <Text style={styles.cancelText}>{t('mobile.cancel')}</Text>
+          </Pressable>
+        </View>
+        {/* The search field's name, shown; the field says it itself. */}
+        <Text style={styles.label} importantForAccessibility="no" accessibilityElementsHidden>
+          {t('dialogs.seriesTimeZone.searchLabel')}
         </Text>
         <TextInput
           ref={inputRef}
@@ -192,7 +222,9 @@ export function ZonePickerDialog({
               key={row.key}
               accessible
               accessibilityRole={selectableRole('radio')}
-              accessibilityState={{ selected: row.current }}
+              // Not the `disabled` prop, which would take the row out of
+              // reach; the state says it, and the label says why.
+              accessibilityState={{ selected: row.current, disabled: !row.selectable }}
               accessibilityLabel={row.text}
               onPress={() => {
                 if (row.selectable) close(row.pick);
@@ -213,14 +245,6 @@ export function ZonePickerDialog({
             </Pressable>
           ))}
         </ScrollView>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('mobile.cancel')}
-          onPress={() => close(null)}
-          style={({ pressed }) => [styles.cancel, pressed && styles.cancelPressed]}
-        >
-          <Text style={styles.cancelText}>{t('mobile.cancel')}</Text>
-        </Pressable>
       </View>
     </Modal>
   );
@@ -228,8 +252,10 @@ export function ZonePickerDialog({
 
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
-    root: { flex: 1, gap: 12, padding: 16, paddingTop: 48, backgroundColor: c.background },
-    title: { fontSize: 20, fontWeight: '700', color: c.textPrimary },
+    root: { flex: 1, gap: 12, paddingHorizontal: 16, backgroundColor: c.background },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+    title: { flex: 1, fontSize: 20, fontWeight: '700', color: c.textPrimary },
+    label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     input: {
       fontSize: 17,
       color: c.textPrimary,
@@ -260,7 +286,6 @@ const makeStyles = (c: ThemeColors) =>
     marker: { fontSize: 18, width: 22, textAlign: 'center', color: c.textPrimary },
     rowText: { flex: 1, fontSize: 16, color: c.textPrimary },
     cancel: {
-      alignSelf: 'flex-end',
       paddingVertical: 12,
       paddingHorizontal: 18,
       borderRadius: 10,
