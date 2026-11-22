@@ -3616,7 +3616,7 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Regeln ab heute statt 313 Städte, jede mit ihrer Uhr zuerst und bis zu drei
   Städten; „+2“ findet Gruppen, ein Stadtname die Stadt. Gewählt speichert
   eine Gruppe die Zone der Serie, sonst die des Geräts, sonst ihre Hauptstadt.
-  Die Auswahldialoge folgen nach den Messungen. Vorläufig (123a bis 129a):
+  Die Auswahldialoge folgen nach den Messungen. Bestätigt (123a bis 129a):
   zwei Jahre, die Rangliste der Hauptstädte, drei Formen der Uhr, die
   Zählzeile einer Suche, Gruppen, die ein Kalender nur zum Teil nimmt, die
   Zeilen über der Liste, Versätze aus WebAssembly.

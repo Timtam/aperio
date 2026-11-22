@@ -1,6 +1,6 @@
 # Zeitzone einer Serie — Entwurf
 
-Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), Stufe 5 (Exchange mit PR 8a, Microsoft 365 #182), Stufe 6 (#183) und Stufe 7 (#184); die Stufen 8 bis 14 werden in der Reihenfolge der Stufenliste gebaut (93b), Stufe 8 nach den Entscheidungen 100a bis 103b.**
+Status: **entschieden; Stufen 1 bis 4 gebaut (#72 bis #74, Exchange-Zonen bis #169), Stufe 5 (Exchange mit PR 8a, Microsoft 365 #182), Stufe 6 (#183), Stufe 7 (#184), Stufe 8 (#185 bis #192, 116a #195), Stufe 9 (#194), Stufe 10 (#196) und der Kern von Stufe 11 (#198); die Auswahldialoge (Stufe 11) und die Editoren (Stufe 12) folgen nach Tonis Messungen, die Stufen 13 und 14 danach, in der Reihenfolge der Stufenliste (93b).**
 Toni hat die Form am 14. und 15. September 2026 festgelegt (Entscheidungen 13b,
 14a, 15a, 16b, 17b, 18a, 20a, 21a, 22a, 23b, 24a, 25b, 26a, 29a bis 32a, 38a
 bis 43b, 46a bis 49a, 51a bis 53a, 57a, 58a, 61a, 62b, 63a und 64a, dazu die Vorlese-Form F). Die Planung lief in zwei
@@ -539,10 +539,10 @@ Bestandsaufnahme der Editoren, des Kerns und der zwei Messungen:
   (eigener PR vor Stufe 8, am Gerät noch ungeprüft).
 
 Zwölf Entscheidungen zum Serienende traf Claude in der Nacht zum 22. November
-2026 **vorläufig**, nach Tonis Auftrag, über Nacht durchzuarbeiten und nur bei
+2026 vorläufig, nach Tonis Auftrag, über Nacht durchzuarbeiten und nur bei
 kritischen Fragen anzuhalten. Grundlage ist eine Bestandsaufnahme aller Stellen,
-die ein UNTIL lesen oder schreiben, mit Gegenprüfung. Toni bestätigt oder kippt
-sie:
+die ein UNTIL lesen oder schreiben, mit Gegenprüfung. **Toni hat sie alle am
+2026-11-22 bestätigt**, 107b mit der Verschiebung auf Stufe 12:
 
 - **105a — die Schutzregel erkennt einen Schnitt an der Uhrzeit.** Ein Ende
   `…T235959Z` auf der Uhr einer Zone gilt als Zeitpunkt, wenn die Sekunde
@@ -633,8 +633,8 @@ Toni hat am 2026-11-22 vor den Messungen zu Stufe 11 entschieden:
     Sommerzeit neben Helsinki; eine Serie läge dann ein halbes Jahr eine
     Stunde daneben. Ebenso verworfen: erst Gruppe, dann Stadt (ein Schritt
     mehr) und die volle Liste (17b).
-  - Die offenen Punkte entschied Toni am selben Tag (119b bis 122b), den Rest
-    wählte Claude vorläufig (123a bis 129a).
+  - Die offenen Punkte entschied Toni am selben Tag (119b bis 122b); den Rest
+    wählte Claude (123a bis 129a), und Toni bestätigte ihn.
 - **119b — ein Gruppen-Eintrag nennt zuerst seine Uhr, dann die Städte:**
   „UTC+01:00, Sommerzeit UTC+02:00: Berlin, Paris, Rome und 13 weitere“.
   Beim Durchpfeilen hört man sofort, wo man in der sortierten Liste steht.
@@ -653,9 +653,9 @@ Toni hat am 2026-11-22 vor den Messungen zu Stufe 11 entschieden:
 - **122b — die Zählzeile ist kurz:** „62 Gruppen“. Verworfen: mit dem
   Hinweis, dass die Suche jede Stadt findet.
 
-Vorläufig von Claude gewählt (2026-11-22, nach einem Entwurf mit drei
-Ansätzen, zwei Gutachtern und einer Zusammenführung; Toni bestätigt oder
-kippt):
+Von Claude gewählt (2026-11-22, nach einem Entwurf mit drei Ansätzen, zwei
+Gutachtern und einer Zusammenführung) und **von Toni am selben Tag
+bestätigt**:
 
 - **123a — „ab heute“ reicht zwei Jahre**, das Ende eingeschlossen, und
   verglichen wird jeder Wechsel der Gesamt-Verschiebung genau, nicht in
@@ -1118,8 +1118,8 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
 - **Anlegen aus dem Editor** stempelt nie die Gerätezone über eine gewählte UTC.
 - **Schreibweise der Gerätezone:** Bis Stufe 10 bekommt eine neue Serie die
   Gerätezone so, wie das Gerät sie schreibt, etwa `Asia/Calcutta` (26a). Stufe 10
-  entscheidet, ob die Vorbelegung kanonisch gespeichert wird: ja, vorläufig
-  (117a), sobald die Editoren das Formular-Modell lesen (Stufe 12).
+  entscheidet, ob die Vorbelegung kanonisch gespeichert wird: ja (117a,
+  bestätigt), sobald die Editoren das Formular-Modell lesen (Stufe 12).
 - **Kopieren und Duplizieren** behalten die Zonen-Entscheidung der Quelle: Eine
   Serie auf „UTC (ohne Sommerzeit)“ bleibt als Kopie auf UTC, statt die
   Gerätezone zu bekommen (gebaut mit PR 8b, 262). Das Verschieben einer ganzen

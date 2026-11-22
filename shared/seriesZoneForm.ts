@@ -136,7 +136,7 @@ function deviceSeriesZone(deviceZone: string | null): string | null {
 
 /**
  * The zone a new series starts with: the device's, written canonically
- * (decision 117a, provisional) where this device can use that spelling, or
+ * (decision 117a) where this device can use that spelling, or
  * UTC where the device reports UTC or a name tzdata does not know (26a) or
  * the calendar cannot store the device's zone (22a). `null` for UTC, and in a
  * calendar that stores no zones.
