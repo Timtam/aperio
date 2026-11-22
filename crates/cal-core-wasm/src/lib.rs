@@ -244,6 +244,14 @@ pub fn wall_clock(question_json: &str) -> Result<String, JsValue> {
     rules::wall_clock(question_json).map_err(to_js)
 }
 
+/// Changing the clock a series repeats on, as JSON: whether the editors ask
+/// which days to keep, and the two answers; `null` for a start that names no
+/// instant. See `cal_core::series_clock_change`.
+#[wasm_bindgen(js_name = seriesClockChange)]
+pub fn series_clock_change(question_json: &str) -> Result<String, JsValue> {
+    rules::series_clock_change(question_json).map_err(to_js)
+}
+
 /// The IANA tzdata release this module's zones were built from, which the
 /// desktop compares with its host's at startup (decision 104a).
 #[wasm_bindgen(js_name = tzdataVersion)]

@@ -82,6 +82,7 @@ import {
   seriesClockZoneThroughCore,
   canonicalZoneThroughCore,
   expansionClockThroughCore,
+  seriesClockChangeJson,
   zoneLabelsJson,
   zoneSearchJson,
   zoneChoiceJson,
@@ -244,6 +245,7 @@ initCoreRules()
       seriesClockZone: seriesClockZoneThroughCore,
       canonicalZone: canonicalZoneThroughCore,
       expansionClock: expansionClockThroughCore,
+      seriesClockChangeJson,
     });
 
     // The world zone list: its names and search from the core in WebAssembly,

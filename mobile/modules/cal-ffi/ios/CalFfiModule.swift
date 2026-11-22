@@ -534,6 +534,11 @@ public class CalFfiModule: Module {
       try recurrenceSummary(inputJson: inputJson)
     }
 
+    // Changing the clock a series repeats on: the question and both answers.
+    Function("seriesClockChange") { (questionJson: String) -> String in
+      try seriesClockChange(questionJson: questionJson)
+    }
+
     // Dates and times on a series' clock: wallOf, instantOf, untilOn.
     Function("wallClock") { (questionJson: String) -> String in
       try wallClock(questionJson: questionJson)

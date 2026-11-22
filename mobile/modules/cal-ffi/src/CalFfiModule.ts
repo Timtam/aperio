@@ -198,6 +198,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  date or time (`cal_core::wall_clock`). Synchronous. */
   wallClock(questionJson: string): string;
 
+  /** Changing the clock a series repeats on, as JSON: whether the editors
+   *  ask which days to keep, and both answers; `null` for a start that names
+   *  no instant (`cal_core::series_clock_change`). Synchronous. */
+  seriesClockChange(questionJson: string): string;
+
   /** The parts a repeat rule takes from a `YYYY-MM-DD` day, as JSON, or
    *  `null` for a key that names no day (`cal_core::day_parts`). Synchronous. */
   dayParts(dayKey: string): string;

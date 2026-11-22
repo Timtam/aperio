@@ -1485,6 +1485,46 @@ Handy im selben PR.
    `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die
    Passung im Kern für gezählte Wochentage und negative Monatstage übereinstimmen.
+   Geprüft (2026-11-22): Für zehn Regeln mit gezählten Wochentagen, Tagen vom
+   Monatsende und Monaten nennt der Kern über zwei Jahre Tag für Tag dieselben
+   Tage wie rrule.js (`seriesClockChange.contract.test.ts`). Gebaut
+   (2026-11-22): `cal_core::series_clock_change` mit Tür `seriesClockChange`
+   (WebAssembly, UniFFI, beide Handy-Module, `shared/seriesClock.ts`), 32 Zeilen
+   in `seriesClockChange.json`, von Hand aus den Zonenregeln, darunter die
+   beiden Beispiele aus „Die Wochentag-Frage“ und eine je Prüfbefund. Die
+   Antworten:
+   - „wie sie jetzt fallen“: Der Beginn bleibt, die Regel wandert um so viele
+     Tage, wie der Beginn auf der neuen Uhr wandert (`series_shift`, ein
+     Schritt von der alten zur neuen Uhr);
+   - „wie in der Regel“: Der Regeltext bleibt, der Beginn rückt auf seinen
+     alten Tag zurück, wo die Tage der Regel nur zu diesem passen (oder die
+     Regel ihre Tage aus dem Beginn nimmt);
+   - in beiden wandert jede Ausnahme, die einen Termin streicht, mit ihm in
+     Wanduhrzeit, so wie die Aufklapper durch eine Regel schreiten; eine, die
+     nichts streicht, bleibt wörtlich. Ob sie streicht, entscheidet, wo der
+     Termin steht: hinter einer Lücke, die seine Uhrzeit überspringt, zu
+     einer Uhrzeit der Regel, an einem Tag, an dem sie wiederholt, in ihrem
+     Intervall (Wochen ab `WKST`) und vor ihrem Ende; stündlich und schneller
+     nach dem Raster der Regel. Stehen zwei Termine auf ihrem Zeitpunkt (der
+     über die Frühjahrs-Lücke geschobene und der danach), wandern beide;
+   - das Ende einer Regel mit einem Termin am Tag wird zum Ende seines
+     letzten Tages auf der neuen Uhr, `…T235959Z`, wo die neue Uhr es so
+     liest (101b, 105a), sonst der letzte Moment dieses Tages; bei einer
+     stündlichen Regel oder mehreren Uhrzeiten am Tag wandert ein Schnitt mit
+     dem Termin, vor dem er endet, und bleibt eine Sekunde davor;
+   - ein Beginn oder eine Ausnahme in der Frühjahrs-Lücke der neuen Uhr lehnt
+     die Antwort ab, ebenso jeder Grund, aus dem `series_shift` ablehnt
+     (20a).
+   Gefragt wird nur, wenn der Beginn den Tag wechselt und die Regel Tage
+   nennt, oder eine Serie, deren Tage am Beginn hängen, sie nicht halten kann
+   (24a). Noch liest das kein Editor (Stufen 10 und 12).
+   Bekannte Grenzen nach drei Prüfrunden: Fällt bei einer stündlichen Regel
+   in der Frühjahrs-Lücke der neuen Uhr der letzte behaltene Termin auf
+   denselben Zeitpunkt wie der erste geschnittene (RFC 5545 schiebt den einen
+   über die Lücke), endet die Serie vor beiden, und ihr letzter Termin geht
+   verloren. Bei Regeln mit `BYSETPOS`, `BYYEARDAY` oder `BYWEEKNO`, deren
+   Tage der Kern nicht nachrechnet, gilt jede Ausnahme zu einer Uhrzeit der
+   Regel als streichend.
 10. **Das Formular-Modell** — `feat(shared): the series clock form model`.
     Sichtbarkeit nach der Tabelle, Vorbelegung, Wechsel, Speicherfunktion,
     Rückfall auf UTC für Zonen, die das Gerät ablehnt, Kopieren und Duplizieren
