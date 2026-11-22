@@ -57,6 +57,7 @@ import uniffi.cal_ffi.taskSettings as uniffiTaskSettings
 import uniffi.cal_ffi.recurrenceSummary as uniffiRecurrenceSummary
 import uniffi.cal_ffi.calendarWeeks as uniffiCalendarWeeks
 import uniffi.cal_ffi.dayParts as uniffiDayParts
+import uniffi.cal_ffi.wallClock as uniffiWallClock
 import uniffi.cal_ffi.seriesShift as uniffiSeriesShift
 import uniffi.cal_ffi.tailExceptions as uniffiTailExceptions
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
@@ -670,6 +671,11 @@ class CalFfiModule : Module() {
     // A repeat rule in words: keys and values the surface renders.
     Function("recurrenceSummary") { inputJson: String ->
       uniffiRecurrenceSummary(inputJson)
+    }
+
+    // Dates and times on a series' clock: wallOf, instantOf, untilOn.
+    Function("wallClock") { questionJson: String ->
+      uniffiWallClock(questionJson)
     }
 
     // The parts a repeat rule takes from a day: weekday, nth weekday, month.

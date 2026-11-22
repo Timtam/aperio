@@ -236,10 +236,24 @@ pub fn expansion_clock(all_day: bool, tzid: &str) -> String {
     rules::expansion_clock(all_day, tzid)
 }
 
+/// A question about a series' clock as JSON (`wallOf`, `instantOf`,
+/// `untilOn`), its answer as JSON, `null` for text that names no instant,
+/// date or time. See `cal_core::wall_clock`.
+#[wasm_bindgen(js_name = wallClock)]
+pub fn wall_clock(question_json: &str) -> Result<String, JsValue> {
+    rules::wall_clock(question_json).map_err(to_js)
+}
+
+/// The IANA tzdata release this module's zones were built from, which the
+/// desktop compares with its host's at startup (decision 104a).
+#[wasm_bindgen(js_name = tzdataVersion)]
+pub fn tzdata_version() -> String {
+    cal_core::tzdata_version().to_string()
+}
+
 /// The world zone list's names: every listed zone's id, city, area and region,
-/// by position. See `cal_core::zone_list`. The offsets are not here: they need
-/// the zones (cal-zone: jiff and its bundled tzdata), which this module leaves
-/// out, and the desktop asks its host.
+/// by position. See `cal_core::zone_list`. The offsets are not here yet: the
+/// desktop asks its host for them.
 #[wasm_bindgen(js_name = zoneLabels)]
 pub fn zone_labels() -> Result<String, JsValue> {
     rules::zone_labels().map_err(to_js)

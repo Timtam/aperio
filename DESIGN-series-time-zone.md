@@ -496,7 +496,7 @@ wieder aufgenommen wurde (97a bis 99a später am Tag, zu den Stufen 6 und 7):
   ablehnen. Der Live-Test vor dem Merge hat es an Tonis Server bestätigt
   (Stufe 7).
 
-Vier Entscheidungen zu Stufe 8 traf Toni am 22. November 2026, nach einer
+Fünf Entscheidungen zu Stufe 8 traf Toni am 22. November 2026, nach einer
 Bestandsaufnahme der Editoren, des Kerns und der zwei Messungen:
 
 - **100a — die Wanduhr-Umrechnung ist eine Kern-Regel, und die Zonendaten
@@ -505,7 +505,10 @@ Bestandsaufnahme der Editoren, des Kerns und der zwei Messungen:
   rechnet der Kern mit denselben Daten (tzdata 2026f), mit denen die Adapter
   schreiben. Damit das auf dem Desktop ohne Warten geht, bekommt
   `cal-core-wasm` die Zonendaten; Stufe 3 hatte sie draußen gelassen. Vorher
-  wird gemessen, wie viel größer das Modul wird, und Toni bekommt die Zahl.
+  wird gemessen, wie viel größer das Modul wird, und Toni bekommt die Zahl:
+  mit einer Probe-Tür 293 KB; mit der Wanduhr-Regel selbst wächst das Modul
+  von 2,42 auf 2,84 MB (+418 KB roh, +143 KB gzip), weil sie auch jiffs
+  Auflösung von Lücke und Doppelstunde braucht.
   Verworfen: eine Kopie mit den Intl-Daten des Geräts (ein getipptes 09:00
   könnte auf einem Gerät mit alten Daten als 10:00 beim Anbieter ankommen)
   und die Kern-Regel nur asynchron über den Host (Texte kämen erst, nachdem
@@ -519,6 +522,16 @@ Bestandsaufnahme der Editoren, des Kerns und der zwei Messungen:
 - **102a — das Ende behält die Dauer.** Wandert der Beginn über eine
   Zeitumstellung, behält das Ende die verstrichene Zeit, wie heute; so landet
   es nie von selbst in einer Lücke.
+- **104a — eine Quelle, in zwei Laufzeiten übersetzt, und eine Prüfung.**
+  Toni wollte die Zonendaten nur einmal haben. Das Handy hat sie ohnehin
+  nur einmal (kein WebAssembly). Auf dem Desktop gibt es eine gepinnte
+  Quelle (jiff-tzdb in Cargo.lock, die Namen aus `crates/cal-core/tzdata`),
+  die beim Bau in den Host und ins WebAssembly-Modul übersetzt wird, wie
+  jede Kern-Regel. Beim Start vergleicht der Desktop die tzdata-Version
+  beider (`tzdata_version`, `tzdataVersion`) und startet bei einem
+  Unterschied nicht, mit Grund; ein Test hält das Modul an die gepinnte
+  Version. Verworfen: die Daten nur im Host und beim Start einmal ins Modul
+  holen (mehr Umbau, ein Startschritt, ein eigener Weg für die Tests).
 - **103b — der Android-Datumsdialog wird sofort berichtigt.** Er las und
   beantwortete einen Tag in UTC; östlich von UTC stand der Vortag
   vorgewählt, westlich kam jedes gewählte Datum einen Tag zu früh zurück
@@ -1368,7 +1381,15 @@ Handy im selben PR.
    `shared/dayParts.ts`, Fixture `dayParts.json`), nicht mehr ein `Date` auf
    der Uhr des Geräts; beide Editoren nehmen dafür eine gemeinsame Regel
    (`resolveAgainstDay`) statt je einer Kopie. WKST bleibt beim Bearbeiten
-   erhalten.
+   erhalten. Gebaut, Schritt 2: die Wanduhr-Regel `cal_core::wall_clock`
+   (`wallOf`, `instantOf`, `untilOn`: Lücke ohne Zeitpunkt mit den Versätzen
+   davor und danach, Doppelstunde die frühere Lesart und die spätere
+   genannt, 23:59:59 eines Tages auf der Uhr), Tür `shared/wallClock.ts`,
+   Fixture `wallClock.json` (aus tzdatas Regeln von Hand, gegen Nodes
+   ICU-Daten geprüft). Das WebAssembly-Modul trägt die Zonen (100a, 104a);
+   der CI-Wächter lässt dort cal-zone zu und hält rrule und chrono-tz
+   draußen. Noch unsichtbar: Die Editoren lesen die Regel ab den nächsten
+   Schritten.
 9. **Die Kern-Regel für den Zonenwechsel (15a)** — `feat(core): changing the clock a series repeats on`.
    `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die

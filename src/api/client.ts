@@ -2391,3 +2391,6 @@ export const listFailedPlugins = () =>
  *  (src-tauri/src/commands/time_zones.rs). */
 export const zoneOffsets = (question: ZoneOffsetsQuestion) =>
   invoke<ZoneOffsets>('zone_offsets', { question });
+
+/** The tzdata release the host's zones were built from (decision 104a). */
+export const hostTzdataVersion = () => invoke<string>('tzdata_version');

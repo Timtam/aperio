@@ -193,6 +193,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  question for many days. */
   calendarWeeks(inputJson: string): string;
 
+  /** A question about a series' clock as JSON (`wallOf`, `instantOf`,
+   *  `untilOn`), its answer as JSON, `null` for text that names no instant,
+   *  date or time (`cal_core::wall_clock`). Synchronous. */
+  wallClock(questionJson: string): string;
+
   /** The parts a repeat rule takes from a `YYYY-MM-DD` day, as JSON, or
    *  `null` for a key that names no day (`cal_core::day_parts`). Synchronous. */
   dayParts(dayKey: string): string;

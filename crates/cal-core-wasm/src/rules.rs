@@ -363,6 +363,11 @@ pub fn day_parts(day_key: &str) -> String {
     cal_core::day_parts_json(day_key)
 }
 
+/// See [`crate::wallClock`].
+pub fn wall_clock(question_json: &str) -> Result<String, WireError> {
+    cal_core::wall_clock_json(question_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 /// See [`crate::calendarWeeks`].
 pub fn calendar_weeks(input_json: &str) -> Result<String, WireError> {
     cal_core::calendar_weeks_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))

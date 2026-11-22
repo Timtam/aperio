@@ -58,6 +58,7 @@ import {
   installRecurrenceSummaryRules,
   installCalendarWeekRules,
   installDayPartsRules,
+  installWallClockRules,
   installSeriesShiftRules,
   installTailExceptionsRules,
   installSeriesClockRules,
@@ -106,6 +107,7 @@ import {
   recurrenceSummaryJson,
   calendarWeeksJson,
   dayPartsJson,
+  wallClockJson,
   seriesShiftJson,
   tailExceptionsJson,
   seriesClockZoneThroughCore,
@@ -184,6 +186,7 @@ installTailExceptionsRules({ tailExceptionsJson });
 installRecurrenceSummaryRules({ recurrenceSummaryJson });
 installCalendarWeekRules({ calendarWeeksJson });
 installDayPartsRules({ dayPartsJson });
+installWallClockRules({ wallClockJson });
 installSeriesClockRules({
   seriesClockZone: seriesClockZoneThroughCore,
   canonicalZone: canonicalZoneThroughCore,

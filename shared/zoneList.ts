@@ -3,9 +3,9 @@
 //
 // The names, the search, and where a stored or device zone stands are rules in
 // the core and answer synchronously on both surfaces. The offsets need tzdata's
-// rules: the phone asks its native core, the desktop asks its host (its
-// WebAssembly module leaves the zone data out), so that one question is a Promise
-// on both surfaces. An answer names the instant it is for; `offsetsAreFor`
+// rules: the phone asks its native core, the desktop its host (its WebAssembly
+// module carries the zones since stage 8, so this may become synchronous
+// there), so that one question is a Promise on both surfaces. An answer names the instant it is for; `offsetsAreFor`
 // lets a form drop one for a start it no longer has.
 //
 // The words — a region's name, the offset's form ("UTC−04:00"), "(auch Oslo)",

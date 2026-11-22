@@ -1,0 +1,388 @@
+{
+  "about": "Dates and times on the clock a series repeats on (cal_core::wall_clock, DESIGN-series-time-zone.md stage 8, decision 100a). Each question is answered with the clock read (the canonical zone, null for UTC) and: wallOf the date, HH:MM time and seconds an instant shows; instantOf how a typed wall time reads (single, fold with the earlier instant and the later one, gap with the offsets before and after, in seconds east of UTC); untilOn the instant of 23:59:59 that day (absent where the clock skips the whole day). null for text that names no instant, date or time. Written by hand from tzdata's rules (Berlin, New York, Lord Howe, Apia 2011, Paris LMT +00:09:21) and checked against Node's ICU zone data; the core and both surfaces read this file.",
+  "rows": [
+    {
+      "name": "wall-berlin-winter",
+      "question": {
+        "op": "wallOf",
+        "at": "2026-11-02T08:00:00Z",
+        "tzid": "Europe/Berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "date": "2026-11-02",
+        "time": "09:00",
+        "second": 0
+      }
+    },
+    {
+      "name": "wall-new-york-crosses-midnight",
+      "question": {
+        "op": "wallOf",
+        "at": "2026-11-02T04:30:00Z",
+        "tzid": "America/New_York"
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "date": "2026-11-01",
+        "time": "23:30",
+        "second": 0
+      }
+    },
+    {
+      "name": "paris-1900-seconds",
+      "question": {
+        "op": "wallOf",
+        "at": "1900-01-01T00:00:00Z",
+        "tzid": "Europe/Paris"
+      },
+      "expect": {
+        "clock": "Europe/Paris",
+        "date": "1900-01-01",
+        "time": "00:09",
+        "second": 21
+      }
+    },
+    {
+      "name": "no-zone-is-utc",
+      "question": {
+        "op": "wallOf",
+        "at": "2026-07-01T00:00:00Z",
+        "tzid": null
+      },
+      "expect": {
+        "clock": null,
+        "date": "2026-07-01",
+        "time": "00:00",
+        "second": 0
+      }
+    },
+    {
+      "name": "utc-name-is-utc",
+      "question": {
+        "op": "wallOf",
+        "at": "2026-07-01T00:00:00Z",
+        "tzid": "Etc/UTC"
+      },
+      "expect": {
+        "clock": null,
+        "date": "2026-07-01",
+        "time": "00:00",
+        "second": 0
+      }
+    },
+    {
+      "name": "unknown-name-is-utc",
+      "question": {
+        "op": "wallOf",
+        "at": "2026-07-01T00:00:00Z",
+        "tzid": "Mars/Olympus"
+      },
+      "expect": {
+        "clock": null,
+        "date": "2026-07-01",
+        "time": "00:00",
+        "second": 0
+      }
+    },
+    {
+      "name": "alias-calcutta",
+      "question": {
+        "op": "wallOf",
+        "at": "2026-07-01T00:00:00Z",
+        "tzid": "Asia/Calcutta"
+      },
+      "expect": {
+        "clock": "Asia/Kolkata",
+        "date": "2026-07-01",
+        "time": "05:30",
+        "second": 0
+      }
+    },
+    {
+      "name": "lower-case-berlin",
+      "question": {
+        "op": "wallOf",
+        "at": "2026-07-01T00:00:00Z",
+        "tzid": "europe/berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "date": "2026-07-01",
+        "time": "02:00",
+        "second": 0
+      }
+    },
+    {
+      "name": "etc-gmt-minus-14",
+      "question": {
+        "op": "wallOf",
+        "at": "2026-07-01T00:00:00Z",
+        "tzid": "Etc/GMT-14"
+      },
+      "expect": {
+        "clock": "Etc/GMT-14",
+        "date": "2026-07-01",
+        "time": "14:00",
+        "second": 0
+      }
+    },
+    {
+      "name": "berlin-single",
+      "question": {
+        "op": "instantOf",
+        "date": "2026-11-02",
+        "time": "09:00",
+        "tzid": "Europe/Berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "wall": {
+          "reading": "single",
+          "at": "2026-11-02T08:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "berlin-spring-gap",
+      "question": {
+        "op": "instantOf",
+        "date": "2027-03-28",
+        "time": "02:30",
+        "tzid": "Europe/Berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "wall": {
+          "reading": "gap",
+          "offsetBefore": 3600,
+          "offsetAfter": 7200
+        }
+      }
+    },
+    {
+      "name": "berlin-autumn-fold",
+      "question": {
+        "op": "instantOf",
+        "date": "2026-10-25",
+        "time": "02:30",
+        "tzid": "Europe/Berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "wall": {
+          "reading": "fold",
+          "at": "2026-10-25T00:30:00Z",
+          "later": "2026-10-25T01:30:00Z"
+        }
+      }
+    },
+    {
+      "name": "new-york-autumn-fold",
+      "question": {
+        "op": "instantOf",
+        "date": "2026-11-01",
+        "time": "01:30",
+        "tzid": "America/New_York"
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "wall": {
+          "reading": "fold",
+          "at": "2026-11-01T05:30:00Z",
+          "later": "2026-11-01T06:30:00Z"
+        }
+      }
+    },
+    {
+      "name": "lord-howe-half-hour-gap",
+      "question": {
+        "op": "instantOf",
+        "date": "2026-10-04",
+        "time": "02:15",
+        "tzid": "Australia/Lord_Howe"
+      },
+      "expect": {
+        "clock": "Australia/Lord_Howe",
+        "wall": {
+          "reading": "gap",
+          "offsetBefore": 37800,
+          "offsetAfter": 39600
+        }
+      }
+    },
+    {
+      "name": "lord-howe-half-hour-fold",
+      "question": {
+        "op": "instantOf",
+        "date": "2026-04-05",
+        "time": "01:45",
+        "tzid": "Australia/Lord_Howe"
+      },
+      "expect": {
+        "clock": "Australia/Lord_Howe",
+        "wall": {
+          "reading": "fold",
+          "at": "2026-04-04T14:45:00Z",
+          "later": "2026-04-04T15:15:00Z"
+        }
+      }
+    },
+    {
+      "name": "apia-skipped-day",
+      "question": {
+        "op": "instantOf",
+        "date": "2011-12-30",
+        "time": "12:00",
+        "tzid": "Pacific/Apia"
+      },
+      "expect": {
+        "clock": "Pacific/Apia",
+        "wall": {
+          "reading": "gap",
+          "offsetBefore": -36000,
+          "offsetAfter": 50400
+        }
+      }
+    },
+    {
+      "name": "utc-single",
+      "question": {
+        "op": "instantOf",
+        "date": "2026-07-01",
+        "time": "12:00",
+        "tzid": null
+      },
+      "expect": {
+        "clock": null,
+        "wall": {
+          "reading": "single",
+          "at": "2026-07-01T12:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "kolkata-single",
+      "question": {
+        "op": "instantOf",
+        "date": "2026-07-01",
+        "time": "05:30",
+        "tzid": "Asia/Calcutta"
+      },
+      "expect": {
+        "clock": "Asia/Kolkata",
+        "wall": {
+          "reading": "single",
+          "at": "2026-07-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "until-berlin",
+      "question": {
+        "op": "untilOn",
+        "date": "2026-11-30",
+        "tzid": "Europe/Berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "at": "2026-11-30T22:59:59Z"
+      }
+    },
+    {
+      "name": "until-new-york",
+      "question": {
+        "op": "untilOn",
+        "date": "2026-11-30",
+        "tzid": "America/New_York"
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "at": "2026-12-01T04:59:59Z"
+      }
+    },
+    {
+      "name": "until-utc",
+      "question": {
+        "op": "untilOn",
+        "date": "2026-11-30",
+        "tzid": null
+      },
+      "expect": {
+        "clock": null,
+        "at": "2026-11-30T23:59:59Z"
+      }
+    },
+    {
+      "name": "until-kiritimati",
+      "question": {
+        "op": "untilOn",
+        "date": "2026-11-30",
+        "tzid": "Pacific/Kiritimati"
+      },
+      "expect": {
+        "clock": "Pacific/Kiritimati",
+        "at": "2026-11-30T09:59:59Z"
+      }
+    },
+    {
+      "name": "until-apia-skipped-day",
+      "question": {
+        "op": "untilOn",
+        "date": "2011-12-30",
+        "tzid": "Pacific/Apia"
+      },
+      "expect": {
+        "clock": "Pacific/Apia"
+      }
+    },
+    {
+      "name": "no-such-date",
+      "question": {
+        "op": "instantOf",
+        "date": "2026-02-30",
+        "time": "09:00",
+        "tzid": null
+      },
+      "expect": null
+    },
+    {
+      "name": "time-24",
+      "question": {
+        "op": "instantOf",
+        "date": "2026-02-03",
+        "time": "24:00",
+        "tzid": null
+      },
+      "expect": null
+    },
+    {
+      "name": "time-short",
+      "question": {
+        "op": "instantOf",
+        "date": "2026-02-03",
+        "time": "9:05",
+        "tzid": null
+      },
+      "expect": null
+    },
+    {
+      "name": "empty-date",
+      "question": {
+        "op": "untilOn",
+        "date": "",
+        "tzid": "Europe/Berlin"
+      },
+      "expect": null
+    },
+    {
+      "name": "not-an-instant",
+      "question": {
+        "op": "wallOf",
+        "at": "yesterday",
+        "tzid": null
+      },
+      "expect": null
+    }
+  ]
+}
