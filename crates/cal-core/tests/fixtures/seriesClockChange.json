@@ -736,6 +736,243 @@
           ]
         }
       }
+    },
+    {
+      "name": "a-weekly-rule-limited-to-its-start-month-follows-its-start",
+      "note": "Weekly in March from Tuesday 3 March 2026 at 23:30 UTC, to Berlin, where the start is Wednesday 00:30: BYMONTH=3 only limits the months, so the days follow the start. As they fall now is refused, as series_shift refuses moving the days of a rule limited to months, so the editors ask. As the rule says the start moves back onto Tuesday, 00:30 Berlin, and the deletion on Tuesday 9 March 2027 moves with its occurrence to Tuesday 00:30 Berlin.",
+      "question": {
+        "rrule": "FREQ=WEEKLY;BYMONTH=3",
+        "start": "2026-03-03T23:30:00Z",
+        "exceptions": [
+          "2027-03-09T23:30:00Z"
+        ],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": true,
+        "startDayBefore": "2026-03-03",
+        "startDayAfter": "2026-03-04",
+        "fit": "both",
+        "asNow": {
+          "outcome": "refused",
+          "reason": "limited_months"
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=WEEKLY;BYMONTH=3",
+          "start": "2026-03-02T23:30:00Z",
+          "exceptions": [
+            "2027-03-08T23:30:00Z"
+          ]
+        }
+      }
+    },
+    {
+      "name": "an-hourly-rule-on-mondays-cancels-nothing-on-a-sunday",
+      "note": "Hourly on Mondays from 09:30 UTC, to Berlin: a deletion at 01:30 UTC on Sunday 28 March 2027 is no occurrence (the rule repeats on Mondays only), so it stays as written, though 02:30 Berlin is skipped that night.",
+      "question": {
+        "rrule": "FREQ=HOURLY;BYDAY=MO",
+        "start": "2027-03-01T09:30:00Z",
+        "exceptions": [
+          "2027-03-28T01:30:00Z"
+        ],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2027-03-01",
+        "startDayAfter": "2027-03-01",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY;BYDAY=MO",
+          "start": "2027-03-01T09:30:00Z",
+          "exceptions": [
+            "2027-03-28T01:30:00Z"
+          ]
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY;BYDAY=MO",
+          "start": "2027-03-01T09:30:00Z",
+          "exceptions": [
+            "2027-03-28T01:30:00Z"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a-yearly-rule-in-march-repeats-on-its-start-day",
+      "note": "Yearly in March from 10 March at 01:30 UTC repeats on 10 March only (RFC 5545 takes the day from the start), so a deletion on 28 March 2027 cancels nothing and stays, though its time moved to Berlin would be skipped.",
+      "question": {
+        "rrule": "FREQ=YEARLY;BYMONTH=3",
+        "start": "2026-03-10T01:30:00Z",
+        "exceptions": [
+          "2027-03-28T01:30:00Z"
+        ],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-03-10",
+        "startDayAfter": "2026-03-10",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=YEARLY;BYMONTH=3",
+          "start": "2026-03-10T01:30:00Z",
+          "exceptions": [
+            "2027-03-28T01:30:00Z"
+          ]
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=YEARLY;BYMONTH=3",
+          "start": "2026-03-10T01:30:00Z",
+          "exceptions": [
+            "2027-03-28T01:30:00Z"
+          ]
+        }
+      }
+    },
+    {
+      "name": "an-hourly-cut-moved-into-the-autumn-fold-ends-before-the-earlier-reading",
+      "note": "Hourly at :30 from UTC to New York, cut a second before 05:30 UTC on 1 November 2026, when New York shows 01:00 to 01:59 twice: the occurrence the cut ends before moves to 01:30 New York, which stands at its earlier reading, 05:30 UTC, so the cut stays a second before it. The later reading would keep that occurrence in the reminders.",
+      "question": {
+        "rrule": "FREQ=HOURLY;UNTIL=20261101T052959Z",
+        "start": "2026-07-01T12:30:00Z",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "America/New_York"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-07-01",
+        "startDayAfter": "2026-07-01",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY;UNTIL=20261101T052959Z",
+          "start": "2026-07-01T12:30:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY;UNTIL=20261101T052959Z",
+          "start": "2026-07-01T12:30:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "an-hourly-rule-with-minutes-moves-its-deletions-in-wall-time",
+      "note": "Hourly at :00 and :30 from UTC to London: the deletion at 11:00 UTC on 3 June 2027 cancels an occurrence and moves to 11:00 London (10:00 UTC), as a rule without minutes does.",
+      "question": {
+        "rrule": "FREQ=HOURLY;BYMINUTE=0,30",
+        "start": "2027-03-01T09:00:00Z",
+        "exceptions": [
+          "2027-06-03T11:00:00Z"
+        ],
+        "fromTzid": null,
+        "toTzid": "Europe/London"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2027-03-01",
+        "startDayAfter": "2027-03-01",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY;BYMINUTE=0,30",
+          "start": "2027-03-01T09:00:00Z",
+          "exceptions": [
+            "2027-06-03T10:00:00Z"
+          ]
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY;BYMINUTE=0,30",
+          "start": "2027-03-01T09:00:00Z",
+          "exceptions": [
+            "2027-06-03T10:00:00Z"
+          ]
+        }
+      }
+    },
+    {
+      "name": "an-hourly-deletion-at-the-spring-hour-cancels-two-occurrences",
+      "note": "Hourly in Berlin, to UTC: at 01:00 UTC on 28 March 2027 stand both 02:00 (skipped, pushed past the gap) and 03:00 Berlin. The deletion cancels both, and both move: to 01:00 and 02:00 UTC.",
+      "question": {
+        "rrule": "FREQ=HOURLY",
+        "start": "2027-03-01T11:00:00Z",
+        "exceptions": [
+          "2027-03-28T01:00:00Z"
+        ],
+        "fromTzid": "Europe/Berlin",
+        "toTzid": null
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2027-03-01",
+        "startDayAfter": "2027-03-01",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY",
+          "start": "2027-03-01T11:00:00Z",
+          "exceptions": [
+            "2027-03-28T01:00:00Z",
+            "2027-03-28T02:00:00Z"
+          ]
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY",
+          "start": "2027-03-01T11:00:00Z",
+          "exceptions": [
+            "2027-03-28T01:00:00Z",
+            "2027-03-28T02:00:00Z"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a-half-hour-gap-pushes-an-hourly-occurrence-by-half-an-hour",
+      "note": "Hourly from midnight on Lord Howe Island, to Auckland: on 4 October 2026 Lord Howe skips 02:00 to 02:30, so the 02:00 occurrence stands at 02:30 (15:30 UTC on the 3rd). The deletion there cancels it and moves with it to 03:30 Auckland (14:30 UTC).",
+      "question": {
+        "rrule": "FREQ=HOURLY",
+        "start": "2026-08-31T13:30:00Z",
+        "exceptions": [
+          "2026-10-03T15:30:00Z"
+        ],
+        "fromTzid": "Australia/Lord_Howe",
+        "toTzid": "Pacific/Auckland"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-09-01",
+        "startDayAfter": "2026-09-01",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY",
+          "start": "2026-08-31T13:30:00Z",
+          "exceptions": [
+            "2026-10-03T14:30:00Z"
+          ]
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY",
+          "start": "2026-08-31T13:30:00Z",
+          "exceptions": [
+            "2026-10-03T14:30:00Z"
+          ]
+        }
+      }
     }
   ]
 }
