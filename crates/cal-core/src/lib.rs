@@ -164,7 +164,7 @@ pub use series_clock::{
     canonical_zone, expansion_clock, listed_zones, series_clock_zone, written_series_zone,
     ExpansionClock, NameKind, TZDATA_VERSION,
 };
-pub use series_end::{last_day_through, utc_until};
+pub use series_end::{last_day_through, read_series_end, utc_until, EndReading, SeriesEnd};
 pub use series_shift::{
     series_shift_json, shift_series, SeriesShift, SeriesShiftQuestion, ShiftRefusal,
 };
@@ -234,8 +234,8 @@ pub use types::{
 };
 #[cfg(feature = "zones")]
 pub use wall_clock::{
-    instant_of, until_on, wall_clock, wall_clock_json, wall_of, WallClockAnswer, WallClockQuestion,
-    WallReading,
+    instant_of, series_end_on_clock, until_on, wall_clock, wall_clock_json, wall_of,
+    WallClockAnswer, WallClockQuestion, WallReading,
 };
 pub use write_leftover::WriteLeftover;
 pub use write_refusal::{BusyDetail, SeriesRewrite, WriteRefusal};

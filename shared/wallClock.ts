@@ -5,8 +5,9 @@
 // stored name names, or UTC. The core turns a date and a time of day into an
 // instant and back with the tzdata the adapters write with: a time the clock
 // skips (the spring gap) has no instant and says so, a time it shows twice
-// (the autumn fold) takes the earlier reading, and a changed repeat end is
-// 23:59:59 of its date on the clock. The desktop asks through its WebAssembly
+// (the autumn fold) takes the earlier reading, a changed repeat end is
+// 23:59:59 of its date on the clock, and a stored one reads through a date or
+// as an instant (`seriesEnd`). The desktop asks through its WebAssembly
 // module, which carries the zones; the phone through its native core. Both
 // answer synchronously, so a form can ask while it renders.
 //
@@ -14,11 +15,13 @@
 // `wallClock.contract.test.ts` replays it through this door, and the core and
 // the phone's bridge read the same file.
 
+import type { EndReading } from './generated/EndReading';
+import type { SeriesEnd } from './generated/SeriesEnd';
 import type { WallClockAnswer } from './generated/WallClockAnswer';
 import type { WallClockQuestion } from './generated/WallClockQuestion';
 import type { WallReading } from './generated/WallReading';
 
-export type { WallClockAnswer, WallClockQuestion, WallReading };
+export type { EndReading, SeriesEnd, WallClockAnswer, WallClockQuestion, WallReading };
 
 /** This surface's door into the core: a question as JSON in, the answer as
  *  JSON out, JSON `null` for text that names no instant, date or time. */
@@ -63,4 +66,25 @@ export function instantOf(date: string, time: string, tzid: string | null): Wall
  *  clock of a series storing `tzid`; no `at` where the clock skips the day. */
 export function untilOn(date: string, tzid: string | null): WallClockAnswer | null {
   return askWallClock({ op: 'untilOn', date, tzid });
+}
+
+/**
+ * How a series' stored `UNTIL` reads on the clock it repeats on: through a
+ * date, an instant, or a wall time, with the bound as a wall time, the last
+ * instant at or before it and the last day it reaches
+ * (`cal_core::read_series_end`, decisions 101b and 105a to 116a). `null` for a
+ * start that names no instant; no `end` in the answer for a rule without an
+ * `UNTIL`, with a `COUNT`, or one that cannot be read.
+ *
+ * `deviceZone` is the zone as this runtime reports it; only a series of days
+ * reads it, on the device's days (decision 48a).
+ */
+export function seriesEnd(
+  rrule: string,
+  start: string,
+  allDay: boolean,
+  tzid: string | null,
+  deviceZone: string | null,
+): WallClockAnswer | null {
+  return askWallClock({ op: 'seriesEnd', rrule, start, allDay, tzid, deviceZone });
 }

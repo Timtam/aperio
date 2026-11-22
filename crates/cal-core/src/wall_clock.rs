@@ -14,6 +14,9 @@
 //!   reading; the answer names the later one too.
 //! - The end of a repeat, a changed `UNTIL`, is 23:59:59 of its date on the
 //!   clock.
+//! - A stored `UNTIL` reads on the clock the series repeats on
+//!   ([`crate::read_series_end`]): through a date, an instant, or a wall
+//!   time (decisions 101b and 105a to 116a).
 //!
 //! One JSON door ([`wall_clock_json`]) answers all three questions, for the
 //! desktop's WebAssembly and the phone's UniFFI bridge. Pinned by
@@ -65,6 +68,21 @@ pub enum WallClockQuestion {
         /// `YYYY-MM-DD`.
         date: String,
         tzid: Option<String>,
+    },
+    /// How a series' stored `UNTIL` reads on the clock it repeats on.
+    #[serde(rename_all = "camelCase")]
+    SeriesEnd {
+        /// The series' rule, with or without `RRULE:`.
+        rrule: String,
+        /// The series' start, an RFC 3339 instant.
+        start: String,
+        /// Whether the series is all-day: it then repeats on the
+        /// device's days (decision 48a).
+        all_day: bool,
+        tzid: Option<String>,
+        /// The device's zone as its runtime reports it, read only for a
+        /// series of days; the core reads no clock of its own.
+        device_zone: Option<String>,
     },
 }
 
@@ -120,6 +138,11 @@ pub struct WallClockAnswer {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-export", ts(optional))]
     pub at: Option<String>,
+    /// For `seriesEnd`: how the end reads; absent for a rule without an
+    /// `UNTIL`, with a `COUNT`, or one that cannot be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
+    pub end: Option<crate::SeriesEnd>,
 }
 
 fn instant_text(at: DateTime<Utc>) -> String {
@@ -151,6 +174,7 @@ pub fn wall_of(at: DateTime<Utc>, tzid: Option<&str>) -> WallClockAnswer {
         second: Some(wall.time().second()),
         wall: None,
         at: None,
+        end: None,
     }
 }
 
@@ -182,6 +206,7 @@ pub fn instant_of(date: NaiveDate, time: NaiveTime, tzid: Option<&str>) -> WallC
         second: None,
         wall: Some(wall),
         at: None,
+        end: None,
     }
 }
 
@@ -205,6 +230,61 @@ pub fn until_on(date: NaiveDate, tzid: Option<&str>) -> WallClockAnswer {
         second: None,
         wall: None,
         at: at.map(instant_text),
+        end: None,
+    }
+}
+
+/// How `rrule`'s stored `UNTIL` reads for a series starting at `start`, on
+/// the clock [`crate::expansion_clock`] gives it: its zone, UTC, or for a
+/// series of days the zone `device_zone` names (UTC where it names none
+/// tzdata knows). The rule is [`crate::read_series_end`]'s; this gives it
+/// the clock.
+pub fn series_end_on_clock(
+    rrule: &str,
+    start: DateTime<Utc>,
+    all_day: bool,
+    tzid: Option<&str>,
+    device_zone: Option<&str>,
+) -> WallClockAnswer {
+    let expansion = crate::expansion_clock(all_day, tzid);
+    let (zone, clock) = match expansion {
+        crate::ExpansionClock::DeviceDays => clock_of(device_zone),
+        crate::ExpansionClock::Zone => clock_of(tzid),
+        crate::ExpansionClock::Utc => (Zone::UTC, None),
+    };
+    let end = crate::read_series_end(
+        rrule,
+        zone.wall(start).time(),
+        expansion,
+        |at| zone.wall(at),
+        |wall| last_at_or_before(zone, wall),
+        |wall| zone.to_utc(wall, WallPolicy::Rfc5545),
+    );
+    WallClockAnswer {
+        clock: clock.map(str::to_string),
+        date: None,
+        time: None,
+        second: None,
+        wall: None,
+        at: None,
+        end,
+    }
+}
+
+/// The last instant whose wall time on `zone` is `wall` or earlier: `wall`
+/// itself, at its later reading where the clock shows it twice, or the
+/// second before a change that skips it.
+fn last_at_or_before(zone: Zone, wall: NaiveDateTime) -> Option<DateTime<Utc>> {
+    let on = |offset: chrono::FixedOffset| {
+        DateTime::<Utc>::from_naive_utc_and_offset(
+            wall - chrono::Duration::seconds(i64::from(offset.local_minus_utc())),
+            Utc,
+        )
+    };
+    match zone.reading(wall) {
+        Reading::Single(offset) => Some(on(offset)),
+        Reading::Fold { later, .. } => Some(on(later)),
+        Reading::Gap { before, after } => last_second_before_gap(zone, wall, before, after),
     }
 }
 
@@ -257,6 +337,24 @@ pub fn wall_clock(question: &WallClockQuestion) -> Option<WallClockAnswer> {
             let date = crate::parse_day_key(date).ok()?;
             Some(until_on(date, tzid.as_deref()))
         }
+        WallClockQuestion::SeriesEnd {
+            rrule,
+            start,
+            all_day,
+            tzid,
+            device_zone,
+        } => {
+            let start = DateTime::parse_from_rfc3339(start)
+                .ok()?
+                .with_timezone(&Utc);
+            Some(series_end_on_clock(
+                rrule,
+                start,
+                *all_day,
+                tzid.as_deref(),
+                device_zone.as_deref(),
+            ))
+        }
     }
 }
 
@@ -300,6 +398,9 @@ mod contract {
             "until-nuuk-gap-at-day-end",
             "no-zone-is-utc",
             "alias-calcutta",
+            "end-berlin-0030-summer-marker-through-day",
+            "end-new-york-1900-winter-cut-stays-an-instant",
+            "end-all-day-marker-by-its-digits",
         ] {
             assert!(
                 rows.iter().any(|r| r["name"] == needed),

@@ -3592,6 +3592,12 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **Wie ein Serienende liest, steht im Kern (Stufe 8, Schritt 5, 2026-11-22,
+  101b, 105a):** `…T235959Z` auf der Uhr einer Zone heißt „bis zu diesem
+  Datum“, außer die Sekunde danach ist eine Uhrzeit der Regel (dann schrieb
+  es ein Schnitt); ein Datum heißt bis zu diesem Tag, eine Uhrzeit ohne Zone
+  gilt auf der Uhr der Serie, ganztägige Serien lesen die Ziffern. Noch
+  liest niemand die Regel; Ansichten und Erinnerungen folgen.
   ↳ **Das Ende einer Wiederholung bleibt, wie es war (Stufe 8, Schritt 4,
   2026-11-22, 106a, 110b, 113a):** Wer an der Wiederholung etwas anderes
   ändert, behält das Ende auf die Sekunde; vorher wurde es als Ende seines

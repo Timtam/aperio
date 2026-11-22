@@ -2,7 +2,14 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import contract from '../../crates/cal-core/tests/fixtures/wallClock.json';
-import { askWallClock, instantOf, untilOn, wallOf, type WallClockQuestion } from '@aperio/shared';
+import {
+  askWallClock,
+  instantOf,
+  seriesEnd,
+  untilOn,
+  wallOf,
+  type WallClockQuestion,
+} from '@aperio/shared';
 import { moduleTzdataVersion } from '../wasm/coreRules';
 
 /**
@@ -27,6 +34,9 @@ describe('wallClock contract', () => {
       'until-nuuk-gap-at-day-end',
       'no-zone-is-utc',
       'alias-calcutta',
+      'end-berlin-0030-summer-marker-through-day',
+      'end-new-york-1900-winter-cut-stays-an-instant',
+      'end-all-day-marker-by-its-digits',
     ]) {
       expect(names, `fixture lost ${needed}`).toContain(needed);
     }
@@ -49,6 +59,10 @@ describe('wallClock contract', () => {
       offsetAfter: 7200,
     });
     expect(untilOn('2026-11-30', 'America/New_York')?.at).toBe('2026-12-01T04:59:59Z');
+    expect(
+      seriesEnd('FREQ=DAILY;UNTIL=20261105T235959Z', '2026-11-02T01:00:00Z', false, 'America/New_York', null)
+        ?.end,
+    ).toMatchObject({ reading: 'throughDay', endDay: '2026-11-05' });
   });
 });
 

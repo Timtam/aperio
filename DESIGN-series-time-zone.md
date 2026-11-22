@@ -1462,6 +1462,14 @@ Handy im selben PR.
    des zehnten Termins (110b) und springt nicht mehr auf „nie“ zurück; auf
    dem Handy ist das Feld eine Datumsauswahl (113a). Aperios Schnitt
    schreibt nie mehr genau `…T235959Z` (106a).
+   Gebaut, Schritt 5: die Regel, wie ein gespeichertes Ende liest
+   (`cal_core::read_series_end`, Tür `seriesEnd` an der Wanduhr-Tür):
+   „bis zu diesem Datum“, ein Zeitpunkt oder eine Wanduhrzeit auf der Uhr
+   der Serie, mit der Grenze als Wanduhrzeit, dem letzten Zeitpunkt davor
+   und dem letzten Tag, den sie erreicht (101b, 105a, 108b, 109a, 111a,
+   115a). Die Schutzregel rechnet ohne Aufklappen; 27 Zeilen in
+   `wallClock.json`, gegen Nodes ICU-Daten geprüft. Noch liest sie niemand:
+   Ansichten und Erinnerungen folgen im nächsten Schritt.
 9. **Die Kern-Regel für den Zonenwechsel (15a)** — `feat(core): changing the clock a series repeats on`.
    `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die
