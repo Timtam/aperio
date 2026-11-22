@@ -3619,6 +3619,19 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Build gebaut und warten auf die gesammelte Prüfung.
   🚩 Vor dem nächsten Handy-Build: die native Bibliothek neu vendoren (die
   Tür `zoneGroups` ist neu), sonst scheitert der Dialog beim Öffnen.
+  ↳ **Zeiten auf der Uhr der Serie (Stufe 12, Teil 1, 2026-11-22, 134a bis
+  136a, 139a):** Beide Editoren zeigen und lesen Beginn und Ende einer Serie
+  auf ihrer Uhr, mit „Startzeit (New York)“, dem Lesefeld „Auf diesem
+  Gerät (Berlin)“, der Lücke am Feld und den Sätzen zur Zone nach der
+  Endzeit. „Diesen und alle folgenden“ lädt die Serie beim Öffnen und sagt
+  es, wenn das nicht gelingt. Die Handy-Teile sind ohne Build gebaut.
+  Für Teil 2 (Auswahl-Knopf, Wahl, Wochentag-Frage): Der Desktop liest in
+  `shownRule`, `repeatSentence` und beim Umschreiben der ganzen Serie
+  (`tailRecurrenceFor`) noch die gespeicherte Zone; mit einer Wahl müssen
+  sie die gewählte lesen, wie das Handy es schon tut.
+  Offen: Ein vom Anbieter einzeln geänderter Termin (ohne eigene Regel), als
+  „diesen und alle folgenden“ geöffnet, steht noch auf der Uhr des Geräts
+  (21a für solche Termine braucht die Regel der Serie im Formular).
   ↳ **Die Zonenliste als Gruppen im Kern (Stufe 11, Kern, 2026-11-22, 118a bis
   129a):** Ohne Suche zeigt die Liste 62 Gruppen von Zonen mit denselben
   Regeln ab heute statt 313 Städte, jede mit ihrer Uhr zuerst und bis zu drei

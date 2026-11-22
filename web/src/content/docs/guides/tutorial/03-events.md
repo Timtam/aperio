@@ -221,6 +221,38 @@ names your choice, such as **Edit this occurrence only**, and is read out when
 the editor opens. On the desktop the form repeats it as the read-only field
 **Apply to**, which `Tab` reaches like every other field.
 
+### A series' time zone
+
+A series repeats in its own time zone: a series at 9:00 in New York stays at
+9:00 New York time, even when the clocks change there. So the editor shows a
+series' date and time in its time zone:
+
+- Where it differs from your device's time zone, the fields name it, such as
+  **Start time (New York)**. After the end time, the read-only field **On this
+  device (Berlin)** gives the same times on your clock.
+- A series without a time zone repeats on UTC. Its fields then read, for
+  example, **Start time (UTC)**.
+- A new series gets your device's time zone. Where the calendar cannot store
+  that time zone, the series is on UTC, and a read-only field after the end
+  time says so.
+- Where a time you typed does not exist on that day in the series' time zone,
+  because the clocks go forward, Aperio says so at the field. It saves only
+  with another time.
+- When you switch the repeat off, the fields are back on your device's clock,
+  at the same moment. On the desktop Aperio says so once when you leave the
+  repeat field, on the phone when its choice closes.
+- **This occurrence only** and single appointments always stand on your
+  device's clock. **This and all following** stands in the series' time zone;
+  a read-only field names it, and you can change it when you edit the whole
+  series. Where Aperio cannot load the series for it, the editor says so and
+  does not save. Try again, or edit this occurrence only.
+- When you give a series a calendar that cannot store its time zone, a
+  read-only field after the end time says so, and it saves only with another
+  calendar.
+- Where your device cannot use a series' time zone (older Android versions
+  do not know some names), the times are in UTC, and changed times or a
+  changed repeat cannot be saved.
+
 > **Single changed or deleted occurrences:** When a whole series moves to
 > another day or time, by dragging it or in the dialog, some single occurrences
 > stay tied to their old date: occurrences changed on their own in an external

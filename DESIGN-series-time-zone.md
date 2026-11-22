@@ -849,8 +849,8 @@ verschiebt, wie der geöffnete Termin wanderte (`ruleFrame`; der Desktop lädt
 dafür die Serie, wenn ein Termin als ganze Serie offen ist). Nur „diesen und
 alle folgenden“ ab dem ersten Vorkommen schreibt erst beim Speichern als ganze
 Serie: Sie behält die Uhrzeit ihrer eigenen Uhr, wo die des Geräts gleich
-blieb, und ihre Regel folgt dem. Wo diese Uhr nicht die des Geräts ist, kann
-das Feld dort um eine Zeitumstellung danebenliegen.
+blieb, und ihre Regel folgt dem. Seit Stufe 12 stehen die Felder dort auf der
+Uhr der Serie, sodass Feld und Speichern dieselbe Uhr lesen.
 
 Die gelöschten Termine gehen mit (152, 188, 189, 196; `cal_core::tail_exceptions`):
 Nach ihrem Platz in der Serie, wenn jedes Vorkommen mit dem Beginn wandert —
@@ -882,10 +882,13 @@ Verglichen wird mit kanonischen Zonen-Namen, denn V8 meldet alte Namen wie
 `Asia/Calcutta` statt `Asia/Kolkata`.
 
 **Nach der Endzeit steht dann ein Hinweis:** „Auf diesem Gerät (Berlin): Montag,
-14. September, 15:00 bis 16:00“. Auf dem Desktop ist das ein fokussierbarer
-Hinweis mit einem eigenen Tab-Stopp. Ein statischer Absatz wäre im
-Anwendungsbereich des Dialogs für NVDA nicht erreichbar. Auf dem Handy ist es ein
-Text mit einem eigenen Wisch-Stopp. Stimmen beide Uhren überein, fehlt er.
+14. September, 15:00 bis 16:00“. Auf dem Desktop ist das ein Lesefeld
+(`ReadOnlyText`) mit eigenem Tab-Stopp; ein fokussierbarer Hinweis mit
+role=note las NVDA nur als „Anmerkung“ (gemessen), und ein statischer Absatz
+wäre im Anwendungsbereich des Dialogs nicht erreichbar. Auf dem Handy ist es
+ein Lesefeld mit einem eigenen Wisch-Stopp. Stimmen beide Uhren überein, fehlt
+er. Jeder weitere Satz über die Zone nach der Endzeit ist ein eigenes Lesefeld
+mit der Beschriftung „Zeitzone der Serie“.
 
 **Beim Öffnen wird nichts zusätzlich angesagt.** Eine zonenlose Serie hört man
 als „Startzeit (UTC), 22:30“; nach der Endzeit folgt der Hinweis.
@@ -1769,6 +1772,26 @@ Handy im selben PR.
     Vorher messen: ob WebView2 bei jedem Pfeil im Wiederholungs-Feld ein
     Änderungsereignis schickt (ja, in Edge gemessen), Fokusfolge von Auswahl
     zu Frage (gemessen, trägt), Ansage nach dem Schließen auf iOS.
+    Gebaut (Teil 1, Zeiten auf der Uhr der Serie, 2026-11-22, ohne
+    Handy-Build): Beide Editoren halten Beginn und Ende als Felder auf der Uhr,
+    die `zoneFormView` nennt (`zoneEditingFor` für beide gleich). Dazu kommen
+    die Beschriftungen mit Uhr, die Lesefelder nach der Endzeit
+    (`shared/zoneFormText.ts`) und die Lücke am Feld. Das Wiederholungs-Feld
+    rechnet still um und sagt es einmal (134a). Ein Kalenderwechsel folgt
+    einer gemeinsamen Regel (`calendarMoveMode`); ein Import zählt dabei als
+    in seinen Kalender verschoben (139a). Gespeichert wird über `zoneToSave` und
+    `savedRecurrence`. Der Desktop lädt bei „diesen und alle folgenden“ die
+    Serie beim Öffnen (21a, 135a). Ohne eigene Frage formuliert, Toni prüft
+    gesammelt: „Keine Wiederholung. Die Zeiten stehen jetzt auf der Uhr
+    dieses Geräts: …“ und „Zeitzone der Serie: {Stadt}. Die Zeiten stehen
+    jetzt auf dieser Uhr: …“ (wie eine Wahl), der Satz zur Zone, die der
+    Kalender nicht speichern kann („… Wähle eine andere Zeitzone oder einen
+    anderen Kalender.“), der Speicher-Grund bei einer Zone, die das Gerät
+    nicht verwenden kann, und der Hinweis „{Stadt}. Ändern lässt sie sich,
+    wenn du die ganze Serie bearbeitest.“ mit der Beschriftung „Zeitzone der
+    Serie“. Ungeprüft auf dem Handy: die Ansage nach dem Schließen der
+    Wiederholungs-Auswahl, die Lücken-Meldung (Live-Region auf Android,
+    Ansage auf iOS), die Reihenfolge der Lesefelder beim Wischen.
 13. **Kopien nehmen die Zone mit (23b)** — `feat(groups): carry a series' time zone to its copies`.
     Die Gruppen-Mitnahme im Kern trägt die Zone und ersetzt für einen
     Zonenwechsel die heutige Mitnahme von Beginn und Ende; das Angebot nach dem

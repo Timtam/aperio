@@ -155,7 +155,13 @@ for offsets and every zone an adapter or the reminders read) is off by
 default too. The phone's binding, the desktop host, the adapters that read
 zones and, since stage 8 of DESIGN-series-time-zone.md, the WebAssembly door
 switch it on: a series' dates and times are read on its own clock while the
-form renders (`cal_core::wall_clock`). That is one pinned source built into
+form renders (`cal_core::wall_clock`). Both event editors hold those fields
+through one shared form model: `shared/clockFields.ts` (a pair of fields on a
+clock, holding the stored instants while untouched), `shared/seriesZoneForm.ts`
+(which clock the fields stand on, by the editor's row of the table in
+DESIGN-series-time-zone.md, and which zone a save writes) and
+`shared/zoneFormText.ts` (the labels, the read-only sentences and the reasons a
+save is refused). That is one pinned source built into
 two desktop runtimes, so the desktop compares the host's tzdata release
 (`tzdata_version`) with the module's (`tzdataVersion`) at startup and
 refuses to start on a difference. No crate but `cal-zone` reads zone data,

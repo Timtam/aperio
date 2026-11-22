@@ -240,6 +240,42 @@ Termin bearbeiten**, und wird beim Öffnen vorgelesen. Am Desktop wiederholt das
 Formular sie im schreibgeschützten Feld **Anwenden auf**, das du wie jedes andere
 Feld mit `Tab` erreichst.
 
+### Die Zeitzone einer Serie
+
+Eine Serie wiederholt sich in ihrer eigenen Zeitzone: Eine Serie um 9 Uhr in
+New York bleibt um 9 Uhr New Yorker Zeit, auch wenn dort die Uhren umgestellt
+werden. Deshalb stehen Datum und Uhrzeit einer Serie im Editor in ihrer
+Zeitzone:
+
+- Weicht sie von der Zeitzone deines Geräts ab, nennen die Felder sie, etwa
+  **Startzeit (New York)**. Nach der Endzeit steht dann das Lesefeld **Auf
+  diesem Gerät (Berlin)** mit denselben Zeiten auf deiner Uhr.
+- Eine Serie ohne Zeitzone wiederholt sich nach UTC. Ihre Felder heißen dann
+  etwa **Startzeit (UTC)**.
+- Eine neue Serie bekommt die Zeitzone deines Geräts. Kann der Kalender diese
+  Zeitzone nicht speichern, steht die Serie auf UTC, und ein Lesefeld nach der
+  Endzeit sagt es.
+- Gibt es eine getippte Uhrzeit an diesem Tag in der Zeitzone der Serie nicht,
+  weil die Uhren vorgestellt werden, sagt Aperio es am Feld. Gespeichert wird
+  erst mit einer anderen Uhrzeit.
+- Schaltest du die Wiederholung aus, stehen die Felder wieder auf der Uhr
+  deines Geräts, zum selben Zeitpunkt. Am Desktop sagt Aperio das einmal, wenn
+  du das Feld für die Wiederholung verlässt, am Handy, wenn sich die Auswahl
+  schließt.
+- **Nur diesen Termin** und Einzeltermine stehen immer auf der Uhr deines
+  Geräts. **Diesen und alle folgenden** steht in der Zeitzone der Serie; ein
+  Lesefeld nennt sie, und ändern lässt sie sich, wenn du die ganze Serie
+  bearbeitest. Kann Aperio die Serie dafür nicht laden, sagt der Editor es und
+  speichert nicht. Versuche es dann noch einmal, oder bearbeite nur diesen
+  Termin.
+- Gibst du einer Serie einen Kalender, der ihre Zeitzone nicht speichern kann,
+  sagt ein Lesefeld nach der Endzeit es, und gespeichert wird erst mit einem
+  anderen Kalender.
+- Kann dein Gerät die Zeitzone einer Serie nicht verwenden (ältere
+  Android-Versionen kennen manche Namen nicht), stehen die Zeiten in UTC, und
+  geänderte Zeiten oder eine geänderte Wiederholung lassen sich nicht
+  speichern.
+
 > **Einzeln geänderte oder gelöschte Termine:** Verschiebst du eine ganze Serie
 > auf einen anderen Tag oder eine andere Uhrzeit, per Ziehen oder im Dialog,
 > bleiben manche Einzeltermine an ihrem alten Datum hängen: Termine, die in
