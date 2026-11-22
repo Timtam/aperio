@@ -3592,6 +3592,11 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **Das Formular-Modell für die Zone einer Serie (Stufe 10, 2026-11-22,
+  117a):** Wo die Auswahl steht, auf welcher Uhr die Felder stehen, mit
+  welcher Zone eine neue Serie beginnt (die Gerätezone, kanonisch), was eine
+  Wahl mit Feldern und Regel tut und welche Zone gespeichert wird, als reine
+  Funktionen (`shared/seriesZoneForm.ts`). Noch in keinem Editor.
   ↳ **Die Kern-Regel für den Zonenwechsel (Stufe 9, 2026-11-22, 15a, 20a,
   24a):** Der Kern sagt, ob nach einer neuen Zone gefragt wird, an welchem Tag
   der Beginn auf beiden Uhren liegt, zu welcher die Tage der Regel passen, und
