@@ -5,10 +5,12 @@ import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import {
   buildRRule,
+  dayParts,
   deriveMonthlyOptions,
-  JS_DAY_TO_RRULE,
-  nthWeekdayOfMonth,
+  localDateKey,
   parseRRule,
+  recurrenceStartDate,
+  resolveAgainstDay,
 } from '@aperio/shared';
 import type {
   EndMode,
@@ -73,29 +75,38 @@ function clampInt(raw: string, min: number, max: number): number {
 export function RecurrenceSelector({
   value,
   onChange,
-  start,
+  startDay: startDayProp,
   capabilities,
 }: {
   value: string | null;
   onChange: (rrule: string | null) => void;
-  /** Event start date — drives the derived monthly/yearly options + defaults.
-   *  Falls back to today when omitted (only matters for the derived options). */
-  start?: Date;
+  /** The day the series starts on, `YYYY-MM-DD` as the form holds it — drives
+   *  the derived monthly/yearly options + defaults, read off the key by the
+   *  core (`cal_core::day_parts`). Today when omitted or not a day. */
+  startDay?: string;
   /** The owning calendar's recurrence capabilities; absent → full RFC-5545. */
   capabilities?: RecurrenceCapabilities;
 }) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const caps = capabilities ?? DEFAULT_RECURRENCE_CAPABILITIES;
-  const startKey = start ? start.toDateString() : '';
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const startDate = useMemo(() => start ?? new Date(), [startKey]);
+  // The day the derived options come from: the form's, or today where it has
+  // none yet (a key the core refuses falls back too). The Date is for naming
+  // the month only.
+  const startDay = useMemo(
+    () =>
+      startDayProp && dayParts(startDayProp) !== null
+        ? startDayProp
+        : localDateKey(new Date()),
+    [startDayProp],
+  );
+  const startDate = useMemo(() => recurrenceStartDate(startDay), [startDay]);
   const parsed = useMemo(() => parseRRule(value), [value]);
   // Fill start-derived defaults so the monthly/yearly controls always show
   // concrete values; then clamp the interval to 1 when the source can't store
   // one for this frequency (e.g. EWS yearly) so the emitted RRULE stays honest.
   const rule = useMemo(() => {
-    const resolved = resolveAgainstStart(parsed, startDate);
+    const resolved = resolveAgainstDay(parsed, startDay);
     if (
       resolved.freq !== 'NONE' &&
       !intervalSupported(resolved.freq, caps) &&
@@ -104,7 +115,7 @@ export function RecurrenceSelector({
       return { ...resolved, interval: 1 };
     }
     return resolved;
-  }, [parsed, startDate, caps]);
+  }, [parsed, startDay, caps]);
 
   const update = (next: ParsedRule) => onChange(buildRRule(next));
 
@@ -135,7 +146,7 @@ export function RecurrenceSelector({
   const monthlyOptions = useMemo(
     () =>
       isMonthlyish
-        ? deriveMonthlyOptions(startDate, {
+        ? deriveMonthlyOptions(startDay, {
             relative: relativeAllowed,
             dayOfMonth: caps.monthly_day_of_month,
           }).filter((o) => !o.disabled || o.key === selectedOptionKey)
@@ -153,7 +164,7 @@ export function RecurrenceSelector({
     // user change it away.
     [
       isMonthlyish,
-      startDate,
+      startDay,
       relativeAllowed,
       caps.monthly_day_of_month,
       selectedOptionKey,
@@ -325,20 +336,6 @@ function applyMonthlyOption(rule: ParsedRule, opt: MonthlyOption): ParsedRule {
     monthlyMode: 'WEEKDAY',
     relOrdinal: opt.ordinal,
     relWeekday: opt.weekday,
-  };
-}
-
-/** Fill start-derived defaults for any monthly/yearly field a parsed rule left
- *  unspecified (0 / ''), so the controls always render concrete values and
- *  buildRRule emits a complete rule. */
-function resolveAgainstStart(parsed: ParsedRule, start: Date): ParsedRule {
-  if (parsed.freq !== 'MONTHLY' && parsed.freq !== 'YEARLY') return parsed;
-  return {
-    ...parsed,
-    byMonthDay: parsed.byMonthDay || start.getDate(),
-    relOrdinal: parsed.relOrdinal || nthWeekdayOfMonth(start),
-    relWeekday: parsed.relWeekday || JS_DAY_TO_RRULE[start.getDay()],
-    byMonth: parsed.byMonth || start.getMonth() + 1,
   };
 }
 

@@ -61,7 +61,6 @@ import {
   prefillTarget,
   readErrorMessage,
   readSeriesRows,
-  recurrenceStartDate,
   recurrenceSummaryText,
   selectableEventCalendars,
   sendsInvitations as sendsInvitationsFor,
@@ -2727,7 +2726,7 @@ function EventEditorScreen({
               setRuleSetAt(ruleFrame?.written ?? occurrence ?? original?.start ?? null);
               setRecurrence(next);
             }}
-            start={recurrenceStartDate(startDate)}
+            startDay={startDate}
             capabilities={calendars.find((c) => c.id === calId)?.recurrence_capabilities}
           />
           </>

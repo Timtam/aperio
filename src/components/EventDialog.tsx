@@ -132,7 +132,6 @@ import {
   dateInput,
   defaultNewEventTimes,
   isBirthdayEventId,
-  recurrenceStartDate,
   selectableEventCalendars,
   timeInput,
   toIso,
@@ -3233,7 +3232,7 @@ export function EventDialog({
               setRuleSetAt(ruleFrame?.written ?? event?.start ?? null);
               update('rrule', rrule);
             }}
-            start={recurrenceStartDate(form.startDate)}
+            startDay={form.startDate}
             capabilities={
               calendars.find((c) => c.id === form.calendarId)
                 ?.recurrence_capabilities

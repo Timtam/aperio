@@ -57,6 +57,7 @@ import {
   installTextCollation,
   installRecurrenceSummaryRules,
   installCalendarWeekRules,
+  installDayPartsRules,
   installSeriesShiftRules,
   installTailExceptionsRules,
   installSeriesClockRules,
@@ -104,6 +105,7 @@ import {
   priorityRank,
   recurrenceSummaryJson,
   calendarWeeksJson,
+  dayPartsJson,
   seriesShiftJson,
   tailExceptionsJson,
   seriesClockZoneThroughCore,
@@ -181,6 +183,7 @@ installSeriesShiftRules({ seriesShiftJson });
 installTailExceptionsRules({ tailExceptionsJson });
 installRecurrenceSummaryRules({ recurrenceSummaryJson });
 installCalendarWeekRules({ calendarWeeksJson });
+installDayPartsRules({ dayPartsJson });
 installSeriesClockRules({
   seriesClockZone: seriesClockZoneThroughCore,
   canonicalZone: canonicalZoneThroughCore,

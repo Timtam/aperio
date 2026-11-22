@@ -21,6 +21,7 @@ import {
   installTextCollation,
   installRecurrenceSummaryRules,
   installCalendarWeekRules,
+  installDayPartsRules,
   installSeriesShiftRules,
   installTailExceptionsRules,
   installSeriesClockRules,
@@ -72,6 +73,7 @@ import {
   priorityRank,
   recurrenceSummaryJson,
   calendarWeeksJson,
+  dayPartsJson,
   seriesShiftJson,
   tailExceptionsJson,
   seriesClockZoneThroughCore,
@@ -215,6 +217,9 @@ initCoreRules()
     // The calendar week a day is shown in, with its ISO number (DESIGN §5.2):
     // the week and month views and, later, every place that names a week.
     installCalendarWeekRules({ calendarWeeksJson });
+
+    // The parts a repeat rule takes from the day a series starts on.
+    installDayPartsRules({ dayPartsJson });
 
     // The clock a series repeats on: which stored zone names are a zone.
     installSeriesClockRules({

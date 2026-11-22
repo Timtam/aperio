@@ -1360,6 +1360,15 @@ Handy im selben PR.
    aus dem Tages-Schlüssel, WKST, UNTIL. Noch unsichtbar. Fixture
    `wallClock.json`. Vorher messen: ob der Datums-Picker auf dem Handy eine feste
    Zone annimmt, und ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet.
+   Beides ist beantwortet (Picker aus dem Code, CI mit #186: Vitest läuft dort
+   auch in New York und Auckland, hinter einem Wächter). Gebaut, Schritt 1
+   (2026-11-22): Die Teile, die eine Regel vom Tag des Beginns nimmt
+   (Wochentag, Tag im Monat, der wievielte Wochentag, letzte Woche, Monat),
+   liest der Kern aus dem Tages-Schlüssel (`cal_core::day_parts`, Tür
+   `shared/dayParts.ts`, Fixture `dayParts.json`), nicht mehr ein `Date` auf
+   der Uhr des Geräts; beide Editoren nehmen dafür eine gemeinsame Regel
+   (`resolveAgainstDay`) statt je einer Kopie. WKST bleibt beim Bearbeiten
+   erhalten.
 9. **Die Kern-Regel für den Zonenwechsel (15a)** — `feat(core): changing the clock a series repeats on`.
    `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die
@@ -1570,10 +1579,6 @@ Handy im selben PR.
 - Größenzuwachs der iOS-App und was der Aufruf der Versätze für 312 Zonen auf
   einem Handy kostet. Gemessen sind die Android-Bibliothek (mit einem Prototyp)
   und WebAssembly (Stufe 3).
-- Ob Node auf den CI-Linux-Rechnern IANA-TZ-Werte beachtet. Lokal unter
-  Windows ja, wenn `TZ` aus der Umgebung des Prozesses kommt (der Test des
-  Android-Datums lief so in Berlin, New York und Kiritimati); auf den
-  CI-Rechnern noch nicht gelaufen.
   - Auf Windows kam `America/Los_Angeles` aus Git Bash nicht an, weil MSYS Werte
     mit `/` umschreibt.
   - Aus PowerShell beachtet Node sie.

@@ -18,6 +18,7 @@ import {
   installTaskSettingsRules,
   installRecurrenceSummaryRules,
   installCalendarWeekRules,
+  installDayPartsRules,
   installSeriesShiftRules,
   installTailExceptionsRules,
   installSeriesClockRules,
@@ -200,6 +201,12 @@ installRecurrenceSummaryRules({
 // same rule the desktop asks through WebAssembly.
 installCalendarWeekRules({
   calendarWeeksJson: (inputJson: string) => CalFfi.calendarWeeks(inputJson),
+});
+
+// The parts a repeat rule takes from the day a series starts on: the same
+// rule the desktop asks through WebAssembly.
+installDayPartsRules({
+  dayPartsJson: (dayKey: string) => CalFfi.dayParts(dayKey),
 });
 
 // The clock a series repeats on: which stored zone names are a zone. Every
