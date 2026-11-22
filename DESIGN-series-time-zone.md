@@ -1678,8 +1678,9 @@ Handy im selben PR.
     ab, die das Gerät nicht verwenden kann. Kopieren und Duplizieren
     behielten die Zonen-Entscheidung der Quelle schon (PR 8b, 262).
 11. **Die Auswahldialoge** — `feat(editors): the series time zone picker dialogs`.
-    Desktop und Handy. Vorher messen: NVDA im verschachtelten Dialog, VoiceOver
-    und TalkBack mit einer langen Liste. Mit 118a zuerst die Regel-Gruppen im
+    Desktop und Handy. Vorher messen: NVDA im verschachtelten Dialog (gemessen
+    2026-11-22, siehe „Gemessen“), VoiceOver und TalkBack mit einer langen
+    Liste. Mit 118a zuerst die Regel-Gruppen im
     Kern (aus tzdata, mit Türen und Fixture), dann die Dialoge; die Liste ohne
     Suche hat dann 62 Einträge statt 313.
     Gebaut (Kern, 2026-11-22): `cal_core::zone_groups` mit Tür `zoneGroups`
@@ -1694,8 +1695,8 @@ Handy im selben PR.
     Beschriftungen, Hinweis, Auswahl, Wochentag-Frage, „diesen und alle folgenden“
     lädt auf dem Desktop die ganze Serie beim Öffnen (21a), Hilfe und Fehlersuche.
     Vorher messen: ob WebView2 bei jedem Pfeil im Wiederholungs-Feld ein
-    Änderungsereignis schickt, Fokusfolge von Auswahl zu Frage, Ansage nach dem
-    Schließen auf iOS.
+    Änderungsereignis schickt (ja, in Edge gemessen), Fokusfolge von Auswahl
+    zu Frage (gemessen, trägt), Ansage nach dem Schließen auf iOS.
 13. **Kopien nehmen die Zone mit (23b)** — `feat(groups): carry a series' time zone to its copies`.
     Die Gruppen-Mitnahme im Kern trägt die Zone und ersetzt für einen
     Zonenwechsel die heutige Mitnahme von Beginn und Ende; das Angebot nach dem
@@ -1811,15 +1812,45 @@ Handy im selben PR.
   eingecheckten tzdata- und CLDR-Dateien (je mit sha256 in `SOURCE`); ein
   Update lässt `--check` laut scheitern.
 
+## Gemessen
+
+**Desktop, 2026-11-22.** Toni mit NVDA (deutsche Stimme) in Microsoft Edge, auf
+einer Messseite, die die geplanten Dialoge mit dem Gerüst der App nachbaut
+(Dialog mit Anwendungsbereich innen, Suchfeld als Combobox mit
+`aria-activedescendant` wie die Teilnehmer-Auswahl) und die echten Einträge aus
+dem Kern zeigt. Edge hat dieselbe Engine wie WebView2, ist aber nicht das
+Fenster von Aperio.
+
+- **Die Auswahl öffnet** mit Dialogtitel, Suchfeld und Zählzeile („62
+  Gruppen“ als Beschreibung des Suchfelds).
+- **Die Einträge** werden beim Pfeilen vollständig gelesen, mit Position („3
+  von 65“). Länge und Reihenfolge, Uhr zuerst (119b), passen.
+- **Die Zählzeile** kommt nach der Tipppause („8 Gruppen“, „Eine Zeitzone“).
+  Sie muss abgebrochen werden, sobald gewählt oder geschlossen wird; sonst
+  überschreibt die verzögerte Ansage die der Wahl (auf der Messseite gefunden).
+- **Escape** schließt nur die Auswahl, der Fokus steht auf dem Knopf, und NVDA
+  liest ihn mit der Zone.
+- **Die Wochentag-Frage** öffnet direkt nach dem Schließen der Auswahl, ohne
+  Wartezeit, und NVDA liest Titel, Nachricht und den ersten Knopf „UTC
+  behalten“. Nach einer Antwort kommt die Ansage, und der Fokus steht wieder
+  auf dem Knopf.
+- **„Startzeit (Tokyo)“** und die anderen Felder mit Uhr lesen sich gut.
+- **Der Hinweis „Auf diesem Gerät …“** als fokussierbarer Bereich
+  (`role="note"`) wird nur als „Anmerkung“ gelesen, ohne Text. Er wird
+  deshalb ein Lesefeld (`ReadOnlyText`, das Textfeld mit `aria-readonly`, von
+  Toni am 2026-11-06 geprüft).
+- **Das Wiederholungs-Feld** schickt bei jedem Pfeil im geschlossenen Feld
+  sofort ein Änderungsereignis. Stufe 12 darf deshalb beim Pfeilen durch
+  „Keine / Täglich / …“ nicht jedes Mal die Felder auf eine andere Uhr
+  umrechnen oder etwas ansagen; wie, entscheidet Toni mit Stufe 12.
+
 ## Ungeprüft
 
-- Wie NVDA (deutsche und englische Stimme) und VoiceOver „Startzeit (New York)“
-  und ganze Einträge mit Kommas in einer langen Liste lesen. Die Versatz-Form
-  selbst hat Toni verglichen (Form F).
-- NVDA im verschachtelten Dialog mit Suchfeld und Liste; ob der Fokus-Rücksprung
-  das Schließen der Auswahl und das Öffnen der Frage übersteht.
-- Ob WebView2 bei jedem Pfeil im geschlossenen Wiederholungs-Feld ein
-  Änderungsereignis schickt.
+- Wie VoiceOver „Startzeit (New York)“ und ganze Einträge in einer langen
+  Liste liest, und NVDA mit englischer Stimme. Die Versatz-Form selbst hat Toni
+  verglichen (Form F); NVDA auf Deutsch ist gemessen (oben).
+- Der verschachtelte Dialog im echten WebView2-Fenster von Aperio; gemessen
+  ist Edge (oben).
 - iOS: ob eine Ansage nach dem Schließen eines Dialogs gehört wird. Android: ob
   das Öffnen einen Moment später mit TalkBack funktioniert. Ob Listenzeilen per
   Wischen erreichbar bleiben.
