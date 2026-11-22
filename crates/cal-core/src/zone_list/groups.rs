@@ -167,7 +167,8 @@ pub struct ZoneGroupsQuestion {
     /// Names this device's clock library refuses: every listed name it
     /// refuses, and the series' stored name in its own spelling when it
     /// refuses that. A stored zone is kept as it is spelled (120a), so its
-    /// spelling decides, not its listed name.
+    /// spelling decides, not its listed name; compared in any ASCII case, as
+    /// clock libraries match zone ids.
     #[serde(default)]
     pub unusable: Vec<String>,
 }
@@ -330,7 +331,10 @@ mod compute {
         let stored_choosable = question.stored.as_deref().is_some_and(|stored| {
             stored_position.is_some_and(|position| {
                 question.calendar_zones.stores(listed[position])
-                    && !question.unusable.iter().any(|name| name == stored)
+                    && !question
+                        .unusable
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(stored))
             })
         });
 

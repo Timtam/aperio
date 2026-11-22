@@ -21,6 +21,10 @@ device: string | null,
  */
 calendar_zones: "all" | "none" | Array<string>, 
 /**
- * Listed names this device's clock library refuses.
+ * Names this device's clock library refuses: every listed name it
+ * refuses, and the series' stored name in its own spelling when it
+ * refuses that. A stored zone is kept as it is spelled (120a), so its
+ * spelling decides, not its listed name; compared in any ASCII case, as
+ * clock libraries match zone ids.
  */
 unusable: Array<string>, };

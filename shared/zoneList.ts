@@ -172,9 +172,11 @@ export function zoneOffsets(at: string, today: string): ZoneOffsets {
 
 /**
  * The list as groups of zones with the same rules from `today` on (decision
- * 118a), the rows above it, and every listed zone's marks. `calendarZones` is
- * the calendar's manifest list (97a); `unusable` the listed names this
- * device's clock library refuses.
+ * 118a), the rows above it, and every listed zone's marks. `calendar_zones`
+ * is the calendar's manifest list (97a); `unusable` the names this device's
+ * clock library refuses: every listed name it refuses, and the series' stored
+ * name in its own spelling when it refuses that (a group keeps the stored
+ * zone as it is spelled, 120a).
  */
 export function zoneGroups(question: ZoneGroupsQuestion): ZoneGroups {
   return JSON.parse(rules().zoneGroupsJson(JSON.stringify(question))) as ZoneGroups;
