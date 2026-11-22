@@ -307,6 +307,34 @@ fn recurring_master_with_until_in_the_past_is_excluded() {
 }
 
 #[test]
+fn a_series_through_a_day_on_its_clock_reaches_its_last_evening() {
+    // Daily 20:00 New York, "through 5 November" (DESIGN-series-time-zone.md,
+    // 101b): its last occurrence starts 6 November 01:00 UTC, past the end of
+    // the UTC day its UNTIL spells, where the row's reach used to stop.
+    let store = setup();
+    let mut ny = recurring_master("ny", "FREQ=DAILY;UNTIL=20261105T235959Z");
+    ny.start = Utc.with_ymd_and_hms(2026, 11, 2, 1, 0, 0).unwrap();
+    ny.end = Utc.with_ymd_and_hms(2026, 11, 2, 2, 0, 0).unwrap();
+    if let Some(recurrence) = ny.recurrence.as_mut() {
+        recurrence.tzid = Some("America/New_York".into());
+    }
+    let after_the_utc_day = DateRange::new(
+        Utc.with_ymd_and_hms(2026, 11, 6, 0, 30, 0).unwrap(),
+        Utc.with_ymd_and_hms(2026, 11, 7, 0, 0, 0).unwrap(),
+    );
+    store
+        .replace_calendar_events(ACC, CAL, after_the_utc_day, &[ny])
+        .unwrap();
+    assert_eq!(
+        store
+            .read_events(ACC, CAL, after_the_utc_day)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn non_recurring_past_event_is_not_widened() {
     let store = setup();
     let mut once = event("once", 0, 0);

@@ -85,7 +85,11 @@ mod tests;
 ///    (review round 1 of #129), which the import's editor and list read. A
 ///    listing stored under 8 has neither and would read every calendar as one
 ///    that keeps no invitation and no file's UID until the next re-bootstrap.
-pub const CACHE_GENERATION: u32 = 9;
+/// 10: a series' end reads on the clock it repeats on (DESIGN-series-time-zone.md,
+///    101b): "through 5 November" on a New York series at 20:00 reaches
+///    6 November 01:00 UTC, past the end of the UTC day a row's reach stood
+///    at, and a range starting in between dropped that last occurrence.
+pub const CACHE_GENERATION: u32 = 10;
 
 /// `user_prefs` key holding the cache generation last applied on this device.
 pub const CACHE_GENERATION_KEY: &str = "cache.generation";
@@ -2471,8 +2475,28 @@ fn range_end_utc(ev: &Event) -> DateTime<Utc> {
     let Some(recurrence) = &ev.recurrence else {
         return ev.end;
     };
-    recurrence_until(&recurrence.rrule)
-        .unwrap_or_else(far_future_utc)
+    let Some(until) = recurrence_until(&recurrence.rrule) else {
+        return far_future_utc();
+    };
+    // The end as the views read it, on the series' clock
+    // (`cal_core::read_series_end`, 101b): "through 5 November" in New York
+    // lasts until 6 November 04:59:59 UTC. A series of days reads its digits on
+    // the device's days, which this store does not know, so its last day may
+    // begin up to fourteen hours after them (UTC+14); the last occurrence then
+    // lasts as long as the series' own. Generous on purpose: a reach too short
+    // drops an occurrence from every range that starts after it.
+    let on_clock = cal_core::series_end_on_clock(
+        &recurrence.rrule,
+        ev.start,
+        ev.all_day,
+        recurrence.tzid.as_deref(),
+        None,
+    )
+    .end
+    .and_then(|end| end.at)
+    .and_then(|at| at.parse::<DateTime<Utc>>().ok());
+    let length = (ev.end - ev.start).max(chrono::Duration::zero());
+    (until.max(on_clock.unwrap_or(until)) + chrono::Duration::hours(14) + length)
         // Guard against a degenerate `UNTIL` before the first occurrence.
         .max(ev.end)
 }
