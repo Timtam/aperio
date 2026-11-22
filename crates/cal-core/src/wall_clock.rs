@@ -258,6 +258,7 @@ pub fn series_end_on_clock(
         expansion,
         |at| zone.wall(at),
         |wall| last_at_or_before(zone, wall),
+        |wall| zone.to_utc(wall, WallPolicy::Rfc5545),
     );
     WallClockAnswer {
         clock: clock.map(str::to_string),
