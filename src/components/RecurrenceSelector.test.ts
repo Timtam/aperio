@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildRRule, deriveMonthlyOptions, parseRRule, resolveAgainstDay } from './rrule';
+import {
+  buildRRule,
+  defaultUntilDay,
+  deriveMonthlyOptions,
+  parseRRule,
+  pickerMisreadsRule,
+  resolveAgainstDay,
+  withEndMode,
+} from './rrule';
 
 // Shared base so each test only spells out the fields it cares about.
 const base = {
@@ -15,6 +23,7 @@ const base = {
   endMode: 'NEVER' as const,
   count: 10,
   until: '',
+  untilText: '',
 };
 
 describe('parseRRule', () => {
@@ -206,6 +215,91 @@ describe('buildRRule', () => {
   it('round-trips a relative yearly rule through parse', () => {
     const original = 'FREQ=YEARLY;BYMONTH=3;BYDAY=1FR';
     expect(buildRRule(parseRRule(original))).toBe(original);
+  });
+});
+
+describe('the end of a rule (UNTIL)', () => {
+  // DESIGN-series-time-zone.md, "Prüfen und Speichern": an untouched end
+  // stays as it was written. The controls rebuild the whole rule on every
+  // change, and rewrote any end as the end of its UTC day: a cut's bound
+  // one second before an occurrence then reached past it again.
+  it('goes back as it came when another control changes', () => {
+    for (const raw of ['20261102T075959Z', '20261031', '20261031T090000', '20261231t235959z']) {
+      const parsed = parseRRule(`FREQ=WEEKLY;BYDAY=MO;UNTIL=${raw}`);
+      expect(parsed.untilText).toBe(raw);
+      const rebuilt = buildRRule({ ...parsed, interval: 2, byDay: ['MO', 'WE'] });
+      expect(rebuilt).toBe(`FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;UNTIL=${raw}`);
+    }
+  });
+
+  it('is written as the end of its UTC day once its date changes', () => {
+    const parsed = parseRRule('FREQ=DAILY;UNTIL=20261102T075959Z');
+    expect(parsed.until).toBe('2026-11-02');
+    expect(buildRRule({ ...parsed, until: '2026-11-20' })).toBe(
+      'FREQ=DAILY;UNTIL=20261120T235959Z',
+    );
+  });
+
+  it('is never written from half a date', () => {
+    for (const until of ['2026-11-3', '2026-1-5', '2026-11']) {
+      const rebuilt = buildRRule({ ...base, freq: 'DAILY', endMode: 'UNTIL', until });
+      expect(rebuilt).toBe('FREQ=DAILY');
+      const fromStored = buildRRule({
+        ...parseRRule('FREQ=DAILY;UNTIL=20261130T235959Z'),
+        until,
+      });
+      expect(fromStored).toBe('FREQ=DAILY');
+    }
+  });
+
+  it('keeps an end it cannot read, while nobody changes it', () => {
+    const parsed = parseRRule('FREQ=DAILY;UNTIL=soon');
+    expect(parsed).toMatchObject({ endMode: 'UNTIL', until: '', untilText: 'soon' });
+    expect(buildRRule({ ...parsed, interval: 3 })).toBe('FREQ=DAILY;INTERVAL=3;UNTIL=soon');
+  });
+
+  it('leaves the controls reading the rule as it is stored', () => {
+    for (const rule of [
+      'FREQ=DAILY;UNTIL=20261102T075959Z',
+      'FREQ=WEEKLY;BYDAY=MO;UNTIL=20261031',
+      'FREQ=WEEKLY;BYDAY=MO;UNTIL=20261031T090000',
+    ]) {
+      expect(pickerMisreadsRule(rule)).toBe(false);
+    }
+  });
+});
+
+describe('choosing "until a date"', () => {
+  it('starts on the day of the tenth occurrence, where the count would end', () => {
+    const weekly = { ...base, freq: 'WEEKLY' as const, byDay: ['MO'] };
+    expect(defaultUntilDay(weekly, '2026-11-02')).toBe('2027-01-04');
+    expect(defaultUntilDay({ ...base, freq: 'DAILY' }, '2026-11-02')).toBe('2026-11-11');
+    const monthly = { ...base, freq: 'MONTHLY' as const, byMonthDay: 31 };
+    // Months without a 31st are skipped, as the rule skips them.
+    expect(defaultUntilDay(monthly, '2026-10-31')).toBe('2028-01-31');
+  });
+
+  it('falls back to the start day where the day cannot be read', () => {
+    expect(defaultUntilDay({ ...base, freq: 'DAILY' }, 'someday')).toBe('someday');
+    expect(defaultUntilDay(base, '2026-11-02')).toBe('2026-11-02');
+  });
+
+  it('stays chosen: the rule it writes reads back as ending on that date', () => {
+    // Without a date no end was written, and the control read the rule
+    // back as "never" at once.
+    const rule = withEndMode(parseRRule('FREQ=DAILY'), 'UNTIL', '2026-11-02');
+    const written = buildRRule(rule);
+    expect(written).toBe('FREQ=DAILY;UNTIL=20261111T235959Z');
+    expect(parseRRule(written)).toMatchObject({ endMode: 'UNTIL', until: '2026-11-11' });
+  });
+
+  it('keeps a date the rule already has, and leaves other ends alone', () => {
+    const stored = parseRRule('FREQ=DAILY;UNTIL=20261102T075959Z');
+    expect(withEndMode(stored, 'UNTIL', '2026-11-02')).toEqual(stored);
+    expect(withEndMode(parseRRule('FREQ=DAILY'), 'COUNT', '2026-11-02')).toMatchObject({
+      endMode: 'COUNT',
+      until: '',
+    });
   });
 });
 

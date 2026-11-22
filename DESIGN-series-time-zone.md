@@ -537,6 +537,52 @@ Bestandsaufnahme der Editoren, des Kerns und der zwei Messungen:
   vorgewählt, westlich kam jedes gewählte Datum einen Tag zu früh zurück
   (eigener PR vor Stufe 8, am Gerät noch ungeprüft).
 
+Zwölf Entscheidungen zum Serienende traf Claude in der Nacht zum 22. November
+2026 **vorläufig**, nach Tonis Auftrag, über Nacht durchzuarbeiten und nur bei
+kritischen Fragen anzuhalten. Grundlage ist eine Bestandsaufnahme aller Stellen,
+die ein UNTIL lesen oder schreiben, mit Gegenprüfung. Toni bestätigt oder kippt
+sie:
+
+- **105a — die Schutzregel erkennt einen Schnitt an der Uhrzeit.** Ein Ende
+  `…T235959Z` auf der Uhr einer Zone gilt als Zeitpunkt, wenn die Sekunde
+  danach, auf dieser Uhr gelesen, auf eine Uhrzeit der Regel fällt; sonst
+  heißt es „bis zu diesem Datum“ (101b). Der Kern rechnet das ohne
+  Aufklappen, also auch im WebAssembly-Modul. Preis: Ein echtes Ende genau
+  zu dieser Uhrzeit (New York 19:00, im Sommer 20:00) verliert weiter seinen
+  letzten Tag. Verworfen: am Termin prüfen (braucht das Aufklappen, zwei
+  Kopien) und gar nicht prüfen (alte Schnitte zeigten den Schnitttag doppelt).
+- **106a — Aperios Schnitt schreibt nie mehr genau `…T235959Z`,** sondern
+  eine Sekunde früher, zusätzlich zur Schutzregel, die alte Schnitte schützt.
+- **107b — Exchange und Microsoft 365 lesen ihr Enddatum als Ende dieses
+  Tages auf der Uhr der Serie zurück.** Ein getipptes Ende kommt so zurück,
+  wie es ging. Braucht eine Live-Runde an Tonis Server; der PR wartet darauf.
+- **108b — das Ende-Feld zeigt den letzten Tag, bis zu dem das Ende reicht,
+  auf der Uhr der Serie.** Was man tippt, bleibt stehen; `…T235959Z` zeigt
+  nach 101b sein Datum. Verworfen: der Tag des letzten Termins (ein getippter
+  Mittwoch spränge bei einer Montagsserie zurück).
+- **109a — stündliche und feinere Regeln behalten ihr Ende als Zeitpunkt.**
+  Der Editor legt sie nicht an.
+- **110b — wer auf „bis Datum“ umstellt, bekommt den Tag des zehnten
+  Termins**, wo die Vorgabe „nach 10 Terminen“ endete. Vorher sprang die
+  Auswahl sofort auf „nie“ zurück, weil ohne Datum kein Ende geschrieben
+  wurde.
+- **111a — die Ziffern-Lesart ganztägiger Serien (201) kommt mit in die
+  Kern-Regel;** die Zone des Geräts geht dafür als Eingabe hinein.
+- **112a — Erinnerungen schweigen, wenn das Ende vor dem Beginn liegt.**
+  Heute klingelt dann der erste Termin, den keine Ansicht zeigt.
+- **113a — das Ende-Feld auf dem Handy wird eine Datumsauswahl wie beim
+  Beginn.** Das Textfeld schrieb bei jedem Tastendruck, und ein halbes Datum
+  wurde ein Ende, das kein Leser verstand.
+- **114b — das Ende-Feld auf der Uhr der Serie kommt mit den anderen Feldern
+  in Stufe 12.** Stufe 8 baut die Regeln dafür (anzeigen nach 108b, schreiben
+  mit `untilOn`), noch unsichtbar, wie die Felder mit Uhr.
+- **115a — ein Datum ohne Uhrzeit als Ende einer Serie mit Uhrzeit heißt
+  „bis zu diesem Datum“ auf der Uhr der Serie, eine Uhrzeit ohne Zone gilt
+  auf der Uhr der Serie.** So lesen es Ansichten und Erinnerungen künftig
+  gleich; heute weichen sie dort voneinander ab.
+- **116a — 101b gilt auch, wo Adapter nach einem Schnitt aufräumen**
+  (CalDAV, Google): Sie fragen dieselbe Kern-Regel.
+
 Geprüft vorab (2026-11-21, Tonis Desktop-Daten nur lesend): Von 89 Serien mit
 Uhrzeit im Zwischenspeicher haben drei keine Zone, alle bei CalDAV und alle mit
 Kennungen im Apple-Stil, also außerhalb von Aperio angelegt. Alle elf Serien, die
@@ -1408,6 +1454,14 @@ Handy im selben PR.
    Uhr wie das Gerät“ nach kanonischem Namen und die Uhr einer Serie, deren
    Zone dieses Gerät nicht verwenden kann: UTC, mit dem Namen der Zone.
    Noch unsichtbar: Die Editoren lesen das ab den Stufen 10 und 12.
+   Gebaut, Schritt 4: Das Ende einer Regel bleibt beim Bearbeiten, wie es
+   geschrieben war, solange sein Datum im Feld nicht geändert wird; vorher
+   schrieb jede Änderung an der Wiederholung es als Ende seines UTC-Tages
+   neu, und ein Schnitt reichte wieder über das Vorkommen hinaus, vor dem er
+   endete. Nur ein ganzes Datum wird geschrieben. „Bis Datum“ beginnt am Tag
+   des zehnten Termins (110b) und springt nicht mehr auf „nie“ zurück; auf
+   dem Handy ist das Feld eine Datumsauswahl (113a). Aperios Schnitt
+   schreibt nie mehr genau `…T235959Z` (106a).
 9. **Die Kern-Regel für den Zonenwechsel (15a)** — `feat(core): changing the clock a series repeats on`.
    `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die

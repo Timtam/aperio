@@ -12,6 +12,7 @@
  * (Fast Refresh) and so the parse/build round-trip can be unit-tested alone.
  */
 import { dayParts } from './dayParts';
+import { nthOccurrence } from './recurrence';
 
 export type Freq = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
@@ -40,8 +41,14 @@ export interface ParsedRule {
   byMonth: number;
   endMode: EndMode;
   count: number;
-  /** YYYY-MM-DD */
+  /** The day the end field shows, `YYYY-MM-DD`; `''` for none. */
   until: string;
+  /** The rule's UNTIL as it was written, `''` when it names none. It is
+   *  written back unchanged while {@link until} still shows its day, so
+   *  touching another control keeps an end nobody changed, to the second
+   *  (DESIGN-series-time-zone.md, "Prüfen und Speichern"): a cut's bound, a
+   *  date, a provider's own spelling. */
+  untilText: string;
 }
 
 const DEFAULT_RULE: ParsedRule = {
@@ -57,6 +64,7 @@ const DEFAULT_RULE: ParsedRule = {
   endMode: 'NEVER',
   count: 10,
   until: '',
+  untilText: '',
 };
 
 export interface MonthlyOption {
@@ -238,17 +246,14 @@ export function parseRRule(value: string | null): ParsedRule {
   let endMode: EndMode = 'NEVER';
   let count = DEFAULT_RULE.count;
   let until = DEFAULT_RULE.until;
+  let untilText = DEFAULT_RULE.untilText;
   if (parts.has('COUNT')) {
     endMode = 'COUNT';
     count = Math.max(1, Number(parts.get('COUNT')) || 1);
   } else if (parts.has('UNTIL')) {
     endMode = 'UNTIL';
-    const raw = parts.get('UNTIL') ?? '';
-    // Accept both "20260530" and "20260530T235959Z" forms.
-    const m = raw.match(/^(\d{4})(\d{2})(\d{2})/);
-    if (m) {
-      until = `${m[1]}-${m[2]}-${m[3]}`;
-    }
+    untilText = parts.get('UNTIL') ?? '';
+    until = untilDayOf(untilText);
   }
 
   return {
@@ -264,6 +269,7 @@ export function parseRRule(value: string | null): ParsedRule {
     endMode,
     count,
     until,
+    untilText,
   };
 }
 
@@ -293,15 +299,57 @@ export function buildRRule(p: ParsedRule): string | null {
 
   if (p.endMode === 'COUNT') {
     out.push(`COUNT=${p.count}`);
-  } else if (p.endMode === 'UNTIL' && p.until) {
-    // RFC 5545 wants a basic-format UTC timestamp. End-of-day so the
-    // last day is included whatever the user's timezone is.
-    const [y, m, d] = p.until.split('-');
-    if (y && m && d) {
-      out.push(`UNTIL=${y}${m}${d}T235959Z`);
+  } else if (p.endMode === 'UNTIL') {
+    const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(p.until);
+    if (p.untilText !== '' && untilDayOf(p.untilText) === p.until) {
+      // Nobody changed the end: it goes back as it came.
+      out.push(`UNTIL=${p.untilText}`);
+    } else if (day) {
+      // RFC 5545 wants a basic-format UTC timestamp. End-of-day so the
+      // last day is included whatever the user's timezone is. Only a
+      // whole date is written: a part of one would be a bound no reader
+      // can parse.
+      out.push(`UNTIL=${day[1]}${day[2]}${day[3]}T235959Z`);
     }
   }
   return out.join(';');
+}
+
+/** The day an UNTIL as written shows in the end field: its first eight
+ *  digits, `YYYY-MM-DD`, or `''` where it starts with none. */
+function untilDayOf(untilText: string): string {
+  const m = /^(\d{4})(\d{2})(\d{2})/.exec(untilText);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
+}
+
+/**
+ * The day a newly chosen "until a date" end starts on: the day of the
+ * tenth occurrence from `startDay`, where the count's default, "after 10
+ * occurrences", ends the same rule. So switching from one to the other
+ * keeps the series, and the field never starts empty, which wrote no end
+ * at all and sent the control back to "never". `startDay` itself where
+ * the rule has fewer occurrences or cannot be read.
+ *
+ * Counted on UTC from noon of the start day, which keeps the days the
+ * rule takes from the start day (`cal_core::day_parts`).
+ */
+export function defaultUntilDay(rule: ParsedRule, startDay: string): string {
+  const counted = buildRRule({ ...rule, endMode: 'COUNT', count: DEFAULT_RULE.count });
+  if (counted === null || dayParts(startDay) === null) return startDay;
+  const tenth = nthOccurrence(
+    { start: `${startDay}T12:00:00Z`, recurrence: { rrule: counted, tzid: null } },
+    DEFAULT_RULE.count,
+  );
+  return tenth === null ? startDay : tenth.slice(0, 10);
+}
+
+/** The rule with another end. "Until a date" starts on a date
+ *  ({@link defaultUntilDay}): without one no end is written, and the control
+ *  fell back to "never" the moment it was chosen. */
+export function withEndMode(rule: ParsedRule, endMode: EndMode, startDay: string): ParsedRule {
+  return endMode === 'UNTIL' && rule.until === ''
+    ? { ...rule, endMode, until: defaultUntilDay(rule, startDay) }
+    : { ...rule, endMode };
 }
 
 /**
@@ -336,9 +384,6 @@ export function pickerMisreadsRule(rrule: string | null | undefined): boolean {
       .split(';')
       .map((part) => part.trim().toUpperCase())
       .filter((part) => part !== '' && part !== 'INTERVAL=1' && part !== 'WKST=MO')
-      // The pickers keep an UNTIL by its day, so a bound that differs only in
-      // its time of day is the same bound to them.
-      .map((part) => (part.startsWith('UNTIL=') ? `UNTIL=${part.slice(6, 14)}` : part))
       .sort()
       .join(';');
   return parts(body) !== parts(rebuilt);

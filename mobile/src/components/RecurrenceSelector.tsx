@@ -11,6 +11,7 @@ import {
   parseRRule,
   recurrenceStartDate,
   resolveAgainstDay,
+  withEndMode,
 } from '@aperio/shared';
 import type {
   EndMode,
@@ -22,6 +23,7 @@ import type {
 } from '@aperio/shared';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { DateTimeFieldButton } from './DateTimeFieldButton';
 import { MultiSelectFieldButton } from './MultiSelectFieldButton';
 import { SelectFieldButton } from './SelectFieldButton';
 
@@ -30,8 +32,8 @@ import { SelectFieldButton } from './SelectFieldButton';
 // rrule.ts); the value model is the raw RRULE body string (what
 // cal_core::EventRecurrence keeps in `rrule`), `null` = non-recurring.
 // <select> → collapsed picker, <input type=number> → numeric TextInput, weekday
-// checkboxes → a collapsed weekday multi-select, <input type=date> → a YYYY-MM-DD field (the
-// reliable SR input used elsewhere in the event editor).
+// checkboxes → a collapsed weekday multi-select, <input type=date> → the
+// editor's own date button (DateTimeFieldButton), as for the start.
 //
 // Capability gating: `capabilities` (the owning calendar's recurrence caps,
 // stamped by the Host from the adapter's plugin manifest) FILTERS options the
@@ -284,7 +286,7 @@ export function RecurrenceSelector({
                 ? [{ value: 'UNTIL' as EndMode, label: t('dialogs.event.recurrence.end.until') }]
                 : []),
             ]}
-            onChange={(endMode) => update({ ...rule, endMode })}
+            onChange={(endMode) => update(withEndMode(rule, endMode, startDay))}
           />
 
           {rule.endMode === 'COUNT' && (
@@ -301,18 +303,15 @@ export function RecurrenceSelector({
           )}
 
           {rule.endMode === 'UNTIL' && (
-            <View style={styles.field}>
-              <Text style={styles.label}>{t('dialogs.event.recurrence.untilLabel')}</Text>
-              <TextInput
-                style={styles.input}
-                value={rule.until}
-                onChangeText={(until) => update({ ...rule, until })}
-                placeholder="YYYY-MM-DD"
-                accessibilityLabel={t('dialogs.event.recurrence.untilLabel')}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
+            // A date picker like the start's, which hands over whole dates
+            // only: a text field wrote the rule on every keystroke, and half a
+            // date became an end no reader could parse.
+            <DateTimeFieldButton
+              label={t('dialogs.event.recurrence.untilLabel')}
+              mode="date"
+              value={rule.until}
+              onChange={(until) => update({ ...rule, until })}
+            />
           )}
         </>
       )}

@@ -11,6 +11,7 @@ import {
   parseRRule,
   recurrenceStartDate,
   resolveAgainstDay,
+  withEndMode,
 } from './rrule';
 import type { EndMode, Freq, MonthlyOption, ParsedRule } from './rrule';
 
@@ -331,9 +332,7 @@ export function RecurrenceSelector({
             </span>
             <select
               value={rule.endMode}
-              onChange={(e) =>
-                update({ ...rule, endMode: e.target.value as EndMode })
-              }
+              onChange={(e) => update(withEndMode(rule, e.target.value as EndMode, startDay))}
             >
               <option value="NEVER">
                 {t('dialogs.event.recurrence.end.never')}

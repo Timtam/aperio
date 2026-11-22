@@ -3584,6 +3584,15 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **Das Ende einer Wiederholung bleibt, wie es war (Stufe 8, Schritt 4,
+  2026-11-22, 106a, 110b, 113a):** Wer an der Wiederholung etwas anderes
+  ändert, behält das Ende auf die Sekunde; vorher wurde es als Ende seines
+  UTC-Tages neu geschrieben, und ein Schnitt holte das Vorkommen zurück, vor
+  dem er endete. „Bis Datum“ ließ sich bisher gar nicht wählen (die Auswahl
+  sprang auf „nie“ zurück); jetzt steht der Tag des zehnten Termins darin.
+  Auf dem Handy ist das Feld eine Datumsauswahl statt eines Textfelds, das
+  halbe Daten als Ende schrieb. Aperios Schnitt schreibt nie mehr genau
+  `…T235959Z`.
   ↳ **Formularfelder mit Uhr (Stufe 8, Schritt 3, 2026-11-22, 102a):**
   Beginn und Ende stehen als Felder auf der Uhr der Serie oder der des
   Geräts (`shared/clockFields.ts`). Ein Feld, in das niemand tippt, hält

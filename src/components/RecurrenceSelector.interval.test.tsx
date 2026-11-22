@@ -57,3 +57,17 @@ describe('RecurrenceSelector interval field', () => {
     expect(input.value).toBe('1');
   });
 });
+
+// Choosing "until a date" wrote no end while the field had no date, so the
+// rule read back as "never" and the control jumped back at once.
+describe('RecurrenceSelector end', () => {
+  it('stays on "until a date" when chosen, starting on the tenth occurrence', () => {
+    const onChange = vi.fn();
+    render(<RecurrenceSelector value="FREQ=DAILY" onChange={onChange} startDay="2026-11-02" />);
+    const endSelect = screen
+      .getAllByRole('combobox')
+      .find((el) => el.querySelector('option[value="UNTIL"]') !== null) as HTMLSelectElement;
+    fireEvent.change(endSelect, { target: { value: 'UNTIL' } });
+    expect(onChange).toHaveBeenLastCalledWith('FREQ=DAILY;UNTIL=20261111T235959Z');
+  });
+});
