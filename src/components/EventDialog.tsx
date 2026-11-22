@@ -162,7 +162,8 @@ import {
   calendarMoveMode,
   prefillMoveMode,
   storedZoneOf,
-  zoneChoiceWaitsForSave,
+  zoneChoiceWait,
+  answeredZone,
   zoneSaveRefusal,
   zoneSentences,
   zoneToSave,
@@ -1925,6 +1926,7 @@ export function EventDialog({
         change,
         start: before.start,
         rrule: current.rrule ?? '',
+        fromZone: zoneFormView(zoneForm, zoneFactsOf(current)).zone,
         zone: pick.zone,
         language: i18n.language,
         t,
@@ -2681,7 +2683,9 @@ export function EventDialog({
                     rrule: loadedRecurrence.rrule,
                     exceptions: loadedRecurrence.exceptions ?? [],
                   },
-                  zoneToSave(zoneForm, zoneFactsOf(form)),
+                  // The zone the answer was computed on, whatever this save
+                  // writes (all-day switched on afterwards writes none).
+                  answeredZone(zoneForm),
                 )
               : loadedSeries;
           const times = isOccurrence
@@ -3920,11 +3924,19 @@ export function EventDialog({
               onClick={() => {
                 if (submitting) return;
                 // A start changed before the choice would be lost between the
-                // answer and the save: save it first (`zoneChoiceWaitsForSave`).
+                // answer and the save, and times without an instant give the
+                // core nothing to answer: say so instead (`zoneChoiceWait`).
                 const baseline =
                   form.zoneAnswer?.start ?? (isEdit && !isOccurrence ? (event?.start ?? null) : null);
-                if (zoneChoiceWaitsForSave(zoneFormOf(form), fields, baseline)) {
-                  announce(t('dialogs.seriesTimeZone.announce.saveStartFirst'));
+                const wait = zoneChoiceWait(zoneFormOf(form), fields, baseline);
+                if (wait !== null) {
+                  announce(
+                    t(
+                      wait === 'start'
+                        ? 'dialogs.seriesTimeZone.announce.saveStartFirst'
+                        : 'dialogs.seriesTimeZone.announce.validTimesFirst',
+                    ),
+                  );
                   return;
                 }
                 setZonePickerOpen(true);

@@ -3633,6 +3633,11 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   gespeicherten Serie zuerst geändert, wartet die Wahl auf ein Speichern.
   Kein Mitnahme-Angebot nach einem Zonenwechsel bis Stufe 13. Die Handy-Teile
   sind ohne Build gebaut.
+  Offen: Eine Exchange-Serie nennt die Plätze einzeln geänderter Vorkommen
+  unter ihren Ausnahmen. Nach „wie die Regel sagt“ und einem Kalenderwechsel
+  wandert so ein Platz wie eine Löschung mit, und das Vorkommen ist im neuen
+  Kalender gelöscht, statt zu seiner üblichen Zeit wiederzukommen (224). Die
+  Frage an den Kern müsste nur echte Löschungen nennen (`plan.standing`).
   Offen: Ein vom Anbieter einzeln geänderter Termin (ohne eigene Regel), als
   „diesen und alle folgenden“ geöffnet, steht noch auf der Uhr des Geräts
   (21a für solche Termine braucht die Regel der Serie im Formular).

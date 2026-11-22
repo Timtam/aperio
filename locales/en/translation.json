@@ -2440,7 +2440,8 @@
         "repeats": "Repeats {{days}}.",
         "unchanged": "Series time zone not changed: {{entry}}",
         "refused": "Series time zone not changed: {{reason}}.",
-        "saveStartFirst": "Series time zone not changed: save the changed start first, then choose the time zone."
+        "saveStartFirst": "Series time zone not changed: save the changed start first, then choose the time zone.",
+        "validTimesFirst": "Series time zone not changed: enter a valid start and end first."
       }
     },
     "readOnlyField": "{{label}}: {{value}}",

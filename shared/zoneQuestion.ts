@@ -8,7 +8,7 @@
 
 import type { ClockFields } from './clockFields';
 import { fieldInstant } from './clockFields';
-import { seriesDayKey } from './recurrence';
+import { expandEvent, seriesDayKey } from './recurrence';
 import { describeRecurrence, recurrenceDaysText } from './recurrenceSummary';
 import type { ClockChangeAnswer, ClockChangeRefusal, SeriesClockChange } from './seriesClock';
 import type { ZoneOffsets } from './types';
@@ -54,11 +54,43 @@ function onClock(at: string, zone: string | null, language: string): string {
   return `${day.format(when)}, ${time.format(when)}`;
 }
 
-/** The days a rule repeats on, starting at `start` on the clock of `zone`:
- *  „jeden Montag“; the rule's own days where it has no words for them. */
-function daysOf(rrule: string, start: string, zone: string | null, language: string, t: Translate): string {
-  const summary = describeRecurrence({ rrule, start: seriesDayKey(start, zone, false), last_day: null });
+/** The days a rule repeats on, starting on `day` (`YYYY-MM-DD` on the
+ *  rule's own clock): „jeden Montag“; the rule's own days where it has no
+ *  words for them. */
+function daysOn(rrule: string, day: string, language: string, t: Translate): string {
+  const summary = describeRecurrence({ rrule, start: day, last_day: null });
   return recurrenceDaysText(summary, { t, language }) ?? t('dialogs.seriesTimeZone.question.ownDays');
+}
+
+/** The days a rule repeats on, starting at `start` on the clock of `zone`. */
+function daysOf(rrule: string, start: string, zone: string | null, language: string, t: Translate): string {
+  return daysOn(rrule, seriesDayKey(start, zone, false), language, t);
+}
+
+/** A sentence whose last word is a day of the month keeps one period: „am
+ *  15.“ ends it, not „am 15..“. */
+function closed(sentence: string): string {
+  return sentence.replace(/\.\.$/, '.');
+}
+
+/** The first occurrence of a series from its start, read on the clock of
+ *  `zone`: where its events begin to fall. Deletions are left out, on both
+ *  sides of a comparison alike. */
+function firstOccurrence(rrule: string, start: string, zone: string | null): string | null {
+  const from = Date.parse(start);
+  const series = {
+    id: 'question',
+    start,
+    end: start,
+    all_day: false,
+    recurrence: { rrule, exceptions: [], tzid: zone },
+  };
+  return (
+    expandEvent(series, { start: new Date(from - DAY_MS), end: new Date(from + 400 * DAY_MS) })
+      .map((occurrence) => occurrence.start)
+      .filter((at) => Date.parse(at) >= from)
+      .sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? null
+  );
 }
 
 /** Why an answer cannot be carried out, as a clause. */
@@ -104,25 +136,36 @@ export function weekdayQuestion(args: {
   change: SeriesClockChange;
   start: string;
   rrule: string;
+  /** The zone the series repeats on now, as stored (`null` for UTC). */
+  fromZone: string | null;
   zone: string | null;
   language: string;
   t: Translate;
 }): WeekdayQuestionText {
-  const { change, start, rrule, zone, language, t } = args;
+  const { change, start, rrule, fromZone, zone, language, t } = args;
   const clock = zoneCityName(zone);
-  const ruleDays = daysOf(rrule, start, zone, language, t);
+  // The rule's days as it reads them now: a day it takes from its start is
+  // the start's day on its own clock, the old one.
+  const ruleDays = daysOn(rrule, change.startDayBefore, language, t);
   const lines = [
-    t('dialogs.seriesTimeZone.question.message', {
-      clock,
-      start: onClock(start, zone, language),
-      days: ruleDays,
-    }),
+    closed(
+      t('dialogs.seriesTimeZone.question.message', {
+        clock,
+        start: onClock(start, zone, language),
+        days: ruleDays,
+      }),
+    ),
   ];
   const answers: WeekdayAnswerButton[] = [];
   const asRule = change.asRule;
   if (asRule.outcome === 'changed') {
+    // How far the events move: the first one as the rule says, on the new
+    // clock, against the first one where it falls now. The start may stay
+    // where the events move (a series that lost its zone), or move with them.
     const dayNumber = (at: string) => Date.parse(seriesDayKey(at, zone, false)) / DAY_MS;
-    const moved = Math.round(dayNumber(asRule.start) - dayNumber(start));
+    const now = firstOccurrence(rrule, start, fromZone);
+    const after = firstOccurrence(asRule.rrule, asRule.start, zone);
+    const moved = now === null || after === null ? 0 : Math.round(dayNumber(after) - dayNumber(now));
     const days = upperFirst(daysOf(asRule.rrule, asRule.start, zone, language, t));
     answers.push({
       answer: 'rule',
@@ -203,7 +246,7 @@ export function zoneChoiceAnnouncement(args: {
           : t('dialogs.seriesTimeZone.announce.sameInstant', { clock, times });
   if (rewritten === null || both === null) return first;
   const days = daysOf(rewritten, both.start, zone, language, t);
-  return `${first} ${t('dialogs.seriesTimeZone.announce.repeats', { days })}`;
+  return `${first} ${closed(t('dialogs.seriesTimeZone.announce.repeats', { days }))}`;
 }
 
 /** „Zeitzone der Serie nicht geändert: Berlin, Europa, UTC+01:00“: the zone

@@ -557,22 +557,41 @@ export function zoneAppliedSeries<
 }
 
 /**
- * Whether choosing a zone for a stored series waits for a save: its start was
- * changed in this session, since the editor opened (`baselineStart`, the
- * stored start) or since the last zone answer (that answer's start). The core
- * is asked against the series as stored or answered, and a whole-series save
- * measures the edit against the answered series (`zoneAppliedSeries`), so a
- * start moved after the choice moves the rule and the deleted occurrences as
- * any date move does; one moved before it would be lost in between. The
- * editor says so instead of asking (predictable rather than half right).
- * `null` for anything else: a new event, a single event, an import.
+ * Why choosing a zone for a stored series waits, or `null` where it may go
+ * ahead. The core is asked against the series as stored or as the last zone
+ * answer left it (`baselineStart`), and a whole-series save measures the edit
+ * against the answered series (`zoneAppliedSeries`), so a change made after
+ * the choice moves the rule and the deleted occurrences as any edit does.
+ * Made before it, part of it would be lost in between, so the editor says so
+ * instead of asking (predictable rather than half right):
+ * - `'start'`: the start was changed in this session, or the series opened
+ *   all-day and now has times ("Speichere zuerst den geänderten Beginn");
+ * - `'times'`: the start or the end names no instant (a time the clock skips,
+ *   half a value), so there is nothing to ask the core about.
+ * `baselineStart` is `null` for anything else (a new event, a single event,
+ * an import), which never waits.
  */
-export function zoneChoiceWaitsForSave(
+export function zoneChoiceWait(
   form: SeriesZoneForm,
   fields: ClockFields,
   baselineStart: string | null,
-): boolean {
-  if (form.editing !== 'series' || baselineStart === null) return false;
+): 'start' | 'times' | null {
+  if (form.editing !== 'series' || baselineStart === null) return null;
+  if (form.openedAllDay) return 'start';
   const start = fieldInstant(fields.start, fields.clock);
-  return start.kind !== 'at' || Date.parse(start.at) !== Date.parse(baselineStart);
+  if (start.kind !== 'at' || fieldInstant(fields.end, fields.clock).kind !== 'at') return 'times';
+  return Date.parse(start.at) === Date.parse(baselineStart) ? null : 'start';
+}
+
+/**
+ * The zone a zone answer was computed on, as a save writes it: the chosen
+ * zone (`writtenZone`, `null` for UTC), or the stored one where nothing was
+ * chosen. The series a whole-series save measures against carries it
+ * (`zoneAppliedSeries`), whatever the save then writes: an all-day series
+ * switched on afterwards writes no zone, but its deletions are read where the
+ * answer put them.
+ */
+export function answeredZone(form: SeriesZoneForm): string | null {
+  if (form.chosen === undefined) return form.stored ?? null;
+  return form.chosen === null ? null : writtenZone(form.chosen);
 }

@@ -58,7 +58,8 @@ import {
   calendarMoveMode,
   prefillMoveMode,
   storedZoneOf,
-  zoneChoiceWaitsForSave,
+  zoneChoiceWait,
+  answeredZone,
   zoneSaveRefusal,
   zoneSentences,
   zoneToSave,
@@ -1552,18 +1553,24 @@ function EventEditorScreen({
   const repeatSentence = (() => {
     if (!original) return '';
     const moved = !locked && shownRule.rrule !== recurrence;
-    const rule = (moved ? shownRule.rrule : original.recurrence?.rrule)?.trim();
+    // A zone answer rewrote the rule the form holds: that is the one saved,
+    // as the desktop says it.
+    const answered = !locked && zoneAnswer !== null;
+    const rule = (
+      moved ? shownRule.rrule : answered ? recurrence : original.recurrence?.rrule
+    )?.trim();
     if (!rule) return locked ? t('dialogs.event.recurrence.none') : '';
     // In the editable editor only where the controls would show another rule
     // than the one stored (87b): otherwise they say it themselves.
     if (!locked && !pickerMisreadsRule(rule)) return '';
-    const series = moved
-      ? {
-          ...original,
-          start: ruleFrame?.written ?? original.start,
-          recurrence: original.recurrence && { ...original.recurrence, rrule: rule },
-        }
-      : original;
+    const series =
+      moved || answered
+        ? {
+            ...original,
+            start: ruleFrame?.written ?? original.start,
+            recurrence: original.recurrence && { ...original.recurrence, rrule: rule },
+          }
+        : original;
     return recurrenceSummaryText(
       describeRecurrence({
         rrule: rule,
@@ -2248,7 +2255,7 @@ function EventEditorScreen({
         const base =
           wholeFromCut ??
           (zoneAnswer !== null && original.recurrence?.rrule
-            ? zoneAppliedSeries(original, zoneAnswer, zoneToSave(zoneForm, facts))
+            ? zoneAppliedSeries(original, zoneAnswer, answeredZone(zoneForm))
             : original);
         const seededOccurrence =
           isOccurrence && occurrence != null && base.recurrence != null
@@ -2873,6 +2880,7 @@ function EventEditorScreen({
         change,
         start,
         rrule: rule,
+        fromZone: view.zone,
         zone: pick.zone,
         language: i18n.language,
         t,
@@ -3346,7 +3354,7 @@ function EventEditorScreen({
             // Its own label: the controls below carry `recurrence.label`.
             <ReadOnlyField
               label={t(
-                shownRule.rrule !== recurrence
+                shownRule.rrule !== recurrence || zoneAnswer !== null
                   ? 'dialogs.event.recurrence.movedLabel'
                   : 'dialogs.event.recurrence.storedLabel',
               )}
@@ -3402,12 +3410,20 @@ function EventEditorScreen({
             accessibilityHint={t('mobile.selectFieldHint')}
             onPress={() => {
               // A start changed before the choice would be lost between the
-              // answer and the save: save it first (`zoneChoiceWaitsForSave`).
+              // answer and the save, and times without an instant give the
+              // core nothing to answer: say so instead (`zoneChoiceWait`).
               const baseline =
                 zoneAnswer?.start ??
                 (editing && original != null && !isOccurrence ? original.start : null);
-              if (zoneChoiceWaitsForSave(zoneForm, fields, baseline)) {
-                afterZoneDialog(t('dialogs.seriesTimeZone.announce.saveStartFirst'));
+              const wait = zoneChoiceWait(zoneForm, fields, baseline);
+              if (wait !== null) {
+                afterZoneDialog(
+                  t(
+                    wait === 'start'
+                      ? 'dialogs.seriesTimeZone.announce.saveStartFirst'
+                      : 'dialogs.seriesTimeZone.announce.validTimesFirst',
+                  ),
+                );
                 return;
               }
               setZonePickerOpen(true);

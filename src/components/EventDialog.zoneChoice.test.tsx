@@ -430,6 +430,53 @@ describe('EventDialog → the whole-series save after a zone answer (question 12
     expect(document.activeElement).toBe(zoneButton());
   });
 
+  it('asks to save a series that opened all-day and got times first', async () => {
+    deviceInBerlin();
+    // Mondays all day from 23 November, on the device's days.
+    const allDay = {
+      ...UTC_SERIES,
+      start: new Date(2026, 10, 23).toISOString(),
+      end: new Date(2026, 10, 24).toISOString(),
+      all_day: true,
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [new Date(2026, 10, 30).toISOString()] },
+    } as unknown as CalendarEvent;
+    await open(allDay);
+    fireEvent.click(screen.getByRole('checkbox', { name: /ganztägig/i }));
+    zoneButton().focus();
+    fireEvent.click(zoneButton());
+    await settle();
+    expect(screen.queryByRole('dialog', { name: /^zeitzone der serie$/i })).toBeNull();
+    expect(announced).toContain(
+      'Zeitzone der Serie nicht geändert: Speichere zuerst den geänderten Beginn, dann wähle die Zeitzone.',
+    );
+  });
+
+  it('keeps the deletions where all-day is switched on after an answer', async () => {
+    deviceInBerlin();
+    // Mondays at 09:00 in Berlin, two of them deleted, one in winter and one
+    // in summer.
+    const berlin = {
+      ...UTC_SERIES,
+      start: '2026-11-23T08:00:00.000Z',
+      end: '2026-11-23T09:00:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: ['2026-12-07T08:00:00.000Z', '2027-07-05T07:00:00.000Z'],
+        tzid: 'Europe/Berlin',
+      },
+    } as unknown as CalendarEvent;
+    await open(berlin);
+    await pick('New York', 'new york');
+    await settle();
+    fireEvent.click(screen.getByRole('checkbox', { name: /ganztägig/i }));
+    save();
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+    const sent = updatesSent()[0];
+    expect(sent.all_day).toBe(true);
+    // Both deleted Mondays stay deleted, as without the zone choice.
+    expect(sent.recurrence?.exceptions).toHaveLength(2);
+  });
+
   it('goes through the question about lost occurrences where the calendar would drop them', async () => {
     deviceInBerlin();
     answers.push(() =>

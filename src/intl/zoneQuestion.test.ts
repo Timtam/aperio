@@ -47,6 +47,7 @@ describe('the weekday question (138a)', () => {
       change,
       start: SUNDAY_LATE,
       rrule: 'FREQ=WEEKLY;BYDAY=SU,WE',
+      fromZone: null,
       zone: BERLIN,
       language: 'de',
       t: de,
@@ -68,12 +69,15 @@ describe('the weekday question (138a)', () => {
       change,
       start: SUNDAY_LATE,
       rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      fromZone: null,
       zone: BERLIN,
       language: 'de',
       t: de,
     });
+    // The start stays, but the events move: from Tuesday 00:30 in Berlin,
+    // where they fall now, back to Monday, where the rule meant them.
     expect(question.answers).toEqual([
-      { answer: 'rule', label: 'Jeden Montag, wie die Regel sagt' },
+      { answer: 'rule', label: 'Jeden Montag, wie die Regel sagt (Termine rücken einen Tag vor)' },
       { answer: 'now', label: 'Jeden Dienstag, wo die Termine jetzt liegen' },
     ]);
   });
@@ -84,6 +88,7 @@ describe('the weekday question (138a)', () => {
       change: { ...change, asNow: { outcome: 'refused', reason: 'skipped_time' } },
       start: SUNDAY_LATE,
       rrule: 'FREQ=WEEKLY;BYDAY=SU,WE',
+      fromZone: null,
       zone: BERLIN,
       language: 'de',
       t: de,
@@ -95,12 +100,32 @@ describe('the weekday question (138a)', () => {
     );
   });
 
+  it('reads a day the rule takes from its start on the old clock, and keeps one period', () => {
+    // Monthly from 31 January 23:30 UTC: on Berlin's clock 1 February.
+    const start = '2026-01-31T23:30:00.000Z';
+    const change = seriesClockChange({ rrule: 'FREQ=MONTHLY', start, exceptions: [], fromTzid: null, toTzid: BERLIN });
+    if (change === null || !change.asks) throw new Error('expected the core to ask');
+    const question = weekdayQuestion({
+      change,
+      start,
+      rrule: 'FREQ=MONTHLY',
+      fromZone: null,
+      zone: BERLIN,
+      language: 'de',
+      t: de,
+    });
+    expect(question.message).not.toMatch(/am 1\./);
+    expect(question.message).not.toMatch(/\.\.$/);
+    expect(question.message.startsWith('In Berlin fällt der Beginn auf Sonntag, 1. Februar, 00:30; die Regel sagt ')).toBe(true);
+  });
+
   it('says the same in English', () => {
     const change = askAbout('FREQ=WEEKLY;BYDAY=SU,WE');
     const question = weekdayQuestion({
       change,
       start: SUNDAY_LATE,
       rrule: 'FREQ=WEEKLY;BYDAY=SU,WE',
+      fromZone: null,
       zone: BERLIN,
       language: 'en',
       t: en,

@@ -246,15 +246,21 @@ series' date and time in its time zone:
 - For a new appointment the typed times stay and now apply on the new clock.
   For a stored series the moment stays, and the fields show it on the new
   clock. Aperio then says once what applies.
-- Where the start falls on another day on the new clock and the rule names
-  days, Aperio asks **Which weekday should apply?**. The buttons: **Don't
-  change the time zone** (it has the focus, as Escape does), the days as the
-  rule says (the appointments then move a day earlier or later), and the days
-  where the appointments fall now. Where an answer cannot be carried out, its
-  button is missing, and the question says why.
-- If you changed the start of a stored series, save first; then the time zone
-  can be chosen. The other way round works in one go: the time zone first,
-  then the date.
+- Where the start falls on another day on the new clock, and the rule names
+  other days than the start's or the series cannot keep its days on the new
+  clock (monthly on the 31st, for example), Aperio asks **Which weekday should
+  apply?**. The buttons: **Don't change the time zone**, the days as the rule
+  says (where the appointments move to another day, "events move one day
+  earlier" or "later" follows), and the days where the appointments fall now.
+  On the desktop **Don't change the time zone** has the focus, and Escape does
+  the same; on the phone the screen reader reads the title first, and Back, a
+  tap outside and VoiceOver's escape gesture change nothing. Where an answer
+  cannot be carried out, its button is missing, and the question says why.
+- If you changed the start of a stored series, or a stored all-day series got
+  times here, save first; then the time zone can be chosen. The other way
+  round works in one go: the time zone first, then the date. Where the start
+  or the end has no valid time, the button says so instead of opening the
+  list.
 - After a change of time zone, Aperio does not offer to carry the change to
   the appointment's copies in other calendars; that comes later.
 - Where a time you typed does not exist on that day in the series' time zone,

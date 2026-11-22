@@ -268,14 +268,21 @@ Zeitzone:
   Zeitpunkt, und die Felder zeigen ihn auf der neuen Uhr. Aperio sagt danach
   einmal, was gilt.
 - Fällt der Beginn auf der neuen Uhr auf einen anderen Tag, und nennt die
-  Regel Tage, fragt Aperio **Welcher Wochentag soll gelten?**. Die Knöpfe:
-  **Zeitzone nicht ändern** (hat den Fokus, wie Escape), die Tage, wie die
-  Regel sagt (die Termine rücken dann einen Tag vor oder zurück), und die
-  Tage, wo die Termine jetzt liegen. Lässt sich eine Antwort nicht umsetzen,
-  fehlt ihr Knopf, und die Frage sagt, warum.
-- Hast du den Beginn einer gespeicherten Serie geändert, speichere zuerst;
+  Regel andere Tage als den des Beginns oder kann die Serie ihre Tage auf der
+  neuen Uhr nicht halten (etwa monatlich am 31.), fragt Aperio **Welcher
+  Wochentag soll gelten?**. Die Knöpfe: **Zeitzone nicht ändern**, die Tage,
+  wie die Regel sagt (rücken die Termine dabei auf einen anderen Tag, steht
+  dahinter „Termine rücken einen Tag vor“ oder „zurück“), und die Tage, wo
+  die Termine jetzt liegen. Am Desktop hat **Zeitzone nicht ändern** den
+  Fokus, und Escape tut dasselbe; am Handy liest der Bildschirmleser zuerst
+  den Titel, und Zurück, Tippen daneben und die Wischgeste von VoiceOver
+  ändern nichts. Lässt sich eine Antwort nicht umsetzen, fehlt ihr Knopf, und
+  die Frage sagt, warum.
+- Hast du den Beginn einer gespeicherten Serie geändert, oder hat eine
+  gespeicherte ganztägige Serie hier Uhrzeiten bekommen, speichere zuerst;
   danach lässt sich die Zeitzone wählen. Andersherum geht es in einem Schritt:
-  erst die Zeitzone, dann das Datum.
+  erst die Zeitzone, dann das Datum. Haben Beginn oder Ende keine gültige
+  Uhrzeit, sagt der Knopf das, statt die Liste zu öffnen.
 - Nach einem Wechsel der Zeitzone bietet Aperio nicht an, die Änderung auf die
   Kopien des Termins in anderen Kalendern mitzunehmen; das kommt später.
 - Gibt es eine getippte Uhrzeit an diesem Tag in der Zeitzone der Serie nicht,
