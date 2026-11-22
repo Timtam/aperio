@@ -225,11 +225,24 @@ export function occurrenceCount(
 ): number | null {
   const built = wallRule(series);
   if (!built) return null;
+  const cap = capOf(series, built.zone);
   let count = 0;
-  built.rule.all(() => {
+  // Only the last few can start past the end's own instant (an occurrence a
+  // spring change pushes past its gap), so only they become instants.
+  const tail: Date[] = [];
+  built.rule.all((at) => {
     count += 1;
+    if (cap !== null) {
+      tail.push(at);
+      if (tail.length > 3) tail.shift();
+    }
     return count <= limit;
   });
+  if (cap !== null && count <= limit) {
+    for (let i = tail.length - 1; i >= 0 && realOf(tail[i], built.zone) > cap; i -= 1) {
+      count -= 1;
+    }
+  }
   return count;
 }
 
@@ -256,7 +269,23 @@ export function nthOccurrence(
   });
   if (found === null) return null;
   const at: Date = found;
+  const cap = capOf(series, built.zone);
+  if (cap !== null && realOf(at, built.zone) > cap) return null;
   return (built.zone ? wallToReal(at, built.zone) : at).toISOString();
+}
+
+/** A wall-clock occurrence of `wallRule` as the instant it is, in ms. */
+function realOf(wall: Date, zone: string | null): number {
+  return (zone ? wallToReal(wall, zone) : wall).getTime();
+}
+
+/** The end's own instant for a series `wallRule` read on `zone`, in ms, the
+ *  cap `expandEvent` applies; `null` without one. */
+function capOf(
+  series: { start: string; all_day?: boolean; recurrence: { rrule: string; tzid?: string | null } },
+  zone: string | null,
+): number | null {
+  return endCap(series.recurrence.rrule, endFacts(series), readsCalendarDays(series) ? zone : null);
 }
 
 /** {@link expansionZoneFor} for a series named by its two facts. */
@@ -670,7 +699,21 @@ export function movedSeriesUntil(
   const wall = (ms: number) => (zone ? realToWall(new Date(ms), zone) : new Date(ms)).getTime();
   const shift = wall(Date.parse(to)) - wall(Date.parse(from));
   const byDigits = expansionClock(allDay, tzid) === 'device-days';
-  const movedWall = (byDigits ? until : wall(until)) + shift;
+  let untilWall = byDigits ? until : wall(until);
+  if (!byDigits) {
+    // An end that does not reach its own day (a cut) moves as "before that
+    // day's first occurrence". Its wall time alone can sit after the
+    // occurrence's nominal time: a cut at an occurrence the spring change
+    // pushes past its gap ends at 03:29:59 for an occurrence at 02:30, and
+    // moved onto a day without the change that bound let 02:30 back in.
+    const end = readEnd(rrule, { start: from, allDay, tzid: tzid ?? null }, null);
+    const untilDay = new Date(untilWall).toISOString().slice(0, 10);
+    if (end !== null && end.endDay < untilDay) {
+      const timeOfDay = ((wall(Date.parse(from)) % DAY_MS) + DAY_MS) % DAY_MS;
+      untilWall = Math.min(untilWall, Date.parse(`${untilDay}T00:00:00Z`) + timeOfDay - 1000);
+    }
+  }
+  const movedWall = untilWall + shift;
   const moved = zone && !byDigits ? wallToReal(new Date(movedWall), zone) : new Date(movedWall);
   return moved.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }

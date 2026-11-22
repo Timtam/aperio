@@ -19,8 +19,10 @@ import {
   movedSeriesUntil,
   moveSeriesInstant,
   nthOccurrence,
+  movedTailRule,
   occurrenceCount,
   seriesDayKey,
+  shiftSeriesRule,
 } from '@aperio/shared';
 
 function mkEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
@@ -1200,5 +1202,64 @@ describe("a series' end on its own clock (101b)", () => {
         '2026-11-02T00:00:00.000Z',
       ),
     ).toBe('20261106T045959Z');
+  });
+});
+
+// A cut at an occurrence the spring change pushes past its gap: daily 02:30
+// Berlin, cut at 29 March 2026 (03:30 CEST, 01:30 UTC), its end one second
+// before. The views cap at that instant and show 20-28 March.
+describe('a series cut in the spring gap (101b)', () => {
+  const tzid = 'Europe/Berlin';
+  const rrule = 'FREQ=DAILY;UNTIL=20260329T012959Z';
+  const master = mkEvent({
+    start: '2026-03-20T01:30:00.000Z',
+    end: '2026-03-20T02:30:00.000Z',
+    recurrence: { rrule, exceptions: [], tzid },
+  });
+  const window = { start: new Date('2026-03-01T00:00:00.000Z'), end: new Date('2026-05-01T00:00:00.000Z') };
+
+  it('counts and names occurrences as the views show them', () => {
+    expect(expandEvent(master, window)).toHaveLength(9);
+    expect(occurrenceCount({ start: master.start, recurrence: { rrule, tzid } }, 100)).toBe(9);
+    expect(occurrenceCount({ start: '2026-03-25T01:30:00.000Z', recurrence: { rrule, tzid } }, 100)).toBe(4);
+    expect(nthOccurrence({ start: master.start, recurrence: { rrule, tzid } }, 9)).toBe('2026-03-28T01:30:00.000Z');
+    expect(nthOccurrence({ start: master.start, recurrence: { rrule, tzid } }, 10)).toBeNull();
+  });
+
+  for (const days of [1, -1, 7]) {
+    it(`keeps its nine occurrences when moved by ${days} days`, () => {
+      const start = moveSeriesInstant(master.start, tzid, false, days);
+      const until = movedSeriesUntil(rrule, tzid, false, master.start, start);
+      const shifted = shiftSeriesRule(rrule, seriesDayKey(master.start, tzid, false), days, false, until);
+      expect(shifted.outcome).toBe('shifted');
+      if (shifted.outcome !== 'shifted') return;
+      const moved = {
+        ...master,
+        start,
+        end: new Date(Date.parse(start) + 3_600_000).toISOString(),
+        recurrence: { rrule: shifted.rrule, exceptions: [], tzid },
+      };
+      expect(expandEvent(moved, window)).toHaveLength(9);
+    });
+  }
+
+  it('keeps the tail of "this and all following" moved by a day to its four', () => {
+    const from = '2026-03-25T01:30:00.000Z';
+    const moved = movedTailRule({
+      rrule,
+      series: { tzid, all_day: false },
+      from,
+      opened: from,
+      tail: { start: '2026-03-26T01:30:00.000Z', all_day: false },
+    });
+    expect(moved.outcome).toBe('shifted');
+    if (moved.outcome !== 'shifted') return;
+    const tail = {
+      ...master,
+      start: '2026-03-26T01:30:00.000Z',
+      end: '2026-03-26T02:30:00.000Z',
+      recurrence: { rrule: moved.rrule, exceptions: [], tzid },
+    };
+    expect(expandEvent(tail, window)).toHaveLength(4);
   });
 });
