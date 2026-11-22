@@ -227,8 +227,11 @@ export function occurrenceCount(
   if (!built) return null;
   const cap = capOf(series, built.zone);
   let count = 0;
-  // Only the last few can start past the end's own instant (an occurrence a
-  // spring change pushes past its gap), so only they become instants.
+  // For a rule that repeats daily or slower, only the last few can start past
+  // the end's own instant (an occurrence a spring change pushes past its gap),
+  // so only they become instants. A rule that repeats by the hour or minute
+  // can have such occurrences before its last ones; it is counted as before
+  // (TODO.md).
   const tail: Date[] = [];
   built.rule.all((at) => {
     count += 1;

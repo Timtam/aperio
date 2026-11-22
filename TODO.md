@@ -1000,6 +1000,15 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **Serien, die in der Frühjahrslücke enden: drei kleine Reste** (zweite
+      Prüfrunde von Stufe 8, Schritt 6, 2026-11-22; keiner neu, alle selten):
+      `occurrenceCount` antwortet `limit + 1`, wenn genau `limit` Termine
+      zählen und einer hinter dem Ende liegt (nur `keepingLength` fragt so,
+      dessen Rückweg stimmt); bei stündlichen oder minütlichen Regeln und bei
+      mehr als drei Uhrzeiten in der Lücke liegen Termine hinter dem Ende nicht
+      nur am Schluss, `occurrenceCount` und `nthOccurrence` zählen sie dann wie
+      früher mit; das Verschieben einer ganzen Serie erreicht eine Regel nicht,
+      deren Beginn nicht die Uhrzeit in der Lücke hat (`BYHOUR=2,10` ab 10:30).
 - [ ] **Speichern prüft nicht, ob das Ende einer Wiederholung vor ihrem Beginn
       liegt** (Prüfung von Stufe 8, Schritt 4, 2026-11-22): Wer bei einer neuen
       Serie „bis Datum“ wählt und danach den Beginn hinter dieses Datum legt,
