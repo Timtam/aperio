@@ -17,7 +17,7 @@
 //   device's clock keeps today's reading, where the runtime moves a skipped
 //   time forward.
 // - A pair with a value that names no instant moves to another clock as typed,
-//   both values, and stays so on the way back.
+//   both values, and stays so on the way back until someone changes either.
 // - Moving the start moves the end by the same elapsed time (decision 102a).
 //   The end is then read from an instant, so it never lands in a gap by itself;
 //   an end typed into a gap stays there until the person changes it.
@@ -53,7 +53,8 @@ export interface ClockField {
   at: string | null;
   /** Set on values carried from another clock as typed, because the pair named
    *  no instant there ({@link keepingInstants}). They move on as typed, so a
-   *  switch away and back returns them. Typing in the field clears it. */
+   *  switch away and back returns them. A change in either field of the pair
+   *  clears it on both. */
   carried?: true;
 }
 
@@ -148,15 +149,13 @@ function belowTheMinute(at: string, ms: number, clock: FieldClock): number {
 }
 
 /**
- * The milliseconds of the minute a field shows, for moving and comparing the
- * fields, or `null` when it is no date and time. This is what
- * `applyDateTimeChange` measures on the device's clock: a held instant counts
- * without the seconds its field does not show, in its own copy of a doubled
- * hour. A time the clock skips counts as it would read with the offset from
- * before the change, as RFC 5545 reads it and as the device's runtime moves
- * it; a save still refuses it.
+ * The milliseconds a field stands for, or `null` when it is no date and time:
+ * its instant, and for a time the clock skips the instant it would read with
+ * the offset from before the change, as RFC 5545 reads it and as the device's
+ * runtime moves it. A save still refuses such a time; the end only measures
+ * against it.
  */
-function shownMs(field: ClockField, clock: FieldClock): number | null {
+function fieldMs(field: ClockField, clock: FieldClock): number | null {
   const named = fieldInstant(field, clock);
   if (named.kind === 'unreadable') return null;
   if (named.kind === 'gap') {
@@ -165,24 +164,52 @@ function shownMs(field: ClockField, clock: FieldClock): number | null {
     return Date.UTC(y, m - 1, d, hh, mm) - named.offsetBefore * 1000;
   }
   const ms = Date.parse(named.at);
-  if (Number.isNaN(ms)) return null;
-  return field.at === null ? ms : ms - belowTheMinute(field.at, ms, clock);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * {@link fieldMs} on the minute the field shows, for moving the end: a held
+ * instant counts without the seconds its field does not show, in its own copy
+ * of a doubled hour. This is what `applyDateTimeChange` measures on the
+ * device's clock.
+ */
+function shownMs(field: ClockField, clock: FieldClock): number | null {
+  const ms = fieldMs(field, clock);
+  if (ms === null || field.at === null) return ms;
+  return ms - belowTheMinute(field.at, ms, clock);
+}
+
+/** The field showing `ms` on `clock` and holding it, or `null` where that
+ *  is off the calendar either reads. */
+function heldAt(ms: number, clock: FieldClock): ClockField | null {
+  const instant = new Date(ms);
+  if (Number.isNaN(instant.getTime())) return null;
+  const field = fieldAt(instant.toISOString(), clock);
+  return field.at === null ? null : field;
+}
+
+/** The field as it was, without the mark of values carried as typed. */
+function uncarried(field: ClockField): ClockField {
+  return field.carried ? typedValues(field) : field;
 }
 
 /**
  * The fields with one value changed to `value`, which the person typed or
  * picked. The changed field stops holding an instant. A value equal to the one
  * shown changes nothing, so a picker confirmed without a change keeps a stored
- * instant to the second.
+ * instant to the second. A change in either field ends a carry for both
+ * ({@link keepingInstants}): the person has now set the pair on this clock.
  *
  * - A changed start moves the end by the same elapsed time (decision 102a),
- *   and the end holds the instant it moved to. A start the clock skips moves it
- *   as the offset from before the change reads it, so the duration holds once
- *   the start is corrected. An end that names no instant (typed into a gap, or
- *   half a value) stays as it is, and so does one that would move off the
- *   calendar.
- * - A changed end only resizes the event, but never ends before the start: an
- *   end before it becomes the start.
+ *   measured on the minutes the fields show, and the end holds the instant it
+ *   moved to. A start the clock skips moves it as the offset from before the
+ *   change reads it, so the duration holds once the start is corrected. An end
+ *   that names no instant (typed into a gap, or half a value) stays as it is,
+ *   and so does one that would move off the calendar.
+ * - A changed end only resizes the event, but never ends before the start's
+ *   instant, seconds included: an end before it becomes the start. Where the
+ *   clock skips the start, the end holds the instant the start would read with
+ *   the offset from before the change, so it does not land in the gap itself.
  *
  * As `applyDateTimeChange` does for the device's clock today.
  */
@@ -198,25 +225,26 @@ export function changeClockField(
   const { clock } = fields;
 
   if (side === 'start') {
-    const next: ClockFields = { ...fields, start: typed };
+    const next: ClockFields = { clock, start: typed, end: uncarried(fields.end) };
     if (fieldInstant(fields.end, clock).kind !== 'at') return next;
     const before = shownMs(fields.start, clock);
     const after = shownMs(typed, clock);
     const end = shownMs(fields.end, clock);
     if (before === null || after === null || end === null) return next;
-    const moved = new Date(end + (after - before));
-    if (Number.isNaN(moved.getTime())) return next;
-    const movedEnd = fieldAt(moved.toISOString(), clock);
-    if (movedEnd.at !== null) next.end = movedEnd;
+    const moved = heldAt(end + (after - before), clock);
+    if (moved !== null) next.end = moved;
     return next;
   }
 
-  const start = shownMs(fields.start, clock);
-  const end = shownMs(typed, clock);
-  if (start !== null && end !== null && end < start) {
-    return { ...fields, end: { ...fields.start } };
+  const start = uncarried(fields.start);
+  const startMs = fieldMs(start, clock);
+  const endMs = fieldMs(typed, clock);
+  if (startMs !== null && endMs !== null && endMs < startMs) {
+    const atStart =
+      fieldInstant(start, clock).kind === 'at' ? { ...start } : heldAt(startMs, clock);
+    if (atStart !== null) return { clock, start, end: atStart };
   }
-  return { ...fields, end: typed };
+  return { clock, start, end: typed };
 }
 
 /**
@@ -230,7 +258,9 @@ export function changeClockField(
  * keep, and moving only one of them would put the end on another day than the
  * start. Carried values move on as typed, so switching back returns them, gap
  * and all ("Wiederholung aus" in DESIGN-series-time-zone.md keeps such values
- * the same way).
+ * the same way). Both are carried or neither: a change in either field ends
+ * the carry for the pair ({@link changeClockField}), and from then on it moves
+ * by its instants again.
  */
 export function keepingInstants(fields: ClockFields, clock: FieldClock): ClockFields {
   const carry = (field: ClockField): ClockField => ({ ...typedValues(field), carried: true });

@@ -4,6 +4,7 @@ import {
   DEVICE_CLOCK,
   applyDateTimeChange,
   changeClockField,
+  combine,
   dateInput,
   fieldAt,
   fieldInstant,
@@ -199,6 +200,32 @@ describe('changing a field on a series clock', () => {
     expect(next.end).toEqual(fields.start);
   });
 
+  it('never lets the end come before the seconds a held start keeps', () => {
+    for (const clock of [BERLIN, DEVICE_CLOCK]) {
+      const fields = fieldsAt('2026-11-02T08:00:30Z', '2026-11-02T09:00:30Z', clock);
+      // The start's own minute, typed: 30 seconds before the instant it holds.
+      const next = changeClockField(fields, 'endTime', fields.start.time);
+      expect(next.end).toEqual(fields.start);
+    }
+  });
+
+  it('puts an end before a skipped start on the instant the start would read, not in the gap', () => {
+    let fields = typed(BERLIN, ['2027-03-28', '01:00'], ['2027-03-28', '04:00']);
+    fields = changeClockField(fields, 'startTime', '02:15');
+    // 03:00 CEST is 01:00Z, before the skipped 02:15 read with the old offset,
+    // 01:15Z, which is 03:15 CEST.
+    fields = changeClockField(fields, 'endTime', '03:00');
+    expect(fields.end).toEqual({
+      date: '2027-03-28',
+      time: '03:15',
+      at: '2027-03-28T01:15:00.000Z',
+    });
+    // Corrected to that same instant, the start leaves the end where it is.
+    fields = changeClockField(fields, 'startTime', '03:15');
+    expect(fields.end).toMatchObject({ date: '2027-03-28', time: '03:15' });
+    expect(fieldInstant(fields.start, BERLIN)).toEqual({ kind: 'at', at: '2027-03-28T01:15:00Z' });
+  });
+
   it('resizes the event when the end moves later', () => {
     const fields = fieldsAt('2026-11-02T08:00:00Z', '2026-11-02T09:00:00Z', BERLIN);
     const next = changeClockField(fields, 'endTime', '11:00');
@@ -240,14 +267,33 @@ describe('moving the fields to another clock', () => {
     expect(fieldInstant(back.start, BERLIN)).toMatchObject({ kind: 'gap' });
   });
 
-  it('moves a value typed after a carry by its instant', () => {
+  it('ends the carry for both values when either changes, and moves the pair by its instants', () => {
     const fields = typed(BERLIN, ['2027-03-28', '02:30'], ['2027-03-28', '04:00']);
     const inNewYork = changeClockField(keepingInstants(fields, NEW_YORK), 'endTime', '05:00');
+    expect(inNewYork.start).toEqual({ date: '2027-03-28', time: '02:30', at: null });
     expect(inNewYork.end).toEqual({ date: '2027-03-28', time: '05:00', at: null });
+    // 02:30 and 05:00 in New York are 06:30Z and 09:00Z, 08:30 and 11:00 in
+    // Berlin: the pair moves together, not one value as typed and one not.
     const back = keepingInstants(inNewYork, BERLIN);
-    expect(back.start).toMatchObject({ time: '02:30', carried: true });
-    // 05:00 in New York is 09:00Z, 11:00 in Berlin.
+    expect(back.start).toEqual({ date: '2027-03-28', time: '08:30', at: '2027-03-28T06:30:00Z' });
     expect(back.end).toEqual({ date: '2027-03-28', time: '11:00', at: '2027-03-28T09:00:00Z' });
+    expect(keepingInstants(back, NEW_YORK)).toMatchObject({
+      start: { date: '2027-03-28', time: '02:30' },
+      end: { date: '2027-03-28', time: '05:00' },
+    });
+  });
+
+  it('keeps a carried pair together when a half value is completed far away', () => {
+    // A start without its time is carried to Auckland with the end. Typed
+    // there, the start does not move the end (it had no old value to measure
+    // from), and the pair goes back to Berlin as one hour on 1 November.
+    const fields = typed(BERLIN, ['2026-11-02', ''], ['2026-11-02', '10:00']);
+    const auckland: FieldClock = { kind: 'series', tzid: 'Pacific/Auckland' };
+    const there = changeClockField(keepingInstants(fields, auckland), 'startTime', '09:00');
+    expect(there.end).toEqual({ date: '2026-11-02', time: '10:00', at: null });
+    const back = keepingInstants(there, BERLIN);
+    expect(back.start).toMatchObject({ date: '2026-11-01', time: '21:00' });
+    expect(back.end).toMatchObject({ date: '2026-11-01', time: '22:00' });
   });
 
   it('carries both values as typed where one is half a value', () => {
@@ -313,19 +359,30 @@ describe('the device clock', () => {
     expect(next.end).toMatchObject({ date: '2026-11-03', time: '10:30' });
   });
 
-  it('moves the end as applyDateTimeChange does, seconds and all', () => {
-    const fields = fieldsAt('2026-11-02T08:00:30Z', '2026-11-02T09:00:30Z', DEVICE_CLOCK);
-    const shown = {
-      startDate: fields.start.date,
-      startTime: fields.start.time,
-      endDate: fields.end.date,
-      endTime: fields.end.time,
-      allDay: false,
-    };
-    const later = shown.startTime === '23:00' ? '22:30' : '23:00';
+  it('moves the end as applyDateTimeChange does, not by the seconds a held start keeps', () => {
+    // The start holds :30 seconds, the end is typed on the whole minute, so a
+    // move measured from the held instant would come out 30 seconds short.
+    const held = fieldsAt('2026-11-02T08:00:30Z', '2026-11-02T09:00:30Z', DEVICE_CLOCK);
+    const fields = changeClockField(held, 'endTime', '23:30');
+    const shown = applyDateTimeChange(
+      {
+        startDate: held.start.date,
+        startTime: held.start.time,
+        endDate: held.end.date,
+        endTime: held.end.time,
+        allDay: false,
+      },
+      'endTime',
+      '23:30',
+    );
+    const later = shown.startTime === '22:00' ? '21:30' : '22:00';
     const today = applyDateTimeChange(shown, 'startTime', later);
     const next = changeClockField(fields, 'startTime', later);
-    expect(next.end).toMatchObject({ date: today.endDate, time: today.endTime });
+    expect(next.end).toEqual({
+      date: today.endDate,
+      time: today.endTime,
+      at: combine(today.endDate, today.endTime, false)?.toISOString(),
+    });
   });
 });
 
