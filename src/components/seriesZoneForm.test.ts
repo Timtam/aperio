@@ -4,6 +4,7 @@ import {
   DEVICE_CLOCK,
   DEVICE_ZONE_VIEW,
   calendarMoveMode,
+  prefillMoveMode,
   storedZoneOf,
   applyClockChange,
   calendarZonesOf,
@@ -413,5 +414,27 @@ describe('a calendar change (question 8 of stage 12)', () => {
     expect(storedZoneOf({ tzid: null })).toBeNull();
     expect(storedZoneOf({})).toBeNull();
     expect(storedZoneOf(null)).toBeUndefined();
+  });
+});
+
+describe('a title suggestion (prefillMoveMode)', () => {
+  const untouchedNew = openZoneForm('new', undefined, false);
+  const onBerlin = zoneFormView(untouchedNew, facts());
+  const onUtc = zoneFormView(untouchedNew, facts({ calendarZones: ['America/New_York'] }));
+
+  it('keeps the dates where it changes all-day', () => {
+    expect(prefillMoveMode(untouchedNew, DEVICE_ZONE_VIEW, onBerlin, true)).toBe('values');
+  });
+
+  it('keeps the instant where it turns the repeat on, as the repeat field does', () => {
+    expect(prefillMoveMode(untouchedNew, DEVICE_ZONE_VIEW, onUtc, false)).toBe('instants');
+  });
+
+  it('moves as its calendar would where the form already repeats', () => {
+    expect(onUtc.clock).toEqual({ kind: 'series', tzid: null });
+    expect(prefillMoveMode(untouchedNew, onBerlin, onUtc, false)).toBe(calendarMoveMode(untouchedNew, onUtc));
+    expect(prefillMoveMode(untouchedNew, onBerlin, onUtc, false)).toBe('values');
+    const series = openZoneForm('series', 'Europe/Berlin', false);
+    expect(prefillMoveMode(series, onBerlin, onUtc, false)).toBe('instants');
   });
 });

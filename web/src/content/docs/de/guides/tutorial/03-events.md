@@ -263,11 +263,14 @@ Zeitzone:
   du das Feld für die Wiederholung verlässt, am Handy, wenn sich die Auswahl
   schließt.
 - **Nur diesen Termin** und Einzeltermine stehen immer auf der Uhr deines
-  Geräts. **Diesen und alle folgenden** steht in der Zeitzone der Serie; ein
-  Lesefeld nennt sie, und ändern lässt sie sich, wenn du die ganze Serie
-  bearbeitest. Kann Aperio die Serie dafür nicht laden, sagt der Editor es und
-  speichert nicht. Versuche es dann noch einmal, oder bearbeite nur diesen
-  Termin.
+  Geräts. **Diesen und alle folgenden** steht in der Zeitzone der Serie, und
+  ein Lesefeld nennt sie. Kann Aperio die Serie dafür nicht laden, sagt der
+  Editor es und speichert nicht. Versuche es dann noch einmal, oder bearbeite
+  nur diesen Termin.
+- Wählst du den Umfang erst im Editor selbst, im Feld **Anwenden auf** (etwa
+  nach einer Erinnerung), stehen die Felder auf der Uhr deines Geräts, auch für
+  die ganze Serie. Ebenso ein Termin, den ein anderes Programm einzeln
+  geändert hat, wenn du ihn als **Diesen und alle folgenden** öffnest.
 - Gibst du einer Serie einen Kalender, der ihre Zeitzone nicht speichern kann,
   sagt ein Lesefeld nach der Endzeit es, und gespeichert wird erst mit einem
   anderen Kalender.

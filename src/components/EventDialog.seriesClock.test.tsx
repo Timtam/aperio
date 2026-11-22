@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import { DEFAULT_RECURRENCE_CAPABILITIES } from '@aperio/shared';
+import { DEFAULT_RECURRENCE_CAPABILITIES, wallOf } from '@aperio/shared';
 
 import type { Calendar, CalendarEvent } from '../api/types';
 
@@ -129,6 +129,28 @@ function deviceInBerlin() {
 }
 
 const calls = (command: string) => invokeMock.mock.calls.filter((call) => call[0] === command);
+
+/**
+ * A series zone whose clock moves against the test machine's between `from`
+ * and `to`. The machine's zone is behind the device's old reading of a time,
+ * which a series' time must not go by; CI runs this in UTC, New York and
+ * Auckland, so no single zone would do: New York changes its clocks in March
+ * 2026 where the machine does not, Tokyo never does.
+ */
+function zoneMovingAgainstMachine(from: string, to: string): string {
+  const machine = (iso: string) => -new Date(iso).getTimezoneOffset();
+  const on = (iso: string, zone: string) => {
+    const wall = wallOf(iso, zone);
+    if (!wall?.date || !wall.time) throw new Error(`no reading of ${iso} in ${zone}`);
+    return (Date.parse(`${wall.date}T${wall.time}:00Z`) - Date.parse(iso)) / 60_000;
+  };
+  const moved = machine(to) - machine(from);
+  const zone = ['America/New_York', 'Asia/Tokyo'].find(
+    (candidate) => on(to, candidate) - on(from, candidate) !== moved,
+  );
+  if (zone === undefined) throw new Error('no zone moves against this machine');
+  return zone;
+}
 
 async function open(
   event: CalendarEvent | null,
@@ -386,34 +408,37 @@ describe('EventDialog → "this and all following" stands on the series clock (2
 
   it('takes a time typed on the series clock from the first occurrence, though the device reads it as before', async () => {
     deviceInBerlin();
-    // Tuesdays at 10:00 New York from 10 March 2026, when US summer time has
-    // begun and the EU's has not: 15:00 in Berlin, as 09:00 New York is on
-    // 31 March. On a machine in Berlin the device's reading does not change.
-    const march = {
+    // A weekly series from 3 March 2026, its first occurrence moved three
+    // weeks on to the time the machine read before. The machine's clock is
+    // the device's old reading, which this must not go by; the series' zone
+    // is one whose clock moved against it meanwhile (`zoneMovingAgainstMachine`).
+    const from = '2026-03-03T15:00:00.000Z';
+    const to = (() => {
+      const when = new Date(from);
+      when.setDate(when.getDate() + 21);
+      return when.toISOString();
+    })();
+    const zone = zoneMovingAgainstMachine(from, to);
+    const first = {
       ...NEW_YORK,
       id: 'ev-mar',
-      start: '2026-03-10T14:00:00.000Z',
-      end: '2026-03-10T15:00:00.000Z',
-      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=TU', exceptions: [], tzid: 'America/New_York' },
+      start: from,
+      end: new Date(Date.parse(from) + 3_600_000).toISOString(),
+      recurrence: { rrule: 'FREQ=WEEKLY', exceptions: [], tzid: zone },
     } as unknown as CalendarEvent;
-    onFile.series = march;
+    onFile.series = first;
     await open(
-      {
-        ...march,
-        id: 'ev-mar@2026-03-10T14:00:00.000Z',
-        series_id: 'ev-mar',
-        occurrence_start: '2026-03-10T14:00:00.000Z',
-      } as unknown as CalendarEvent,
+      { ...first, id: `ev-mar@${from}`, series_id: 'ev-mar', occurrence_start: from } as unknown as CalendarEvent,
       'this_and_future',
     );
-    await screen.findByLabelText(/^startzeit \(new york\)$/i);
-    fireEvent.change(input(/^startdatum \(new york\)$/i), { target: { value: '2026-03-31' } });
-    fireEvent.change(input(/^startzeit \(new york\)$/i), { target: { value: '09:00' } });
+    const typed = wallOf(to, zone);
+    await screen.findByLabelText(/^startzeit \(/i);
+    fireEvent.change(input(/^startdatum \(/i), { target: { value: typed?.date } });
+    fireEvent.change(input(/^startzeit \(/i), { target: { value: typed?.time } });
     save();
     await waitFor(() => expect(calls('update_event')).toHaveLength(1));
     const sent = (calls('update_event')[0][1] as { event: CalendarEvent }).event;
-    expect(sent.start).toBe('2026-03-31T13:00:00.000Z');
-    expect(sent.end).toBe('2026-03-31T14:00:00.000Z');
+    expect(sent.start).toBe(to);
   });
 
   it('opens a series that no longer repeats without the failure, and the save says why', async () => {

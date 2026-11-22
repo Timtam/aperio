@@ -308,14 +308,24 @@ export function calendarMoveMode(form: SeriesZoneForm, next: ZoneFormView): 'ins
 
 /**
  * How the fields move when a title suggestion fills the form ("Titelvorschläge
- * füllen die Regel, lassen die Zone aber stehen"): as a switch of all-day
- * moves them where it changes all-day (the dates stay), else as a repeat
- * switched on or off does (the instant stays). A calendar the suggestion
- * brings changes while the form does not repeat yet, on the device's clock,
- * where the instant stays as well.
+ * füllen die Regel, lassen die Zone aber stehen"), from the view `before` it
+ * to the view `after`:
+ * - where it changes all-day, as that switch moves them: the dates stay;
+ * - where the fields stood on the device's clock, as a repeat switched on
+ *   does: the instant stays (a calendar the suggestion brings changes there
+ *   too, where the instant stays as well);
+ * - where the form already repeated, as the calendar it brings moves them
+ *   (`calendarMoveMode`), the same as choosing that calendar by hand.
  */
-export function prefillMoveMode(allDayChanges: boolean): 'instants' | 'values' {
-  return allDayChanges ? 'values' : 'instants';
+export function prefillMoveMode(
+  form: SeriesZoneForm,
+  before: ZoneFormView,
+  after: ZoneFormView,
+  allDayChanges: boolean,
+): 'instants' | 'values' {
+  if (allDayChanges) return 'values';
+  if (before.clock.kind === 'device') return 'instants';
+  return calendarMoveMode(form, after);
 }
 
 /** What the form shows of the zone, and the clock its fields stand on. */

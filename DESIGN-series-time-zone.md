@@ -848,9 +848,12 @@ bei der ganzen Serie ihren eigenen, den die Bearbeitung um so viele Tage
 verschiebt, wie der geöffnete Termin wanderte (`ruleFrame`; der Desktop lädt
 dafür die Serie, wenn ein Termin als ganze Serie offen ist). Nur „diesen und
 alle folgenden“ ab dem ersten Vorkommen schreibt erst beim Speichern als ganze
-Serie: Sie behält die Uhrzeit ihrer eigenen Uhr, wo die des Geräts gleich
-blieb, und ihre Regel folgt dem. Seit Stufe 12 stehen die Felder dort auf der
-Uhr der Serie, sodass Feld und Speichern dieselbe Uhr lesen.
+Serie: Sie behält die Uhrzeit ihrer eigenen Uhr, wo die Anzeige der Felder
+gleich blieb, und ihre Regel folgt dem. Seit Stufe 12 stehen die Felder dort
+auf der Uhr der Serie, sodass Feld und Speichern dieselbe Uhr lesen. Nur die
+Umfang-Auswahl im Formular stellt die Felder auf die Uhr des Geräts; wo diese
+nicht die der Serie ist, kann das Feld dort um eine Zeitumstellung
+danebenliegen.
 
 Die gelöschten Termine gehen mit (152, 188, 189, 196; `cal_core::tail_exceptions`):
 Nach ihrem Platz in der Serie, wenn jedes Vorkommen mit dem Beginn wandert —

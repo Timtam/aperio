@@ -858,7 +858,12 @@ export function EventDialog({
         const moved = withFieldsMoved(
           prev,
           filled,
-          prefillMoveMode(prev.allDay !== fill.all_day),
+          prefillMoveMode(
+            zoneRef.current.formOf(prev),
+            zoneRef.current.viewOf(prev),
+            zoneRef.current.viewOf(filled),
+            prev.allDay !== fill.all_day,
+          ),
           zoneRef.current.viewOf,
         );
         if (fill.all_day) return moved;
@@ -2108,8 +2113,9 @@ export function EventDialog({
           // rule that cannot move with the date or time is said in words,
           // before anything is written (decision 193). The field reads the
           // form's start; a series rewritten whole from its first occurrence
-          // keeps its own clock's time where the device's did not change
-          // (`seriesTimesFromOccurrenceEdit`), and its rule follows that.
+          // keeps its own clock's time where the fields' reading did not
+          // change (`seriesTimesFromOccurrenceEdit`), and its rule follows
+          // that.
           // The zones the calendar the series is written to can store: a
           // series that gets a time of day here starts on its default there.
           const calendarZones = calendarZonesOf(

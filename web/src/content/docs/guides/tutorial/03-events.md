@@ -242,10 +242,14 @@ series' date and time in its time zone:
   at the same moment. On the desktop Aperio says so once when you leave the
   repeat field, on the phone when its choice closes.
 - **This occurrence only** and single appointments always stand on your
-  device's clock. **This and all following** stands in the series' time zone;
-  a read-only field names it, and you can change it when you edit the whole
-  series. Where Aperio cannot load the series for it, the editor says so and
-  does not save. Try again, or edit this occurrence only.
+  device's clock. **This and all following** stands in the series' time zone,
+  and a read-only field names it. Where Aperio cannot load the series for it,
+  the editor says so and does not save. Try again, or edit this occurrence
+  only.
+- When you choose the scope in the editor itself, in the **Apply to** field
+  (after a reminder, for example), the fields stand on your device's clock,
+  for the whole series too. So does an occurrence another app changed on its
+  own, when you open it as **This and all following**.
 - When you give a series a calendar that cannot store its time zone, a
   read-only field after the end time says so, and it saves only with another
   calendar.

@@ -731,7 +731,11 @@ function EventEditorScreen({
           calendarId: target.kind === 'offer' ? target.id : calId,
         }),
       );
-      const moved = fieldsOnView(fields, nextView, prefillMoveMode(nextAllDay !== allDay));
+      const moved = fieldsOnView(
+        fields,
+        nextView,
+        prefillMoveMode(zone, view, nextView, nextAllDay !== allDay),
+      );
       if (nextAllDay) {
         setTimes({ ...times, allDay: true, zone, fields: moved });
       } else {
@@ -768,7 +772,7 @@ function EventEditorScreen({
       setPrefillNote(note);
       return note;
     },
-    [calendars, calId, t, allDay, zoneForm, viewWith, factsWith, fields, times],
+    [calendars, calId, t, allDay, zoneForm, view, viewWith, factsWith, fields, times],
   );
 
   /**
