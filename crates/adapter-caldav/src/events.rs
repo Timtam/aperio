@@ -443,10 +443,14 @@ pub async fn update_event(
         // exception here.
         Some(DateTime::<Utc>::MIN_UTC)
     } else if event.truncate_tail_overrides && !event.all_day {
-        event
-            .recurrence
-            .as_ref()
-            .and_then(|r| rrule_until_instant(&r.rrule))
+        // The end as the views read it, on the series' clock (101b, 116a): an
+        // earlier end the cut kept, `…T235959Z` in New York at 20:00, keeps
+        // the overrides of its last day; the UTC reading of the digits dropped
+        // them.
+        event.recurrence.as_ref().and_then(|r| {
+            cal_core::series_end_instant(&r.rrule, event.start, false, r.tzid.as_deref())
+                .or_else(|| rrule_until_instant(&r.rrule))
+        })
     } else {
         None
     };

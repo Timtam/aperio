@@ -1013,11 +1013,11 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
     // anchorings, mis-classifying the cutoff-day instance off UTC. All-day
     // truncations skip the cleanup (a rare gap, unchanged from before).
     if ev.truncate_tail_overrides && !ev.all_day {
-        if let Some(until) = ev
-            .recurrence
-            .as_ref()
-            .and_then(|r| rrule_until_instant(&r.rrule))
-        {
+        // The end as the views read it, on the series' clock (101b, 116a).
+        if let Some(until) = ev.recurrence.as_ref().and_then(|r| {
+            cal_core::series_end_instant(&r.rrule, ev.start, false, r.tzid.as_deref())
+                .or_else(|| rrule_until_instant(&r.rrule))
+        }) {
             if let Err(e) =
                 drop_tail_modified_instances(state, &ev.calendar_id, &ev.id, until).await
             {

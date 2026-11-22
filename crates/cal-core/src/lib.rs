@@ -234,8 +234,8 @@ pub use types::{
 };
 #[cfg(feature = "zones")]
 pub use wall_clock::{
-    instant_of, series_end_on_clock, until_on, wall_clock, wall_clock_json, wall_of,
-    WallClockAnswer, WallClockQuestion, WallReading,
+    instant_of, series_end_instant, series_end_on_clock, until_on, wall_clock, wall_clock_json,
+    wall_of, WallClockAnswer, WallClockQuestion, WallReading,
 };
 pub use write_leftover::WriteLeftover;
 pub use write_refusal::{BusyDetail, SeriesRewrite, WriteRefusal};

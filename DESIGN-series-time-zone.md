@@ -555,7 +555,19 @@ sie:
   eine Sekunde früher, zusätzlich zur Schutzregel, die alte Schnitte schützt.
 - **107b — Exchange und Microsoft 365 lesen ihr Enddatum als Ende dieses
   Tages auf der Uhr der Serie zurück.** Ein getipptes Ende kommt so zurück,
-  wie es ging. Braucht eine Live-Runde an Tonis Server; der PR wartet darauf.
+  wie es ging. Braucht eine Live-Runde an Tonis Server.
+  Kommt als Ganzes mit Stufe 12 (2026-11-22, nach zwei gescheiterten
+  Teilbauten): Lesen, Schreiben und das Ende-Feld (108b) hängen am selben
+  toten Winkel von 105a, einer Serie, deren Uhrzeit auf ihrer Uhr Mitternacht
+  UTC ist (19:00 in New York). Ein erster Bau las das Enddatum dort als
+  letzten Moment des Tages zurück. Dann zeigte das Ende-Feld, das noch die
+  UTC-Ziffern liest, den Tag danach, und ein Anlegen (abgeteilter Rest,
+  Kopie, Umzug) schrieb einen Tag mehr. Ein zweiter Bau ließ das Zurücklesen
+  und schrieb nur ein Ende, das ein Zeitpunkt ist, als sein Datum auf der
+  Uhr der Serie. Dann trug `movedSeriesUntil` das am toten Winkel als
+  Schnitt gelesene Ende in eine verschobene Serie, und Exchange hätte ihren
+  echten letzten Termin gelöscht. Bis Stufe 12 verliert eine Exchange-Serie
+  an diesem toten Winkel ihren letzten Tag in Aperio, wie schon vor 101b.
 - **108b — das Ende-Feld zeigt den letzten Tag, bis zu dem das Ende reicht,
   auf der Uhr der Serie.** Was man tippt, bleibt stehen; `…T235959Z` zeigt
   nach 101b sein Datum. Verworfen: der Tag des letzten Termins (ein getippter
@@ -581,7 +593,8 @@ sie:
   auf der Uhr der Serie.** So lesen es Ansichten und Erinnerungen künftig
   gleich; heute weichen sie dort voneinander ab.
 - **116a — 101b gilt auch, wo Adapter nach einem Schnitt aufräumen**
-  (CalDAV, Google): Sie fragen dieselbe Kern-Regel.
+  (CalDAV, Google): Sie fragen dieselbe Kern-Regel. Gebaut (2026-11-22):
+  `cal_core::series_end_instant`.
 
 Geprüft vorab (2026-11-21, Tonis Desktop-Daten nur lesend): Von 89 Serien mit
 Uhrzeit im Zwischenspeicher haben drei keine Zone, alle bei CalDAV und alle mit

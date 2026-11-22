@@ -3603,6 +3603,14 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **CalDAV und Google räumen nach einem Schnitt bis zum Ende auf der Uhr
+  der Serie auf (116a, 2026-11-22):** über `cal_core::series_end_instant`,
+  dieselbe Kern-Regel wie Ansichten und Erinnerungen.
+  Offen, mit Stufe 12 als Ganzes: 107b, das Enddatum von Exchange und
+  Microsoft 365 am toten Winkel von 105a (19:00 in New York) als ganzen Tag
+  lesen und ein Ende, das ein Zeitpunkt ist, als sein Datum schreiben,
+  zusammen mit dem Ende-Feld nach 108b. Zwei Teilbauten scheiterten in der
+  Prüfung (DESIGN, 107b).
   ↳ **„Bis 5. November“ heißt überall bis zum 5. November (Stufe 8, Schritt 6,
   2026-11-22, 101b):** Ansichten, Erinnerungen, Schnitt, Verschieben und der
   Zwischenspeicher lesen ein Serienende über die Kern-Regel. Eine Berliner
