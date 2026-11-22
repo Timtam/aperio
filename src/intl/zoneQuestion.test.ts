@@ -156,6 +156,24 @@ describe('the weekday question (138a)', () => {
     );
   });
 
+  it('says no move where an every-other-week rule keeps its start across a week boundary', () => {
+    // Every other Monday, from Sunday 23:30 UTC: on Berlin's clock the start's
+    // week is the next one, so the other weeks are meant, not a day earlier.
+    const change = askAbout('FREQ=WEEKLY;INTERVAL=2;BYDAY=MO');
+    if (!change.asks) throw new Error('expected the core to ask');
+    const question = weekdayQuestion({
+      change,
+      start: SUNDAY_LATE,
+      rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO',
+      zone: BERLIN,
+      language: 'de',
+      t: de,
+    });
+    expect(question.answers.find((answer) => answer.answer === 'rule')?.label).toBe(
+      'Alle 2 Wochen am Montag, wie die Regel sagt',
+    );
+  });
+
   it('says the same in English', () => {
     const change = askAbout('FREQ=WEEKLY;BYDAY=SU,WE');
     const question = weekdayQuestion({

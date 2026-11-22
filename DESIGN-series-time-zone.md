@@ -1806,16 +1806,23 @@ Handy im selben PR.
     Mitnahme-Angebot (137a). Die Frage nach verlorenen Vorkommen steht auf
     dem Handy im Editor. Technisch und ohne eigene Frage entschieden:
     - Wurde der Beginn einer gespeicherten Serie in dieser Sitzung geändert,
+      oder hat eine gespeicherte ganztägige Serie hier Uhrzeiten bekommen,
       wartet die Wahl auf ein Speichern („Zeitzone der Serie nicht geändert:
-      Speichere zuerst den geänderten Beginn, dann wähle die Zeitzone.“,
-      `zoneChoiceWaitsForSave`). Erst die Zone, dann das Datum geht in
-      einem Schritt. Die andere Reihenfolge verlöre sonst die mitwandernden
-      Löschungen oder die mitwandernde Regel.
+      Speichere zuerst den geänderten Beginn, dann wähle die Zeitzone.“).
+      Nennen Beginn oder Ende keinen Zeitpunkt, sagt sie „… Gib zuerst einen
+      gültigen Beginn und ein gültiges Ende ein.“ (`zoneChoiceWait`). Erst
+      die Zone, dann das Datum geht in einem Schritt. Die andere Reihenfolge
+      verlöre sonst die mitwandernden Löschungen oder die mitwandernde Regel.
+      Ein Import wartet nie; sein Speichern legt an.
     - Die Wischgeste zum Schließen von VoiceOver bricht jeden Dialog im
       Handy-Editor ab, wie Tippen daneben und Androids Zurück.
     - {Tage} sind die Worte der Zusammenfassung ohne Ende („jeden Montag“).
       Die Nachricht nennt den Beginn mit Datum („Dienstag, 16. Juni,
-      00:30“). „vor“ heißt früher, wie im Beispiel Dienstag zu Montag.
+      00:30“). „vor“ heißt früher, wie im Beispiel Dienstag zu Montag. Wie
+      weit die Termine rücken, ist der Tag des Beginns auf der alten Uhr
+      weniger seinem Tag auf der neuen, wie der Kern sie nennt: Jeder Termin
+      fällt heute um so viele Tage daneben, und wie die Regel sagt, kehrt er
+      auf ihren Tag zurück, auch wo der Beginn selbst bleibt.
     - Eine nicht umsetzbare Antwort sagt: „{Tage}, wie die Regel sagt, geht
       nicht: {Grund}.“ beziehungsweise „Die Tage, wo die Termine jetzt
       liegen, gehen nicht: {Grund}.“

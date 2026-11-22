@@ -106,8 +106,8 @@ export interface WeekdayQuestionText {
  *   why („… geht nicht: {Grund}.“), its button left out;
  * - buttons „Zeitzone nicht ändern“, „Jeden Montag, wie die Regel sagt
  *   (Termine rücken einen Tag vor)“ (vor: to an earlier day, zurück: to a
- *   later one, nothing where the start stays) and „Jeden Dienstag, wo die
- *   Termine jetzt liegen“.
+ *   later one; left out where the events do not all move alike) and
+ *   „Jeden Dienstag, wo die Termine jetzt liegen“.
  *
  * `start` is the series' start as the form holds it, `rrule` its rule, `zone`
  * the zone chosen (`null` for UTC).
@@ -142,10 +142,17 @@ export function weekdayQuestion(args: {
     // says, it goes back onto the day the rule names. So every event moves by
     // the start's day on the old clock less its day on the new one, whether
     // the start itself moves (a series that really means its old zone) or
-    // stays (one that lost its zone), east or west.
-    const moved = Math.round(
-      (Date.parse(change.startDayBefore) - Date.parse(change.startDayAfter)) / DAY_MS,
-    );
+    // stays (one that lost its zone), east or west. Not where the start stays
+    // and the rule repeats every few weeks, months or years: its period is
+    // then counted from the start's day on the new clock, which may lie in
+    // another week, month or year, and the events do not all move alike.
+    // The button then says the days alone, rather than a wrong move.
+    const interval = Number(/(?:^|;)INTERVAL=(\d+)/i.exec(asRule.rrule)?.[1] ?? '1');
+    const startStays = Date.parse(asRule.start) === Date.parse(start);
+    const moved =
+      interval > 1 && startStays
+        ? 0
+        : Math.round((Date.parse(change.startDayBefore) - Date.parse(change.startDayAfter)) / DAY_MS);
     const days = upperFirst(daysOf(asRule.rrule, asRule.start, zone, language, t));
     answers.push({
       answer: 'rule',
