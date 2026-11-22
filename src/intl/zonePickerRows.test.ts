@@ -49,7 +49,6 @@ function rows(
     regionNames: zoneRegionNames(de),
     stored,
     device,
-    unusable,
     t: de,
     formatDay: day,
   });
@@ -147,9 +146,12 @@ describe('what choosing a row does', () => {
     const options = { stored: 'Europe/Kyiv', device: 'Europe/Kiev', unusable: ['Europe/Kyiv'] };
     const empty = rows('', options);
     expect(empty.rows.some((r) => r.key === 'head-current')).toBe(false);
+    // The device's row stands in for "Aktuell": it says the series' zone,
+    // and choosing it writes the spelling this device can use.
     expect(row(empty, 'head-device')).toMatchObject({
       pick: { kind: 'zone', zone: 'Europe/Kiev' },
-      current: false,
+      current: true,
+      selectable: true,
     });
     expect(groupWith(empty, 'Kyiv').pick).toEqual({ kind: 'zone', zone: 'Europe/Kiev' });
     const hit = rows('kyiv', options).rows[0];
@@ -217,12 +219,32 @@ describe('marked rows', () => {
     expect(group.pick).toEqual({ kind: 'zone', zone: 'Europe/Berlin' });
   });
 
-  it("never keeps the device's own zone where the calendar refuses it", () => {
+  it("still says the zone in effect on the device's row where the calendar refuses it", () => {
+    // "Aktuell" is left out for the device's row, which says the series' zone
+    // even marked off, so the list still tells which zone the series is on.
     const options = { stored: 'Europe/Berlin', calendar: LISTED.filter((zone) => zone !== 'Europe/Berlin') };
-    expect(row(rows('', options), 'head-device')).toMatchObject({
+    const empty = rows('', options);
+    expect(empty.rows.some((r) => r.key === 'head-current')).toBe(false);
+    expect(row(empty, 'head-device')).toMatchObject({
       text: 'Dieses Gerät: Berlin, Europa, UTC+01:00 (dieser Kalender kann diese Zeitzone nicht speichern)',
       selectable: false,
-      current: false,
+      current: true,
+    });
+  });
+
+  it('mark "Aktuell" for a stored zone outside the list the calendar cannot store', () => {
+    // Exchange's list has no EST5EDT; a calendar of the listed zones alone
+    // stores no zone outside the list.
+    const current = row(rows('', { stored: 'EST5EDT', calendar: LISTED }), 'head-current');
+    expect(current).toMatchObject({
+      text: 'Aktuell: EST5EDT (nicht in Aperios Liste) (dieser Kalender kann diese Zeitzone nicht speichern)',
+      selectable: false,
+      current: true,
+    });
+    expect(row(rows('', { stored: 'EST5EDT', device: 'EST5EDT' }), 'head-device')).toMatchObject({
+      pick: { kind: 'unchanged' },
+      current: true,
+      selectable: true,
     });
   });
 });

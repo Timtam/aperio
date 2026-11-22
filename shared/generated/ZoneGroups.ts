@@ -30,4 +30,12 @@ head: Array<HeadEntry>,
 /**
  * By listed position: why each zone cannot be chosen, for city hits.
  */
-refused: Array<ZoneRefusal | null>, };
+refused: Array<ZoneRefusal | null>, 
+/**
+ * The listed position whose city and group keep the series' zone as it
+ * is spelled (120a): the stored zone's, where the calendar stores it and
+ * this device can use its stored spelling. That city hit is then not
+ * refused for the device, though its listed name may be. `null` where no
+ * listed entry keeps it.
+ */
+kept: number | null, };

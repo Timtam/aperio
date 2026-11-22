@@ -125,11 +125,10 @@ export function ZonePickerDialog({
       regionNames: zoneRegionNames(t),
       stored,
       device: deviceZone,
-      unusable,
       t,
       formatDay,
     });
-  }, [groups, offsets, query, stored, deviceZone, unusable, t, i18n.language]);
+  }, [groups, offsets, query, stored, deviceZone, t, i18n.language]);
 
   // iOS hears the count line once the typing pauses; Android reads it from
   // the live region. Never for the list as it opens, where it is the search

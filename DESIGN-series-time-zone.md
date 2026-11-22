@@ -1755,7 +1755,14 @@ Handy im selben PR.
     Teilnehmer-Auswahl, 130a, 131a, die Zählzeile nach der Tipppause und nie
     über einer Wahl), Handy `ZonePickerDialog` (eigener Dialog im Bildschirm
     des Editors, Zeilen als Auswahl-Knöpfe, die Wahl erst nach dem Schließen).
-    Noch an keinen Knopf gebunden: das kommt mit Stufe 12.
+    Noch an keinen Knopf gebunden: das kommt mit Stufe 12. Die Prüfung ergab:
+    Auch für die Zeilen über der Liste entscheidet der Kern alles (128a). Er
+    sagt, ob eine Zeile markiert ist (zuerst der Kalender, dann die
+    gespeicherte Schreibweise; auch „Aktuell“, auch für eine Zone außerhalb
+    der Liste wie EST5EDT). Er sagt, ob sie die geltende Zone nennt (die
+    Zeile des Geräts, wo „Aktuell“ für sie wegfällt, auch markiert). Und er
+    sagt, ob ihre Wahl nichts ändert, dazu welche Stadt der Liste die Zone
+    behält (`kept`).
 12. **Die Editoren** — `feat(editors): times typed on the series clock, and the weekday question`.
     Beschriftungen, Hinweis, Auswahl, Wochentag-Frage, „diesen und alle folgenden“
     lädt auf dem Desktop die ganze Serie beim Öffnen (21a), Hilfe und Fehlersuche.

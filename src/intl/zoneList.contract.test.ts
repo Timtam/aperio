@@ -70,7 +70,8 @@ interface HeadRow {
   stored?: string;
   device?: string;
   calendar?: 'all' | 'none' | { except: string[] };
-  expect: { kind: string }[];
+  unusable?: string[];
+  expect: { kind: string; refusal?: string; current?: boolean; keeps?: boolean }[];
   note: string;
 }
 
@@ -299,8 +300,15 @@ describe('zoneList contract (WebAssembly door and shared shell)', () => {
 
   for (const row of headRows) {
     it(`puts the rows above the list: ${row.note}`, () => {
-      expect(groupsFor(row).head.map((entry) => entry.kind)).toEqual(
-        row.expect.map((entry) => entry.kind),
+      expect(
+        groupsFor(row).head.map(({ kind, refusal, current, keeps }) => ({ kind, refusal, current, keeps })),
+      ).toEqual(
+        row.expect.map((entry) => ({
+          kind: entry.kind,
+          refusal: entry.refusal ?? null,
+          current: entry.current ?? false,
+          keeps: entry.keeps ?? false,
+        })),
       );
     });
   }

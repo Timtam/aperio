@@ -1745,6 +1745,9 @@ mod contract {
                         want.get("refusal").cloned().unwrap_or(Value::Null),
                         "{note}: refusal"
                     );
+                    let flag = |key: &str| want.get(key).and_then(Value::as_bool).unwrap_or(false);
+                    assert_eq!(got.current, flag("current"), "{note}: current");
+                    assert_eq!(got.keeps, flag("keeps"), "{note}: keeps");
                 }
             }
         }
