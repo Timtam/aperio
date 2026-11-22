@@ -47,7 +47,6 @@ describe('the weekday question (138a)', () => {
       change,
       start: SUNDAY_LATE,
       rrule: 'FREQ=WEEKLY;BYDAY=SU,WE',
-      fromZone: null,
       zone: BERLIN,
       language: 'de',
       t: de,
@@ -69,7 +68,6 @@ describe('the weekday question (138a)', () => {
       change,
       start: SUNDAY_LATE,
       rrule: 'FREQ=WEEKLY;BYDAY=MO',
-      fromZone: null,
       zone: BERLIN,
       language: 'de',
       t: de,
@@ -88,7 +86,6 @@ describe('the weekday question (138a)', () => {
       change: { ...change, asNow: { outcome: 'refused', reason: 'skipped_time' } },
       start: SUNDAY_LATE,
       rrule: 'FREQ=WEEKLY;BYDAY=SU,WE',
-      fromZone: null,
       zone: BERLIN,
       language: 'de',
       t: de,
@@ -109,7 +106,6 @@ describe('the weekday question (138a)', () => {
       change,
       start,
       rrule: 'FREQ=MONTHLY',
-      fromZone: null,
       zone: BERLIN,
       language: 'de',
       t: de,
@@ -119,13 +115,53 @@ describe('the weekday question (138a)', () => {
     expect(question.message.startsWith('In Berlin fällt der Beginn auf Sonntag, 1. Februar, 00:30; die Regel sagt ')).toBe(true);
   });
 
+  it('says the events move a day later for a westward repair', () => {
+    // A New York series that lost its zone: Sundays at 01:30 UTC, which is
+    // Saturday evening in New York. As the rule says, Sunday evening there.
+    const start = '2026-11-23T01:30:00.000Z';
+    const change = seriesClockChange({
+      rrule: 'FREQ=WEEKLY;BYDAY=SU',
+      start,
+      exceptions: [],
+      fromTzid: null,
+      toTzid: 'America/New_York',
+    });
+    if (change === null || !change.asks) throw new Error('expected the core to ask');
+    const question = weekdayQuestion({
+      change,
+      start,
+      rrule: 'FREQ=WEEKLY;BYDAY=SU',
+      zone: 'America/New_York',
+      language: 'de',
+      t: de,
+    });
+    expect(question.answers.find((answer) => answer.answer === 'rule')?.label).toBe(
+      'Jeden Sonntag, wie die Regel sagt (Termine rücken einen Tag zurück)',
+    );
+  });
+
+  it('says the events move where both start days are rule days', () => {
+    const change = askAbout('FREQ=WEEKLY;BYDAY=SU,MO');
+    if (!change.asks) throw new Error('expected the core to ask');
+    const question = weekdayQuestion({
+      change,
+      start: SUNDAY_LATE,
+      rrule: 'FREQ=WEEKLY;BYDAY=SU,MO',
+      zone: BERLIN,
+      language: 'de',
+      t: de,
+    });
+    expect(question.answers.find((answer) => answer.answer === 'rule')?.label).toMatch(
+      /\(Termine rücken einen Tag vor\)$/,
+    );
+  });
+
   it('says the same in English', () => {
     const change = askAbout('FREQ=WEEKLY;BYDAY=SU,WE');
     const question = weekdayQuestion({
       change,
       start: SUNDAY_LATE,
       rrule: 'FREQ=WEEKLY;BYDAY=SU,WE',
-      fromZone: null,
       zone: BERLIN,
       language: 'en',
       t: en,

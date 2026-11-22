@@ -1926,7 +1926,6 @@ export function EventDialog({
         change,
         start: before.start,
         rrule: current.rrule ?? '',
-        fromZone: zoneFormView(zoneForm, zoneFactsOf(current)).zone,
         zone: pick.zone,
         language: i18n.language,
         t,
@@ -3926,8 +3925,9 @@ export function EventDialog({
                 // A start changed before the choice would be lost between the
                 // answer and the save, and times without an instant give the
                 // core nothing to answer: say so instead (`zoneChoiceWait`).
+                // Only a stored series waits; an import is created as it stands.
                 const baseline =
-                  form.zoneAnswer?.start ?? (isEdit && !isOccurrence ? (event?.start ?? null) : null);
+                  isEdit && !isOccurrence ? (form.zoneAnswer?.start ?? event?.start ?? null) : null;
                 const wait = zoneChoiceWait(zoneFormOf(form), fields, baseline);
                 if (wait !== null) {
                   announce(

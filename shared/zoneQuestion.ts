@@ -8,7 +8,7 @@
 
 import type { ClockFields } from './clockFields';
 import { fieldInstant } from './clockFields';
-import { expandEvent, seriesDayKey } from './recurrence';
+import { seriesDayKey } from './recurrence';
 import { describeRecurrence, recurrenceDaysText } from './recurrenceSummary';
 import type { ClockChangeAnswer, ClockChangeRefusal, SeriesClockChange } from './seriesClock';
 import type { ZoneOffsets } from './types';
@@ -73,26 +73,6 @@ function closed(sentence: string): string {
   return sentence.replace(/\.\.$/, '.');
 }
 
-/** The first occurrence of a series from its start, read on the clock of
- *  `zone`: where its events begin to fall. Deletions are left out, on both
- *  sides of a comparison alike. */
-function firstOccurrence(rrule: string, start: string, zone: string | null): string | null {
-  const from = Date.parse(start);
-  const series = {
-    id: 'question',
-    start,
-    end: start,
-    all_day: false,
-    recurrence: { rrule, exceptions: [], tzid: zone },
-  };
-  return (
-    expandEvent(series, { start: new Date(from - DAY_MS), end: new Date(from + 400 * DAY_MS) })
-      .map((occurrence) => occurrence.start)
-      .filter((at) => Date.parse(at) >= from)
-      .sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? null
-  );
-}
-
 /** Why an answer cannot be carried out, as a clause. */
 function refusalText(reason: ClockChangeRefusal, zone: string | null, t: Translate): string {
   return t(`dialogs.moveScope.refusal.${reason}`, { clock: zoneCityName(zone) });
@@ -136,13 +116,11 @@ export function weekdayQuestion(args: {
   change: SeriesClockChange;
   start: string;
   rrule: string;
-  /** The zone the series repeats on now, as stored (`null` for UTC). */
-  fromZone: string | null;
   zone: string | null;
   language: string;
   t: Translate;
 }): WeekdayQuestionText {
-  const { change, start, rrule, fromZone, zone, language, t } = args;
+  const { change, start, rrule, zone, language, t } = args;
   const clock = zoneCityName(zone);
   // The rule's days as it reads them now: a day it takes from its start is
   // the start's day on its own clock, the old one.
@@ -159,13 +137,15 @@ export function weekdayQuestion(args: {
   const answers: WeekdayAnswerButton[] = [];
   const asRule = change.asRule;
   if (asRule.outcome === 'changed') {
-    // How far the events move: the first one as the rule says, on the new
-    // clock, against the first one where it falls now. The start may stay
-    // where the events move (a series that lost its zone), or move with them.
-    const dayNumber = (at: string) => Date.parse(seriesDayKey(at, zone, false)) / DAY_MS;
-    const now = firstOccurrence(rrule, start, fromZone);
-    const after = firstOccurrence(asRule.rrule, asRule.start, zone);
-    const moved = now === null || after === null ? 0 : Math.round(dayNumber(after) - dayNumber(now));
+    // How far the events move. Each falls now on its day on the old clock
+    // plus the days the start's day shifts between the clocks; as the rule
+    // says, it goes back onto the day the rule names. So every event moves by
+    // the start's day on the old clock less its day on the new one, whether
+    // the start itself moves (a series that really means its old zone) or
+    // stays (one that lost its zone), east or west.
+    const moved = Math.round(
+      (Date.parse(change.startDayBefore) - Date.parse(change.startDayAfter)) / DAY_MS,
+    );
     const days = upperFirst(daysOf(asRule.rrule, asRule.start, zone, language, t));
     answers.push({
       answer: 'rule',

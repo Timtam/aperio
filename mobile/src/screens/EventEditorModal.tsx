@@ -2880,7 +2880,6 @@ function EventEditorScreen({
         change,
         start,
         rrule: rule,
-        fromZone: view.zone,
         zone: pick.zone,
         language: i18n.language,
         t,
@@ -3412,9 +3411,11 @@ function EventEditorScreen({
               // A start changed before the choice would be lost between the
               // answer and the save, and times without an instant give the
               // core nothing to answer: say so instead (`zoneChoiceWait`).
+              // Only a stored series waits; an import is created as it stands.
               const baseline =
-                zoneAnswer?.start ??
-                (editing && original != null && !isOccurrence ? original.start : null);
+                editing && original != null && !isOccurrence
+                  ? (zoneAnswer?.start ?? original.start)
+                  : null;
               const wait = zoneChoiceWait(zoneForm, fields, baseline);
               if (wait !== null) {
                 afterZoneDialog(
