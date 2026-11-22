@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEVICE_CLOCK,
   applyClockChange,
+  calendarZonesOf,
   changeClockField,
   chooseZone,
   defaultSeriesZone,
@@ -13,6 +14,8 @@ import {
   unusableZoneRefusal,
   withAllDay,
   zoneFormView,
+  zoneEditingFor,
+  zoneFacts,
   zoneToSave,
   type ZoneFormFacts,
 } from '@aperio/shared';
@@ -303,5 +306,83 @@ describe('switching repeat or all-day', () => {
     expect(withAllDay(openZoneForm('series', 'Europe/Berlin', false), true).allDayTurnedOn).toBe(true);
     expect(withAllDay(openZoneForm('series', 'Europe/Berlin', true), true).allDayTurnedOn).toBe(false);
     expect(withAllDay(withAllDay(openZoneForm('series', 'Europe/Berlin', false), true), false).allDayTurnedOn).toBe(false);
+  });
+});
+
+describe('the row an editor stands on (zoneEditingFor)', () => {
+  const ask = (over: Partial<Parameters<typeof zoneEditingFor>[0]> = {}) =>
+    zoneEditingFor({
+      isEdit: true,
+      isOccurrence: false,
+      repeats: true,
+      scope: null,
+      imported: false,
+      readOnly: false,
+      ...over,
+    });
+
+  it('follows the table for both editors', () => {
+    expect(ask({ isEdit: false, repeats: false })).toBe('new');
+    expect(ask()).toBe('series');
+    expect(ask({ repeats: false })).toBe('single');
+    expect(ask({ isOccurrence: true, scope: 'series' })).toBe('series');
+    expect(ask({ isOccurrence: true, scope: 'this_and_future' })).toBe('following');
+    expect(ask({ isOccurrence: true, scope: 'occurrence' })).toBe('occurrence');
+    expect(ask({ isOccurrence: true, scope: null })).toBe('scope-in-form');
+  });
+
+  it('counts an appointment from a file as a stored one (136a), and leaves a read-only one on the device', () => {
+    expect(ask({ isEdit: false, imported: true })).toBe('series');
+    expect(ask({ isEdit: false, imported: true, repeats: false })).toBe('single');
+    expect(ask({ readOnly: true })).toBeNull();
+    expect(ask({ isEdit: false, imported: true, readOnly: true })).toBeNull();
+  });
+});
+
+describe('the facts of a form (zoneFacts)', () => {
+  it('reads the repeat, the calendar list and the device', () => {
+    expect(
+      zoneFacts({
+        rrule: 'FREQ=WEEKLY',
+        allDay: false,
+        calendar: { recurrence_capabilities: { time_zones: ['Europe/Berlin'] } },
+        deviceZone: 'Europe/Berlin',
+      }),
+    ).toEqual({
+      repeats: true,
+      allDay: false,
+      calendarZones: ['Europe/Berlin'],
+      deviceZone: 'Europe/Berlin',
+      calendarMoved: false,
+    });
+    const blank = zoneFacts({ rrule: ' ', allDay: true, calendar: undefined, deviceZone: null, calendarMoved: true });
+    expect(blank).toMatchObject({ repeats: false, calendarZones: 'all', calendarMoved: true });
+    expect(calendarZonesOf({ recurrence_capabilities: null })).toBe('all');
+  });
+});
+
+describe('a zone the target calendar cannot store (139a)', () => {
+  const exchange = ['Europe/Berlin', 'Asia/Kolkata'];
+
+  it('is named where the event moves to that calendar, canonically', () => {
+    const form = openZoneForm('series', 'America/New_York', false);
+    expect(zoneFormView(form, facts({ calendarZones: exchange, calendarMoved: true })).notStorable).toBe(
+      'America/New_York',
+    );
+    expect(zoneFormView(openZoneForm('series', 'Asia/Calcutta', false), facts({ calendarZones: exchange, calendarMoved: true })).notStorable).toBeNull();
+  });
+
+  it('is not named for an untouched zone in its own calendar, nor for UTC', () => {
+    const form = openZoneForm('series', 'America/New_York', false);
+    expect(zoneFormView(form, facts({ calendarZones: exchange })).notStorable).toBeNull();
+    const utc = openZoneForm('series', null, false);
+    expect(zoneFormView(utc, facts({ calendarZones: exchange, calendarMoved: true })).notStorable).toBeNull();
+  });
+
+  it('is named for a chosen zone, which stays', () => {
+    const chosen = { ...openZoneForm('new', undefined, false), chosen: 'America/New_York' };
+    const view = zoneFormView(chosen, facts({ calendarZones: exchange }));
+    expect(view.zone).toBe('America/New_York');
+    expect(view.notStorable).toBe('America/New_York');
   });
 });
