@@ -307,7 +307,7 @@ describe('zoneList contract (WebAssembly door and shared shell)', () => {
 });
 
 /**
- * How a group is heard (119b, 122b and the provisional 125a, 126a): its clock
+ * How a group is heard (119b, 122b, 125a and 126a): its clock
  * first, then up to three cities and how many more; a group of one city reads
  * as that city; the count line counts groups.
  */
