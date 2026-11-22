@@ -111,17 +111,27 @@ export interface ZoneFormFacts {
   deviceZone: string | null;
 }
 
+/**
+ * A zone as the form writes it (117a): tzdata's spelling, or the name as given
+ * where this device can use that and not tzdata's (old zone data reports
+ * `Europe/Kiev` and refuses `Europe/Kyiv`). A name tzdata does not know stays
+ * as it is. The default and a chosen zone both go through it, so picking the
+ * device's own zone from the list (a group's pick from the device, its row
+ * "Dieses Gerät") writes what the device can use.
+ */
+export function writtenZone(name: string): string {
+  const canonical = canonicalZone(name);
+  if (canonical === null) return name;
+  return zoneUsableHere(canonical) || !zoneUsableHere(name) ? canonical : name;
+}
+
 /** The device's zone as a new series would get it, before the calendar has
- *  a say: tzdata's spelling (117a), or the device's own where this device
- *  cannot use tzdata's (old zone data reports `Europe/Kiev` and refuses
- *  `Europe/Kyiv`); `null` for a device on UTC or on a name tzdata does not
- *  know (26a). */
+ *  a say ([`writtenZone`]); `null` for a device on UTC or on a name tzdata does
+ *  not know (26a). */
 function deviceSeriesZone(deviceZone: string | null): string | null {
   const zone = seriesClockZone(deviceZone);
-  if (zone === null) return null;
-  const canonical = canonicalZone(zone);
-  if (canonical === null) return null;
-  return zoneUsableHere(canonical) || !zoneUsableHere(zone) ? canonical : zone;
+  if (zone === null || canonicalZone(zone) === null) return null;
+  return writtenZone(zone);
 }
 
 /**
@@ -195,7 +205,8 @@ export function zoneFormView(form: SeriesZoneForm, facts: ZoneFormFacts): ZoneFo
  * - a form that does not repeat writes none;
  * - an all-day series writes none where all-day was switched on here, and its
  *   stored value, literally, where it opened all-day (46a);
- * - a chosen zone is written canonically, a chosen UTC as none;
+ * - a chosen zone is written canonically, or in the device's spelling where
+ *   the device cannot use tzdata's ([`writtenZone`]); a chosen UTC as none;
  * - an untouched stored zone is written literally, as stored;
  * - a new series, a single event that becomes one, and an all-day series that
  *   gets times here get the default, never over a chosen UTC.
@@ -206,7 +217,7 @@ export function zoneToSave(form: SeriesZoneForm, facts: ZoneFormFacts): string |
     return form.allDayTurnedOn || form.stored === undefined ? null : form.stored;
   }
   if (form.chosen !== undefined) {
-    return form.chosen === null ? null : (canonicalZone(form.chosen) ?? form.chosen);
+    return form.chosen === null ? null : writtenZone(form.chosen);
   }
   return zoneInEffect(form, facts);
 }

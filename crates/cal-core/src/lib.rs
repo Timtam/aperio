@@ -71,6 +71,7 @@ pub mod series_clock;
 pub mod series_clock_change;
 pub mod series_end;
 pub mod series_shift;
+mod series_time_zones;
 pub mod step_write;
 pub mod tail_exceptions;
 pub mod task_occurrences;
@@ -260,12 +261,15 @@ pub use zone_clock::{
 pub use cal_zone::{
     tzdata_version, OffsetChange, OffsetInfo, Reading, UnknownZone, WallPolicy, Zone, COVERED_YEARS,
 };
+pub use series_time_zones::SeriesTimeZones;
 pub use zone_list::{
     listed_zone_labels, zone_choice, zone_choice_json, zone_labels_json, zone_search,
-    zone_search_json, ListedOffset, ListedZone, MatchField, OffsetSign, RegionName, ZoneAlias,
-    ZoneChoice, ZoneChoiceAnswer, ZoneChoiceQuestion, ZoneHit, ZoneOffset, ZoneOffsets,
-    ZoneOffsetsQuestion, ZoneRef, ZoneRegion, ZoneSearchAnswer, ZoneSearchError,
-    ZoneSearchQuestion,
+    zone_search_json, GroupClock, GroupPick, HeadEntry, HeadKind, ListedOffset, ListedZone,
+    ListingKind, MatchField, OffsetSign, PickSource, RegionName, ZoneAlias, ZoneChoice,
+    ZoneChoiceAnswer, ZoneChoiceQuestion, ZoneGroup, ZoneGroups, ZoneGroupsQuestion, ZoneHit,
+    ZoneOffset, ZoneOffsets, ZoneOffsetsQuestion, ZoneRef, ZoneRefusal, ZoneRegion,
+    ZoneSearchAnswer, ZoneSearchError, ZoneSearchQuestion, GROUP_HORIZON_DAYS, NAMED_CITIES,
+    STANDARD_YEAR_DAYS,
 };
 #[cfg(feature = "zones")]
-pub use zone_list::{zone_offsets, zone_offsets_json};
+pub use zone_list::{zone_groups, zone_groups_json, zone_offsets, zone_offsets_json};

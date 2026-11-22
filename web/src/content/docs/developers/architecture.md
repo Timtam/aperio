@@ -130,10 +130,12 @@ Some of the rules that cross today:
   JSON door of its own, pinned by `seriesClockChange.json`.
 
 - **the world zone list**, `cal_core::zone_list`: `zoneLabels`, `zoneSearch`
-  and `zoneChoice` give the names, the search and where a stored zone stands.
-  Its offsets need the zones (`cal-zone`), and they are the one part that does not cross
-  here: the desktop asks its host (`zone_offsets`, a Tauri command) and the
-  phone its native core.
+  and `zoneChoice` give the names, the search and where a stored zone stands;
+  `zoneOffsets` the offsets and the order of the cities; `zoneGroups` the list
+  as groups of zones with the same rules from today on (decision 118a), the
+  rows above it and every zone's marks for the series' calendar. The offsets
+  and groups need the zones (`cal-zone`), which the module carries since
+  stage 8, so both surfaces answer them synchronously.
 
 `src/wasm/coreRules.ts` holds every WebAssembly door.
 

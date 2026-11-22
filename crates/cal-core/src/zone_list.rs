@@ -1,7 +1,7 @@
 //! The world list a series' zone is chosen from: its entries, how they are
 //! named, the search over them, and how a stored or device zone relates to
 //! them (DESIGN-series-time-zone.md, "Die Zonenliste"; decisions 17b, 25b, 26a,
-//! 29a-32a).
+//! 29a-32a, and 118a-129a for the groups).
 //!
 //! The list is the 312 zones outside `Etc/` from [`crate::listed_zones`] plus
 //! one UTC entry. A zone is named from its tzdata id: the city is the last part
@@ -10,11 +10,16 @@
 //! answers with those parts and a [`ZoneRegion`]; each surface puts them into
 //! words in its own language.
 //!
-//! Everything here but [`zone_offsets`] works without tzdata's rules, so it is
-//! in every build, WebAssembly included. The offsets need cal-zone (jiff and
-//! the tzdata bundled with jiff-tzdb) and sit behind the `zones` feature, which
-//! the native bindings and, since stage 8, the desktop's WebAssembly module
-//! switch on; the desktop still asks its host for the offsets.
+//! Without a search the list shows groups instead of cities (118a): zones
+//! with the same rules from today on stand as one entry ([`zone_groups`],
+//! in `zone_list/groups.rs`). The search still finds every city, and a query
+//! of offsets alone finds groups (121a).
+//!
+//! Everything here but [`zone_offsets`] and [`zone_groups`] works without
+//! tzdata's rules, so it is in every build, WebAssembly included. Those two
+//! need cal-zone (jiff and the tzdata bundled with jiff-tzdb) and sit behind
+//! the `zones` feature, which the native bindings and, since stage 8, the
+//! desktop's WebAssembly module switch on.
 //!
 //! The core reads no clock and no device zone: the instant an offset is asked
 //! for, "today", and the device's zone name are all parameters.
@@ -29,6 +34,16 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::series_clock::{self, NameKind};
+
+mod groups;
+mod prominence;
+
+#[cfg(feature = "zones")]
+pub use groups::{zone_groups, zone_groups_json};
+pub use groups::{
+    GroupClock, GroupPick, HeadEntry, HeadKind, PickSource, ZoneGroup, ZoneGroups,
+    ZoneGroupsQuestion, ZoneRefusal, GROUP_HORIZON_DAYS, NAMED_CITIES, STANDARD_YEAR_DAYS,
+};
 
 /// The part of the world a listed zone's id starts with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -90,13 +105,15 @@ pub struct ListedZone {
     pub region: ZoneRegion,
 }
 
-/// One entry of the list: the UTC entry, or a listed zone by its position.
+/// One entry of the list: the UTC entry, a listed zone by its position, or a
+/// group of [`ZoneGroups`] by its index (118a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum ZoneRef {
     Utc,
     Zone { position: usize },
+    Group { group: usize },
 }
 
 /// Whether an offset is east of UTC (or zero) or west of it.
@@ -199,6 +216,11 @@ pub struct ZoneSearchQuestion {
     /// with the UTC entry first and then by position.
     #[serde(default)]
     pub offsets: Option<ZoneOffsets>,
+    /// The list as groups, from [`zone_groups`]. With them a query of offsets
+    /// alone, or of nothing, finds the UTC entry and groups by the offsets
+    /// their entries say (121a); any other word still finds cities.
+    #[serde(default)]
+    pub groups: Option<ZoneGroups>,
 }
 
 /// Which part of an entry a word matched.
@@ -238,11 +260,21 @@ pub struct ZoneHit {
     pub also: Option<ZoneAlias>,
 }
 
+/// Whether a search's hits are groups (and the UTC entry) or cities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub enum ListingKind {
+    Groups,
+    Zones,
+}
+
 /// What a search found, in the order of the list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub struct ZoneSearchAnswer {
     pub query: String,
+    pub kind: ListingKind,
     pub hits: Vec<ZoneHit>,
 }
 
@@ -253,6 +285,8 @@ pub enum ZoneSearchError {
     MissingRegion(ZoneRegion),
     /// Offsets for another list than this build's.
     OffsetsDoNotFit,
+    /// Groups for another list than this build's.
+    GroupsDoNotFit,
 }
 
 impl fmt::Display for ZoneSearchError {
@@ -264,6 +298,10 @@ impl fmt::Display for ZoneSearchError {
             ZoneSearchError::OffsetsDoNotFit => write!(
                 f,
                 "the offsets handed to the zone search are for another list than this one"
+            ),
+            ZoneSearchError::GroupsDoNotFit => write!(
+                f,
+                "the groups handed to the zone search are for another list than this one"
             ),
         }
     }
@@ -282,7 +320,7 @@ pub struct ZoneChoiceQuestion {
 }
 
 /// How a zone name relates to the list.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 pub enum ZoneChoice {
@@ -551,6 +589,14 @@ pub fn zone_search(question: &ZoneSearchQuestion) -> Result<ZoneSearchAnswer, Zo
             return Err(ZoneSearchError::OffsetsDoNotFit);
         }
     }
+    if let Some(groups) = &question.groups {
+        if !groups_fit(groups, labels.len()) {
+            return Err(ZoneSearchError::GroupsDoNotFit);
+        }
+        if words.iter().all(|word| matches!(word, Word::Offset { .. })) {
+            return Ok(search_groups(&question.query, &words, groups));
+        }
+    }
     let (zone_aliases, utc_aliases) = aliases(&labels);
     let order: Vec<ZoneRef> = match &question.offsets {
         Some(offsets) => offsets.order.clone(),
@@ -571,6 +617,7 @@ pub fn zone_search(question: &ZoneSearchQuestion) -> Result<ZoneSearchAnswer, Zo
                     &utc_aliases,
                     question.offsets.as_ref().map(|_| 0),
                 ),
+                ZoneRef::Group { .. } => return Err(ZoneSearchError::OffsetsDoNotFit),
                 ZoneRef::Zone { position } => {
                     let label = labels
                         .get(position)
@@ -599,8 +646,79 @@ pub fn zone_search(question: &ZoneSearchQuestion) -> Result<ZoneSearchAnswer, Zo
     }
     Ok(ZoneSearchAnswer {
         query: question.query.clone(),
+        kind: ListingKind::Zones,
         hits,
     })
+}
+
+/// Whether `groups` is an answer for a list of `listed` zones: a mark for
+/// every zone, every zone in exactly one group, and an order that holds the
+/// UTC entry once and every group once.
+fn groups_fit(groups: &ZoneGroups, listed: usize) -> bool {
+    let mut seen = vec![false; listed];
+    for member in groups.groups.iter().flat_map(|group| &group.members) {
+        match seen.get_mut(*member) {
+            Some(seen) if !*seen => *seen = true,
+            _ => return false,
+        }
+    }
+    let mut in_order = vec![false; groups.groups.len()];
+    let mut utc = 0;
+    for entry in &groups.order {
+        match entry {
+            ZoneRef::Utc => utc += 1,
+            ZoneRef::Group { group } => match in_order.get_mut(*group) {
+                Some(seen) if !*seen => *seen = true,
+                _ => return false,
+            },
+            ZoneRef::Zone { .. } => return false,
+        }
+    }
+    groups.refused.len() == listed
+        && seen.iter().all(|seen| *seen)
+        && in_order.iter().all(|seen| *seen)
+        && utc == 1
+}
+
+/// A query of offsets alone, or of nothing, over the groups (121a): the UTC
+/// entry says +00:00, a group the offsets its clock says, in whole minutes.
+/// Every word must match one of them.
+fn search_groups(query: &str, words: &[Word], groups: &ZoneGroups) -> ZoneSearchAnswer {
+    let fits = |shown: i32, sign: Option<i32>, wanted: i32| match sign {
+        Some(sign) => shown == sign * wanted,
+        None => shown.abs() == wanted,
+    };
+    let hits = groups
+        .order
+        .iter()
+        .filter(|entry| {
+            let shown: Vec<i32> = match entry {
+                ZoneRef::Group { group } => groups.groups[*group]
+                    .clock
+                    .offsets()
+                    .iter()
+                    .map(|offset| offset.seconds / 60 * 60)
+                    .collect(),
+                _ => vec![0],
+            };
+            words.iter().all(|word| match word {
+                Word::Offset { sign, seconds } => {
+                    shown.iter().any(|shown| fits(*shown, *sign, *seconds))
+                }
+                Word::Text { .. } => false,
+            })
+        })
+        .map(|entry| ZoneHit {
+            entry: *entry,
+            via: vec![MatchField::Offset; words.len()],
+            also: None,
+        })
+        .collect();
+    ZoneSearchAnswer {
+        query: query.to_string(),
+        kind: ListingKind::Groups,
+        hits,
+    }
 }
 
 fn match_entry(
@@ -706,16 +824,15 @@ pub fn zone_choice_json(input_json: &str) -> Result<String, serde_json::Error> {
 /// Every listed zone's offset at `at` and its standard offset as of `today`,
 /// and the order of the list.
 ///
-/// The standard offset is the smallest offset in the 365 days from `today`,
-/// sampled every 15 days and on the 365th (decision 29a). It is read from total offsets only —
+/// The standard offset is the smallest total offset in the 365 days from
+/// `today`, its end included (decision 29a), read from every change in that
+/// year, as the groups read it. It is read from total offsets only —
 /// never from a daylight-saving flag, which tzdata writes differently between
 /// its data forms (Dublin, Casablanca; the bundled data is the rearguard form)
 /// — so Dublin sits at +00:00 beside London, and every series sees the same
 /// order.
 #[cfg(feature = "zones")]
 pub fn zone_offsets(question: &ZoneOffsetsQuestion) -> ZoneOffsets {
-    use chrono::TimeDelta;
-
     let listed = series_clock::listed_zones();
     let zones: Vec<ListedOffset> = listed
         .iter()
@@ -723,12 +840,7 @@ pub fn zone_offsets(question: &ZoneOffsetsQuestion) -> ZoneOffsets {
             let tz = cal_zone::Zone::named(name)
                 .unwrap_or_else(|| panic!("the listed zone {name} is a bundled tzdata zone"));
             let offset_at = |instant: DateTime<Utc>| tz.offset_at(instant).local_minus_utc();
-            let standard = (0..=24)
-                .map(|k| 15 * k)
-                .chain(std::iter::once(365))
-                .map(|day| offset_at(question.today + TimeDelta::days(day)))
-                .min()
-                .unwrap_or_else(|| offset_at(question.today));
+            let standard = groups::year_standard_seconds(name, question.today);
             ListedOffset {
                 offset: ZoneOffset::from_seconds(offset_at(question.at)),
                 standard: ZoneOffset::from_seconds(standard),
@@ -770,6 +882,19 @@ pub fn zone_offsets_json(input_json: &str) -> Result<String, serde_json::Error> 
 mod table {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn every_ranked_zone_is_listed_once() {
+        let mut seen = BTreeSet::new();
+        for zone in prominence::PROMINENCE {
+            assert!(
+                series_clock::listed_position(zone)
+                    .is_some_and(|position| series_clock::listed_zones()[position] == *zone),
+                "{zone} is ranked but not listed so: rank its target or drop it"
+            );
+            assert!(seen.insert(*zone), "{zone} is ranked twice");
+        }
+    }
 
     #[test]
     fn every_listed_zone_has_a_region_and_a_label_of_its_own() {
@@ -841,6 +966,7 @@ mod table {
                 query: "berlin".into(),
                 region_names,
                 offsets,
+                groups: None,
             })
         };
         assert_eq!(
@@ -906,6 +1032,7 @@ mod contract {
         match entry {
             ZoneRef::Utc => "utc".to_string(),
             ZoneRef::Zone { position } => series_clock::listed_zones()[*position].to_string(),
+            ZoneRef::Group { group } => format!("group {group}"),
         }
     }
 
@@ -958,6 +1085,7 @@ mod contract {
             query: query.to_string(),
             region_names: region_names(doc, row["regions"].as_str().expect("a region set")),
             offsets,
+            groups: None,
         };
         let answer = zone_search(&question).unwrap_or_else(|e| panic!("{query:?}: {e}"));
         if let Some(hits) = row.get("hits") {
@@ -1249,6 +1377,372 @@ mod contract {
                 (None, None) => {}
                 (Some(device), Some(want)) => choice_is(device, want),
                 (got, want) => panic!("{question:?}: got {got:?}, want {want:?}"),
+            }
+        }
+    }
+
+    /// The groups (118a), their order, their search and the rows above them.
+    #[cfg(feature = "zones")]
+    mod groups {
+        use super::*;
+        use crate::SeriesTimeZones;
+
+        const TODAY: &str = "2026-11-22T12:00:00Z";
+
+        fn zone_name(position: usize) -> &'static str {
+            series_clock::listed_zones()[position]
+        }
+
+        fn question(row: &Value) -> ZoneGroupsQuestion {
+            let calendar_zones = match row.get("calendar") {
+                None => SeriesTimeZones::Every,
+                Some(Value::String(word)) if word == "all" => SeriesTimeZones::Every,
+                Some(Value::String(word)) if word == "none" => SeriesTimeZones::NoZone,
+                Some(written) => {
+                    let except: Vec<&str> = written["except"]
+                        .as_array()
+                        .expect("a calendar is all, none or {except}")
+                        .iter()
+                        .map(|zone| zone.as_str().expect("a zone"))
+                        .collect();
+                    SeriesTimeZones::Only(
+                        series_clock::listed_zones()
+                            .iter()
+                            .filter(|zone| !except.contains(zone))
+                            .map(|zone| zone.to_string())
+                            .collect(),
+                    )
+                }
+            };
+            ZoneGroupsQuestion {
+                today: instant(row.get("today").unwrap_or(&Value::String(TODAY.into()))),
+                stored: row["stored"].as_str().map(str::to_string),
+                device: row["device"].as_str().map(str::to_string),
+                calendar_zones,
+                unusable: row
+                    .get("unusable")
+                    .and_then(Value::as_array)
+                    .map(|zones| {
+                        zones
+                            .iter()
+                            .map(|zone| zone.as_str().expect("a zone").to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            }
+        }
+
+        fn group_of<'a>(groups: &'a ZoneGroups, zone: &str) -> &'a ZoneGroup {
+            let position = position(zone);
+            groups
+                .groups
+                .iter()
+                .find(|group| group.members.contains(&position))
+                .unwrap_or_else(|| panic!("{zone} is in no group"))
+        }
+
+        fn names(positions: &[usize]) -> Vec<&'static str> {
+            positions
+                .iter()
+                .map(|position| zone_name(*position))
+                .collect()
+        }
+
+        fn strings(value: &Value) -> Vec<&str> {
+            value
+                .as_array()
+                .expect("a list")
+                .iter()
+                .map(|zone| zone.as_str().expect("a zone"))
+                .collect()
+        }
+
+        fn clock_json(clock: &GroupClock) -> Value {
+            match clock {
+                GroupClock::Fixed { offset } => {
+                    serde_json::json!({ "kind": "fixed", "offset": offset.seconds })
+                }
+                GroupClock::Seasonal { standard, summer } => serde_json::json!({
+                    "kind": "seasonal", "standard": standard.seconds, "summer": summer.seconds
+                }),
+                GroupClock::Changing {
+                    now,
+                    next,
+                    next_at,
+                    next_on,
+                } => serde_json::json!({
+                    "kind": "changing", "now": now.seconds, "next": next.seconds,
+                    "next_at": next_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    "next_on": next_on.to_string()
+                }),
+            }
+        }
+
+        fn refusal_json(refusal: Option<ZoneRefusal>) -> Value {
+            serde_json::to_value(refusal).expect("a refusal")
+        }
+
+        fn main_of(groups: &ZoneGroups, entry: &ZoneRef) -> String {
+            match entry {
+                ZoneRef::Utc => "utc".to_string(),
+                ZoneRef::Group { group } => {
+                    format!("group:{}", zone_name(groups.groups[*group].members[0]))
+                }
+                ZoneRef::Zone { position } => zone_name(*position).to_string(),
+            }
+        }
+
+        #[test]
+        fn every_group_row_holds() {
+            for row in doc()["groups"].as_array().expect("group rows") {
+                let note = row["note"].as_str().unwrap_or("");
+                let answer = zone_groups(&question(row));
+                let of = row["of"].as_str().expect("of");
+                let group = group_of(&answer, of);
+                let at = |what: &str| format!("{of} ({note}): {what}");
+                if let Some(members) = row.get("members") {
+                    let mut want = strings(members);
+                    let mut got = names(&group.members);
+                    want.sort_unstable();
+                    got.sort_unstable();
+                    assert_eq!(got, want, "{}", at("members"));
+                }
+                if let Some(main) = row.get("main") {
+                    assert_eq!(zone_name(group.members[0]), main, "{}", at("main"));
+                }
+                if let Some(clock) = row.get("clock") {
+                    assert_eq!(&clock_json(&group.clock), clock, "{}", at("clock"));
+                }
+                if let Some(standard) = row.get("standard") {
+                    assert_eq!(
+                        i64::from(group.standard.seconds),
+                        standard.as_i64().expect("seconds"),
+                        "{}",
+                        at("standard")
+                    );
+                }
+                if let Some(named) = row.get("named") {
+                    assert_eq!(names(&group.named), strings(named), "{}", at("named"));
+                }
+                if let Some(more) = row.get("more") {
+                    assert_eq!(
+                        group.more as u64,
+                        more.as_u64().expect("more"),
+                        "{}",
+                        at("more")
+                    );
+                }
+                if let Some(pick) = row.get("pick") {
+                    let got = group.pick.map(|pick| {
+                        serde_json::json!({
+                            "zone": zone_name(pick.position),
+                            "source": serde_json::to_value(pick.source).expect("a source")
+                        })
+                    });
+                    assert_eq!(got.unwrap_or(Value::Null), *pick, "{}", at("pick"));
+                }
+                if let Some(refusal) = row.get("refusal") {
+                    assert_eq!(refusal_json(group.refusal), *refusal, "{}", at("refusal"));
+                }
+                if let Some(excludes) = row.get("excludes") {
+                    for zone in strings(excludes) {
+                        assert!(
+                            !group.members.contains(&position(zone)),
+                            "{}",
+                            at(&format!("{zone} is not in it"))
+                        );
+                    }
+                }
+                if let Some(refused) = row.get("refused") {
+                    for (zone, want) in refused.as_object().expect("refused") {
+                        assert_eq!(
+                            refusal_json(answer.refused[position(zone)]),
+                            *want,
+                            "{}",
+                            at(&format!("refused {zone}"))
+                        );
+                    }
+                }
+                // What every group holds whatever the row pins.
+                for group in &answer.groups {
+                    match group.pick {
+                        Some(pick) => {
+                            assert_eq!(
+                                group.named.first(),
+                                Some(&pick.position),
+                                "{}",
+                                at("pick named first")
+                            );
+                            assert!(group.refusal.is_none(), "{}", at("a pick and a refusal"));
+                        }
+                        None => assert!(group.refusal.is_some(), "{}", at("no pick, no refusal")),
+                    }
+                    assert!(
+                        group.named.len() <= NAMED_CITIES,
+                        "{}",
+                        at("too many named")
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn the_main_cities_hold() {
+            for row in doc()["groupMains"].as_array().expect("main rows") {
+                let answer = zone_groups(&question(row));
+                let mains: Vec<&str> = answer
+                    .groups
+                    .iter()
+                    .filter(|group| group.members.len() > 1)
+                    .map(|group| zone_name(group.members[0]))
+                    .collect();
+                assert_eq!(mains, strings(&row["mains"]), "{}", row["note"]);
+            }
+        }
+
+        #[test]
+        fn the_group_order_holds() {
+            for row in doc()["groupOrder"].as_array().expect("order rows") {
+                let note = row["note"].as_str().unwrap_or("");
+                let answer = zone_groups(&question(row));
+                assert_eq!(answer.until, instant(&row["until"]), "{note}: until");
+                let entries: Vec<String> = answer
+                    .order
+                    .iter()
+                    .map(|entry| main_of(&answer, entry))
+                    .collect();
+                let groups: Vec<&str> = entries
+                    .iter()
+                    .filter_map(|entry| entry.strip_prefix("group:"))
+                    .collect();
+                let head = strings(&row["head"]);
+                assert_eq!(&groups[..head.len()], head.as_slice(), "{note}: head");
+                let tail = strings(&row["tail"]);
+                assert_eq!(
+                    &groups[groups.len() - tail.len()..],
+                    tail.as_slice(),
+                    "{note}: tail"
+                );
+                let utc = entries
+                    .iter()
+                    .position(|entry| entry == "utc")
+                    .expect("the UTC entry");
+                assert_eq!(
+                    entries[utc - 1],
+                    format!("group:{}", row["utcAfter"].as_str().expect("utcAfter")),
+                    "{note}: before the UTC entry"
+                );
+                assert_eq!(
+                    entries[utc + 1],
+                    format!("group:{}", row["utcBefore"].as_str().expect("utcBefore")),
+                    "{note}: after the UTC entry"
+                );
+            }
+        }
+
+        #[test]
+        fn every_group_search_row_holds() {
+            let doc = doc();
+            for row in doc["groupSearch"].as_array().expect("search rows") {
+                let query = row["query"].as_str().expect("a query");
+                let note = row["note"].as_str().unwrap_or("");
+                let groups = zone_groups(&question(row));
+                let offsets = row.get("offsets").map(|asked| {
+                    zone_offsets(&ZoneOffsetsQuestion {
+                        at: instant(&asked["at"]),
+                        today: instant(&asked["today"]),
+                    })
+                });
+                let answer = zone_search(&ZoneSearchQuestion {
+                    query: query.to_string(),
+                    region_names: region_names(&doc, "en"),
+                    offsets,
+                    groups: Some(groups.clone()),
+                })
+                .unwrap_or_else(|e| panic!("{query:?}: {e}"));
+                assert_eq!(
+                    serde_json::to_value(answer.kind).expect("a kind"),
+                    row["kind"],
+                    "{query:?} ({note}): kind"
+                );
+                if let Some(hits) = row.get("hits") {
+                    let want = hits.as_array().expect("hits");
+                    assert_eq!(
+                        answer.hits.len(),
+                        want.len(),
+                        "{query:?} ({note}): {:?}",
+                        answer.hits
+                    );
+                    for (hit, want) in answer.hits.iter().zip(want) {
+                        match want {
+                            Value::String(entry) => {
+                                assert_eq!(
+                                    &main_of(&groups, &hit.entry),
+                                    entry,
+                                    "{query:?} ({note})"
+                                );
+                                assert!(
+                                    hit.via.iter().all(|field| *field == MatchField::Offset),
+                                    "{query:?}: a group is found by its offsets"
+                                );
+                            }
+                            _ => assert!(
+                                hit_is(hit, want),
+                                "{query:?} ({note}): {hit:?} is not {want}"
+                            ),
+                        }
+                    }
+                }
+                if let Some(count) = row.get("count") {
+                    assert_eq!(
+                        answer.hits.len() as u64,
+                        count.as_u64().expect("a count"),
+                        "{query:?}"
+                    );
+                }
+                if let Some(first) = row.get("first") {
+                    assert_eq!(
+                        main_of(&groups, &answer.hits[0].entry),
+                        first.as_str().expect("first"),
+                        "{query:?}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn groups_for_another_list_are_refused() {
+            let mut groups = zone_groups(&question(&Value::Null));
+            groups.refused.pop();
+            let asked = zone_search(&ZoneSearchQuestion {
+                query: "+2".into(),
+                region_names: region_names(&doc(), "en"),
+                offsets: None,
+                groups: Some(groups),
+            });
+            assert_eq!(asked, Err(ZoneSearchError::GroupsDoNotFit));
+        }
+
+        #[test]
+        fn every_head_row_holds() {
+            for row in doc()["head"].as_array().expect("head rows") {
+                let note = row["note"].as_str().unwrap_or("");
+                let answer = zone_groups(&question(row));
+                let want = row["expect"].as_array().expect("expect");
+                assert_eq!(answer.head.len(), want.len(), "{note}: {:?}", answer.head);
+                for (got, want) in answer.head.iter().zip(want) {
+                    assert_eq!(
+                        serde_json::to_value(got.kind).expect("a kind"),
+                        want["kind"],
+                        "{note}"
+                    );
+                    choice_is(&got.choice, &want["choice"]);
+                    assert_eq!(
+                        refusal_json(got.refusal),
+                        want.get("refusal").cloned().unwrap_or(Value::Null),
+                        "{note}: refusal"
+                    );
+                }
             }
         }
     }

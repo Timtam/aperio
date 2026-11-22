@@ -117,6 +117,8 @@ import {
   zoneLabelsJson,
   zoneSearchJson,
   zoneChoiceJson,
+  zoneOffsetsJson,
+  zoneGroupsJson,
 } from './wasm/coreRules';
 
 initSync({
@@ -198,8 +200,6 @@ installZoneListRules({
   zoneLabelsJson,
   zoneSearchJson,
   zoneChoiceJson,
-  // The offsets come from the desktop host, which the tests do not run; a test
-  // that needs them installs its own.
-  zoneOffsets: () =>
-    Promise.reject(new Error('zone offsets come from the desktop host, which tests do not run')),
+  zoneOffsetsJson,
+  zoneGroupsJson,
 });

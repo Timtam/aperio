@@ -24,7 +24,6 @@ import {
   installTailExceptionsRules,
   installSeriesClockRules,
   installZoneListRules,
-  type ZoneOffsets,
   installTaskPriorityRules,
   installTextCollation,
   type TaskPriority,
@@ -226,15 +225,14 @@ installSeriesClockRules({
   seriesClockChangeJson: (questionJson) => CalFfi.seriesClockChange(questionJson),
 });
 
-// The world zone list a series' zone is chosen from. The offsets answer
-// synchronously here; the shell takes a Promise because the desktop asks its
-// host for them.
+// The world zone list a series' zone is chosen from: names, search, offsets
+// and groups, all synchronous.
 installZoneListRules({
   zoneLabelsJson: () => CalFfi.zoneLabels(),
   zoneSearchJson: (inputJson) => CalFfi.zoneSearch(inputJson),
   zoneChoiceJson: (inputJson) => CalFfi.zoneChoice(inputJson),
-  zoneOffsets: async (question) =>
-    JSON.parse(CalFfi.zoneOffsets(JSON.stringify(question))) as ZoneOffsets,
+  zoneOffsetsJson: (inputJson) => CalFfi.zoneOffsets(inputJson),
+  zoneGroupsJson: (inputJson) => CalFfi.zoneGroups(inputJson),
 });
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

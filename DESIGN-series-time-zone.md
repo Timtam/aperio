@@ -616,13 +616,14 @@ Toni hat am 2026-11-22 vor den Messungen zu Stufe 11 entschieden:
   Liste nicht mehr jede Zone einzeln. Sie zeigt Gruppen von Zonen mit
   denselben Regeln ab heute: dieselbe Verschiebung zu jedem Zeitpunkt,
   Sommerzeit und Umstellungstage eingeschlossen. Aus 312 Zonen werden so
-  etwa 63 Einträge (gezählt am 2026-11-22 mit tzdata 2026b in Node; mit
-  2026f wohl ein, zwei mehr). Berlin, Paris, Rom, Madrid, Wien und 11
+  62 Einträge (tzdata 2026f am 2026-11-22; 63 am 2026-09-14; mit Node und
+  tzdata 2026b waren es 63). Berlin, Paris, Rom, Madrid, Wien und 11
   weitere sind eine Gruppe, London, Dublin, Lissabon und 3 weitere eine
   andere. Ein Eintrag nennt die Verschiebung ohne und mit Sommerzeit und
   einige Städte.
   - Aus der Liste gewählt, wird die Gerätezone gespeichert, wenn sie in der
-    Gruppe liegt, sonst die Hauptstadt der Gruppe. Ändert später ein Land
+    Gruppe liegt, sonst die Hauptstadt der Gruppe (vor beiden steht seit
+    120a die Zone der Serie selbst). Ändert später ein Land
     seine Regeln, gilt das nur für die gespeicherte Zone; wer in Wien die
     Gruppe wählt, behält so Wien.
   - Die Suche findet weiter jede Stadt und speichert genau deren Zone.
@@ -632,11 +633,77 @@ Toni hat am 2026-11-22 vor den Messungen zu Stufe 11 entschieden:
     Sommerzeit neben Helsinki; eine Serie läge dann ein halbes Jahr eine
     Stunde daneben. Ebenso verworfen: erst Gruppe, dann Stadt (ein Schritt
     mehr) und die volle Liste (17b).
-  - Offen, mit Stufe 11 zu entscheiden: wie weit „ab heute“ reicht, welche
-    Stadt die Hauptstadt einer Gruppe ist und welche Städte ein Eintrag
-    nennt, ob eine Suche nach einem Versatz Gruppen oder Städte findet, und
-    wie eine Gruppe dasteht, von der ein Exchange-Kalender nur einen Teil
-    speichern kann (22a).
+  - Die offenen Punkte entschied Toni am selben Tag (119b bis 122b), den Rest
+    wählte Claude vorläufig (123a bis 129a).
+- **119b — ein Gruppen-Eintrag nennt zuerst seine Uhr, dann die Städte:**
+  „UTC+01:00, Sommerzeit UTC+02:00: Berlin, Paris, Rome und 13 weitere“.
+  Beim Durchpfeilen hört man sofort, wo man in der sortierten Liste steht.
+  Verworfen: Städte zuerst wie bei den Städte-Einträgen, und nur zwei Städte.
+- **120a — eine Gruppe behält die Zone der Serie:** Liegt die gespeicherte
+  Zone der Serie in der gewählten Gruppe, bleibt sie, und nichts wird
+  umgeschrieben; sonst die Gerätezone, sonst die Hauptstadt. Der Eintrag
+  nennt die Stadt, die gespeichert wird, zuerst. Verworfen: immer die
+  Gerätezone wie im Wortlaut von 118a.
+- **121a — eine Suche nach einer Verschiebung findet Gruppen:** Besteht die
+  Suche nur aus Verschiebungen („+2“, „UTC+1“, „5:30“), findet sie den
+  UTC-Eintrag und die Gruppen, deren Uhr diese Verschiebung nennt, Normal-
+  oder Sommerzeit oder die kommende. Sobald ein Wort Text ist („berlin
+  +2“), sucht sie Städte wie bisher, mit dem Versatz am Beginn der Serie.
+  Verworfen: immer Städte.
+- **122b — die Zählzeile ist kurz:** „62 Gruppen“. Verworfen: mit dem
+  Hinweis, dass die Suche jede Stadt findet.
+
+Vorläufig von Claude gewählt (2026-11-22, nach einem Entwurf mit drei
+Ansätzen, zwei Gutachtern und einer Zusammenführung; Toni bestätigt oder
+kippt):
+
+- **123a — „ab heute“ reicht zwei Jahre**, das Ende eingeschlossen, und
+  verglichen wird jeder Wechsel der Gesamt-Verschiebung genau, nicht in
+  Stichproben. Ein Jahr ließ Havanna einen Monat vor seinem letzten
+  Sommerzeit-Wechsel in die feste −04:00-Gruppe fallen, die „ohne
+  Sommerzeit“ sagt. Die Normalzeit (29a) wird ebenso genau aus dem Jahr ab
+  heute gelesen, für Städte und Gruppen mit einer Regel; vorher wurde sie
+  alle 15 Tage abgetastet.
+- **124a — die Hauptstadt einer Gruppe steht in einer handgeschriebenen
+  Rangliste** im Kern (`zone_list/prominence.rs`, 144 Zonen, Gruppe für
+  Gruppe gegen 2026f geschrieben): eine große, bekannte Stadt zuerst, eine
+  Hauptstadt vor einer anderen Stadt ihres Landes, ein lange gleicher Name
+  vor einem neu geänderten (Phoenix vor Vancouver, Mexiko-Stadt vor
+  Edmonton, Bogotá vor Winnipeg, Athen vor Kyjiw, das alte Android-Daten
+  nicht kennen). Eine Zone ohne Rang folgt nach der Zahl der Namen, die auf
+  sie zeigen, dann nach Stadt. Ein Eintrag nennt höchstens drei Städte: die,
+  die gespeichert wird, dann die anderen wählbaren nach Rang, und zählt den
+  Rest wählbarer Städte als „und N weitere“. Verworfen: Daten aus CLDR oder
+  `zonenow.tab` (London, Lissabon, Dublin; Paris vor Berlin; mehr Daten),
+  die meisten Verweise (Belgrad gleichauf mit Berlin) und das Alphabet
+  (Andorra).
+- **125a — die Uhr einer Gruppe hat drei Formen:** fest („UTC+05:30, ohne
+  Sommerzeit“), Sommerzeit („UTC+01:00, Sommerzeit UTC+02:00“: zwei Werte im
+  Wechsel, ein Wechsel im Jahr ab heute) und ein kommender Wechsel
+  („UTC−04:00, ab 7. November 2027 UTC−05:00“). So heißt ein einmaliger
+  Wechsel (Casablanca, Havanna) nie Sommerzeit. „ohne Sommerzeit“ wird
+  ausgesprochen. Eine Gruppe mit einer Stadt und keiner weiteren liest sich
+  wie diese Stadt: „UTC+05:45, ohne Sommerzeit: Kathmandu, Asien“.
+- **126a — die Zählzeile einer Suche nach Verschiebungen** sagt „8 Gruppen“
+  oder „UTC und 4 Gruppen“, wenn der UTC-Eintrag dabei ist; eine Suche nach
+  Städten sagt weiter „12 Zeitzonen“.
+- **127a — Gruppen, die ein Kalender oder das Gerät nur zum Teil nehmen:**
+  Ein Eintrag nennt und zählt nur Städte, die der Kalender speichern und das
+  Gerät verwenden kann (die Gerätezone selbst gilt immer als verwendbar,
+  117a). Ist keine wählbar, steht die Gruppe markiert an ihrem Platz, mit
+  dem Grund Kalender (keine speicherbar) oder Gerät. Bei Exchange heißt die
+  Gruppe von Nuuk so nur „Nuuk“, Troll ist markiert, Casey und Vostok fehlen
+  in den Zahlen von Shanghai und Karachi. Verworfen: die ganze Gruppe zu
+  markieren, sobald eine Stadt fehlt (Casey hätte Shanghai versteckt).
+- **128a — die Zeilen über der Liste sind eine Kern-Regel:** „Aktuell“
+  (außer sie sagte die Gerätezone noch einmal: dieselbe Zone der Liste oder
+  derselbe Name), „Dieses Gerät“ und UTC. Sie bleiben Städte-Einträge mit dem
+  Versatz am Beginn der Serie; Gruppen-Einträge sagen ihre Uhr ab heute und
+  ändern sich nicht, wenn der Beginn geändert wird.
+- **129a — Versätze und Gruppen kommen auf dem Desktop aus WebAssembly**,
+  synchron wie auf dem Handy; der Host-Befehl `zone_offsets` entfällt. Wie
+  ein Kalender Zonen speichert (`SeriesTimeZones`, 97a), steht dafür im
+  Kern; plugin-core führt es unter dem alten Pfad weiter.
 
 ## Was es löst
 
@@ -777,8 +844,9 @@ Auswählen.“
 ### Die Zonenliste
 
 **Seit 118a** zeigt die Liste ohne Suche Regel-Gruppen statt einzelner
-Zonen. Was dieser Abschnitt über Einträge sagt, gilt für die Suche nach
-Städten; für die Gruppen entscheidet Stufe 11 die offenen Punkte aus 118a.
+Zonen (119b bis 129a). Was dieser Abschnitt über Einträge sagt, gilt für
+die Suche nach Städten, für die Zeilen über der Liste und für markierte
+Städte; die Zählzeile ohne Suche sagt „62 Gruppen“ (122b).
 
 **313 Einträge:** 312 kanonische Zonen ohne `Etc/*` und ein UTC-Eintrag. Ein
 Eintrag lautet „Stadt, Region, UTC±hh:mm“, zum Beispiel „Berlin, Europa,
@@ -1613,7 +1681,15 @@ Handy im selben PR.
     Desktop und Handy. Vorher messen: NVDA im verschachtelten Dialog, VoiceOver
     und TalkBack mit einer langen Liste. Mit 118a zuerst die Regel-Gruppen im
     Kern (aus tzdata, mit Türen und Fixture), dann die Dialoge; die Liste ohne
-    Suche hat dann etwa 63 Einträge statt 313.
+    Suche hat dann 62 Einträge statt 313.
+    Gebaut (Kern, 2026-11-22): `cal_core::zone_groups` mit Tür `zoneGroups`
+    (WebAssembly, UniFFI, beide Handy-Module), die Gruppen-Suche in
+    `zone_search`, `zoneOffsets` auf dem Desktop aus WebAssembly, die
+    Rangliste, `shared/zoneList.ts` mit den Wortlauten (119b, 125a, 126a) und
+    `writtenZone` für 117a. Zeilen in `timeZoneFilter.json`: groups,
+    groupMains, groupOrder, groupSearch, head; geprüft mit einer eigenen
+    Lesung der TZif-Daten aus jiff-tzdb. Die Dialoge selbst folgen nach den
+    Messungen.
 12. **Die Editoren** — `feat(editors): times typed on the series clock, and the weekday question`.
     Beschriftungen, Hinweis, Auswahl, Wochentag-Frage, „diesen und alle folgenden“
     lädt auf dem Desktop die ganze Serie beim Öffnen (21a), Hilfe und Fehlersuche.

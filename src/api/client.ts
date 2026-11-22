@@ -10,8 +10,6 @@ import {
   type SeriesRows,
   type SeriesRowsRequest,
   type TapData,
-  type ZoneOffsets,
-  type ZoneOffsetsQuestion,
 } from '@aperio/shared';
 import i18n from '../i18n';
 import { withCreatedRecurrenceZone } from '../intl/recurrence';
@@ -2384,13 +2382,6 @@ export const listRemotePlugins = () =>
  *  werden"-section of the Settings → Plugins panel. */
 export const listFailedPlugins = () =>
   invoke<FailedPluginInfo[]>('list_failed_plugins');
-
-/** Every listed zone's offset at a series' start and its standard offset as of
- *  today, and the order of the world zone list. A host command
- *  (src-tauri/src/commands/time_zones.rs); the WebAssembly module carries the
- *  zones too since stage 8, so this may move there. */
-export const zoneOffsets = (question: ZoneOffsetsQuestion) =>
-  invoke<ZoneOffsets>('zone_offsets', { question });
 
 /** The tzdata release the host's zones were built from (decision 104a). */
 export const hostTzdataVersion = () => invoke<string>('tzdata_version');

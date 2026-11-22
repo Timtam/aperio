@@ -94,6 +94,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Every listed zone's offsets and the list's order, as JSON. Synchronous. */
   zoneOffsets(inputJson: string): string;
 
+  /** The world zone list as groups of zones with the same rules from today on
+   *  (decision 118a), the rows above it and every zone's marks, as JSON.
+   *  Synchronous. */
+  zoneGroups(inputJson: string): string;
+
   /** Fold each group's members into a single row. `{events[], groups[]}` in,
    *  one row per surviving slot out. Synchronous. See
    *  `cal_core::event_group_fold`. */

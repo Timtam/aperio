@@ -317,6 +317,17 @@ pub fn zone_offsets(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// The world zone list as groups of zones with the same rules from today on
+/// (decision 118a), the rows above it and every zone's marks, as JSON. See
+/// cal_core::zone_groups.
+#[uniffi::export]
+pub fn zone_groups(input_json: String) -> Result<String, StoreError> {
+    cal_core::zone_groups_json(&input_json).map_err(|e| StoreError::InvalidField {
+        field: "zone groups question".into(),
+        detail: e.to_string(),
+    })
+}
+
 /// Fold each group's members into a single row, as JSON.
 ///
 /// `input_json` is `{events[], groups[]}`; the answer is one row per surviving
@@ -1032,6 +1043,209 @@ mod tests {
                 want,
                 "all_day={all_day} {tzid:?}",
             );
+        }
+    }
+
+    /// The zone list's groups (decision 118a) through the phone's doors: every
+    /// group, search and head row, as the JSON the doors read and write.
+    #[test]
+    fn zone_groups_door_answers_every_group_row() {
+        use serde_json::{json, Value};
+
+        const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/timeZoneFilter.json");
+        let doc: Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let labels: Vec<Value> =
+            serde_json::from_str(&zone_labels().expect("the labels")).expect("a list");
+        let name = |position: &Value| -> String {
+            labels[position.as_u64().expect("a position") as usize]["zone"]
+                .as_str()
+                .expect("a zone")
+                .to_string()
+        };
+        let question = |row: &Value| -> Value {
+            let calendar = match row.get("calendar") {
+                None => json!("all"),
+                Some(Value::Object(written)) => {
+                    let except = written["except"].as_array().expect("except");
+                    Value::Array(
+                        labels
+                            .iter()
+                            .map(|label| label["zone"].clone())
+                            .filter(|zone| !except.contains(zone))
+                            .collect(),
+                    )
+                }
+                Some(word) => word.clone(),
+            };
+            json!({
+                "today": row.get("today").cloned().unwrap_or(json!("2026-11-22T12:00:00Z")),
+                "stored": row.get("stored").cloned().unwrap_or(Value::Null),
+                "device": row.get("device").cloned().unwrap_or(Value::Null),
+                "calendar_zones": calendar,
+                "unusable": row.get("unusable").cloned().unwrap_or(json!([])),
+            })
+        };
+        let groups_for = |row: &Value| -> Value {
+            serde_json::from_str(&zone_groups(question(row).to_string()).expect("the groups"))
+                .expect("groups JSON")
+        };
+        let main_of = |groups: &Value, entry: &Value| -> String {
+            match entry["kind"].as_str() {
+                Some("group") => format!(
+                    "group:{}",
+                    name(
+                        &groups["groups"][entry["group"].as_u64().expect("a group") as usize]
+                            ["members"][0]
+                    )
+                ),
+                Some("zone") => name(&entry["position"]),
+                _ => "utc".to_string(),
+            }
+        };
+
+        let group_rows = doc["groups"].as_array().expect("group rows");
+        // Anti-silence: the rows the rules turn on, by name.
+        for note in [
+            "120a",
+            "Exchange cannot store Troll",
+            "This device refuses America/Nuuk",
+        ] {
+            assert!(
+                group_rows
+                    .iter()
+                    .any(|row| row["note"].as_str().is_some_and(|n| n.contains(note))),
+                "the contract lost the {note:?} group row"
+            );
+        }
+        for row in group_rows {
+            let note = row["note"].as_str().unwrap_or("");
+            let groups = groups_for(row);
+            let of = row["of"].as_str().expect("of");
+            let group = groups["groups"]
+                .as_array()
+                .expect("groups")
+                .iter()
+                .find(|group| {
+                    group["members"]
+                        .as_array()
+                        .expect("members")
+                        .iter()
+                        .any(|m| name(m) == of)
+                })
+                .unwrap_or_else(|| panic!("{of} is in no group"));
+            if let Some(main) = row.get("main") {
+                assert_eq!(name(&group["members"][0]), *main, "{of} ({note}): main");
+            }
+            if let Some(named) = row.get("named") {
+                let got: Vec<String> = group["named"]
+                    .as_array()
+                    .expect("named")
+                    .iter()
+                    .map(name)
+                    .collect();
+                assert_eq!(json!(got), *named, "{of} ({note}): named");
+            }
+            if let Some(more) = row.get("more") {
+                assert_eq!(group["more"], *more, "{of} ({note}): more");
+            }
+            if let Some(pick) = row.get("pick") {
+                let got = match &group["pick"] {
+                    Value::Null => Value::Null,
+                    pick => json!({ "zone": name(&pick["position"]), "source": pick["source"] }),
+                };
+                assert_eq!(got, *pick, "{of} ({note}): pick");
+            }
+            if let Some(refusal) = row.get("refusal") {
+                assert_eq!(group["refusal"], *refusal, "{of} ({note}): refusal");
+            }
+            if let Some(standard) = row.get("standard") {
+                assert_eq!(
+                    group["standard"]["seconds"], *standard,
+                    "{of} ({note}): standard"
+                );
+            }
+        }
+
+        for row in doc["groupMains"].as_array().expect("main rows") {
+            let groups = groups_for(row);
+            let mains: Vec<String> = groups["groups"]
+                .as_array()
+                .expect("groups")
+                .iter()
+                .filter(|group| group["members"].as_array().expect("members").len() > 1)
+                .map(|group| name(&group["members"][0]))
+                .collect();
+            assert_eq!(json!(mains), row["mains"]);
+        }
+
+        let regions: Vec<Value> = doc["regions"]["en"]
+            .as_object()
+            .expect("region names")
+            .iter()
+            .map(|(region, name)| json!({ "region": region, "name": name }))
+            .collect();
+        let search_rows = doc["groupSearch"].as_array().expect("group search rows");
+        for query in ["+2", "+0", "-4", "   ", "Vienna"] {
+            assert!(
+                search_rows.iter().any(|row| row["query"] == query),
+                "the contract lost the {query:?} group search row"
+            );
+        }
+        for row in search_rows {
+            let query = row["query"].as_str().expect("a query");
+            let groups = groups_for(row);
+            let offsets = match row.get("offsets") {
+                Some(asked) => serde_json::from_str::<Value>(
+                    &zone_offsets(asked.to_string()).expect("the offsets"),
+                )
+                .expect("offsets JSON"),
+                None => Value::Null,
+            };
+            let asked = json!({
+                "query": query, "region_names": regions, "offsets": offsets, "groups": groups
+            });
+            let answer: Value =
+                serde_json::from_str(&zone_search(asked.to_string()).expect("a search"))
+                    .expect("an answer");
+            assert_eq!(answer["kind"], row["kind"], "{query:?}: kind");
+            let hits = answer["hits"].as_array().expect("hits");
+            if let Some(want) = row.get("hits") {
+                let got: Vec<Value> = hits
+                    .iter()
+                    .map(|hit| json!(main_of(&groups, &hit["entry"])))
+                    .collect();
+                let want: Vec<Value> = want
+                    .as_array()
+                    .expect("hits")
+                    .iter()
+                    .map(|want| match want {
+                        Value::String(_) => want.clone(),
+                        _ => want["zone"].clone(),
+                    })
+                    .collect();
+                assert_eq!(hits.len(), want.len(), "{query:?}: {hits:?}");
+                assert_eq!(got, want, "{query:?}");
+            }
+            if let Some(count) = row.get("count") {
+                assert_eq!(json!(hits.len()), *count, "{query:?}: count");
+            }
+        }
+
+        for row in doc["head"].as_array().expect("head rows") {
+            let groups = groups_for(row);
+            let got: Vec<Value> = groups["head"]
+                .as_array()
+                .expect("head")
+                .iter()
+                .map(|entry| entry["kind"].clone())
+                .collect();
+            let want: Vec<Value> = row["expect"]
+                .as_array()
+                .expect("expect")
+                .iter()
+                .map(|entry| entry["kind"].clone())
+                .collect();
+            assert_eq!(got, want, "{}", row["note"]);
         }
     }
 

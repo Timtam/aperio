@@ -215,6 +215,16 @@ pub fn zone_choice(input_json: &str) -> Result<String, WireError> {
     cal_core::zone_choice_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::zoneOffsets`].
+pub fn zone_offsets(input_json: &str) -> Result<String, WireError> {
+    cal_core::zone_offsets_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
+/// See [`crate::zoneGroups`].
+pub fn zone_groups(input_json: &str) -> Result<String, WireError> {
+    cal_core::zone_groups_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 /// See [`crate::collapseEventGroups`].
 pub fn collapse_event_groups(input_json: &str) -> Result<String, WireError> {
     cal_core::collapse_event_groups_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))
