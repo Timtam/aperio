@@ -1389,8 +1389,19 @@ Handy im selben PR.
    Fixture `wallClock.json` (aus tzdatas Regeln von Hand, gegen Nodes
    ICU-Daten geprüft). Das WebAssembly-Modul trägt die Zonen (100a, 104a);
    der CI-Wächter lässt dort cal-zone zu und hält rrule und chrono-tz
-   draußen. Noch unsichtbar: Die Editoren lesen die Regel ab den nächsten
-   Schritten.
+   draußen. Gebaut, Schritt 3: Formularfelder mit Uhr
+   (`shared/clockFields.ts`), auf der Uhr der Serie oder der des Geräts.
+   Ein Feld, in das niemand tippt, hält seinen Zeitpunkt: den gespeicherten,
+   auf die Sekunde, auch in der zweiten Doppelstunde, und ebenso nach einem
+   Wechsel auf eine andere Uhr, so dass Hin- und Rückwechsel die
+   Ausgangswerte ergeben. Eine getippte Uhrzeit in einer Lücke ist eine
+   Antwort mit den Teilen der Meldung. Der Beginn nimmt das Ende um die
+   verstrichene Zeit mit (102a); eine übersprungene Uhrzeit zählt dabei
+   mit dem Versatz vor der Umstellung, wie RFC 5545 sie liest, so dass die
+   Dauer stimmt, sobald der Beginn berichtigt ist. Dazu die Prüfung „gleiche
+   Uhr wie das Gerät“ nach kanonischem Namen und die Uhr einer Serie, deren
+   Zone dieses Gerät nicht verwenden kann: UTC, mit dem Namen der Zone.
+   Noch unsichtbar: Die Editoren lesen das ab den Stufen 10 und 12.
 9. **Die Kern-Regel für den Zonenwechsel (15a)** — `feat(core): changing the clock a series repeats on`.
    `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die

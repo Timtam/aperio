@@ -512,6 +512,13 @@ function usableZone(zone: string | null): string | null {
   }
 }
 
+/** Whether this device's `Intl` can use `zone`: the check the views make
+ *  before they expand a series on it. A series on a zone that fails it expands
+ *  on UTC, so a form shows its fields on UTC too (`seriesFieldClock`). */
+export function zoneUsableHere(zone: string): boolean {
+  return usableZone(zone) !== null;
+}
+
 /** An instant on the clock a series recurs in, as a Date whose UTC fields hold
  *  that clock's reading. */
 function seriesWall(
