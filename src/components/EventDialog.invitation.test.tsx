@@ -251,14 +251,10 @@ describe('EventDialog → an invitation somebody else organizes', () => {
 
 describe('EventDialog → an invitation opened from the reminder of one occurrence (TODO A5)', () => {
   const THIRD = '2026-11-23T15:00:00.000Z';
-  // The editor shows dates on the device's clock, where 15:00 UTC is the
-  // next day east of UTC+9 (Auckland): the expected days are read there too.
+  // The locked editor shows dates on the device's clock, where 15:00 UTC is
+  // the next day east of UTC+9 (Auckland): the expected days are read there
+  // too.
   const deviceDay = (iso: string) => new Date(iso).getDate();
-  const deviceKey = (iso: string) => {
-    const d = new Date(iso);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  };
 
   async function openShown(event: CalendarEvent, waitFor: RegExp) {
     const { EventDialog } = await import('./EventDialog');
@@ -300,10 +296,13 @@ describe('EventDialog → an invitation opened from the reminder of one occurren
   });
 
   it('ignores it for a series one may edit: saved, it would move the series', async () => {
+    // The series repeats without a zone, so its fields stand on UTC and say
+    // so, unless this machine runs on UTC itself (stage 12).
     const own = { ...INVITATION, organized_elsewhere: false, attendees: [] } as CalendarEvent;
-    await openShown(own, /^beginnt am$|^start date$|^startdatum$/i);
-    const start = field(/^beginnt am$|^start date$|^startdatum$/i);
+    const startLabel = /^startdatum( \(UTC\))?$|^start date( \(UTC\))?$/i;
+    await openShown(own, startLabel);
+    const start = field(startLabel);
     expect(start.readOnly).toBe(false);
-    expect(start.value).toBe(deviceKey(INVITATION.start));
+    expect(start.value).toBe(INVITATION.start.slice(0, 10));
   });
 });

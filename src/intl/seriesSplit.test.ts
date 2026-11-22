@@ -16,7 +16,8 @@ import {
   planSeriesSplit,
   readSeriesRows,
   ruleFromCut,
-  localTimeZone,
+  defaultSeriesZone,
+  deviceZoneName,
   movedTailRule,
   tailRecurrenceFor,
   TailShiftRefusedError,
@@ -1488,7 +1489,8 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     });
     expect(tail?.exceptions).toEqual([nineOn(27)]);
     // "Ganztägig aus": the series gets the device's zone, as a created one does.
-    expect(tail?.tzid).toBe(localTimeZone());
+    // As a created series gets it: canonically (117a), whatever the runtime reports.
+    expect(tail?.tzid ?? null).toBe(defaultSeriesZone(deviceZoneName(), 'all'));
   });
 
   it('drops a deletion on a day a new rule never meets (188)', () => {
@@ -1750,6 +1752,41 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
         });
       });
       expect(tail?.tzid).toBe('Europe/Berlin');
+    });
+
+    it('writes that zone as a created series gets it: canonically (117a), UTC where the calendar cannot store it (22a)', () => {
+      const allDay = {
+        ...mondays,
+        start: '2026-08-02T22:00:00.000Z',
+        end: '2026-08-03T22:00:00.000Z',
+        all_day: true,
+      };
+      const onDevice = <T,>(zone: string, body: () => T): T => {
+        const real = new Intl.DateTimeFormat().resolvedOptions();
+        const spy = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+          ...real,
+          timeZone: zone,
+        });
+        try {
+          return body();
+        } finally {
+          spy.mockRestore();
+        }
+      };
+      const tailIn = (calendarZones?: 'all' | 'none' | string[]) =>
+        onDevice('Asia/Calcutta', () => {
+          const plan = planSeriesSplit(allDay, '2026-08-09T22:00:00.000Z', []);
+          return tailRecurrenceFor({
+            master: allDay,
+            cutoffIso: '2026-08-09T22:00:00.000Z',
+            plan: cutOf(plan),
+            tail: { start: '2026-08-10T07:00:00.000Z', all_day: false },
+            calendarZones,
+          });
+        });
+      expect(tailIn()?.tzid).toBe('Asia/Kolkata');
+      expect(tailIn(['Asia/Kolkata'])?.tzid).toBe('Asia/Kolkata');
+      expect(tailIn(['Europe/Berlin'])?.tzid ?? null).toBeNull();
     });
   });
 });

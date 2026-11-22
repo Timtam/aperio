@@ -54,6 +54,87 @@ export type ZoneEditing =
  *  `recurrence.time_zones`, decision 97a). */
 export type CalendarZones = 'all' | 'none' | string[];
 
+/** What an editor opened, as the table in "Wo die Auswahl erscheint" asks. */
+export interface ZoneEditingQuestion {
+  /** Whether the editor opened something stored, not a new event or a file. */
+  isEdit: boolean;
+  /** Whether it opened one occurrence of a series (expanded, or an override). */
+  isOccurrence: boolean;
+  /** Whether the event opened as a series. */
+  repeats: boolean;
+  /** The scope asked before the editor opened; `null` where the form asks it
+   *  itself (the scope picker in the form, without the question before it). */
+  scope: 'series' | 'this_and_future' | 'occurrence' | null;
+  /** Whether an appointment read from a file fills the editor. */
+  imported: boolean;
+  /** Whether the editor only shows the event: a locked invitation, or an
+   *  invitation read from a file. */
+  readOnly: boolean;
+}
+
+/**
+ * The row of the table in "Wo die Auswahl erscheint" an editor stands on, the
+ * same for both editors; `null` where the editor only shows the event, whose
+ * fields stay on the device's clock.
+ *
+ * An appointment read from a file counts as a stored one (136a): the file
+ * names its instants and its zone, so its fields stand on its clock and a zone
+ * change keeps the instants.
+ */
+export function zoneEditingFor(q: ZoneEditingQuestion): ZoneEditing | null {
+  if (q.readOnly) return null;
+  if (q.imported || (q.isEdit && !q.isOccurrence)) return q.repeats ? 'series' : 'single';
+  if (!q.isEdit) return 'new';
+  switch (q.scope) {
+    case null:
+      return 'scope-in-form';
+    case 'series':
+      return 'series';
+    case 'this_and_future':
+      return 'following';
+    case 'occurrence':
+      return 'occurrence';
+  }
+}
+
+/** The zones a calendar stores for a series (97a); every zone for a calendar
+ *  not known (yet), as the list says nothing against it. */
+export function calendarZonesOf(
+  calendar: { recurrence_capabilities?: { time_zones?: CalendarZones } | null } | null | undefined,
+): CalendarZones {
+  return calendar?.recurrence_capabilities?.time_zones ?? 'all';
+}
+
+/** Whether `calendarZones` stores `zone`, compared canonically as the core
+ *  compares it (`SeriesTimeZones::stores`). UTC is no zone and always fits,
+ *  under any of its names; so does a name tzdata does not know, which the
+ *  series repeats on as UTC and the adapter judges when it writes. */
+function storesZone(calendarZones: CalendarZones, zone: string | null): boolean {
+  const named = seriesClockZone(zone);
+  if (named === null || calendarZones === 'all') return true;
+  if (calendarZones === 'none') return false;
+  return calendarZones.includes(canonicalZone(named) ?? named);
+}
+
+/** The facts of a form, from what its editor holds. */
+export function zoneFacts(args: {
+  rrule: string | null | undefined;
+  allDay: boolean;
+  calendar: Parameters<typeof calendarZonesOf>[0];
+  /** `deviceZoneName()`, read by the editor. */
+  deviceZone: string | null;
+  /** Whether the target calendar is another than the one the event opened in. */
+  calendarMoved?: boolean;
+}): ZoneFormFacts {
+  return {
+    repeats: !!args.rrule?.trim(),
+    allDay: args.allDay,
+    calendarZones: calendarZonesOf(args.calendar),
+    deviceZone: args.deviceZone,
+    calendarMoved: args.calendarMoved ?? false,
+  };
+}
+
 /** The zone part of an editor's state. */
 export interface SeriesZoneForm {
   editing: ZoneEditing;
@@ -97,6 +178,12 @@ export interface ZoneFormView {
    *  new series therefore starts on UTC (22a): the editor says so after the
    *  end time. `null` otherwise. */
   calendarRefuses: string | null;
+  /** The zone in effect, canonically, where it was chosen here or the event
+   *  moves to another calendar, and the target calendar cannot store it
+   *  (139a): the choice stays, the editor says so after the end time, and a
+   *  save is refused until another zone or calendar is chosen. `null`
+   *  otherwise; an untouched zone in its own calendar is written as stored. */
+  notStorable: string | null;
 }
 
 /** The facts of the form a view and a save need. */
@@ -109,6 +196,8 @@ export interface ZoneFormFacts {
   calendarZones: CalendarZones;
   /** The device's zone as its runtime reports it, `null` for none. */
   deviceZone: string | null;
+  /** Whether the target calendar is another than the one the event opened in. */
+  calendarMoved?: boolean;
 }
 
 /**
@@ -183,12 +272,65 @@ function zoneInEffect(form: SeriesZoneForm, facts: ZoneFormFacts): string | null
   return defaultSeriesZone(facts.deviceZone, facts.calendarZones);
 }
 
+/** What a form says of a series' zone where its fields stand on the device's
+ *  clock: nothing. Also the view of an editor that only shows the event (a
+ *  locked invitation, an invitation read from a file; `zoneEditingFor` gives
+ *  `null` there). */
+export const DEVICE_ZONE_VIEW: ZoneFormView = Object.freeze({
+  choice: 'none',
+  clock: DEVICE_CLOCK,
+  zone: null,
+  unusable: null,
+  calendarRefuses: null,
+  notStorable: null,
+});
+
+/** The zone a stored event opened with, as `SeriesZoneForm.stored` takes it:
+ *  its series' zone as stored, `null` for a series without one, `undefined`
+ *  for an event that is no series. */
+export function storedZoneOf(
+  recurrence: { tzid?: string | null } | null | undefined,
+): string | null | undefined {
+  return recurrence ? (recurrence.tzid ?? null) : undefined;
+}
+
+/**
+ * How the fields move when the target calendar changes (question 8 of stage
+ * 12, 139a): to the device's clock (a calendar that stores no zones) the
+ * instant stays; a new series on its untouched default keeps the typed times,
+ * now on the clock that calendar gives it (22a); everything else keeps its
+ * instants, and a chosen zone stays chosen.
+ */
+export function calendarMoveMode(form: SeriesZoneForm, next: ZoneFormView): 'instants' | 'values' {
+  if (next.clock.kind === 'device') return 'instants';
+  return form.editing === 'new' && form.chosen === undefined ? 'values' : 'instants';
+}
+
+/**
+ * How the fields move when a title suggestion fills the form ("Titelvorschläge
+ * füllen die Regel, lassen die Zone aber stehen") to the view `after`:
+ * - where it changes all-day, as that switch moves them: the dates stay;
+ * - where the form did not repeat before, as a repeat switched on does: the
+ *   instant stays (a calendar the suggestion brings changes while it does not
+ *   repeat, on the device's clock, where the instant stays as well);
+ * - where the form already repeated, as the calendar it brings moves them
+ *   (`calendarMoveMode`), the same as choosing that calendar by hand, also
+ *   from a calendar that stores no zones.
+ */
+export function prefillMoveMode(
+  form: SeriesZoneForm,
+  after: ZoneFormView,
+  change: { allDay: boolean; repeatedBefore: boolean },
+): 'instants' | 'values' {
+  if (change.allDay) return 'values';
+  if (!change.repeatedBefore) return 'instants';
+  return calendarMoveMode(form, after);
+}
+
 /** What the form shows of the zone, and the clock its fields stand on. */
 export function zoneFormView(form: SeriesZoneForm, facts: ZoneFormFacts): ZoneFormView {
   const placed = placement(form, facts);
-  if (placed === 'device') {
-    return { choice: 'none', clock: DEVICE_CLOCK, zone: null, unusable: null, calendarRefuses: null };
-  }
+  if (placed === 'device') return DEVICE_ZONE_VIEW;
   const zone = zoneInEffect(form, facts);
   const { clock, unusable } = seriesFieldClock(zone);
   const device = deviceSeriesZone(facts.deviceZone);
@@ -196,7 +338,12 @@ export function zoneFormView(form: SeriesZoneForm, facts: ZoneFormFacts): ZoneFo
     form.chosen === undefined && takesTheDefault(form) && zone === null && device !== null
       ? (canonicalZone(device) ?? device)
       : null;
-  return { choice: placed, clock, zone, unusable, calendarRefuses };
+  const chosenOrMoved = form.chosen !== undefined || facts.calendarMoved === true;
+  const notStorable =
+    zone !== null && chosenOrMoved && !storesZone(facts.calendarZones, zone)
+      ? (canonicalZone(zone) ?? zone)
+      : null;
+  return { choice: placed, clock, zone, unusable, calendarRefuses, notStorable };
 }
 
 /**

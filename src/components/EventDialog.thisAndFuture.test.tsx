@@ -2,8 +2,6 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import { dateInput } from '@aperio/shared';
-
 import type { Calendar, CalendarEvent } from '../api/types';
 
 /**
@@ -218,8 +216,16 @@ const setStartTime = (value: string) =>
 
 const save = () => fireEvent.click(screen.getByRole('button', { name: /speichern|save/i }));
 
-/** The day the form shows for an instant, `days` on: it reads this machine's clock. */
-const dayOn = (iso: string, days = 0) => dateInput(new Date(Date.parse(iso) + days * 86_400_000));
+/** The day the form shows for an instant, `days` on: "this and all following"
+ *  stands on the series' clock (21a), Berlin here, whatever clock this
+ *  machine runs on. */
+const dayOn = (iso: string, days = 0) =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(Date.parse(iso) + days * 86_400_000));
 
 const WHOLE = /Davor war kein Termin mehr übrig|No earlier occurrence was left/;
 
@@ -271,11 +277,11 @@ describe('EventDialog → "this and all following" at the first occurrence', () 
     save();
     await waitFor(() => expect(calls('update_event')).toHaveLength(1));
 
-    // The time field is read on this machine's clock: the day the form shows
-    // for the series' start, at 10:30 there, and the excluded Monday moved by
-    // as much.
+    // The time field is read on the series' clock (21a): its first day at
+    // 10:30 in Berlin, whatever clock this machine runs on, and the excluded
+    // Monday moved by as much.
     const sent = (calls('update_event')[0][1] as { event: CalendarEvent }).event;
-    expect(sent.start).toBe(new Date(`${dayOn(SERIES.start)}T10:30`).toISOString());
+    expect(sent.start).toBe('2026-06-15T08:30:00.000Z');
     const moved = Date.parse(sent.start) - Date.parse(SERIES.start);
     expect(sent.recurrence?.exceptions).toEqual([
       new Date(Date.parse('2026-07-13T07:00:00.000Z') + moved).toISOString(),
@@ -688,10 +694,10 @@ describe('EventDialog → "this and all following" at a later occurrence', () =>
     save();
     await waitFor(() => expect(calls('create_event')).toHaveLength(1));
 
-    // Read on this machine's clock, as the field is: the day it shows for the
-    // occurrence, at 10:30.
+    // Read on the series' clock, as the field is (21a): the occurrence's day
+    // at 10:30 in Berlin.
     const tail = (calls('create_event')[0][1] as { request: CalendarEvent }).request;
-    expect(tail.start).toBe(new Date(`${dayOn(JULY.start)}T10:30`).toISOString());
+    expect(tail.start).toBe('2026-07-06T08:30:00.000Z');
     const moved = Date.parse(tail.start) - Date.parse(JULY.start);
     expect(moved).not.toBe(0);
     expect(tail.recurrence?.exceptions).toEqual([

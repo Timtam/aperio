@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEVICE_CLOCK,
+  DEVICE_ZONE_VIEW,
+  calendarMoveMode,
+  prefillMoveMode,
+  storedZoneOf,
   applyClockChange,
+  calendarZonesOf,
   changeClockField,
   chooseZone,
   defaultSeriesZone,
@@ -13,6 +18,8 @@ import {
   unusableZoneRefusal,
   withAllDay,
   zoneFormView,
+  zoneEditingFor,
+  zoneFacts,
   zoneToSave,
   type ZoneFormFacts,
 } from '@aperio/shared';
@@ -303,5 +310,136 @@ describe('switching repeat or all-day', () => {
     expect(withAllDay(openZoneForm('series', 'Europe/Berlin', false), true).allDayTurnedOn).toBe(true);
     expect(withAllDay(openZoneForm('series', 'Europe/Berlin', true), true).allDayTurnedOn).toBe(false);
     expect(withAllDay(withAllDay(openZoneForm('series', 'Europe/Berlin', false), true), false).allDayTurnedOn).toBe(false);
+  });
+});
+
+describe('the row an editor stands on (zoneEditingFor)', () => {
+  const ask = (over: Partial<Parameters<typeof zoneEditingFor>[0]> = {}) =>
+    zoneEditingFor({
+      isEdit: true,
+      isOccurrence: false,
+      repeats: true,
+      scope: null,
+      imported: false,
+      readOnly: false,
+      ...over,
+    });
+
+  it('follows the table for both editors', () => {
+    expect(ask({ isEdit: false, repeats: false })).toBe('new');
+    expect(ask()).toBe('series');
+    expect(ask({ repeats: false })).toBe('single');
+    expect(ask({ isOccurrence: true, scope: 'series' })).toBe('series');
+    expect(ask({ isOccurrence: true, scope: 'this_and_future' })).toBe('following');
+    expect(ask({ isOccurrence: true, scope: 'occurrence' })).toBe('occurrence');
+    expect(ask({ isOccurrence: true, scope: null })).toBe('scope-in-form');
+  });
+
+  it('counts an appointment from a file as a stored one (136a), and leaves a read-only one on the device', () => {
+    expect(ask({ isEdit: false, imported: true })).toBe('series');
+    expect(ask({ isEdit: false, imported: true, repeats: false })).toBe('single');
+    expect(ask({ readOnly: true })).toBeNull();
+    expect(ask({ isEdit: false, imported: true, readOnly: true })).toBeNull();
+  });
+});
+
+describe('the facts of a form (zoneFacts)', () => {
+  it('reads the repeat, the calendar list and the device', () => {
+    expect(
+      zoneFacts({
+        rrule: 'FREQ=WEEKLY',
+        allDay: false,
+        calendar: { recurrence_capabilities: { time_zones: ['Europe/Berlin'] } },
+        deviceZone: 'Europe/Berlin',
+      }),
+    ).toEqual({
+      repeats: true,
+      allDay: false,
+      calendarZones: ['Europe/Berlin'],
+      deviceZone: 'Europe/Berlin',
+      calendarMoved: false,
+    });
+    const blank = zoneFacts({ rrule: ' ', allDay: true, calendar: undefined, deviceZone: null, calendarMoved: true });
+    expect(blank).toMatchObject({ repeats: false, calendarZones: 'all', calendarMoved: true });
+    expect(calendarZonesOf({ recurrence_capabilities: null })).toBe('all');
+  });
+});
+
+describe('a zone the target calendar cannot store (139a)', () => {
+  const exchange = ['Europe/Berlin', 'Asia/Kolkata'];
+
+  it('is named where the event moves to that calendar, canonically', () => {
+    const form = openZoneForm('series', 'America/New_York', false);
+    expect(zoneFormView(form, facts({ calendarZones: exchange, calendarMoved: true })).notStorable).toBe(
+      'America/New_York',
+    );
+    expect(zoneFormView(openZoneForm('series', 'Asia/Calcutta', false), facts({ calendarZones: exchange, calendarMoved: true })).notStorable).toBeNull();
+  });
+
+  it('is not named for an untouched zone in its own calendar, nor for UTC', () => {
+    const form = openZoneForm('series', 'America/New_York', false);
+    expect(zoneFormView(form, facts({ calendarZones: exchange })).notStorable).toBeNull();
+    const utc = openZoneForm('series', null, false);
+    expect(zoneFormView(utc, facts({ calendarZones: exchange, calendarMoved: true })).notStorable).toBeNull();
+  });
+
+  it('is not named for UTC under another name, nor for a name tzdata does not know', () => {
+    for (const stored of ['UTC', 'Etc/UTC', 'GMT', 'Pacific Standard Time']) {
+      const form = openZoneForm('series', stored, false);
+      expect(zoneFormView(form, facts({ calendarZones: exchange, calendarMoved: true })).notStorable, stored).toBeNull();
+    }
+  });
+
+  it('is named for a chosen zone, which stays', () => {
+    const chosen = { ...openZoneForm('new', undefined, false), chosen: 'America/New_York' };
+    const view = zoneFormView(chosen, facts({ calendarZones: exchange }));
+    expect(view.zone).toBe('America/New_York');
+    expect(view.notStorable).toBe('America/New_York');
+  });
+});
+
+describe('a calendar change (question 8 of stage 12)', () => {
+  it('keeps the instant on the device clock, the typed times of an untouched new series, and the instants otherwise', () => {
+    const series = zoneFormView(openZoneForm('series', 'Europe/Berlin', false), facts());
+    const device = zoneFormView(openZoneForm('new', undefined, false), facts({ calendarZones: 'none' }));
+    expect(device).toBe(DEVICE_ZONE_VIEW);
+    expect(calendarMoveMode(openZoneForm('new', undefined, false), device)).toBe('instants');
+    expect(calendarMoveMode(openZoneForm('new', undefined, false), series)).toBe('values');
+    expect(calendarMoveMode({ ...openZoneForm('new', undefined, false), chosen: null }, series)).toBe('instants');
+    expect(calendarMoveMode(openZoneForm('series', 'Europe/Berlin', false), series)).toBe('instants');
+  });
+
+  it('reads the stored zone of what opened', () => {
+    expect(storedZoneOf({ tzid: 'Europe/Kiev' })).toBe('Europe/Kiev');
+    expect(storedZoneOf({ tzid: null })).toBeNull();
+    expect(storedZoneOf({})).toBeNull();
+    expect(storedZoneOf(null)).toBeUndefined();
+  });
+});
+
+describe('a title suggestion (prefillMoveMode)', () => {
+  const untouchedNew = openZoneForm('new', undefined, false);
+  const onBerlin = zoneFormView(untouchedNew, facts());
+  const onUtc = zoneFormView(untouchedNew, facts({ calendarZones: ['America/New_York'] }));
+
+  const repeating = { allDay: false, repeatedBefore: true };
+
+  it('keeps the dates where it changes all-day', () => {
+    expect(prefillMoveMode(untouchedNew, onBerlin, { allDay: true, repeatedBefore: false })).toBe('values');
+  });
+
+  it('keeps the instant where it turns the repeat on, as the repeat field does', () => {
+    expect(prefillMoveMode(untouchedNew, onUtc, { allDay: false, repeatedBefore: false })).toBe('instants');
+  });
+
+  it('moves as its calendar would where the form already repeats, from a calendar without zones too', () => {
+    expect(onUtc.clock).toEqual({ kind: 'series', tzid: null });
+    expect(prefillMoveMode(untouchedNew, onUtc, repeating)).toBe(calendarMoveMode(untouchedNew, onUtc));
+    expect(prefillMoveMode(untouchedNew, onUtc, repeating)).toBe('values');
+    // A repeating new event in a device calendar stands on the device's clock
+    // (DEVICE_ZONE_VIEW) and still repeats.
+    expect(zoneFormView(untouchedNew, facts({ calendarZones: 'none' }))).toBe(DEVICE_ZONE_VIEW);
+    const series = openZoneForm('series', 'Europe/Berlin', false);
+    expect(prefillMoveMode(series, onUtc, repeating)).toBe('instants');
   });
 });

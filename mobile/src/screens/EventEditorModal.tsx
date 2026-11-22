@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
   findNodeHandle,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -12,14 +13,47 @@ import {
 } from 'react-native';
 
 import type {
+  ClockField,
+  ClockFieldKey,
+  ClockFields,
   ColorLabel,
   EventTimes,
   ExpandedOccurrence,
   ImportedEvent,
   ImportInto,
   Reminder,
+  SeriesZoneForm,
+  ZoneEditing,
+  ZoneFormFacts,
+  ZoneFormView,
 } from '@aperio/shared';
 import {
+  calendarZonesOf,
+  changeClockField,
+  clockFieldGaps,
+  clockFieldLabel,
+  DEVICE_CLOCK,
+  deviceHint,
+  deviceZoneName,
+  fieldAt,
+  fieldInstant,
+  fieldsAt,
+  fieldsOnView,
+  followingHint,
+  openZoneForm,
+  repeatClockAnnouncement,
+  savedRecurrence,
+  withAllDay,
+  zoneEditingFor,
+  zoneFacts,
+  zoneFormView,
+  DEVICE_ZONE_VIEW,
+  calendarMoveMode,
+  prefillMoveMode,
+  storedZoneOf,
+  zoneSaveRefusal,
+  zoneSentences,
+  zoneToSave,
   importEditorPeople,
   importInto,
   importIntoSentence,
@@ -37,7 +71,6 @@ import {
   defaultNewEventTimes,
   deletionsNotRestoredSentence,
   describeRecurrence,
-  editedRecurrence,
   eventPrefillFrom,
   eventWriteErrorMessage,
   eventWriteFailureReason,
@@ -182,6 +215,82 @@ function isoToLocalParts(iso: string): { date: string; time: string } {
   return { date: dateInput(d), time: timeInput(d) };
 }
 
+const NO_FIELD: ClockField = { date: '', time: '', at: null };
+
+/**
+ * The form's date and time state: the four fields on one clock, all-day, the
+ * series' zone part, and the exceptions a zone change moved (`null`: the
+ * stored ones). They live in ONE state object because they are coupled:
+ * moving the start slides the end along, the end never precedes the start
+ * (`changeClockField`, `applyDateTimeChange`), and switching repeat, all-day
+ * or the calendar moves the fields to another clock. Mirrors the desktop.
+ */
+interface EditorTimes {
+  fields: ClockFields;
+  allDay: boolean;
+  /** The zone part; its `editing` is read again on every render
+   *  (`zoneEditingOf`), the rest is what the editor opened. */
+  zone: SeriesZoneForm;
+  exceptions: string[] | null;
+}
+
+/**
+ * The row of the table in "Wo die Auswahl erscheint" the phone editor stands
+ * on. An occurrence opened from a series that lost its rule on another device
+ * reads as the plain event it degrades to (the load below); a provider
+ * override opened in place stays an occurrence.
+ */
+function zoneEditingOf(args: {
+  editing: boolean;
+  ev: CalendarEvent | null;
+  isOccurrence: boolean;
+  scope: 'occurrence' | 'series' | 'this_and_future' | null | undefined;
+  imported: ImportedEvent | null;
+  readOnly: boolean;
+}): ZoneEditing | null {
+  const { ev, imported } = args;
+  return zoneEditingFor({
+    isEdit: args.editing,
+    isOccurrence:
+      args.isOccurrence && ev != null && (ev.recurrence != null || isProviderOverride(ev)),
+    repeats: !!(ev?.recurrence?.rrule ?? imported?.recurrence?.rrule)?.trim(),
+    scope: args.scope ?? null,
+    imported: imported != null,
+    readOnly: args.readOnly,
+  });
+}
+
+/**
+ * Fields showing a stored start and end: on `clock` for a timed event, holding
+ * both instants; as the device's days for an all-day one, the end as the last
+ * day it covers (`allDayFormEndDate`), typed.
+ */
+function seededFields(
+  start: string,
+  end: string,
+  allDay: boolean,
+  clock: ClockFields['clock'],
+): ClockFields {
+  if (!allDay) return fieldsAt(start, end, clock);
+  const s = isoToLocalParts(start);
+  const e = isoToLocalParts(end);
+  return {
+    clock: DEVICE_CLOCK,
+    start: { date: s.date, time: s.time, at: null },
+    end: {
+      date: e.date === '' ? '' : allDayFormEndDate(new Date(start), new Date(end)),
+      time: e.time,
+      at: null,
+    },
+  };
+}
+
+/** The instant a timed field names, `null` where it names none. */
+function instantOrNull(field: ClockField, clock: ClockFields['clock']): string | null {
+  const named = fieldInstant(field, clock);
+  return named.kind === 'at' ? named.at : null;
+}
+
 /** The rows that ride ON the event — a real alarm the provider stores and
  *  every other client of the calendar sees. The placement flag is Aperio's own
  *  bookkeeping and never goes on the wire. */
@@ -259,6 +368,9 @@ function EventEditorScreen({
   // A single occurrence of a recurring series was opened (occurrence = its
   // instant) — offer the edit scope + seed the dates from the occurrence.
   const isOccurrence = occurrence != null;
+  // "This and all following", asked before the editor opened: its fields
+  // stand on the series' clock, so the series has to load (21a, 135a).
+  const opensFollowing = editing && isOccurrence && initialScope === 'this_and_future';
   // Seeded from the up-front "this occurrence vs whole series" prompt
   // (eventEditScope). When the prompt set it, the control below is read-only.
   const [editScope, setEditScope] = useState<
@@ -364,26 +476,27 @@ function EventEditorScreen({
 
   const [title, setTitle] = useState('');
   const [calId, setCalId] = useState(calendarId);
-  // The four date/time fields + all-day live in ONE state object because they
-  // are COUPLED: moving the start slides the end along (duration preserved),
-  // and the end is clamped so it can never precede the start. That maths needs
-  // all four values at once, which separate setters can't give atomically —
-  // it's delegated to the shared, unit-tested `applyDateTimeChange` the desktop
-  // EventDialog uses, so both platforms behave identically (Outlook/Google).
-  const [times, setTimes] = useState<EventTimes>({
-    startDate: '',
-    startTime: '',
-    endDate: '',
-    endTime: '',
+  // The four date/time fields + all-day + the series' zone live in ONE state
+  // object (`EditorTimes`): see there. The maths is the shared, unit-tested
+  // `changeClockField` / `applyDateTimeChange` the desktop EventDialog uses, so
+  // both platforms behave identically (Outlook/Google).
+  const [times, setTimes] = useState<EditorTimes>(() => ({
+    fields: { clock: DEVICE_CLOCK, start: NO_FIELD, end: NO_FIELD },
     allDay: false,
-  });
-  const { startDate, startTime, endDate, endTime, allDay } = times;
-  const setDateTime = useCallback(
-    (key: 'startDate' | 'startTime' | 'endDate' | 'endTime', value: string) => {
-      setTimes((prev) => applyDateTimeChange(prev, key, value));
-    },
-    [],
-  );
+    zone: openZoneForm(editing ? 'single' : 'new', undefined, false),
+    exceptions: null,
+  }));
+  const { allDay } = times;
+  // The device's zone as its runtime reports it, read once per opening: the
+  // labels, the hint and a new series' default compare against it.
+  const deviceZone = useMemo(() => deviceZoneName(), []);
+  // The RRULE body (without "RRULE:"), or null = non-recurring. The series'
+  // EXDATE exceptions are preserved from the original on save.
+  const [recurrence, setRecurrence] = useState<string | null>(null);
+  // 135a: "this and all following" whose series could not be loaded opens with
+  // that said, and refuses to save; its fields never fall back to the device's
+  // clock.
+  const [seriesLoadFailed, setSeriesLoadFailed] = useState(false);
   const [location, setLocation] = useState('');
   /**
    * Earlier appointments with this name, offered while a NEW one is typed.
@@ -402,6 +515,172 @@ function EventEditorScreen({
       ),
     [titleMatches, title, calendars, t],
   );
+  // 77a: someone else's meeting, on a provider that takes only this account's
+  // own reply and reminders. From the calendar the row came FROM — a locked
+  // invitation has no calendar picker to change.
+  const locked = invitationLocked(
+    calendars.find((c) => c.id === original?.calendar_id),
+    original ?? null,
+  );
+  // Whether the calendar picked holds the imported appointment already (I4),
+  // asked again whenever the pick changes: then it is created as a copy.
+  const importedAlone = useMemo(() => (imported ? [imported] : []), [imported]);
+  const importCalendar = calendars.find((c) => c.id === calId);
+  // Not known before the calendars are: asked once they load.
+  const importHeld = useHeldOnImport(
+    imported ? calId : '',
+    importedAlone,
+    calendars.length === 0 ? undefined : importCalendar?.keeps_uid,
+  );
+  const importIsHeld = importHeld.status === 'known' && importHeld.held.has(0);
+  const importCalendarName = importCalendar?.name ?? '';
+  const importHeldNote = !imported
+    ? null
+    : importIsHeld
+      ? t('fileImport.held.editor', { calendar: importCalendarName })
+      : importHeld.status === 'failed'
+        ? t('fileImport.held.editorFailed', { calendar: importCalendarName })
+        : importHeld.status === 'unknowable'
+          ? t('fileImport.held.editorUnknowable', { calendar: importCalendarName })
+          : null;
+  // Whose the imported appointment is, as the calendar picked tells (I6): the
+  // account's own meeting is a new appointment; someone else's an invitation
+  // the calendar keeps — shown as the file has it, locked like a received one,
+  // and locked too while it is still asked — or sets aside, the account's own
+  // without its people.
+  const importOwn = useCalendarOwnAddress(calId, !!imported?.organizer?.trim());
+  const importAs = useMemo((): ImportInto | null => {
+    if (!imported) return null;
+    // Not known before the calendars are: until they load, a calendar that
+    // keeps invitations would read as one that does not, and its sentence
+    // would be said first.
+    if (calendars.length === 0) return { kind: 'checking' };
+    return importInto(importOwner(imported, importOwn), importCalendar);
+  }, [imported, importOwn, importCalendar, calendars.length]);
+  const importLocked = importAs?.kind === 'invitation' || importAs?.kind === 'checking';
+  // The content as it came: the invitation lock adds to the provider's own.
+  // The calendar, the reminders and the colour stay the person's to choose.
+  const fieldsLocked = locked || importLocked;
+
+  // The series' clock (DESIGN-series-time-zone.md, stage 12): the row of the
+  // table in "Wo die Auswahl erscheint" the editor stands on, the facts of the
+  // form, what it shows of the zone and the clock its fields stand on. Read on
+  // every render, as a lock or an import's way in can settle after the load.
+  // A form that only shows the event stays on the device's clock; its save
+  // still writes the zone the series has (`zoneToSave`).
+  const zoneEditing =
+    zoneEditingOf({
+      editing,
+      ev: original,
+      isOccurrence,
+      scope: initialScope,
+      imported,
+      readOnly: false,
+    }) ?? 'new';
+  const zoneForm = useMemo(
+    (): SeriesZoneForm => ({ ...times.zone, editing: zoneEditing }),
+    [times.zone, zoneEditing],
+  );
+  /** The facts of the form, with what a transition is about to change. */
+  const factsWith = useCallback(
+    (change: { rrule?: string | null; allDay?: boolean; calendarId?: string } = {}) => {
+      const calendarId = change.calendarId ?? calId;
+      return zoneFacts({
+        rrule: change.rrule !== undefined ? change.rrule : recurrence,
+        allDay: change.allDay ?? allDay,
+        calendar: calendars.find((c) => c.id === calendarId),
+        deviceZone,
+        // Another calendar than the one the event opened in; an appointment
+        // from a file comes from none, so its zone counts as moved (136a).
+        calendarMoved:
+          imported != null || (original != null && calendarId !== original.calendar_id),
+      });
+    },
+    [calId, recurrence, allDay, calendars, deviceZone, imported, original],
+  );
+  const viewWith = useCallback(
+    (form: SeriesZoneForm, formFacts: ZoneFormFacts): ZoneFormView =>
+      fieldsLocked ? DEVICE_ZONE_VIEW : zoneFormView(form, formFacts),
+    [fieldsLocked],
+  );
+  const facts = useMemo(() => factsWith(), [factsWith]);
+  const view = useMemo(() => viewWith(zoneForm, facts), [viewWith, zoneForm, facts]);
+  // The fields on the view's clock. A transition that decides how they move
+  // (repeat, all-day, the calendar, a prefill) moves them in the state itself;
+  // anything else that moves the clock, an import's lock settling, keeps the
+  // instants.
+  const fields = useMemo(() => fieldsOnView(times.fields, view, 'instants'), [times.fields, view]);
+  const startDate = fields.start.date;
+  const startTime = fields.start.time;
+  const endDate = fields.end.date;
+  const endTime = fields.end.time;
+  // The instants the form names: the device's days for an all-day event (the
+  // end exclusive, see allDayWireEnd), the fields' own on their clock
+  // otherwise; `null` where a field names none (a gap, half a value).
+  const formInstants = useMemo((): { start: string | null; end: string | null } => {
+    if (allDay) {
+      return {
+        start: toIso(fields.start.date, fields.start.time, true),
+        end: allDayWireEnd(fields.end.date),
+      };
+    }
+    return {
+      start: instantOrNull(fields.start, fields.clock),
+      end: instantOrNull(fields.end, fields.clock),
+    };
+  }, [allDay, fields]);
+  // The zone the series repeats on as the form stands, for its rule moved with
+  // a new date: the view's where the fields stand on the series' clock, the
+  // stored one elsewhere. And the zones the target calendar stores, for a
+  // series that gets a time of day here.
+  const seriesZone = view.choice !== 'none' ? view.zone : (original?.recurrence?.tzid ?? null);
+  const targetZones = calendarZonesOf(calendars.find((c) => c.id === calId));
+  // The message of a typed time the series' clock skips, under its field.
+  const gaps = useMemo(
+    () => clockFieldGaps(fields, i18n.language, t),
+    [fields, i18n.language, t],
+  );
+  /** A typed or picked date or time: on the fields' clock for a timed event,
+   *  on the device's days for an all-day one. A time the series' clock skips
+   *  is said once it appears, under its field and, on iOS, aloud. */
+  const setDateTime = (key: ClockFieldKey, value: string) => {
+    if (allDay) {
+      const before: EventTimes = { startDate, startTime, endDate, endTime, allDay: true };
+      const after = applyDateTimeChange(before, key, value);
+      const typed = (date: string, time: string, was: ClockField): ClockField =>
+        date === was.date && time === was.time ? was : { date, time, at: null };
+      setTimes({
+        ...times,
+        fields: {
+          clock: fields.clock,
+          start: typed(after.startDate, after.startTime, fields.start),
+          end: typed(after.endDate, after.endTime, fields.end),
+        },
+      });
+      return;
+    }
+    const next = changeClockField(fields, key, value);
+    if (next === fields) return;
+    setTimes({ ...times, fields: next });
+    sayNewGaps(next);
+  };
+  /** Says a gap message that `next` shows and the fields do not yet, queued
+   *  behind VoiceOver's reading of the control just used. Android reads it
+   *  from the message's live region. */
+  const sayNewGaps = (next: ClockFields) => {
+    if (Platform.OS !== 'ios') return;
+    const nextGaps = clockFieldGaps(next, i18n.language, t);
+    const appeared = [
+      nextGaps.start !== gaps.start ? nextGaps.start : null,
+      nextGaps.end !== gaps.end ? nextGaps.end : null,
+    ].filter((message): message is string => message !== null);
+    if (appeared.length > 0) {
+      AccessibilityInfo.announceForAccessibilityWithOptions(appeared.join(' '), {
+        queue: true,
+      });
+    }
+  };
+
   /** Said under the calendar picker when an accepted offer's calendar could
    *  not be used — the same note the desktop shows (decision 161). */
   const [prefillNote, setPrefillNote] = useState<string | null>(null);
@@ -439,19 +718,44 @@ function EventEditorScreen({
       );
       if (target.kind === 'offer') setCalId(target.id);
       // The DAY stays exactly as it is — only the LENGTH travels, laid onto
-      // whatever day the editor was opened on.
-      setTimes((prev) => {
-        if (fill.all_day) return { ...prev, allDay: true };
-        const start = new Date(`${prev.startDate}T${prev.startTime || '00:00'}`);
-        if (!Number.isFinite(start.getTime())) return prev;
-        const end = new Date(start.getTime() + fill.durationMinutes * 60_000);
-        return {
-          ...prev,
-          allDay: false,
-          endDate: dateInput(end),
-          endTime: timeInput(end),
-        };
-      });
+      // whatever day the editor was opened on, on the clock the fields stand
+      // on once the rule, all-day and the calendar are filled in. The series'
+      // zone stays as it is: a title fills the rule, not the zone.
+      const nextAllDay = fill.all_day === true;
+      const zone = nextAllDay !== allDay ? withAllDay(zoneForm, nextAllDay) : zoneForm;
+      const nextView = viewWith(
+        zone,
+        factsWith({
+          rrule: fill.rrule,
+          allDay: nextAllDay,
+          calendarId: target.kind === 'offer' ? target.id : calId,
+        }),
+      );
+      const moved = fieldsOnView(
+        fields,
+        nextView,
+        prefillMoveMode(zone, nextView, {
+          allDay: nextAllDay !== allDay,
+          repeatedBefore: !!recurrence?.trim(),
+        }),
+      );
+      if (nextAllDay) {
+        setTimes({ ...times, allDay: true, zone, fields: moved });
+      } else {
+        // A start that names no instant (a gap, half a value) gets no length,
+        // and the form stays as it is, as before.
+        const start = instantOrNull(moved.start, moved.clock);
+        const end =
+          start === null ? Number.NaN : Date.parse(start) + fill.durationMinutes * 60_000;
+        if (Number.isFinite(end)) {
+          setTimes({
+            ...times,
+            allDay: false,
+            zone,
+            fields: { ...moved, end: fieldAt(new Date(end).toISOString(), moved.clock) },
+          });
+        }
+      }
       // Refused: the offer named one calendar and this one stays — said, and
       // shown under the picker, naming both (as on the desktop).
       const kept = calendars.find((c) => c.id === calId)?.name;
@@ -471,7 +775,7 @@ function EventEditorScreen({
       setPrefillNote(note);
       return note;
     },
-    [calendars, calId, t],
+    [calendars, calId, t, allDay, zoneForm, recurrence, viewWith, factsWith, fields, times],
   );
 
   /**
@@ -479,23 +783,50 @@ function EventEditorScreen({
    * all but the calendar and the reminders: its day and time, its series'
    * rule (the gaps and zone travel with `importFrom` to the save), and its
    * invitees. Mirrors the desktop's `formFromImport`.
+   *
+   * The file's appointment counts as a stored one (136a): its zone is the
+   * series', and its fields show its instants on that clock. Kept as the file
+   * has it (`readOnly`, someone else's invitation), they show them on the
+   * device's clock, as a locked invitation does.
    */
-  const seedFromImport = useCallback((from: ImportedEvent) => {
-    const start = new Date(from.start);
-    const end = new Date(from.end);
+  const seedFromImport = useCallback((from: ImportedEvent, readOnly: boolean) => {
+    const zone = openZoneForm(
+      zoneEditingOf({
+        editing: false,
+        ev: null,
+        isOccurrence: false,
+        scope: null,
+        imported: from,
+        readOnly: false,
+      }) ?? 'single',
+      storedZoneOf(from.recurrence),
+      from.all_day,
+    );
+    const clock = readOnly
+      ? DEVICE_CLOCK
+      : zoneFormView(
+          zone,
+          zoneFacts({
+            rrule: from.recurrence?.rrule,
+            allDay: from.all_day,
+            // Not known yet at the load: the fields follow the calendar once
+            // it is (they keep their instants).
+            calendar: undefined,
+            deviceZone,
+          }),
+        ).clock;
     setTimes({
-      startDate: dateInput(start),
-      startTime: timeInput(start),
-      endDate: from.all_day ? allDayFormEndDate(start, end) : dateInput(end),
-      endTime: timeInput(end),
+      fields: seededFields(from.start, from.end, from.all_day, clock),
       allDay: from.all_day,
+      zone,
+      exceptions: null,
     });
     setTitle(from.title);
     setLocation(from.location ?? '');
     setDescription(from.description ?? '');
     setRecurrence(from.recurrence?.rrule ?? null);
     setAttendees(from.attendees);
-  }, []);
+  }, [deviceZone]);
 
   const acceptTitleSuggestion = useCallback(
     (key: string) => {
@@ -556,9 +887,6 @@ function EventEditorScreen({
   // silently promoted to a per-event VALARM on the server. Mirrors the desktop
   // EventDialog's keepRemindersAsDefault.
   const [keepRemindersAsDefault, setKeepRemindersAsDefault] = useState(false);
-  // The RRULE body (without "RRULE:"), or null = non-recurring. The series'
-  // EXDATE exceptions are preserved from the original on save.
-  const [recurrence, setRecurrence] = useState<string | null>(null);
   /** The start the user set the repeat rule at, once they changed it in the
    *  field; `null` while it is the rule the editor was filled with. */
   const [ruleSetAt, setRuleSetAt] = useState<string | null>(null);
@@ -747,35 +1075,49 @@ function EventEditorScreen({
               )
                 ? shownOccurrence
                 : null);
+            // The fields stand on the clock the table gives what was opened:
+            // the series' own for a whole series or "this and all following"
+            // (21a), the device's for "only this one", a single event and a
+            // locked invitation (DESIGN-series-time-zone.md, stage 12).
+            const evCalendar = cals.find((c) => c.id === ev.calendar_id);
+            const zone = openZoneForm(
+              zoneEditingOf({
+                editing: true,
+                ev,
+                isOccurrence,
+                scope: initialScope,
+                imported: null,
+                readOnly: false,
+              }) ?? 'single',
+              storedZoneOf(ev.recurrence),
+              ev.all_day,
+            );
+            const clock = invitationLocked(evCalendar, ev)
+              ? DEVICE_CLOCK
+              : zoneFormView(
+                  zone,
+                  zoneFacts({
+                    rrule: ev.recurrence?.rrule,
+                    allDay: ev.all_day,
+                    calendar: evCalendar,
+                    deviceZone,
+                  }),
+                ).clock;
+            let seeded: ClockFields;
             if (seedFrom != null && ev.recurrence != null) {
               const occStart = new Date(seedFrom);
               const dur = new Date(ev.end).getTime() - new Date(ev.start).getTime();
               const occEnd = new Date(occStart.getTime() + (Number.isFinite(dur) ? dur : 0));
-              const so = isoToLocalParts(occStart.toISOString());
-              const eo = isoToLocalParts(occEnd.toISOString());
-              setTimes({
-                startDate: so.date,
-                startTime: so.time,
-                // All-day: map the (exclusive) end back to the last inclusive
-                // day, else the editor shows one day too many (see the shared
-                // allDayFormEndDate).
-                endDate: ev.all_day ? allDayFormEndDate(occStart, occEnd) : eo.date,
-                endTime: eo.time,
-                allDay: ev.all_day,
-              });
+              // All-day: the (exclusive) end maps back to the last inclusive
+              // day, else the editor shows one day too many (see the shared
+              // allDayFormEndDate).
+              seeded = Number.isNaN(occStart.getTime())
+                ? { clock, start: NO_FIELD, end: NO_FIELD }
+                : seededFields(occStart.toISOString(), occEnd.toISOString(), ev.all_day, clock);
             } else {
-              const s = isoToLocalParts(ev.start);
-              const e = isoToLocalParts(ev.end);
-              setTimes({
-                startDate: s.date,
-                startTime: s.time,
-                endDate: ev.all_day
-                  ? allDayFormEndDate(new Date(ev.start), new Date(ev.end))
-                  : e.date,
-                endTime: e.time,
-                allDay: ev.all_day,
-              });
+              seeded = seededFields(ev.start, ev.end, ev.all_day, clock);
             }
+            setTimes({ fields: seeded, allDay: ev.all_day, zone, exceptions: null });
             setLocation(ev.location ?? '');
             setDescription(ev.description ?? '');
             setColorLabel(ev.color_label ?? '');
@@ -812,11 +1154,17 @@ function EventEditorScreen({
               });
             setRecurrence(ev.recurrence?.rrule ?? null);
             setAttendees(ev.attendees ?? []);
+          } else if (opensFollowing) {
+            // 135a: the series is not there to stand the fields on.
+            const message = t('dialogs.event.seriesLoadFailedOpen');
+            setSeriesLoadFailed(true);
+            setError(message);
+            AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
           }
         } else if (imported) {
           // An appointment from a file is the form, all but the calendar; its
           // alarms are the user's own choice, as on the desktop.
-          seedFromImport(imported);
+          seedFromImport(imported, false);
           setReminders(imported.reminders.map((r) => ({ ...r, attach: true })));
         } else {
           // New event: a ONE-HOUR slot whose time-of-day adapts to context —
@@ -835,12 +1183,12 @@ function EventEditorScreen({
             start = picked;
             end = new Date(picked.getTime() + 60 * 60 * 1000);
           }
+          // A new event does not repeat yet: the device's clock.
           setTimes({
-            startDate: dateInput(start),
-            startTime: timeInput(start),
-            endDate: dateInput(end),
-            endTime: timeInput(end),
+            fields: fieldsAt(start.toISOString(), end.toISOString(), DEVICE_CLOCK),
             allDay: false,
+            zone: openZoneForm('new', undefined, false),
+            exceptions: null,
           });
           // `initialTitle` carries the title typed into the event quick-add
           // before "More details …".
@@ -848,7 +1196,12 @@ function EventEditorScreen({
         }
       } catch (err) {
         // A load: a busy provider says so, never that nothing was changed.
-        const message = readErrorMessage(err, t);
+        // "This and all following" says that the series is missing (135a),
+        // and refuses to save.
+        const message = opensFollowing
+          ? t('dialogs.event.seriesLoadFailedOpen')
+          : readErrorMessage(err, t);
+        if (opensFollowing) setSeriesLoadFailed(true);
         setError(message);
         AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
       } finally {
@@ -867,6 +1220,10 @@ function EventEditorScreen({
     imported,
     seedFromImport,
     t,
+    deviceZone,
+    initialScope,
+    isOccurrence,
+    opensFollowing,
   ]);
 
   /**
@@ -999,52 +1356,6 @@ function EventEditorScreen({
   );
 
 
-  // 77a: someone else's meeting, on a provider that takes only this account's
-  // own reply and reminders. From the calendar the row came FROM — a locked
-  // invitation has no calendar picker to change.
-  const locked = invitationLocked(
-    calendars.find((c) => c.id === original?.calendar_id),
-    original ?? null,
-  );
-  // Whether the calendar picked holds the imported appointment already (I4),
-  // asked again whenever the pick changes: then it is created as a copy.
-  const importedAlone = useMemo(() => (imported ? [imported] : []), [imported]);
-  const importCalendar = calendars.find((c) => c.id === calId);
-  // Not known before the calendars are: asked once they load.
-  const importHeld = useHeldOnImport(
-    imported ? calId : '',
-    importedAlone,
-    calendars.length === 0 ? undefined : importCalendar?.keeps_uid,
-  );
-  const importIsHeld = importHeld.status === 'known' && importHeld.held.has(0);
-  const importCalendarName = importCalendar?.name ?? '';
-  const importHeldNote = !imported
-    ? null
-    : importIsHeld
-      ? t('fileImport.held.editor', { calendar: importCalendarName })
-      : importHeld.status === 'failed'
-        ? t('fileImport.held.editorFailed', { calendar: importCalendarName })
-        : importHeld.status === 'unknowable'
-          ? t('fileImport.held.editorUnknowable', { calendar: importCalendarName })
-          : null;
-  // Whose the imported appointment is, as the calendar picked tells (I6): the
-  // account's own meeting is a new appointment; someone else's an invitation
-  // the calendar keeps — shown as the file has it, locked like a received one,
-  // and locked too while it is still asked — or sets aside, the account's own
-  // without its people.
-  const importOwn = useCalendarOwnAddress(calId, !!imported?.organizer?.trim());
-  const importAs = useMemo((): ImportInto | null => {
-    if (!imported) return null;
-    // Not known before the calendars are: until they load, a calendar that
-    // keeps invitations would read as one that does not, and its sentence
-    // would be said first.
-    if (calendars.length === 0) return { kind: 'checking' };
-    return importInto(importOwner(imported, importOwn), importCalendar);
-  }, [imported, importOwn, importCalendar, calendars.length]);
-  const importLocked = importAs?.kind === 'invitation' || importAs?.kind === 'checking';
-  // The content as it came: the invitation lock adds to the provider's own.
-  // The calendar, the reminders and the colour stay the person's to choose.
-  const fieldsLocked = locked || importLocked;
   const importAsNote =
     imported && importAs ? importIntoSentence(imported, importAs, importCalendarName, t) : null;
   // Each said once when it appears: they come after the editor opened.
@@ -1079,7 +1390,7 @@ function EventEditorScreen({
     if (!imported || loading || !importAsKind || importAsKind === 'checking') return;
     if (importAsApplied.current === importAsKind) return;
     importAsApplied.current = importAsKind;
-    if (importAsKind === 'invitation') seedFromImport(imported);
+    if (importAsKind === 'invitation') seedFromImport(imported, true);
     else if (importAsKind === 'set-aside') setAttendees([]);
     else setAttendees(imported.attendees);
   }, [imported, importAsKind, loading, seedFromImport]);
@@ -1135,8 +1446,7 @@ function EventEditorScreen({
   // (`seriesTimesFromOccurrenceEdit`). Mirrors the desktop.
   const ruleFrame = useMemo((): { from: string; written: string } | null => {
     if (!editing || !original?.recurrence?.rrule) return null;
-    const start = toIso(startDate, startTime, allDay);
-    const end = allDay ? allDayWireEnd(endDate) : toIso(endDate, endTime, false);
+    const { start, end } = formInstants;
     if (!start || Number.isNaN(Date.parse(start))) return null;
     if (isOccurrence && occurrence != null && editScope === 'this_and_future') {
       return { from: occurrence, written: start };
@@ -1155,6 +1465,7 @@ function EventEditorScreen({
         seeded,
         { start, end },
         allDay,
+        fields.clock,
       ).start;
       return { from: original.start, written };
     }
@@ -1165,11 +1476,9 @@ function EventEditorScreen({
     occurrence,
     isOccurrence,
     editScope,
-    startDate,
-    startTime,
-    endDate,
-    endTime,
+    formInstants,
     allDay,
+    fields.clock,
   ]);
   // The rule "this and all following" — or the whole series — writes, shown in
   // the repeat field as it will be saved (decisions 197, 199): moved with a new
@@ -1185,10 +1494,11 @@ function EventEditorScreen({
     try {
       const answer = movedTailRule({
         rrule: recurrence,
-        series: { tzid: original.recurrence.tzid, all_day: original.all_day },
+        series: { tzid: seriesZone, all_day: original.all_day },
         from: ruleSetAt ?? ruleFrame.from,
         opened: ruleSetAt ?? ruleFrame.from,
         tail: { start: ruleFrame.written, all_day: allDay },
+        calendarZones: targetZones,
       });
       return answer.outcome === 'shifted'
         ? { rrule: answer.rrule, refused: null }
@@ -1198,7 +1508,7 @@ function EventEditorScreen({
       // `tailRecurrenceFor`; the field keeps showing the rule meanwhile.
       return unmoved;
     }
-  }, [recurrence, allDay, original, ruleFrame, ruleSetAt]);
+  }, [recurrence, allDay, original, ruleFrame, ruleSetAt, seriesZone, targetZones]);
   // The repeat rule in words (84a), because there are no controls to read.
   // Moved with a new date, it is the rule the save writes, from the new start
   // (197).
@@ -1220,7 +1530,7 @@ function EventEditorScreen({
     return recurrenceSummaryText(
       describeRecurrence({
         rrule: rule,
-        start: seriesDayKey(series.start, original.recurrence?.tzid, original.all_day),
+        start: seriesDayKey(series.start, seriesZone, original.all_day),
         last_day: lastOccurrenceDayKey(series),
       }),
       { t, language: i18n.language },
@@ -1256,6 +1566,16 @@ function EventEditorScreen({
   };
 
   const save = useCallback(async (acceptsLoss = false) => {
+    // 135a: without its series, "this and all following" has no clock to
+    // stand its fields on, so nothing is written. First, before the title:
+    // nothing was loaded, so the title is empty too, and asking for it would
+    // send the person the wrong way.
+    if (seriesLoadFailed) {
+      const message = t('dialogs.event.seriesLoadFailedOpen');
+      setError(message);
+      AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
+      return;
+    }
     const trimmedTitle = title.trim();
     if (trimmedTitle.length === 0) {
       setError(t('dialogs.event.titleRequired'));
@@ -1277,11 +1597,34 @@ function EventEditorScreen({
         return;
       }
     }
+    // The series' clock: a typed time it skips, changed times of a series
+    // whose zone this device cannot use, a zone the calendar cannot store
+    // ("Prüfen und Speichern"). Never for a single event or "only this one",
+    // whose fields stand on the device's clock.
+    const zoneRefusal = zoneSaveRefusal({
+      fields,
+      view,
+      form: zoneForm,
+      changed: {
+        times:
+          allDay !== zoneForm.openedAllDay || fields.start.at === null || fields.end.at === null,
+        rule:
+          (recurrence ?? null) !==
+          (original?.recurrence?.rrule ?? imported?.recurrence?.rrule ?? null),
+      },
+      language: i18n.language,
+      t,
+    });
+    if (zoneRefusal !== null) {
+      setError(zoneRefusal);
+      AccessibilityInfo.announceForAccessibility(t('mobile.error', { message: zoneRefusal }));
+      return;
+    }
     // All-day: start = local midnight of the start day; end = local midnight of
     // the day AFTER the last picked day (END-EXCLUSIVE, the view convention —
-    // see allDayWireEnd). Timed: the entered times.
-    const start = toIso(startDate, startTime, allDay);
-    const end = allDay ? allDayWireEnd(endDate) : toIso(endDate, endTime, false);
+    // see allDayWireEnd). Timed: the instants the fields name on their clock,
+    // a stored one unchanged while nobody touched its field.
+    const { start, end } = formInstants;
     if (start == null || end == null) {
       setError(t('dialogs.event.dateInvalid'));
       return;
@@ -1373,14 +1716,15 @@ function EventEditorScreen({
         await setEventLocalReminders(write).catch(() => undefined);
       }
     };
-    // Keep the series' EXDATE exceptions and its zone when editing; an event
-    // that becomes a series here gets the device's zone, as a new one does.
-    // An imported series keeps the file's gaps and zone, as a series edited
-    // here keeps its own.
-    const recurrenceToSend = editedRecurrence(
+    // Keep the series' EXDATE exceptions when editing, and write the zone the
+    // form stands on ("Prüfen und Speichern"): an untouched stored one as
+    // stored, a new series' default (the device's, canonically), none for a
+    // series made all-day here. An imported series keeps the file's gaps and
+    // zone, as a series edited here keeps its own (136a).
+    const recurrenceToSend = savedRecurrence(
       recurrence,
-      original?.recurrence ?? imported?.recurrence,
-      allDay,
+      times.exceptions ?? (original?.recurrence ?? imported?.recurrence)?.exceptions,
+      zoneToSave(zoneForm, facts),
     );
     setError(null);
     setSaving(true);
@@ -1596,12 +1940,13 @@ function EventEditorScreen({
             const moved = movedTailRule({
               rrule: rule,
               series: {
-                tzid: args.master.recurrence?.tzid,
+                tzid: seriesZone,
                 all_day: args.master.all_day,
               },
               from: ruleSetAt ?? own.from,
               opened: ruleSetAt ?? opened,
               tail: args.tail,
+              calendarZones: targetZones,
             });
             if (moved.outcome === 'refused') {
               throw new TailShiftRefusedError(moved.reason);
@@ -1613,6 +1958,9 @@ function EventEditorScreen({
             opened,
             rule: { form: rule, opened: openedRule, touched: set },
             whole: own.whole,
+            // A series that gets a time of day here starts on the zone the
+            // target calendar can store (22a).
+            calendarZones: targetZones,
           });
         } catch (err) {
           if (err instanceof TailShiftRefusedError) {
@@ -1873,6 +2221,7 @@ function EventEditorScreen({
               seededOccurrence,
               { start, end },
               allDay,
+              fields.clock,
             )
           : { start, end };
         // The whole series moves as "this and all following" from its own
@@ -2076,16 +2425,18 @@ function EventEditorScreen({
           uid_to_keep: importIsHeld ? null : (imported?.uid ?? null),
         };
         // An imported series keeps the file's zone, or none, as a copy does
-        // (decision 262). One whose calendar writes its deletions one by one is
-        // created in steps (decisions 227, 265), unless it goes in as someone
-        // else's meeting (I6).
+        // (decision 262), and a new one gets the form's. One whose calendar
+        // writes its deletions one by one is created in steps (decisions 227,
+        // 265), unless it goes in as someone else's meeting (I6).
         const created = await stepWriteWait(
           createRunsInSteps(
             calendars.find((c) => c.id === calId),
             request,
             importOwn,
           ),
-          () => createEvent(request, { preserveRecurrenceZone: imported != null }),
+          // The zone is the form's (`zoneToSave`), never a device stamp over a
+          // chosen UTC.
+          () => createEvent(request, { preserveRecurrenceZone: true }),
         );
         await savePrivate(created);
         if (!isLocalCal) {
@@ -2178,8 +2529,6 @@ function EventEditorScreen({
     description,
     editScope,
     editing,
-    endDate,
-    endTime,
     isOccurrence,
     keepRemindersAsDefault,
     location,
@@ -2192,8 +2541,6 @@ function EventEditorScreen({
     recurrence,
     reminders,
     ruleSetAt,
-    startDate,
-    startTime,
     t,
     i18n.language,
     title,
@@ -2206,6 +2553,15 @@ function EventEditorScreen({
     importToken,
     importIndex,
     noticeOriginal,
+    seriesLoadFailed,
+    fields,
+    view,
+    zoneForm,
+    facts,
+    formInstants,
+    times.exceptions,
+    seriesZone,
+    targetZones,
   ]);
   // The question's yes saves again through the save of the latest render.
   saveRef.current = save;
@@ -2274,12 +2630,57 @@ function EventEditorScreen({
     // The user has answered the question the note asked.
     setPrefillNote(null);
     setCalId(next);
+    // The series' clock follows the calendar, silently (question 8 of stage
+    // 12): the sentences after the end time say what it means.
+    const nextView = viewWith(zoneForm, factsWith({ calendarId: next }));
+    const moved = fieldsOnView(fields, nextView, calendarMoveMode(zoneForm, nextView));
+    if (moved !== times.fields) setTimes({ ...times, fields: moved });
     const after = noticeFor(next, attendees);
     if (
       saysASentence(after.notice) &&
       (!saysASentence(notice) || after.sentence !== noticeSentence)
     ) {
       AccessibilityInfo.announceForAccessibilityWithOptions(after.sentence, { queue: true });
+    }
+  };
+  /** A date or time field's name, naming the clock where it is not the
+   *  device's: „Startzeit (New York)“. */
+  const fieldLabel = (key: ClockFieldKey) => clockFieldLabel(key, fields.clock, deviceZone, t);
+  // The sentences after the end time, and the hint in the choice's place.
+  const shownDeviceHint = deviceHint(fields, deviceZone, i18n.language, t);
+  const afterEndSentences = [
+    ...(shownDeviceHint !== null ? [shownDeviceHint] : []),
+    ...zoneSentences(view, t),
+  ];
+  const seriesHint = followingHint(view, t);
+  // All-day on: the dates stay on the device's days and a series made all-day
+  // here writes no zone; off: the times come back as typed on the clock the
+  // form stands on then ("Wiederholung, Ganztägig, Umfänge").
+  const toggleAllDay = () => {
+    const nextAllDay = !allDay;
+    const zone = withAllDay(zoneForm, nextAllDay);
+    const nextView = viewWith(zone, factsWith({ allDay: nextAllDay }));
+    const moved = fieldsOnView(fields, nextView, 'values');
+    setTimes({ ...times, allDay: nextAllDay, zone, fields: moved });
+    // Times typed back onto a clock that skips them say so (all-day has none).
+    if (!nextAllDay) sayNewGaps(moved);
+  };
+  // The repeat field: switching repeat on or off moves the fields to the
+  // series' clock or the device's, keeping the instants (Wiederholung aus,
+  // wieder an). A tap commits once on the phone, so once its choice closed it
+  // is said once, queued behind VoiceOver's reading of the field, where the
+  // clock the labels name changed (134a).
+  const changeRecurrence = (next: string | null) => {
+    // The user's rule from here on, at the start it was set at — as it would
+    // be written: a later new date moves it from there (197).
+    setRuleSetAt(ruleFrame?.written ?? occurrence ?? original?.start ?? null);
+    setRecurrence(next);
+    const nextView = viewWith(zoneForm, factsWith({ rrule: next }));
+    const moved = fieldsOnView(fields, nextView, 'instants');
+    if (moved !== times.fields) setTimes({ ...times, fields: moved });
+    const said = repeatClockAnnouncement(fields.clock, moved, deviceZone, i18n.language, t);
+    if (said !== null) {
+      AccessibilityInfo.announceForAccessibilityWithOptions(said, { queue: true });
     }
   };
 
@@ -2432,23 +2833,30 @@ function EventEditorScreen({
           {/* The same labels as the editable editor, and an all-day
               invitation has no times, exactly as there. */}
           <ReadOnlyField
-            label={t('dialogs.event.fields.startDate')}
+            label={fieldLabel('startDate')}
             value={readOnlyDay(startDate)}
           />
           {!allDay && (
             <ReadOnlyField
-              label={t('dialogs.event.fields.startTime')}
+              label={fieldLabel('startTime')}
               value={startTime}
             />
           )}
           <ReadOnlyField
-            label={t('dialogs.event.fields.endDate')}
+            label={fieldLabel('endDate')}
             value={readOnlyDay(endDate)}
           />
           {!allDay && (
-            <ReadOnlyField label={t('dialogs.event.fields.endTime')} value={endTime} />
+            <ReadOnlyField label={fieldLabel('endTime')} value={endTime} />
           )}
         </>
+      ) : seriesLoadFailed ? (
+        // 135a: the times have no clock to stand on; this says why they are
+        // missing, where they would be, for as long as the editor is open.
+        <ReadOnlyField
+          label={t('dialogs.seriesTimeZone.title')}
+          value={t('dialogs.event.seriesLoadFailedOpen')}
+        />
       ) : (
         <>
       {/* One switch node for SR (the Pressable carries role + checked + label and
@@ -2459,7 +2867,7 @@ function EventEditorScreen({
         accessibilityRole="switch"
         accessibilityState={{ checked: allDay }}
         accessibilityLabel={t('dialogs.event.fields.allDay')}
-        onPress={() => setTimes((p) => ({ ...p, allDay: !p.allDay }))}
+        onPress={toggleAllDay}
         style={({ pressed }) => [styles.switchRow, pressed && styles.pressed]}
       >
         <Text style={styles.switchLabel} importantForAccessibility="no">
@@ -2489,10 +2897,10 @@ function EventEditorScreen({
           accessibilityElementsHidden
           importantForAccessibility="no"
         >
-          {t('dialogs.event.fields.startDate')}
+          {fieldLabel('startDate')}
         </Text>
         <DateTimeFieldButton
-          label={t('dialogs.event.fields.startDate')}
+          label={fieldLabel('startDate')}
           mode="date"
           value={startDate}
           onChange={(next) => setDateTime('startDate', next)}
@@ -2505,14 +2913,21 @@ function EventEditorScreen({
             accessibilityElementsHidden
             importantForAccessibility="no"
           >
-            {t('dialogs.event.fields.startTime')}
+            {fieldLabel('startTime')}
           </Text>
           <DateTimeFieldButton
-            label={t('dialogs.event.fields.startTime')}
+            label={fieldLabel('startTime')}
             mode="time"
             value={startTime}
             onChange={(next) => setDateTime('startTime', next)}
           />
+          {gaps.start !== null && (
+            // Under its field, read on the way past it; a save is refused
+            // until another time is picked.
+            <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="polite">
+              {gaps.start}
+            </Text>
+          )}
           <QuickTimeButton value={startTime} onPick={(next) => setDateTime('startTime', next)} />
         </View>
       )}
@@ -2523,10 +2938,10 @@ function EventEditorScreen({
           accessibilityElementsHidden
           importantForAccessibility="no"
         >
-          {t('dialogs.event.fields.endDate')}
+          {fieldLabel('endDate')}
         </Text>
         <DateTimeFieldButton
-          label={t('dialogs.event.fields.endDate')}
+          label={fieldLabel('endDate')}
           mode="date"
           value={endDate}
           onChange={(next) => setDateTime('endDate', next)}
@@ -2539,17 +2954,34 @@ function EventEditorScreen({
             accessibilityElementsHidden
             importantForAccessibility="no"
           >
-            {t('dialogs.event.fields.endTime')}
+            {fieldLabel('endTime')}
           </Text>
           <DateTimeFieldButton
-            label={t('dialogs.event.fields.endTime')}
+            label={fieldLabel('endTime')}
             mode="time"
             value={endTime}
             onChange={(next) => setDateTime('endTime', next)}
           />
+          {gaps.end !== null && (
+            <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="polite">
+              {gaps.end}
+            </Text>
+          )}
           <QuickTimeButton value={endTime} onPick={(next) => setDateTime('endTime', next)} />
         </View>
       )}
+      {/* After the end time, each sentence about the clock its own field, one
+          swipe stop that reads its label and its value: the times on this
+          device where the fields stand on another clock, then the series'
+          zone where this device cannot use it, the calendar cannot store the
+          device's zone (22a) or the zone chosen (139a). */}
+      {afterEndSentences.map((sentence) => (
+        <ReadOnlyField
+          key={sentence.value}
+          label={sentence.label}
+          value={sentence.value}
+        />
+      ))}
         </>
       )}
 
@@ -2720,17 +3152,19 @@ function EventEditorScreen({
           )}
           <RecurrenceSelector
             value={shownRule.rrule}
-            onChange={(next) => {
-              // The user's rule from here on, at the start it was set at — as
-              // it would be written: a later new date moves it from there (197).
-              setRuleSetAt(ruleFrame?.written ?? occurrence ?? original?.start ?? null);
-              setRecurrence(next);
-            }}
+            onChange={changeRecurrence}
             startDay={startDate}
             capabilities={calendars.find((c) => c.id === calId)?.recurrence_capabilities}
           />
           </>
         )
+      )}
+
+      {/* "This and all following" names the series' zone where the choice
+          stands for a whole series (21a), after the repeat block and before
+          the reminders. */}
+      {!fieldsLocked && seriesHint !== null && (
+        <ReadOnlyField label={seriesHint.label} value={seriesHint.value} />
       )}
 
       {/* Reminders — relative-to-start / absolute / app-start, the same editor
@@ -2806,8 +3240,8 @@ function EventEditorScreen({
           <AvailabilityChecker
             calendarId={calId}
             attendees={attendees}
-            start={toIso(startDate, startTime, allDay)}
-            end={allDay ? allDayWireEnd(endDate) : toIso(endDate, endTime, false)}
+            start={formInstants.start}
+            end={formInstants.end}
           />
         )}
 

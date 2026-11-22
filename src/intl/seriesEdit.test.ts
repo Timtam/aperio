@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { wallOf } from '@aperio/shared';
+
 import { exceptionsAtSeriesTime, expandEvent, seriesTimesFromOccurrenceEdit } from './recurrence';
 
 // A weekly series at 09:00 New York time, written in June (EDT, UTC-4). The
@@ -18,6 +20,54 @@ function onDevice(iso: string, days: number): string {
   when.setDate(when.getDate() + days);
   return when.toISOString();
 }
+
+/**
+ * A series zone whose clock moves against the test machine's between `from`
+ * and `to`. The machine's zone is the device's here, and the device's old
+ * reading of a time is what these tests must tell apart from the series'. CI
+ * runs them in UTC, New York and Auckland, so no single zone would do: New
+ * York changes its clocks in March 2026 where the machine does not, Tokyo
+ * never does.
+ */
+function zoneMovingAgainstMachine(from: string, to: string): string {
+  const machine = (iso: string) => -new Date(iso).getTimezoneOffset();
+  const on = (iso: string, zone: string) => {
+    const wall = wallOf(iso, zone);
+    if (!wall?.date || !wall.time) throw new Error(`no reading of ${iso} in ${zone}`);
+    return (Date.parse(`${wall.date}T${wall.time}:00Z`) - Date.parse(iso)) / 60_000;
+  };
+  const moved = machine(to) - machine(from);
+  const zone = ['America/New_York', 'Asia/Tokyo'].find((candidate) => on(to, candidate) - on(from, candidate) !== moved);
+  if (zone === undefined) throw new Error('no zone moves against this machine');
+  return zone;
+}
+
+describe('seriesTimesFromOccurrenceEdit on the series clock (stage 12)', () => {
+  // The fields of "this and all following" and of the whole series stand on
+  // the series' clock: a time is read there, whatever the device reads.
+  const onNewYork = { kind: 'series', tzid: NY } as const;
+
+  it('takes a typed time the device reads as before', () => {
+    // Three weeks on at the time the device read before: on the series'
+    // clock, which changed against the device's meanwhile, another time.
+    const occurrence = { start: '2026-03-03T15:00:00.000Z', end: '2026-03-03T16:00:00.000Z' };
+    const edited = { start: onDevice(occurrence.start, 21), end: onDevice(occurrence.end, 21) };
+    const zone = zoneMovingAgainstMachine(occurrence.start, edited.start);
+    const onSeries = { kind: 'series', tzid: zone } as const;
+    expect(seriesTimesFromOccurrenceEdit(occurrence, zone, occurrence, edited, false, onSeries)).toEqual(edited);
+    // Read on the device's clock, as before stage 12, the time looks untouched.
+    expect(seriesTimesFromOccurrenceEdit(occurrence, zone, occurrence, edited, false).start).not.toBe(
+      edited.start,
+    );
+  });
+
+  it('keeps the series time when only the date moved on its clock', () => {
+    const winter = { start: '2026-03-03T15:00:00.000Z', end: '2026-03-03T16:00:00.000Z' };
+    // Three weeks on, still 10:00 New York, now in summer time.
+    const edited = { start: '2026-03-24T14:00:00.000Z', end: '2026-03-24T15:00:00.000Z' };
+    expect(seriesTimesFromOccurrenceEdit(winter, NY, winter, edited, false, onNewYork)).toEqual(edited);
+  });
+});
 
 describe('seriesTimesFromOccurrenceEdit', () => {
   it('leaves the series where it is when the fields are untouched', () => {

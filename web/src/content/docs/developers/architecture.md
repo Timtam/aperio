@@ -164,6 +164,14 @@ operating system. CI checks that the WebAssembly door carries cal-zone and
 stays without rrule and chrono-tz, that chrono-tz stays out of the build,
 and that only cal-zone depends on jiff.
 
+Both event editors hold a series' date and time fields through one shared
+form model: `shared/clockFields.ts` (a pair of fields on a clock, holding the
+stored instants while untouched), `shared/seriesZoneForm.ts` (which clock the
+fields stand on, by the editor's row of the table in
+DESIGN-series-time-zone.md, and which zone a save writes) and
+`shared/zoneFormText.ts` (the labels, the read-only sentences and the reasons
+a save is refused).
+
 **A module behind an optional feature needs `#[cfg(feature = "…")]` on both
 the `pub mod` and its `pub use`.** `cargo build --workspace` will not tell you
 otherwise: cargo unifies features across everything in one build, so a

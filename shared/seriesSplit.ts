@@ -77,18 +77,19 @@ import {
   expandAll,
   expandEvent,
   isExpandedOccurrence,
-  localTimeZone,
   movedSeriesUntil,
   moveSeriesInstant,
   nthOccurrence,
   occurrenceCount,
   overrideRecurrenceIso,
   overrideSeriesId,
+  deviceZoneName,
   ruleFromCut,
   seriesDayKey,
   slotMatcher,
   splitRRuleForEdit,
 } from './recurrence';
+import { defaultSeriesZone, type CalendarZones } from './seriesZoneForm';
 import { shiftSeriesRule, type SeriesShift, type ShiftRefusal } from './seriesShift';
 import { tailExceptions } from './tailExceptions';
 import type { TailSlot } from './types';
@@ -452,21 +453,26 @@ export interface TailRuleMove {
   opened: string;
   /** The start and the kind being written. */
   tail: { start: string; all_day: boolean };
+  /** The zones the target calendar stores, for a series that gets a time of
+   *  day here; every zone where not given. */
+  calendarZones?: CalendarZones;
 }
 
 /**
  * The zone of the series written from the cut on: kept while it stays timed or
  * stays all-day (a continuation expands as its other half does), none once it
- * becomes all-day, the device's once it gets a time of day, as a created
- * series does (DESIGN-series-time-zone.md, "Ganztägig aus").
+ * becomes all-day, and once it gets a time of day the zone a created series
+ * starts with (DESIGN-series-time-zone.md, "Ganztägig aus"): the device's,
+ * written canonically (117a), or UTC where the calendar cannot store it (22a).
  */
 function tailZone(
   zone: string | null | undefined,
   allDay: boolean,
   tailAllDay: boolean,
+  calendarZones: CalendarZones = 'all',
 ): string | null {
   if (tailAllDay === allDay) return zone ?? null;
-  return tailAllDay ? null : localTimeZone();
+  return tailAllDay ? null : defaultSeriesZone(deviceZoneName(), calendarZones);
 }
 
 /** A rule's UNTIL as written, when it ends by one. */
@@ -580,7 +586,14 @@ function keepingLength(
  *
  * Nothing moved gives the rule back as it was written.
  */
-export function movedTailRule({ rrule, series, from, opened, tail }: TailRuleMove): SeriesShift {
+export function movedTailRule({
+  rrule,
+  series,
+  from,
+  opened,
+  tail,
+  calendarZones,
+}: TailRuleMove): SeriesShift {
   const tzid = series.tzid ?? null;
   const allDay = series.all_day;
   const sameKind = tail.all_day === allDay;
@@ -616,7 +629,7 @@ export function movedTailRule({ rrule, series, from, opened, tail }: TailRuleMov
     if (answer.outcome === 'refused') return answer;
     moved = answer.rrule;
   }
-  const zone = tailZone(tzid, allDay, tail.all_day);
+  const zone = tailZone(tzid, allDay, tail.all_day, calendarZones);
   const candidates = [moved];
   // The bound moved by the new time of day too, where that is another one.
   const timedBound = movedSeriesUntil(rrule, tzid, allDay, from, byTime);
@@ -686,15 +699,18 @@ export function tailRecurrenceFor(input: {
   rule?: { form: string | null; opened: string | null; touched?: boolean };
   /** The whole series, rewritten from its own start (`cutoffIso`, 198). */
   whole?: boolean;
+  /** The zones the target calendar stores, for a series that gets a time of
+   *  day here; every zone where not given. */
+  calendarZones?: CalendarZones;
 }): TailRecurrence | null {
-  const { master, cutoffIso, plan, tail, opened, rule, whole } = input;
+  const { master, cutoffIso, plan, tail, opened, rule, whole, calendarZones } = input;
   const ruleChanged =
     rule !== undefined && (rule.touched === true || rule.form !== rule.opened);
   let rrule = ruleChanged
     ? rule.form && ruleFromCut(rule.form, plan.occurrencesBefore)
     : plan.tail.rrule;
   if (!rrule) return null;
-  const tzid = tailZone(plan.tail.tzid, master.all_day, tail.all_day);
+  const tzid = tailZone(plan.tail.tzid, master.all_day, tail.all_day, calendarZones);
   if (!ruleChanged && opened !== undefined) {
     const moved = movedTailRule({
       rrule,
@@ -702,6 +718,7 @@ export function tailRecurrenceFor(input: {
       from: cutoffIso,
       opened,
       tail,
+      calendarZones,
     });
     if (moved.outcome === 'refused') {
       throw new TailShiftRefusedError(moved.reason);
