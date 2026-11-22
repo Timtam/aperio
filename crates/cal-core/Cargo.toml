@@ -76,8 +76,8 @@ ts-export = ["dep:ts-rs"]
 # above, and DESIGN §4.4.
 collation = ["dep:icu_collator", "dep:icu_locale_core"]
 # Zones with their offsets, from cal-zone: jiff and the tzdata bundled with
-# jiff-tzdb (about 207 KB of data). OFF by default, and off in WebAssembly,
-# where CI checks that neither jiff nor jiff-tzdb reaches the module. The
-# phone's binding, the desktop host and every adapter that reads a zone switch
-# it on. The names and the search need none of it and stay on.
+# jiff-tzdb (about 207 KB of data). OFF by default. The phone's binding, the
+# desktop host, the desktop's WebAssembly door (the wall clock rule, since
+# stage 8) and every adapter that reads a zone switch it on. The names and the
+# search need none of it and stay on.
 zones = ["dep:cal-zone"]

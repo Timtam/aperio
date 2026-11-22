@@ -12,7 +12,13 @@ description = "Aperio — a synchronous WebAssembly door from the desktop webvie
 # `collation` on: text ordering is one of the rules the desktop needs
 # SYNCHRONOUSLY during render. It costs roughly a megabyte of baked CLDR
 # data — the price was weighed and accepted (TODO A11, DESIGN §4.4).
-cal-core = { workspace = true, features = ["collation"] }
+# `zones` on: a series' dates and times are read on its own clock while the
+# form renders (cal_core::wall_clock, DESIGN-series-time-zone.md 100a). It
+# brings cal-zone with jiff and the bundled tzdata, +418 KB of module raw,
+# +143 KB gzip (2.42 to 2.84 MB, measured 2026-11-22; a probe door had shown
+# 293 KB); one pinned source with the host's, and the desktop
+# checks at startup that both name the same tzdata release (104a).
+cal-core = { workspace = true, features = ["collation", "zones"] }
 wasm-bindgen = "0.2"
 
 [lib]

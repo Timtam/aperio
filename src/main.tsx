@@ -22,13 +22,14 @@ import {
   installRecurrenceSummaryRules,
   installCalendarWeekRules,
   installDayPartsRules,
+  installWallClockRules,
   installSeriesShiftRules,
   installTailExceptionsRules,
   installSeriesClockRules,
   installZoneListRules,
 } from '@aperio/shared';
 
-import { zoneOffsets } from './api/client';
+import { hostTzdataVersion, zoneOffsets } from './api/client';
 import { App } from './App';
 import { installConsoleBridge } from './dev/consoleBridge';
 import { applyThemeMode, readThemeMode } from './state/themeMode';
@@ -74,6 +75,8 @@ import {
   recurrenceSummaryJson,
   calendarWeeksJson,
   dayPartsJson,
+  wallClockJson,
+  moduleTzdataVersion,
   seriesShiftJson,
   tailExceptionsJson,
   seriesClockZoneThroughCore,
@@ -110,7 +113,19 @@ applyThemeMode(readThemeMode());
 // a second implementation are the thing this exists to remove, and a blank
 // window would tell a screen-reader user nothing at all.
 initCoreRules()
-  .then(() => {
+  .then(async () => {
+    // One tzdata source for the host and this module, built into both
+    // (decision 104a). A module built from another release, a stale
+    // package in development, must not start: the form would read a
+    // series' times on other rules than the adapters write them with.
+    const hostTzdata = await hostTzdataVersion();
+    const moduleTzdata = moduleTzdataVersion();
+    if (hostTzdata !== moduleTzdata) {
+      throw new Error(
+        `die Zeitzonendaten des Programms (${hostTzdata}) und seines WebAssembly-Moduls (${moduleTzdata}) unterscheiden sich`,
+      );
+    }
+
     // The core's ordering rule, bound to the language the USER chose — not the
     // one the operating system reports, which is what `localeCompare` followed
     // before. Re-bound on every language change, so a switch reorders the
@@ -220,6 +235,9 @@ initCoreRules()
 
     // The parts a repeat rule takes from the day a series starts on.
     installDayPartsRules({ dayPartsJson });
+
+    // Dates and times on a series' clock, with the zones this module carries.
+    installWallClockRules({ wallClockJson });
 
     // The clock a series repeats on: which stored zone names are a zone.
     installSeriesClockRules({

@@ -572,6 +572,17 @@ pub fn recurrence_summary(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// A question about a series' clock as JSON, its answer as JSON, `null` for
+/// text that names no instant, date or time (cal_core::wall_clock): the
+/// desktop asks the same rule through WebAssembly.
+#[uniffi::export]
+pub fn wall_clock(question_json: String) -> Result<String, StoreError> {
+    cal_core::wall_clock_json(&question_json).map_err(|e| StoreError::InvalidField {
+        field: "wall clock question".into(),
+        detail: e.to_string(),
+    })
+}
+
 /// The parts a repeat rule takes from the day a series starts on, as JSON,
 /// and JSON `null` for a key that names no day (cal_core::day_parts): the
 /// desktop asks the same rule through WebAssembly.
@@ -882,6 +893,26 @@ mod tests {
             Err(StoreError::InvalidField { field, .. }) => {
                 assert_eq!(field, "recurrence summary question")
             }
+            other => panic!("expected an invalid-field error, got {other:?}"),
+        }
+    }
+
+    /// Every row of the core's wall-clock table through the phone's door; JSON
+    /// that is no question at all is the field error the bridge throws.
+    #[test]
+    fn wall_clock_door_answers_every_contract_row() {
+        const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/wallClock.json");
+        let doc: serde_json::Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let rows = doc["rows"].as_array().expect("rows");
+        assert!(rows.len() > 20, "the contract lost rows");
+        for row in rows {
+            let answer: serde_json::Value =
+                serde_json::from_str(&wall_clock(row["question"].to_string()).expect("a question"))
+                    .expect("json");
+            assert_eq!(answer, row["expect"], "{}", row["name"]);
+        }
+        match wall_clock("{\"op\":\"teleport\"}".to_string()) {
+            Err(StoreError::InvalidField { field, .. }) => assert_eq!(field, "wall clock question"),
             other => panic!("expected an invalid-field error, got {other:?}"),
         }
     }

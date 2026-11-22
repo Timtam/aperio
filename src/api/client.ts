@@ -2386,8 +2386,11 @@ export const listFailedPlugins = () =>
   invoke<FailedPluginInfo[]>('list_failed_plugins');
 
 /** Every listed zone's offset at a series' start and its standard offset as of
- *  today, and the order of the world zone list. A host command rather than a
- *  WebAssembly door: the offsets need the zone data, which the module leaves out
- *  (src-tauri/src/commands/time_zones.rs). */
+ *  today, and the order of the world zone list. A host command
+ *  (src-tauri/src/commands/time_zones.rs); the WebAssembly module carries the
+ *  zones too since stage 8, so this may move there. */
 export const zoneOffsets = (question: ZoneOffsetsQuestion) =>
   invoke<ZoneOffsets>('zone_offsets', { question });
+
+/** The tzdata release the host's zones were built from (decision 104a). */
+export const hostTzdataVersion = () => invoke<string>('tzdata_version');

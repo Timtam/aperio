@@ -3589,6 +3589,13 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Wächter, der prüft, dass die Zone greift. Vier Tests, die nur in UTC
   stimmten, sind berichtigt (ganztägige Grenzen, Erledigt-Tag, Tage im
   Editor, ein Fall nur für ein Gerät auf anderer Uhr).
+  ↳ **Die Wanduhr-Regel (Stufe 8, Schritt 2, 2026-11-22, 100a, 104a):** Der
+  Kern rechnet Datum und Uhrzeit auf der Uhr einer Serie in einen Zeitpunkt
+  und zurück (`cal_core::wall_clock`): eine Uhrzeit in der Frühjahrs-Lücke
+  hat keinen, in der Doppelstunde gilt die frühere, und ein Serienende ist
+  die letzte Sekunde des Tages auf der Uhr. Das WebAssembly-Modul des Desktops trägt dafür die
+  Zonendaten (+418 KB); der Desktop startet nicht, wenn Host und Modul
+  verschiedene tzdata-Versionen melden.
   ↳ **Regelteile aus dem Tages-Schlüssel (Stufe 8, Schritt 1, 2026-11-22):**
   Wochentag, Tag im Monat, der wievielte Wochentag, letzte Woche und Monat
   einer Regel liest der Kern aus dem Tag des Beginns (`cal_core::day_parts`),

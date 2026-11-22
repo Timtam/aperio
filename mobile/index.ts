@@ -19,6 +19,7 @@ import {
   installRecurrenceSummaryRules,
   installCalendarWeekRules,
   installDayPartsRules,
+  installWallClockRules,
   installSeriesShiftRules,
   installTailExceptionsRules,
   installSeriesClockRules,
@@ -207,6 +208,12 @@ installCalendarWeekRules({
 // rule the desktop asks through WebAssembly.
 installDayPartsRules({
   dayPartsJson: (dayKey: string) => CalFfi.dayParts(dayKey),
+});
+
+// Dates and times on a series' clock: the same rule the desktop asks
+// through WebAssembly, on the zones this native library carries.
+installWallClockRules({
+  wallClockJson: (questionJson: string) => CalFfi.wallClock(questionJson),
 });
 
 // The clock a series repeats on: which stored zone names are a zone. Every

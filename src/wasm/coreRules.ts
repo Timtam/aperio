@@ -61,6 +61,8 @@ import init, {
   recurrenceSummary as wasmRecurrenceSummary,
   calendarWeeks as wasmCalendarWeeks,
   dayParts as wasmDayParts,
+  wallClock as wasmWallClock,
+  tzdataVersion as wasmTzdataVersion,
   seriesClockZone as wasmSeriesClockZone,
   canonicalZone as wasmCanonicalZone,
   expansionClock as wasmExpansionClock,
@@ -346,6 +348,18 @@ export function tailExceptionsJson(inputJson: string): string {
 export function recurrenceSummaryJson(inputJson: string): string {
   assertReady();
   return wasmRecurrenceSummary(inputJson);
+}
+
+/** See `cal_core::wall_clock::wall_clock_json`. */
+export function wallClockJson(questionJson: string): string {
+  assertReady();
+  return wasmWallClock(questionJson);
+}
+
+/** The tzdata release this module's zones were built from (104a). */
+export function moduleTzdataVersion(): string {
+  assertReady();
+  return wasmTzdataVersion();
 }
 
 /** See `cal_core::day_parts::day_parts_json`. */

@@ -75,6 +75,10 @@ pub mod task_settings;
 pub mod task_status;
 pub mod types;
 pub mod windows_zone;
+// Dates and times on a series' clock (stage 8): reads tzdata, so behind
+// `zones` with cal-zone.
+#[cfg(feature = "zones")]
+pub mod wall_clock;
 pub mod write_leftover;
 pub mod write_refusal;
 // Which tzdata zone runs a clock a provider defines by its rules; it reads
@@ -227,6 +231,11 @@ pub use types::{
     RecurrenceEnd, RecurrenceFrequency, RecurrencePlacement, Section, Task, TaskAssignment,
     TaskEffort, TaskList, TaskListShare, TaskPriority, TaskRecurrence, TaskStatus, TaskUser,
     Weekday,
+};
+#[cfg(feature = "zones")]
+pub use wall_clock::{
+    instant_of, until_on, wall_clock, wall_clock_json, wall_of, WallClockAnswer, WallClockQuestion,
+    WallReading,
 };
 pub use write_leftover::WriteLeftover;
 pub use write_refusal::{BusyDetail, SeriesRewrite, WriteRefusal};

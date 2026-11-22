@@ -949,6 +949,7 @@ pub fn run() {
             commands::detach_meeting,
             commands::event_meeting,
             commands::zone_offsets,
+            commands::tzdata_version,
             commands::inspect_event_meeting,
             commands::adopt_meeting,
             commands::get_meeting,

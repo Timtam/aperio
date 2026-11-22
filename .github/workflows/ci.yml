@@ -133,6 +133,13 @@ jobs:
               # through the real WebAssembly module. Without this line a change
               # to the ordering rule alone would run no frontend job at all.
               - 'crates/cal-core/**'
+              # The zones the module carries since stage 8 (`cal_core::wall_clock`
+              # reads them; `src/components/wallClock.contract.test.ts` replays
+              # its table through the real module and holds its tzdata release
+              # to the pinned one). A change to cal-zone or a jiff/jiff-tzdb bump
+              # in the lockfile alone would otherwise run no frontend job.
+              - 'crates/cal-zone/**'
+              - 'Cargo.lock'
               - 'public/**'
               - 'index.html'
               # `src/wasm/csp.test.ts` reads the shipped app's Content Security
@@ -307,18 +314,18 @@ jobs:
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: cargo xtask windows-zones --check
 
-      # The zones stay out of the desktop's WebAssembly door: the zone list's
-      # offsets come from the host there, and jiff with its bundled tzdata
-      # (about 207 KB of data) would only grow the module. A `zones` feature
-      # switched on anywhere in cal-core-wasm's graph would pull them in
-      # without a sound, so the graph is asked, package by package. The first
-      # line is the control: it fails if the question is asked of the wrong
-      # graph.
-      - name: The zones stay out of the WebAssembly door
+      # The desktop's WebAssembly door carries the zones (cal-zone, jiff and
+      # its bundled tzdata): a series' dates and times are read on its clock
+      # while the form renders (DESIGN-series-time-zone.md 100a, 104a). The
+      # repeat expander (rrule) and chrono-tz stay out; the graph is asked,
+      # package by package. The first lines are the controls: cal-core and
+      # cal-zone must be found, or the question was asked of the wrong graph.
+      - name: The WebAssembly door carries the zones and nothing else of them
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: |
           cargo tree -p cal-core-wasm --target wasm32-unknown-unknown -e normal -i cal-core > /dev/null
-          for pkg in jiff jiff-tzdb cal-zone rrule chrono-tz; do
+          cargo tree -p cal-core-wasm --target wasm32-unknown-unknown -e normal -i cal-zone > /dev/null
+          for pkg in rrule chrono-tz; do
             if out=$(cargo tree -p cal-core-wasm --target wasm32-unknown-unknown -e normal -i "$pkg" 2>&1); then
               echo "$pkg is in the WebAssembly door's dependency graph:"
               echo "$out"
