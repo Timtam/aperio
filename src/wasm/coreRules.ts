@@ -60,6 +60,7 @@ import init, {
   tailExceptions as wasmTailExceptions,
   recurrenceSummary as wasmRecurrenceSummary,
   calendarWeeks as wasmCalendarWeeks,
+  dayParts as wasmDayParts,
   seriesClockZone as wasmSeriesClockZone,
   canonicalZone as wasmCanonicalZone,
   expansionClock as wasmExpansionClock,
@@ -345,6 +346,12 @@ export function tailExceptionsJson(inputJson: string): string {
 export function recurrenceSummaryJson(inputJson: string): string {
   assertReady();
   return wasmRecurrenceSummary(inputJson);
+}
+
+/** See `cal_core::day_parts::day_parts_json`. */
+export function dayPartsJson(dayKey: string): string {
+  assertReady();
+  return wasmDayParts(dayKey);
 }
 
 /** See `cal_core::calendar_week::calendar_weeks_json`. */

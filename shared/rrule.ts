@@ -11,6 +11,8 @@
  * Kept free of React/DOM so both editor components stay pure-component modules
  * (Fast Refresh) and so the parse/build round-trip can be unit-tested alone.
  */
+import { dayParts } from './dayParts';
+
 export type Freq = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
 export type EndMode = 'NEVER' | 'COUNT' | 'UNTIL';
@@ -23,6 +25,9 @@ export interface ParsedRule {
   freq: Freq;
   interval: number;
   byDay: string[];
+  /** The rule's WKST, kept as it was written so touching the controls does
+   *  not drop it; `''` when the rule names none (RFC 5545: Monday). */
+  wkst: string;
   /** Monthly/yearly axis. Only meaningful for MONTHLY/YEARLY. */
   monthlyMode: MonthlyMode;
   /** Day-of-month for DAY_OF_MONTH mode. 0 = derive from start. */
@@ -43,6 +48,7 @@ const DEFAULT_RULE: ParsedRule = {
   freq: 'NONE',
   interval: 1,
   byDay: [],
+  wkst: '',
   monthlyMode: 'DAY_OF_MONTH',
   byMonthDay: 0,
   relOrdinal: 0,
@@ -67,25 +73,6 @@ export interface MonthlyOption {
   disabled?: boolean;
 }
 
-/** JS `Date.getDay()` (0=Sun) → RRULE weekday code. */
-export const JS_DAY_TO_RRULE = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-
-/** How many days in the month containing `d`. */
-function daysInMonth(d: Date): number {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-}
-
-/** 1-based ordinal of `d`'s weekday within its month (1st..5th). */
-export function nthWeekdayOfMonth(d: Date): number {
-  return Math.floor((d.getDate() - 1) / 7) + 1;
-}
-
-/** True when `d` sits in the final 7 days of its month — the window
- *  where offering a "last <weekday>" option is meaningful (and more
- *  robust than "fourth/fifth", which some months don't have). */
-function isInLastWeek(d: Date): boolean {
-  return d.getDate() > daysInMonth(d) - 7;
-}
 
 /** Which monthly shapes the target source can store.
  *
@@ -101,7 +88,11 @@ export interface MonthlyOptionSupport {
   dayOfMonth?: boolean;
 }
 
-/** Compute the 2-3 monthly/yearly options for a given start date.
+/** Compute the 2-3 monthly/yearly options for the day a series starts on
+ *  (`YYYY-MM-DD`), its parts read off the day key by the core
+ *  (`cal_core::day_parts`), not off a Date on the device's clock: the
+ *  form's day, whichever clock its fields stand on. No options for a key
+ *  the core refuses.
  *
  *  Unsupported options come back marked `disabled` rather than missing, and it
  *  is the SURFACE that decides what to do with that: the desktop greys them so
@@ -116,14 +107,16 @@ export interface MonthlyOptionSupport {
  *  that cannot store "the 14th" still offered that on the desktop — in both
  *  cases the editor accepted a repeat shape the provider would drop. */
 export function deriveMonthlyOptions(
-  start: Date,
+  startDay: string,
   support: MonthlyOptionSupport = {},
 ): MonthlyOption[] {
+  const parts = dayParts(startDay);
+  if (parts === null) return [];
   const relativeAllowed = support.relative ?? true;
   const dayOfMonthAllowed = support.dayOfMonth ?? true;
-  const day = start.getDate();
-  const weekday = JS_DAY_TO_RRULE[start.getDay()];
-  const ordinal = nthWeekdayOfMonth(start);
+  const day = parts.dayOfMonth;
+  const weekday = parts.weekday;
+  const ordinal = parts.nthWeekday;
   const opts: MonthlyOption[] = [
     {
       key: 'dom',
@@ -145,7 +138,7 @@ export function deriveMonthlyOptions(
   // Only offer "last <weekday>" when the start lands in the final
   // week — otherwise "fourth" and "last" would usually coincide and
   // the extra option is just noise.
-  if (isInLastWeek(start)) {
+  if (parts.inLastWeek) {
     opts.push({
       key: 'last',
       mode: 'WEEKDAY',
@@ -156,6 +149,24 @@ export function deriveMonthlyOptions(
     });
   }
   return opts;
+}
+
+/** Fill the day-derived defaults for any monthly/yearly field a parsed rule
+ *  left unspecified (0 / ''), from the day the series starts on
+ *  (`YYYY-MM-DD`), so the controls always show concrete values and
+ *  `buildRRule` writes a complete rule. One rule for both editors, which
+ *  each kept a copy reading a Date on the device's clock. */
+export function resolveAgainstDay(parsed: ParsedRule, startDay: string): ParsedRule {
+  if (parsed.freq !== 'MONTHLY' && parsed.freq !== 'YEARLY') return parsed;
+  const parts = dayParts(startDay);
+  if (parts === null) return parsed;
+  return {
+    ...parsed,
+    byMonthDay: parsed.byMonthDay || parts.dayOfMonth,
+    relOrdinal: parsed.relOrdinal || parts.nthWeekday,
+    relWeekday: parsed.relWeekday || parts.weekday,
+    byMonth: parsed.byMonth || parts.month,
+  };
 }
 
 export function parseRRule(value: string | null): ParsedRule {
@@ -179,6 +190,7 @@ export function parseRRule(value: string | null): ParsedRule {
       : 'NONE';
 
   const interval = Math.max(1, Number(parts.get('INTERVAL') ?? '1') || 1);
+  const wkst = (parts.get('WKST') ?? '').toUpperCase();
   const byDayRaw = (parts.get('BYDAY') ?? '')
     .split(',')
     .map((x) => x.trim())
@@ -243,6 +255,7 @@ export function parseRRule(value: string | null): ParsedRule {
     freq,
     interval,
     byDay,
+    wkst,
     monthlyMode,
     byMonthDay,
     relOrdinal,
@@ -262,6 +275,9 @@ export function buildRRule(p: ParsedRule): string | null {
   if (p.freq === 'WEEKLY' && p.byDay.length > 0) {
     out.push(`BYDAY=${p.byDay.join(',')}`);
   }
+  // Kept as the rule had it: dropping it would move a biweekly series whose
+  // week does not start on Monday (DESIGN-series-time-zone.md, WKST).
+  if (p.wkst) out.push(`WKST=${p.wkst}`);
 
   if (p.freq === 'MONTHLY' || p.freq === 'YEARLY') {
     if (p.freq === 'YEARLY' && p.byMonth) {

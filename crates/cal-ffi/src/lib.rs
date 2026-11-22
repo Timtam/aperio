@@ -572,6 +572,14 @@ pub fn recurrence_summary(input_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// The parts a repeat rule takes from the day a series starts on, as JSON,
+/// and JSON `null` for a key that names no day (cal_core::day_parts): the
+/// desktop asks the same rule through WebAssembly.
+#[uniffi::export]
+pub fn day_parts(day_key: String) -> String {
+    cal_core::day_parts_json(&day_key)
+}
+
 /// The calendar week each day is shown in, with its ISO number (DESIGN §5.2):
 /// the desktop asks the same rule through WebAssembly.
 #[uniffi::export]
@@ -875,6 +883,26 @@ mod tests {
                 assert_eq!(field, "recurrence summary question")
             }
             other => panic!("expected an invalid-field error, got {other:?}"),
+        }
+    }
+
+    /// Every row of the core's day-parts table through the phone's door, and
+    /// a key that names no day as JSON null, never an error.
+    #[test]
+    fn day_parts_door_answers_every_contract_row() {
+        const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/dayParts.json");
+        let doc: serde_json::Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let rows = doc["rows"].as_array().expect("rows");
+        assert!(!rows.is_empty(), "the contract lost its rows");
+        for row in rows {
+            let key = row["day"].as_str().expect("a day");
+            let answer: serde_json::Value =
+                serde_json::from_str(&day_parts(key.to_string())).expect("json");
+            assert_eq!(answer, row["expect"], "{key}");
+        }
+        for key in doc["refused"].as_array().expect("refused") {
+            let key = key.as_str().expect("a string");
+            assert_eq!(day_parts(key.to_string()), "null", "{key:?}");
         }
     }
 

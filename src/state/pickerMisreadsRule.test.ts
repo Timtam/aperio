@@ -28,6 +28,8 @@ describe('pickerMisreadsRule', () => {
       // The defaults a provider spells out and the pickers leave implicit.
       'FREQ=WEEKLY;INTERVAL=1;BYDAY=TU',
       'FREQ=WEEKLY;WKST=MO;BYDAY=TU',
+      // WKST is carried, so a week that starts on Sunday is held too.
+      'FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,TU;WKST=SU',
       'FREQ=DAILY;INTERVAL=1',
       'RRULE:FREQ=DAILY',
     ]) {

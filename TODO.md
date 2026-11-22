@@ -3584,6 +3584,17 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **Vitest in drei Zonen (Stufe 8, #186, 2026-11-22):** Die CI lässt die
+  Suite außer in UTC auch in New York und Auckland laufen, hinter einem
+  Wächter, der prüft, dass die Zone greift. Vier Tests, die nur in UTC
+  stimmten, sind berichtigt (ganztägige Grenzen, Erledigt-Tag, Tage im
+  Editor, ein Fall nur für ein Gerät auf anderer Uhr).
+  ↳ **Regelteile aus dem Tages-Schlüssel (Stufe 8, Schritt 1, 2026-11-22):**
+  Wochentag, Tag im Monat, der wievielte Wochentag, letzte Woche und Monat
+  einer Regel liest der Kern aus dem Tag des Beginns (`cal_core::day_parts`),
+  nicht mehr ein `Date` auf der Uhr des Geräts; beide Editoren teilen sich
+  die Regel. WKST bleibt beim Bearbeiten erhalten; vorher ging es verloren,
+  sobald man die Wiederholung anfasste.
   ↳ **Android-Datumsdialog las den Tag in UTC (gefunden bei Stufe 8,
   2026-11-22, 103b):** Östlich von UTC stand der Vortag vorgewählt, und wer
   unverändert bestätigte, speicherte ihn; westlich kam jedes gewählte Datum

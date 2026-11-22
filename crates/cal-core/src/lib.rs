@@ -14,6 +14,7 @@ pub mod collation;
 pub mod color;
 pub mod conferencing;
 pub mod day_marker;
+pub mod day_parts;
 pub mod day_start;
 pub mod error;
 pub mod event_anchor;
@@ -110,6 +111,7 @@ pub use calendar_week::{
 pub use collation::{compare_names, compare_titles, CollationLanguage};
 pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use day_marker::{DayLog, DayMarker};
+pub use day_parts::{day_parts, day_parts_json, parse_day_key, DayParts, DayPartsError};
 pub use day_start::{
     day_start_json, CarryOverDefault, DayStartIdentity, DayStartListSettings, DayStartMoved,
     DayStartPlan, DayStartQuestion, DayStartReminderGroups, DayStartReminderSettings, DayStartTask,

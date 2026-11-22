@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildRRule, deriveMonthlyOptions, parseRRule } from './rrule';
+import { buildRRule, deriveMonthlyOptions, parseRRule, resolveAgainstDay } from './rrule';
 
 // Shared base so each test only spells out the fields it cares about.
 const base = {
   freq: 'NONE' as const,
   interval: 1,
   byDay: [] as string[],
+  wkst: '',
   monthlyMode: 'DAY_OF_MONTH' as const,
   byMonthDay: 0,
   relOrdinal: 0,
@@ -72,6 +73,49 @@ describe('parseRRule', () => {
     expect(r.monthlyMode).toBe('WEEKDAY');
     expect(r.relOrdinal).toBe(1);
     expect(r.relWeekday).toBe('FR');
+  });
+});
+
+describe('WKST', () => {
+  // DESIGN-series-time-zone.md: WKST stays. The controls had no field for
+  // it, so touching them dropped it, and a biweekly series whose week
+  // starts on Sunday moved to other weeks.
+  it('is read and written back as the rule had it', () => {
+    const rule = 'FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,TU;WKST=SU';
+    const parsed = parseRRule(rule);
+    expect(parsed.wkst).toBe('SU');
+    expect(buildRRule({ ...parsed, interval: 3 })).toBe(
+      'FREQ=WEEKLY;INTERVAL=3;BYDAY=SU,TU;WKST=SU',
+    );
+  });
+
+  it('is not written where the rule named none', () => {
+    expect(parseRRule('FREQ=WEEKLY;BYDAY=MO').wkst).toBe('');
+    expect(buildRRule(parseRRule('FREQ=WEEKLY;BYDAY=MO'))).toBe('FREQ=WEEKLY;BYDAY=MO');
+  });
+});
+
+describe('the day-derived parts (cal_core::day_parts)', () => {
+  it('come from the day key, not from a Date on the device clock', () => {
+    // 2026-11-24 is the fourth Tuesday of November and in its last week.
+    expect(deriveMonthlyOptions('2026-11-24').map((o) => o.key)).toEqual([
+      'dom',
+      'nth',
+      'last',
+    ]);
+    expect(resolveAgainstDay(parseRRule('FREQ=YEARLY'), '2026-11-24')).toMatchObject({
+      byMonthDay: 24,
+      relOrdinal: 4,
+      relWeekday: 'TU',
+      byMonth: 11,
+    });
+  });
+
+  it('give nothing for a day the core refuses', () => {
+    expect(deriveMonthlyOptions('')).toEqual([]);
+    expect(deriveMonthlyOptions('2026-02-30')).toEqual([]);
+    const rule = parseRRule('FREQ=MONTHLY');
+    expect(resolveAgainstDay(rule, 'today')).toBe(rule);
   });
 });
 
@@ -168,7 +212,7 @@ describe('buildRRule', () => {
 describe('deriveMonthlyOptions', () => {
   it('offers day-of-month + nth-weekday for a mid-month date', () => {
     // 2024-05-15 is the third Wednesday of May (not in the last week).
-    const opts = deriveMonthlyOptions(new Date(2024, 4, 15));
+    const opts = deriveMonthlyOptions('2024-05-15');
     expect(opts.map((o) => o.key)).toEqual(['dom', 'nth']);
     expect(opts[0]).toMatchObject({ mode: 'DAY_OF_MONTH', day: 15 });
     expect(opts[1]).toMatchObject({
@@ -180,7 +224,7 @@ describe('deriveMonthlyOptions', () => {
 
   it('adds a "last weekday" option when the date is in the final week', () => {
     // 2026-05-29 is a Friday in the last 7 days of May.
-    const opts = deriveMonthlyOptions(new Date(2026, 4, 29));
+    const opts = deriveMonthlyOptions('2026-05-29');
     expect(opts.map((o) => o.key)).toContain('last');
     const last = opts.find((o) => o.key === 'last');
     expect(last).toMatchObject({ mode: 'WEEKDAY', ordinal: -1, weekday: 'FR' });
@@ -190,7 +234,7 @@ describe('deriveMonthlyOptions', () => {
     // A source that can't store relative recurrence (BYDAY=Nxx):
     // the day-of-month option stays enabled, the weekday options
     // are greyed (still visible) rather than removed.
-    const opts = deriveMonthlyOptions(new Date(2026, 4, 29), { relative: false });
+    const opts = deriveMonthlyOptions('2026-05-29', { relative: false });
     const dom = opts.find((o) => o.key === 'dom');
     const nth = opts.find((o) => o.key === 'nth');
     const last = opts.find((o) => o.key === 'last');
@@ -204,7 +248,7 @@ describe('deriveMonthlyOptions', () => {
     // the item's own day and cannot take a separate day number (Vikunja says
     // so in its manifest) still had "on the 29th" offered on the desktop, and
     // the value was accepted and dropped on save.
-    const opts = deriveMonthlyOptions(new Date(2026, 4, 29), {
+    const opts = deriveMonthlyOptions('2026-05-29', {
       dayOfMonth: false,
     });
     expect(opts.find((o) => o.key === 'dom')?.disabled).toBe(true);
@@ -213,7 +257,7 @@ describe('deriveMonthlyOptions', () => {
   });
 
   it('can disable both axes at once', () => {
-    const opts = deriveMonthlyOptions(new Date(2026, 4, 29), {
+    const opts = deriveMonthlyOptions('2026-05-29', {
       relative: false,
       dayOfMonth: false,
     });
@@ -224,10 +268,10 @@ describe('deriveMonthlyOptions', () => {
     // The permissive default the manifest itself uses: an adapter spells out
     // only what it restricts, so an absent block must mean "everything".
     expect(
-      deriveMonthlyOptions(new Date(2024, 4, 15)).every((o) => !o.disabled),
+      deriveMonthlyOptions('2024-05-15').every((o) => !o.disabled),
     ).toBe(true);
     expect(
-      deriveMonthlyOptions(new Date(2024, 4, 15), {}).every((o) => !o.disabled),
+      deriveMonthlyOptions('2024-05-15', {}).every((o) => !o.disabled),
     ).toBe(true);
   });
 });

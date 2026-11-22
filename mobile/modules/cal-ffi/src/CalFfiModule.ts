@@ -193,6 +193,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  question for many days. */
   calendarWeeks(inputJson: string): string;
 
+  /** The parts a repeat rule takes from a `YYYY-MM-DD` day, as JSON, or
+   *  `null` for a key that names no day (`cal_core::day_parts`). Synchronous. */
+  dayParts(dayKey: string): string;
+
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
   // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed

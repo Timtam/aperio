@@ -5,10 +5,12 @@ import { DEFAULT_RECURRENCE_CAPABILITIES } from '@aperio/shared';
 import type { RecurrenceCapabilities, RecurrenceFreq } from '../api/types';
 import {
   buildRRule,
+  dayParts,
   deriveMonthlyOptions,
-  JS_DAY_TO_RRULE,
-  nthWeekdayOfMonth,
+  localDateKey,
   parseRRule,
+  recurrenceStartDate,
+  resolveAgainstDay,
 } from './rrule';
 import type { EndMode, Freq, MonthlyOption, ParsedRule } from './rrule';
 
@@ -36,11 +38,12 @@ import type { EndMode, Freq, MonthlyOption, ParsedRule } from './rrule';
 export interface RecurrenceSelectorProps {
   value: string | null;
   onChange: (rrule: string | null) => void;
-  /** Event start date — drives the derived monthly/yearly options.
-   *  Optional so non-event callers / older tests still work; falls
-   *  back to "today" when omitted (only matters for the derived
+  /** The day the series starts on, `YYYY-MM-DD` as the form holds it —
+   *  drives the derived monthly/yearly options, read off the key by the
+   *  core (`cal_core::day_parts`). Optional so non-event callers still
+   *  work; today when omitted or not a day (only matters for the derived
    *  defaults, never for an explicit rule). */
-  start?: Date;
+  startDay?: string;
   /** Recurrence shapes the target calendar's adapter can store.
    *  Unsupported options are rendered disabled with a hint rather
    *  than hidden, so the user can see the option exists but isn't
@@ -79,18 +82,22 @@ const WEEKDAYS: { iso: number; rrule: string; key: string }[] = [
 export function RecurrenceSelector({
   value,
   onChange,
-  start,
+  startDay: startDayProp,
   capabilities,
 }: RecurrenceSelectorProps) {
   const { t, i18n } = useTranslation();
   const caps = capabilities ?? DEFAULT_RECURRENCE_CAPABILITIES;
-  // Stabilise the fallback Date so the memos below don't re-run every
-  // render when `start` is omitted (a fresh `new Date()` each render
-  // would otherwise bust their dependency arrays). Keyed on the start
-  // day so a real date change still flows through.
-  const startKey = start ? start.toDateString() : '';
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const startDate = useMemo(() => start ?? new Date(), [startKey]);
+  // The day the derived options come from: the form's, or today where it
+  // has none yet (a key the core refuses falls back too). The Date is for
+  // naming the month only.
+  const startDay = useMemo(
+    () =>
+      startDayProp && dayParts(startDayProp) !== null
+        ? startDayProp
+        : localDateKey(new Date()),
+    [startDayProp],
+  );
+  const startDate = useMemo(() => recurrenceStartDate(startDay), [startDay]);
   const parsed = useMemo(() => parseRRule(value), [value]);
   // Resolve start-derived defaults so the monthly/yearly controls
   // always have concrete values to show even for a legacy
@@ -100,7 +107,7 @@ export function RecurrenceSelector({
   // and the disabled input showing the value that'll actually
   // round-trip.
   const rule = useMemo(() => {
-    const resolved = resolveAgainstStart(parsed, startDate);
+    const resolved = resolveAgainstDay(parsed, startDay);
     if (
       resolved.freq !== 'NONE' &&
       !intervalSupported(resolved.freq, caps) &&
@@ -109,7 +116,7 @@ export function RecurrenceSelector({
       return { ...resolved, interval: 1 };
     }
     return resolved;
-  }, [parsed, startDate, caps]);
+  }, [parsed, startDay, caps]);
 
   const update = (next: ParsedRule) => onChange(buildRRule(next));
 
@@ -121,7 +128,7 @@ export function RecurrenceSelector({
   const monthlyOptions = useMemo(
     () =>
       isMonthlyish
-        ? deriveMonthlyOptions(startDate, {
+        ? deriveMonthlyOptions(startDay, {
             relative: relativeAllowed,
             // Its own axis, and it was never asked: a source that repeats on
             // the item's own day and cannot take a separate day number still
@@ -130,7 +137,7 @@ export function RecurrenceSelector({
             dayOfMonth: caps.monthly_day_of_month,
           })
         : [],
-    [isMonthlyish, startDate, relativeAllowed, caps.monthly_day_of_month],
+    [isMonthlyish, startDay, relativeAllowed, caps.monthly_day_of_month],
   );
   const selectedOptionKey = monthlyOptionKey(rule);
   const intervalEnabled = intervalSupported(rule.freq, caps);
@@ -394,20 +401,6 @@ function applyMonthlyOption(rule: ParsedRule, opt: MonthlyOption): ParsedRule {
     monthlyMode: 'WEEKDAY',
     relOrdinal: opt.ordinal,
     relWeekday: opt.weekday,
-  };
-}
-
-/** Fill start-derived defaults for any monthly/yearly field a parsed
- *  rule left unspecified (0 / ''), so the controls always render
- *  concrete values and `buildRRule` emits a complete rule. */
-function resolveAgainstStart(parsed: ParsedRule, start: Date): ParsedRule {
-  if (parsed.freq !== 'MONTHLY' && parsed.freq !== 'YEARLY') return parsed;
-  return {
-    ...parsed,
-    byMonthDay: parsed.byMonthDay || start.getDate(),
-    relOrdinal: parsed.relOrdinal || nthWeekdayOfMonth(start),
-    relWeekday: parsed.relWeekday || JS_DAY_TO_RRULE[start.getDay()],
-    byMonth: parsed.byMonth || start.getMonth() + 1,
   };
 }
 

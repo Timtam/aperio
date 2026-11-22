@@ -20,7 +20,7 @@ describe('RecurrenceSelector interval field', () => {
       <RecurrenceSelector
         value="FREQ=WEEKLY;INTERVAL=1"
         onChange={onChange}
-        start={new Date(2026, 0, 7)}
+        startDay="2026-01-07"
       />,
     );
     return onChange;

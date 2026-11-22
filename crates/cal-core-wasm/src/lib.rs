@@ -441,6 +441,13 @@ pub fn recurrence_summary(input_json: &str) -> Result<String, JsValue> {
     rules::recurrence_summary(input_json).map_err(to_js)
 }
 
+/// The parts a repeat rule takes from the day a series starts on: weekday,
+/// day of the month, nth weekday, last week, month (cal_core::day_parts).
+#[wasm_bindgen(js_name = dayParts)]
+pub fn day_parts(day_key: &str) -> String {
+    rules::day_parts(day_key)
+}
+
 /// The calendar week each day is shown in, with its ISO number (DESIGN §5.2).
 #[wasm_bindgen(js_name = calendarWeeks)]
 pub fn calendar_weeks(input_json: &str) -> Result<String, JsValue> {

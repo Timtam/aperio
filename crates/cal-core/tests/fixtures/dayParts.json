@@ -1,0 +1,143 @@
+{
+  "about": "The parts a repeat rule takes from the day a series starts on (cal_core::day_parts): its weekday as an RRULE code, its day of the month, which of the month's weekdays of its kind it is (1-5), whether it lies in the month's last seven days (where \"last <weekday>\" is offered), and its month. Computed independently with Python's datetime and calendar.monthrange; the core and both surfaces read this file.",
+  "rows": [
+    {
+      "day": "2026-01-31",
+      "expect": {
+        "weekday": "SA",
+        "dayOfMonth": 31,
+        "nthWeekday": 5,
+        "inLastWeek": true,
+        "month": 1
+      }
+    },
+    {
+      "day": "2026-02-28",
+      "expect": {
+        "weekday": "SA",
+        "dayOfMonth": 28,
+        "nthWeekday": 4,
+        "inLastWeek": true,
+        "month": 2
+      }
+    },
+    {
+      "day": "2028-02-29",
+      "expect": {
+        "weekday": "TU",
+        "dayOfMonth": 29,
+        "nthWeekday": 5,
+        "inLastWeek": true,
+        "month": 2
+      }
+    },
+    {
+      "day": "2026-11-22",
+      "expect": {
+        "weekday": "SU",
+        "dayOfMonth": 22,
+        "nthWeekday": 4,
+        "inLastWeek": false,
+        "month": 11
+      }
+    },
+    {
+      "day": "2026-11-24",
+      "expect": {
+        "weekday": "TU",
+        "dayOfMonth": 24,
+        "nthWeekday": 4,
+        "inLastWeek": true,
+        "month": 11
+      }
+    },
+    {
+      "day": "2026-12-01",
+      "expect": {
+        "weekday": "TU",
+        "dayOfMonth": 1,
+        "nthWeekday": 1,
+        "inLastWeek": false,
+        "month": 12
+      }
+    },
+    {
+      "day": "2026-03-29",
+      "expect": {
+        "weekday": "SU",
+        "dayOfMonth": 29,
+        "nthWeekday": 5,
+        "inLastWeek": true,
+        "month": 3
+      }
+    },
+    {
+      "day": "2026-05-31",
+      "expect": {
+        "weekday": "SU",
+        "dayOfMonth": 31,
+        "nthWeekday": 5,
+        "inLastWeek": true,
+        "month": 5
+      }
+    },
+    {
+      "day": "2027-01-01",
+      "expect": {
+        "weekday": "FR",
+        "dayOfMonth": 1,
+        "nthWeekday": 1,
+        "inLastWeek": false,
+        "month": 1
+      }
+    },
+    {
+      "day": "2026-09-30",
+      "expect": {
+        "weekday": "WE",
+        "dayOfMonth": 30,
+        "nthWeekday": 5,
+        "inLastWeek": true,
+        "month": 9
+      }
+    },
+    {
+      "day": "2026-06-24",
+      "expect": {
+        "weekday": "WE",
+        "dayOfMonth": 24,
+        "nthWeekday": 4,
+        "inLastWeek": true,
+        "month": 6
+      }
+    },
+    {
+      "day": "2026-06-23",
+      "expect": {
+        "weekday": "TU",
+        "dayOfMonth": 23,
+        "nthWeekday": 4,
+        "inLastWeek": false,
+        "month": 6
+      }
+    },
+    {
+      "day": "2100-03-01",
+      "expect": {
+        "weekday": "MO",
+        "dayOfMonth": 1,
+        "nthWeekday": 1,
+        "inLastWeek": false,
+        "month": 3
+      }
+    }
+  ],
+  "refused": [
+    "",
+    "2026-02-30",
+    "2026-13-01",
+    "26-01-01",
+    "2026-1-1",
+    "today"
+  ]
+}
