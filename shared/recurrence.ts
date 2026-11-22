@@ -2,6 +2,7 @@ import { RRule, rrulestr } from 'rrule';
 
 import { compareMachineStrings } from './ordering';
 import { expansionClock, seriesClockZone, type SeriesExpansionClock } from './seriesClock';
+import { seriesEnd, untilOn, type SeriesEnd } from './wallClock';
 
 // Event recurrence expansion, shared by desktop + mobile. Generic over a
 // minimal `RecurringEventLike` so it needs neither side's full `CalendarEvent`
@@ -76,16 +77,13 @@ export function expandEvent<E extends RecurringEventLike>(
   const clock = expansionClock(event.all_day === true, event.recurrence.tzid);
   const byDay = clock === 'device-days';
   const tzid = zoneOfClock(clock, event.recurrence.tzid);
+  const facts = endFacts(event);
 
   let occurrences: Date[];
   try {
     occurrences = tzid
-      ? zonedOccurrences(event.recurrence.rrule, dtstart, tzid, range, byDay)
-      : utcOccurrences(
-          byDay ? untilOnClock(event.recurrence.rrule, 'UTC', true) : event.recurrence.rrule,
-          dtstart,
-          range,
-        );
+      ? zonedOccurrences(event.recurrence.rrule, dtstart, tzid, range, facts)
+      : utcOccurrences(untilOnClock(event.recurrence.rrule, facts, null), dtstart, range);
   } catch (err) {
     // Bad rule string — fall back to showing the master at its stored start so
     // the user can still see and edit it.
@@ -189,7 +187,7 @@ function wallRule(series: {
       try {
         return {
           rule: buildRule(
-            untilOnClock(series.recurrence.rrule, zone, readsCalendarDays(series)),
+            untilOnClock(series.recurrence.rrule, endFacts(series), zone),
             realToWall(dtstart, zone),
           ),
           zone,
@@ -198,9 +196,7 @@ function wallRule(series: {
         // A zone `Intl` cannot load reads on UTC, as `zonedOccurrences` does.
       }
     }
-    const body = readsCalendarDays(series)
-      ? untilOnClock(series.recurrence.rrule, 'UTC', true)
-      : series.recurrence.rrule;
+    const body = untilOnClock(series.recurrence.rrule, endFacts(series), null);
     return { rule: buildRule(body, dtstart), zone: null };
   } catch {
     return null;
@@ -348,7 +344,7 @@ function zonedOccurrences(
   dtstart: Date,
   tzid: string,
   range: { start: Date; end: Date },
-  byDay = false,
+  facts: EndFacts,
 ): Date[] {
   let dtstartWall: Date;
   try {
@@ -357,11 +353,11 @@ function zonedOccurrences(
     // Unresolvable IANA zone (a typo, a Windows zone name, or a custom VTIMEZONE
     // id `Intl` can't load) — degrade to UTC expansion rather than dropping the
     // series. Worst case is the pre-fix behaviour, never worse.
-    return utcOccurrences(byDay ? untilOnClock(rruleBody, tzid, true) : rruleBody, dtstart, range);
+    return utcOccurrences(untilOnClock(rruleBody, facts, null), dtstart, range);
   }
   // Iterate UNTIL in wall-clock space too, else a bounded series' final cutoff is
   // off by the zone offset.
-  const rule = buildRule(untilOnClock(rruleBody, tzid, byDay), dtstartWall);
+  const rule = buildRule(untilOnClock(rruleBody, facts, tzid), dtstartWall);
   // Pad the wall-clock window a day each side (any zone offset is < 24h) so no
   // occurrence near a real-range edge is missed; the precise real filter trims.
   const lo = new Date(realToWall(range.start, tzid).getTime() - DAY_MS);
@@ -448,55 +444,87 @@ function wallToReal(wall: Date, tzid: string): Date {
   return new Date(Math.max(candBefore, candAfter)); // gap → round forward
 }
 
-/**
- * The rule with its UNTIL as the wall-clock bound it is iterated against.
- *
- * A timed series' UTC UNTIL is an instant: it is shifted into the zone's wall
- * time. A series of DAYS (decision 201) reads its UNTIL by its digits as
- * written, on its day clock — a date covers that whole day, a date-time is
- * that wall time, with or without `Z`: "until 31 December" ends with the 31st
- * however it is spelled. The repeat field writes `…1231T235959Z`, and shifted
- * from UTC into Berlin's wall time that was 1 January 00:59, which put 1
- * January in the series; it is the day the field shows, and the one the
- * sentence names (`lastOccurrenceDayKey`). A date read as its midnight lost
- * the last day of a series whose days begin later than midnight on this
- * device — one written in another zone. The reminders read it the same way
- * (`until_on_day_clock` in host-core).
- */
-function untilOnClock(rruleBody: string, tzid: string, byDay: boolean): string {
-  if (!byDay) return shiftUntilToWall(rruleBody, tzid);
-  return rruleBody.replace(
-    /(UNTIL=)(\d{8})(?:T(\d{6})Z?)?(?=;|$)/i,
-    (_whole, key: string, date: string, time: string | undefined) =>
-      `${key}${date}T${time ?? '235959'}Z`,
-  );
+/** What the core needs to read a series' end: its start, whether it is
+ *  all-day, and the zone name it stores. */
+interface EndFacts {
+  start: string;
+  allDay: boolean;
+  tzid: string | null;
 }
 
-/** Rewrite a real-UTC `UNTIL=…Z` bound into wall-clock space so it lines up with
- *  the wall-clock iteration above; other UNTIL forms are left untouched. */
-function shiftUntilToWall(rruleBody: string, tzid: string): string {
-  return rruleBody.replace(
-    /UNTIL=(\d{8})T(\d{6})Z/i,
-    (whole, d: string, t: string) => {
-      const real = new Date(
-        Date.UTC(
-          Number(d.slice(0, 4)),
-          Number(d.slice(4, 6)) - 1,
-          Number(d.slice(6, 8)),
-          Number(t.slice(0, 2)),
-          Number(t.slice(2, 4)),
-          Number(t.slice(4, 6)),
-        ),
-      );
-      if (Number.isNaN(real.getTime())) return whole;
-      const w = realToWall(real, tzid);
-      const p2 = (n: number): string => String(n).padStart(2, '0');
-      return (
-        `UNTIL=${w.getUTCFullYear()}${p2(w.getUTCMonth() + 1)}${p2(w.getUTCDate())}` +
-        `T${p2(w.getUTCHours())}${p2(w.getUTCMinutes())}${p2(w.getUTCSeconds())}Z`
-      );
-    },
-  );
+function endFacts(series: {
+  start: string;
+  all_day?: boolean;
+  recurrence?: { tzid?: string | null } | null;
+}): EndFacts {
+  return {
+    start: series.start,
+    allDay: series.all_day === true,
+    tzid: series.recurrence?.tzid ?? null,
+  };
+}
+
+/**
+ * The core's reading of a series' end, asked once per series and clock: the
+ * views expand every series on screen on every render, and the answer only
+ * changes with the rule, the start, the zone or the device's zone. Kept small,
+ * since an edited rule asks with every keystroke.
+ */
+const endReadings = new Map<string, SeriesEnd | null>();
+function readEnd(rruleBody: string, facts: EndFacts, deviceZone: string | null): SeriesEnd | null {
+  const key = JSON.stringify([rruleBody, facts.start, facts.allDay, facts.tzid, deviceZone]);
+  const known = endReadings.get(key);
+  if (known !== undefined) return known;
+  const answer = seriesEnd(rruleBody, facts.start, facts.allDay, facts.tzid, deviceZone);
+  const reading = answer?.end ?? null;
+  if (endReadings.size >= 2000) endReadings.clear();
+  endReadings.set(key, reading);
+  return reading;
+}
+
+/** `YYYY-MM-DDTHH:MM:SS`, with or without `Z`, as an RRULE's UTC date-time. */
+function ruleDateTime(text: string): string {
+  return `${text.replace(/[-:]/g, '').slice(0, 15)}Z`;
+}
+
+/**
+ * The rule with its UNTIL as the bound the views iterate it against, on the
+ * clock they expand the series on: `zoneInUse`, or UTC for `null`.
+ *
+ * How an end reads is the core's rule (`cal_core::read_series_end`,
+ * DESIGN-series-time-zone.md, decisions 101b and 105a to 116a), read on the
+ * clock the series repeats on: its zone, UTC, or for a series of days the
+ * device's days, by its digits (201).
+ * - Through a date (`…T235959Z` on a zone's clock that no cut wrote, a date)
+ *   and a wall time (a date-time without `Z`, a series of days' digits) go
+ *   in as that wall time: the views iterate in the clock's wall time. "Until
+ *   3 May" on a Berlin series at 00:30 no longer reaches 4 May 00:30, and one
+ *   in New York at 20:00 keeps its 3 May.
+ * - An instant goes in as its wall time on this device's reading of the zone,
+ *   the reading every occurrence gets, as before.
+ * - Where this device's `Intl` cannot use a zone the core reads, the series
+ *   expands on UTC, and the bound goes in as the instant the core names.
+ * An end the core cannot read stays as written, for rrule.js to judge. The
+ * reminders read the same answer (host-core `expand_occurrences`); both are
+ * pinned by `shared/contracts/eventOccurrences.json`.
+ */
+function untilOnClock(rruleBody: string, facts: EndFacts, zoneInUse: string | null): string {
+  if (!/UNTIL=/i.test(rruleBody)) return rruleBody;
+  const clock = expansionClock(facts.allDay, facts.tzid);
+  // A series of days reads its digits on the days the views expand it on.
+  const end = readEnd(rruleBody, facts, clock === 'device-days' ? zoneInUse : null);
+  if (end === null) return rruleBody;
+  let bound: string | null;
+  if (end.reading === 'instant' && end.at !== null) {
+    bound =
+      zoneInUse === null ? ruleDateTime(end.at) : ruleDateTime(realToWall(new Date(end.at), zoneInUse).toISOString());
+  } else if (clock === 'zone' && zoneInUse === null) {
+    bound = end.at === null ? null : ruleDateTime(end.at);
+  } else {
+    bound = ruleDateTime(end.wall);
+  }
+  if (bound === null) return rruleBody;
+  return rruleBody.replace(/UNTIL=[^;]*/i, `UNTIL=${bound}`);
 }
 
 /** A zone the core accepted, if THIS device's `Intl` can also use it; `null`
@@ -594,6 +622,29 @@ export function movedSeriesUntil(
 ): string | undefined {
   const match = /(?:^|;)\s*UNTIL=(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\s*(?:;|$)/i.exec(rrule);
   if (!match) return undefined;
+  // `…T235959Z` that reads as "through that date" on the series' clock
+  // (101b) is a date, not an instant: the core moves it by whole days and
+  // keeps its spelling, so the series keeps ending on the day it moved to.
+  // Moved as an instant across a clock change, it would no longer read so.
+  // Only where the moved series' time of day would make that spelling read
+  // as a cut (105a: New York at 19:00 in winter) is the day's end written as
+  // its instant on the series' clock instead, which reads the same day.
+  if (!allDay) {
+    const end = readEnd(rrule, { start: from, allDay, tzid: tzid ?? null }, null);
+    if (end?.reading === 'throughDay') {
+      const days = Math.round(
+        (Date.parse(seriesDayKey(to, tzid, allDay)) - Date.parse(seriesDayKey(from, tzid, allDay))) /
+          DAY_MS,
+      );
+      const day = new Date(Date.parse(end.wall.slice(0, 10)) + days * DAY_MS).toISOString().slice(0, 10);
+      const spelled = rrule.replace(/UNTIL=[^;]*/i, `UNTIL=${day.replace(/-/g, '')}T235959Z`);
+      if (readEnd(spelled, { start: to, allDay, tzid: tzid ?? null }, null)?.reading === 'throughDay') {
+        return undefined;
+      }
+      const at = untilOn(day, tzid ?? null)?.at;
+      return at === undefined ? undefined : ruleDateTime(at);
+    }
+  }
   const [, y, mo, d, h, mi, s] = match.map(Number);
   const until = Date.UTC(y, mo - 1, d, h, mi, s);
   if (Number.isNaN(until)) return undefined;
@@ -1057,7 +1108,7 @@ function untilInstantMs(until: string): number {
 export function truncateRRuleBefore(
   rrule: string,
   cutoff: Date,
-  opts: { allDay?: boolean } = {},
+  opts: { allDay?: boolean; tzid?: string | null; start?: string } = {},
 ): string {
   const lastKept = new Date(cutoff.getTime() - 1000);
   const body = rrule.trim().replace(/^RRULE:/i, '');
@@ -1074,14 +1125,33 @@ export function truncateRRuleBefore(
     }
     kept.push(part);
   }
-  // Keep whichever ends the series sooner, comparing on normalized instants so a
-  // date-only existing UNTIL and the computed bound rank chronologically. Re-emit
-  // in the series' own value type (date-only for all-day) regardless of which
-  // bound won, so an all-day series never carries a datetime UNTIL.
+  // Keep whichever ends the series sooner. With the series' start at hand the
+  // existing end reads as the views and the reminders read it
+  // (`cal_core::read_series_end`, 101b): `…T235959Z` on a zone's clock is the
+  // end of that day there, so a New York series at 20:00 cut on its last day
+  // ends before it, where the end of the UTC day let it stand twice. An end
+  // that wins goes back as it was written (an all-day series' as its date, the
+  // value type its start has); re-spelled through an instant, a date-only end
+  // became a UTC end of day and an all-day one moved to the next day east of
+  // Greenwich. Without the start, the end is compared on its UTC reading, as
+  // before.
   let boundMs = lastKept.getTime();
+  let keptEnd: string | null = null;
   if (existingUntil) {
-    const ex = untilInstantMs(existingUntil);
-    if (Number.isFinite(ex) && ex < boundMs) boundMs = ex;
+    const facts = { start: opts.start ?? '', allDay: opts.allDay === true, tzid: opts.tzid ?? null };
+    const read =
+      opts.start === undefined
+        ? null
+        : readEnd(body, facts, facts.allDay ? usableZone(localTimeZone()) : null);
+    const ex = read?.at != null ? Date.parse(read.at) : untilInstantMs(existingUntil);
+    if (Number.isFinite(ex) && ex < boundMs) {
+      boundMs = ex;
+      if (read !== null) keptEnd = existingUntil;
+    }
+  }
+  if (keptEnd !== null) {
+    kept.push(`UNTIL=${opts.allDay ? keptEnd.slice(0, 8) : keptEnd}`);
+    return kept.join(';');
   }
   const bound = new Date(boundMs);
   const finalUntil = opts.allDay
@@ -1107,7 +1177,7 @@ export function splitRRuleForEdit(
   rrule: string,
   cutoff: Date,
   occurrencesBeforeCutoff: number,
-  opts: { allDay?: boolean } = {},
+  opts: { allDay?: boolean; tzid?: string | null; start?: string } = {},
 ): { oldRule: string; newRule: string } {
   const oldRule = truncateRRuleBefore(rrule, cutoff, opts);
   return { oldRule, newRule: ruleFromCut(rrule, occurrencesBeforeCutoff) };

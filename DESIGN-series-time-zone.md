@@ -1414,8 +1414,17 @@ Handy im selben PR.
    der Serie, mit der Grenze als Wanduhrzeit, dem letzten Zeitpunkt davor
    und dem letzten Tag, den sie erreicht (101b, 105a, 108b, 109a, 111a,
    115a). Die Schutzregel rechnet ohne Aufklappen; 23 Zeilen in
-   `wallClock.json`, gegen Nodes ICU-Daten geprüft. Noch liest sie niemand:
-   Ansichten und Erinnerungen folgen im nächsten Schritt.
+   `wallClock.json`, gegen Nodes ICU-Daten geprüft. Gebaut, Schritt 6:
+   Ansichten, Erinnerungen, Schnitt, Verschieben und der Zwischenspeicher
+   lesen ein Ende über diese Regel (101b live). Eine Berliner Serie um 00:30
+   mit Ende „3. Mai“ reicht nicht mehr in den 4. Mai, eine New Yorker um
+   20:00 behält ihren letzten Abend; ein Schnitt am letzten Abend endet
+   davor; ein Datum ohne Uhrzeit und eine Uhrzeit ohne `Z` lesen Ansichten
+   und Erinnerungen jetzt gleich (115a), und ein Ende vor dem Beginn lässt
+   auch die Erinnerungen schweigen (112a). Wird eine Serie auf die Uhrzeit
+   verschoben, an der die Schutzregel ihr Ende als Schnitt läse, wird es als
+   Tagesende auf ihrer Uhr geschrieben. Der Zwischenspeicher lädt einmal neu
+   (Generation 10).
 9. **Die Kern-Regel für den Zonenwechsel (15a)** — `feat(core): changing the clock a series repeats on`.
    `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die
@@ -1526,7 +1535,11 @@ Handy im selben PR.
   Uhrzeit ab 24 Uhr weniger dem Abstand der Zone zu UTC (New York ab 19:00, im
   Sommer ab 20:00; Los Angeles ab 16:00, im Sommer ab 17:00). Nach einem Schnitt
   bei Exchange liest Aperio das Enddatum so zurück und irrt in zwei Fenstern um
-  einen Tag (255).
+  einen Tag (255). **Behoben mit Stufe 8, Schritt 6 (101b):** Ansichten,
+  Erinnerungen, Schnitt, Verschieben und der Zwischenspeicher lesen
+  `…T235959Z` auf der Uhr der Serie als „bis zu diesem Datum“. Übrig bleibt
+  der blinde Fleck der Schutzregel (105a): Ein echtes Ende genau um 19:00 New
+  York (im Sommer 20:00) liest weiter als Zeitpunkt.
 - **Lange Listen auf dem Handy.** Virtualisierte Listen können Zeilen vor dem
   Wischen verbergen; alle 313 Zeilen zu zeichnen kann auf alten Android-Geräten
   langsam sein.

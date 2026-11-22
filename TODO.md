@@ -1333,8 +1333,10 @@ Vorschläge sind nicht aufgenommen.
       (tzid ohne Zone, gespeichert Berlin oder `w_europe()`, im Winter
       angelegt, im Sommer geschnitten). Gefunden in der ersten Prüfrunde von
       #125 (2026-10-17), älter als #125.
-- [ ] **Schnitt ab einem geänderten letzten Termin westlich von UTC schreibt
-      nichts.** Eine Serie täglich 20:00 New York mit Ende 5.11. liest Aperio
+- [x] **Schnitt ab einem geänderten letzten Termin westlich von UTC schreibt
+      nichts.** Erledigt mit Stufe 8, Schritt 6 (2026-11-22, 101b): Das
+      Ende liest auf der Uhr der Serie, der Schnitt am 5.11. endet davor und
+      schreibt sein Ende. Eine Serie täglich 20:00 New York mit Ende 5.11. liest Aperio
       als `UNTIL=20261105T235959Z` zurück und zeigt den 5.11. nicht (255).
       Wurde der 5.11. in Outlook geändert, steht er als eigene Zeile; ein
       Schnitt oder Löschen ab dieser Zeile behält das frühere `UNTIL`
@@ -3584,6 +3586,14 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **„Bis 5. November“ heißt überall bis zum 5. November (Stufe 8, Schritt 6,
+  2026-11-22, 101b):** Ansichten, Erinnerungen, Schnitt, Verschieben und der
+  Zwischenspeicher lesen ein Serienende über die Kern-Regel. Eine Berliner
+  Serie um 00:30 zeigte einen Tag zu viel, eine New Yorker um 20:00 einen zu
+  wenig; ein Schnitt am letzten Abend einer New Yorker Serie ließ ihn doppelt
+  stehen. Ein Datum ohne Uhrzeit und eine Uhrzeit ohne Zone lesen Ansichten
+  und Erinnerungen jetzt gleich, und ein Ende vor dem Beginn klingelt nicht
+  mehr. Die Konten laden einmal neu.
   ↳ **Wie ein Serienende liest, steht im Kern (Stufe 8, Schritt 5, 2026-11-22,
   101b, 105a):** `…T235959Z` auf der Uhr einer Zone heißt „bis zu diesem
   Datum“, außer die Sekunde danach ist eine Uhrzeit der Regel (dann schrieb

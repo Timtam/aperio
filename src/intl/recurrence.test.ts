@@ -1118,3 +1118,76 @@ describe('an all-day series ends on the day its UNTIL names (201)', () => {
     });
   }
 });
+
+// DESIGN-series-time-zone.md, decision 101b: `…T235959Z` on a zone's clock is
+// "through that date" there, unless a cut wrote it (105a). A cut and a move
+// read an existing end the way the views and the reminders do.
+describe("a series' end on its own clock (101b)", () => {
+  it('lets a cut on the last evening of a New York series end it before that evening', () => {
+    // Daily 20:00 New York, through November 5. Cut at the November 5
+    // occurrence (01:00 UTC on November 6): the end of the UTC day spelled
+    // November 5 23:59:59 UTC, before the cut, so it won and the cut
+    // occurrence stood in both series.
+    const out = truncateRRuleBefore(
+      'FREQ=DAILY;UNTIL=20261105T235959Z',
+      new Date('2026-11-06T01:00:00.000Z'),
+      { tzid: 'America/New_York', start: '2026-11-02T01:00:00Z' },
+    );
+    expect(out).toBe('FREQ=DAILY;UNTIL=20261106T005959Z');
+  });
+
+  it('keeps an earlier end as it was written', () => {
+    expect(
+      truncateRRuleBefore('FREQ=DAILY;UNTIL=20260503T235959Z', new Date('2026-05-10T22:30:00.000Z'), {
+        tzid: 'Europe/Berlin',
+        start: '2026-04-01T22:30:00Z',
+      }),
+    ).toBe('FREQ=DAILY;UNTIL=20260503T235959Z');
+    // A date stays a date; re-spelled through an instant it became the end of
+    // the UTC day.
+    expect(
+      truncateRRuleBefore('FREQ=DAILY;UNTIL=20260503', new Date('2026-05-10T07:00:00.000Z'), {
+        tzid: 'Europe/Berlin',
+        start: '2026-05-01T07:00:00Z',
+      }),
+    ).toBe('FREQ=DAILY;UNTIL=20260503');
+  });
+
+  it('keeps an all-day series ending on the day its end names', () => {
+    // Re-spelled through its instant, the end of October 31 became November 1
+    // east of Greenwich.
+    const out = truncateRRuleBefore(
+      'FREQ=DAILY;UNTIL=20261031T235959Z',
+      new Date(2026, 10, 5),
+      { allDay: true, start: new Date(2026, 9, 1).toISOString() },
+    );
+    expect(out).toBe('FREQ=DAILY;UNTIL=20261031');
+  });
+
+  it('leaves an end through a day to the core when the series moves by days', () => {
+    // The core moves the digits and keeps the spelling.
+    expect(
+      movedSeriesUntil(
+        'FREQ=DAILY;UNTIL=20261105T235959Z',
+        'America/New_York',
+        false,
+        '2026-11-02T01:00:00.000Z',
+        '2026-11-09T01:00:00.000Z',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('writes the end of the day as an instant where the moved time would read it as a cut', () => {
+    // Moved from 20:00 to 19:00 New York, "through November 5" spelled
+    // `…T235959Z` would read as a cut: the second after it is 19:00 there.
+    expect(
+      movedSeriesUntil(
+        'FREQ=DAILY;UNTIL=20261105T235959Z',
+        'America/New_York',
+        false,
+        '2026-11-02T01:00:00.000Z',
+        '2026-11-02T00:00:00.000Z',
+      ),
+    ).toBe('20261106T045959Z');
+  });
+});
