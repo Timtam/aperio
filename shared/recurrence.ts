@@ -748,6 +748,42 @@ export function localTimeZone(): string | null {
 let deviceFormatter: Intl.DateTimeFormat | null = null;
 
 /**
+ * The device's zone name exactly as the runtime reports it (`Asia/Calcutta`,
+ * `Europe/Kiev`, `UTC`, `+00:00`), or `null` when it reports none. The zone
+ * list reads it so (decision 118a): the core resolves the name itself, and
+ * a pick of the device's own zone is written in this spelling where the
+ * device cannot use tzdata's (117a). {@link localTimeZone} is the same name
+ * read as a series clock.
+ */
+export function deviceZoneName(): string | null {
+  try {
+    deviceFormatter ??= new Intl.DateTimeFormat();
+    return deviceFormatter.resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The listed zones this device's clock library refuses, read once. */
+let refusedListed: readonly string[] | null = null;
+
+/**
+ * The names this device's clock library refuses, for the zone list's groups
+ * (`unusable`, 127a): every listed zone it refuses, read once per session,
+ * and the series' stored name in its own spelling when it refuses that (a
+ * group keeps the stored zone as it is spelled, 120a). `listed` is the zone
+ * list's names by position.
+ */
+export function unusableZones(listed: readonly string[], stored: string | null): string[] {
+  refusedListed ??= Object.freeze(listed.filter((zone) => !zoneUsableHere(zone)));
+  const refused = [...refusedListed];
+  if (stored !== null && stored !== '' && !zoneUsableHere(stored) && !refused.includes(stored)) {
+    refused.push(stored);
+  }
+  return refused;
+}
+
+/**
  * Stamp the host's local zone onto a freshly-created TIMED recurring rule so it
  * expands DST-correctly — a series created here at 19:00 keeps 19:00 across DST,
  * the same guarantee a zoned CalDAV series gets. Leaves all-day rules (they use

@@ -2344,6 +2344,21 @@
       "calendarHint": "Neue Termine in diesem Kalender tragen sie automatisch. Im Editor kannst du trotzdem eine andere wählen oder keine."
     },
     "seriesTimeZone": {
+      "title": "Zeitzone der Serie",
+      "searchLabel": "Zeitzone suchen",
+      "listLabel": "Zeitzonen",
+      "headCurrent": "Aktuell: {{entry}}",
+      "headDevice": "Dieses Gerät: {{entry}}",
+      "notListed": "{{name}} (nicht in Aperios Liste)",
+      "unreadable": "{{name}} (Aperio kann diese Zeitzone nicht lesen; die Serie wiederholt sich nach UTC)",
+      "mark": {
+        "calendar": "{{entry}} (dieser Kalender kann diese Zeitzone nicht speichern)",
+        "device": "{{entry}} (dieses Gerät kann die Zeitzone nicht verwenden)"
+      },
+      "markGroup": {
+        "calendar": "{{entry}} (dieser Kalender kann keine dieser Zeitzonen speichern)",
+        "device": "{{entry}} (dieses Gerät kann keine dieser Zeitzonen verwenden)"
+      },
       "entry": "{{city}}, {{region}}, {{offset}}",
       "entryWithArea": "{{city}} ({{area}}), {{region}}, {{offset}}",
       "entryNoOffset": "{{city}}, {{region}}",

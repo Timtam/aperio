@@ -3611,6 +3611,14 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   lesen und ein Ende, das ein Zeitpunkt ist, als sein Datum schreiben,
   zusammen mit dem Ende-Feld nach 108b. Zwei Teilbauten scheiterten in der
   Prüfung (DESIGN, 107b).
+  ↳ **Die Auswahl „Zeitzone der Serie“ (Stufe 11, Dialoge, 2026-11-22, 130a bis
+  132a):** Desktop und Handy haben den Dialog: Suchfeld „Zeitzone suchen“ mit
+  dem ersten Fokus, die Zählzeile, die Liste der Gruppen und Städte mit
+  Markierungen, „dieser Kalender kann … nicht speichern“. Noch an keinen Knopf
+  gebunden; das kommt mit den Editoren (Stufe 12). Die Handy-Teile sind ohne
+  Build gebaut und warten auf die gesammelte Prüfung.
+  🚩 Vor dem nächsten Handy-Build: die native Bibliothek neu vendoren (die
+  Tür `zoneGroups` ist neu), sonst scheitert der Dialog beim Öffnen.
   ↳ **Die Zonenliste als Gruppen im Kern (Stufe 11, Kern, 2026-11-22, 118a bis
   129a):** Ohne Suche zeigt die Liste 62 Gruppen von Zonen mit denselben
   Regeln ab heute statt 313 Städte, jede mit ihrer Uhr zuerst und bis zu drei
