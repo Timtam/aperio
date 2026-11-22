@@ -523,6 +523,20 @@ jobs:
         if: needs.changes.outputs.frontend == 'true'
         run: npm test
 
+      # The run above is in the runner's zone, UTC, where the device's clock and
+      # UTC agree, so a test that mixes them up passes. Two more runs put the
+      # device west of UTC with daylight saving (New York) and far east of it
+      # (Auckland, +13 in its summer), where a UTC midnight is another day. Node
+      # reads TZ from the environment; the guard first proves it took, so a
+      # runner that ignored it fails here instead of passing in UTC again.
+      - name: Vitest in other device zones
+        if: needs.changes.outputs.frontend == 'true'
+        run: |
+          for zone in America/New_York Pacific/Auckland; do
+            TZ="$zone" node -e "const z = Intl.DateTimeFormat().resolvedOptions().timeZone; const o = new Date().getTimezoneOffset(); if (z !== process.env.TZ || o === 0) { console.error('TZ not applied: ' + z + ', offset ' + o); process.exit(1); } console.log('device zone ' + z + ', offset ' + o);"
+            TZ="$zone" npx vitest run
+          done
+
   # Build the per-OS release zips (Linux x64, Windows x64,
   # Windows ARM64, macOS universal) on every commit / PR build,
   # not just on tagged releases — each lands as a downloadable

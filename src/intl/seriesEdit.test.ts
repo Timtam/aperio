@@ -105,15 +105,24 @@ describe('exceptionsAtSeriesTime', () => {
     });
   });
 
-  it('moves an exception a day when the new time crosses midnight on the series clock', () => {
-    // 21:00 in New York becomes 01:00 the next day there, on the same date on
-    // the device. The occurrences move a day on the series' clock; an exception
-    // left on its day would cancel the occurrence before the one it cancelled.
-    const daily = { rrule: 'FREQ=DAILY', exceptions: ['2026-06-18T01:00:00.000Z'], tzid: NY };
-    expect(
-      exceptionsAtSeriesTime(daily, '2026-06-15T01:00:00.000Z', '2026-06-15T05:00:00.000Z', false),
-    ).toEqual({ ...daily, exceptions: ['2026-06-18T05:00:00.000Z'] });
-  });
+  // The case needs a device on which both instants share a date: one on New
+  // York's clock (or within an hour or so of it) sees the user change the
+  // date as well, which moves only the series start, and skips here by name.
+  const sameDeviceDate =
+    new Date('2026-06-15T01:00:00.000Z').toDateString() ===
+    new Date('2026-06-15T05:00:00.000Z').toDateString();
+  it.skipIf(!sameDeviceDate)(
+    'moves an exception a day when the new time crosses midnight on the series clock (device date unchanged)',
+    () => {
+      // 21:00 in New York becomes 01:00 the next day there, on the same date on
+      // the device. The occurrences move a day on the series' clock; an exception
+      // left on its day would cancel the occurrence before the one it cancelled.
+      const daily = { rrule: 'FREQ=DAILY', exceptions: ['2026-06-18T01:00:00.000Z'], tzid: NY };
+      expect(
+        exceptionsAtSeriesTime(daily, '2026-06-15T01:00:00.000Z', '2026-06-15T05:00:00.000Z', false),
+      ).toEqual({ ...daily, exceptions: ['2026-06-18T05:00:00.000Z'] });
+    },
+  );
 
   it('keeps exceptions on their day for a rule that names its weekdays', () => {
     // Mondays at 21:00 in New York, moved to 01:00 there: the editors write the

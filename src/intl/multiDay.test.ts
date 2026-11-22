@@ -9,6 +9,14 @@ import {
   multiDayInfo,
 } from './multiDay';
 
+/** An all-day boundary as Aperio keeps it: the device's local midnight of
+ *  `key`, written in UTC. A UTC midnight is the evening before west of UTC,
+ *  where these cases read a day early. */
+function day(key: string): string {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toISOString();
+}
+
 function weekStartingMonday(year: number, month: number, day: number): Date[] {
   const out: Date[] = [];
   for (let i = 0; i < 7; i++) {
@@ -24,8 +32,8 @@ function mkEvent(over: Partial<CalendarEvent>): CalendarEvent {
     title: 'Urlaub',
     description: null,
     location: null,
-    start: '2026-05-20T00:00:00Z',
-    end: '2026-06-03T00:00:00Z',
+    start: day('2026-05-20'),
+    end: day('2026-06-03'),
     all_day: true,
     recurrence: null,
     color_label: null,
@@ -51,16 +59,16 @@ describe('daysCoveredKeys', () => {
 
   it('falls back to a single key when DTEND equals DTSTART', () => {
     const ev = mkEvent({
-      start: '2026-05-20T00:00:00Z',
-      end: '2026-05-20T00:00:00Z',
+      start: day('2026-05-20'),
+      end: day('2026-05-20'),
     });
     expect(daysCoveredKeys(ev)).toEqual(['2026-05-20']);
   });
 
   it('emits one key for a single-day all-day event', () => {
     const ev = mkEvent({
-      start: '2026-05-20T00:00:00Z',
-      end: '2026-05-21T00:00:00Z',
+      start: day('2026-05-20'),
+      end: day('2026-05-21'),
     });
     expect(daysCoveredKeys(ev)).toEqual(['2026-05-20']);
   });
@@ -109,8 +117,8 @@ describe('multiDayInfo', () => {
 
   it('returns null for a single-day all-day event', () => {
     const single = mkEvent({
-      start: '2026-05-20T00:00:00Z',
-      end: '2026-05-21T00:00:00Z',
+      start: day('2026-05-20'),
+      end: day('2026-05-21'),
     });
     expect(multiDayInfo(single, new Date(2026, 4, 20))).toBeNull();
   });
@@ -216,8 +224,8 @@ describe('buildAllDayBars', () => {
 
   it('spans a single-day all-day event over one column', () => {
     const ev = mkEvent({
-      start: '2026-05-20T00:00:00Z',
-      end: '2026-05-21T00:00:00Z',
+      start: day('2026-05-20'),
+      end: day('2026-05-21'),
     });
     const bars = buildAllDayBars([ev], week);
     expect(bars).toHaveLength(1);
@@ -232,8 +240,8 @@ describe('buildAllDayBars', () => {
     // 2026-05-18 sits in column 1 (Mon); the vacation began before the
     // visible week and runs into the next one.
     const ev = mkEvent({
-      start: '2026-05-15T00:00:00Z',
-      end: '2026-05-30T00:00:00Z',
+      start: day('2026-05-15'),
+      end: day('2026-05-30'),
     });
     const bars = buildAllDayBars([ev], week);
     expect(bars).toHaveLength(1);
@@ -246,18 +254,18 @@ describe('buildAllDayBars', () => {
   it('packs three overlapping all-day events into three lanes', () => {
     const a = mkEvent({
       id: 'a',
-      start: '2026-05-18T00:00:00Z',
-      end: '2026-05-21T00:00:00Z', // Mon–Wed
+      start: day('2026-05-18'),
+      end: day('2026-05-21'), // Mon–Wed
     });
     const b = mkEvent({
       id: 'b',
-      start: '2026-05-19T00:00:00Z',
-      end: '2026-05-22T00:00:00Z', // Tue–Thu
+      start: day('2026-05-19'),
+      end: day('2026-05-22'), // Tue–Thu
     });
     const c = mkEvent({
       id: 'c',
-      start: '2026-05-20T00:00:00Z',
-      end: '2026-05-23T00:00:00Z', // Wed–Fri
+      start: day('2026-05-20'),
+      end: day('2026-05-23'), // Wed–Fri
     });
     const bars = buildAllDayBars([a, b, c], week);
     expect(bars.map((x) => x.lane).sort()).toEqual([0, 1, 2]);
@@ -269,13 +277,13 @@ describe('buildAllDayBars', () => {
   it('reuses a lane when the next bar starts after the previous ends', () => {
     const earlyWeek = mkEvent({
       id: 'early',
-      start: '2026-05-18T00:00:00Z',
-      end: '2026-05-20T00:00:00Z', // Mon–Tue
+      start: day('2026-05-18'),
+      end: day('2026-05-20'), // Mon–Tue
     });
     const lateWeek = mkEvent({
       id: 'late',
-      start: '2026-05-21T00:00:00Z',
-      end: '2026-05-23T00:00:00Z', // Thu–Fri
+      start: day('2026-05-21'),
+      end: day('2026-05-23'), // Thu–Fri
     });
     const bars = buildAllDayBars([earlyWeek, lateWeek], week);
     // Both can share lane 0 — they don't overlap.

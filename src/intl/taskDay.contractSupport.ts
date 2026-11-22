@@ -44,7 +44,18 @@ export interface OnDayInput {
 export type OnDayAnswer = Record<string, DayTaskRow[]>;
 
 export function answerOnDay(input: OnDayInput, baseTask: Task): OnDayAnswer {
-  const tasks = input.tasks.map((over) => ({ ...baseTask, ...over }) as Task);
+  // The fixture names the day a task was ticked off (`completed_day`, which
+  // the core reads). This side derives it from `completed_at` on the device's
+  // clock, so the instant goes in as that day's local noon: the fixture's
+  // `…T12:00:00Z` is the next day east of UTC+12 (Auckland, Kiritimati).
+  const tasks = input.tasks.map((over) => {
+    const task = { ...baseTask, ...over } as Task & { completed_day?: string };
+    if (task.completed_day) {
+      const [y, m, d] = task.completed_day.split('-').map(Number);
+      task.completed_at = new Date(y, m - 1, d, 12).toISOString();
+    }
+    return task as Task;
+  });
   const visible = new Set(input.completedVisible ?? []);
   const isCompletedVisible =
     input.completedVisible === undefined ? undefined : (listId: string) => visible.has(listId);
