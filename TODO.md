@@ -3584,6 +3584,13 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **Formularfelder mit Uhr (Stufe 8, Schritt 3, 2026-11-22, 102a):**
+  Beginn und Ende stehen als Felder auf der Uhr der Serie oder der des
+  Geräts (`shared/clockFields.ts`). Ein Feld, in das niemand tippt, hält
+  seinen gespeicherten Zeitpunkt auf die Sekunde, auch über einen Wechsel
+  der Uhr hin und zurück; eine getippte Uhrzeit in der Frühjahrs-Lücke ist
+  eine Antwort mit den Teilen der Meldung; der Beginn nimmt das Ende um die
+  verstrichene Zeit mit. Noch nicht in den Editoren.
   ↳ **Vitest in drei Zonen (Stufe 8, #186, 2026-11-22):** Die CI lässt die
   Suite außer in UTC auch in New York und Auckland laufen, hinter einem
   Wächter, der prüft, dass die Zone greift. Vier Tests, die nur in UTC

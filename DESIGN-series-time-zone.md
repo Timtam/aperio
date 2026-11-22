@@ -788,7 +788,11 @@ neuen Uhr, ausgehend von den aktuellen Werten im Formular, also bleiben Änderun
 von vorher erhalten. Angesagt wird: „Zeitzone der Serie: New York. Die Serie
 beginnt zum selben Zeitpunkt: Sonntag, 13. September, 18:30 bis 19:30 auf dieser
 Uhr.“ Ein Hin- und Rückwechsel mit denselben Antworten ergibt genau die
-Ausgangswerte.
+Ausgangswerte. Gibt es Beginn oder Ende auf der bisherigen Uhr nicht (eine
+Lücke, oder ein halb getippter Wert), haben die Felder keinen Zeitpunkt: Beide
+bleiben wie getippt, wie bei „Wiederholung aus“, und auch beim Zurückwechseln,
+so dass der Fehler auf der Ausgangsuhr wiederkommt. Wird nur einer der beiden
+umgerechnet, läge das Ende auf einem anderen Tag als der Beginn.
 
 ### Die Wochentag-Frage (15a)
 
@@ -1389,8 +1393,21 @@ Handy im selben PR.
    Fixture `wallClock.json` (aus tzdatas Regeln von Hand, gegen Nodes
    ICU-Daten geprüft). Das WebAssembly-Modul trägt die Zonen (100a, 104a);
    der CI-Wächter lässt dort cal-zone zu und hält rrule und chrono-tz
-   draußen. Noch unsichtbar: Die Editoren lesen die Regel ab den nächsten
-   Schritten.
+   draußen. Gebaut, Schritt 3: Formularfelder mit Uhr
+   (`shared/clockFields.ts`), auf der Uhr der Serie oder der des Geräts.
+   Ein Feld, in das niemand tippt, hält seinen Zeitpunkt: den gespeicherten,
+   auf die Sekunde, auch in der zweiten Doppelstunde, und ebenso nach einem
+   Wechsel auf eine andere Uhr, so dass Hin- und Rückwechsel die
+   Ausgangswerte ergeben. Eine getippte Uhrzeit in einer Lücke ist eine
+   Antwort mit den Teilen der Meldung. Der Beginn nimmt das Ende um die
+   verstrichene Zeit mit (102a), gemessen an den Minuten, die die Felder
+   zeigen; eine übersprungene Uhrzeit zählt dabei mit dem Versatz vor der
+   Umstellung, wie RFC 5545 sie liest, so dass die Dauer stimmt, sobald der
+   Beginn berichtigt ist. Ein Ende in einer Lücke bleibt stehen, bis es
+   jemand ändert. Dazu die Prüfung „gleiche
+   Uhr wie das Gerät“ nach kanonischem Namen und die Uhr einer Serie, deren
+   Zone dieses Gerät nicht verwenden kann: UTC, mit dem Namen der Zone.
+   Noch unsichtbar: Die Editoren lesen das ab den Stufen 10 und 12.
 9. **Die Kern-Regel für den Zonenwechsel (15a)** — `feat(core): changing the clock a series repeats on`.
    `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die

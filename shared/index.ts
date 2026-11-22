@@ -55,6 +55,7 @@ export * from './signatures';
 export * from './calendarSelection';
 export * from './eventKey';
 export * from './eventDateTime';
+export * from './clockFields';
 export * from './accountSchema';
 export * from './deviceAccess';
 export * from './refreshErrors';
