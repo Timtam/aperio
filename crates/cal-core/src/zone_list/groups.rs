@@ -164,7 +164,10 @@ pub struct ZoneGroupsQuestion {
     #[serde(default)]
     #[cfg_attr(feature = "ts-export", ts(type = "\"all\" | \"none\" | Array<string>"))]
     pub calendar_zones: SeriesTimeZones,
-    /// Listed names this device's clock library refuses.
+    /// Names this device's clock library refuses: every listed name it
+    /// refuses, and the series' stored name in its own spelling when it
+    /// refuses that. A stored zone is kept as it is spelled (120a), so its
+    /// spelling decides, not its listed name.
     #[serde(default)]
     pub unusable: Vec<String>,
 }
@@ -322,6 +325,14 @@ mod compute {
             .map(|name| choice_of(Some(name), true));
         let device_position = device.as_ref().and_then(listed_at);
         let stored_position = listed_at(&choice_of(question.stored.as_deref(), true));
+        // The series' own zone is kept in its stored spelling (120a): the
+        // calendar must store its zone, and the device use that spelling.
+        let stored_choosable = question.stored.as_deref().is_some_and(|stored| {
+            stored_position.is_some_and(|position| {
+                question.calendar_zones.stores(listed[position])
+                    && !question.unusable.iter().any(|name| name == stored)
+            })
+        });
 
         let unusable: BTreeSet<&str> = question.unusable.iter().map(String::as_str).collect();
         let refused: Vec<Option<ZoneRefusal>> = listed
@@ -354,18 +365,21 @@ mod compute {
                 members.sort_by_cached_key(|position| rank_key(*position, &labels, &counts));
                 let rules = &rules[members[0]];
                 let in_group = |position: &usize| members.contains(position);
-                let pick = stored_position
-                    .filter(in_group)
-                    .map(|position| (position, PickSource::Stored))
-                    .into_iter()
-                    .chain(
-                        device_position
-                            .filter(in_group)
-                            .map(|position| (position, PickSource::Device)),
-                    )
-                    .chain(members.iter().map(|position| (*position, PickSource::Rank)))
-                    .find(|(position, _)| choosable(*position))
-                    .map(|(position, source)| GroupPick { position, source });
+                let stored = stored_position
+                    .filter(|position| stored_choosable && in_group(position))
+                    .map(|position| GroupPick {
+                        position,
+                        source: PickSource::Stored,
+                    });
+                let pick = stored.or_else(|| {
+                    device_position
+                        .filter(in_group)
+                        .map(|position| (position, PickSource::Device))
+                        .into_iter()
+                        .chain(members.iter().map(|position| (*position, PickSource::Rank)))
+                        .find(|(position, _)| choosable(*position))
+                        .map(|(position, source)| GroupPick { position, source })
+                });
                 let (named, more, refusal) = match pick {
                     Some(pick) => {
                         let others: Vec<usize> = members
@@ -426,13 +440,15 @@ mod compute {
             order.push(ZoneRef::Utc);
         }
 
-        // The rows above the list. "Aktuell" is left out where it would say
-        // the device's zone again: the same listed zone, or the same name.
+        // The rows above the list. "Aktuell" is left out where the device's
+        // row would say it again: the same listed zone, or the same name. A
+        // device name tzdata does not know has no row, so it hides nothing.
         let stored = choice_of(question.stored.as_deref(), false);
         let same_as_device = match (&stored, &device) {
             (ZoneChoice::Listed { position }, Some(ZoneChoice::Listed { position: own })) => {
                 position == own
             }
+            (_, None | Some(ZoneChoice::Utc | ZoneChoice::Unreadable { .. })) => false,
             _ => question
                 .stored
                 .as_deref()

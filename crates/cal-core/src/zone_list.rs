@@ -36,6 +36,8 @@ use serde::{Deserialize, Serialize};
 use crate::series_clock::{self, NameKind};
 
 mod groups;
+// Read only where groups are computed, with tzdata's rules.
+#[cfg(feature = "zones")]
 mod prominence;
 
 #[cfg(feature = "zones")]
@@ -883,6 +885,7 @@ mod table {
     use super::*;
     use std::collections::BTreeSet;
 
+    #[cfg(feature = "zones")]
     #[test]
     fn every_ranked_zone_is_listed_once() {
         let mut seen = BTreeSet::new();

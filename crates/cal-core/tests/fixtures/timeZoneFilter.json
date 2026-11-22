@@ -9,13 +9,13 @@
   "readBy": [
     "crates/cal-core/src/zone_list.rs (every row; the offsets, the order and the search rows with offsets only with the `zones` feature)",
     "crates/cal-ffi/src/lib.rs (labels, notListed, search with offsets, choice, offsets and order, through the phone's doors; the fold rows are the core's alone, since no door hands out the fold)",
-    "src/intl/zoneList.contract.test.ts (labels, notListed, the search rows without offsets and choice, through the WebAssembly door and the shared shell; the offsets come from the host there)",
+    "src/intl/zoneList.contract.test.ts (labels, notListed, every search row, the offsets and choice, through the WebAssembly door and the shared shell, which carries the offsets since stage 11)",
     "The group sections: crates/cal-core/src/zone_list.rs (with the `zones` feature), crates/cal-ffi/src/lib.rs and src/intl/zoneList.contract.test.ts through the groups door."
   ],
   "whereItLives": {
     "note": "Inside cal-core, like seriesClock.json: twelve adapter repositories compile cal-core, and an include_str! reaching out of the crate would break the day it moves. A crate reads its own files."
   },
-  "notInThisTable": "Whether a device's clock library can use a zone (the shell's Intl check), the words each surface writes (the offset's form \"UTC−04:00\", region names, the count line), and which rows open the list (\"Aktuell\", \"Dieses Gerät\"): later stages of the design.",
+  "notInThisTable": "Whether a device's clock library can use a zone (the shell's Intl check, handed to the groups as `unusable`) and the words each surface writes (the offset's form \"UTC−04:00\", region names, a group's clock and cities, the count line): the surfaces' own, pinned in src/intl/zoneList.contract.test.ts.",
   "shape": {
     "regions": "the region names a search question carries, in German and English, as the translations name them",
     "labels": "[{zone, city, area, region}]: listed zones and their parts",
@@ -248,7 +248,9 @@
     { "of": "America/Nuuk", "calendar": { "except": ["America/Scoresbysund", "Antarctica/Casey", "Antarctica/Troll", "Antarctica/Vostok"] }, "unusable": ["America/Nuuk"], "pick": null, "refusal": "device", "named": ["America/Nuuk", "America/Scoresbysund"], "more": 0, "note": "Exchange stores Nuuk, the device refuses it: nothing can be chosen, and the device is why." },
     { "of": "Europe/Athens", "device": "Europe/Kiev", "unusable": ["Europe/Kyiv"], "pick": { "zone": "Europe/Kyiv", "source": "device" }, "named": ["Europe/Kyiv", "Europe/Athens", "Europe/Helsinki"], "refused": { "Europe/Kyiv": null }, "note": "The device's own zone is never refused by the device (117a writes it in the device's spelling)." },
     { "of": "Europe/Athens", "device": "Europe/Berlin", "unusable": ["Europe/Kyiv"], "named": ["Europe/Athens", "Europe/Helsinki", "Europe/Bucharest"], "more": 7, "refused": { "Europe/Kyiv": "device" }, "note": "On another device the refused Kyiv is neither named nor counted." },
-    { "of": "Europe/Berlin", "calendar": "none", "pick": null, "refusal": "calendar", "note": "A calendar that stores no zone: no group can be chosen." }
+    { "of": "Europe/Berlin", "calendar": "none", "pick": null, "refusal": "calendar", "note": "A calendar that stores no zone: no group can be chosen." },
+    { "of": "Europe/Athens", "stored": "Europe/Kyiv", "device": "Europe/Kiev", "unusable": ["Europe/Kyiv"], "pick": { "zone": "Europe/Kyiv", "source": "device" }, "note": "120a keeps a stored zone in its spelling, so that spelling must be usable here: this device refuses Europe/Kyiv, and the group picks the device's Kyiv, which 117a writes as Europe/Kiev." },
+    { "of": "Europe/Athens", "stored": "Europe/Kiev", "device": "Europe/Berlin", "unusable": ["Europe/Kyiv"], "pick": { "zone": "Europe/Kyiv", "source": "stored" }, "named": ["Europe/Kyiv", "Europe/Athens", "Europe/Helsinki"], "more": 8, "refused": { "Europe/Kyiv": "device" }, "note": "The stored Europe/Kiev is usable in its spelling though the device refuses Europe/Kyiv: choosing the group keeps it (120a); the city hit Kyiv stays marked." }
   ],
   "groupMains": [
     { "today": "2026-11-22T12:00:00Z", "mains": ["Pacific/Pago_Pago", "Pacific/Honolulu", "America/Anchorage", "America/Los_Angeles", "America/Denver", "America/Phoenix", "America/Chicago", "America/Mexico_City", "America/Bogota", "America/New_York", "America/Caracas", "America/Halifax", "America/Sao_Paulo", "America/Noronha", "America/Nuuk", "Africa/Abidjan", "Europe/London", "Europe/Berlin", "Africa/Lagos", "Europe/Athens", "Asia/Gaza", "Africa/Johannesburg", "Europe/Moscow", "Asia/Dubai", "Asia/Karachi", "Asia/Kolkata", "Asia/Dhaka", "Asia/Jakarta", "Asia/Shanghai", "Asia/Tokyo", "Australia/Adelaide", "Australia/Brisbane", "Australia/Sydney", "Pacific/Noumea", "Pacific/Fiji", "Pacific/Apia"], "note": "Anti-silence by name: a group that appears, splits or changes its main city after a tzdata update shows here. 62 groups on this day, 36 with more than one member (63 on 2026-09-14)." }
@@ -290,6 +292,7 @@
     { "device": "EST5EDT", "expect": [{ "kind": "device", "choice": { "kind": "not_listed", "name": "EST5EDT", "canonical": "EST5EDT" } }, { "kind": "utc", "choice": { "kind": "utc" } }], "note": "A device zone outside the list." },
     { "device": "EST5EDT", "calendar": { "except": ["America/Scoresbysund", "Antarctica/Casey", "Antarctica/Troll", "Antarctica/Vostok"] }, "expect": [{ "kind": "device", "choice": { "kind": "not_listed", "name": "EST5EDT", "canonical": "EST5EDT" }, "refusal": "calendar" }, { "kind": "utc", "choice": { "kind": "utc" } }], "note": "A calendar that does not store it marks the device's row." },
     { "device": "America/Scoresbysund", "calendar": { "except": ["America/Scoresbysund", "Antarctica/Casey", "Antarctica/Troll", "Antarctica/Vostok"] }, "expect": [{ "kind": "device", "choice": { "kind": "listed", "zone": "America/Scoresbysund" }, "refusal": "calendar" }, { "kind": "utc", "choice": { "kind": "utc" } }], "note": "A listed device zone the calendar cannot store." },
-    { "device": "Europe/Berlin", "calendar": "none", "expect": [{ "kind": "device", "choice": { "kind": "listed", "zone": "Europe/Berlin" }, "refusal": "calendar" }, { "kind": "utc", "choice": { "kind": "utc" } }], "note": "UTC can always be chosen." }
+    { "device": "Europe/Berlin", "calendar": "none", "expect": [{ "kind": "device", "choice": { "kind": "listed", "zone": "Europe/Berlin" }, "refusal": "calendar" }, { "kind": "utc", "choice": { "kind": "utc" } }], "note": "UTC can always be chosen." },
+    { "stored": "Pacific Standard Time", "device": "Pacific Standard Time", "expect": [{ "kind": "current", "choice": { "kind": "unreadable", "name": "Pacific Standard Time" } }, { "kind": "utc", "choice": { "kind": "utc" } }], "note": "A device name tzdata does not know has no row, so the series' zone keeps its own though the names are the same." }
   ]
 }
