@@ -53,7 +53,8 @@ keinen, dort ist die Wahl Tonis Sache.
 - **16b — beim Anbieter geänderte Einzeltermine.** Der Zonenwechsel ist erlaubt;
   die Hilfe warnt, wie schon beim Verschieben ganzer Serien (11c).
 - **17b — die volle Liste.** Rund 313 Weltzonen von Anfang an, durchsuchbar,
-  erzeugt in Rust aus chrono-tz.
+  erzeugt in Rust aus chrono-tz. Für die Liste ohne Suche gekippt durch 118a
+  (Regel-Gruppen); die Suche findet weiter jede Zone.
 - **18a — Einzeltermine behalten die Anbieter-Zone.** Ein eigener, späterer Fix
   ohne Auswahl. Nicht Teil dieses Entwurfs.
 - **20a — was eine Ablehnung entfernt.** Nur die Antwort, die sich nicht umsetzen
@@ -609,6 +610,34 @@ Kennungen im Apple-Stil, also außerhalb von Aperio angelegt. Alle elf Serien, d
 Aperio selbst bei CalDAV angelegt hat, tragen eine Zone. Ein heute noch
 laufender Aperio-Weg, der Serien ohne Zone schreibt, ist damit nicht zu sehen.
 
+Toni hat am 2026-11-22 vor den Messungen zu Stufe 11 entschieden:
+
+- **118a — Regel-Gruppen statt der vollen Liste.** Ohne Suche zeigt die
+  Liste nicht mehr jede Zone einzeln. Sie zeigt Gruppen von Zonen mit
+  denselben Regeln ab heute: dieselbe Verschiebung zu jedem Zeitpunkt,
+  Sommerzeit und Umstellungstage eingeschlossen. Aus 312 Zonen werden so
+  etwa 63 Einträge (gezählt am 2026-11-22 mit tzdata 2026b in Node; mit
+  2026f wohl ein, zwei mehr). Berlin, Paris, Rom, Madrid, Wien und 11
+  weitere sind eine Gruppe, London, Dublin, Lissabon und 3 weitere eine
+  andere. Ein Eintrag nennt die Verschiebung ohne und mit Sommerzeit und
+  einige Städte.
+  - Aus der Liste gewählt, wird die Gerätezone gespeichert, wenn sie in der
+    Gruppe liegt, sonst die Hauptstadt der Gruppe. Ändert später ein Land
+    seine Regeln, gilt das nur für die gespeicherte Zone; wer in Wien die
+    Gruppe wählt, behält so Wien.
+  - Die Suche findet weiter jede Stadt und speichert genau deren Zone.
+  - Verworfen: Gruppen nach der heutigen Verschiebung („GMT+2“, 37
+    Einträge). Sie legen Zonen mit verschiedener Sommerzeit zusammen,
+    unter UTC+02:00 heute 23 Zonen mit sechs Regeln, Johannesburg ohne
+    Sommerzeit neben Helsinki; eine Serie läge dann ein halbes Jahr eine
+    Stunde daneben. Ebenso verworfen: erst Gruppe, dann Stadt (ein Schritt
+    mehr) und die volle Liste (17b).
+  - Offen, mit Stufe 11 zu entscheiden: wie weit „ab heute“ reicht, welche
+    Stadt die Hauptstadt einer Gruppe ist und welche Städte ein Eintrag
+    nennt, ob eine Suche nach einem Versatz Gruppen oder Städte findet, und
+    wie eine Gruppe dasteht, von der ein Exchange-Kalender nur einen Teil
+    speichern kann (22a).
+
 ## Was es löst
 
 **Aperio sagt, auf welcher Uhr eine Serie läuft.** Eine zonenlose Serie steht
@@ -746,6 +775,10 @@ einen Dialog öffnet: „Zeitzone der Serie Berlin, Europa, UTC+02:00, Schalter,
 Auswählen.“
 
 ### Die Zonenliste
+
+**Seit 118a** zeigt die Liste ohne Suche Regel-Gruppen statt einzelner
+Zonen. Was dieser Abschnitt über Einträge sagt, gilt für die Suche nach
+Städten; für die Gruppen entscheidet Stufe 11 die offenen Punkte aus 118a.
 
 **313 Einträge:** 312 kanonische Zonen ohne `Etc/*` und ein UTC-Eintrag. Ein
 Eintrag lautet „Stadt, Region, UTC±hh:mm“, zum Beispiel „Berlin, Europa,
@@ -1578,7 +1611,9 @@ Handy im selben PR.
     behielten die Zonen-Entscheidung der Quelle schon (PR 8b, 262).
 11. **Die Auswahldialoge** — `feat(editors): the series time zone picker dialogs`.
     Desktop und Handy. Vorher messen: NVDA im verschachtelten Dialog, VoiceOver
-    und TalkBack mit einer langen Liste.
+    und TalkBack mit einer langen Liste. Mit 118a zuerst die Regel-Gruppen im
+    Kern (aus tzdata, mit Türen und Fixture), dann die Dialoge; die Liste ohne
+    Suche hat dann etwa 63 Einträge statt 313.
 12. **Die Editoren** — `feat(editors): times typed on the series clock, and the weekday question`.
     Beschriftungen, Hinweis, Auswahl, Wochentag-Frage, „diesen und alle folgenden“
     lädt auf dem Desktop die ganze Serie beim Öffnen (21a), Hilfe und Fehlersuche.
