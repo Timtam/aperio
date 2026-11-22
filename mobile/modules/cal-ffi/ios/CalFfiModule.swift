@@ -536,7 +536,7 @@ public class CalFfiModule: Module {
 
     // The parts a repeat rule takes from a day: weekday, nth weekday, month.
     Function("dayParts") { (dayKey: String) -> String in
-      try dayParts(dayKey: dayKey)
+      dayParts(dayKey: dayKey)
     }
 
     // The calendar week each day is shown in, with its ISO number.

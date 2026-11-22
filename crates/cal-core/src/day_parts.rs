@@ -98,10 +98,15 @@ pub fn parse_day_key(key: &str) -> Result<NaiveDate, DayPartsError> {
 }
 
 /// [`day_parts`] over the wire, for the desktop's WebAssembly and the phone's
-/// UniFFI bridge: a `YYYY-MM-DD` key in, the parts as JSON out.
-pub fn day_parts_json(day_key: &str) -> Result<String, DayPartsError> {
-    let day = parse_day_key(day_key)?;
-    Ok(serde_json::to_string(&day_parts(day)).expect("day parts serialize"))
+/// UniFFI bridge: a `YYYY-MM-DD` key in, the parts as JSON out, and JSON
+/// `null` for a key that names no day. A form whose date is being typed asks
+/// with such keys while it renders, so the answer is a value, not an error:
+/// whatever a door still throws is a fault of the door, and stays loud.
+pub fn day_parts_json(day_key: &str) -> String {
+    match parse_day_key(day_key) {
+        Ok(day) => serde_json::to_string(&day_parts(day)).expect("day parts serialize"),
+        Err(_) => "null".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -138,18 +143,18 @@ mod contract {
         }
         for row in rows {
             let key = row["day"].as_str().expect("a day");
-            let answer: Value =
-                serde_json::from_str(&day_parts_json(key).expect("a day")).expect("json");
+            let answer: Value = serde_json::from_str(&day_parts_json(key)).expect("json");
             assert_eq!(answer, row["expect"], "{key}");
         }
     }
 
     #[test]
-    fn a_key_that_names_no_day_is_refused() {
+    fn a_key_that_names_no_day_answers_null() {
         for key in fixture()["refused"].as_array().expect("refused") {
             let key = key.as_str().expect("a string");
+            assert_eq!(day_parts_json(key), "null", "{key:?}");
             assert_eq!(
-                day_parts_json(key),
+                parse_day_key(key),
                 Err(DayPartsError::NotADay(key.to_string())),
                 "{key:?}"
             );

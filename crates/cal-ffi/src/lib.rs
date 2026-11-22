@@ -572,15 +572,12 @@ pub fn recurrence_summary(input_json: String) -> Result<String, StoreError> {
     })
 }
 
-/// The parts a repeat rule takes from the day a series starts on, as JSON
-/// (cal_core::day_parts): the desktop asks the same rule through
-/// WebAssembly.
+/// The parts a repeat rule takes from the day a series starts on, as JSON,
+/// and JSON `null` for a key that names no day (cal_core::day_parts): the
+/// desktop asks the same rule through WebAssembly.
 #[uniffi::export]
-pub fn day_parts(day_key: String) -> Result<String, StoreError> {
-    cal_core::day_parts_json(&day_key).map_err(|e| StoreError::InvalidField {
-        field: "day key".into(),
-        detail: e.to_string(),
-    })
+pub fn day_parts(day_key: String) -> String {
+    cal_core::day_parts_json(&day_key)
 }
 
 /// The calendar week each day is shown in, with its ISO number (DESIGN §5.2):
@@ -890,7 +887,7 @@ mod tests {
     }
 
     /// Every row of the core's day-parts table through the phone's door, and
-    /// a key it refuses as the field error the bridge throws.
+    /// a key that names no day as JSON null, never an error.
     #[test]
     fn day_parts_door_answers_every_contract_row() {
         const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/dayParts.json");
@@ -900,15 +897,12 @@ mod tests {
         for row in rows {
             let key = row["day"].as_str().expect("a day");
             let answer: serde_json::Value =
-                serde_json::from_str(&day_parts(key.to_string()).expect("a day")).expect("json");
+                serde_json::from_str(&day_parts(key.to_string())).expect("json");
             assert_eq!(answer, row["expect"], "{key}");
         }
         for key in doc["refused"].as_array().expect("refused") {
             let key = key.as_str().expect("a string");
-            match day_parts(key.to_string()) {
-                Err(StoreError::InvalidField { field, .. }) => assert_eq!(field, "day key"),
-                other => panic!("{key:?}: expected an invalid-field error, got {other:?}"),
-            }
+            assert_eq!(day_parts(key.to_string()), "null", "{key:?}");
         }
     }
 

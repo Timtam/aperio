@@ -358,8 +358,9 @@ pub fn recurrence_summary(input_json: &str) -> Result<String, WireError> {
 }
 
 /// See [`crate::dayParts`].
-pub fn day_parts(day_key: &str) -> Result<String, WireError> {
-    cal_core::day_parts_json(day_key).map_err(|e| WireError::BadJson(e.to_string()))
+/// JSON `null` for a key that names no day.
+pub fn day_parts(day_key: &str) -> String {
+    cal_core::day_parts_json(day_key)
 }
 
 /// See [`crate::calendarWeeks`].

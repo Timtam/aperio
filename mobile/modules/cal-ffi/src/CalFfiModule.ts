@@ -193,8 +193,8 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  question for many days. */
   calendarWeeks(inputJson: string): string;
 
-  /** The parts a repeat rule takes from a `YYYY-MM-DD` day, as JSON
-   *  (`cal_core::day_parts`). Synchronous. */
+  /** The parts a repeat rule takes from a `YYYY-MM-DD` day, as JSON, or
+   *  `null` for a key that names no day (`cal_core::day_parts`). Synchronous. */
   dayParts(dayKey: string): string;
 
   // ── Tasks / lists / sections (JSON bridge, sync-logged) ──

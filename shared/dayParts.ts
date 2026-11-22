@@ -16,7 +16,8 @@ import type { DayParts } from './generated/DayParts';
 
 export type { DayParts };
 
-/** This surface's door into the core: one day key in, its parts as JSON. */
+/** This surface's door into the core: one day key in, its parts as JSON, or
+ *  JSON `null` for a key that names no day. */
 export interface DayPartsRules {
   dayPartsJson(dayKey: string): string;
 }
@@ -29,8 +30,9 @@ export function installDayPartsRules(rules: DayPartsRules): void {
 }
 
 /** The parts of the day `dayKey` (`YYYY-MM-DD`) names, or `null` for a key
- *  the core refuses (empty, `2026-02-30`): a form whose date field is being
- *  typed must not throw while it renders. */
+ *  that names none (empty, `2026-02-30`): the core answers that as a value,
+ *  so a form whose date field is being typed does not throw while it
+ *  renders, and anything a door does throw is its own fault and loud. */
 export function dayParts(dayKey: string): DayParts | null {
   if (installedRules === null) {
     // Loud, not a local fallback: a copy of the rule here is the copy the core
@@ -40,11 +42,5 @@ export function dayParts(dayKey: string): DayParts | null {
         'door into cal_core::day_parts at startup',
     );
   }
-  let answer: string;
-  try {
-    answer = installedRules.dayPartsJson(dayKey);
-  } catch {
-    return null;
-  }
-  return JSON.parse(answer) as DayParts;
+  return JSON.parse(installedRules.dayPartsJson(dayKey)) as DayParts | null;
 }

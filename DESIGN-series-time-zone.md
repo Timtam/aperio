@@ -1579,6 +1579,3 @@ Handy im selben PR.
 - Größenzuwachs der iOS-App und was der Aufruf der Versätze für 312 Zonen auf
   einem Handy kostet. Gemessen sind die Android-Bibliothek (mit einem Prototyp)
   und WebAssembly (Stufe 3).
-  - Auf Windows kam `America/Los_Angeles` aus Git Bash nicht an, weil MSYS Werte
-    mit `/` umschreibt.
-  - Aus PowerShell beachtet Node sie.
