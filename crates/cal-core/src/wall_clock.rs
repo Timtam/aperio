@@ -271,6 +271,24 @@ pub fn series_end_on_clock(
     }
 }
 
+/// The last instant a series' stored `UNTIL` lets an occurrence start at,
+/// read on the clock the series repeats on ([`crate::read_series_end`]'s
+/// `at`, decision 101b): where an adapter drops a cut series' overrides
+/// after (116a). `None` without an `UNTIL`, or for one that cannot be read.
+pub fn series_end_instant(
+    rrule: &str,
+    start: DateTime<Utc>,
+    all_day: bool,
+    tzid: Option<&str>,
+) -> Option<DateTime<Utc>> {
+    let at = series_end_on_clock(rrule, start, all_day, tzid, None)
+        .end?
+        .at?;
+    DateTime::parse_from_rfc3339(&at)
+        .ok()
+        .map(|at| at.with_timezone(&Utc))
+}
+
 /// The last instant whose wall time on `zone` is `wall` or earlier: `wall`
 /// itself, at its later reading where the clock shows it twice, or the
 /// second before a change that skips it.
@@ -420,5 +438,37 @@ mod contract {
     fn text_that_is_no_question_is_an_error() {
         assert!(wall_clock_json("{\"op\":\"teleport\"}").is_err());
         assert!(wall_clock_json("not json").is_err());
+    }
+
+    /// Where an adapter drops a cut series' overrides after (116a): the end's
+    /// own instant on the series' clock, not the UTC reading of its digits.
+    #[test]
+    fn the_end_instant_reads_on_the_series_clock() {
+        let at = |s: &str| s.parse::<DateTime<Utc>>().expect("an instant");
+        // Daily 20:00 New York through 5 November: its last evening is
+        // 6 November 01:00 UTC, and the end reaches 04:59:59 UTC.
+        assert_eq!(
+            series_end_instant(
+                "FREQ=DAILY;UNTIL=20261105T235959Z",
+                at("2026-11-02T01:00:00Z"),
+                false,
+                Some("America/New_York"),
+            ),
+            Some(at("2026-11-06T04:59:59Z"))
+        );
+        // A cut stays the instant it is.
+        assert_eq!(
+            series_end_instant(
+                "FREQ=DAILY;UNTIL=20261110T075959Z",
+                at("2026-11-02T08:00:00Z"),
+                false,
+                Some("Europe/Berlin"),
+            ),
+            Some(at("2026-11-10T07:59:59Z"))
+        );
+        assert_eq!(
+            series_end_instant("FREQ=DAILY", at("2026-11-02T08:00:00Z"), false, None),
+            None
+        );
     }
 }
