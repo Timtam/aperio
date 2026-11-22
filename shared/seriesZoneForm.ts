@@ -269,19 +269,44 @@ function zoneInEffect(form: SeriesZoneForm, facts: ZoneFormFacts): string | null
   return defaultSeriesZone(facts.deviceZone, facts.calendarZones);
 }
 
+/** What a form says of a series' zone where its fields stand on the device's
+ *  clock: nothing. Also the view of an editor that only shows the event (a
+ *  locked invitation, an invitation read from a file; `zoneEditingFor` gives
+ *  `null` there). */
+export const DEVICE_ZONE_VIEW: ZoneFormView = Object.freeze({
+  choice: 'none',
+  clock: DEVICE_CLOCK,
+  zone: null,
+  unusable: null,
+  calendarRefuses: null,
+  notStorable: null,
+});
+
+/** The zone a stored event opened with, as `SeriesZoneForm.stored` takes it:
+ *  its series' zone as stored, `null` for a series without one, `undefined`
+ *  for an event that is no series. */
+export function storedZoneOf(
+  recurrence: { tzid?: string | null } | null | undefined,
+): string | null | undefined {
+  return recurrence ? (recurrence.tzid ?? null) : undefined;
+}
+
+/**
+ * How the fields move when the target calendar changes (question 8 of stage
+ * 12, 139a): to the device's clock (a calendar that stores no zones) the
+ * instant stays; a new series on its untouched default keeps the typed times,
+ * now on the clock that calendar gives it (22a); everything else keeps its
+ * instants, and a chosen zone stays chosen.
+ */
+export function calendarMoveMode(form: SeriesZoneForm, next: ZoneFormView): 'instants' | 'values' {
+  if (next.clock.kind === 'device') return 'instants';
+  return form.editing === 'new' && form.chosen === undefined ? 'values' : 'instants';
+}
+
 /** What the form shows of the zone, and the clock its fields stand on. */
 export function zoneFormView(form: SeriesZoneForm, facts: ZoneFormFacts): ZoneFormView {
   const placed = placement(form, facts);
-  if (placed === 'device') {
-    return {
-      choice: 'none',
-      clock: DEVICE_CLOCK,
-      zone: null,
-      unusable: null,
-      calendarRefuses: null,
-      notStorable: null,
-    };
-  }
+  if (placed === 'device') return DEVICE_ZONE_VIEW;
   const zone = zoneInEffect(form, facts);
   const { clock, unusable } = seriesFieldClock(zone);
   const device = deviceSeriesZone(facts.deviceZone);

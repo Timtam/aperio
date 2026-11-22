@@ -2,8 +2,6 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-import { dateInput } from '@aperio/shared';
-
 import type { Calendar, CalendarEvent } from '../api/types';
 import { localTimeZone } from '../intl/recurrence';
 
@@ -149,6 +147,16 @@ afterEach(() => {
   announced.length = 0;
   vi.restoreAllMocks();
 });
+
+/** The `YYYY-MM-DD` day of an instant in Berlin. */
+function berlinDay(ms: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ms));
+}
 
 /** Pretend the device is in Berlin, whatever zone the test machine is in. */
 function deviceInBerlin() {
@@ -296,10 +304,9 @@ describe('EventDialog → a row of a series saved as the whole series', () => {
       },
       'series',
     );
-    const start = new Date(sent.start);
-    // The series' own day, at the new time.
-    expect([start.getHours(), start.getMinutes()]).toEqual([10, 30]);
-    expect(start.toDateString()).toBe(new Date(SERIES.start).toDateString());
+    // The series' own day, at the new time on its clock: 10:30 in Berlin,
+    // whatever clock this machine runs on (stage 12).
+    expect(sent.start).toBe('2026-06-15T08:30:00.000Z');
     // The excluded Monday moved with it, or it would come back at 10:30.
     const moved = Date.parse(sent.start) - Date.parse(SERIES.start);
     expect(moved).not.toBe(0);
@@ -701,9 +708,9 @@ describe('EventDialog → the whole series moves as from its first occurrence (1
       target: { value },
     });
   const ruleShown = () => screen.getByRole('status', { name: 'rule shown' }).textContent;
-  /** The day the form shows for an instant, `days` on: the form reads this
-   *  machine's clock. */
-  const dayOn = (iso: string, days = 0) => dateInput(new Date(Date.parse(iso) + days * 86_400_000));
+  /** The day the form shows for an instant, `days` on: a series' fields
+   *  stand on its clock, Berlin here, whatever clock this machine runs on. */
+  const dayOn = (iso: string, days = 0) => berlinDay(Date.parse(iso) + days * 86_400_000);
 
   it('moves "every Monday" to Tuesday with a later occurrence, and its deletion by place', async () => {
     deviceInBerlin();

@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEVICE_CLOCK,
+  DEVICE_ZONE_VIEW,
+  calendarMoveMode,
+  storedZoneOf,
   applyClockChange,
   calendarZonesOf,
   changeClockField,
@@ -384,5 +387,24 @@ describe('a zone the target calendar cannot store (139a)', () => {
     const view = zoneFormView(chosen, facts({ calendarZones: exchange }));
     expect(view.zone).toBe('America/New_York');
     expect(view.notStorable).toBe('America/New_York');
+  });
+});
+
+describe('a calendar change (question 8 of stage 12)', () => {
+  it('keeps the instant on the device clock, the typed times of an untouched new series, and the instants otherwise', () => {
+    const series = zoneFormView(openZoneForm('series', 'Europe/Berlin', false), facts());
+    const device = zoneFormView(openZoneForm('new', undefined, false), facts({ calendarZones: 'none' }));
+    expect(device).toBe(DEVICE_ZONE_VIEW);
+    expect(calendarMoveMode(openZoneForm('new', undefined, false), device)).toBe('instants');
+    expect(calendarMoveMode(openZoneForm('new', undefined, false), series)).toBe('values');
+    expect(calendarMoveMode({ ...openZoneForm('new', undefined, false), chosen: null }, series)).toBe('instants');
+    expect(calendarMoveMode(openZoneForm('series', 'Europe/Berlin', false), series)).toBe('instants');
+  });
+
+  it('reads the stored zone of what opened', () => {
+    expect(storedZoneOf({ tzid: 'Europe/Kiev' })).toBe('Europe/Kiev');
+    expect(storedZoneOf({ tzid: null })).toBeNull();
+    expect(storedZoneOf({})).toBeNull();
+    expect(storedZoneOf(null)).toBeUndefined();
   });
 });
