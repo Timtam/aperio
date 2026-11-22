@@ -73,7 +73,14 @@ CI runs on every push/PR and is the authority. It mirrors the local gate:
 - `cargo fmt --all -- --check` (fails fast on formatting),
 - `cargo clippy --workspace --all-targets -- -D warnings`,
 - `cargo test --workspace`,
-- `tsc`, ESLint, Vitest, and the production `vite build`,
+- `tsc`, ESLint and Vitest on Linux, Vitest three times: in UTC, the
+  runner's zone, then with `TZ` set to `America/New_York` and
+  `Pacific/Auckland`, after a guard proves the zone took,
+- the production builds on the supported desktop platforms.
 
-across the supported desktop platforms. Make the local gate green before
-pushing and CI will follow.
+A test that reads the device's clock must hold in every zone: write
+all-day boundaries as local midnights, and read expected days on the
+device's clock rather than as fixed UTC instants. To run the suite in
+another zone locally, set `TZ` from PowerShell (`$env:TZ =
+'Pacific/Auckland'; npx vitest run`); Git Bash drops it. Make the local
+gate green before pushing and CI will follow.
