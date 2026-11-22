@@ -70,6 +70,8 @@ import init, {
   zoneLabels as wasmZoneLabels,
   zoneSearch as wasmZoneSearch,
   zoneChoice as wasmZoneChoice,
+  zoneOffsets as wasmZoneOffsets,
+  zoneGroups as wasmZoneGroups,
   compareTitles as wasmCompareTitles,
   isImportantPriority as wasmIsImportantPriority,
   normalPriority as wasmNormalPriority,
@@ -415,4 +417,16 @@ export function zoneSearchJson(inputJson: string): string {
 export function zoneChoiceJson(inputJson: string): string {
   assertReady();
   return wasmZoneChoice(inputJson);
+}
+
+/** See `cal_core::zone_offsets_json`. */
+export function zoneOffsetsJson(inputJson: string): string {
+  assertReady();
+  return wasmZoneOffsets(inputJson);
+}
+
+/** See `cal_core::zone_groups_json`. */
+export function zoneGroupsJson(inputJson: string): string {
+  assertReady();
+  return wasmZoneGroups(inputJson);
 }

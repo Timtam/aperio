@@ -3611,6 +3611,15 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   lesen und ein Ende, das ein Zeitpunkt ist, als sein Datum schreiben,
   zusammen mit dem Ende-Feld nach 108b. Zwei Teilbauten scheiterten in der
   Prüfung (DESIGN, 107b).
+  ↳ **Die Zonenliste als Gruppen im Kern (Stufe 11, Kern, 2026-11-22, 118a bis
+  129a):** Ohne Suche zeigt die Liste 62 Gruppen von Zonen mit denselben
+  Regeln ab heute statt 313 Städte, jede mit ihrer Uhr zuerst und bis zu drei
+  Städten; „+2“ findet Gruppen, ein Stadtname die Stadt. Gewählt speichert
+  eine Gruppe die Zone der Serie, sonst die des Geräts, sonst ihre Hauptstadt.
+  Die Auswahldialoge folgen nach den Messungen. Vorläufig (123a bis 129a):
+  zwei Jahre, die Rangliste der Hauptstädte, drei Formen der Uhr, die
+  Zählzeile einer Suche, Gruppen, die ein Kalender nur zum Teil nimmt, die
+  Zeilen über der Liste, Versätze aus WebAssembly.
   ↳ **Das Formular-Modell für die Zone einer Serie (Stufe 10, 2026-11-22,
   117a):** Wo die Auswahl steht, auf welcher Uhr die Felder stehen, mit
   welcher Zone eine neue Serie beginnt (die Gerätezone, kanonisch), was eine

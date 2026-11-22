@@ -404,6 +404,10 @@ public class CalFfiModule: Module {
       try zoneOffsets(inputJson: inputJson)
     }
 
+    Function("zoneGroups") { (inputJson: String) -> String in
+      try zoneGroups(inputJson: inputJson)
+    }
+
     // Folding a group into one row — what a day actually looks like.
     Function("collapseEventGroups") { (inputJson: String) -> String in
       try collapseEventGroups(inputJson: inputJson)

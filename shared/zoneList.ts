@@ -1,46 +1,62 @@
 // The world list a series' zone is chosen from — this surface's doors into
 // `cal_core::zone_list`.
 //
-// The names, the search, and where a stored or device zone stands are rules in
-// the core and answer synchronously on both surfaces. The offsets need tzdata's
-// rules: the phone asks its native core, the desktop its host (its WebAssembly
-// module carries the zones since stage 8, so this may become synchronous
-// there), so that one question is a Promise on both surfaces. An answer names the instant it is for; `offsetsAreFor`
-// lets a form drop one for a start it no longer has.
+// The names, the search, where a stored or device zone stands, the offsets and
+// the groups (decision 118a) are rules in the core and answer synchronously on
+// both surfaces: the phone asks its native core, the desktop its WebAssembly
+// module, which carries the zones since stage 8. An offsets answer names the
+// instant it is for; `offsetsAreFor` lets a form drop one for a start it no
+// longer has.
 //
-// The words — a region's name, the offset's form ("UTC−04:00"), "(auch Oslo)",
-// the count line — are this surface's, from its translations.
+// The words — a region's name, the offset's form ("UTC−04:00"), a group's
+// clock and cities, "(auch Oslo)", the count line — are this surface's, from
+// its translations.
 
 import type {
+  GroupClock,
+  GroupPick,
+  HeadEntry,
   ListedZone,
   RegionName,
   ZoneChoiceAnswer,
+  ZoneGroup,
+  ZoneGroups,
+  ZoneGroupsQuestion,
   ZoneHit,
   ZoneOffset,
   ZoneOffsets,
   ZoneOffsetsQuestion,
+  ZoneRefusal,
   ZoneRegion,
   ZoneSearchAnswer,
 } from './types';
 
 export type {
+  GroupClock,
+  GroupPick,
+  HeadEntry,
   ListedZone,
   RegionName,
   ZoneChoiceAnswer,
+  ZoneGroup,
+  ZoneGroups,
+  ZoneGroupsQuestion,
   ZoneHit,
   ZoneOffset,
   ZoneOffsets,
   ZoneOffsetsQuestion,
+  ZoneRefusal,
   ZoneRegion,
   ZoneSearchAnswer,
 };
 
-/** This surface's doors into `cal_core::zone_list`. */
+/** This surface's doors into `cal_core::zone_list`, all synchronous. */
 export interface ZoneListRules {
   zoneLabelsJson(): string;
   zoneSearchJson(inputJson: string): string;
   zoneChoiceJson(inputJson: string): string;
-  zoneOffsets(question: ZoneOffsetsQuestion): Promise<ZoneOffsets>;
+  zoneOffsetsJson(inputJson: string): string;
+  zoneGroupsJson(inputJson: string): string;
 }
 
 type Translate = (key: string, vars?: Record<string, unknown>) => string;
@@ -119,15 +135,21 @@ export function zoneRegionNames(t: Translate): RegionName[] {
 /**
  * Search the list. Every word must match; a query of nothing but spaces
  * matches every entry. Hits come in the list's order when `offsets` are given,
- * and offset words ("+2", "UTC−3:30", "5:30") match only then.
+ * and offset words ("+2", "UTC−3:30", "5:30") match only then. With `groups`
+ * a query of offsets alone, or of nothing, finds the UTC entry and groups by
+ * the offsets their entries say (121a; the answer's `kind` is `groups`); any
+ * other word finds cities.
  */
 export function searchZones(
   query: string,
   regionNames: RegionName[],
   offsets: ZoneOffsets | null,
+  groups: ZoneGroups | null = null,
 ): ZoneSearchAnswer {
   return JSON.parse(
-    rules().zoneSearchJson(JSON.stringify({ query, region_names: regionNames, offsets })),
+    rules().zoneSearchJson(
+      JSON.stringify({ query, region_names: regionNames, offsets, groups }),
+    ),
   ) as ZoneSearchAnswer;
 }
 
@@ -143,8 +165,21 @@ export function zoneChoice(
 
 /** Every listed zone's offset at `at` and standard offset as of `today`, and
  *  the list's order. Both instants are RFC 3339. */
-export function zoneOffsets(at: string, today: string): Promise<ZoneOffsets> {
-  return rules().zoneOffsets({ at, today });
+export function zoneOffsets(at: string, today: string): ZoneOffsets {
+  const question: ZoneOffsetsQuestion = { at, today };
+  return JSON.parse(rules().zoneOffsetsJson(JSON.stringify(question))) as ZoneOffsets;
+}
+
+/**
+ * The list as groups of zones with the same rules from `today` on (decision
+ * 118a), the rows above it, and every listed zone's marks. `calendar_zones`
+ * is the calendar's manifest list (97a); `unusable` the names this device's
+ * clock library refuses: every listed name it refuses, and the series' stored
+ * name in its own spelling when it refuses that (a group keeps the stored
+ * zone as it is spelled, 120a).
+ */
+export function zoneGroups(question: ZoneGroupsQuestion): ZoneGroups {
+  return JSON.parse(rules().zoneGroupsJson(JSON.stringify(question))) as ZoneGroups;
 }
 
 /** Whether `offsets` were asked for `at`, compared as instants. */
@@ -188,25 +223,120 @@ export function zoneEntryText(
   });
 }
 
-/** A hit's text: its entry, and the other name it was found by. */
-export function zoneHitText(hit: ZoneHit, offsets: ZoneOffsets | null, t: Translate): string {
-  const entry =
-    hit.entry.kind === 'utc'
-      ? zoneEntryText(null, null, t)
-      : zoneEntryText(
-          listedZoneLabels()[hit.entry.position],
-          offsets === null ? null : offsets.zones[hit.entry.position].offset,
-          t,
-        );
+/**
+ * A group's clock as its entry says it (125a): "UTC+05:30, ohne Sommerzeit",
+ * "UTC+01:00, Sommerzeit UTC+02:00", "UTC−04:00, ab 7. November 2027
+ * UTC−05:00". `formatDay` writes a date (`YYYY-MM-DD`) in this surface's
+ * language.
+ */
+export function groupClockText(
+  clock: GroupClock,
+  t: Translate,
+  formatDay: (day: string) => string,
+): string {
+  switch (clock.kind) {
+    case 'fixed':
+      return t('dialogs.seriesTimeZone.clockFixed', { offset: zoneOffsetText(clock.offset, t) });
+    case 'seasonal':
+      return t('dialogs.seriesTimeZone.clockSeasonal', {
+        standard: zoneOffsetText(clock.standard, t),
+        summer: zoneOffsetText(clock.summer, t),
+      });
+    case 'changing':
+      return t('dialogs.seriesTimeZone.clockChanging', {
+        now: zoneOffsetText(clock.now, t),
+        day: formatDay(clock.next_on),
+        next: zoneOffsetText(clock.next, t),
+      });
+  }
+}
+
+/**
+ * A group's entry, its clock first (119b): "UTC+01:00, Sommerzeit UTC+02:00:
+ * Berlin, Paris, Rome und 13 weitere". The first city is the one choosing the
+ * group stores. A group that names one city and no more reads as that city:
+ * "UTC+05:45, ohne Sommerzeit: Kathmandu, Asien".
+ */
+export function zoneGroupText(
+  group: ZoneGroup,
+  t: Translate,
+  formatDay: (day: string) => string,
+): string {
+  const labels = listedZoneLabels();
+  const clock = groupClockText(group.clock, t, formatDay);
+  const city = (position: number) => {
+    const label = labels[position];
+    return label.area === null ? label.city : `${label.city} (${label.area})`;
+  };
+  if (group.named.length === 1 && group.more === 0) {
+    const only = labels[group.named[0]];
+    return t('dialogs.seriesTimeZone.groupEntryOneCity', {
+      clock,
+      city: city(group.named[0]),
+      region: zoneRegionName(only.region, t),
+    });
+  }
+  const named = group.named.map(city).join(', ');
+  const cities =
+    group.more === 0
+      ? named
+      : t('dialogs.seriesTimeZone.groupCitiesMore', { cities: named, count: group.more });
+  return t('dialogs.seriesTimeZone.groupEntry', { clock, cities });
+}
+
+/** A hit's text: its entry, and the other name it was found by. A group hit
+ *  needs the groups the search was asked with. */
+export function zoneHitText(
+  hit: ZoneHit,
+  offsets: ZoneOffsets | null,
+  t: Translate,
+  groups: ZoneGroups | null = null,
+  formatDay: (day: string) => string = (day) => day,
+): string {
+  const found = hit.entry;
+  let entry: string;
+  switch (found.kind) {
+    case 'utc':
+      entry = zoneEntryText(null, null, t);
+      break;
+    case 'zone':
+      entry = zoneEntryText(
+        listedZoneLabels()[found.position],
+        offsets === null ? null : offsets.zones[found.position].offset,
+        t,
+      );
+      break;
+    case 'group':
+      if (groups === null) {
+        throw new Error('a group hit is worded from the groups the search was asked with');
+      }
+      entry = zoneGroupText(groups.groups[found.group], t, formatDay);
+      break;
+  }
   return hit.also === null
     ? entry
     : t('dialogs.seriesTimeZone.alsoKnownAs', { entry, alias: hit.also.label });
 }
 
-/** The count line under the search: "Eine Zeitzone", "12 Zeitzonen", or that
- *  nothing matches. */
-export function zoneCountText(count: number, query: string, t: Translate): string {
-  return count === 0
-    ? t('dialogs.seriesTimeZone.noMatch', { query })
-    : t('dialogs.seriesTimeZone.count', { count });
+/**
+ * The count line under the search. For cities: "Eine Zeitzone", "12
+ * Zeitzonen". For groups (122b, 126a): "62 Gruppen" for the whole list,
+ * "8 Gruppen" or "UTC und 4 Gruppen" for an offset search. Nothing found:
+ * that nothing matches.
+ */
+export function zoneCountText(
+  count: number,
+  query: string,
+  t: Translate,
+  answer: ZoneSearchAnswer | null = null,
+): string {
+  if (count === 0) return t('dialogs.seriesTimeZone.noMatch', { query });
+  if (answer === null || answer.kind === 'zones') {
+    return t('dialogs.seriesTimeZone.count', { count });
+  }
+  const groups = answer.hits.filter((hit) => hit.entry.kind === 'group').length;
+  const withUtc = query.trim() !== '' && answer.hits.some((hit) => hit.entry.kind === 'utc');
+  return withUtc
+    ? t('dialogs.seriesTimeZone.groupCountWithUtc', { count: groups })
+    : t('dialogs.seriesTimeZone.groupCount', { count: groups });
 }

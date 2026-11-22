@@ -163,6 +163,16 @@ export type { ZoneRef } from './generated/ZoneRef';
 export type { ZoneRegion } from './generated/ZoneRegion';
 export type { ZoneSearchAnswer } from './generated/ZoneSearchAnswer';
 export type { ZoneSearchQuestion } from './generated/ZoneSearchQuestion';
+export type { GroupClock } from './generated/GroupClock';
+export type { GroupPick } from './generated/GroupPick';
+export type { HeadEntry } from './generated/HeadEntry';
+export type { HeadKind } from './generated/HeadKind';
+export type { ListingKind } from './generated/ListingKind';
+export type { PickSource } from './generated/PickSource';
+export type { ZoneGroup } from './generated/ZoneGroup';
+export type { ZoneGroups } from './generated/ZoneGroups';
+export type { ZoneGroupsQuestion } from './generated/ZoneGroupsQuestion';
+export type { ZoneRefusal } from './generated/ZoneRefusal';
 
 /**
  * A calendar as the frontends receive it when they LIST them: the

@@ -71,6 +71,7 @@ import uniffi.cal_ffi.expansionClock as uniffiExpansionClock
 import uniffi.cal_ffi.zoneLabels as uniffiZoneLabels
 import uniffi.cal_ffi.zoneSearch as uniffiZoneSearch
 import uniffi.cal_ffi.zoneChoice as uniffiZoneChoice
+import uniffi.cal_ffi.zoneGroups as uniffiZoneGroups
 import uniffi.cal_ffi.zoneOffsets as uniffiZoneOffsets
 import uniffi.cal_ffi.occurrenceCarryFields as uniffiOccurrenceCarryFields
 import uniffi.cal_ffi.planCarry as uniffiPlanCarry
@@ -541,6 +542,10 @@ class CalFfiModule : Module() {
 
     Function("zoneOffsets") { inputJson: String ->
       uniffiZoneOffsets(inputJson)
+    }
+
+    Function("zoneGroups") { inputJson: String ->
+      uniffiZoneGroups(inputJson)
     }
 
     // Folding a group into one row — what a day actually looks like.

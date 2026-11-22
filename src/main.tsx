@@ -29,7 +29,7 @@ import {
   installZoneListRules,
 } from '@aperio/shared';
 
-import { hostTzdataVersion, zoneOffsets } from './api/client';
+import { hostTzdataVersion } from './api/client';
 import { App } from './App';
 import { installConsoleBridge } from './dev/consoleBridge';
 import { applyThemeMode, readThemeMode } from './state/themeMode';
@@ -86,6 +86,8 @@ import {
   zoneLabelsJson,
   zoneSearchJson,
   zoneChoiceJson,
+  zoneOffsetsJson,
+  zoneGroupsJson,
 } from './wasm/coreRules';
 import i18n from './i18n';
 import './styles.css';
@@ -248,9 +250,15 @@ initCoreRules()
       seriesClockChangeJson,
     });
 
-    // The world zone list: its names and search from the core in WebAssembly,
-    // its offsets from the host.
-    installZoneListRules({ zoneLabelsJson, zoneSearchJson, zoneChoiceJson, zoneOffsets });
+    // The world zone list from the core in WebAssembly: names, search,
+    // offsets and groups, from the zones the module carries since stage 8.
+    installZoneListRules({
+      zoneLabelsJson,
+      zoneSearchJson,
+      zoneChoiceJson,
+      zoneOffsetsJson,
+      zoneGroupsJson,
+    });
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>

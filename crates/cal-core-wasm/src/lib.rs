@@ -260,16 +260,16 @@ pub fn tzdata_version() -> String {
 }
 
 /// The world zone list's names: every listed zone's id, city, area and region,
-/// by position. See `cal_core::zone_list`. The offsets are not here yet: the
-/// desktop asks its host for them.
+/// by position. See `cal_core::zone_list`.
 #[wasm_bindgen(js_name = zoneLabels)]
 pub fn zone_labels() -> Result<String, JsValue> {
     rules::zone_labels().map_err(to_js)
 }
 
-/// A search over the world zone list: `{query, region_names, offsets}` in, the
-/// hits out — in list order when offsets are given, else the UTC entry first
-/// and then by position.
+/// A search over the world zone list: `{query, region_names, offsets, groups}`
+/// in, the hits out — in list order when offsets are given, else the UTC entry
+/// first and then by position; groups for a query of offsets alone when groups
+/// are given (decision 121a).
 #[wasm_bindgen(js_name = zoneSearch)]
 pub fn zone_search(input_json: &str) -> Result<String, JsValue> {
     rules::zone_search(input_json).map_err(to_js)
@@ -279,6 +279,21 @@ pub fn zone_search(input_json: &str) -> Result<String, JsValue> {
 #[wasm_bindgen(js_name = zoneChoice)]
 pub fn zone_choice(input_json: &str) -> Result<String, JsValue> {
     rules::zone_choice(input_json).map_err(to_js)
+}
+
+/// Every listed zone's offset at `at` and standard offset as of `today`, and
+/// the list's order: `{at, today}` in. See `cal_core::zone_offsets`.
+#[wasm_bindgen(js_name = zoneOffsets)]
+pub fn zone_offsets(input_json: &str) -> Result<String, JsValue> {
+    rules::zone_offsets(input_json).map_err(to_js)
+}
+
+/// The list as groups of zones with the same rules from today on (decision
+/// 118a), the rows above it and every zone's marks: `{today, stored, device,
+/// calendar_zones, unusable}` in. See `cal_core::zone_groups`.
+#[wasm_bindgen(js_name = zoneGroups)]
+pub fn zone_groups(input_json: &str) -> Result<String, JsValue> {
+    rules::zone_groups(input_json).map_err(to_js)
 }
 
 /// Fold each group's members into a single row, keeping the input order.
