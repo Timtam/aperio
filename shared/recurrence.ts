@@ -1172,9 +1172,22 @@ export function truncateRRuleBefore(
     return kept.join(';');
   }
   const bound = new Date(boundMs);
-  const finalUntil = opts.allDay
+  let finalUntil = opts.allDay
     ? formatRRuleUntilDate(bound)
     : formatRRuleUntilUtc(bound);
+  // A cut never spells the end of a UTC day. `…T235959Z` reads as "through
+  // that date" (DESIGN-series-time-zone.md, decision 101b), and one second
+  // before an occurrence at 00:00 UTC (New York at 19:00, in summer at
+  // 20:00) is exactly that spelling. Two seconds before it keeps the same
+  // occurrences, except in a rule that repeats by the second.
+  if (
+    !opts.allDay &&
+    boundMs === lastKept.getTime() &&
+    /T235959Z$/.test(finalUntil) &&
+    !/FREQ=SECONDLY/i.test(body)
+  ) {
+    finalUntil = formatRRuleUntilUtc(new Date(boundMs - 1000));
+  }
   kept.push(`UNTIL=${finalUntil}`);
   return kept.join(';');
 }

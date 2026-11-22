@@ -105,16 +105,16 @@ pub struct SeriesEnd {
     pub at: Option<String>,
     /// The last day the end reaches on the clock (108b): the bound's day, or
     /// the day before where that day's first occurrence starts after the
-    /// bound.
+    /// bound, read where the occurrence stands (past a gap that skips its
+    /// time, at the earlier reading in a fold). For a rule that repeats by
+    /// the hour or faster, the bound's day.
     pub end_day: String,
 }
 
-/// The `UNTIL` value a rule names, `None` without one or with a `COUNT`,
-/// which ends it instead.
+/// The `UNTIL` value a rule names. A rule with a `COUNT` as well is read too:
+/// RFC 5545 forbids the pair, but providers write it, and both expanders
+/// stop at whichever comes first.
 fn until_value(parts: &[Part]) -> Option<&str> {
-    if part(parts, "COUNT").is_some() {
-        return None;
-    }
     part(parts, "UNTIL")
 }
 
@@ -156,7 +156,7 @@ fn spells_end_of_utc_day(value: &str) -> bool {
 
 /// How `rrule`'s `UNTIL` reads for a series whose occurrences start at
 /// `start` on `clock` (its wall time there), or `None` for a rule without an
-/// `UNTIL` (or with a `COUNT`) and for one that cannot be read.
+/// `UNTIL` and for one that cannot be read.
 ///
 /// - On a series of days ([`ExpansionClock::DeviceDays`]) the digits as
 ///   written (decision 201): a date, or a date-time at 23:59:59, is through
@@ -171,15 +171,18 @@ fn spells_end_of_utc_day(value: &str) -> bool {
 /// - A date is through that day, a date-time without `Z` is that wall time on
 ///   the clock (115a), on every clock.
 ///
-/// The clock comes as two functions, as for [`last_day_through`]: `wall`
-/// reads an instant on it, `last_at_or_before` gives the last instant whose
-/// wall time is the given one or earlier.
+/// The clock comes as functions, as for [`last_day_through`]: `wall` reads
+/// an instant on it, `last_at_or_before` gives the last instant whose wall
+/// time is the given one or earlier, and `occurrence_at` places an
+/// occurrence's wall time as the expanders do (past a gap that skips it, at
+/// the earlier reading in a fold).
 pub fn read_series_end(
     rrule: &str,
     start: NaiveTime,
     clock: crate::ExpansionClock,
     wall: impl Fn(DateTime<Utc>) -> NaiveDateTime,
     last_at_or_before: impl Fn(NaiveDateTime) -> Option<DateTime<Utc>>,
+    occurrence_at: impl Fn(NaiveDateTime) -> Option<DateTime<Utc>>,
 ) -> Option<SeriesEnd> {
     use crate::ExpansionClock;
 
@@ -229,11 +232,19 @@ pub fn read_series_end(
 
     let at = instant.or_else(|| last_at_or_before(bound));
     let day = bound.date();
-    let end_day = if day.and_time(first_time) <= bound {
-        day
-    } else {
-        day.pred_opt()?
-    };
+    // The bound's day counts where its first occurrence starts at or before
+    // the bound, compared where that occurrence stands: a cut at an occurrence
+    // the spring change pushes past its gap ends one second before it, a wall
+    // time later than the nominal one, and the cut's day is not reached. A
+    // rule that repeats by the hour or faster has occurrences all day, so its
+    // bound's day is reached; how early its first one falls would need the
+    // rule expanded, which this rule never does.
+    let reached = sub_daily
+        || match (at, occurrence_at(day.and_time(first_time))) {
+            (Some(at), Some(first)) => first <= at,
+            _ => day.and_time(first_time) <= bound,
+        };
+    let end_day = if reached { day } else { day.pred_opt()? };
     Some(SeriesEnd {
         reading,
         wall: bound.format("%Y-%m-%dT%H:%M:%S").to_string(),

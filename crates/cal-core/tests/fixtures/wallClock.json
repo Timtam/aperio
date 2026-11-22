@@ -572,7 +572,7 @@
           "reading": "instant",
           "wall": "2026-12-01T00:59:59",
           "at": "2026-11-30T23:59:59Z",
-          "endDay": "2026-11-30"
+          "endDay": "2026-12-01"
         }
       }
     },
@@ -792,7 +792,7 @@
           "reading": "throughDay",
           "wall": "2011-12-30T23:59:59",
           "at": "2011-12-30T09:59:59Z",
-          "endDay": "2011-12-30"
+          "endDay": "2011-12-29"
         }
       }
     },
@@ -835,6 +835,86 @@
         "deviceZone": null
       },
       "expect": null
+    },
+    {
+      "name": "end-cut-in-the-spring-gap",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20260329T012959Z",
+        "start": "2026-03-20T01:30:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-03-29T03:29:59",
+          "at": "2026-03-29T01:29:59Z",
+          "endDay": "2026-03-28"
+        }
+      }
+    },
+    {
+      "name": "end-instant-in-the-autumn-fold",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20261025T011500Z",
+        "start": "2026-10-01T00:30:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-10-25T02:15:00",
+          "at": "2026-10-25T01:15:00Z",
+          "endDay": "2026-10-25"
+        }
+      }
+    },
+    {
+      "name": "end-count-and-until-together",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;COUNT=30;UNTIL=20261105T005959Z",
+        "start": "2026-11-02T01:00:00Z",
+        "allDay": false,
+        "tzid": "America/New_York",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-11-04T19:59:59",
+          "at": "2026-11-05T00:59:59Z",
+          "endDay": "2026-11-03"
+        }
+      }
+    },
+    {
+      "name": "end-minutely-reaches-its-day",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=MINUTELY;INTERVAL=15;UNTIL=20261130T063000Z",
+        "start": "2026-11-01T10:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-11-30T07:30:00",
+          "at": "2026-11-30T06:30:00Z",
+          "endDay": "2026-11-30"
+        }
+      }
     }
   ]
 }
