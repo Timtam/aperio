@@ -1474,6 +1474,30 @@ Handy im selben PR.
    `series_clock_change` mit Türen, erweitert `shared/seriesClock.ts` aus Stufe 2, Fixture
    `seriesClockChange.json`. Vorher prüfen, ob das Aufklappen mit rrule.js und die
    Passung im Kern für gezählte Wochentage und negative Monatstage übereinstimmen.
+   Geprüft (2026-11-22): Für zehn Regeln mit gezählten Wochentagen, Tagen vom
+   Monatsende und Monaten nennt der Kern über zwei Jahre Tag für Tag dieselben
+   Tage wie rrule.js (`seriesClockChange.contract.test.ts`). Gebaut
+   (2026-11-22): `cal_core::series_clock_change` mit Tür `seriesClockChange`
+   (WebAssembly, UniFFI, beide Handy-Module, `shared/seriesClock.ts`), 14 Zeilen
+   in `seriesClockChange.json`, von Hand aus den Zonenregeln, darunter die
+   beiden Beispiele aus „Die Wochentag-Frage“. Die Antworten:
+   - „wie sie jetzt fallen“: Der Beginn bleibt, die Regel wandert um so viele
+     Tage, wie der Beginn auf der neuen Uhr wandert (`series_shift`, ein
+     Schritt von der alten zur neuen Uhr);
+   - „wie in der Regel“: Der Regeltext bleibt, der Beginn rückt auf seinen
+     alten Tag zurück, wo die Tage der Regel nur zu diesem passen (oder die
+     Regel ihre Tage aus dem Beginn nimmt);
+   - in beiden wandert eine Ausnahme zur Uhrzeit der Serie mit ihrem Termin,
+     auf die neue Uhrzeit; eine zu anderer Uhrzeit bleibt wörtlich; ein Ende,
+     das ein Zeitpunkt ist (ein Schnitt), wird zum Ende seines letzten Tages
+     auf der neuen Uhr, ein Ende „bis zu diesem Datum“ wandert mit den Tagen
+     (101b);
+   - ein Beginn oder eine Ausnahme in der Frühjahrs-Lücke der neuen Uhr lehnt
+     die Antwort ab, ebenso jeder Grund, aus dem `series_shift` ablehnt
+     (20a).
+   Gefragt wird nur, wenn der Beginn den Tag wechselt und die Regel Tage
+   nennt, oder eine Serie, deren Tage am Beginn hängen, sie nicht halten kann
+   (24a). Noch liest das kein Editor (Stufen 10 und 12).
 10. **Das Formular-Modell** — `feat(shared): the series clock form model`.
     Sichtbarkeit nach der Tabelle, Vorbelegung, Wechsel, Speicherfunktion,
     Rückfall auf UTC für Zonen, die das Gerät ablehnt, Kopieren und Duplizieren

@@ -3592,6 +3592,13 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   aus der CLDR-Tabelle. Desktop und Handy fragen dieselbe Regel im Kern, die
   die eingebauten Manifeste zuerst liest. Die Editoren lesen es mit den
   Stufen 10 und 11.
+  ↳ **Die Kern-Regel für den Zonenwechsel (Stufe 9, 2026-11-22, 15a, 20a,
+  24a):** Der Kern sagt, ob nach einer neuen Zone gefragt wird, an welchem Tag
+  der Beginn auf beiden Uhren liegt, zu welcher die Tage der Regel passen, und
+  schreibt beide Antworten („wie sie jetzt fallen“, „wie in der Regel“) samt
+  Ausnahmen und Ende, oder lehnt sie mit Grund ab. Vorher geprüft: Für
+  gezählte Wochentage und Tage vom Monatsende nennt der Kern dieselben Tage
+  wie rrule.js. Noch liest das kein Editor.
   ↳ **Wie ein Serienende liest, steht im Kern (Stufe 8, Schritt 5, 2026-11-22,
   101b, 105a):** `…T235959Z` auf der Uhr einer Zone heißt „bis zu diesem
   Datum“, außer die Sekunde danach ist eine Uhrzeit der Regel (dann schrieb

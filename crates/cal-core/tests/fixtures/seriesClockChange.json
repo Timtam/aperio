@@ -1,0 +1,387 @@
+{
+  "about": "Changing the clock a series repeats on (cal_core::series_clock_change, DESIGN-series-time-zone.md stage 9; decisions 15a, 20a, 24a). Each question is a series as it is stored (rule, start, exceptions, its zone or none) and the zone chosen (or none for UTC). The answer says whether the editors ask which days to keep, the start's day on the old and the new clock, which of them the rule's named days fit, and the two answers: as they fall now (the start stays, the rule names the days the occurrences fall on on the new clock) and as the rule says (the rule's text stays, the start moves back onto its old day where the rule fits only that one), each written or refused with a reason. An exception at the series' time of day moves with its occurrence; one at another time stays. An instant end moves as the end of its last day on the new clock. null for a start that names no instant. Written by hand from tzdata's rules; the core and both surfaces read this file.",
+  "rows": [
+    {
+      "name": "lost-berlin-zone-monday-rule",
+      "note": "DESIGN, \"Die Wochentag-Frage\": a series that lost its Berlin zone, Mondays, starting Sunday 23:30 UTC. Berlin chosen: as the rule says, it starts Monday 00:30 Berlin and repeats on Mondays (repaired); as they fall now, Tuesdays.",
+      "question": {
+        "rrule": "FREQ=WEEKLY;BYDAY=MO",
+        "start": "2026-11-01T23:30:00Z",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": true,
+        "startDayBefore": "2026-11-01",
+        "startDayAfter": "2026-11-02",
+        "fit": "after",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=WEEKLY;BYDAY=TU",
+          "start": "2026-11-01T23:30:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=WEEKLY;BYDAY=MO",
+          "start": "2026-11-01T23:30:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "a-series-that-means-utc-sundays",
+      "note": "DESIGN: Sundays from Sunday 23:30 UTC names only its start's day, so its days follow its start (24a) and nobody is asked: it becomes Mondays 00:30 Berlin. As the rule says it would start Sunday 00:30 Berlin.",
+      "question": {
+        "rrule": "FREQ=WEEKLY;BYDAY=SU",
+        "start": "2026-11-01T23:30:00Z",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-01",
+        "startDayAfter": "2026-11-02",
+        "fit": "before",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=WEEKLY;BYDAY=MO",
+          "start": "2026-11-01T23:30:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=WEEKLY;BYDAY=SU",
+          "start": "2026-10-31T23:30:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "same-day-moves-cancelling-exceptions-only",
+      "note": "Berlin 09:00 to New York 03:00, the same day: nobody is asked. An exception at the series' time moves with its occurrence to 03:00 New York (in mid-March 2027 New York is already on summer time, Berlin not yet: 08:00 UTC becomes 07:00 UTC); one at another time cancels nothing and stays.",
+      "question": {
+        "rrule": "FREQ=WEEKLY;BYDAY=MO,WE",
+        "start": "2026-11-02T08:00:00Z",
+        "exceptions": [
+          "2027-03-17T08:00:00Z",
+          "2026-11-11T07:00:00Z"
+        ],
+        "fromTzid": "Europe/Berlin",
+        "toTzid": "America/New_York"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-02",
+        "startDayAfter": "2026-11-02",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,WE",
+          "start": "2026-11-02T08:00:00Z",
+          "exceptions": [
+            "2027-03-17T07:00:00Z",
+            "2026-11-11T07:00:00Z"
+          ]
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,WE",
+          "start": "2026-11-02T08:00:00Z",
+          "exceptions": [
+            "2027-03-17T07:00:00Z",
+            "2026-11-11T07:00:00Z"
+          ]
+        }
+      }
+    },
+    {
+      "name": "monthly-on-the-31st-cannot-keep-its-days",
+      "note": "Monthly from 31 October 23:30 UTC takes its day from its start; in Berlin that is 1 November, and as they fall now cannot be written (a day past the 28th). So the question comes; as the rule says, it starts on 31 October 00:30 Berlin.",
+      "question": {
+        "rrule": "FREQ=MONTHLY",
+        "start": "2026-10-31T23:30:00Z",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": true,
+        "startDayBefore": "2026-10-31",
+        "startDayAfter": "2026-11-01",
+        "fit": "both",
+        "asNow": {
+          "outcome": "refused",
+          "reason": "month_end"
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=MONTHLY",
+          "start": "2026-10-30T23:30:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "hours-in-the-rule-and-a-new-time",
+      "note": "A rule with BYHOUR whose time of day changes on the new clock: no answer can be written, so the change itself is refused.",
+      "question": {
+        "rrule": "FREQ=DAILY;BYHOUR=9",
+        "start": "2026-11-02T08:00:00Z",
+        "exceptions": [],
+        "fromTzid": "Europe/Berlin",
+        "toTzid": "America/New_York"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-02",
+        "startDayAfter": "2026-11-02",
+        "fit": "both",
+        "asNow": {
+          "outcome": "refused",
+          "reason": "time_of_day"
+        },
+        "asRule": {
+          "outcome": "refused",
+          "reason": "time_of_day"
+        }
+      }
+    },
+    {
+      "name": "moved-start-in-the-spring-gap",
+      "note": "Sundays 17:30 Los Angeles, chosen Berlin on 28 March 2027: the start is Monday 02:30 there. As the rule says would move it back to Sunday 28 March 02:30 Berlin, which the spring change skips: refused. As they fall now repeats on Mondays.",
+      "question": {
+        "rrule": "FREQ=WEEKLY;BYDAY=SU",
+        "start": "2027-03-29T00:30:00Z",
+        "exceptions": [],
+        "fromTzid": "America/Los_Angeles",
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2027-03-28",
+        "startDayAfter": "2027-03-29",
+        "fit": "before",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=WEEKLY;BYDAY=MO",
+          "start": "2027-03-29T00:30:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "refused",
+          "reason": "skipped_time"
+        }
+      }
+    },
+    {
+      "name": "a-cut-moves-as-the-end-of-its-last-day",
+      "note": "Daily 09:00 Berlin cut before 10 November (its last day the 9th), to New York 03:00 the same day: the end becomes the end of 9 November in New York.",
+      "question": {
+        "rrule": "FREQ=DAILY;UNTIL=20261110T075959Z",
+        "start": "2026-11-02T08:00:00Z",
+        "exceptions": [],
+        "fromTzid": "Europe/Berlin",
+        "toTzid": "America/New_York"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-02",
+        "startDayAfter": "2026-11-02",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261110T045959Z",
+          "start": "2026-11-02T08:00:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261110T045959Z",
+          "start": "2026-11-02T08:00:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "an-end-on-utc-moves-with-the-days",
+      "note": "Daily 23:30 UTC through 5 November, to Berlin 00:30 the next day: as they fall now the occurrences stand on 2 to 6 November in Berlin, and so does the end; as the rule says, the start moves back to 1 November 00:30 Berlin and the end stays the 5th.",
+      "question": {
+        "rrule": "FREQ=DAILY;UNTIL=20261105T235959Z",
+        "start": "2026-11-01T23:30:00Z",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-01",
+        "startDayAfter": "2026-11-02",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261106T225959Z",
+          "start": "2026-11-01T23:30:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261105T225959Z",
+          "start": "2026-10-31T23:30:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "an-end-through-a-day-moves-its-digits",
+      "note": "Daily 00:30 Berlin through 3 May (101b), to UTC 22:30 the day before: as they fall now the end moves to 2 May and keeps its spelling; as the rule says, the start moves to 2 April 22:30 UTC and the end stays.",
+      "question": {
+        "rrule": "FREQ=DAILY;UNTIL=20260503T235959Z",
+        "start": "2026-04-01T22:30:00Z",
+        "exceptions": [],
+        "fromTzid": "Europe/Berlin",
+        "toTzid": null
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-04-02",
+        "startDayAfter": "2026-04-01",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20260502T235959Z",
+          "start": "2026-04-01T22:30:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20260503T235959Z",
+          "start": "2026-04-02T22:30:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "a-counted-weekday-is-asked-and-refused-as-it-falls",
+      "note": "Monthly on the first Monday from Sunday 1 November 23:30 UTC, which is Monday 2 November 00:30 Berlin, the first Monday there: the rule fits the new day. A counted weekday cannot be moved by a day.",
+      "question": {
+        "rrule": "FREQ=MONTHLY;BYDAY=1MO",
+        "start": "2026-11-01T23:30:00Z",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": true,
+        "startDayBefore": "2026-11-01",
+        "startDayAfter": "2026-11-02",
+        "fit": "after",
+        "asNow": {
+          "outcome": "refused",
+          "reason": "ordinal_weekday"
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=MONTHLY;BYDAY=1MO",
+          "start": "2026-11-01T23:30:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "the-last-day-of-the-month",
+      "note": "Monthly on the last day from 30 November 23:30 UTC, which is 1 December 00:30 Berlin: the rule fits the old day only, so as the rule says the start moves back to 30 November 00:30 Berlin; a negative day of the month cannot be moved.",
+      "question": {
+        "rrule": "FREQ=MONTHLY;BYMONTHDAY=-1",
+        "start": "2026-11-30T23:30:00Z",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": true,
+        "startDayBefore": "2026-11-30",
+        "startDayAfter": "2026-12-01",
+        "fit": "before",
+        "asNow": {
+          "outcome": "refused",
+          "reason": "negative_month_day"
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=MONTHLY;BYMONTHDAY=-1",
+          "start": "2026-11-29T23:30:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "a-rule-that-cannot-be-read",
+      "note": "A part given twice: no reader agrees on it, so neither answer can be written.",
+      "question": {
+        "rrule": "FREQ=WEEKLY;BYDAY=MO;BYDAY=TU",
+        "start": "2026-11-01T23:30:00Z",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": true,
+        "startDayBefore": "2026-11-01",
+        "startDayAfter": "2026-11-02",
+        "fit": "unknown",
+        "asNow": {
+          "outcome": "refused",
+          "reason": "unreadable"
+        },
+        "asRule": {
+          "outcome": "refused",
+          "reason": "unreadable"
+        }
+      }
+    },
+    {
+      "name": "the-same-zone-changes-nothing",
+      "note": "Choosing the zone the series already has.",
+      "question": {
+        "rrule": "FREQ=WEEKLY;BYDAY=MO",
+        "start": "2026-11-02T08:00:00Z",
+        "exceptions": [],
+        "fromTzid": "Europe/Berlin",
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-02",
+        "startDayAfter": "2026-11-02",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=WEEKLY;BYDAY=MO",
+          "start": "2026-11-02T08:00:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=WEEKLY;BYDAY=MO",
+          "start": "2026-11-02T08:00:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "a-start-that-names-no-instant",
+      "note": "null for text that names no instant.",
+      "question": {
+        "rrule": "FREQ=DAILY",
+        "start": "yesterday",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": null
+    }
+  ]
+}

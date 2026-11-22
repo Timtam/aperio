@@ -113,6 +113,7 @@ import {
   seriesClockZoneThroughCore,
   canonicalZoneThroughCore,
   expansionClockThroughCore,
+  seriesClockChangeJson,
   zoneLabelsJson,
   zoneSearchJson,
   zoneChoiceJson,
@@ -191,6 +192,7 @@ installSeriesClockRules({
   seriesClockZone: seriesClockZoneThroughCore,
   canonicalZone: canonicalZoneThroughCore,
   expansionClock: expansionClockThroughCore,
+  seriesClockChangeJson,
 });
 installZoneListRules({
   zoneLabelsJson,

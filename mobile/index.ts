@@ -223,6 +223,7 @@ installSeriesClockRules({
   seriesClockZone: (tzid) => CalFfi.seriesClockZone(tzid),
   expansionClock: (allDay, tzid) => CalFfi.expansionClock(allDay, tzid),
   canonicalZone: (name) => CalFfi.canonicalZone(name),
+  seriesClockChangeJson: (questionJson) => CalFfi.seriesClockChange(questionJson),
 });
 
 // The world zone list a series' zone is chosen from. The offsets answer

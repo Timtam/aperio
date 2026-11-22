@@ -9,6 +9,18 @@
 // reminders alike. Whether THIS device's clock library can then use an accepted
 // zone is the shell's own check, after the rule (`expansionZone` in
 // recurrence.ts).
+//
+// Choosing another zone for a series is a rule too (stage 9,
+// `cal_core::series_clock_change`): whether the editors ask which days to
+// keep (15a, 24a), and the two answers, written or refused with a reason.
+
+import type { ClockChangeQuestion } from './generated/ClockChangeQuestion';
+import type { SeriesClockChange } from './generated/SeriesClockChange';
+
+export type { ClockChangeAnswer } from './generated/ClockChangeAnswer';
+export type { ClockChangeRefusal } from './generated/ClockChangeRefusal';
+export type { RuleFit } from './generated/RuleFit';
+export type { ClockChangeQuestion, SeriesClockChange };
 
 /** This surface's door into `cal_core::series_clock`. The empty string stands
  *  for "none", in both directions. */
@@ -20,6 +32,9 @@ export interface SeriesClockRules {
   /** Which clock the series' rule is read on: `device-days`, `zone` or `utc`.
    *  The empty string stands for "no zone stored". */
   expansionClock(allDay: boolean, tzid: string): string;
+  /** Changing the clock a series repeats on: a question as JSON in, the
+   *  answer as JSON out, JSON `null` for a start that names no instant. */
+  seriesClockChangeJson(questionJson: string): string;
 }
 
 /** The clock a series' rule is read on — the core's answer (decision 48a). */
@@ -83,4 +98,16 @@ export function expansionClock(
     throw new Error(`the core named an unknown expansion clock: ${answer}`);
   }
   return answer;
+}
+
+/**
+ * What choosing `toTzid` (or UTC for `null`) for a series stored on `fromTzid`
+ * writes: whether the editors ask which days to keep, the start's day on both
+ * clocks, which of them the rule's days fit, and the two answers, "as they
+ * fall now" and "as the rule says", each written or refused with a reason
+ * (DESIGN-series-time-zone.md, "Die Wochentag-Frage"). `null` for a start
+ * that names no instant. A door that throws is at fault and stays loud.
+ */
+export function seriesClockChange(question: ClockChangeQuestion): SeriesClockChange | null {
+  return JSON.parse(rules().seriesClockChangeJson(JSON.stringify(question))) as SeriesClockChange | null;
 }
