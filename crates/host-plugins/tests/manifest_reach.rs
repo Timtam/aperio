@@ -355,10 +355,10 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// anything, which is an allowlist that quietly widens itself every time one of
 /// those files grows a second include.
 ///
-/// All but four read `shared/contracts/`, the directory holding the contracts
+/// All but five read `shared/contracts/`, the directory holding the contracts
 /// that BOTH languages check themselves against. The exceptions are the phone's
-/// series-clock, zone-list, repeat-summary and tail-exceptions doors, which read
-/// cal-core's own fixtures; cal-ffi never leaves this repository, so those
+/// series-clock, zone-list, repeat-summary, tail-exceptions and day-parts
+/// doors, which read cal-core's own fixtures; cal-ffi never leaves this repository, so those
 /// reaches hold as long as cal-core stays beside it.
 /// All but the last are the app reading a file in its own checkout and are
 /// correct as they stand.
@@ -372,7 +372,7 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// fix — a crate that owns the contracts and hands out their bytes — is the
 /// same move every `plugin.json` already made, and it is worth making once the
 /// mechanism is chosen rather than twice.
-const KNOWN_REACHES: [(&str, &str); 12] = [
+const KNOWN_REACHES: [(&str, &str); 13] = [
     // The app reading its own file: the near end of the chain, a stored pref
     // parsing into reminders.
     (
@@ -449,6 +449,13 @@ const KNOWN_REACHES: [(&str, &str); 12] = [
     (
         "crates/cal-ffi/src/lib.rs",
         "cal-core/tests/fixtures/tailExceptions.json",
+    ),
+    // And for the day-parts door (stage 8 of DESIGN-series-time-zone.md): a
+    // key that names no day must come back as JSON null, which only the rows
+    // through the door show.
+    (
+        "crates/cal-ffi/src/lib.rs",
+        "cal-core/tests/fixtures/dayParts.json",
     ),
     // THE ONE THAT IS DEBT. The far end of the chain — a reminder becoming a
     // VALARM a CalDAV server stores — asserted from the app's own numbers, by
