@@ -201,7 +201,7 @@ export function TaskRecurrenceSelector({
 
           {showInterval && (
             <View style={styles.field}>
-              <Text style={styles.label}>
+              <Text style={styles.label} aria-hidden>
                 {t('dialogs.task.recurrence.intervalLabel', {
                   unit: t(`dialogs.task.recurrence.unit.${value.freq}`),
                 })}
@@ -248,7 +248,7 @@ export function TaskRecurrenceSelector({
 
           {showDayOfMonth && (
             <View style={styles.field}>
-              <Text style={styles.label}>
+              <Text style={styles.label} aria-hidden>
                 {t('dialogs.task.recurrence.dayOfMonthLabel')}
               </Text>
               <TextInput
@@ -284,7 +284,7 @@ export function TaskRecurrenceSelector({
 
           {value.endMode === 'COUNT' && (
             <View style={styles.field}>
-              <Text style={styles.label}>
+              <Text style={styles.label} aria-hidden>
                 {t('dialogs.task.recurrence.countLabel')}
               </Text>
               <TextInput
@@ -301,7 +301,7 @@ export function TaskRecurrenceSelector({
 
           {value.endMode === 'UNTIL' && (
             <View style={styles.field}>
-              <Text style={styles.label}>
+              <Text style={styles.label} aria-hidden>
                 {t('dialogs.task.recurrence.untilLabel')}
               </Text>
               <TextInput

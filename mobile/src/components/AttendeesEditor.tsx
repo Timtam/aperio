@@ -193,7 +193,14 @@ export function AttendeesEditor({
 
   return (
     <View style={styles.field}>
-      <Text style={styles.label}>{t('dialogs.event.fields.attendees')}</Text>
+      {/* A heading over the attendee list and its input, as the task editor's
+          date blocks. */}
+      <Text
+        style={styles.label}
+        accessibilityRole={readOnly && value.length === 0 ? undefined : 'header'}
+      >
+        {t('dialogs.event.fields.attendees')}
+      </Text>
 
       {value.length > 0 && (
         <View
@@ -236,7 +243,8 @@ export function AttendeesEditor({
           value={input}
           onChangeText={setInput}
           placeholder={t('dialogs.event.attendees.placeholder')}
-          accessibilityLabel={t('dialogs.event.fields.attendees')}
+          // Not the heading's word again, nor the Add button's: what goes in.
+          accessibilityLabel={t('dialogs.event.attendees.inputLabel')}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"

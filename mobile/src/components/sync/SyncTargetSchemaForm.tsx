@@ -8,6 +8,8 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputInstance,
+  type TextInstance,
 } from 'react-native';
 
 import {
@@ -128,15 +130,15 @@ export function SyncTargetSchemaForm({
     preview: HostKeyPreview;
   } | null>(null);
 
-  const errorRef = useRef<Text>(null);
-  const passphraseRef = useRef<TextInput>(null);
+  const errorRef = useRef<TextInstance>(null);
+  const passphraseRef = useRef<TextInputInstance>(null);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
     [],
   );
 
-  const focusOn = useCallback((node: Text | TextInput | null) => {
+  const focusOn = useCallback((node: TextInstance | TextInputInstance | null) => {
     const tag = node ? findNodeHandle(node) : null;
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, []);
@@ -357,7 +359,7 @@ export function SyncTargetSchemaForm({
       )}
 
       <View style={styles.field}>
-        <Text style={styles.label}>
+        <Text style={styles.label} aria-hidden>
           {t('dialogs.settings.sync.deviceName')}
         </Text>
         <TextInput
@@ -371,7 +373,7 @@ export function SyncTargetSchemaForm({
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>
+        <Text style={styles.label} aria-hidden>
           {t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel')}
         </Text>
         <TextInput
@@ -387,7 +389,7 @@ export function SyncTargetSchemaForm({
           )}
           accessibilityHint={t('dialogs.settings.sync.connectEmptyReveal')}
         />
-        <Text style={styles.hint}>
+        <Text style={styles.hint} aria-hidden>
           {t('dialogs.settings.sync.connectEmptyReveal')}
         </Text>
       </View>

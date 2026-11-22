@@ -2,7 +2,7 @@ import { useEffect, type ReactElement } from 'react';
 import { BackHandler } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
-import { HeaderCancelButton } from './HeaderCancelButton';
+import { HeaderTextButton } from './HeaderTextButton';
 
 /** What else decides how the screen may be left, beyond the plain button. */
 export interface CancelHeaderHold {
@@ -47,9 +47,9 @@ export function useCancelHeader(
     navigation.setOptions({
       headerLeft: () =>
         close != null ? (
-          <HeaderCancelButton label={t('dialogs.close')} onPress={close} />
+          <HeaderTextButton label={t('dialogs.close')} onPress={close} />
         ) : (
-          <HeaderCancelButton
+          <HeaderTextButton
             label={t(labelKey)}
             disabled={writing}
             onPress={() => navigation.goBack()}

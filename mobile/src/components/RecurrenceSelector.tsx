@@ -214,7 +214,7 @@ export function RecurrenceSelector({
       {rule.freq !== 'NONE' && (
         <>
           <View style={styles.field}>
-            <Text style={styles.label}>
+            <Text style={styles.label} aria-hidden>
               {t('dialogs.event.recurrence.intervalLabel', {
                 unit: t(`dialogs.event.recurrence.unit.${rule.freq}`),
               })}
@@ -289,7 +289,7 @@ export function RecurrenceSelector({
 
           {rule.endMode === 'COUNT' && (
             <View style={styles.field}>
-              <Text style={styles.label}>{t('dialogs.event.recurrence.countLabel')}</Text>
+              <Text style={styles.label} aria-hidden>{t('dialogs.event.recurrence.countLabel')}</Text>
               <TextInput
                 style={styles.input}
                 value={String(rule.count)}
@@ -302,7 +302,7 @@ export function RecurrenceSelector({
 
           {rule.endMode === 'UNTIL' && (
             <View style={styles.field}>
-              <Text style={styles.label}>{t('dialogs.event.recurrence.untilLabel')}</Text>
+              <Text style={styles.label} aria-hidden>{t('dialogs.event.recurrence.untilLabel')}</Text>
               <TextInput
                 style={styles.input}
                 value={rule.until}

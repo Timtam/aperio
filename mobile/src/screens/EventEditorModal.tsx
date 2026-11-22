@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInstance,
 } from 'react-native';
 
 import type {
@@ -122,6 +123,7 @@ import {
 import { SoundSelect } from '../components/SoundSelect';
 import { StepWriteWaitHost } from '../components/StepWriteWaitHost';
 import { useCancelHeader } from '../components/useCancelHeader';
+import { useActionHeader } from '../components/useActionHeader';
 import {
   addEventExdate,
   Calendar,
@@ -297,7 +299,7 @@ function EventEditorScreen({
     sentence: string;
     proceed: () => Promise<void>;
   } | null>(null);
-  const splitNoticeRef = useRef<Text>(null);
+  const splitNoticeRef = useRef<TextInstance>(null);
   useEffect(() => {
     if (splitNotice == null) return;
     // After the render that put it there, so the node exists.
@@ -2283,6 +2285,19 @@ function EventEditorScreen({
     }
   };
 
+  // Save in the header, always on screen: below the fold, with the keyboard
+  // open, VoiceOver did not scroll down to it (useActionHeader). Not while
+  // loading, nor for a birthday or a notice, which have nothing to save.
+  const saveFromHeader = useCallback(() => void save(), [save]);
+  useActionHeader(
+    navigation,
+    !loading &&
+      !(eventId != null && isBirthdayEventId(eventId)) &&
+      splitNotice == null
+      ? { label: t('mobile.save'), onPress: saveFromHeader, disabled: saving }
+      : null,
+  );
+
   if (loading) {
     return (
       <View style={styles.screen}>
@@ -2380,7 +2395,7 @@ function EventEditorScreen({
         <ReadOnlyField label={t('dialogs.event.fields.title')} value={title} />
       ) : (
         <View style={styles.field}>
-          <Text style={styles.label}>{t('dialogs.event.fields.title')}</Text>
+          <Text style={styles.label} aria-hidden>{t('dialogs.event.fields.title')}</Text>
           <TitleField
             style={styles.input}
             value={title}
@@ -2559,7 +2574,7 @@ function EventEditorScreen({
         )
       ) : (
         <View style={styles.field}>
-          <Text style={styles.label}>{t('dialogs.event.fields.location')}</Text>
+          <Text style={styles.label} aria-hidden>{t('dialogs.event.fields.location')}</Text>
           <TextInput
             style={styles.input}
             value={location}
@@ -2581,7 +2596,7 @@ function EventEditorScreen({
         </>
       ) : (
         <View style={styles.field}>
-          <Text style={styles.label}>{t('dialogs.event.fields.description')}</Text>
+          <Text style={styles.label} aria-hidden>{t('dialogs.event.fields.description')}</Text>
           <TextInput
             style={[styles.input, styles.multiline]}
             value={description}
@@ -2826,23 +2841,8 @@ function EventEditorScreen({
         />
       )}
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: saving }}
-        accessibilityLabel={t('mobile.save')}
-        disabled={saving}
-        onPress={() => void save()}
-        style={({ pressed }) => [
-          styles.primaryButton,
-          pressed && styles.primaryPressed,
-          saving && styles.primaryDisabled,
-        ]}
-      >
-        <Text style={styles.primaryButtonText}>{t('mobile.save')}</Text>
-      </Pressable>
-
-      {/* Delete — edit-only (a new event has nothing to delete), after Save and
-          visually destructive; disabled while a save runs. Hidden on a
+      {/* Delete — edit-only (a new event has nothing to delete), at the end of
+          the form (Save is in the header) and visually destructive; disabled while a save runs. Hidden on a
           READ-ONLY calendar: the row surfaces gate their delete action the same
           way, but Search + Reminders open this editor for ANY event — without
           the gate the button would just dead-end in a provider rejection. */}
@@ -2905,7 +2905,6 @@ const makeStyles = (c: ThemeColors) =>
       alignItems: 'center',
     },
     primaryPressed: { backgroundColor: c.accentPressed },
-    primaryDisabled: { backgroundColor: c.accentDisabled },
     primaryButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
     deleteButton: {
       marginTop: 8,

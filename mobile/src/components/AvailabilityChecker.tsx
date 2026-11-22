@@ -165,7 +165,7 @@ export function AvailabilityChecker({
                     </Text>
                     <Text
                       style={[styles.status, busy ? styles.statusBusy : styles.statusFree]}
-                      importantForAccessibility="no"
+                      aria-hidden
                     >
                       {status}
                     </Text>

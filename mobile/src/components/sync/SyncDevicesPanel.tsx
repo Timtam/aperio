@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInstance,
 } from 'react-native';
 import {
   canForgetDevice,
@@ -111,15 +112,15 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [forgetFor, setForgetFor] = useState<SyncDeviceSummary | null>(null);
 
-  const statusRef = useRef<Text>(null);
-  const errorRef = useRef<Text>(null);
+  const statusRef = useRef<TextInstance>(null);
+  const errorRef = useRef<TextInstance>(null);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
     [],
   );
 
-  const focusOn = useCallback((node: Text | null) => {
+  const focusOn = useCallback((node: TextInstance | null) => {
     const tag = node ? findNodeHandle(node) : null;
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, []);
@@ -306,7 +307,7 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
 
   return (
     <>
-      <Text style={styles.label} nativeID="sync-device-name-label">
+      <Text style={styles.label} aria-hidden nativeID="sync-device-name-label">
         {t('dialogs.settings.sync.deviceName')}
       </Text>
       <TextInput

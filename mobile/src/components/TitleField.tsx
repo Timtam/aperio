@@ -1,5 +1,5 @@
 import { forwardRef, memo } from 'react';
-import { StyleSheet, TextInput, type TextStyle } from 'react-native';
+import { StyleSheet, TextInput, type TextStyle, type TextInputInstance } from 'react-native';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -49,7 +49,7 @@ export interface TitleFieldProps {
 }
 
 export const TitleField = memo(
-  forwardRef<TextInput, TitleFieldProps>(function TitleField(
+  forwardRef<TextInputInstance, TitleFieldProps>(function TitleField(
     {
       value,
       onChangeText,

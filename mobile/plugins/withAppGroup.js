@@ -1,4 +1,4 @@
-const { withEntitlementsPlist } = require('@expo/config-plugins');
+const { withEntitlementsPlist } = require('expo/config-plugins');
 
 /** The shared container the app and, later, the widget extension both open.
  *
@@ -21,8 +21,8 @@ const APP_GROUP = 'group.com.aperio.mobile';
 // whether the capability signs at all against our provisioning profile — and
 // that question has bitten this project before. Build #5 failed at fastlane
 // because the generated entitlements asked for `aps-environment` that the
-// profile did not carry, which is why `withoutPushEntitlement.js` exists next
-// door. App Groups is the same class of problem, and the iOS loop is one EAS
+// profile did not carry, which is why expo-notifications runs with
+// `enableRemoteNotifications: false` (app.json). App Groups is the same class of problem, and the iOS loop is one EAS
 // build long, so it gets its own build rather than being discovered three
 // features deep.
 //

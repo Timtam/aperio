@@ -233,7 +233,7 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
           />
           <View style={styles.rangeRow}>
             <View style={styles.rangeField}>
-              <Text style={styles.rangeLabel}>{t('dialogs.search.sinceLabel')}</Text>
+              <Text style={styles.rangeLabel} aria-hidden>{t('dialogs.search.sinceLabel')}</Text>
               <TextInput
                 style={styles.rangeInput}
                 value={since}
@@ -245,7 +245,7 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
               />
             </View>
             <View style={styles.rangeField}>
-              <Text style={styles.rangeLabel}>{t('dialogs.search.untilLabel')}</Text>
+              <Text style={styles.rangeLabel} aria-hidden>{t('dialogs.search.untilLabel')}</Text>
               <TextInput
                 style={styles.rangeInput}
                 value={until}

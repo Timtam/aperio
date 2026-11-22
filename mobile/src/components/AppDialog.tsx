@@ -9,6 +9,8 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputInstance,
+  type TextInstance,
 } from 'react-native';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -73,8 +75,8 @@ export function AppDialog({
   children?: ReactNode;
 }) {
   const styles = useThemedStyles(makeStyles);
-  const titleRef = useRef<Text | null>(null);
-  const inputRef = useRef<TextInput | null>(null);
+  const titleRef = useRef<TextInstance | null>(null);
+  const inputRef = useRef<TextInputInstance | null>(null);
 
   const focusInitial = () => {
     const node = input ? inputRef.current : titleRef.current;

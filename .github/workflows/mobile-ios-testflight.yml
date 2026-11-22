@@ -211,9 +211,10 @@ jobs:
       # What the app will ASK Apple for, printed before anything tries to sign
       # it. Entitlements are assembled by config plugins whose order decides the
       # outcome, and the only place that used to be visible was an Xcode error
-      # 25 minutes later — which is how a silently-broken `withoutPushEntitlement`
-      # went unnoticed until EAS enabled Push Notifications at the developer
-      # portal on its own.
+      # 25 minutes later — which is how a silently-broken plugin that removed
+      # the push entitlement went unnoticed until EAS enabled Push Notifications
+      # at the developer portal on its own. (Since SDK 58 expo-notifications
+      # leaves the entitlement out itself: `enableRemoteNotifications: false`.)
       #
       # `|| true` on purpose: this is diagnostics. A config command that trips
       # over something must not be what stops a build that would otherwise pass.

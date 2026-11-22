@@ -84,9 +84,14 @@ import uniffi.cal_ffi.withoutDuplicateMeetings as uniffiWithoutDuplicateMeetings
  *  MAX_IMPORT_BYTES`, 25 MiB): enough for the read to call a file too large. */
 private const val INCOMING_CAP: Long = 25L * 1024 * 1024 + 1
 
-/** Where the launch intent last taken is remembered, across processes. */
+/** Where the launch intents last taken are remembered, across processes: a
+ *  calendar file's and an appointment link's, each by task and URI. */
 private const val INCOMING_PREFS = "aperio_incoming_file"
 private const val TAKEN_LAUNCH = "taken_launch"
+private const val TAKEN_LAUNCH_LINK = "taken_launch_link"
+
+/** The scheme of the links Aperio builds itself (app.json `scheme`). */
+private const val APP_SCHEME = "aperio"
 
 class CalFfiModule : Module() {
   // Expo runs EVERY AsyncFunction body on ONE single-threaded HandlerThread
@@ -958,6 +963,12 @@ class CalFfiModule : Module() {
     AsyncFunction("takeIncomingFileJson") {
       takeIncomingFile()
     }
+
+    // The appointment link that started the activity. A tap while Aperio runs
+    // is a new intent, which reaches JavaScript as a link event instead.
+    AsyncFunction("takeLaunchLink") {
+      takeLaunchLink()
+    }
   }
 
   /** The intent a share or an "open with" brought while the app ran. */
@@ -1008,12 +1019,8 @@ class CalFfiModule : Module() {
     if (uri.scheme != "content" && uri.scheme != "file") return null
     if (!takenIntents.add(intent)) return null
     val context = appContext.reactContext?.applicationContext ?: return null
-    if (fresh == null) {
-      if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return null
-      val launch = "${activity?.taskId}|$uri"
-      val taken = context.getSharedPreferences(INCOMING_PREFS, Context.MODE_PRIVATE)
-      if (taken.getString(TAKEN_LAUNCH, null) == launch) return null
-      taken.edit().putString(TAKEN_LAUNCH, launch).apply()
+    if (fresh == null && !firstTakeOfLaunch(context, activity?.taskId, intent, uri, TAKEN_LAUNCH)) {
+      return null
     }
     val name = incomingName(context, intent, uri)
     try {
@@ -1040,6 +1047,52 @@ class CalFfiModule : Module() {
       // Not opened (no permission, gone, not a file): said with its name.
       throw CodedException("internal", name, e)
     }
+  }
+
+  /**
+   * The `aperio:` link that started the activity (a tap on the ongoing
+   * appointment notification, `LiveActivityNotifier`, while Aperio was not
+   * running), or `null` when there is none or it was taken already.
+   *
+   * Taken once per launch, by the file import's rules (`firstTakeOfLaunch`):
+   * Android hands the same intent to an activity it recreates (a font size,
+   * display size or language change) and to a task it brings back after the
+   * process was ended, and each would otherwise open the appointment again.
+   * expo-linking records the intent's URL anew on every activity creation, so
+   * its `getLinkingURL` cannot tell. A new tap after Back starts a new task,
+   * so it still opens.
+   */
+  private fun takeLaunchLink(): String? {
+    val activity = appContext.currentActivity ?: return null
+    val intent = activity.intent ?: return null
+    if (intent.action != Intent.ACTION_VIEW) return null
+    val uri = intent.data ?: return null
+    if (uri.scheme != APP_SCHEME) return null
+    if (!takenIntents.add(intent)) return null
+    val context = appContext.reactContext?.applicationContext ?: return null
+    if (!firstTakeOfLaunch(context, activity.taskId, intent, uri, TAKEN_LAUNCH_LINK)) return null
+    return uri.toString()
+  }
+
+  /**
+   * Whether the activity's launch intent is taken for the first time, and if
+   * so, remember it: not relaunched from Recents
+   * (`FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY`), and not the one this task last
+   * took, remembered under `key` by task and URI across processes.
+   */
+  private fun firstTakeOfLaunch(
+    context: Context,
+    taskId: Int?,
+    intent: Intent,
+    uri: Uri,
+    key: String,
+  ): Boolean {
+    if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return false
+    val launch = "$taskId|$uri"
+    val taken = context.getSharedPreferences(INCOMING_PREFS, Context.MODE_PRIVATE)
+    if (taken.getString(key, null) == launch) return false
+    taken.edit().putString(key, launch).apply()
+    return true
   }
 
   /**

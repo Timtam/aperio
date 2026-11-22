@@ -358,6 +358,12 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  none, or it was taken already. iOS hands an opened file to `Linking` as
    *  a `file://` URL instead. */
   takeIncomingFileJson(): Promise<string | null>;
+  /** Android only: the `aperio:` link that started the activity (a tap on the
+   *  ongoing appointment notification), once per launch — `null` when there
+   *  is none, or it was taken already. An activity Android recreates carries
+   *  the same intent and gets `null`. iOS reads its launch link from
+   *  expo-linking. */
+  takeLaunchLink(): Promise<string | null>;
   /** Create an event from `{calendar_id, …NewEvent}`; returns the created
    *  `Event` as JSON. */
   createEventJson(requestJson: string): Promise<string>;

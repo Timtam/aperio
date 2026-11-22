@@ -24,6 +24,7 @@ export function RadioGroup<T extends string | number>({
   onChange,
   disabled,
   labelAsHeading,
+  hideLegend,
 }: {
   label: string;
   value: T;
@@ -34,11 +35,18 @@ export function RadioGroup<T extends string | number>({
    *  navigation reaches section-level pickers (the Settings groups). Off by
    *  default — inline pickers (status/priority/list/section) are not headers. */
   labelAsHeading?: boolean;
+  /** Keep the legend visible but out of both readers, where something right
+   *  before it already says the same (a dialog titled with the label). */
+  hideLegend?: boolean;
 }) {
   const styles = useThemedStyles(makeStyles);
   return (
     <View accessibilityRole="radiogroup" accessibilityLabel={label} style={styles.group}>
-      <Text style={styles.legend} accessibilityRole={labelAsHeading ? 'header' : undefined}>
+      <Text
+        style={styles.legend}
+        accessibilityRole={labelAsHeading ? 'header' : undefined}
+        aria-hidden={hideLegend}
+      >
         {label}
       </Text>
       {options.map((opt) => {

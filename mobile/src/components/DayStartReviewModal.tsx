@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type TextInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -259,7 +260,7 @@ export default function DayStartReviewModal({
   // Each row registers its title node; after an action we land focus on the
   // next remaining row so the user keeps their place. The title gets focus on
   // open.
-  const titleRef = useRef<Text>(null);
+  const titleRef = useRef<TextInstance>(null);
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
   // After a failed write: what its focus waits on until the re-read comes
@@ -841,7 +842,7 @@ export default function DayStartReviewModal({
       <View key={task.id} style={styles.row}>
         <Text
           ref={(node) => {
-            rowTags.current[task.id] = node ? findNodeHandle(node) : null;
+            rowTags.current[task.id] = node ? (findNodeHandle(node) ?? null) : null;
           }}
           accessible
           accessibilityRole="text"
@@ -857,7 +858,7 @@ export default function DayStartReviewModal({
           ) : null}
         </Text>
         {meta != null && (
-          <Text style={styles.rowMeta} importantForAccessibility="no">
+          <Text style={styles.rowMeta} aria-hidden>
             {meta}
           </Text>
         )}

@@ -650,6 +650,18 @@
         "feedback": "Feedback"
       },
       "logs": {
+        "formLab": {
+          "heading": "VoiceOver und Tastatur (Test)",
+          "hint": "Nur für den Testbuild: Lösungen für das Wischen bei offener Tastatur, zum Vergleichen. Eine einschalten, in einem Formular mit offener Tastatur bis ans Ende wischen, dann Protokolle senden. Wirkt sofort, auch auf offene Formulare erst nach erneutem Öffnen.",
+          "container": "Formular als geordneter Container",
+          "focusFollows": "Fokus folgt über der Tastatur",
+          "resignOnLeave": "Tastatur schließt beim Verlassen des Felds",
+          "windowGestures": "Drei-Finger-Wischen am Fenster",
+          "windowNormal": "Wie bisher",
+          "windowNarrow": "Nur links und rechts",
+          "windowOff": "Aus, an iOS zurück",
+          "log": "Ablauf protokollieren"
+        },
         "hint": "Aperio führt zur Fehlersuche eine rollierende Protokolldatei. Wähle, wie ausführlich protokolliert wird, sieh die letzten Zeilen ein oder exportiere das Protokoll, um es für den Support zu senden.",
         "levelHeading": "Detailgrad",
         "levelLabel": "Protokoll-Stufe",
@@ -1695,6 +1707,7 @@
         "colorLabel": "Farb-Label"
       },
       "attendees": {
+        "inputLabel": "Neuer Teilnehmer, Name oder E-Mail",
         "placeholder": "Name oder E-Mail eingeben …",
         "popupLabel": "Kontaktvorschläge",
         "chipsLabel": "Aktuelle Teilnehmer",

@@ -7,8 +7,8 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
+  type TextInputInstance,
 } from 'react-native';
 
 import {
@@ -122,7 +122,7 @@ export default function QuickAddEventModal({
     [titleMatches, navigation, calId, date, time],
   );
 
-  const titleRef = useRef<TextInput | null>(null);
+  const titleRef = useRef<TextInputInstance | null>(null);
   // Live mirrors for the mount-only default-calendar resolution below — refs so
   // the effect reads the CURRENT visibility rules without re-running (which
   // would re-adopt the stored calendar over a pick the user already made).
@@ -282,7 +282,7 @@ export default function QuickAddEventModal({
       )}
 
       <View style={styles.field}>
-        <Text style={styles.legend}>{t('dialogs.event.fields.title')}</Text>
+        <Text style={styles.legend} aria-hidden>{t('dialogs.event.fields.title')}</Text>
         <TitleField
           ref={titleRef}
           style={styles.input}

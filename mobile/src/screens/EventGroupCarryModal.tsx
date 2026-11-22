@@ -16,6 +16,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  type TextInstance,
 } from 'react-native';
 
 import {
@@ -149,7 +150,7 @@ function EventGroupCarryScreen({
   /** The outcome line, which takes the cursor whenever a pass ends with an
    *  outcome, as the desktop's outcome note does, and what it then reads: the
    *  outcome, the last failure and this pass's doubts, in one utterance. */
-  const outcomeRef = useRef<Text>(null);
+  const outcomeRef = useRef<TextInstance>(null);
   const [outcomeSaid, setOutcomeSaid] = useState('');
   const carryRef = useRef<
     (only?: CarryTarget[], consent?: ReadonlySet<string>, earlier?: string) => Promise<void>

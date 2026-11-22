@@ -68,8 +68,14 @@ export function AccountSchemaForm({
             return (
               <View key={field.key} style={styles.switchRow}>
                 <View style={styles.switchText}>
-                  <Text style={styles.label}>{label(field)}</Text>
-                  {description && <Text style={styles.hint}>{description}</Text>}
+                  <Text style={styles.label} aria-hidden>{label(field)}</Text>
+                  {/* Name and hint travel with the switch; the visible copies
+                      would be read again on the next swipe. */}
+                  {description && (
+                    <Text style={styles.hint} aria-hidden>
+                      {description}
+                    </Text>
+                  )}
                 </View>
                 <Switch
                   value={checked}
@@ -106,7 +112,7 @@ export function AccountSchemaForm({
           }
           return (
             <View key={field.key} style={styles.field}>
-              <Text style={styles.label}>{label(field)}</Text>
+              <Text style={styles.label} aria-hidden>{label(field)}</Text>
               <TextInput
                 style={styles.input}
                 value={value}
@@ -129,7 +135,11 @@ export function AccountSchemaForm({
                 accessibilityLabel={label(field)}
                 accessibilityHint={description ?? undefined}
               />
-              {description && <Text style={styles.hint}>{description}</Text>}
+              {description && (
+                <Text style={styles.hint} aria-hidden>
+                  {description}
+                </Text>
+              )}
             </View>
           );
         })}

@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type ScrollViewInstance,
 } from 'react-native';
 
 import { A11yPagerView } from '../../modules/a11y-pager';
@@ -87,7 +88,7 @@ export function CalendarPager({
   announceKey?: string | number;
   children: ReactNode;
 }) {
-  const ref = useRef<ScrollView>(null);
+  const ref = useRef<ScrollViewInstance>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const screenReader = useScreenReaderEnabled();
   const styles = useThemedStyles(makeStyles);

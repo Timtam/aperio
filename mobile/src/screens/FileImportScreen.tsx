@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type TextInstance,
 } from 'react-native';
 
 import {
@@ -152,7 +153,7 @@ function FileImportList({
   const setNotice = useCallback((text: string | null) => {
     setNoticeState((prev) => (text == null ? null : { text, seq: (prev?.seq ?? 0) + 1 }));
   }, []);
-  const noticeRef = useRef<Text>(null);
+  const noticeRef = useRef<TextInstance>(null);
   useEffect(() => {
     if (notice == null) return;
     requestAnimationFrame(() => {
