@@ -27,7 +27,7 @@
 //!
 //! Pinned by `tests/fixtures/seriesClockChange.json`; the surfaces replay it.
 
-use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use cal_zone::{Reading, Zone};
@@ -281,20 +281,33 @@ pub fn rule_names_day(rrule: &str, day: NaiveDate) -> Option<bool> {
 }
 
 /// Whether a rule takes its days from its start: it names none, or names only
-/// the start's own day (`BYDAY=MO` from a Monday, `BYMONTHDAY=15` from the
-/// 15th, `BYMONTH=3` from March).
-fn days_follow_start(parts: &[Part], start: NaiveDate) -> bool {
+/// the day the start falls on anyway — `BYDAY=MO` from a Monday in a weekly
+/// rule, `BYMONTHDAY=15` from the 15th in a monthly one, `BYMONTH=3` with the
+/// start's day in a yearly one. In a monthly or yearly rule `BYDAY=MO` names
+/// every Monday, and a yearly `BYMONTHDAY=15` without a month the 15th of every
+/// month: those name days of their own.
+fn days_follow_start(parts: &[Part], freq: Freq, start: NaiveDate) -> bool {
+    let number = |key: &str| part(parts, key).and_then(|v| v.trim().parse::<u32>().ok());
+    let has_month = part(parts, "BYMONTH").is_some();
     parts
         .iter()
         .filter(|p| DAY_PARTS.contains(&p.key.as_str()))
-        .all(|p| {
-            let value = p.value.trim();
-            match p.key.as_str() {
-                "BYDAY" => value.eq_ignore_ascii_case(weekday_token(start)),
-                "BYMONTHDAY" => value.parse::<u32>().ok() == Some(start.day()),
-                "BYMONTH" => value.parse::<u32>().ok() == Some(start.month()),
-                _ => false,
+        .all(|p| match p.key.as_str() {
+            "BYDAY" => {
+                matches!(freq, Freq::Weekly)
+                    && p.value.trim().eq_ignore_ascii_case(weekday_token(start))
             }
+            "BYMONTHDAY" => {
+                number("BYMONTHDAY") == Some(start.day())
+                    && (matches!(freq, Freq::Monthly)
+                        || (matches!(freq, Freq::Yearly) && has_month))
+            }
+            "BYMONTH" => {
+                matches!(freq, Freq::Yearly)
+                    && number("BYMONTH") == Some(start.month())
+                    && part(parts, "BYDAY").is_none()
+            }
+            _ => false,
         })
 }
 
@@ -391,9 +404,15 @@ fn on_the_start_pattern(freq: Freq, day: NaiveDate, start: NaiveDate) -> bool {
 
 /// Whether `day` lies in a period the rule's `INTERVAL` repeats in, counted
 /// from the start's: every other week from the start's week, every third
-/// month, and so on. Weeks are counted from Monday, months and years by the
-/// calendar.
-fn in_an_interval(freq: Freq, interval: u32, day: NaiveDate, start: NaiveDate) -> bool {
+/// month, and so on. Weeks begin on the rule's `WKST` (`week_start`, days
+/// from Monday), as RFC 5545 counts them; months and years by the calendar.
+fn in_an_interval(
+    freq: Freq,
+    interval: u32,
+    week_start: u32,
+    day: NaiveDate,
+    start: NaiveDate,
+) -> bool {
     if interval <= 1 {
         return true;
     }
@@ -401,9 +420,12 @@ fn in_an_interval(freq: Freq, interval: u32, day: NaiveDate, start: NaiveDate) -
     let periods = match freq {
         Freq::Daily => (day - start).num_days(),
         Freq::Weekly => {
-            let monday =
-                |d: NaiveDate| d - Duration::days(i64::from(d.weekday().num_days_from_monday()));
-            (monday(day) - monday(start)).num_days() / 7
+            let first = |d: NaiveDate| {
+                let back = (i64::from(d.weekday().num_days_from_monday()) - i64::from(week_start))
+                    .rem_euclid(7);
+                d - Duration::days(back)
+            };
+            (first(day) - first(start)).num_days() / 7
         }
         Freq::Monthly => {
             i64::from(day.year() - start.year()) * 12 + i64::from(day.month())
@@ -431,7 +453,6 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
     let day_after = wall_after.date();
     let days = i32::try_from((day_after - day_before).num_days()).ok()?;
     let time_changes = wall_before.time() != wall_after.time();
-    let time_shift = wall_after.time() - wall_before.time();
     let rrule = question.rrule.trim();
     let day_text = |day: NaiveDate| day.format("%Y-%m-%d").to_string();
     let refused = |reason| ClockChangeAnswer::Refused { reason };
@@ -463,7 +484,22 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
     };
     let freq = part(&parts, "FREQ").and_then(parse_freq)?;
     let interval = parse_interval(part(&parts, "INTERVAL"))?;
-    let follows = days_follow_start(&parts, day_before);
+    let follows = days_follow_start(&parts, freq, day_before);
+    let names_days = parts.iter().any(|p| DAY_PARTS.contains(&p.key.as_str()));
+    let week_start = part(&parts, "WKST")
+        .and_then(|w| {
+            WEEKDAY_TOKENS
+                .iter()
+                .position(|t| t.eq_ignore_ascii_case(w.trim()))
+        })
+        .map_or(0, |i| i as u32);
+    // How far every occurrence moves in wall time: as they fall now by the
+    // start's own move (its days and its time of day), as the rule says by
+    // the change in time of day alone, its days staying. The expanders step
+    // through a rule in its clock's wall time, so an occurrence, a deletion
+    // and a cut's end move together this way on any clock.
+    let wall_shift = wall_after - wall_before;
+    let rule_shift = wall_shift - Duration::days(i64::from(days));
     let times = crate::series_end::rule_times(&parts, wall_before.time())?;
     // A rule with more than one occurrence a day (hourly, or several times):
     // its occurrences keep their distances from the start, so its end moves
@@ -500,7 +536,9 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
     let end_text = |start_after: DateTime<Utc>, by_days: i64| -> Option<String> {
         let at = end_at?;
         if several_a_day {
-            return Some(rule_until_text(at + (start_after - start)));
+            let shift = if by_days == 0 { rule_shift } else { wall_shift };
+            let moved = before_zone.wall(at) + shift;
+            return crate::wall_clock::last_at_or_before(after_zone, moved).map(rule_until_text);
         }
         let day = end_day?.checked_add_signed(Duration::days(by_days))?;
         let marker = format!("{}T235959Z", day.format("%Y%m%d"));
@@ -527,26 +565,46 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
     // expanders place it), on a day the rule repeats on, within its interval
     // and its end. The time of day it matched, for moving it. Others cancel
     // nothing and stay as written.
-    let cancelled_slot = |at: DateTime<Utc>| -> Option<NaiveTime> {
+    let cancelled_slot = |at: DateTime<Utc>| -> Option<NaiveDateTime> {
         if at < start || end_at.is_some_and(|end| at > end) {
             return None;
         }
-        let day = before_zone.wall(at).date();
-        let named = if follows {
-            on_the_start_pattern(freq, day, day_before)
-        } else {
-            rule_names_day(rrule, day) != Some(false)
+        let wall = before_zone.wall(at);
+        let day = wall.date();
+        let stands =
+            |nominal: NaiveDateTime| before_zone.to_utc(nominal, WallPolicy::Rfc5545) == Some(at);
+        let unit = match freq {
+            Freq::Hourly => Some(3600),
+            Freq::Minutely => Some(60),
+            Freq::Secondly => Some(1),
+            _ => None,
         };
-        if !named || !in_an_interval(freq, interval, day, day_before) {
+        if let (Some(unit), false) = (unit, has_time_parts) {
+            // By the hour or faster: every `interval` units of wall time from
+            // the start's, read back where the occurrence stands.
+            let step = unit * i64::from(interval);
+            let nominal = (0..=1)
+                .map(|hours| wall - Duration::hours(hours))
+                .find(|nominal| {
+                    let since = (*nominal - wall_before).num_seconds();
+                    since >= 0 && since % step == 0 && stands(*nominal)
+                })?;
+            return Some(nominal);
+        }
+        let named = if names_days {
+            rule_names_day(rrule, day) != Some(false)
+        } else {
+            on_the_start_pattern(freq, day, day_before)
+        };
+        if !named || !in_an_interval(freq, interval, week_start, day, day_before) {
             return None;
         }
-        times.iter().copied().find(|time| {
-            before_zone.to_utc(NaiveDateTime::new(day, *time), WallPolicy::Rfc5545) == Some(at)
-        })
+        times
+            .iter()
+            .map(|time| NaiveDateTime::new(day, *time))
+            .find(|nominal| stands(*nominal))
     };
-    let move_exceptions = |by_days: i64,
-                           start_after: DateTime<Utc>|
-     -> Result<Vec<String>, ClockChangeRefusal> {
+    let move_exceptions = |by_days: i64| -> Result<Vec<String>, ClockChangeRefusal> {
         question
             .exceptions
             .iter()
@@ -554,15 +612,12 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
                 let at = DateTime::parse_from_rfc3339(text)
                     .map_err(|_| ClockChangeRefusal::Unreadable)?
                     .with_timezone(&Utc);
-                let Some(time) = cancelled_slot(at) else {
+                let Some(nominal) = cancelled_slot(at) else {
                     return Ok(text.clone());
                 };
-                if several_a_day {
-                    // Its occurrence keeps its distance from the start.
-                    return Ok(instant_text(at + (start_after - start)));
-                }
-                let day = before_zone.wall(at).date() + Duration::days(by_days);
-                instant_on(after_zone, NaiveDateTime::new(day, time + time_shift)).map(instant_text)
+                // Its occurrence moves in wall time, as every occurrence does.
+                let shift = if by_days == 0 { rule_shift } else { wall_shift };
+                instant_on(after_zone, nominal + shift).map(instant_text)
             })
             .collect()
     };
@@ -577,7 +632,7 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
     // As they fall now.
     let as_now = match crate::shift_series(rrule, day_before, days, time_changes, None) {
         SeriesShift::Refused { reason } => refused(reason.into()),
-        SeriesShift::Shifted { rrule: moved } => match move_exceptions(i64::from(days), start) {
+        SeriesShift::Shifted { rrule: moved } => match move_exceptions(i64::from(days)) {
             Ok(exceptions) => ClockChangeAnswer::Changed {
                 rrule: with_end(moved, start, i64::from(days)),
                 start: question.start.clone(),
@@ -602,7 +657,7 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
         };
         match start_after {
             Err(reason) => refused(reason),
-            Ok(start_after) => match move_exceptions(0, start_after) {
+            Ok(start_after) => match move_exceptions(0) {
                 Ok(exceptions) => ClockChangeAnswer::Changed {
                     rrule: with_end(rrule.to_string(), start_after, 0),
                     start: if moves_back {
