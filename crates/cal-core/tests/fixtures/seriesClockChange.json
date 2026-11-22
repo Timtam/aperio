@@ -178,7 +178,7 @@
     },
     {
       "name": "a-cut-moves-as-the-end-of-its-last-day",
-      "note": "Daily 09:00 Berlin cut before 10 November (its last day the 9th), to New York 03:00 the same day: the end becomes the end of 9 November in New York.",
+      "note": "Daily 09:00 Berlin cut before 10 November (its last day the 9th), to New York 03:00 the same day: the end becomes \"through 9 November\", which New York reads as that day.",
       "question": {
         "rrule": "FREQ=DAILY;UNTIL=20261110T075959Z",
         "start": "2026-11-02T08:00:00Z",
@@ -193,13 +193,13 @@
         "fit": "both",
         "asNow": {
           "outcome": "changed",
-          "rrule": "FREQ=DAILY;UNTIL=20261110T045959Z",
+          "rrule": "FREQ=DAILY;UNTIL=20261109T235959Z",
           "start": "2026-11-02T08:00:00Z",
           "exceptions": []
         },
         "asRule": {
           "outcome": "changed",
-          "rrule": "FREQ=DAILY;UNTIL=20261110T045959Z",
+          "rrule": "FREQ=DAILY;UNTIL=20261109T235959Z",
           "start": "2026-11-02T08:00:00Z",
           "exceptions": []
         }
@@ -222,13 +222,13 @@
         "fit": "both",
         "asNow": {
           "outcome": "changed",
-          "rrule": "FREQ=DAILY;UNTIL=20261106T225959Z",
+          "rrule": "FREQ=DAILY;UNTIL=20261106T235959Z",
           "start": "2026-11-01T23:30:00Z",
           "exceptions": []
         },
         "asRule": {
           "outcome": "changed",
-          "rrule": "FREQ=DAILY;UNTIL=20261105T225959Z",
+          "rrule": "FREQ=DAILY;UNTIL=20261105T235959Z",
           "start": "2026-10-31T23:30:00Z",
           "exceptions": []
         }
@@ -382,6 +382,217 @@
         "toTzid": "Europe/Berlin"
       },
       "expect": null
+    },
+    {
+      "name": "a-floating-end-keeps-its-last-day",
+      "note": "An UNTIL without Z is a wall time on the series' clock (115a): 12:00 on 5 November reaches 4 November at 23:30 UTC. On Berlin the series stands at 00:30, so the end is written through its last day there (as they fall now the 5th, as the rule says the 4th), not as 12:00, which would gain a day.",
+      "question": {
+        "rrule": "FREQ=DAILY;UNTIL=20261105T120000",
+        "start": "2026-11-01T23:30:00Z",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-01",
+        "startDayAfter": "2026-11-02",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261105T235959Z",
+          "start": "2026-11-01T23:30:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261104T235959Z",
+          "start": "2026-10-31T23:30:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "an-hourly-end-stays-an-instant",
+      "note": "A rule that repeats by the hour keeps its end an instant (109a): its occurrences keep their distance from the start, so the end does not grow to the end of a day.",
+      "question": {
+        "rrule": "FREQ=HOURLY;UNTIL=20261105T120000Z",
+        "start": "2026-11-02T08:00:00Z",
+        "exceptions": [],
+        "fromTzid": "Europe/Berlin",
+        "toTzid": "America/New_York"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-02",
+        "startDayAfter": "2026-11-02",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY;UNTIL=20261105T120000Z",
+          "start": "2026-11-02T08:00:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=HOURLY;UNTIL=20261105T120000Z",
+          "start": "2026-11-02T08:00:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "a-cut-between-two-times-of-a-day-stays",
+      "note": "Daily at 09:00 and 17:00 Berlin, cut before 17:00 on 10 November, to Paris (the same clock): the cut stays where it was instead of growing to the end of that day.",
+      "question": {
+        "rrule": "FREQ=DAILY;BYHOUR=9,17;UNTIL=20261110T155959Z",
+        "start": "2026-11-02T08:00:00Z",
+        "exceptions": [],
+        "fromTzid": "Europe/Berlin",
+        "toTzid": "Europe/Paris"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-02",
+        "startDayAfter": "2026-11-02",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;BYHOUR=9,17;UNTIL=20261110T155959Z",
+          "start": "2026-11-02T08:00:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;BYHOUR=9,17;UNTIL=20261110T155959Z",
+          "start": "2026-11-02T08:00:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "an-end-through-a-day-the-new-clock-would-read-as-a-cut",
+      "note": "Daily 10:00 Tokyo through 1 June 2027, to New York (20:00, the day before). In summer 20:00 in New York is 00:00 UTC, so \"…T235959Z\" there would read as a cut (105a) and lose the last day: the end is written as the day's last instant on the New York clock instead.",
+      "question": {
+        "rrule": "FREQ=DAILY;UNTIL=20270601T235959Z",
+        "start": "2026-11-02T01:00:00Z",
+        "exceptions": [],
+        "fromTzid": "Asia/Tokyo",
+        "toTzid": "America/New_York"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-02",
+        "startDayAfter": "2026-11-01",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20270601T035959Z",
+          "start": "2026-11-02T01:00:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20270602T035959Z",
+          "start": "2026-11-03T01:00:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "an-exception-past-the-spring-gap-moves-with-its-occurrence",
+      "note": "Daily 02:30 Berlin; on 28 March 2027 that time is skipped and the occurrence stands at 03:30 (01:30 UTC), where its exception was stored. It cancels that occurrence, so it moves with it: to 20:30 New York the day before (as they fall now), or on 28 March itself (as the rule says).",
+      "question": {
+        "rrule": "FREQ=DAILY",
+        "start": "2027-03-01T01:30:00Z",
+        "exceptions": [
+          "2027-03-28T01:30:00Z"
+        ],
+        "fromTzid": "Europe/Berlin",
+        "toTzid": "America/New_York"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2027-03-01",
+        "startDayAfter": "2027-02-28",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY",
+          "start": "2027-03-01T01:30:00Z",
+          "exceptions": [
+            "2027-03-28T00:30:00Z"
+          ]
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY",
+          "start": "2027-03-02T01:30:00Z",
+          "exceptions": [
+            "2027-03-29T00:30:00Z"
+          ]
+        }
+      }
+    },
+    {
+      "name": "an-exception-after-the-end-cancels-nothing-and-stays",
+      "note": "An exception on a day after the series ended cancels nothing, so it stays as written: it does not refuse the change by falling into Berlin's spring gap.",
+      "question": {
+        "rrule": "FREQ=DAILY;UNTIL=20270320T235959Z",
+        "start": "2027-03-01T01:30:00Z",
+        "exceptions": [
+          "2027-03-28T01:30:00Z"
+        ],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2027-03-01",
+        "startDayAfter": "2027-03-01",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20270320T235959Z",
+          "start": "2027-03-01T01:30:00Z",
+          "exceptions": [
+            "2027-03-28T01:30:00Z"
+          ]
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20270320T235959Z",
+          "start": "2027-03-01T01:30:00Z",
+          "exceptions": [
+            "2027-03-28T01:30:00Z"
+          ]
+        }
+      }
+    },
+    {
+      "name": "an-empty-rule-is-unreadable",
+      "note": "A rule without FREQ: neither answer can be written.",
+      "question": {
+        "rrule": "",
+        "start": "2026-11-01T23:30:00Z",
+        "exceptions": [],
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin"
+      },
+      "expect": {
+        "asks": true,
+        "startDayBefore": "2026-11-01",
+        "startDayAfter": "2026-11-02",
+        "fit": "unknown",
+        "asNow": {
+          "outcome": "refused",
+          "reason": "unreadable"
+        },
+        "asRule": {
+          "outcome": "refused",
+          "reason": "unreadable"
+        }
+      }
     }
   ]
 }

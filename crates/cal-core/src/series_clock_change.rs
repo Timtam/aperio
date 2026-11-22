@@ -27,7 +27,7 @@
 //!
 //! Pinned by `tests/fixtures/seriesClockChange.json`; the surfaces replay it.
 
-use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use cal_zone::{Reading, Zone};
@@ -337,8 +337,89 @@ fn with_until(rrule: &str, value: &str) -> String {
         .join(";")
 }
 
+/// Whether every part of a rule can be read: a `FREQ` this reader knows, a
+/// whole `INTERVAL` of at least 1, weekday tokens (with or without an
+/// ordinal) and numbers where numbers belong.
+fn rule_is_readable(parts: &[Part]) -> bool {
+    let Some(freq) = part(parts, "FREQ") else {
+        return false;
+    };
+    if parse_freq(freq).is_none()
+        || crate::rrule_parts::parse_interval(part(parts, "INTERVAL")).is_none()
+    {
+        return false;
+    }
+    let numbers = |key: &str| {
+        part(parts, key)
+            .is_none_or(|value| value.split(',').all(|n| n.trim().parse::<i64>().is_ok()))
+    };
+    let weekdays = part(parts, "BYDAY").is_none_or(|value| {
+        value.split(',').all(|token| {
+            let token = token.trim().to_ascii_uppercase();
+            token.len() >= 2
+                && token.is_ascii()
+                && WEEKDAY_TOKENS.contains(&&token[token.len() - 2..])
+                && (token.len() == 2 || token[..token.len() - 2].parse::<i64>().is_ok())
+        })
+    });
+    weekdays
+        && [
+            "BYMONTHDAY",
+            "BYMONTH",
+            "BYHOUR",
+            "BYMINUTE",
+            "BYSECOND",
+            "BYSETPOS",
+            "BYYEARDAY",
+            "BYWEEKNO",
+            "COUNT",
+        ]
+        .iter()
+        .all(|key| numbers(key))
+}
+
+/// Whether `day` is one of the days a rule that takes its days from its start
+/// (`start`) repeats on, by its frequency alone.
+fn on_the_start_pattern(freq: Freq, day: NaiveDate, start: NaiveDate) -> bool {
+    match freq {
+        Freq::Weekly => day.weekday() == start.weekday(),
+        Freq::Monthly => day.day() == start.day(),
+        Freq::Yearly => day.day() == start.day() && day.month() == start.month(),
+        _ => true,
+    }
+}
+
+/// Whether `day` lies in a period the rule's `INTERVAL` repeats in, counted
+/// from the start's: every other week from the start's week, every third
+/// month, and so on. Weeks are counted from Monday, months and years by the
+/// calendar.
+fn in_an_interval(freq: Freq, interval: u32, day: NaiveDate, start: NaiveDate) -> bool {
+    if interval <= 1 {
+        return true;
+    }
+    let n = i64::from(interval);
+    let periods = match freq {
+        Freq::Daily => (day - start).num_days(),
+        Freq::Weekly => {
+            let monday =
+                |d: NaiveDate| d - Duration::days(i64::from(d.weekday().num_days_from_monday()));
+            (monday(day) - monday(start)).num_days() / 7
+        }
+        Freq::Monthly => {
+            i64::from(day.year() - start.year()) * 12 + i64::from(day.month())
+                - i64::from(start.month())
+        }
+        Freq::Yearly => i64::from(day.year() - start.year()),
+        _ => return true,
+    };
+    periods.rem_euclid(n) == 0
+}
+
 /// The answer to one question; `None` for a start that names no instant.
 pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClockChange> {
+    use crate::rrule_parts::parse_interval;
+    use cal_zone::WallPolicy;
+
     let start = DateTime::parse_from_rfc3339(&question.start)
         .ok()?
         .with_timezone(&Utc);
@@ -350,12 +431,15 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
     let day_after = wall_after.date();
     let days = i32::try_from((day_after - day_before).num_days()).ok()?;
     let time_changes = wall_before.time() != wall_after.time();
+    let time_shift = wall_after.time() - wall_before.time();
     let rrule = question.rrule.trim();
+    let day_text = |day: NaiveDate| day.format("%Y-%m-%d").to_string();
+    let refused = |reason| ClockChangeAnswer::Refused { reason };
 
-    let parts = parse_parts(rrule).ok().map(|(_, parts)| parts);
-    let follows = parts
-        .as_ref()
-        .is_some_and(|parts| days_follow_start(parts, day_before));
+    let parts = parse_parts(rrule)
+        .ok()
+        .map(|(_, parts)| parts)
+        .filter(|parts| rule_is_readable(parts));
     let fit = match (
         rule_names_day(rrule, day_before),
         rule_names_day(rrule, day_after),
@@ -366,42 +450,103 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
         (Some(false), Some(false)) => RuleFit::Neither,
         _ => RuleFit::Unknown,
     };
+    let Some(parts) = parts else {
+        // Nothing can be written for a rule no reader agrees on.
+        return Some(SeriesClockChange {
+            asks: days != 0,
+            start_day_before: day_text(day_before),
+            start_day_after: day_text(day_after),
+            fit,
+            as_now: refused(ClockChangeRefusal::Unreadable),
+            as_rule: refused(ClockChangeRefusal::Unreadable),
+        });
+    };
+    let freq = part(&parts, "FREQ").and_then(parse_freq)?;
+    let interval = parse_interval(part(&parts, "INTERVAL"))?;
+    let follows = days_follow_start(&parts, day_before);
+    let times = crate::series_end::rule_times(&parts, wall_before.time())?;
+    // A rule with more than one occurrence a day (hourly, or several times):
+    // its occurrences keep their distances from the start, so its end moves
+    // with the start's instant rather than as the end of a day.
+    let several_a_day =
+        matches!(freq, Freq::Hourly | Freq::Minutely | Freq::Secondly) || times.len() > 1;
+    let has_time_parts = ["BYHOUR", "BYMINUTE", "BYSECOND"]
+        .iter()
+        .any(|k| part(&parts, k).is_some());
 
-    // The end, read on the old clock (101b). An instant (a cut) moves with
-    // the occurrences as the end of its last day on the new clock; through a
-    // date and a wall time move by days in `series_shift` (as they fall now)
-    // or stay (as the rule says).
+    // The end, read on the old clock (101b, 115a).
     let end = crate::read_series_end(
         rrule,
         wall_before.time(),
         crate::expansion_clock(false, question.from_tzid.as_deref()),
         |at| before_zone.wall(at),
         |wall| crate::wall_clock::last_at_or_before(before_zone, wall),
-        |wall| before_zone.to_utc(wall, cal_zone::WallPolicy::Rfc5545),
+        |wall| before_zone.to_utc(wall, WallPolicy::Rfc5545),
     );
-    let instant_end_day = end
+    let end_at = end
         .as_ref()
-        .filter(|end| end.reading == EndReading::Instant)
+        .and_then(|end| end.at.as_deref())
+        .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+        .map(|at| at.with_timezone(&Utc));
+    let end_day = end
+        .as_ref()
         .and_then(|end| NaiveDate::parse_from_str(&end.end_day, "%Y-%m-%d").ok());
-    let end_on_new_clock = |day: NaiveDate| -> Option<String> {
+
+    // The end a new series writes: `start_after` is its start, `by_days` how
+    // far its days moved on the new clock. One time a day: through its last
+    // day there, spelled `…T235959Z` where the new clock reads that as through
+    // the day, else as that day's last instant. Several a day: the old end's
+    // instant, moved as far as the start moved.
+    let end_text = |start_after: DateTime<Utc>, by_days: i64| -> Option<String> {
+        let at = end_at?;
+        if several_a_day {
+            return Some(rule_until_text(at + (start_after - start)));
+        }
+        let day = end_day?.checked_add_signed(Duration::days(by_days))?;
+        let marker = format!("{}T235959Z", day.format("%Y%m%d"));
+        let reads_through = crate::read_series_end(
+            &with_until(rrule, &marker),
+            after_zone.wall(start_after).time(),
+            crate::expansion_clock(false, question.to_tzid.as_deref()),
+            |at| after_zone.wall(at),
+            |wall| crate::wall_clock::last_at_or_before(after_zone, wall),
+            |wall| after_zone.to_utc(wall, WallPolicy::Rfc5545),
+        )
+        .is_some_and(|read| {
+            read.reading == EndReading::ThroughDay && read.end_day == day_text(day)
+        });
+        if reads_through {
+            return Some(marker);
+        }
         let last = day.and_hms_opt(23, 59, 59)?;
         crate::wall_clock::last_at_or_before(after_zone, last).map(rule_until_text)
     };
 
-    // Each exception that cancels an occurrence on the old clock: one at the
-    // series' time of day on a day the rule names. Others cancel nothing and
-    // stay as they are.
-    let cancels = |at: DateTime<Utc>| -> bool {
-        let wall = before_zone.wall(at);
-        if wall.time() != wall_before.time() {
-            return false;
+    // Each exception that cancels an occurrence on the old clock: at an
+    // instant where one stands (past a gap that skips its time, as the
+    // expanders place it), on a day the rule repeats on, within its interval
+    // and its end. The time of day it matched, for moving it. Others cancel
+    // nothing and stay as written.
+    let cancelled_slot = |at: DateTime<Utc>| -> Option<NaiveTime> {
+        if at < start || end_at.is_some_and(|end| at > end) {
+            return None;
         }
-        if follows {
-            return true;
+        let day = before_zone.wall(at).date();
+        let named = if follows {
+            on_the_start_pattern(freq, day, day_before)
+        } else {
+            rule_names_day(rrule, day) != Some(false)
+        };
+        if !named || !in_an_interval(freq, interval, day, day_before) {
+            return None;
         }
-        rule_names_day(rrule, wall.date()) != Some(false)
+        times.iter().copied().find(|time| {
+            before_zone.to_utc(NaiveDateTime::new(day, *time), WallPolicy::Rfc5545) == Some(at)
+        })
     };
-    let move_exceptions = |by_days: i64| -> Result<Vec<String>, ClockChangeRefusal> {
+    let move_exceptions = |by_days: i64,
+                           start_after: DateTime<Utc>|
+     -> Result<Vec<String>, ClockChangeRefusal> {
         question
             .exceptions
             .iter()
@@ -409,48 +554,42 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
                 let at = DateTime::parse_from_rfc3339(text)
                     .map_err(|_| ClockChangeRefusal::Unreadable)?
                     .with_timezone(&Utc);
-                if !cancels(at) {
+                let Some(time) = cancelled_slot(at) else {
                     return Ok(text.clone());
+                };
+                if several_a_day {
+                    // Its occurrence keeps its distance from the start.
+                    return Ok(instant_text(at + (start_after - start)));
                 }
                 let day = before_zone.wall(at).date() + Duration::days(by_days);
-                instant_on(after_zone, NaiveDateTime::new(day, wall_after.time())).map(instant_text)
+                instant_on(after_zone, NaiveDateTime::new(day, time + time_shift)).map(instant_text)
             })
             .collect()
     };
+    let with_end = |rule: String, start_after: DateTime<Utc>, by_days: i64| match end_text(
+        start_after,
+        by_days,
+    ) {
+        Some(until) => with_until(&rule, &until),
+        None => rule,
+    };
 
     // As they fall now.
-    let until_now = instant_end_day
-        .and_then(|day| day.checked_add_signed(Duration::days(i64::from(days))))
-        .and_then(end_on_new_clock);
-    let as_now =
-        match crate::shift_series(rrule, day_before, days, time_changes, until_now.as_deref()) {
-            SeriesShift::Refused { reason } => ClockChangeAnswer::Refused {
-                reason: reason.into(),
+    let as_now = match crate::shift_series(rrule, day_before, days, time_changes, None) {
+        SeriesShift::Refused { reason } => refused(reason.into()),
+        SeriesShift::Shifted { rrule: moved } => match move_exceptions(i64::from(days), start) {
+            Ok(exceptions) => ClockChangeAnswer::Changed {
+                rrule: with_end(moved, start, i64::from(days)),
+                start: question.start.clone(),
+                exceptions,
             },
-            SeriesShift::Shifted { rrule: moved } => match move_exceptions(i64::from(days)) {
-                Ok(exceptions) => ClockChangeAnswer::Changed {
-                    rrule: moved,
-                    start: question.start.clone(),
-                    exceptions,
-                },
-                Err(reason) => ClockChangeAnswer::Refused { reason },
-            },
-        };
+            Err(reason) => refused(reason),
+        },
+    };
 
     // As the rule says.
-    let has_time_parts = parts.as_ref().is_some_and(|parts| {
-        ["BYHOUR", "BYMINUTE", "BYSECOND"]
-            .iter()
-            .any(|k| part(parts, k).is_some())
-    });
-    let as_rule = if parts.is_none() {
-        ClockChangeAnswer::Refused {
-            reason: ClockChangeRefusal::Unreadable,
-        }
-    } else if has_time_parts && time_changes {
-        ClockChangeAnswer::Refused {
-            reason: ClockChangeRefusal::TimeOfDay,
-        }
+    let as_rule = if has_time_parts && time_changes {
+        refused(ClockChangeRefusal::TimeOfDay)
     } else {
         let moves_back = days != 0 && (follows || fit == RuleFit::Before);
         let start_after = if moves_back {
@@ -458,29 +597,31 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
                 after_zone,
                 NaiveDateTime::new(day_before, wall_after.time()),
             )
-            .map(instant_text)
         } else {
-            Ok(question.start.clone())
+            Ok(start)
         };
-        let rule_after = match instant_end_day.and_then(end_on_new_clock) {
-            Some(until) => with_until(rrule, &until),
-            None => rrule.to_string(),
-        };
-        match (start_after, move_exceptions(0)) {
-            (Ok(start), Ok(exceptions)) => ClockChangeAnswer::Changed {
-                rrule: rule_after,
-                start,
-                exceptions,
+        match start_after {
+            Err(reason) => refused(reason),
+            Ok(start_after) => match move_exceptions(0, start_after) {
+                Ok(exceptions) => ClockChangeAnswer::Changed {
+                    rrule: with_end(rrule.to_string(), start_after, 0),
+                    start: if moves_back {
+                        instant_text(start_after)
+                    } else {
+                        question.start.clone()
+                    },
+                    exceptions,
+                },
+                Err(reason) => refused(reason),
             },
-            (Err(reason), _) | (_, Err(reason)) => ClockChangeAnswer::Refused { reason },
         }
     };
 
     let asks = days != 0 && (!follows || matches!(as_now, ClockChangeAnswer::Refused { .. }));
     Some(SeriesClockChange {
         asks,
-        start_day_before: day_before.format("%Y-%m-%d").to_string(),
-        start_day_after: day_after.format("%Y-%m-%d").to_string(),
+        start_day_before: day_text(day_before),
+        start_day_after: day_text(day_after),
         fit,
         as_now,
         as_rule,
