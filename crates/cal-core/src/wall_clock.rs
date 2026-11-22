@@ -114,8 +114,9 @@ pub struct WallClockAnswer {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-export", ts(optional))]
     pub wall: Option<WallReading>,
-    /// For `untilOn`: the instant; `None` where the clock skips the whole day
-    /// (Samoa, 30 December 2011).
+    /// For `untilOn`: the day's last second; the one before the change where
+    /// a change skips the day's end; `None` only where the clock skips the
+    /// whole day (Samoa, 30 December 2011).
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-export", ts(optional))]
     pub at: Option<String>,
@@ -184,16 +185,17 @@ pub fn instant_of(date: NaiveDate, time: NaiveTime, tzid: Option<&str>) -> WallC
     }
 }
 
-/// The instant a repeat ending on `date` ends at: 23:59:59 that day on
-/// `tzid`'s clock, the earlier reading in a fold, an hour later where a
-/// change skips it; `None` in the answer where the clock skips that too.
+/// The instant a repeat ending on `date` ends at: the day's last second on
+/// `tzid`'s clock. That is 23:59:59, the earlier reading in a fold; where a
+/// change skips the day's end (Nuuk's 23:00 to 00:00 on the last Saturday of
+/// March), the second before the change; `None` in the answer only where
+/// the clock skips the whole day (Samoa, 30 December 2011).
 pub fn until_on(date: NaiveDate, tzid: Option<&str>) -> WallClockAnswer {
     let (zone, clock) = clock_of(tzid);
     let last = date.and_hms_opt(23, 59, 59).expect("23:59:59 is a time");
-    // An hour later is the next day: a day the clock skips at its end has no
-    // last second, and the next day's is not this one's.
     let at = match zone.reading(last) {
-        Reading::Gap { .. } => None,
+        Reading::Gap { before, after } => last_second_before_gap(zone, last, before, after)
+            .filter(|at| zone.wall(*at).date() == date),
         _ => zone.to_utc(last, WallPolicy::EarlierElseHourLater),
     };
     WallClockAnswer {
@@ -204,6 +206,38 @@ pub fn until_on(date: NaiveDate, tzid: Option<&str>) -> WallClockAnswer {
         wall: None,
         at: at.map(instant_text),
     }
+}
+
+/// The last instant before the change that skips `wall`: the second before
+/// the first instant on the `after` offset. `wall` read on `after` lies
+/// before the change and read on `before` at or after it, so the change is
+/// found between the two, to the second.
+fn last_second_before_gap(
+    zone: Zone,
+    wall: NaiveDateTime,
+    before: chrono::FixedOffset,
+    after: chrono::FixedOffset,
+) -> Option<DateTime<Utc>> {
+    let on = |offset: chrono::FixedOffset| {
+        DateTime::<Utc>::from_naive_utc_and_offset(
+            wall - chrono::Duration::seconds(i64::from(offset.local_minus_utc())),
+            Utc,
+        )
+    };
+    // `lo` still reads `before`, `hi` no longer does.
+    let (mut lo, mut hi) = (on(after), on(before));
+    if zone.offset_at(lo) != before || zone.offset_at(hi) == before {
+        return None;
+    }
+    while hi - lo > chrono::Duration::seconds(1) {
+        let mid = lo + (hi - lo) / 2;
+        if zone.offset_at(mid) == before {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    Some(lo)
 }
 
 /// The answer to one question, `None` where its text names no instant, date
@@ -263,6 +297,7 @@ mod contract {
             "apia-skipped-day",
             "paris-1900-seconds",
             "until-new-york",
+            "until-nuuk-gap-at-day-end",
             "no-zone-is-utc",
             "alias-calcutta",
         ] {

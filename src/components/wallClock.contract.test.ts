@@ -24,6 +24,7 @@ describe('wallClock contract', () => {
       'apia-skipped-day',
       'paris-1900-seconds',
       'until-new-york',
+      'until-nuuk-gap-at-day-end',
       'no-zone-is-utc',
       'alias-calcutta',
     ]) {

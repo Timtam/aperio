@@ -1,5 +1,5 @@
 {
-  "about": "Dates and times on the clock a series repeats on (cal_core::wall_clock, DESIGN-series-time-zone.md stage 8, decision 100a). Each question is answered with the clock read (the canonical zone, null for UTC) and: wallOf the date, HH:MM time and seconds an instant shows; instantOf how a typed wall time reads (single, fold with the earlier instant and the later one, gap with the offsets before and after, in seconds east of UTC); untilOn the instant of 23:59:59 that day (absent where the clock skips the whole day). null for text that names no instant, date or time. Written by hand from tzdata's rules (Berlin, New York, Lord Howe, Apia 2011, Paris LMT +00:09:21) and checked against Node's ICU zone data; the core and both surfaces read this file.",
+  "about": "Dates and times on the clock a series repeats on (cal_core::wall_clock, DESIGN-series-time-zone.md stage 8, decision 100a). Each question is answered with the clock read (the canonical zone, null for UTC) and: wallOf the date, HH:MM time and seconds an instant shows; instantOf how a typed wall time reads (single, fold with the earlier instant and the later one, gap with the offsets before and after, in seconds east of UTC); untilOn the day's last second on the clock: 23:59:59, or the second before the change where one skips the day's end (Nuuk), absent only where the clock skips the whole day (Apia). null for text that names no instant, date or time. Written by hand from tzdata's rules (Berlin, New York, Lord Howe, Apia 2011, Paris LMT +00:09:21) and checked against Node's ICU zone data; the core and both surfaces read this file.",
   "rows": [
     {
       "name": "wall-berlin-winter",
@@ -323,6 +323,18 @@
       "expect": {
         "clock": "Pacific/Kiritimati",
         "at": "2026-11-30T09:59:59Z"
+      }
+    },
+    {
+      "name": "until-nuuk-gap-at-day-end",
+      "question": {
+        "op": "untilOn",
+        "date": "2027-03-27",
+        "tzid": "America/Nuuk"
+      },
+      "expect": {
+        "clock": "America/Nuuk",
+        "at": "2027-03-28T00:59:59Z"
       }
     },
     {

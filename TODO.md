@@ -3593,7 +3593,7 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Kern rechnet Datum und Uhrzeit auf der Uhr einer Serie in einen Zeitpunkt
   und zurück (`cal_core::wall_clock`): eine Uhrzeit in der Frühjahrs-Lücke
   hat keinen, in der Doppelstunde gilt die frühere, und ein Serienende ist
-  23:59:59 auf der Uhr. Das WebAssembly-Modul des Desktops trägt dafür die
+  die letzte Sekunde des Tages auf der Uhr. Das WebAssembly-Modul des Desktops trägt dafür die
   Zonendaten (+418 KB); der Desktop startet nicht, wenn Host und Modul
   verschiedene tzdata-Versionen melden.
   ↳ **Regelteile aus dem Tages-Schlüssel (Stufe 8, Schritt 1, 2026-11-22):**

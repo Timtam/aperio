@@ -13,8 +13,8 @@
 //! Everything here but [`zone_offsets`] works without tzdata's rules, so it is
 //! in every build, WebAssembly included. The offsets need cal-zone (jiff and
 //! the tzdata bundled with jiff-tzdb) and sit behind the `zones` feature, which
-//! the native bindings switch on and the desktop's WebAssembly module leaves
-//! off.
+//! the native bindings and, since stage 8, the desktop's WebAssembly module
+//! switch on; the desktop still asks its host for the offsets.
 //!
 //! The core reads no clock and no device zone: the instant an offset is asked
 //! for, "today", and the device's zone name are all parameters.

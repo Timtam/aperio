@@ -145,12 +145,17 @@ frontend bindings switch it on.
 
 The `zones` feature (`cal-zone`: jiff reading the tzdata jiff-tzdb bundles,
 for offsets and every zone an adapter or the reminders read) is off by
-default too, and it stays off in the WebAssembly door. The phone's binding,
-the desktop host and the adapters that read zones switch it on. No crate but
-`cal-zone` reads zone data, and jiff is built without any database feature,
-so it never asks the operating system. CI checks that the WebAssembly door's
-dependency graph stays without jiff, jiff-tzdb, cal-zone and rrule, that
-chrono-tz stays out of the build, and that only cal-zone depends on jiff.
+default too. The phone's binding, the desktop host, the adapters that read
+zones and, since stage 8 of DESIGN-series-time-zone.md, the WebAssembly door
+switch it on: a series' dates and times are read on its own clock while the
+form renders (`cal_core::wall_clock`). That is one pinned source built into
+two desktop runtimes, so the desktop compares the host's tzdata release
+(`tzdata_version`) with the module's (`tzdataVersion`) at startup and
+refuses to start on a difference. No crate but `cal-zone` reads zone data,
+and jiff is built without any database feature, so it never asks the
+operating system. CI checks that the WebAssembly door carries cal-zone and
+stays without rrule and chrono-tz, that chrono-tz stays out of the build,
+and that only cal-zone depends on jiff.
 
 **A module behind an optional feature needs `#[cfg(feature = "…")]` on both
 the `pub mod` and its `pub use`.** `cargo build --workspace` will not tell you

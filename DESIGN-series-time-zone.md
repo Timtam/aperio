@@ -1384,7 +1384,8 @@ Handy im selben PR.
    erhalten. Gebaut, Schritt 2: die Wanduhr-Regel `cal_core::wall_clock`
    (`wallOf`, `instantOf`, `untilOn`: Lücke ohne Zeitpunkt mit den Versätzen
    davor und danach, Doppelstunde die frühere Lesart und die spätere
-   genannt, 23:59:59 eines Tages auf der Uhr), Tür `shared/wallClock.ts`,
+   genannt, die letzte Sekunde eines Tages auf der Uhr: 23:59:59, wo eine
+   Umstellung das Tagesende überspringt die Sekunde davor), Tür `shared/wallClock.ts`,
    Fixture `wallClock.json` (aus tzdatas Regeln von Hand, gegen Nodes
    ICU-Daten geprüft). Das WebAssembly-Modul trägt die Zonen (100a, 104a);
    der CI-Wächter lässt dort cal-zone zu und hält rrule und chrono-tz

@@ -62,8 +62,9 @@ tracing-appender.workspace = true
 anyhow.workspace = true
 
 # `zones` on: the world zone list's offsets are a command here
-# (src/commands/time_zones.rs), because the WebAssembly door leaves the zones
-# (cal-zone) out and this binary links them already through host-core.
+# (src/commands/time_zones.rs), and so is the tzdata release the desktop
+# compares with its WebAssembly door's at startup (decision 104a); this
+# binary links the zones already through host-core.
 cal-core = { workspace = true, features = ["zones"] }
 adapter-local.workspace = true
 host-core.workspace = true
