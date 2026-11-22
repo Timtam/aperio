@@ -586,7 +586,9 @@ sie:
   Entwurf es Stufe 10 überlässt): Eine neue Serie bekommt die Gerätezone in
   tzdatas Schreibweise, `Asia/Kolkata` statt `Asia/Calcutta`, so wie eine
   gewählte Zone. So ist jede neu geschriebene Zone kanonisch, und die
-  Exchange-Liste (22a) findet sie ohne Umweg.
+  Exchange-Liste (22a) findet sie ohne Umweg. Kann dieses Gerät tzdatas
+  Schreibweise nicht verwenden (alte Zonendaten melden `Europe/Kiev` und
+  lehnen `Europe/Kyiv` ab), bleibt es bei der Schreibweise des Geräts.
 
 Geprüft vorab (2026-11-21, Tonis Desktop-Daten nur lesend): Von 89 Serien mit
 Uhrzeit im Zwischenspeicher haben drei keine Zone, alle bei CalDAV und alle mit
@@ -1518,9 +1520,18 @@ Handy im selben PR.
     eine gespeicherte ganztägige Serie mit Uhrzeiten die Vorbelegung.
     `chooseZone` ist der Wechsel: Ein neuer Termin behält die getippten
     Zeiten, Gespeichertes den Zeitpunkt, und für die Regel fragt es die
-    Kern-Regel aus Stufe 9; `applyClockChange` legt eine Antwort auf die
-    Felder, das Ende mit derselben Dauer. `fieldsOnView` trägt die Felder
-    bei „Wiederholung aus/an“ und „Ganztägig an/aus“ auf die richtige Uhr,
+    Kern-Regel aus Stufe 9, gelesen auf der Zone, auf der die Serie
+    wiederholt (auch wo das Gerät sie ablehnt und die Felder auf UTC zeigt);
+    kann keine Antwort geschrieben werden, wird der Wechsel abgelehnt, und
+    nichts ändert sich. `applyClockChange` gibt die Regel, die Ausnahmen und
+    die Felder einer Antwort zurück, das Ende mit derselben Dauer; die
+    Speicherfunktion nimmt die Ausnahmen, die das Formular hält. Felder, die
+    wie getippt mitgenommen werden, fragen den Kern nicht. `fieldsOnView`
+    trägt die Felder bei „Wiederholung aus/an“ mit ihren Zeitpunkten und bei
+    „Ganztägig an/aus“ mit ihren Werten (die Daten bleiben) auf die richtige
+    Uhr; eine gespeicherte ganztägige Serie, die Uhrzeiten bekommt, bekommt
+    die Gerätezone, welche Zone sie auch trug; die Ansicht nennt die
+    Gerätezone, die der Kalender nicht speichern kann (22a),
     `withAllDay` merkt sich, ob ganztägig hier eingeschaltet wurde, und
     `unusableZoneRefusal` lehnt geänderte Zeiten oder Regeln bei einer Zone
     ab, die das Gerät nicht verwenden kann. Kopieren und Duplizieren

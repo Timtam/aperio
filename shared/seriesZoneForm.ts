@@ -3,10 +3,12 @@
 // What an editor needs to hold a series' zone: where the choice shows and
 // which clock the date and time fields stand on (the table under "Wo die
 // Auswahl erscheint"), which zone a new series starts with, what choosing
-// another zone does to the fields and the rule ("Die Zone wechseln"), and
-// which zone a save writes ("Prüfen und Speichern"). The fields themselves are
-// `clockFields.ts` (stage 8), the rule for a zone change is the core's
-// `series_clock_change` (stage 9, `seriesClock.ts`).
+// another zone does to the fields, the rule and the exceptions ("Die Zone
+// wechseln"), what switching repeat or all-day does ("Wiederholung,
+// Ganztägig, Umfänge"), and which zone a save writes ("Prüfen und
+// Speichern"). The fields themselves are `clockFields.ts` (stage 8), the rule
+// for a zone change is the core's `series_clock_change` (stage 9,
+// `seriesClock.ts`).
 //
 // Pure: the editors hold a `SeriesZoneForm` in their state and ask these
 // functions; nothing here reads the device or an editor. They start using it
@@ -22,11 +24,13 @@ import {
   type ClockFields,
   type FieldClock,
 } from './clockFields';
+import { zoneUsableHere } from './recurrence';
 import {
   canonicalZone,
   seriesClockChange,
   seriesClockZone,
   type ClockChangeAnswer,
+  type ClockChangeRefusal,
   type SeriesClockChange,
 } from './seriesClock';
 
@@ -89,6 +93,10 @@ export interface ZoneFormView {
    *  fields stand on UTC, and changed times or a changed rule cannot be saved
    *  (`unusableZoneRefusal`). */
   unusable: string | null;
+  /** The device's zone, canonically, where the calendar cannot store it and a
+   *  new series therefore starts on UTC (22a): the editor says so after the
+   *  end time. `null` otherwise. */
+  calendarRefuses: string | null;
 }
 
 /** The facts of the form a view and a save need. */
@@ -103,19 +111,32 @@ export interface ZoneFormFacts {
   deviceZone: string | null;
 }
 
+/** The device's zone as a new series would get it, before the calendar has
+ *  a say: tzdata's spelling (117a), or the device's own where this device
+ *  cannot use tzdata's (old zone data reports `Europe/Kiev` and refuses
+ *  `Europe/Kyiv`); `null` for a device on UTC or on a name tzdata does not
+ *  know (26a). */
+function deviceSeriesZone(deviceZone: string | null): string | null {
+  const zone = seriesClockZone(deviceZone);
+  if (zone === null) return null;
+  const canonical = canonicalZone(zone);
+  if (canonical === null) return null;
+  return zoneUsableHere(canonical) || !zoneUsableHere(zone) ? canonical : zone;
+}
+
 /**
  * The zone a new series starts with: the device's, written canonically
- * (decision 117a, provisional), or UTC where the device reports UTC or a
- * name tzdata does not know (26a) or the calendar cannot store the device's
- * zone (22a). `null` for UTC, and in a calendar that stores no zones.
+ * (decision 117a, provisional) where this device can use that spelling, or
+ * UTC where the device reports UTC or a name tzdata does not know (26a) or
+ * the calendar cannot store the device's zone (22a). `null` for UTC, and in a
+ * calendar that stores no zones.
  */
 export function defaultSeriesZone(deviceZone: string | null, calendarZones: CalendarZones): string | null {
   if (calendarZones === 'none') return null;
-  const zone = seriesClockZone(deviceZone);
-  const canonical = zone === null ? null : canonicalZone(zone);
-  if (canonical === null) return null;
-  if (calendarZones !== 'all' && !calendarZones.includes(canonical)) return null;
-  return canonical;
+  const zone = deviceSeriesZone(deviceZone);
+  if (zone === null) return null;
+  if (calendarZones !== 'all' && !calendarZones.includes(canonicalZone(zone) ?? zone)) return null;
+  return zone;
 }
 
 /** Whether the table puts the fields on the series' clock, and shows the
@@ -136,13 +157,19 @@ function placement(form: SeriesZoneForm, facts: ZoneFormFacts): 'picker' | 'hint
   }
 }
 
+/** Whether the series takes the new series' default rather than a stored
+ *  zone: nothing stored, or an all-day series that gets times here, which
+ *  gets the device's zone whatever zone it carried (46a, 48a, "Ganztägig
+ *  aus"), as `tailZone` writes it on a split. */
+function takesTheDefault(form: SeriesZoneForm): boolean {
+  return form.stored === undefined || form.openedAllDay;
+}
+
 /** The zone the series repeats on as the form stands, before a save writes
  *  it: the one chosen, else the stored one, else the new series' default. */
 function zoneInEffect(form: SeriesZoneForm, facts: ZoneFormFacts): string | null {
   if (form.chosen !== undefined) return form.chosen;
-  if (form.stored !== undefined && !(form.openedAllDay && form.stored === null)) {
-    return form.stored;
-  }
+  if (!takesTheDefault(form)) return form.stored ?? null;
   return defaultSeriesZone(facts.deviceZone, facts.calendarZones);
 }
 
@@ -150,11 +177,16 @@ function zoneInEffect(form: SeriesZoneForm, facts: ZoneFormFacts): string | null
 export function zoneFormView(form: SeriesZoneForm, facts: ZoneFormFacts): ZoneFormView {
   const placed = placement(form, facts);
   if (placed === 'device') {
-    return { choice: 'none', clock: DEVICE_CLOCK, zone: null, unusable: null };
+    return { choice: 'none', clock: DEVICE_CLOCK, zone: null, unusable: null, calendarRefuses: null };
   }
   const zone = zoneInEffect(form, facts);
   const { clock, unusable } = seriesFieldClock(zone);
-  return { choice: placed, clock, zone, unusable };
+  const device = deviceSeriesZone(facts.deviceZone);
+  const calendarRefuses =
+    form.chosen === undefined && takesTheDefault(form) && zone === null && device !== null
+      ? (canonicalZone(device) ?? device)
+      : null;
+  return { choice: placed, clock, zone, unusable, calendarRefuses };
 }
 
 /**
@@ -164,10 +196,9 @@ export function zoneFormView(form: SeriesZoneForm, facts: ZoneFormFacts): ZoneFo
  * - an all-day series writes none where all-day was switched on here, and its
  *   stored value, literally, where it opened all-day (46a);
  * - a chosen zone is written canonically, a chosen UTC as none;
- * - an untouched stored zone is written literally, as stored; a stored
- *   all-day series that gets times here gets the new series' default;
- * - a new series, and a single event that becomes one, gets the default,
- *   never over a chosen UTC.
+ * - an untouched stored zone is written literally, as stored;
+ * - a new series, a single event that becomes one, and an all-day series that
+ *   gets times here get the default, never over a chosen UTC.
  */
 export function zoneToSave(form: SeriesZoneForm, facts: ZoneFormFacts): string | null {
   if (!facts.repeats) return null;
@@ -177,25 +208,23 @@ export function zoneToSave(form: SeriesZoneForm, facts: ZoneFormFacts): string |
   if (form.chosen !== undefined) {
     return form.chosen === null ? null : (canonicalZone(form.chosen) ?? form.chosen);
   }
-  if (form.stored !== undefined && !(form.openedAllDay && form.stored === null)) {
-    return form.stored;
-  }
-  return defaultSeriesZone(facts.deviceZone, facts.calendarZones);
+  return zoneInEffect(form, facts);
 }
 
 /**
- * The recurrence a save writes: the form's rule, the exceptions of the series
- * it edits, and the zone `zoneToSave` names. It replaces `editedRecurrence`,
- * which kept the old zone, so a choice was never written.
+ * The recurrence a save writes: the form's rule, the exceptions it holds, and
+ * the zone `zoneToSave` names. It replaces `editedRecurrence`, which kept the
+ * old zone, so a choice was never written. `exceptions` are the series'
+ * stored ones, or the ones a zone change moved (`ClockChangeApplied`).
  */
 export function savedRecurrence(
   rrule: string | null | undefined,
-  previous: { exceptions: string[] } | null | undefined,
+  exceptions: string[] | null | undefined,
   zone: string | null,
 ): { rrule: string; exceptions: string[]; tzid?: string } | null {
   if (!rrule) return null;
-  const exceptions = previous?.exceptions ?? [];
-  return zone === null ? { rrule, exceptions } : { rrule, exceptions, tzid: zone };
+  const kept = exceptions ?? [];
+  return zone === null ? { rrule, exceptions: kept } : { rrule, exceptions: kept, tzid: zone };
 }
 
 /**
@@ -217,15 +246,20 @@ export function unusableZoneRefusal(
 
 /** What choosing a zone does. */
 export interface ZoneChoiceResult {
+  /** The form with the zone chosen; the form as it was where the change is
+   *  refused. */
   form: SeriesZoneForm;
-  /** The fields on the new clock. */
+  /** The fields on the new clock; as they were where the change is refused. */
   fields: ClockFields;
   /** For something stored: what the core says about the rule, the start and
-   *  the exceptions (stage 9). The editor asks when `asks` is set and applies
-   *  the answer with `applyClockChange`; otherwise it applies `asNow`. `null`
-   *  for a new event, whose typed times stay and whose rule takes its days
-   *  from the date. */
+   *  the exceptions (stage 9). The editor asks when `asks` is set, and
+   *  otherwise applies `asNow`, with `applyClockChange`. `null` for a new
+   *  event (its typed times stay and its rule takes its days from the date),
+   *  and for fields that name no instant (they move as typed). */
   change: SeriesClockChange | null;
+  /** Why the change itself is refused: no answer can be written (20a), and
+   *  the zone stays. `null` otherwise. */
+  refused: ClockChangeRefusal | null;
 }
 
 /**
@@ -235,11 +269,16 @@ export interface ZoneChoiceResult {
  * rule's days come from the date, so the weekday question never comes. For
  * anything stored, the instant stays: the fields show it on the new clock,
  * starting from what the form holds now, and the core answers what becomes
- * of the rule (`rrule`, the form's current rule), the start and the
- * `exceptions`.
+ * of the rule (`series.rrule`, the form's current rule), the start and
+ * `series.exceptions` (the ones the form holds). The core reads the series
+ * on the zone it repeats on, which is the stored one even where this device
+ * shows the fields on UTC. Fields that name no instant move as typed, and
+ * the core is not asked. Where the core can write no answer, the change is
+ * refused and nothing moves.
  */
 export function chooseZone(
   form: SeriesZoneForm,
+  facts: ZoneFormFacts,
   fields: ClockFields,
   zone: string | null,
   series: { rrule: string; exceptions: string[] },
@@ -247,40 +286,62 @@ export function chooseZone(
   const next: SeriesZoneForm = { ...form, chosen: zone };
   const clock: FieldClock = { kind: 'series', tzid: zone };
   if (form.editing === 'new') {
-    return { form: next, fields: keepingWallTimes(fields, clock), change: null };
+    return { form: next, fields: keepingWallTimes(fields, clock), change: null, refused: null };
   }
   const moved = keepingInstants(fields, clock);
   const start = fieldInstant(fields.start, fields.clock);
-  if (start.kind !== 'at') {
-    // No instant to keep: nothing to ask the core about the days yet.
-    return { form: next, fields: moved, change: null };
+  if (start.kind !== 'at' || moved.start.carried) {
+    return { form: next, fields: moved, change: null, refused: null };
   }
-  const from = fields.clock.kind === 'series' ? fields.clock.tzid : null;
   const change = seriesClockChange({
     rrule: series.rrule,
     start: start.at,
     exceptions: series.exceptions,
-    fromTzid: from,
+    fromTzid: zoneInEffect(form, facts),
     toTzid: zone,
   });
-  return { form: next, fields: moved, change };
+  if (change !== null) {
+    const answers = change.asks ? [change.asNow, change.asRule] : [change.asNow];
+    const written = answers.find((answer) => answer.outcome === 'changed');
+    if (written === undefined) {
+      const first = answers[0];
+      const reason = first.outcome === 'refused' ? first.reason : 'unreadable';
+      return { form, fields, change, refused: reason };
+    }
+  }
+  return { form: next, fields: moved, change, refused: null };
+}
+
+/** The series after an answer of the core: the fields, and the rule and the
+ *  exceptions the editor keeps in its state and saves (`savedRecurrence`). */
+export interface ClockChangeApplied {
+  fields: ClockFields;
+  rrule: string;
+  exceptions: string[];
 }
 
 /**
- * The fields after an answer of the core moved the start (as the rule says,
- * onto its old day): the start shows the answer's start, and the end keeps
+ * The series after an answer of the core: its rule and its exceptions as the
+ * answer writes them, and the fields with the answer's start, the end keeping
  * the elapsed time it had (102a). Fields of an answer that kept the start
- * come back unchanged. A refused answer changes nothing.
+ * stay as they are. `null` for a refused answer, which changes nothing.
  */
-export function applyClockChange(fields: ClockFields, answer: ClockChangeAnswer): ClockFields {
-  if (answer.outcome !== 'changed') return fields;
+export function applyClockChange(fields: ClockFields, answer: ClockChangeAnswer): ClockChangeApplied | null {
+  if (answer.outcome !== 'changed') return null;
+  const { rrule, exceptions } = answer;
   const before = fieldInstant(fields.start, fields.clock);
   const end = fieldInstant(fields.end, fields.clock);
-  if (before.kind !== 'at' || Date.parse(before.at) === Date.parse(answer.start)) return fields;
+  if (before.kind !== 'at' || Date.parse(before.at) === Date.parse(answer.start)) {
+    return { fields, rrule, exceptions };
+  }
   const start = fieldAt(answer.start, fields.clock);
-  if (end.kind !== 'at') return { ...fields, start };
+  if (end.kind !== 'at') return { fields: { ...fields, start }, rrule, exceptions };
   const movedEnd = new Date(Date.parse(end.at) + (Date.parse(answer.start) - Date.parse(before.at)));
-  return { ...fields, start, end: fieldAt(movedEnd.toISOString(), fields.clock) };
+  return {
+    fields: { ...fields, start, end: fieldAt(movedEnd.toISOString(), fields.clock) },
+    rrule,
+    exceptions,
+  };
 }
 
 /** The form with all-day switched on or off here: a series that becomes
@@ -290,15 +351,23 @@ export function withAllDay(form: SeriesZoneForm, allDay: boolean): SeriesZoneFor
 }
 
 /**
- * The fields on the clock `view` puts them on, keeping their instants: after
- * repeat is switched off they go back to the device's clock, after it is
- * switched on again to the series' clock, and values that name no instant
- * stay as typed ("Wiederholung aus", "Wiederholung wieder an").
+ * The fields on the clock `view` puts them on.
+ * - `'instants'`, after repeat is switched off or on: the instants stay, and
+ *   the fields show them on the new clock ("Wiederholung aus", "Wiederholung
+ *   wieder an"); values that name no instant stay as typed.
+ * - `'values'`, after all-day is switched on or off: the dates stay ("die
+ *   Daten bleiben"), and the times the form kept come back as typed on the
+ *   clock it now stands on ("Ganztägig aus").
  */
-export function fieldsOnView(fields: ClockFields, view: ZoneFormView): ClockFields {
+export function fieldsOnView(
+  fields: ClockFields,
+  view: ZoneFormView,
+  keep: 'instants' | 'values',
+): ClockFields {
   const same =
     fields.clock.kind === view.clock.kind &&
     (fields.clock.kind === 'device' ||
       (view.clock.kind === 'series' && fields.clock.tzid === view.clock.tzid));
-  return same ? fields : keepingInstants(fields, view.clock);
+  if (same) return fields;
+  return keep === 'instants' ? keepingInstants(fields, view.clock) : keepingWallTimes(fields, view.clock);
 }

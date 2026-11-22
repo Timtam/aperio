@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEVICE_CLOCK,
   applyClockChange,
+  changeClockField,
   chooseZone,
   defaultSeriesZone,
   fieldsAt,
@@ -30,11 +31,29 @@ const facts = (over: Partial<ZoneFormFacts> = {}): ZoneFormFacts => ({
   ...over,
 });
 
+/** Intl refusing `zone`, as a device with old zone data does. */
+function deviceRefuses(zone: string): void {
+  const Real = Intl.DateTimeFormat;
+  vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (
+    locales?: string | string[],
+    options?: Intl.DateTimeFormatOptions,
+  ) {
+    if (options?.timeZone === zone) throw new RangeError(`no such zone: ${zone}`);
+    return new Real(locales, options);
+  } as unknown as typeof Intl.DateTimeFormat);
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('where the choice shows (the table in "Wo die Auswahl erscheint")', () => {
   it('follows the rows of the table', () => {
     const row = (editing: Parameters<typeof openZoneForm>[0], over: Partial<ZoneFormFacts> = {}) =>
-      zoneFormView(openZoneForm(editing, editing === 'new' || editing === 'single' ? undefined : 'Europe/Berlin', false), facts(over))
-        .choice;
+      zoneFormView(
+        openZoneForm(editing, editing === 'new' || editing === 'single' ? undefined : 'Europe/Berlin', false),
+        facts(over),
+      ).choice;
     expect(row('new', { repeats: false })).toBe('none');
     expect(row('new')).toBe('picker');
     expect(row('new', { allDay: true })).toBe('none');
@@ -59,6 +78,20 @@ describe('where the choice shows (the table in "Wo die Auswahl erscheint")', () 
       zone: null,
     });
   });
+
+  it('names the device zone the calendar cannot store (22a), and nothing for UTC otherwise', () => {
+    const fresh = openZoneForm('new', undefined, false);
+    const list = ['Europe/Berlin', 'America/New_York'];
+    expect(zoneFormView(fresh, facts({ calendarZones: list, deviceZone: 'Antarctica/Troll' }))).toMatchObject({
+      zone: null,
+      calendarRefuses: 'Antarctica/Troll',
+    });
+    expect(zoneFormView(fresh, facts({ calendarZones: list, deviceZone: 'UTC' })).calendarRefuses).toBeNull();
+    expect(
+      zoneFormView({ ...fresh, chosen: null }, facts({ calendarZones: list })).calendarRefuses,
+    ).toBeNull();
+    expect(zoneFormView(fresh, facts({ calendarZones: list })).calendarRefuses).toBeNull();
+  });
 });
 
 describe('the zone a new series starts with', () => {
@@ -67,11 +100,21 @@ describe('the zone a new series starts with', () => {
     expect(defaultSeriesZone('Europe/Berlin', 'all')).toBe('Europe/Berlin');
   });
 
+  it('keeps the device spelling where this device cannot use tzdata\'s', () => {
+    deviceRefuses('Europe/Kyiv');
+    expect(defaultSeriesZone('Europe/Kiev', 'all')).toBe('Europe/Kiev');
+    expect(defaultSeriesZone('Europe/Kiev', ['Europe/Kyiv'])).toBe('Europe/Kiev');
+    const view = zoneFormView(openZoneForm('new', undefined, false), facts({ deviceZone: 'Europe/Kiev' }));
+    expect(view).toMatchObject({ clock: { kind: 'series', tzid: 'Europe/Kiev' }, unusable: null });
+  });
+
   it('is UTC for a device on UTC or an unknown zone (26a), or a calendar that cannot store it (22a)', () => {
     expect(defaultSeriesZone('UTC', 'all')).toBeNull();
     expect(defaultSeriesZone('Etc/Unknown', 'all')).toBeNull();
     expect(defaultSeriesZone(null, 'all')).toBeNull();
-    expect(defaultSeriesZone('America/Ciudad_Juarez', ['Europe/Berlin'])).toBeNull();
+    // Not a zone another test here makes Intl refuse: the views keep the
+    // formatter they built for a zone, and a later refusal would not be seen.
+    expect(defaultSeriesZone('America/Chicago', ['Europe/Berlin'])).toBeNull();
     expect(defaultSeriesZone('Europe/Berlin', ['Europe/Berlin'])).toBe('Europe/Berlin');
     expect(defaultSeriesZone('Europe/Berlin', 'none')).toBeNull();
   });
@@ -79,8 +122,7 @@ describe('the zone a new series starts with', () => {
 
 describe('what a save writes ("Prüfen und Speichern")', () => {
   it('writes an untouched stored zone literally', () => {
-    const form = openZoneForm('series', 'Asia/Calcutta', false);
-    expect(zoneToSave(form, facts())).toBe('Asia/Calcutta');
+    expect(zoneToSave(openZoneForm('series', 'Asia/Calcutta', false), facts())).toBe('Asia/Calcutta');
     expect(zoneToSave(openZoneForm('series', null, false), facts())).toBeNull();
   });
 
@@ -103,17 +145,23 @@ describe('what a save writes ("Prüfen und Speichern")', () => {
     expect(zoneToSave(madeAllDay, facts({ allDay: true }))).toBeNull();
   });
 
-  it('keeps a stored all-day series\' value, and gives it the default once it gets times', () => {
+  it('keeps a stored all-day series\' value, and gives it the device zone once it gets times', () => {
     const allDay = openZoneForm('series', null, true);
     expect(zoneToSave(allDay, facts({ allDay: true }))).toBeNull();
     expect(zoneToSave(withAllDay(allDay, false), facts())).toBe('Europe/Berlin');
+    // A zone an all-day series carried from elsewhere means nothing (46a, 48a):
+    // with times it gets the device's zone, as a split writes it (tailZone).
     const zoned = openZoneForm('series', 'America/New_York', true);
     expect(zoneToSave(zoned, facts({ allDay: true }))).toBe('America/New_York');
-    expect(zoneToSave(withAllDay(zoned, false), facts())).toBe('America/New_York');
+    expect(zoneToSave(withAllDay(zoned, false), facts())).toBe('Europe/Berlin');
+    expect(zoneFormView(withAllDay(zoned, false), facts()).clock).toEqual({
+      kind: 'series',
+      tzid: 'Europe/Berlin',
+    });
   });
 
-  it('builds the recurrence with the series\' exceptions and the zone', () => {
-    expect(savedRecurrence('FREQ=DAILY', { exceptions: ['2026-11-03T08:00:00Z'] }, 'Europe/Berlin')).toEqual({
+  it('builds the recurrence with the exceptions the form holds and the zone', () => {
+    expect(savedRecurrence('FREQ=DAILY', ['2026-11-03T08:00:00Z'], 'Europe/Berlin')).toEqual({
       rrule: 'FREQ=DAILY',
       exceptions: ['2026-11-03T08:00:00Z'],
       tzid: 'Europe/Berlin',
@@ -124,19 +172,8 @@ describe('what a save writes ("Prüfen und Speichern")', () => {
 });
 
 describe('a zone this device cannot use', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('stands on UTC, and refuses changed times or a changed rule until another zone is chosen', () => {
-    const Real = Intl.DateTimeFormat;
-    vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (
-      locales?: string | string[],
-      options?: Intl.DateTimeFormatOptions,
-    ) {
-      if (options?.timeZone === 'America/Ciudad_Juarez') throw new RangeError('no such zone');
-      return new Real(locales, options);
-    } as unknown as typeof Intl.DateTimeFormat);
+    deviceRefuses('America/Ciudad_Juarez');
     const form = openZoneForm('series', 'America/Ciudad_Juarez', false);
     const view = zoneFormView(form, facts());
     expect(view).toMatchObject({ clock: { kind: 'series', tzid: null }, unusable: 'America/Ciudad_Juarez' });
@@ -144,6 +181,20 @@ describe('a zone this device cannot use', () => {
     expect(unusableZoneRefusal(view, form, { times: false, rule: true })).toBe('America/Ciudad_Juarez');
     expect(unusableZoneRefusal(view, form, { times: false, rule: false })).toBeNull();
     expect(unusableZoneRefusal(view, { ...form, chosen: 'Europe/Berlin' }, { times: true, rule: true })).toBeNull();
+  });
+
+  it('asks the core about the zone the series repeats on, not the UTC its fields show here', () => {
+    deviceRefuses('Europe/Kyiv');
+    const form = openZoneForm('series', 'Europe/Kyiv', false);
+    const view = zoneFormView(form, facts());
+    // Mondays 00:30 Kyiv, shown on UTC as Sunday 22:30. Read on Kyiv the start
+    // is Monday, as it is in Helsinki: no day changes and nothing is asked.
+    const fields = fieldsAt('2026-11-01T22:30:00Z', '2026-11-01T23:30:00Z', view.clock);
+    const result = chooseZone(form, facts(), fields, 'Europe/Helsinki', {
+      rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      exceptions: [],
+    });
+    expect(result.change).toMatchObject({ asks: false, startDayBefore: '2026-11-02', startDayAfter: '2026-11-02' });
   });
 });
 
@@ -155,7 +206,7 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
       start: { date: '2026-09-14', time: '09:00', at: null },
       end: { date: '2026-09-14', time: '10:00', at: null },
     };
-    const result = chooseZone(form, fields, 'America/New_York', { rrule: 'FREQ=WEEKLY', exceptions: [] });
+    const result = chooseZone(form, facts(), fields, 'America/New_York', { rrule: 'FREQ=WEEKLY', exceptions: [] });
     expect(result.change).toBeNull();
     expect(result.form.chosen).toBe('America/New_York');
     expect(result.fields).toEqual({
@@ -169,12 +220,12 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
     // A series that lost its Berlin zone: Mondays from Sunday 23:30 UTC.
     const form = openZoneForm('series', null, false);
     const fields = fieldsAt('2026-11-01T23:30:00Z', '2026-11-02T00:30:00Z', { kind: 'series', tzid: null });
-    const result = chooseZone(form, fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [] });
+    const result = chooseZone(form, facts(), fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [] });
     expect(result.fields.start).toEqual({ date: '2026-11-02', time: '00:30', at: '2026-11-01T23:30:00Z' });
     expect(result.change).toMatchObject({ asks: true, fit: 'after' });
     // As the rule says, the start stays where it is: the fields do not move.
-    const asRule = result.change!.asRule;
-    expect(applyClockChange(result.fields, asRule)).toEqual(result.fields);
+    const applied = applyClockChange(result.fields, result.change!.asRule);
+    expect(applied).toEqual({ fields: result.fields, rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [] });
   });
 
   it('moves the start and the end together when the answer moves the start', () => {
@@ -182,22 +233,70 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
     // Berlin, a day earlier.
     const form = openZoneForm('series', null, false);
     const fields = fieldsAt('2026-11-01T23:30:00Z', '2026-11-02T00:30:00Z', { kind: 'series', tzid: null });
-    const result = chooseZone(form, fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=SU', exceptions: [] });
+    const result = chooseZone(form, facts(), fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=SU', exceptions: [] });
     expect(result.change?.asks).toBe(false);
-    const moved = applyClockChange(result.fields, result.change!.asRule);
-    expect(moved.start).toMatchObject({ date: '2026-11-01', time: '00:30' });
-    expect(moved.end).toMatchObject({ date: '2026-11-01', time: '01:30' });
+    const applied = applyClockChange(result.fields, result.change!.asRule)!;
+    expect(applied.fields.start).toMatchObject({ date: '2026-11-01', time: '00:30' });
+    expect(applied.fields.end).toMatchObject({ date: '2026-11-01', time: '01:30' });
+  });
+
+  it('hands on the exceptions the answer moved, for the save', () => {
+    const form = openZoneForm('series', 'Europe/Berlin', false);
+    const fields = fieldsAt('2026-11-02T08:00:00Z', '2026-11-02T09:00:00Z', { kind: 'series', tzid: 'Europe/Berlin' });
+    const series = { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE', exceptions: ['2027-03-17T08:00:00Z'] };
+    const result = chooseZone(form, facts(), fields, 'America/New_York', series);
+    const applied = applyClockChange(result.fields, result.change!.asNow)!;
+    expect(applied.exceptions).toEqual(['2027-03-17T07:00:00Z']);
+    expect(savedRecurrence(applied.rrule, applied.exceptions, zoneToSave(result.form, facts()))).toEqual({
+      rrule: 'FREQ=WEEKLY;BYDAY=MO,WE',
+      exceptions: ['2027-03-17T07:00:00Z'],
+      tzid: 'America/New_York',
+    });
+  });
+
+  it('refuses a change no answer can write, and leaves the zone and the fields', () => {
+    const form = openZoneForm('series', 'Europe/Berlin', false);
+    const fields = fieldsAt('2026-11-02T08:00:00Z', '2026-11-02T09:00:00Z', { kind: 'series', tzid: 'Europe/Berlin' });
+    const result = chooseZone(form, facts(), fields, 'America/New_York', { rrule: 'FREQ=DAILY;BYHOUR=9', exceptions: [] });
+    expect(result.refused).toBe('time_of_day');
+    expect(result.form).toBe(form);
+    expect(result.fields).toBe(fields);
+  });
+
+  it('does not ask the core for fields carried as typed', () => {
+    const form = openZoneForm('series', null, false);
+    const fields = changeClockField(
+      fieldsAt('2026-11-01T23:30:00Z', '2026-11-02T00:30:00Z', { kind: 'series', tzid: null }),
+      'endTime',
+      '',
+    );
+    const result = chooseZone(form, facts(), fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=SU', exceptions: [] });
+    expect(result.change).toBeNull();
+    expect(result.fields.start).toMatchObject({ date: '2026-11-01', time: '23:30', carried: true });
   });
 });
 
 describe('switching repeat or all-day', () => {
-  it('puts the fields back on the device clock without a repeat, and on the series clock with one', () => {
+  it('keeps the instants when repeat is switched off and on', () => {
     const form = openZoneForm('series', 'America/New_York', false);
     const fields = fieldsAt('2026-11-02T14:00:00Z', '2026-11-02T15:00:00Z', { kind: 'series', tzid: 'America/New_York' });
-    const off = fieldsOnView(fields, zoneFormView(form, facts({ repeats: false })));
+    const off = fieldsOnView(fields, zoneFormView(form, facts({ repeats: false })), 'instants');
     expect(off.clock).toEqual(DEVICE_CLOCK);
-    const on = fieldsOnView(off, zoneFormView(form, facts()));
+    const on = fieldsOnView(off, zoneFormView(form, facts()), 'instants');
     expect(on).toEqual(fields);
+  });
+
+  it('keeps the dates when all-day is switched on, and the times as typed when it is switched off', () => {
+    const form = openZoneForm('series', 'America/New_York', false);
+    // 2 November 21:00 New York is 3 November on every clock east of it.
+    const fields = fieldsAt('2026-11-03T02:00:00Z', '2026-11-03T03:00:00Z', { kind: 'series', tzid: 'America/New_York' });
+    const allDay = withAllDay(form, true);
+    const on = fieldsOnView(fields, zoneFormView(allDay, facts({ allDay: true })), 'values');
+    expect(on.start).toEqual({ date: '2026-11-02', time: '21:00', at: null });
+    const moved = changeClockField(on, 'startDate', '2026-11-10');
+    const off = fieldsOnView(moved, zoneFormView(withAllDay(allDay, false), facts()), 'values');
+    expect(off.clock).toEqual({ kind: 'series', tzid: 'America/New_York' });
+    expect(off.start).toEqual({ date: '2026-11-10', time: '21:00', at: null });
   });
 
   it('marks all-day switched on only when it was not on when the editor opened', () => {
