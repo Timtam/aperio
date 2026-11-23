@@ -797,6 +797,27 @@ noch einmal.“ („The repeat end date can't be written on this device. Update
 Aperio and try again.“), wenn die Bibliothek des Geräts das Ende nicht
 schreiben kann.
 
+Toni hat am 2026-11-23 für Stufe 13 entschieden, jeweils die Empfehlung:
+
+- **143a — die Zone geht in die bestehende Frage „Die anderen Kopien“:**
+  eine Frage pro Speichern, die Zone steht in der Liste der Änderungen,
+  etwa „Die Änderung (Zeitzone: New York, Titel) mitziehen?“. Bericht,
+  erneuter Versuch und die Exchange-Verlustfrage bleiben die der
+  bestehenden Mitnahme.
+- **144a — eine Kopie aus dem anderen Halbjahr kommt auf die Uhrzeit der
+  Serie:** Beginnt die Kopie im Sommer und die Serie im Winter (oder
+  umgekehrt), bekommt sie auf der neuen Uhr dieselbe Uhrzeit und dieselbe
+  Tagesrückung wie die Serie. Geht das nicht, behält sie ihre Zeiten und wird
+  mit Grund genannt.
+- **145a — eine Kopie behält ihren Abstand zur Serie:** Lag sie schon vorher
+  zu einer anderen Uhrzeit (etwa 10:00 statt 09:00), bleibt dieser Abstand
+  auf der neuen Uhr. Eine echte Kopie (Abstand null) landet so genau auf der
+  Uhrzeit der Serie.
+- **146a — Titel, Ort und Beschreibung gehen auch zu einer Kopie, die die
+  Zone nicht bekommen kann:** Ihre Zeiten und ihre Zone bleiben, und sie wird
+  mit Grund genannt. Eine Kopie, die dort keine Serie ist (Einzeltermin,
+  Gerätekalender), bekommt die Textfelder ohnehin; die Zone gilt dort nicht.
+
 ## Was es löst
 
 **Aperio sagt, auf welcher Uhr eine Serie läuft.** Eine zonenlose Serie steht
@@ -1154,11 +1175,11 @@ und Regel. Stufe 13 legt fest, wie die Zonen-Mitnahme das ersetzt.
 Nimmt Toni das Angebot an, bekommt jede beschreibbare Kopie dieselbe Zone, mit
 derselben Antwort wie in der Wochentag-Frage. Eine Kopie, deren Regel diese
 Antwort ablehnt oder deren Kalender die Zone nicht speichern kann, wird nicht
-geändert und mit Grund genannt. Offen und in Stufe 13 zu entscheiden:
-- ob die Mitnahme eine eigene Frage zur Zone ist oder die bestehende
-  Mitnahme-Frage um die Zone erweitert;
-- was eine Kopie bekommt, die eine Antwort braucht, wenn für die Serie selbst
-  keine Frage kam (Vorschlag: für diese Kopie einzeln fragen).
+geändert und mit Grund genannt. Entschieden (2026-11-23): Die Zone geht in
+die bestehende Mitnahme-Frage (143a). Eine Kopie folgt der Serie: dieselbe
+Uhrzeit und Tagesrückung auf der neuen Uhr, auch aus dem anderen Halbjahr
+(144a), mit ihrem bisherigen Abstand zur Serie (145a). Kann sie die Zone nicht
+bekommen, gehen Titel, Ort und Beschreibung trotzdem mit (146a).
 
 ### Wiederholung, Ganztägig, Umfänge
 
@@ -2082,6 +2103,21 @@ Fenster von Aperio.
   sofort ein Änderungsereignis. Stufe 12 darf deshalb beim Pfeilen durch
   „Keine / Täglich / …“ nicht jedes Mal die Felder auf eine andere Uhr
   umrechnen oder etwas ansagen; wie, entscheidet Toni mit Stufe 12.
+
+**Exchange, 2026-11-23 (107b, Stufe 12, Teil 3).** Toni startete
+`ews-zones.exe ende` gegen seinen Exchange-Server, über Aperios eigenen
+Exchange-Adapter. 21 von 21 Prüfungen passten, alle 19 Testserien wurden
+wieder entfernt:
+- Eine Serie um 19:00 New York mit Ende 10.11. behält ihren letzten Termin
+  (Lesen und Schreiben, auch nach einer reinen Titeländerung, die keine
+  Wiederholung mitschickt). Die Gegenproben 18:00 New York, 10:00 und 01:00
+  Berlin passen ebenso.
+- Ein getipptes Ende, ein Schnitt mit Rest (jeder Tag genau einmal), ein Rest
+  mit gelöschtem letzten Tag, eine Kopie, das Ziehen um einen Tag und auf
+  eine andere Uhrzeit, ein altes `…T235959Z`, ganztägig und Sommerzeit
+  schreiben das erwartete Enddatum.
+Der Handteil in Aperio (das Ende-Feld mit NVDA, Speichern im Editor) kommt
+mit der gesammelten Prüfung.
 
 ## Ungeprüft
 
