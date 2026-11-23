@@ -143,6 +143,27 @@ pub(crate) fn is_utc_date_time(value: &str) -> bool {
         && bytes[15].eq_ignore_ascii_case(&b'Z')
 }
 
+/// `rrule` with its `UNTIL` set to `value`, every other part as written. A
+/// rule without an `UNTIL` gets none: the caller adds one where it means to.
+pub fn with_until(rrule: &str, value: &str) -> String {
+    let trimmed = rrule.trim();
+    trimmed
+        .split(';')
+        .map(|part| match part.split_once('=') {
+            Some((key, _)) if key.trim().eq_ignore_ascii_case("UNTIL") => {
+                format!("{}={value}", key.trim())
+            }
+            _ => part.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// An instant as a rule's `UNTIL` spells it, `YYYYMMDDTHHMMSSZ`.
+pub fn rule_until_text(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.format("%Y%m%dT%H%M%SZ").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -970,6 +970,7 @@ export function WeekView() {
               back = saved.deletions_not_restored;
             },
             acceptsLoss,
+            calendar: calendarById.get(ev.calendar_id),
           },
         );
         if (!moved) return; // nothing changed — nothing to announce

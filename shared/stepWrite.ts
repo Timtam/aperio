@@ -9,10 +9,14 @@
 // while it runs: decided here, once.
 
 import type { RecurrenceCapabilities } from './generated/RecurrenceCapabilities';
+import type { EndsByDateCalendar } from './recurrence';
 
-/** The calendar a series is created in, as far as this asks. */
+/** The calendar a series is created in, as far as this asks; for a duplicate,
+ *  which stays in its calendar, also the calendar its end is read from. */
 export interface StepWriteTarget {
-  recurrence_capabilities?: Pick<RecurrenceCapabilities, 'deletions_in_steps'> | null;
+  recurrence_capabilities?:
+    | (Pick<RecurrenceCapabilities, 'deletions_in_steps'> & Partial<Pick<RecurrenceCapabilities, 'ends_by_date'>>)
+    | null;
 }
 
 /** The recurrence a series is created with, as far as this asks. */
@@ -83,10 +87,17 @@ export const writeWithoutWaiting: StepWriteWait = (_inSteps, write) => write();
  * How a move, a copy or a duplicate waits while it creates a series in steps
  * (decisions 227, 265): the surface's wait, and the row of the calendar it
  * writes to. Absent, the write just runs.
+ *
+ * `source` is the row of the calendar the carried series is read from: where
+ * it stores a series' end as a date (`recurrence.ends_by_date`), an end the
+ * 105a guard alone reads as a cut counts through its own date, and the series
+ * is carried so (`carriedEnd`, DESIGN-series-time-zone.md, 140a). Absent, the
+ * end keeps the 105a reading.
  */
 export interface StepWriteOptions {
   wait?: StepWriteWait;
   target?: StepWriteTarget | null;
+  source?: EndsByDateCalendar | null;
 }
 
 /** Marks a failure a surface already said in its "please wait" dialog. */

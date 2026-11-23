@@ -109,6 +109,19 @@ pub struct SeriesEnd {
     /// time, at the earlier reading in a fold). For a rule that repeats by
     /// the hour or faster, the bound's day.
     pub end_day: String,
+    /// Whether the end reads as an instant only through the 105a guard: the
+    /// series repeats on a zone's clock ([`crate::ExpansionClock::Zone`]),
+    /// its `UNTIL` spells the end of a UTC day (`…T235959Z`), the rule
+    /// repeats by the day or slower, and the second after the `UNTIL`, read
+    /// on the clock, is one of the rule's times of day. Without the guard
+    /// that text would read through its own date. `false` everywhere else.
+    ///
+    /// Such an end is settled on its own calendar's facts before it is
+    /// counted, moved or carried (DESIGN-series-time-zone.md, 140a): where
+    /// the calendar stores a series' end as a date (manifest
+    /// `recurrence.ends_by_date`), through its own date; elsewhere as the
+    /// 106a cut ([`crate::cut_before`]), which keeps 105a's reading.
+    pub guarded: bool,
 }
 
 /// The `UNTIL` value a rule names. A rule with a `COUNT` as well is read too:
@@ -207,26 +220,30 @@ pub fn read_series_end(
     };
     let end_of = |day: NaiveDate| day.and_hms_opt(23, 59, 59);
 
-    let (reading, bound, instant) = if let Some(day) = date {
-        (EndReading::ThroughDay, end_of(day)?, None)
+    // The 105a guard looks at the second after the `UNTIL` only for this
+    // text on a zone's clock, for a rule that repeats by the day or slower.
+    let guard_applies =
+        matches!(clock, ExpansionClock::Zone) && spells_end_of_utc_day(value) && !sub_daily;
+    let (reading, bound, instant, guarded) = if let Some(day) = date {
+        (EndReading::ThroughDay, end_of(day)?, None, false)
     } else if let Some(floating) = floating {
-        (EndReading::Wall, floating, None)
+        (EndReading::Wall, floating, None, false)
     } else {
         let at = utc?;
         let digits = at.naive_utc();
         match clock {
             ExpansionClock::DeviceDays if spells_end_of_utc_day(value) => {
-                (EndReading::ThroughDay, digits, None)
+                (EndReading::ThroughDay, digits, None, false)
             }
-            ExpansionClock::DeviceDays => (EndReading::Wall, digits, None),
-            ExpansionClock::Zone
-                if spells_end_of_utc_day(value)
-                    && !sub_daily
-                    && !times.contains(&wall(at + Duration::seconds(1)).time()) =>
-            {
-                (EndReading::ThroughDay, end_of(digits.date())?, None)
+            ExpansionClock::DeviceDays => (EndReading::Wall, digits, None, false),
+            ExpansionClock::Zone if guard_applies => {
+                if times.contains(&wall(at + Duration::seconds(1)).time()) {
+                    (EndReading::Instant, wall(at), Some(at), true)
+                } else {
+                    (EndReading::ThroughDay, end_of(digits.date())?, None, false)
+                }
             }
-            _ => (EndReading::Instant, wall(at), Some(at)),
+            _ => (EndReading::Instant, wall(at), Some(at), false),
         }
     };
 
@@ -250,7 +267,84 @@ pub fn read_series_end(
         wall: bound.format("%Y-%m-%dT%H:%M:%S").to_string(),
         at: at.map(|at| at.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
         end_day: end_day.format("%Y-%m-%d").to_string(),
+        guarded,
     })
+}
+
+/// The date a calendar that stores a series' end as a date (manifest
+/// `recurrence.ends_by_date`) writes for a series that repeats once a day at
+/// `time` on its clock: every occurrence stands at that wall time, so the
+/// end needs no expansion of the rule. Not for a rule with several times a
+/// day.
+///
+/// It equals [`read_series_end`]'s `end_day` with one exception: an `UNTIL`
+/// that spells the end of a UTC day (`…T235959Z`) and was not flagged as a
+/// cut counts as its own date, even where the 105a guard reads it as an
+/// instant (its `guarded`). Such a calendar stores a date, and the text is
+/// the one the repeat field has always written for one. Only a flagged cut
+/// (`cut`, "this and all following") is counted as the instant it is.
+///
+/// - A date gives that date.
+/// - A date-time without `Z` (115a) gives its date where that day's
+///   occurrence starts at or before it in wall time, else the day before.
+///   A gap is not modelled.
+/// - `…T235959Z`, unflagged, gives its digits' date.
+/// - Any other UTC date-time gives [`last_day_through`]: the day of the
+///   `UNTIL` on the clock where that day's occurrence starts at or before
+///   it, else the day before.
+///
+/// `None` for a rule without an `UNTIL`, one that cannot be read, and where
+/// the clock cannot say.
+pub fn written_end_day(
+    rrule: &str,
+    time: NaiveTime,
+    cut: bool,
+    wall: impl Fn(DateTime<Utc>) -> Option<NaiveDateTime>,
+    instant_of: impl Fn(NaiveDateTime) -> Option<DateTime<Utc>>,
+) -> Option<NaiveDate> {
+    let (_, parts) = parse_parts(rrule).ok()?;
+    let value = part(&parts, "UNTIL")?;
+    let upper = value.to_ascii_uppercase();
+    if let Ok(date) = NaiveDate::parse_from_str(&upper, "%Y%m%d") {
+        return Some(date);
+    }
+    if let Ok(floating) = NaiveDateTime::parse_from_str(&upper, "%Y%m%dT%H%M%S") {
+        let day = floating.date();
+        return if day.and_time(time) <= floating {
+            Some(day)
+        } else {
+            day.pred_opt()
+        };
+    }
+    if !is_utc_date_time(value) {
+        return None;
+    }
+    let at = Utc.from_utc_datetime(&NaiveDateTime::parse_from_str(&upper, "%Y%m%dT%H%M%SZ").ok()?);
+    if spells_end_of_utc_day(value) && !cut {
+        return Some(at.date_naive());
+    }
+    last_day_through(at, time, wall, instant_of)
+}
+
+/// The `UNTIL` that ends a series just before its occurrence at `next`
+/// (106a): one second before it, or two where one second before would
+/// spell the end of a UTC day (`…T235959Z`), a text the 105a guard would
+/// have to tell from an end typed for that day. A rule that repeats by the
+/// second keeps one second, as its occurrences may stand one second apart;
+/// a rule that cannot be read counts as one that does not.
+pub fn cut_before(next: DateTime<Utc>, rrule: &str) -> DateTime<Utc> {
+    let bound = next - Duration::seconds(1);
+    let secondly = parse_parts(rrule).ok().is_some_and(|(_, parts)| {
+        matches!(
+            part(&parts, "FREQ").and_then(parse_freq),
+            Some(Freq::Secondly)
+        )
+    });
+    if bound.time() == NaiveTime::from_hms_opt(23, 59, 59).expect("a time") && !secondly {
+        bound - Duration::seconds(1)
+    } else {
+        bound
+    }
 }
 
 #[cfg(test)]
@@ -435,5 +529,103 @@ mod tests {
         assert_eq!(utc_until("FREQ=DAILY;UNTIL=20261105T065959"), None);
         assert_eq!(utc_until("FREQ=DAILY;COUNT=6"), None);
         assert_eq!(utc_until("FREQ=DAILY"), None);
+    }
+
+    fn written(rule: &str, time: NaiveTime, cut: bool, hours: i32) -> Option<NaiveDate> {
+        let (wall, instant_of) = fixed(hours);
+        written_end_day(rule, time, cut, wall, instant_of)
+    }
+
+    #[test]
+    fn written_end_day_reads_each_spelling() {
+        // Daily 19:00 New York in winter: an unflagged end of a UTC day is
+        // its own date; flagged, the cut it is.
+        let rule = "FREQ=DAILY;UNTIL=20261110T235959Z";
+        assert_eq!(written(rule, hm(19, 0), false, -5), Some(day(2026, 11, 10)));
+        assert_eq!(written(rule, hm(19, 0), true, -5), Some(day(2026, 11, 9)));
+        // The end of the 10th on New York's clock, either way.
+        for cut in [false, true] {
+            assert_eq!(
+                written("FREQ=DAILY;UNTIL=20261111T045959Z", hm(19, 0), cut, -5),
+                Some(day(2026, 11, 10))
+            );
+            // The 106a cut before the 7th's occurrence ends on the 6th.
+            assert_eq!(
+                written("FREQ=DAILY;UNTIL=20261107T235958Z", hm(19, 0), cut, -5),
+                Some(day(2026, 11, 6))
+            );
+        }
+        // Daily 20:00 New York in summer: the end of the 27th on its clock.
+        assert_eq!(
+            written("FREQ=DAILY;UNTIL=20261028T035959Z", hm(20, 0), false, -4),
+            Some(day(2026, 10, 27))
+        );
+        // Daily 01:00 Berlin: the end of a UTC day is 00:59:59 on the next
+        // day, before that day's occurrence; the 10th either way.
+        for cut in [false, true] {
+            assert_eq!(
+                written("FREQ=DAILY;UNTIL=20261110T235959Z", hm(1, 0), cut, 1),
+                Some(day(2026, 11, 10))
+            );
+        }
+        // Daily 00:30 Berlin: an UTC instant on the 9th is the 10th's
+        // occurrence; a date is that date.
+        assert_eq!(
+            written("FREQ=DAILY;UNTIL=20261109T233000Z", hm(0, 30), false, 1),
+            Some(day(2026, 11, 10))
+        );
+        assert_eq!(
+            written("FREQ=DAILY;UNTIL=20261110", hm(0, 30), false, 1),
+            Some(day(2026, 11, 10))
+        );
+        // A floating time (115a), compared in wall time.
+        assert_eq!(
+            written("FREQ=DAILY;UNTIL=20261110T190000", hm(19, 0), false, -5),
+            Some(day(2026, 11, 10))
+        );
+        assert_eq!(
+            written("FREQ=DAILY;UNTIL=20261110T185959", hm(19, 0), false, -5),
+            Some(day(2026, 11, 9))
+        );
+    }
+
+    #[test]
+    fn written_end_day_gives_no_day_where_it_cannot_say() {
+        let none_wall = |_: DateTime<Utc>| None;
+        let (_, instant_of) = fixed(-5);
+        assert_eq!(
+            written_end_day(
+                "FREQ=DAILY;UNTIL=20261111T045959Z",
+                hm(19, 0),
+                false,
+                none_wall,
+                instant_of
+            ),
+            None
+        );
+        assert_eq!(written("FREQ=DAILY", hm(19, 0), false, -5), None);
+        assert_eq!(written("FREQ=DAILY;COUNT=5", hm(19, 0), false, -5), None);
+    }
+
+    #[test]
+    fn cut_before_never_spells_the_end_of_a_utc_day() {
+        assert_eq!(
+            cut_before(at("2026-11-08T00:00:00Z"), "FREQ=DAILY"),
+            at("2026-11-07T23:59:58Z")
+        );
+        assert_eq!(
+            cut_before(at("2026-11-05T07:00:00Z"), "FREQ=DAILY"),
+            at("2026-11-05T06:59:59Z")
+        );
+        // By the second, one second before is the only bound that keeps the
+        // occurrence before it.
+        assert_eq!(
+            cut_before(at("2026-11-08T00:00:00Z"), "FREQ=SECONDLY"),
+            at("2026-11-07T23:59:59Z")
+        );
+        assert_eq!(
+            cut_before(at("2026-11-08T00:00:00Z"), "garbage"),
+            at("2026-11-07T23:59:58Z")
+        );
     }
 }

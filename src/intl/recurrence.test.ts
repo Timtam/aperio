@@ -15,8 +15,15 @@ import {
 } from './recurrence';
 import type { CalendarEvent } from '../api/types';
 import {
+  asTypedEnd,
+  carriedEnd,
+  endIsADay,
+  endsByDateOf,
+  importedRule,
   exceptionsAtSeriesTime,
   movedSeriesUntil,
+  seriesEndOf,
+  settledEnd,
   moveSeriesInstant,
   nthOccurrence,
   movedTailRule,
@@ -728,6 +735,13 @@ describe('truncateRRuleBefore', () => {
     ).toBe('FREQ=DAILY;UNTIL=20261101T235959Z');
   });
 
+  it('cuts a rule that repeats by the second one second before, as the core spells it (106a)', () => {
+    // Two seconds before would drop the occurrence at 23:59:59.
+    expect(truncateRRuleBefore('FREQ=SECONDLY', new Date('2026-11-08T00:00:00.000Z'))).toBe(
+      'FREQ=SECONDLY;UNTIL=20261107T235959Z',
+    );
+  });
+
   it('tolerates a leading RRULE: prefix', () => {
     const out = truncateRRuleBefore(
       'RRULE:FREQ=DAILY',
@@ -1247,7 +1261,7 @@ describe('a series cut in the spring gap (101b)', () => {
     const from = '2026-03-25T01:30:00.000Z';
     const moved = movedTailRule({
       rrule,
-      series: { tzid, all_day: false },
+      series: { tzid, all_day: false, endsByDate: false },
       from,
       opened: from,
       tail: { start: '2026-03-26T01:30:00.000Z', all_day: false },
@@ -1261,5 +1275,238 @@ describe('a series cut in the spring gap (101b)', () => {
       recurrence: { rrule: moved.rrule, exceptions: [], tzid },
     };
     expect(expandEvent(tail, window)).toHaveLength(4);
+  });
+});
+
+// Stage 12, part 3: an end is a day on the series' clock, and only the core
+// says which day and how to spell it (DESIGN-series-time-zone.md, 140a-142a).
+// A daily series in New York at 19:00 in winter starts at 00:00 UTC: there
+// `…T235959Z` is one second before an occurrence, which the 105a guard reads
+// as a cut.
+describe("an end on the series' clock (140a-142a)", () => {
+  const NY = 'America/New_York';
+  const at1900 = { start: '2026-11-03T00:00:00Z', allDay: false, tzid: NY };
+  const at1800 = { start: '2026-11-02T23:00:00Z', allDay: false, tzid: NY };
+
+  describe('movedSeriesUntil', () => {
+    it('never moves a cut onto the end of a UTC day (D5)', () => {
+      // 18:00 cut before 7 November, moved to 19:00: one second before 00:00
+      // UTC would spell `…T235959Z`.
+      const moved = movedSeriesUntil(
+        'FREQ=DAILY;UNTIL=20261107T225959Z',
+        NY,
+        false,
+        '2026-11-02T23:00:00.000Z',
+        '2026-11-03T00:00:00.000Z',
+      );
+      expect(moved).toBe('20261107T235958Z');
+      expect(seriesEndOf(`FREQ=DAILY;UNTIL=${moved}`, at1900, null)?.endDay).toBe('2026-11-06');
+    });
+
+    it('spells the end of a day the core reads through as its instant at 19:00', () => {
+      expect(
+        movedSeriesUntil(
+          'FREQ=DAILY;UNTIL=20261110T235959Z',
+          NY,
+          false,
+          '2026-11-02T23:00:00.000Z',
+          '2026-11-03T00:00:00.000Z',
+        ),
+      ).toBe('20261111T045959Z');
+    });
+
+    it('moves a canonical end with the time of day and keeps its day', () => {
+      const back = movedSeriesUntil(
+        'FREQ=DAILY;UNTIL=20261111T045959Z',
+        NY,
+        false,
+        '2026-11-03T00:00:00.000Z',
+        '2026-11-02T23:00:00.000Z',
+      );
+      expect(back).toBe('20261111T035959Z');
+      expect(seriesEndOf(`FREQ=DAILY;UNTIL=${back}`, at1800, null)?.endDay).toBe('2026-11-10');
+      expect(
+        movedSeriesUntil(
+          'FREQ=DAILY;UNTIL=20261111T045959Z',
+          NY,
+          false,
+          '2026-11-03T00:00:00.000Z',
+          '2026-11-04T00:00:00.000Z',
+        ),
+      ).toBe('20261112T045959Z');
+    });
+
+    it('still moves an hourly end as an instant', () => {
+      expect(
+        movedSeriesUntil(
+          'FREQ=HOURLY;UNTIL=20261110T235959Z',
+          NY,
+          false,
+          '2026-11-03T00:00:00.000Z',
+          '2026-11-03T02:00:00.000Z',
+        ),
+      ).toBe('20261111T015959Z');
+    });
+  });
+
+  describe('carriedEnd (D1, D4)', () => {
+    const legacy = 'FREQ=DAILY;UNTIL=20261110T235959Z';
+
+    it('settles a guarded end through its own date on an ends-by-date calendar, else as the 106a cut', () => {
+      expect(carriedEnd(legacy, at1900, true)).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+      expect(carriedEnd(legacy, at1900, false)).toBe('FREQ=DAILY;UNTIL=20261110T235958Z');
+      expect(carriedEnd(`RRULE:${legacy}`, at1900, true)).toBe('RRULE:FREQ=DAILY;UNTIL=20261111T045959Z');
+    });
+
+    it('leaves every end the guard does not decide as it is', () => {
+      for (const endsByDate of [true, false]) {
+        expect(carriedEnd(legacy, at1800, endsByDate)).toBe(legacy);
+        expect(carriedEnd('FREQ=HOURLY;UNTIL=20261110T235959Z', at1900, endsByDate)).toBe(
+          'FREQ=HOURLY;UNTIL=20261110T235959Z',
+        );
+        expect(carriedEnd(legacy, { ...at1900, tzid: null }, endsByDate)).toBe(legacy);
+        expect(carriedEnd(legacy, { ...at1900, allDay: true }, endsByDate)).toBe(legacy);
+        expect(carriedEnd('FREQ=DAILY;UNTIL=20261111T045959Z', at1900, endsByDate)).toBe(
+          'FREQ=DAILY;UNTIL=20261111T045959Z',
+        );
+      }
+    });
+  });
+
+  describe('settledEnd (D3)', () => {
+    it('spells a typed day on the facts being saved', () => {
+      expect(settledEnd('FREQ=DAILY;UNTIL=20261110T235959Z', at1900)).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+    });
+
+    it('leaves what already reads through the day as it is', () => {
+      expect(settledEnd('FREQ=DAILY;UNTIL=20261110T235959Z', at1800)).toBe('FREQ=DAILY;UNTIL=20261110T235959Z');
+      expect(settledEnd('FREQ=DAILY;UNTIL=20261111T045959Z', at1900)).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+      expect(settledEnd('FREQ=DAILY;UNTIL=20261110T235959Z', { ...at1900, allDay: true })).toBe(
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      );
+      expect(
+        settledEnd('FREQ=DAILY;UNTIL=20261110T235959Z', {
+          start: '2026-11-03T05:00:00Z',
+          allDay: false,
+          tzid: 'Pacific/Honolulu',
+        }),
+      ).toBe('FREQ=DAILY;UNTIL=20261110T235959Z');
+      // East of UTC, 05:00 Berlin: the end of the UTC day is 00:59:59 there,
+      // the next second no occurrence.
+      expect(
+        settledEnd('FREQ=DAILY;UNTIL=20261110T235959Z', {
+          start: '2026-11-03T04:00:00Z',
+          allDay: false,
+          tzid: 'Europe/Berlin',
+        }),
+      ).toBe('FREQ=DAILY;UNTIL=20261110T235959Z');
+      expect(settledEnd(null, at1900)).toBeNull();
+    });
+  });
+
+  describe('asTypedEnd', () => {
+    it("turns a stored end into the day it reaches on its source's clock", () => {
+      expect(asTypedEnd('FREQ=DAILY;UNTIL=20261111T045959Z', at1900, false)).toBe(
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      );
+      expect(asTypedEnd('FREQ=DAILY;UNTIL=20261110T235959Z', at1900, true)).toBe(
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      );
+      expect(asTypedEnd('FREQ=DAILY;UNTIL=20261110T235959Z', at1900, false)).toBe(
+        'FREQ=DAILY;UNTIL=20261109T235959Z',
+      );
+    });
+
+    it('leaves a count, no end and an all-day rule as they are', () => {
+      expect(asTypedEnd('FREQ=DAILY;COUNT=5', at1900, true)).toBe('FREQ=DAILY;COUNT=5');
+      expect(asTypedEnd('FREQ=DAILY', at1900, true)).toBe('FREQ=DAILY');
+      expect(asTypedEnd('FREQ=DAILY;UNTIL=20261110', { ...at1900, allDay: true }, true)).toBe(
+        'FREQ=DAILY;UNTIL=20261110',
+      );
+      expect(asTypedEnd(null, at1900, true)).toBeNull();
+    });
+  });
+
+  describe('importedRule', () => {
+    /** A file's daily series on New York's clock from `start`, ending `until`. */
+    const file = (start: string, until: string) => ({
+      start,
+      all_day: false,
+      recurrence: { rrule: `FREQ=DAILY;UNTIL=${until}`, tzid: NY },
+    });
+
+    it("reads a file's end once as the day it reaches on the file's own facts", () => {
+      // 10:00 New York through 10 November, the marker unguarded there.
+      expect(importedRule(file('2026-11-03T15:00:00Z', '20261110T235959Z'))).toBe(
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      );
+      // 19:00 New York: Outlook's midnight UTC and Google's last second.
+      expect(importedRule(file('2026-11-03T00:00:00Z', '20261111T000000Z'))).toBe(
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      );
+      expect(importedRule(file('2026-11-03T00:00:00Z', '20261111T045959Z'))).toBe(
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      );
+    });
+
+    it('reads a guarded end as the day before the cut: a file stores no end as a date', () => {
+      // One second before the 10 November occurrence at 19:00 New York.
+      expect(importedRule(file('2026-11-03T00:00:00Z', '20261110T235959Z'))).toBe(
+        'FREQ=DAILY;UNTIL=20261109T235959Z',
+      );
+    });
+
+    it('leaves a rule without an end, an all-day one and none as they are', () => {
+      expect(importedRule({ start: '2026-11-03T00:00:00Z', recurrence: { rrule: 'FREQ=DAILY' } })).toBe(
+        'FREQ=DAILY',
+      );
+      expect(
+        importedRule({
+          start: '2026-11-03T00:00:00Z',
+          all_day: true,
+          recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261110' },
+        }),
+      ).toBe('FREQ=DAILY;UNTIL=20261110');
+      expect(importedRule({ start: '2026-11-03T00:00:00Z', recurrence: null })).toBeNull();
+    });
+
+    it('keeps the end of a rule that repeats more than once a day as written: it is a moment, not a day', () => {
+      const tzFile = (rrule: string) => ({
+        start: '2026-11-03T15:00:00Z',
+        all_day: false,
+        recurrence: { rrule, tzid: NY },
+      });
+      for (const rrule of [
+        'FREQ=HOURLY;INTERVAL=6;UNTIL=20261110T120000Z',
+        'FREQ=DAILY;BYHOUR=10,15;BYMINUTE=0;UNTIL=20261110T180000Z',
+        'FREQ=HOURLY;UNTIL=20261110T235959Z',
+      ]) {
+        expect(importedRule(tzFile(rrule)), rrule).toBe(rrule);
+        // And a save leaves it so.
+        expect(settledEnd(rrule, { start: '2026-11-03T15:00:00Z', allDay: false, tzid: NY }), rrule).toBe(rrule);
+      }
+      expect(endIsADay('FREQ=DAILY;UNTIL=20261110T235959Z')).toBe(true);
+      expect(endIsADay('FREQ=WEEKLY;BYDAY=MO,WE;BYHOUR=9;UNTIL=20261110T235959Z')).toBe(true);
+      expect(endIsADay('FREQ=MINUTELY;UNTIL=20261110T235959Z')).toBe(false);
+      expect(endIsADay('FREQ=DAILY;BYMINUTE=0,30')).toBe(false);
+    });
+
+    it('settles a guarded end of a rule with several times a day to the cut, so it keeps its moment', () => {
+      // 10:00 and 19:00 New York: the second after the end is the 10
+      // November 19:00 occurrence, which the file leaves out.
+      expect(
+        importedRule({
+          start: '2026-11-03T15:00:00Z',
+          all_day: false,
+          recurrence: { rrule: 'FREQ=DAILY;BYHOUR=10,19;UNTIL=20261110T235959Z', tzid: NY },
+        }),
+      ).toBe('FREQ=DAILY;BYHOUR=10,19;UNTIL=20261110T235958Z');
+    });
+  });
+
+  it('reads the capability through endsByDateOf only', () => {
+    expect(endsByDateOf(undefined)).toBe(false);
+    expect(endsByDateOf({ recurrence_capabilities: { ends_by_date: true } })).toBe(true);
+    expect(endsByDateOf({ recurrence_capabilities: null })).toBe(false);
   });
 });

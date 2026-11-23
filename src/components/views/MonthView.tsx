@@ -566,6 +566,7 @@ export function MonthView() {
               back = saved.deletions_not_restored;
             },
             acceptsLoss,
+            calendar: calendarById.get(ev.calendar_id),
           },
         );
         if (!moved) return; // same-day drop — nothing to announce

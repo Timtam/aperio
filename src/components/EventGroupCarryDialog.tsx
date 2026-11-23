@@ -11,6 +11,7 @@ import {
   planCarry,
   planSeriesSplit,
   tailRecurrenceFor,
+  endsByDateOf,
   TailShiftRefusedError,
   cutoffDay,
   readSeriesRows,
@@ -490,6 +491,7 @@ export function EventGroupCarryDialog({
                   // as the anchor's are (decision 152).
                   recurrence: tailRecurrenceFor({
                     master: current,
+                    endsByDate: endsByDateOf(calendars.find((c) => c.id === current.calendar_id)),
                     cutoffIso: anchorIso,
                     plan: splitPlan,
                     tail: { start: row.start, all_day: row.all_day },
@@ -519,6 +521,7 @@ export function EventGroupCarryDialog({
               // are (decision 152).
               const tailRecurrence = tailRecurrenceFor({
                 master: current,
+                endsByDate: endsByDateOf(calendars.find((c) => c.id === current.calendar_id)),
                 cutoffIso: anchorIso,
                 plan: splitPlan,
                 tail: { start: row.start, all_day: row.all_day },
@@ -630,6 +633,7 @@ export function EventGroupCarryDialog({
                     ...next,
                     recurrence: tailRecurrenceFor({
                       master: current,
+                      endsByDate: endsByDateOf(calendars.find((c) => c.id === current.calendar_id)),
                       cutoffIso: current.start,
                       plan: wholePlan,
                       tail: { start: next.start, all_day: next.all_day },

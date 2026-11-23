@@ -882,6 +882,7 @@ export function DayView() {
             back = saved.deletions_not_restored;
           },
           acceptsLoss,
+          calendar: calendarById.get(ev.calendar_id),
         },
       );
       if (!moved) return; // dropped back on its own time — nothing happened
@@ -1168,6 +1169,7 @@ export function DayView() {
             void duplicateEvent(ev, {
               wait: stepWriteWait((err) => duplicateFailedSentence(err, ev.title, t)),
               target: calendars.find((c) => c.id === ev.calendar_id),
+              source: calendars.find((c) => c.id === ev.calendar_id),
             })
               .then(
                 (source) => {

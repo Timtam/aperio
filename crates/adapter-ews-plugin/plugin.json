@@ -29,6 +29,7 @@
       "monthly"
     ],
     "deletions_in_steps": true,
+    "ends_by_date": true,
     "time_zones": [
       "Africa/Abidjan",
       "Africa/Algiers",

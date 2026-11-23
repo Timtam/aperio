@@ -12,7 +12,7 @@
  * (Fast Refresh) and so the parse/build round-trip can be unit-tested alone.
  */
 import { dayParts } from './dayParts';
-import { nthOccurrence } from './recurrence';
+import { nthOccurrence, seriesEndOf, untilThroughText, type SeriesEndFacts } from './recurrence';
 
 export type Freq = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
@@ -21,6 +21,35 @@ export type EndMode = 'NEVER' | 'COUNT' | 'UNTIL';
 /** Which monthly/yearly axis is active: a fixed day-of-month
  *  ("the 15th") or a relative weekday ("the third Wednesday"). */
 export type MonthlyMode = 'DAY_OF_MONTH' | 'WEEKDAY';
+
+/**
+ * What the end field of a STORED series' rule reads and writes its day on
+ * (DESIGN-series-time-zone.md, stage 12, part 3): the series' start, whether
+ * it is all-day, the zone the rule is saved with — the one the views, the
+ * providers and every carry read its end on, also where the form's fields
+ * stand on the device's clock or on UTC, and which the field's label names
+ * (`seriesEndClockName`) — and the device's zone, which only a series of days
+ * reads. An end is a day on the series' clock, and only the core says which
+ * day and how to spell it (`cal_core::read_series_end`,
+ * `cal_core::until_through`). A rule that is no stored series' own (a new
+ * series, a file's, `importedRule`) is edited without facts: its end stays the
+ * typed day, `{D}T235959Z`, until a save spells it on the facts being saved
+ * (`settledEnd`, 141a).
+ */
+export type FieldEndFacts = SeriesEndFacts & { deviceZone: string | null };
+
+/**
+ * A typed end date the core gave no spelling for on the series' facts: a
+ * start that names no instant, or a library older than the op. The field
+ * says so and writes nothing; a `…T235959Z` on those facts could read as
+ * another day (D6).
+ */
+export class UntilNotSpelledError extends Error {
+  constructor() {
+    super('the repeat end could not be spelled on the series clock');
+    this.name = 'UntilNotSpelledError';
+  }
+}
 
 export interface ParsedRule {
   freq: Freq;
@@ -44,11 +73,13 @@ export interface ParsedRule {
   /** The day the end field shows, `YYYY-MM-DD`; `''` for none. */
   until: string;
   /** The rule's UNTIL as it was written, `''` when it names none. It is
-   *  written back unchanged while {@link until} still shows its day, so
-   *  touching another control keeps an end nobody changed, to the second
-   *  (DESIGN-series-time-zone.md, "Prüfen und Speichern"): a cut's bound, a
-   *  date, a provider's own spelling. */
+   *  written back unchanged while {@link until} still shows the day it was
+   *  parsed with ({@link untilShown}), so touching another control keeps an
+   *  end nobody changed, to the second (DESIGN-series-time-zone.md, "Prüfen
+   *  und Speichern"): a cut's bound, a date, a provider's own spelling. */
   untilText: string;
+  /** The day the field showed when the rule was parsed, `''` for none. */
+  untilShown: string;
 }
 
 const DEFAULT_RULE: ParsedRule = {
@@ -65,6 +96,7 @@ const DEFAULT_RULE: ParsedRule = {
   count: 10,
   until: '',
   untilText: '',
+  untilShown: '',
 };
 
 export interface MonthlyOption {
@@ -177,7 +209,13 @@ export function resolveAgainstDay(parsed: ParsedRule, startDay: string): ParsedR
   };
 }
 
-export function parseRRule(value: string | null): ParsedRule {
+/**
+ * The repeat controls' reading of a rule. With `facts` (a stored series'
+ * rule) the end field shows the last day the end reaches on the series'
+ * clock, as the core reads it (`seriesEndOf`); the digits stand in only where
+ * the core cannot read the rule. Without facts, the end's first eight digits.
+ */
+export function parseRRule(value: string | null, facts?: FieldEndFacts): ParsedRule {
   if (!value) return { ...DEFAULT_RULE };
   const body = value.toUpperCase().startsWith('RRULE:')
     ? value.slice('RRULE:'.length)
@@ -247,13 +285,19 @@ export function parseRRule(value: string | null): ParsedRule {
   let count = DEFAULT_RULE.count;
   let until = DEFAULT_RULE.until;
   let untilText = DEFAULT_RULE.untilText;
+  let untilShown = DEFAULT_RULE.untilShown;
   if (parts.has('COUNT')) {
     endMode = 'COUNT';
     count = Math.max(1, Number(parts.get('COUNT')) || 1);
   } else if (parts.has('UNTIL')) {
     endMode = 'UNTIL';
     untilText = parts.get('UNTIL') ?? '';
-    until = untilDayOf(untilText);
+    until =
+      (facts === undefined
+        ? undefined
+        : seriesEndOf(body, facts, facts.allDay ? facts.deviceZone : null)?.endDay) ??
+      untilDayOf(untilText);
+    untilShown = until;
   }
 
   return {
@@ -270,10 +314,19 @@ export function parseRRule(value: string | null): ParsedRule {
     count,
     until,
     untilText,
+    untilShown,
   };
 }
 
-export function buildRRule(p: ParsedRule): string | null {
+/**
+ * The rule the repeat controls write. An end nobody changed goes back byte for
+ * byte. A typed day is written, without `facts`, as `{D}T235959Z`: the day
+ * state of a rule that is no stored series' own, which its save spells
+ * (`settledEnd`). With `facts` it is spelled through that day on the series'
+ * clock by the core (`untilThroughText`); where the core gives no spelling,
+ * {@link UntilNotSpelledError} is thrown and nothing is written (D6).
+ */
+export function buildRRule(p: ParsedRule, facts?: FieldEndFacts): string | null {
   if (p.freq === 'NONE') return null;
   const out: string[] = [`FREQ=${p.freq}`];
   if (p.interval > 1) out.push(`INTERVAL=${p.interval}`);
@@ -301,16 +354,21 @@ export function buildRRule(p: ParsedRule): string | null {
     out.push(`COUNT=${p.count}`);
   } else if (p.endMode === 'UNTIL') {
     const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(p.until);
-    if (p.untilText !== '' && (untilDayOf(p.untilText) === p.until || !day)) {
+    if (p.untilText !== '' && (p.until === p.untilShown || !day)) {
       // Nobody changed the end, or what stands in the field is no whole date
       // yet: the end goes back as it came, rather than none at all.
       out.push(`UNTIL=${p.untilText}`);
-    } else if (day) {
-      // RFC 5545 wants a basic-format UTC timestamp. End-of-day so the
-      // last day is included whatever the user's timezone is. Only a
-      // whole date is written: a part of one would be a bound no reader
-      // can parse.
+    } else if (day && facts === undefined) {
+      // The typed day, `{D}T235959Z`, which the save spells on the facts it
+      // saves (`settledEnd`). Only a whole date is written: a part of one
+      // would be a bound no reader can parse.
       out.push(`UNTIL=${day[1]}${day[2]}${day[3]}T235959Z`);
+    } else if (day && facts !== undefined) {
+      // Through that day on the series' clock, as the core spells it on the
+      // rule as it now stands.
+      const text = untilThroughText(p.until, out.join(';'), facts);
+      if (text === null) throw new UntilNotSpelledError();
+      out.push(`UNTIL=${text}`);
     }
   }
   return out.join(';');

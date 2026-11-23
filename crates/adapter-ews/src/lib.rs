@@ -2276,6 +2276,13 @@ mod delta_read_tests {
     #[tokio::test]
     async fn a_token_from_another_zone_translation_emits_every_cached_item() {
         use mockito::Matcher;
+        // READ_RULE 7 respells a series' EndDate (107b): every cached item is
+        // translated again under it.
+        assert!(
+            crate::windows_tz::translation_id().ends_with(".7"),
+            "{}",
+            crate::windows_tz::translation_id()
+        );
         let mut server = Server::new_async().await;
         let update = r#"<t:Update><t:CalendarItem>
                  <t:ItemId Id="A" ChangeKey="CKA2"/>

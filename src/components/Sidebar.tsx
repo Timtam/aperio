@@ -1984,6 +1984,7 @@ function LeafRow({
         const moved = await moveEventToCalendar(event, calendarId, {
           wait: stepWriteWait(failure),
           target: calendars.find((c) => c.id === calendarId),
+          source: calendars.find((c) => c.id === event.calendar_id),
         });
         invalidateData();
         // An original the provider was too busy to delete is said (277).

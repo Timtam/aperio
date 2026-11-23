@@ -139,6 +139,12 @@ import {
   DEVICE_CLOCK,
   answerMovesStart,
   applyClockChange,
+  asTypedEnd,
+  endsByDateOf,
+  importedRule,
+  seriesEndClockName,
+  settledEnd,
+  type FieldEndFacts,
   calendarZonesOf,
   chooseZone,
   changeClockField,
@@ -882,7 +888,18 @@ export function EventDialog({
           description: fill.description ?? '',
           location: fill.location ?? '',
           allDay: fill.all_day,
-          rrule: fill.rrule,
+          // A new event's end is the day it reaches on the earlier one's
+          // clock, settled on its calendar, and spelled when it is saved
+          // (`asTypedEnd`, `settledEnd`; DESIGN-series-time-zone.md, 141a).
+          rrule: asTypedEnd(
+            fill.rrule,
+            {
+              start: source.start,
+              allDay: source.all_day,
+              tzid: source.recurrence?.tzid ?? null,
+            },
+            endsByDateOf(calendars.find((c) => c.id === source.calendar_id)),
+          ),
           colorLabel: fill.color_label,
           reminders: (fill.reminders as Reminder[]).map((r) => ({ ...r, attach: true })),
           attendees: fill.attendees,
@@ -1242,6 +1259,10 @@ export function EventDialog({
   // date (decisions 189, 192-194) in `ruleFrame`, or from the start the user
   // set the rule at. One that cannot move stays as it is, with the reason
   // (decision 193); saving then says it.
+  // Whether the series' own calendar stores its end as a date: an end the
+  // 105a guard alone reads as a cut is settled on that before it moves or is
+  // carried (`carriedEnd`, DESIGN-series-time-zone.md, 140a).
+  const seriesEndsByDate = endsByDateOf(calendars.find((c) => c.id === event?.calendar_id));
   const shownRule = useMemo((): {
     rrule: string | null;
     refused: ShiftRefusal | null;
@@ -1252,7 +1273,7 @@ export function EventDialog({
     try {
       const answer = movedTailRule({
         rrule: form.rrule,
-        series: { tzid: seriesZone, all_day: series.all_day },
+        series: { tzid: seriesZone, all_day: series.all_day, endsByDate: seriesEndsByDate },
         from: ruleSetAt ?? ruleFrame.from,
         opened: ruleSetAt ?? ruleFrame.opened,
         tail: { start: ruleFrame.written, all_day: form.allDay },
@@ -1276,7 +1297,35 @@ export function EventDialog({
     ruleFrame,
     ruleSetAt,
     seriesZone,
+    seriesEndsByDate,
   ]);
+  // A stored series' rule: its end field reads and writes its day as the form
+  // will save it (DESIGN-series-time-zone.md, stage 12, part 3): from the
+  // start the rule is written at, the kind, and the zone it is saved with —
+  // the stored or chosen one, which the views, the providers and every carry
+  // read its end on. That is the series' zone also where the other fields
+  // stand on the device's clock (the scope asked in the form) or on UTC (a
+  // zone this device cannot use): a `…T235959Z` end means another day on
+  // another clock. The field's label names that zone (`seriesEndClockName`).
+  // Any other rule — a new series, an event that becomes one, a prefill, a
+  // file's (`importedRule`) — keeps the typed day until it is saved
+  // (`settledEnd`, 141a), on the zone the save writes, which the label names
+  // too. Never the digits of a UTC day for a timed series on a zone (D6):
+  // without a frame, the stored start.
+  const endFactsSeries = wholeSeriesMaster ?? event;
+  const storedRule = !!endFactsSeries?.recurrence?.rrule;
+  const endFactsStart = storedRule
+    ? (ruleFrame?.written ?? ruleSetAt ?? endFactsSeries?.start ?? null)
+    : null;
+  const endZone = zoneToSave(zoneFormOf(form), zoneFactsOf(form));
+  const endFactsTzid = storedRule ? endZone : null;
+  const endFacts = useMemo(
+    (): FieldEndFacts | null =>
+      endFactsStart === null
+        ? null
+        : { start: endFactsStart, allDay: form.allDay, tzid: endFactsTzid, deviceZone },
+    [endFactsStart, form.allDay, endFactsTzid, deviceZone],
+  );
   // The repeat rule in words (84a): there are no controls to read in a locked
   // invitation, and an expanded occurrence carries its series' rule. Moved
   // with a new date, it is the rule the save writes, from the new start (197).
@@ -1882,6 +1931,9 @@ export function EventDialog({
     const result = chooseZone(zoneForm, zoneFactsOf(current), shown, pick.zone, {
       rrule: current.rrule ?? '',
       exceptions: current.exceptions ?? storedExceptions,
+      endsByDate: seriesEndsByDate,
+      // A file's end is a typed day too (`importedRule`).
+      typedEnd: !storedRule,
     });
     // No answer can be written (20a): the zone stays, and why is said.
     if (result.refused !== null) {
@@ -1965,7 +2017,10 @@ export function EventDialog({
       // zone this device cannot use, a zone the calendar cannot store: said,
       // and nothing is written ("Prüfen und Speichern", 139a).
       const zoneForm = zoneFormOf(form);
-      const openedRule = (event ?? imported)?.recurrence?.rrule ?? null;
+      // A file's rule as the form was filled with it (`importedRule`).
+      const openedRule = imported
+        ? importedRule(imported)
+        : (event?.recurrence?.rrule ?? null);
       const refusal = zoneSaveRefusal({
         fields,
         view,
@@ -2006,10 +2061,18 @@ export function EventDialog({
       const storedExceptions =
         (isOccurrence ? event?.recurrence : (event?.recurrence ?? imported?.recurrence))
           ?.exceptions ?? [];
+      // A rule that is no stored series' own — a file's included, whose end
+      // was read once as a day (`importedRule`) — holds its end as the typed
+      // day until here: spelled through that day on the facts saved (141a,
+      // D3), the start saved and the zone saved.
+      const savedZone = zoneToSave(zoneForm, zoneFactsOf(form));
+      const ruleToSave = storedRule
+        ? form.rrule
+        : settledEnd(form.rrule, { start, allDay: form.allDay, tzid: savedZone });
       const recurrence = savedRecurrence(
-        form.rrule,
+        ruleToSave,
         form.exceptions ?? storedExceptions,
-        zoneToSave(zoneForm, zoneFactsOf(form)),
+        savedZone,
       );
 
       setSubmitting(true);
@@ -2336,7 +2399,7 @@ export function EventDialog({
           const tailRecurrenceForEdit = (
             args: Omit<
               Parameters<typeof tailRecurrenceFor>[0],
-              'opened' | 'rule' | 'whole' | 'calendarZones'
+              'opened' | 'rule' | 'whole' | 'calendarZones' | 'endsByDate' | 'intoAnotherCalendar'
             >,
             opened: string,
             own: { from: string; refused: 'thisAndFuture' | 'series'; whole?: boolean },
@@ -2354,6 +2417,7 @@ export function EventDialog({
                   series: {
                     tzid: args.master.recurrence?.tzid,
                     all_day: args.master.all_day,
+                    endsByDate: seriesEndsByDate,
                   },
                   from: ruleSetAt ?? own.from,
                   opened: ruleSetAt ?? opened,
@@ -2371,6 +2435,8 @@ export function EventDialog({
                 rule: { form: rule, opened: openedRule, touched: set },
                 whole: own.whole,
                 calendarZones,
+                endsByDate: seriesEndsByDate,
+                intoAnotherCalendar: form.calendarId !== event.calendar_id,
               });
             } catch (err) {
               if (err instanceof TailShiftRefusedError) {
@@ -2743,7 +2809,11 @@ export function EventDialog({
               : null;
           const keptRecurrence =
             movesCalendar && seriesRows
-              ? newSeriesRecurrence({ ...series, recurrence: seriesRecurrence }, seriesRows)
+              ? newSeriesRecurrence(
+                  { ...series, recurrence: seriesRecurrence },
+                  seriesRows,
+                  endsByDateOf(calendars.find((c) => c.id === event.calendar_id)),
+                )
               : seriesRecurrence;
           const updated: CalendarEvent = {
             ...series,
@@ -3043,6 +3113,8 @@ export function EventDialog({
       isOccurrence,
       editScope,
       ruleSetAt,
+      storedRule,
+      seriesEndsByDate,
       keepRemindersAsDefault,
       // What was STORED for this event decides whether an emptied list is a
       // decision to write or ignorance to leave alone, and which signature a
@@ -3905,6 +3977,9 @@ export function EventDialog({
               calendars.find((c) => c.id === form.calendarId)
                 ?.recurrence_capabilities
             }
+            endFacts={endFacts}
+            clockName={seriesEndClockName(endZone, form.allDay, deviceZone)}
+            announce={announce}
           />
           </div>
           </>
@@ -4267,7 +4342,9 @@ function formFromImport(imported: ImportedEvent, calendarId: string): FormState 
     allDay: imported.all_day,
     location: imported.location ?? '',
     description: imported.description ?? '',
-    rrule: imported.recurrence?.rrule ?? null,
+    // Its end read once as a day on the file's facts, then a typed day as a
+    // new series' (`importedRule`, DESIGN-series-time-zone.md, part 3).
+    rrule: importedRule(imported),
     colorLabel: null,
     reminders: imported.reminders.map((r) => ({ ...r, attach: true })),
     attendees: imported.attendees,

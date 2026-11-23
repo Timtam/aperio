@@ -4,9 +4,11 @@ import { describe, expect, it } from 'vitest';
 import contract from '../../crates/cal-core/tests/fixtures/wallClock.json';
 import {
   askWallClock,
+  cutBefore,
   instantOf,
   seriesEnd,
   untilOn,
+  untilThrough,
   wallOf,
   type WallClockQuestion,
 } from '@aperio/shared';
@@ -37,6 +39,12 @@ describe('wallClock contract', () => {
       'end-berlin-0030-summer-marker-through-day',
       'end-new-york-1900-winter-cut-stays-an-instant',
       'end-all-day-marker-by-its-digits',
+      'until-through-new-york-1900-winter-blind-spot',
+      'until-through-berlin-0100-winter-east-blind-spot',
+      'until-through-apia-skipped-day-falls-back',
+      'until-through-nuuk-2300-spring-change-pushes-the-last-occurrence',
+      'cut-before-blind-spot',
+      'cut-before-secondly',
     ]) {
       expect(names, `fixture lost ${needed}`).toContain(needed);
     }
@@ -62,7 +70,15 @@ describe('wallClock contract', () => {
     expect(
       seriesEnd('FREQ=DAILY;UNTIL=20261105T235959Z', '2026-11-02T01:00:00Z', false, 'America/New_York', null)
         ?.end,
-    ).toMatchObject({ reading: 'throughDay', endDay: '2026-11-05' });
+    ).toMatchObject({ reading: 'throughDay', endDay: '2026-11-05', guarded: false });
+    expect(
+      seriesEnd('FREQ=DAILY;UNTIL=20261110T235959Z', '2026-11-03T00:00:00Z', false, 'America/New_York', null)
+        ?.end,
+    ).toMatchObject({ reading: 'instant', guarded: true });
+    expect(untilThrough('2026-11-10', 'FREQ=DAILY', '2026-11-03T00:00:00Z', false, 'America/New_York')?.at).toBe(
+      '2026-11-11T04:59:59Z',
+    );
+    expect(cutBefore('2026-11-11T00:00:00Z', 'FREQ=DAILY')?.at).toBe('2026-11-10T23:59:58Z');
   });
 });
 

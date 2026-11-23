@@ -3,10 +3,14 @@ import {
   buildRRule,
   defaultUntilDay,
   deriveMonthlyOptions,
+  occurrenceCount,
   parseRRule,
   pickerMisreadsRule,
+  rebuiltByPicker,
   resolveAgainstDay,
+  UntilNotSpelledError,
   withEndMode,
+  type FieldEndFacts,
 } from './rrule';
 
 // Shared base so each test only spells out the fields it cares about.
@@ -24,6 +28,7 @@ const base = {
   count: 10,
   until: '',
   untilText: '',
+  untilShown: '',
 };
 
 describe('parseRRule', () => {
@@ -300,6 +305,92 @@ describe('choosing "until a date"', () => {
       endMode: 'COUNT',
       until: '',
     });
+  });
+});
+
+// Stage 12, part 3: a stored series' end field reads and writes its day on the
+// series' clock (DESIGN-series-time-zone.md, 140a-142a). Daily in New York at
+// 19:00 in winter, 00:00 UTC: "through 10 November" there is 04:59:59 UTC on
+// 11 November.
+describe("the end field on a stored series' clock", () => {
+  const NY: FieldEndFacts = {
+    start: '2026-11-03T00:00:00Z',
+    allDay: false,
+    tzid: 'America/New_York',
+    deviceZone: 'Europe/Berlin',
+  };
+
+  it('shows the day the end reaches there and keeps it untouched', () => {
+    const p = parseRRule('FREQ=DAILY;UNTIL=20261111T045959Z', NY);
+    expect(p.until).toBe('2026-11-10');
+    expect(buildRRule({ ...p, interval: 2 }, NY)).toBe('FREQ=DAILY;INTERVAL=2;UNTIL=20261111T045959Z');
+  });
+
+  it('spells a typed day through that day on the clock', () => {
+    const typed = { ...parseRRule('FREQ=DAILY', NY), endMode: 'UNTIL' as const, until: '2026-11-10' };
+    expect(buildRRule(typed, NY)).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+    const at1800 = { ...NY, start: '2026-11-02T23:00:00Z' };
+    expect(buildRRule({ ...parseRRule('FREQ=DAILY', at1800), endMode: 'UNTIL', until: '2026-11-10' }, at1800)).toBe(
+      'FREQ=DAILY;UNTIL=20261110T235959Z',
+    );
+  });
+
+  it('shows a legacy end at the blind spot as the cut the views read, until its day is typed', () => {
+    const p = parseRRule('FREQ=DAILY;UNTIL=20261110T235959Z', NY);
+    expect(p.until).toBe('2026-11-09');
+    expect(buildRRule({ ...p, interval: 2 }, NY)).toBe('FREQ=DAILY;INTERVAL=2;UNTIL=20261110T235959Z');
+    expect(buildRRule({ ...p, until: '2026-11-10' }, NY)).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+  });
+
+  it("keeps a cut's bound east of UTC as written", () => {
+    const berlin: FieldEndFacts = {
+      start: '2026-10-26T07:00:00Z',
+      allDay: false,
+      tzid: 'Europe/Berlin',
+      deviceZone: 'Europe/Berlin',
+    };
+    // The head of a split at the 2 November occurrence: 08:00 CET is 07:00
+    // UTC, one second before it 06:59:59 UTC.
+    const p = parseRRule('FREQ=DAILY;UNTIL=20261102T065959Z', berlin);
+    expect(p.until).toBe('2026-11-01');
+    expect(buildRRule({ ...p, interval: 2 }, berlin)).toBe('FREQ=DAILY;INTERVAL=2;UNTIL=20261102T065959Z');
+  });
+
+  it("spells the tenth day of a newly chosen end on the series' clock (110b)", () => {
+    const rule = withEndMode(parseRRule('FREQ=DAILY', NY), 'UNTIL', '2026-11-02');
+    const rrule = buildRRule(rule, NY);
+    expect(rrule).toBe('FREQ=DAILY;UNTIL=20261112T045959Z');
+    expect(
+      occurrenceCount(
+        { start: '2026-11-03T00:00:00Z', all_day: false, recurrence: { rrule: rrule!, tzid: 'America/New_York' } },
+        50,
+      ),
+    ).toBe(10);
+  });
+
+  it('shows and writes the digits of a series of days', () => {
+    const allDay: FieldEndFacts = { ...NY, allDay: true, tzid: null };
+    const p = parseRRule('FREQ=DAILY;UNTIL=20261110T235959Z', allDay);
+    expect(p.until).toBe('2026-11-10');
+    expect(buildRRule({ ...p, until: '2026-11-12' }, allDay)).toBe('FREQ=DAILY;UNTIL=20261112T235959Z');
+  });
+
+  it('refuses a typed day it cannot spell, and keeps an untouched end (D6)', () => {
+    const blind: FieldEndFacts = { ...NY, start: '' };
+    const p = parseRRule('FREQ=DAILY;UNTIL=20261111T045959Z', blind);
+    expect(p.until).toBe('2026-11-11');
+    expect(buildRRule({ ...p, interval: 2 }, blind)).toBe('FREQ=DAILY;INTERVAL=2;UNTIL=20261111T045959Z');
+    expect(() => buildRRule({ ...p, until: '2026-11-12' }, blind)).toThrow(UntilNotSpelledError);
+  });
+
+  it('writes a typed day as its day state without facts', () => {
+    const typed = { ...parseRRule('FREQ=DAILY'), endMode: 'UNTIL' as const, until: '2026-11-10' };
+    expect(buildRRule(typed)).toBe('FREQ=DAILY;UNTIL=20261110T235959Z');
+  });
+
+  it('leaves the picker without a clock byte-preserving', () => {
+    expect(rebuiltByPicker('FREQ=DAILY;UNTIL=20261111T045959Z')).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+    expect(pickerMisreadsRule('FREQ=DAILY;UNTIL=20261111T045959Z')).toBe(false);
   });
 });
 

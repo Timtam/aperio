@@ -32,6 +32,7 @@ const askAbout = (rrule: string) => {
     exceptions: [],
     fromTzid: null,
     toTzid: BERLIN,
+    endsByDate: false,
   });
   if (change === null) throw new Error('the core gave no answer');
   return change;
@@ -100,7 +101,7 @@ describe('the weekday question (138a)', () => {
   it('reads a day the rule takes from its start on the old clock, and keeps one period', () => {
     // Monthly from 31 January 23:30 UTC: on Berlin's clock 1 February.
     const start = '2026-01-31T23:30:00.000Z';
-    const change = seriesClockChange({ rrule: 'FREQ=MONTHLY', start, exceptions: [], fromTzid: null, toTzid: BERLIN });
+    const change = seriesClockChange({ rrule: 'FREQ=MONTHLY', start, exceptions: [], fromTzid: null, toTzid: BERLIN, endsByDate: false });
     if (change === null || !change.asks) throw new Error('expected the core to ask');
     const question = weekdayQuestion({
       change,
@@ -125,6 +126,7 @@ describe('the weekday question (138a)', () => {
       exceptions: [],
       fromTzid: null,
       toTzid: 'America/New_York',
+      endsByDate: false,
     });
     if (change === null || !change.asks) throw new Error('expected the core to ask');
     const question = weekdayQuestion({

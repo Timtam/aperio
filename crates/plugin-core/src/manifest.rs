@@ -158,6 +158,17 @@ pub struct RecurrenceCapabilities {
     /// with the series itself — RFC 5545 — writes it in one request.
     #[serde(default)]
     pub deletions_in_steps: bool,
+    /// The calendar stores a series' end as a date, counted whole on the
+    /// series' clock (Exchange: live round 10a). Aperio then counts an
+    /// unflagged `…T235959Z`, which the 105a guard would read as a cut,
+    /// through its own date, and settles such an end on this fact before it
+    /// is moved or carried (DESIGN-series-time-zone.md, 140a;
+    /// `cal_core::written_end_day`).
+    ///
+    /// Defaults to `false`, as `deletions_in_steps`: it says how the store
+    /// counts, not a shape the source restricts.
+    #[serde(default)]
+    pub ends_by_date: bool,
     /// The time zones a series in this calendar can repeat on
     /// (DESIGN-series-time-zone.md, stage 6, decision 97a): every zone, none
     /// (the calendar stores no zone, as the phone's own calendars), or only
@@ -182,6 +193,7 @@ impl Default for RecurrenceCapabilities {
             count: true,
             until: true,
             deletions_in_steps: false,
+            ends_by_date: false,
             time_zones: SeriesTimeZones::Every,
         }
     }
@@ -1427,6 +1439,34 @@ mod tests {
         assert!(m.recurrence.deletions_in_steps);
         // The task block's recurrence is its own and says nothing of it.
         assert!(!m.tasks.recurrence.deletions_in_steps);
+    }
+
+    #[test]
+    fn recurrence_ends_by_date_defaults_false_and_reads_true() {
+        let m = PluginManifest::from_bytes(sample_manifest_json().as_bytes()).expect("parses");
+        assert!(!m.recurrence.ends_by_date);
+        let json = format!(
+            r#"{{
+                "id": "x.y",
+                "name": "X",
+                "version": "1.0.0",
+                "plugin_type": "adapter",
+                "capabilities": ["calendar"],
+                "abi_version": {ABI_VERSION},
+                "min_app_version": "1.0.0",
+                "recurrence": {{ "ends_by_date": true }}
+            }}"#
+        );
+        let m = PluginManifest::from_bytes(json.as_bytes()).expect("parses");
+        assert!(m.recurrence.ends_by_date);
+        // Every other axis stays at its default.
+        assert_eq!(
+            m.recurrence,
+            RecurrenceCapabilities {
+                ends_by_date: true,
+                ..RecurrenceCapabilities::default()
+            }
+        );
     }
 
     /// Decision 97a: `recurrence.time_zones` is `"all"`, `"none"` or a list,

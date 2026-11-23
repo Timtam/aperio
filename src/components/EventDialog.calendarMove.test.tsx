@@ -265,3 +265,48 @@ describe('EventDialog → a whole series into a calendar that creates it in step
     expect(screen.queryByRole('button', { name: /^speichern$|^save$/i })).toBeNull();
   });
 });
+
+// Stage 12, part 3 (DESIGN-series-time-zone.md, 140a, D1): a legacy end
+// `…T235959Z` at New York's blind spot (19:00 in winter) is settled on the
+// calendar the series comes FROM before it is written into another one.
+describe('EventDialog → a legacy end at the blind spot carried into another calendar (140a)', () => {
+  const legacyIn = (calendarId: string) =>
+    ({
+      ...SERIES,
+      id: 'ny-legacy',
+      calendar_id: calendarId,
+      start: '2026-11-03T00:00:00.000Z',
+      end: '2026-11-03T01:00:00.000Z',
+      recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261110T235959Z', exceptions: [], tzid: 'America/New_York' },
+    }) as unknown as CalendarEvent;
+  const endsByDate = (id: string) => {
+    (CALENDARS.find((c) => c.id === id) as { recurrence_capabilities?: unknown }).recurrence_capabilities = {
+      ...DEFAULT_RECURRENCE_CAPABILITIES,
+      ends_by_date: true,
+    };
+  };
+  async function moveTo(event: CalendarEvent, target: string) {
+    rowsOnFile.current = [];
+    const { EventDialog } = await import('./EventDialog');
+    render(
+      <StrictMode>
+        <EventDialog isOpen onClose={() => {}} event={event} />
+      </StrictMode>,
+    );
+    const picker = await screen.findByRole('combobox', { name: /kalender/i }, { timeout: 8000 });
+    fireEvent.change(picker, { target: { value: target } });
+    fireEvent.click(screen.getByRole('button', { name: /^speichern$|^save$/i }));
+    await waitFor(() => expect(updatesSent()).toHaveLength(1));
+    return updatesSent()[0].event.recurrence?.rrule;
+  }
+
+  it('ends it through its own date when it leaves a calendar that stores the end as a date', async () => {
+    endsByDate('cal-work');
+    expect(await moveTo(legacyIn('cal-work'), 'cal-home')).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+  });
+
+  it('keeps the cut 105a reads when it comes from any other calendar', async () => {
+    endsByDate('cal-work');
+    expect(await moveTo(legacyIn('cal-home'), 'cal-work')).toBe('FREQ=DAILY;UNTIL=20261110T235958Z');
+  });
+});

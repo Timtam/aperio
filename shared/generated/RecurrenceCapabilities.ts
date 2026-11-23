@@ -69,6 +69,18 @@ until: boolean,
  */
 deletions_in_steps: boolean, 
 /**
+ * The calendar stores a series' end as a date, counted whole on the
+ * series' clock (Exchange: live round 10a). Aperio then counts an
+ * unflagged `…T235959Z`, which the 105a guard would read as a cut,
+ * through its own date, and settles such an end on this fact before it
+ * is moved or carried (DESIGN-series-time-zone.md, 140a;
+ * `cal_core::written_end_day`).
+ *
+ * Defaults to `false`, as `deletions_in_steps`: it says how the store
+ * counts, not a shape the source restricts.
+ */
+ends_by_date: boolean, 
+/**
  * The time zones a series in this calendar can repeat on
  * (DESIGN-series-time-zone.md, stage 6, decision 97a): every zone, none
  * (the calendar stores no zone, as the phone's own calendars), or only

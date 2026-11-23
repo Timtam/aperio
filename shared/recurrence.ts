@@ -2,7 +2,7 @@ import { RRule, rrulestr } from 'rrule';
 
 import { compareMachineStrings } from './ordering';
 import { expansionClock, seriesClockZone, type SeriesExpansionClock } from './seriesClock';
-import { seriesEnd, untilOn, wallOf, type SeriesEnd } from './wallClock';
+import { cutBefore, seriesEnd, untilThrough, wallOf, type SeriesEnd } from './wallClock';
 import type { FieldClock } from './clockFields';
 
 // Event recurrence expansion, shared by desktop + mobile. Generic over a
@@ -385,7 +385,7 @@ function zonedOccurrences(
   dtstart: Date,
   tzid: string,
   range: { start: Date; end: Date },
-  facts: EndFacts,
+  facts: SeriesEndFacts,
 ): Date[] {
   let dtstartWall: Date;
   try {
@@ -487,17 +487,18 @@ function wallToReal(wall: Date, tzid: string): Date {
 
 /** What the core needs to read a series' end: its start, whether it is
  *  all-day, and the zone name it stores. */
-interface EndFacts {
+export interface SeriesEndFacts {
   start: string;
   allDay: boolean;
   tzid: string | null;
 }
 
-function endFacts(series: {
+/** The facts a stored series' end is read on. */
+export function endFacts(series: {
   start: string;
   all_day?: boolean;
   recurrence?: { tzid?: string | null } | null;
-}): EndFacts {
+}): SeriesEndFacts {
   return {
     start: series.start,
     allDay: series.all_day === true,
@@ -512,7 +513,7 @@ function endFacts(series: {
  * since an edited rule asks with every keystroke.
  */
 const endReadings = new Map<string, SeriesEnd | null>();
-function readEnd(rruleBody: string, facts: EndFacts, deviceZone: string | null): SeriesEnd | null {
+function readEnd(rruleBody: string, facts: SeriesEndFacts, deviceZone: string | null): SeriesEnd | null {
   const key = JSON.stringify([rruleBody, facts.start, facts.allDay, facts.tzid, deviceZone]);
   const known = endReadings.get(key);
   if (known !== undefined) return known;
@@ -525,7 +526,7 @@ function readEnd(rruleBody: string, facts: EndFacts, deviceZone: string | null):
 
 /** The last instant a series' end lets an occurrence start at, in ms: the
  *  core's `at` (`cal_core::read_series_end`). `null` without one. */
-function endCap(rruleBody: string, facts: EndFacts, deviceZone: string | null): number | null {
+function endCap(rruleBody: string, facts: SeriesEndFacts, deviceZone: string | null): number | null {
   if (!/UNTIL=/i.test(rruleBody)) return null;
   const at = readEnd(rruleBody, facts, deviceZone)?.at;
   if (at === null || at === undefined) return null;
@@ -536,6 +537,205 @@ function endCap(rruleBody: string, facts: EndFacts, deviceZone: string | null): 
 /** `YYYY-MM-DDTHH:MM:SS`, with or without `Z`, as an RRULE's UTC date-time. */
 function ruleDateTime(text: string): string {
   return `${text.replace(/[-:]/g, '').slice(0, 15)}Z`;
+}
+
+/**
+ * How a series' end reads on the clock it repeats on: the core's answer
+ * (`cal_core::read_series_end`), asked once per rule and facts. `deviceZone`
+ * is read only for a series of days. `null` where the rule has no `UNTIL` or
+ * cannot be read.
+ */
+export function seriesEndOf(
+  rrule: string,
+  facts: SeriesEndFacts,
+  deviceZone: string | null,
+): SeriesEnd | null {
+  return readEnd(rrule.trim().replace(/^RRULE:/i, ''), facts, deviceZone);
+}
+
+/** The calendar a series is stored in, as far as how it stores an end goes. */
+export interface EndsByDateCalendar {
+  recurrence_capabilities?: { ends_by_date?: boolean } | null;
+}
+
+/**
+ * Whether `calendar` stores a series' end as a date, counted whole on the
+ * series' clock (manifest `recurrence.ends_by_date`; DESIGN-series-time-zone.md,
+ * 140a). Shared code reads the capability only through this, never by the
+ * adapter's name. A calendar not known reads `false`: the 105a reading.
+ */
+export function endsByDateOf(calendar: EndsByDateCalendar | null | undefined): boolean {
+  return calendar?.recurrence_capabilities?.ends_by_date === true;
+}
+
+/** A rule's UNTIL as written, or `null`. */
+export function untilTextOf(rrule: string): string | null {
+  return /(?:^|[;:])\s*UNTIL=([^;]*)/i.exec(rrule)?.[1]?.trim() ?? null;
+}
+
+/** The rule with its UNTIL written as `value`; a leading `RRULE:` stays. */
+function replacedUntil(rrule: string, value: string): string {
+  return rrule.replace(/((?:^|[;:])\s*UNTIL=)[^;]*/i, `$1${value}`);
+}
+
+/** The rule without its UNTIL: it repeats on for as long as it is read. A
+ *  leading `RRULE:` stays. */
+export function ruleWithoutUntil(rrule: string): string {
+  const [, prefix = '', body = ''] = /^(RRULE:)?(.*)$/is.exec(rrule.trim()) ?? [];
+  return (
+    prefix +
+    body
+      .split(';')
+      .filter((part) => part.trim() !== '' && !/^\s*UNTIL=/i.test(part))
+      .join(';')
+  );
+}
+
+/** The rule ending by the UNTIL `value`: its own replaced, or added last
+ *  where it names none. A leading `RRULE:` stays. */
+export function ruleWithUntil(rrule: string, value: string): string {
+  return untilTextOf(rrule) === null ? `${rrule};UNTIL=${value}` : replacedUntil(rrule, value);
+}
+
+/** `YYYY-MM-DD` from the first eight digits of an UNTIL, or `null`. */
+function untilDigitsDay(until: string): string | null {
+  const m = /^(\d{4})(\d{2})(\d{2})/.exec(until);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+/**
+ * The UNTIL, as the rule stores it, that ends a series through `day`
+ * (`YYYY-MM-DD`) on its clock (`cal_core::until_through`): `DT235959Z` where
+ * that reads through the day on these facts, else the day's last instant on
+ * the series' clock. `null` where the core gives no answer: facts that name
+ * no instant, or a door that fails (a library older than the op).
+ */
+export function untilThroughText(day: string, rrule: string, facts: SeriesEndFacts): string | null {
+  let at: string | undefined;
+  try {
+    at = untilThrough(day, rrule, facts.start, facts.allDay, facts.tzid)?.at;
+  } catch {
+    return null;
+  }
+  return at === undefined ? null : ruleDateTime(at);
+}
+
+/**
+ * The UNTIL, as the rule stores it, that ends a series just before the
+ * occurrence at `next` (`cal_core::cut_before`, 106a): one second before it,
+ * two where one would spell `…T235959Z`, except in a rule that repeats by the
+ * second. A cut Aperio writes so never needs the 105a guard (142a). Throws
+ * where the core gives no answer: a cut has no other spelling.
+ */
+export function cutBeforeText(next: string, rrule: string): string {
+  const at = cutBefore(next, rrule)?.at;
+  if (at === undefined) throw new Error('cutBefore: no answer');
+  return ruleDateTime(at);
+}
+
+/**
+ * A stored rule ready to be counted, moved or carried to another calendar,
+ * settled on the facts of the calendar it is read from
+ * (DESIGN-series-time-zone.md, 140a; D1, D4).
+ *
+ * Only an end the core reads as an instant through the 105a guard alone
+ * (`SeriesEnd.guarded`) changes. Where its own calendar stores an end as a
+ * date (`endsByDate`), it ends through its own date and is written so
+ * (`untilThroughText`); everywhere else it is the cut 105a reads it as, now
+ * spelled `…T235958Z` (`cutBeforeText`), which every reader reads alike. Any
+ * other rule comes back as it was. A leading `RRULE:` stays.
+ */
+export function carriedEnd(rrule: string, facts: SeriesEndFacts, endsByDate: boolean): string {
+  const end = seriesEndOf(rrule, facts, null);
+  if (end?.guarded !== true) return rrule;
+  const until = untilTextOf(rrule);
+  const day = until === null ? null : untilDigitsDay(until);
+  if (until === null || day === null) return rrule;
+  if (endsByDate) {
+    const text = untilThroughText(day, rrule, facts);
+    return text === null ? rrule : replacedUntil(rrule, text);
+  }
+  const at = untilInstantMs(until);
+  if (!Number.isFinite(at)) return rrule;
+  return replacedUntil(rrule, cutBeforeText(new Date(at + 1000).toISOString(), rrule));
+}
+
+/**
+ * Whether `rrule` repeats at most once a day, the only rules whose end is a
+ * day (DESIGN-series-time-zone.md, part 3 of stage 12): not hourly or faster,
+ * and at most one value in each of BYHOUR, BYMINUTE and BYSECOND. The end of
+ * any other rule is a moment, and the day state (`{D}T235959Z`) would stretch
+ * it to the whole day: such a rule keeps its end as written.
+ */
+export function endIsADay(rrule: string): boolean {
+  const freq = /(?:^|[;:])\s*FREQ=([A-Z]+)/i.exec(rrule)?.[1]?.toUpperCase();
+  if (freq === 'HOURLY' || freq === 'MINUTELY' || freq === 'SECONDLY') return false;
+  return ['BYHOUR', 'BYMINUTE', 'BYSECOND'].every((part) => {
+    const value = new RegExp(`(?:^|[;:])\\s*${part}=([^;]*)`, 'i').exec(rrule)?.[1];
+    return value === undefined || !value.includes(',');
+  });
+}
+
+/**
+ * The rule a new series is saved with (DESIGN-series-time-zone.md, 141a, D3).
+ * A rule that is not a stored series' own keeps its end as the day the user
+ * typed, `{D}T235959Z`, while the form is open; on save it is spelled through
+ * that day on the facts being saved (`untilThroughText`). For rules in that
+ * day state only: a stored series' end is read and written on its own facts
+ * (`parseRRule`, `buildRRule`). All-day facts, no such end, or no answer from
+ * the core leave the rule as it is.
+ */
+export function settledEnd(rrule: string | null, facts: SeriesEndFacts): string | null {
+  if (rrule === null || facts.allDay || !endIsADay(rrule)) return rrule;
+  const until = untilTextOf(rrule);
+  if (until === null || !/^\d{8}T235959Z$/i.test(until)) return rrule;
+  const day = untilDigitsDay(until);
+  if (day === null) return rrule;
+  const text = untilThroughText(day, rrule, facts);
+  return text === null ? rrule : replacedUntil(rrule, text);
+}
+
+/**
+ * A stored rule as a new form holds it (a prefill from another event): its
+ * end settled on its source (`carriedEnd`), then turned into the day it
+ * reaches on the source's clock, in day state, `{D}T235959Z`, which the save
+ * spells on the new event's facts (`settledEnd`). All-day rules, rules
+ * without an UNTIL, rules with a COUNT and rules whose end is a moment, not a
+ * day (`endIsADay`), stay as they are; an end the core gives no day for stays
+ * as carried.
+ */
+export function asTypedEnd(
+  rrule: string | null,
+  facts: SeriesEndFacts,
+  endsByDate: boolean,
+): string | null {
+  if (rrule === null || facts.allDay) return rrule;
+  // A rule that repeats more than once a day keeps a moment as its end; one
+  // the 105a guard alone reads as a cut is settled on its source first, so
+  // the text keeps its meaning when the start or the zone changes later.
+  if (!endIsADay(rrule)) return carriedEnd(rrule, facts, endsByDate);
+  if (untilTextOf(rrule) === null || /(?:^|[;:])\s*COUNT=/i.test(rrule)) return rrule;
+  const carried = carriedEnd(rrule, facts, endsByDate);
+  const day = seriesEndOf(carried, facts, null)?.endDay;
+  return day ? replacedUntil(carried, `${day.replace(/-/g, '')}T235959Z`) : carried;
+}
+
+/**
+ * The rule an editor holds for a series read from a file (136a; DESIGN-
+ * series-time-zone.md, stage 12, part 3): its end read ONCE as a day on the
+ * file's own facts — its start, its kind and its zone — when the editor is
+ * filled (`asTypedEnd`). A file stores no end as a date, so an end the 105a
+ * guard alone reads as a cut counts as the day before it. From then on the end
+ * is the typed day, `{D}T235959Z`, as a new series' (141a, D3), and the save
+ * spells it on the facts it saves (`settledEnd`): a time or zone changed in
+ * the editor keeps the last day.
+ */
+export function importedRule(file: {
+  start: string;
+  all_day?: boolean;
+  recurrence?: { rrule?: string | null; tzid?: string | null } | null;
+}): string | null {
+  return asTypedEnd(file.recurrence?.rrule ?? null, endFacts(file), false);
 }
 
 /**
@@ -559,7 +759,7 @@ function ruleDateTime(text: string): string {
  * reminders read the same answer (host-core `expand_occurrences`); both are
  * pinned by `shared/contracts/eventOccurrences.json`.
  */
-function untilOnClock(rruleBody: string, facts: EndFacts, zoneInUse: string | null): string {
+function untilOnClock(rruleBody: string, facts: SeriesEndFacts, zoneInUse: string | null): string {
   if (!/UNTIL=/i.test(rruleBody)) return rruleBody;
   const clock = expansionClock(facts.allDay, facts.tzid);
   // A series of days reads its digits on the days the views expand it on.
@@ -663,6 +863,13 @@ export function moveSeriesInstant(
  * (decision 201), so the digits move as its days do: moved as an instant
  * across a clock change, they landed an hour into the next day, and the
  * series gained one.
+ *
+ * The end it gives needs no guard to be read (142a): an end through a day is
+ * spelled by the core (`untilThroughText`), a moved cut never spells
+ * `…T235959Z` (`cutBeforeText`, D5). An end that reads as a cut only through
+ * the 105a guard is settled by the caller first, on the facts of the calendar
+ * it is read from (`carriedEnd`, D4); moved as it stands, it would be moved
+ * as a cut on a calendar where it ends through its own date.
  */
 export function movedSeriesUntil(
   rrule: string,
@@ -688,12 +895,9 @@ export function movedSeriesUntil(
           DAY_MS,
       );
       const day = new Date(Date.parse(end.wall.slice(0, 10)) + days * DAY_MS).toISOString().slice(0, 10);
-      const spelled = rrule.replace(/UNTIL=[^;]*/i, `UNTIL=${day.replace(/-/g, '')}T235959Z`);
-      if (readEnd(spelled, { start: to, allDay, tzid: tzid ?? null }, null)?.reading === 'throughDay') {
-        return undefined;
-      }
-      const at = untilOn(day, tzid ?? null)?.at;
-      return at === undefined ? undefined : ruleDateTime(at);
+      const text = untilThroughText(day, rrule, { start: to, allDay, tzid: tzid ?? null });
+      if (text === null || text === `${day.replace(/-/g, '')}T235959Z`) return undefined;
+      return text;
     }
   }
   const [, y, mo, d, h, mi, s] = match.map(Number);
@@ -719,7 +923,15 @@ export function movedSeriesUntil(
   }
   const movedWall = untilWall + shift;
   const moved = zone && !byDigits ? wallToReal(new Date(movedWall), zone) : new Date(movedWall);
-  return moved.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  // On a zone's clock a moved instant never spells the end of a UTC day
+  // (106a, D5): the 105a guard would have to read it, and only reads it right
+  // where it is a cut. On UTC that spelling is the end of the day it names,
+  // read alike with or without the guard, and the digits of a series of days
+  // are its date: both stay as moved.
+  if (expansionClock(allDay, tzid) !== 'zone') {
+    return moved.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  }
+  return cutBeforeText(new Date(moved.getTime() + 1000).toISOString(), rrule);
 }
 
 /**
@@ -1279,15 +1491,11 @@ export function truncateRRuleBefore(
   // A cut never spells the end of a UTC day. `…T235959Z` reads as "through
   // that date" (DESIGN-series-time-zone.md, decision 101b), and one second
   // before an occurrence at 00:00 UTC (New York at 19:00, in summer at
-  // 20:00) is exactly that spelling. Two seconds before it keeps the same
+  // 20:00) is exactly that spelling. The core spells the cut (106a,
+  // `cal_core::cut_before`): two seconds before it then, which keeps the same
   // occurrences, except in a rule that repeats by the second.
-  if (
-    !opts.allDay &&
-    boundMs === lastKept.getTime() &&
-    /T235959Z$/.test(finalUntil) &&
-    !/FREQ=SECONDLY/i.test(body)
-  ) {
-    finalUntil = formatRRuleUntilUtc(new Date(boundMs - 1000));
+  if (!opts.allDay && boundMs === lastKept.getTime()) {
+    finalUntil = cutBeforeText(cutoff.toISOString(), body);
   }
   kept.push(`UNTIL=${finalUntil}`);
   return kept.join(';');

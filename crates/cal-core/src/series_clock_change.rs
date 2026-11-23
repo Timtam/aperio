@@ -32,9 +32,11 @@ use serde::{Deserialize, Serialize};
 
 use cal_zone::{Reading, Zone};
 
-use crate::rrule_parts::{parse_freq, parse_parts, part, Freq, Part, WEEKDAY_TOKENS};
+use crate::rrule_parts::{
+    parse_freq, parse_parts, part, rule_until_text, with_until, Freq, Part, WEEKDAY_TOKENS,
+};
 use crate::wall_clock::clock_of;
-use crate::{EndReading, SeriesShift, ShiftRefusal};
+use crate::{SeriesShift, ShiftRefusal};
 
 /// A question: a series as it is stored, and the zone it is to repeat on.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -52,6 +54,13 @@ pub struct ClockChangeQuestion {
     pub from_tzid: Option<String>,
     /// The zone it is to repeat on; `None` for UTC.
     pub to_tzid: Option<String>,
+    /// The series' own calendar stores its end as a date (manifest
+    /// `recurrence.ends_by_date`). An unflagged `…T235959Z` that the 105a
+    /// guard reads as a cut ([`crate::SeriesEnd::guarded`]) then counts
+    /// through its own date (DESIGN-series-time-zone.md, 140a, D1). JSON
+    /// without the field reads `false`.
+    #[serde(default)]
+    pub ends_by_date: bool,
 }
 
 /// Which clock's start the rule's named days fit.
@@ -328,25 +337,6 @@ fn instant_text(at: DateTime<Utc>) -> String {
     at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-fn rule_until_text(at: DateTime<Utc>) -> String {
-    at.format("%Y%m%dT%H%M%SZ").to_string()
-}
-
-/// `rrule` with its `UNTIL` set to `value`, every other part as written.
-fn with_until(rrule: &str, value: &str) -> String {
-    let trimmed = rrule.trim();
-    trimmed
-        .split(';')
-        .map(|part| match part.split_once('=') {
-            Some((key, _)) if key.trim().eq_ignore_ascii_case("UNTIL") => {
-                format!("{}={value}", key.trim())
-            }
-            _ => part.to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join(";")
-}
-
 /// Whether every part of a rule can be read: a `FREQ` this reader knows, a
 /// whole `INTERVAL` of at least 1, weekday tokens (with or without an
 /// ordinal) and numbers where numbers belong.
@@ -520,15 +510,37 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
         .and_then(|end| end.at.as_deref())
         .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
         .map(|at| at.with_timezone(&Utc));
-    let end_day = end
-        .as_ref()
-        .and_then(|end| NaiveDate::parse_from_str(&end.end_day, "%Y-%m-%d").ok());
+    // A guarded end on a calendar that stores its end as a date was typed
+    // for its own date there (D1): it ends through the UTC digits' date.
+    let end_day = end.as_ref().and_then(|end| {
+        if question.ends_by_date && end.guarded {
+            crate::utc_until(rrule).map(|at| at.date_naive())
+        } else {
+            NaiveDate::parse_from_str(&end.end_day, "%Y-%m-%d").ok()
+        }
+    });
+    // The instant an exception counts within the end by, on the old clock:
+    // the end the answer writes. A guarded end counted through its own date
+    // bounds them by that date's last instant there, so a deletion on that
+    // day moves with its occurrence; any other end by its own instant.
+    let guarded_by_date =
+        question.ends_by_date && !several_a_day && end.as_ref().is_some_and(|end| end.guarded);
+    let cancel_bound = match end_day {
+        Some(day) if guarded_by_date => Some(crate::until_through(
+            day,
+            rrule,
+            start,
+            false,
+            question.from_tzid.as_deref(),
+        )),
+        _ => end_at,
+    };
 
     // The end a new series writes: `start_after` is its start, `by_days` how
     // far its days moved on the new clock. One time a day: through its last
-    // day there, spelled `…T235959Z` where the new clock reads that as through
-    // the day, else as that day's last instant. Several a day: the old end's
-    // instant, moved as far as the start moved.
+    // day there, as `until_through` spells it (`…T235959Z` where the new
+    // clock reads that as through the day, else that day's last instant).
+    // Several a day: the old end's instant, moved as far as the start moved.
     let end_text = |start_after: DateTime<Utc>, by_days: i64| -> Option<String> {
         let at = end_at?;
         if several_a_day {
@@ -542,23 +554,13 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
             return Some(rule_until_text(placed - Duration::seconds(1)));
         }
         let day = end_day?.checked_add_signed(Duration::days(by_days))?;
-        let marker = format!("{}T235959Z", day.format("%Y%m%d"));
-        let reads_through = crate::read_series_end(
-            &with_until(rrule, &marker),
-            after_zone.wall(start_after).time(),
-            crate::expansion_clock(false, question.to_tzid.as_deref()),
-            |at| after_zone.wall(at),
-            |wall| crate::wall_clock::last_at_or_before(after_zone, wall),
-            |wall| after_zone.to_utc(wall, WallPolicy::Rfc5545),
-        )
-        .is_some_and(|read| {
-            read.reading == EndReading::ThroughDay && read.end_day == day_text(day)
-        });
-        if reads_through {
-            return Some(marker);
-        }
-        let last = day.and_hms_opt(23, 59, 59)?;
-        crate::wall_clock::last_at_or_before(after_zone, last).map(rule_until_text)
+        Some(rule_until_text(crate::until_through(
+            day,
+            rrule,
+            start_after,
+            false,
+            question.to_tzid.as_deref(),
+        )))
     };
 
     // A rule by the hour or faster: the unit it steps in, in seconds.
@@ -620,7 +622,7 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
     // rule repeats on, within its interval and its end. None for an
     // exception that cancels nothing: it stays as written.
     let cancelled = |at: DateTime<Utc>| -> Vec<NaiveDateTime> {
-        if at < start || end_at.is_some_and(|end| at > end) {
+        if at < start || cancel_bound.is_some_and(|end| at > end) {
             return Vec::new();
         }
         let wall = before_zone.wall(at);
@@ -776,6 +778,9 @@ mod contract {
             "monthly-on-the-31st-cannot-keep-its-days",
             "moved-start-in-the-spring-gap",
             "a-cut-moves-as-the-end-of-its-last-day",
+            "new-york-1900-end-of-utc-day-to-chicago-ends-by-date",
+            "new-york-2000-end-of-utc-day-to-berlin-ends-by-date-moves-the-last-deletion",
+            "new-york-1900-end-of-utc-day-to-chicago-reads-as-a-cut",
         ] {
             assert!(
                 rows.iter().any(|r| r["name"] == needed),

@@ -6,6 +6,7 @@ import type { Task } from '@aperio/shared';
 import {
   afterLanded,
   createsInSteps,
+  endsByDateOf,
   isSeriesOccurrence,
   newSeriesRecurrence,
   occurrenceIsoOf,
@@ -194,15 +195,17 @@ export async function moveOrCopyEvent(
   // The other calendar creates the series anew: in steps where it writes its
   // deletions so (decisions 227, 265). Mirrors the desktop.
   const wait = steps.wait ?? writeWithoutWaiting;
+  // The series' end is settled on the calendar it comes from (140a).
+  const endsByDate = endsByDateOf(steps.source);
 
   if (mode === 'move' && !asOccurrence) {
-    const series = await newSeriesRowOf(event);
+    const series = await newSeriesRowOf(event, endsByDate);
     return wait(createsInSteps(steps.target, series.recurrence), () =>
       updateEvent({ ...series, calendar_id: targetCalendarId }, series.calendar_id),
     );
   }
 
-  const source = asOccurrence ? event : await newSeriesRowOf(event);
+  const source = asOccurrence ? event : await newSeriesRowOf(event, endsByDate);
   const created = await wait(!asOccurrence && createsInSteps(steps.target, source.recurrence), () =>
     createEvent(
       {
@@ -248,9 +251,11 @@ export async function moveOrCopyEvent(
  * id, and as exceptions exactly its real deletions (`newSeriesRecurrence`). An
  * occurrence changed elsewhere is no deletion: the new series shows it at its
  * usual time. A single event is itself. A read that fails is a series that
- * could not be loaded, and nothing is written. Mirrors the desktop.
+ * could not be loaded, and nothing is written. Its end is settled on the
+ * calendar it comes from (`endsByDate`, `carriedEnd`, 140a). Mirrors the
+ * desktop.
  */
-async function newSeriesRowOf(event: CalendarEvent): Promise<CalendarEvent> {
+async function newSeriesRowOf(event: CalendarEvent, endsByDate: boolean): Promise<CalendarEvent> {
   const series = await seriesRowOf(event);
   if (!series.recurrence?.rrule) return series;
   let rows: CalendarEvent[];
@@ -259,7 +264,7 @@ async function newSeriesRowOf(event: CalendarEvent): Promise<CalendarEvent> {
   } catch {
     throw new SeriesNotLoadedError(series.id);
   }
-  return { ...series, recurrence: newSeriesRecurrence(series, rows) };
+  return { ...series, recurrence: newSeriesRecurrence(series, rows, endsByDate) };
 }
 
 /** The row that stands for the whole series `event` belongs to: `event` itself

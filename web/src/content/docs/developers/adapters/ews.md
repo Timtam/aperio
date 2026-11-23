@@ -137,26 +137,36 @@ The endpoint is discovered or user-supplied.
   a daily 00:30 Berlin series ending on 3.11. keeps the 3.11. and not the
   4.11. (still the 3.11. in UTC), and a daily 20:00 New York series ending on
   5.11. keeps the 5.11. there (live round 10a, M1, M2, 2026-10-17). The
-  writer takes an `UNTIL`'s own date, which is right for an end the user
-  typed and for the `…T235959Z` the reader writes back. A cut, though,
-  writes `UNTIL` one second before the occurrence it is cut at, an instant,
-  and its UTC date mostly kept the cut's own day: it stood in both series
-  (the 8a live test), and a delete from one occurrence on left it standing
-  (round 10a, M5). Only east of UTC, for a time of day up to and including
-  the zone's distance from UTC (in Berlin up to 01:00, in summer 02:00), was
-  the UTC date the day before already (M1); west of UTC, for a time of day
-  after 24:00 less that distance (in New York after 19:00, in summer after
-  20:00), it was the day after, and two days stood twice (M2). At 19:00 New
-  York the cut's `UNTIL` is the very text of an end typed for the cut's day,
-  `…T235959Z`: only the flag tells them apart. So an update marked as
-  a cut (`truncate_tail_overrides`) of a timed series ends on the last day
-  whose occurrence, at the master's wall time on the clock the rule is
-  written on, starts at or before the `UNTIL` (`cut_end_day`,
-  `cal_core::last_day_through`, decision 254): a weekly Monday series cut
-  on a Monday ends on the Sunday before, and Exchange keeps such a date
-  (M3). A deleted occurrence on the end day stays deleted (M4). An all-day
-  cut already sends the day before as a date (M6). A clock Aperio cannot
-  read refuses the cut with the unreadable-zone sentence (256).
+  manifest says so with `recurrence.ends_by_date`, and the core reads that
+  fact, never the adapter's name (DESIGN-series-time-zone.md, 140a).
+  - **Reading.** An `EndDate` D reads back as the `UNTIL` that
+    `cal_core::until_through` spells for "through D" on the series' clock
+    (`READ_RULE` 7, 107b). That is `DT235959Z` wherever every reader counts
+    that text through D, and the last instant of D on the series' clock
+    where the 105a guard would read it as a cut: west of UTC at 24:00 less
+    the zone's offset (New York 19:00, 20:00 in summer, gives
+    `…T045959Z` of the next UTC day; Los Angeles 16:00, 17:00), and east of
+    UTC at the hour UTC's midnight falls on (Berlin 01:00 in winter gives
+    `…T225959Z` of D, 02:00 in summer `…T215959Z`). An all-day series, a
+    series without a zone, and one whose zone Aperio cannot read keep
+    `DT235959Z`. `READ_RULE` 7 emits every cached item again under it.
+  - **Writing.** Every write of an end — a create, an update, a copy, a
+    move, a split's remainder — goes through `cal_core::written_end_day` on
+    the clock the rule is written on: on a create the written zone, else
+    UTC (Aperio creates a series without a zone in UTC); on an update the
+    rule's clock, the stored zone or the new one where the update moves it
+    (decision 241). The date is the last day whose occurrence, at the
+    master's wall time on that clock, starts at or before the `UNTIL`, so
+    the end read back above compares equal to itself and is written as D. An
+    unflagged `…T235959Z` counts as its own date: the repeat field has
+    always written that text for a day typed. A cut (`truncate_tail_overrides`,
+    decision 254) stays flagged and is counted as the instant it is: a
+    weekly Monday series cut on a Monday ends on the Sunday before, and
+    Exchange keeps such a date (M3); a 106a cut at 19:00 New York
+    (`…T235958Z`) ends on the day before. A deleted occurrence on the end day
+    stays deleted (M4). An all-day series keeps the date it names, and an
+    all-day cut already sends the day before (M6). A cut on a clock Aperio
+    cannot read is refused with the unreadable-zone sentence (256).
 - **Occurrences are found by their slot.** Skipping one occurrence
   (`add_event_exdate`) probes the series' `InstanceIndex`es with `GetItem`.
   It matches an exception by its `OriginalStart`, the slot it fills, not by

@@ -67,12 +67,24 @@ flow and token refresh; the adapter sends a `Bearer` token.
   anything else on UTC's. A rule without BYDAY, BYMONTHDAY or BYMONTH takes
   its weekday, day and month from that day. Read off the UTC instant, as
   before, the range and its default weekday of a Berlin series at 00:30 were
-  a day early, and those of a New York series at 20:00 a day late. A cut (`truncate_tail_overrides`) ends on the last day
-  whose occurrence starts at or before the `UNTIL`, on the series' clock
-  (`cal_core::last_day_through`), as the Exchange adapter does; an `UNTIL`
-  the user typed keeps its date. Whether Graph counts the end date whole on
-  that clock, as Exchange does, is not measured. The cut is dormant today,
-  like `clear_recurrence`, because the adapter reads no series masters.
+  a day early, and those of a New York series at 20:00 a day late.
+- **A series' end is a day on that clock** (DESIGN-series-time-zone.md,
+  140a). Every write of an end, a create, an update, a copy, goes through
+  `cal_core::written_end_day` on the clock the start is written on: the last
+  day whose occurrence, at the master's wall time, starts at or before the
+  `UNTIL`, as the Exchange adapter writes it. An unflagged `…T235959Z`
+  counts as its own date, the day the repeat field wrote it for; a cut
+  (`truncate_tail_overrides`) is counted as the instant it is, and one the
+  clock cannot place is refused. An all-day series keeps the date it names.
+  The read-back of a POST or PATCH response spells `endDate` D with
+  `cal_core::until_through` on the clock the views read the zone on, with no
+  exact-case gate: `DT235959Z` where that reads through D, else the last
+  instant of D there (19:00 New York gives `…T045959Z` of the next UTC day),
+  so an untouched save writes D again. The manifest declares
+  `recurrence.ends_by_date`. Whether Graph counts `endDate` whole on the
+  series' clock, as Exchange does, and which zone name it sends back with a
+  master, are not measured (TODO.md). The cut is dormant today, like
+  `clear_recurrence`, because the adapter reads no series masters.
 - **Relative patterns are not written.** `rrule_to_recurrence` has no
   `relativeMonthly` or `relativeYearly`. Only a monthly rule with BYDAY and
   BYSETPOS and no BYMONTHDAY is refused. Any other relative rule goes out as

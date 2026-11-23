@@ -1774,6 +1774,8 @@
         },
         "countLabel": "Number of occurrences",
         "untilLabel": "End date",
+        "untilLabelWithClock": "Repeat until ({{clock}})",
+        "untilUnavailable": "The repeat end date can't be written on this device. Update Aperio and try again.",
         "by": {
           "label": "Repeat on",
           "monthlyOnDay": "on day {{day}}",

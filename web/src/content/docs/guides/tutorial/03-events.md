@@ -230,6 +230,12 @@ series' date and time in its time zone:
 - Where it differs from your device's time zone, the fields name it, such as
   **Start time (New York)**. After the end time, the read-only field **On this
   device (Berlin)** gives the same times on your clock.
+- The end of a repeat is always a day in the series' time zone, and its field
+  names it, such as **Repeat until (New York)**. That holds also where the
+  other fields are on your device's clock or in UTC. A series until 10
+  November has its last appointment on 10 November in New York, even where
+  that is already 11 November on your device. Exchange and Microsoft 365 store
+  exactly that date as the series' end.
 - A series without a time zone repeats on UTC. Its fields then read, for
   example, **Start time (UTC)**.
 - A new series gets your device's time zone. Where the calendar cannot store

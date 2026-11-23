@@ -569,10 +569,14 @@ die ein UNTIL lesen oder schreiben, mit Gegenprüfung. **Toni hat sie alle am
   Schnitt gelesene Ende in eine verschobene Serie, und Exchange hätte ihren
   echten letzten Termin gelöscht. Bis Stufe 12 verliert eine Exchange-Serie
   an diesem toten Winkel ihren letzten Tag in Aperio, wie schon vor 101b.
+  **Gebaut 2026-11-23 (Stufe 12, Teil 3, 140a bis 142a):** Exchange liest
+  über `until_through` zurück (READ_RULE 7) und schreibt über
+  `written_end_day`; Microsoft 365 ebenso, ungemessen.
 - **108b — das Ende-Feld zeigt den letzten Tag, bis zu dem das Ende reicht,
   auf der Uhr der Serie.** Was man tippt, bleibt stehen; `…T235959Z` zeigt
   nach 101b sein Datum. Verworfen: der Tag des letzten Termins (ein getippter
-  Mittwoch spränge bei einer Montagsserie zurück).
+  Mittwoch spränge bei einer Montagsserie zurück). **Gebaut 2026-11-23
+  (Stufe 12, Teil 3):** das Feld zeigt `endDay` des Kerns.
 - **109a — stündliche und feinere Regeln behalten ihr Ende als Zeitpunkt.**
   Der Editor legt sie nicht an.
 - **110b — wer auf „bis Datum“ umstellt, bekommt den Tag des zehnten
@@ -588,7 +592,9 @@ die ein UNTIL lesen oder schreiben, mit Gegenprüfung. **Toni hat sie alle am
   wurde ein Ende, das kein Leser verstand.
 - **114b — das Ende-Feld auf der Uhr der Serie kommt mit den anderen Feldern
   in Stufe 12.** Stufe 8 baut die Regeln dafür (anzeigen nach 108b, schreiben
-  mit `untilOn`), noch unsichtbar, wie die Felder mit Uhr.
+  mit `untilOn`), noch unsichtbar, wie die Felder mit Uhr. **Gebaut
+  2026-11-23 (Stufe 12, Teil 3):** geschrieben wird mit `until_through`
+  statt `untilOn`.
 - **115a — ein Datum ohne Uhrzeit als Ende einer Serie mit Uhrzeit heißt
   „bis zu diesem Datum“ auf der Uhr der Serie, eine Uhrzeit ohne Zone gilt
   auf der Uhr der Serie.** So lesen es Ansichten und Erinnerungen künftig
@@ -761,6 +767,36 @@ Ausnahmen wird auf dem Handy im Editor selbst gezeigt. Das Serienende auf der
 Uhr der Serie (107b, 108b, 114b) kommt als eigener, letzter Schritt von Stufe
 12, mit der Live-Runde an Tonis Server.
 
+Für diesen Schritt hat Claude am 2026-11-23 technisch entschieden; **Claude,
+technisch, Toni prüft gesammelt**:
+
+- **140a — ein Ende `…T235959Z`, das die Schutzregel als Schnitt liest, zählt
+  nur bei Kalendern bis zu seinem eigenen Datum, die das Ende als Datum
+  speichern** (Manifest `recurrence.ends_by_date`: Exchange, Microsoft 365).
+  Bevor es verschoben oder mitgenommen wird, wird es dort als Ende dieses
+  Tages geschrieben, überall sonst als Schnitt `…T235958Z`. Der Kern und
+  shared lesen die Fähigkeit, nie den Namen eines Adapters (`endsByDateOf`).
+- **141a — eine neue Serie behält bis zum Speichern den getippten Tag.** Das
+  Feld hält `{Tag}T235959Z`; jedes Speichern schreibt ihn über `settledEnd`
+  auf den Angaben, mit denen gespeichert wird (Beginn, Zone, ganztägig). Das
+  gilt auch für einen Termin, der zur Serie wird, für eine Vorbelegung und
+  für die Vorgabe von 110b.
+- **142a — kein Ende, das Aperio schreibt, braucht die Schutzregel**
+  (`until_through`, `cut_before`, `guarded`): „bis Tag D“ schreibt der Kern
+  so, dass es ohne 105a richtig gelesen wird, ein Schnitt ist nie genau
+  `…T235959Z` (106a, auch ein verschobener), und `SeriesEnd.guarded` sagt,
+  wo ein Ende nur durch die Schutzregel ein Zeitpunkt ist.
+
+Für Tonis Textstapel (D10): Das Ende-Feld mit Uhr heißt „Ende-Datum ({Uhr})“,
+etwa „Ende-Datum (New York)“, englisch „Repeat until ({clock})“, damit es nicht
+mit „End date (New York)“ des Termins zusammenfällt. Offen: Die englische
+Beschriftung ohne Uhr bleibt „End date“; soll sie ebenfalls „Repeat until“
+heißen? Sie bleibt, bis Toni entscheidet. Neu ist auch „Das Ende-Datum lässt
+sich auf diesem Gerät nicht schreiben. Aktualisiere Aperio und versuche es
+noch einmal.“ („The repeat end date can't be written on this device. Update
+Aperio and try again.“), wenn die Bibliothek des Geräts das Ende nicht
+schreiben kann.
+
 ## Was es löst
 
 **Aperio sagt, auf welcher Uhr eine Serie läuft.** Eine zonenlose Serie steht
@@ -880,7 +916,9 @@ Uhrzeit die Gerätezone.
 
 **Weicht die Uhr der Felder von der des Geräts ab**, heißen die vier Felder
 „Startdatum (New York)“, „Startzeit (New York)“, „Enddatum (New York)“ und
-„Endzeit (New York)“. Das Enddatum der Wiederholung nennt die Uhr genauso.
+„Endzeit (New York)“. Das Enddatum der Wiederholung nennt die Uhr genauso;
+es nennt immer die Zone der Serie, auch wo die anderen Felder auf der Uhr des
+Geräts oder auf UTC stehen (Stufe 12, Teil 3).
 Verglichen wird mit kanonischen Zonen-Namen, denn V8 meldet alte Namen wie
 `Asia/Calcutta` statt `Asia/Kolkata`.
 
@@ -1831,6 +1869,69 @@ Handy im selben PR.
     Ungeprüft auf dem Handy: der Name und der Hinweis des Knopfs, die Frage
     direkt nach der Auswahl, der Fokus zurück auf den Knopf, die Ansage
     400 ms danach, die Verlustfrage über dem Editor-Blatt auf iOS.
+    Gebaut (Teil 3, Serienende auf der Uhr der Serie, 2026-11-23, ohne
+    Handy-Build; 140a bis 142a): Ein Ende ist ein Tag auf der Uhr der Serie,
+    und nur der Kern sagt, welcher Tag und wie man ihn schreibt.
+    - Gelesen wird überall mit `read_series_end` (`endDay`): Ansichten,
+      Erinnerungen, der Wiederholungs-Satz, `movedSeriesUntil`,
+      `keepingLength`, `series_clock_change` und jetzt das Ende-Feld. Ein
+      Adapter, dessen Kalender das Ende als Datum speichert, schreibt es mit
+      `written_end_day`.
+    - Geschrieben wird „bis Tag D“ mit `until_through` (`DT235959Z`, wo das
+      ohne Schutzregel durch D liest, sonst der letzte Moment von D auf der
+      Uhr der Serie; schiebt eine Umstellung, die das Ende von D überspringt,
+      den letzten Termin von D darüber hinaus, der Moment, an dem er steht:
+      Nuuk im Frühjahr ab 23:00) und „kurz vor einem Termin“ mit `cut_before`
+      (106a). Bekannte Grenze: Eine Regel mit mehreren Uhrzeiten am Tag
+      (`BYHOUR=10,23`, nur aus CalDAV oder einer Datei) verliert an diesem
+      Tag in Nuuk ihren Termin ab 23:00, weil schon die frühere Uhrzeit bis D
+      liest.
+      `SeriesEnd.guarded` sagt, wo ein Ende nur durch 105a ein Zeitpunkt ist.
+    - Das Manifest nennt `recurrence.ends_by_date`; wahr bei Exchange und
+      Microsoft 365, sonst falsch.
+    - Ein solches Ende wird vor dem Verschieben, Kopieren, Teilen, der
+      Zonenwahl und dem Ziehen auf den Angaben seines eigenen Kalenders
+      festgelegt (`carriedEnd`): dort bis zu seinem Datum, sonst als Schnitt
+      `…T235958Z`. Ein Ziel-Kalender bekommt so nie einen Schnitt, der in
+      Wahrheit ein Datum war. Die Zonenwahl (`series_clock_change`) zählt
+      dabei auch die Ausnahmen bis zu diesem Datum: eine Löschung an seinem
+      Tag wandert mit ihrem Termin. „Diesen und alle folgenden“ mit
+      geänderter Regel in einen anderen Kalender legt das Ende ebenso fest.
+    - Eine neue Serie behält den getippten Tag bis zum Speichern (141a), auch
+      ein einzelner Termin, der hier zur Serie wird, und eine Serie aus einer
+      Datei, wenn danach eine Zone gewählt wird: der Kern wird dann ohne das
+      Ende gefragt, und der getippte Tag kommt in jede Antwort zurück
+      (`chooseZone`).
+    - Eine gespeicherte Serie liest und schreibt ihr Feld auf ihren Angaben
+      und fällt bei einer Serie mit Uhrzeit auf einer Zone nie auf die
+      UTC-Ziffern zurück.
+    - Bei einem Termin aus einer Datei wird das Ende einmal beim Füllen des
+      Editors als Tag gelesen, auf den Angaben der Datei (`importedRule`;
+      eine Datei speichert kein Ende als Datum, ein Ende, das nur die
+      Schutzregel als Schnitt liest, gilt also bis zum Tag davor). Danach ist
+      es ein getippter Tag wie bei einer neuen Serie, und jedes Speichern
+      schreibt ihn mit `settledEnd` auf dem Beginn und der Zone, die
+      gespeichert werden: eine geänderte Uhrzeit behält den letzten Tag. Die
+      Zone zählt weiter als gespeichert (136a).
+    - Das Feld liest und schreibt das Ende immer auf der Zone, mit der die
+      Regel gespeichert wird (gespeichert oder gewählt), denn darauf lesen es
+      die Ansichten, die Anbieter, `carriedEnd` und das Speichern; ein
+      `…T235959Z` heißt auf einer anderen Uhr einen anderen Tag. Die
+      Beschriftung nennt diese Zone, wo sie nicht die des Geräts ist, auch
+      wenn Beginn und Ende auf der Uhr des Geräts stehen (Umfang im Formular)
+      oder auf UTC (eine Zone, die dieses Gerät nicht kennt): „Ende-Datum (New
+      York)“ neben „Startzeit“.
+    - Kann der Kern nicht antworten (eine ältere Bibliothek), bleibt ein
+      unberührtes Ende wie es ist, und ein neues Datum wird mit Grund
+      abgelehnt (D6), auch die Wahl „Bis Datum“; der Desktop sagt den Grund
+      einmal an, wie das Handy.
+    - READ_RULE 7 schreibt auch die Serien östlich von UTC neu, deren Uhrzeit
+      Mitternacht UTC ist (Berlin 01:00 im Winter, 02:00 im Sommer).
+    - Das Feld heißt mit Uhr „Ende-Datum (New York)“, englisch „Repeat until
+      (New York)“ (im Textstapel, siehe oben).
+    - Microsoft 365 geht ungemessen hinein (TODO.md).
+    Ungeprüft auf dem Handy: die Beschriftung mit Uhr am Datumsknopf und die
+    Ansage einer Ablehnung.
 13. **Kopien nehmen die Zone mit (23b)** — `feat(groups): carry a series' time zone to its copies`.
     Die Gruppen-Mitnahme im Kern trägt die Zone und ersetzt für einen
     Zonenwechsel die heutige Mitnahme von Beginn und Ende; das Angebot nach dem
@@ -1926,9 +2027,12 @@ Handy im selben PR.
   bei Exchange liest Aperio das Enddatum so zurück und irrt in zwei Fenstern um
   einen Tag (255). **Behoben mit Stufe 8, Schritt 6 (101b):** Ansichten,
   Erinnerungen, Schnitt, Verschieben und der Zwischenspeicher lesen
-  `…T235959Z` auf der Uhr der Serie als „bis zu diesem Datum“. Übrig bleibt
-  der blinde Fleck der Schutzregel (105a): Ein echtes Ende genau um 19:00 New
-  York (im Sommer 20:00) liest weiter als Zeitpunkt.
+  `…T235959Z` auf der Uhr der Serie als „bis zu diesem Datum“. Seit Stufe 12,
+  Teil 3 (140a bis 142a) bleibt übrig: Alte Enden `…T235959Z` am blinden Fleck
+  lesen bei CalDAV und Google als Schnitt, wie 105a sagt, auch verschoben oder
+  kopiert, jetzt als `…T235958Z`. Exchange-Zeilen, die vor READ_RULE 7
+  zwischengespeichert wurden, zeigen bis zum ersten Abgleich den Tag davor;
+  jedes Schreiben behält den echten Tag. Microsoft 365 ist ungemessen.
 - **Lange Listen auf dem Handy.** Virtualisierte Listen können Zeilen vor dem
   Wischen verbergen; der Handy-Dialog zeichnet deshalb alle Zeilen (ohne Suche
   65, mit einer Stadtsuche bis zu 313), was auf alten Android-Geräten langsam

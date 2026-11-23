@@ -33,7 +33,8 @@ wall?: WallReading,
 /**
  * For `untilOn`: the day's last second; the one before the change where
  * a change skips the day's end; `None` only where the clock skips the
- * whole day (Samoa, 30 December 2011).
+ * whole day (Samoa, 30 December 2011). For `untilThrough` and
+ * `cutBefore`: the `UNTIL` as an instant.
  */
 at?: string, 
 /**

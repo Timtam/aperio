@@ -785,6 +785,17 @@ mod tests {
     }
 
     #[test]
+    fn the_manifest_says_exchange_stores_a_series_end_as_a_date() {
+        // Exchange keeps a series' end as an EndDate, counted whole on the
+        // series' clock (live round 10a): the core then counts an unflagged
+        // end of a UTC day through its own date (140a).
+        let manifest = manifest();
+        assert!(manifest.recurrence.ends_by_date);
+        assert!(manifest.recurrence.deletions_in_steps);
+        assert!(!manifest.tasks.recurrence.ends_by_date);
+    }
+
+    #[test]
     fn a_new_series_deletes_its_occurrences_in_steps_and_tasks_do_not() {
         // Exchange creates a series without its deleted occurrences, and the
         // adapter deletes them again one by one (decisions 202, 227): the

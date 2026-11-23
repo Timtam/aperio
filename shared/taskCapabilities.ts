@@ -26,6 +26,7 @@ export const DEFAULT_RECURRENCE_CAPABILITIES: RecurrenceCapabilities = {
   count: true,
   until: true,
   deletions_in_steps: false,
+  ends_by_date: false,
   time_zones: 'all',
 };
 

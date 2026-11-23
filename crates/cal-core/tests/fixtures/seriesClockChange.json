@@ -1,5 +1,5 @@
 {
-  "about": "Changing the clock a series repeats on (cal_core::series_clock_change, DESIGN-series-time-zone.md stage 9; decisions 15a, 20a, 24a). Each question is a series as it is stored (rule, start, exceptions, its zone or none) and the zone chosen (or none for UTC). The answer says whether the editors ask which days to keep, the start's day on the old and the new clock, which of them the rule's named days fit, and the two answers: as they fall now (the start stays, the rule names the days the occurrences fall on on the new clock) and as the rule says (the rule's text stays, the start moves back onto its old day where the rule fits only that one), each written or refused with a reason. An exception that cancels an occurrence moves with it in wall time, as every occurrence does; one that cancels nothing stays. On a rule with one time a day, an end moves as the end of its last day on the new clock; on an hourly rule or one with several times a day, a cut moves in wall time with the occurrences. null for a start that names no instant. Written by hand from tzdata's rules; the core and both surfaces read this file.",
+  "about": "Changing the clock a series repeats on (cal_core::series_clock_change, DESIGN-series-time-zone.md stage 9; decisions 15a, 20a, 24a). Each question is a series as it is stored (rule, start, exceptions, its zone or none) and the zone chosen (or none for UTC). The answer says whether the editors ask which days to keep, the start's day on the old and the new clock, which of them the rule's named days fit, and the two answers: as they fall now (the start stays, the rule names the days the occurrences fall on on the new clock) and as the rule says (the rule's text stays, the start moves back onto its old day where the rule fits only that one), each written or refused with a reason. An exception that cancels an occurrence moves with it in wall time, as every occurrence does; one that cancels nothing stays. On a rule with one time a day, an end moves as the end of its last day on the new clock; on an hourly rule or one with several times a day, a cut moves in wall time with the occurrences. Where the series' own calendar stores its end as a date (endsByDate, manifest recurrence.ends_by_date; absent reads false), an end of a UTC day that the 105a guard reads as a cut counts through its own date (D1), and an exception on that date moves with its occurrence. null for a start that names no instant. Written by hand from tzdata's rules; the core and both surfaces read this file.",
   "rows": [
     {
       "name": "lost-berlin-zone-monday-rule",
@@ -971,6 +971,105 @@
           "exceptions": [
             "2026-10-03T14:30:00Z"
           ]
+        }
+      }
+    },
+    {
+      "name": "new-york-1900-end-of-utc-day-to-chicago-ends-by-date",
+      "note": "Daily 19:00 New York (winter) ending 20261110T235959Z, on a calendar that stores a series' end as a date (endsByDate): the text was typed for 10 November there, so it ends through the 10th, and on Chicago's clock (18:00) that is the 10th's last instant.",
+      "question": {
+        "rrule": "FREQ=DAILY;UNTIL=20261110T235959Z",
+        "start": "2026-11-03T00:00:00Z",
+        "exceptions": [],
+        "fromTzid": "America/New_York",
+        "toTzid": "America/Chicago",
+        "endsByDate": true
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-02",
+        "startDayAfter": "2026-11-02",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261111T055959Z",
+          "start": "2026-11-03T00:00:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261111T055959Z",
+          "start": "2026-11-03T00:00:00Z",
+          "exceptions": []
+        }
+      }
+    },
+    {
+      "name": "new-york-2000-end-of-utc-day-to-berlin-ends-by-date-moves-the-last-deletion",
+      "note": "Daily 20:00 New York (summer) ending 20261028T235959Z on a calendar that stores a series' end as a date, its 28 October occurrence (29 October 00:00 UTC) and the 26th's deleted. The guarded end counts through the 28th (D1), so the deletion on that day is within the end and moves with its occurrence, as the 26th's does; bounded by the guarded instant, it stayed and cancelled nothing.",
+      "question": {
+        "rrule": "FREQ=DAILY;UNTIL=20261028T235959Z",
+        "start": "2026-10-20T00:00:00Z",
+        "exceptions": [
+          "2026-10-29T00:00:00Z",
+          "2026-10-27T00:00:00Z"
+        ],
+        "fromTzid": "America/New_York",
+        "toTzid": "Europe/Berlin",
+        "endsByDate": true
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-10-19",
+        "startDayAfter": "2026-10-20",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261029T235959Z",
+          "start": "2026-10-20T00:00:00Z",
+          "exceptions": [
+            "2026-10-29T01:00:00Z",
+            "2026-10-27T01:00:00Z"
+          ]
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261028T235959Z",
+          "start": "2026-10-19T00:00:00Z",
+          "exceptions": [
+            "2026-10-28T01:00:00Z",
+            "2026-10-26T01:00:00Z"
+          ]
+        }
+      }
+    },
+    {
+      "name": "new-york-1900-end-of-utc-day-to-chicago-reads-as-a-cut",
+      "note": "The same series on a calendar that does not store its end as a date: 105a reads the text as a cut before the 10th's occurrence, so it ends through 9 November, on Chicago's clock that day's last instant.",
+      "question": {
+        "rrule": "FREQ=DAILY;UNTIL=20261110T235959Z",
+        "start": "2026-11-03T00:00:00Z",
+        "exceptions": [],
+        "fromTzid": "America/New_York",
+        "toTzid": "America/Chicago",
+        "endsByDate": false
+      },
+      "expect": {
+        "asks": false,
+        "startDayBefore": "2026-11-02",
+        "startDayAfter": "2026-11-02",
+        "fit": "both",
+        "asNow": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261110T055959Z",
+          "start": "2026-11-03T00:00:00Z",
+          "exceptions": []
+        },
+        "asRule": {
+          "outcome": "changed",
+          "rrule": "FREQ=DAILY;UNTIL=20261110T055959Z",
+          "start": "2026-11-03T00:00:00Z",
+          "exceptions": []
         }
       }
     }
