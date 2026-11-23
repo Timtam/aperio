@@ -351,6 +351,7 @@ describe('EventDialog → the whole-series save after a zone answer (question 12
       exceptions: [DELETED],
       fromTzid: null,
       toTzid: 'Europe/Berlin',
+      endsByDate: false,
     });
     const answer = change?.[which];
     if (answer?.outcome !== 'changed') throw new Error('the core gave no answer');

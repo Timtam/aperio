@@ -884,3 +884,60 @@ describe('moveEventToSlot (dropping an event in the hour grid)', () => {
     expect(await moveEventToSlot(ev, localKey(ev.start), null)).toBe(false);
   });
 });
+
+// Stage 12, part 3 (DESIGN-series-time-zone.md, 140a, D1, D4): a legacy end
+// `…T235959Z` at New York's blind spot (19:00 in winter) is settled on the
+// calendar the series is stored in before it moves or is carried.
+describe('a legacy end at the blind spot moves as its calendar reads it', () => {
+  const legacy = {
+    id: 'ny',
+    calendar_id: 'c1',
+    title: 'Evening',
+    description: null,
+    location: null,
+    start: '2026-11-03T00:00:00.000Z',
+    end: '2026-11-03T01:00:00.000Z',
+    all_day: false,
+    recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261110T235959Z', exceptions: [], tzid: 'America/New_York' },
+    color_label: null,
+    reminders: [],
+    sound: null,
+    attendees: [],
+  } as unknown as CalendarEvent;
+  const endsByDate = { recurrence_capabilities: { ends_by_date: true } };
+  const localKey = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const callsTo = (cmd: string) => invokeMock.mock.calls.filter((call) => call[0] === cmd);
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((cmd: string, payload?: { event?: object }) => {
+      if (cmd === 'get_event_by_id') return Promise.resolve(legacy);
+      if (cmd === 'get_series_rows') return Promise.resolve({ rows: [], reach: { kind: 'complete' } });
+      if (cmd === 'update_event') return Promise.resolve(payload?.event ?? {});
+      return Promise.resolve({});
+    });
+  });
+
+  const dropAt1800 = (calendar?: typeof endsByDate) => {
+    // 18:00 New York the same evening.
+    const dropped = new Date('2026-11-02T23:00:00.000Z');
+    const minute = dropped.getHours() * 60 + dropped.getMinutes();
+    return moveEventToSlot(legacy, localKey(dropped), minute, 'series', null, { calendar });
+  };
+
+  it('keeps the real last day when dragged on an ends-by-date calendar', async () => {
+    expect(await dropAt1800(endsByDate)).toBe(true);
+    expect(callsTo('update_event')[0][1].event.recurrence.rrule).toBe('FREQ=DAILY;UNTIL=20261111T035959Z');
+  });
+
+  it('keeps the cut 105a reads without the capability', async () => {
+    expect(await dropAt1800()).toBe(true);
+    expect(callsTo('update_event')[0][1].event.recurrence.rrule).toBe('FREQ=DAILY;UNTIL=20261110T225958Z');
+  });
+
+  it('copies it from an ends-by-date calendar through its own date', async () => {
+    await moveOrCopyEvent(legacy, 'c2', 'copy', 'series', { source: endsByDate });
+    expect(callsTo('create_event')[0][1].request.recurrence.rrule).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+  });
+});

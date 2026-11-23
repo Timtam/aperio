@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_RECURRENCE_CAPABILITIES } from '@aperio/shared';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import {
   buildRRule,
@@ -11,10 +11,12 @@ import {
   parseRRule,
   recurrenceStartDate,
   resolveAgainstDay,
+  UntilNotSpelledError,
   withEndMode,
 } from '@aperio/shared';
 import type {
   EndMode,
+  FieldEndFacts,
   Freq,
   MonthlyOption,
   ParsedRule,
@@ -79,6 +81,8 @@ export function RecurrenceSelector({
   onChange,
   startDay: startDayProp,
   capabilities,
+  endFacts,
+  clockName,
 }: {
   value: string | null;
   onChange: (rrule: string | null) => void;
@@ -88,6 +92,14 @@ export function RecurrenceSelector({
   startDay?: string;
   /** The owning calendar's recurrence capabilities; absent → full RFC-5545. */
   capabilities?: RecurrenceCapabilities;
+  /** For a STORED series' rule only: the facts its end field reads and writes
+   *  its day on, the series' clock (DESIGN-series-time-zone.md, stage 12,
+   *  part 3). Absent, a typed end stays the day it names, `{D}T235959Z`, which
+   *  the save spells (`settledEnd`). Mirrors the desktop. */
+  endFacts?: FieldEndFacts | null;
+  /** The name of the clock the form's fields stand on (`fieldClockName`), for
+   *  the end field's label; `null` where it is the device's own. */
+  clockName?: string | null;
 }) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -103,7 +115,7 @@ export function RecurrenceSelector({
     [startDayProp],
   );
   const startDate = useMemo(() => recurrenceStartDate(startDay), [startDay]);
-  const parsed = useMemo(() => parseRRule(value), [value]);
+  const parsed = useMemo(() => parseRRule(value, endFacts ?? undefined), [value, endFacts]);
   // Fill start-derived defaults so the monthly/yearly controls always show
   // concrete values; then clamp the interval to 1 when the source can't store
   // one for this frequency (e.g. EWS yearly) so the emitted RRULE stays honest.
@@ -119,7 +131,27 @@ export function RecurrenceSelector({
     return resolved;
   }, [parsed, startDay, caps]);
 
-  const update = (next: ParsedRule) => onChange(buildRRule(next));
+  // A typed end the core gave no spelling for on the series' facts is not
+  // written (D6): the field keeps the end it had and says why, aloud too.
+  const [untilRefused, setUntilRefused] = useState(false);
+  const update = (next: ParsedRule) => {
+    let built: string | null;
+    try {
+      built = buildRRule(next, endFacts ?? undefined);
+    } catch (e) {
+      if (e instanceof UntilNotSpelledError) {
+        setUntilRefused(true);
+        AccessibilityInfo.announceForAccessibility(t('dialogs.event.recurrence.untilUnavailable'));
+        return;
+      }
+      throw e;
+    }
+    setUntilRefused(false);
+    onChange(built);
+  };
+  const untilLabel = clockName
+    ? t('dialogs.event.recurrence.untilLabelWithClock', { clock: clockName })
+    : t('dialogs.event.recurrence.untilLabel');
 
   // Draft text for the interval field so the user can CLEAR it mid-edit —
   // binding straight to `rule.interval` snapped an emptied field back to 1,
@@ -314,14 +346,19 @@ export function RecurrenceSelector({
                 accessibilityElementsHidden
                 importantForAccessibility="no"
               >
-                {t('dialogs.event.recurrence.untilLabel')}
+                {untilLabel}
               </Text>
               <DateTimeFieldButton
-                label={t('dialogs.event.recurrence.untilLabel')}
+                label={untilLabel}
                 mode="date"
                 value={rule.until}
                 onChange={(until) => update({ ...rule, until })}
               />
+              {untilRefused && (
+                <Text style={styles.hint} accessibilityLiveRegion="polite">
+                  {t('dialogs.event.recurrence.untilUnavailable')}
+                </Text>
+              )}
             </View>
           )}
         </>
@@ -374,6 +411,7 @@ const makeStyles = (c: ThemeColors) =>
     group: { gap: 14 },
     field: { gap: 6 },
     label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    hint: { fontSize: 15, color: c.textSecondary },
     input: {
       fontSize: 17,
       color: c.textPrimary,

@@ -1,5 +1,6 @@
 import {
   createsInSteps,
+  endsByDateOf,
   eventWriteErrorMessage,
   eventWriteLeftover,
   organizerOf,
@@ -26,13 +27,15 @@ import { newSeriesRowOf, SeriesNotLoadedError } from '../state/moveActions';
  * into the same calendar does: with its real deletions only and its zone as
  * the source has it (`newSeriesRowOf`, decisions 259, 262). Written from the
  * occurrence, it started there and its COUNT ran on past the series' end.
- * Answers with what it wrote from, so the sentence names that.
+ * Answers with what it wrote from, so the sentence names that. Its end is
+ * settled on its own calendar first (`carriedEnd`, 140a): `steps.source`, or
+ * the target, which is the same calendar.
  */
 export async function duplicateEvent(
   event: CalendarEvent,
   steps: StepWriteOptions = {},
 ): Promise<CalendarEvent> {
-  const source = await newSeriesRowOf(event);
+  const source = await newSeriesRowOf(event, endsByDateOf(steps.source ?? steps.target));
   // A series whose calendar writes a new series' deletions in steps is
   // waited for (decisions 227, 265).
   await (steps.wait ?? writeWithoutWaiting)(

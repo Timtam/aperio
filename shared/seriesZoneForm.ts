@@ -432,14 +432,16 @@ export interface ZoneChoiceResult {
  * on the zone it repeats on, which is the stored one even where this device
  * shows the fields on UTC. Fields that name no instant move as typed, and
  * the core is not asked. Where the core can write no answer, the change is
- * refused and nothing moves.
+ * refused and nothing moves. `series.endsByDate` is whether the series'
+ * stored calendar stores its end as a date (`endsByDateOf`): an end the 105a
+ * guard alone reads as a cut then counts through its own date (140a, D1).
  */
 export function chooseZone(
   form: SeriesZoneForm,
   facts: ZoneFormFacts,
   fields: ClockFields,
   zone: string | null,
-  series: { rrule: string; exceptions: string[] },
+  series: { rrule: string; exceptions: string[]; endsByDate: boolean },
 ): ZoneChoiceResult {
   const next: SeriesZoneForm = { ...form, chosen: zone };
   const clock: FieldClock = { kind: 'series', tzid: zone };
@@ -457,6 +459,7 @@ export function chooseZone(
     exceptions: series.exceptions,
     fromTzid: zoneInEffect(form, facts),
     toTzid: zone,
+    endsByDate: series.endsByDate,
   });
   if (change !== null) {
     const answers = change.asks ? [change.asNow, change.asRule] : [change.asNow];

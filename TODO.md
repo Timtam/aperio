@@ -640,10 +640,14 @@ Siehe DESIGN §4.2.
   eine Woche verrutscht sein.
   🚩 **Microsoft 365: wie Graph das Enddatum zählt** (Toni, 2026-11-21:
   messen, sobald ein Microsoft-Konto zum Testen da ist). Aperio nimmt an, dass
-  Graph es wie Exchange als ganzen Tag auf der Uhr der Serie zählt. Wichtig
-  wird es erst, wenn der Adapter Serienköpfe liest; bis dahin schneidet
-  Aperio keine Microsoft-365-Serie. Dabei auch messen, wie Graph
-  `recurrenceTimeZone` beim Zurücklesen nennt.
+  Graph es wie Exchange als ganzen Tag auf der Uhr der Serie zählt. 107b geht
+  ungemessen hinein (Stufe 12, Teil 3): Graph schreibt das Ende mit
+  `written_end_day` und liest es mit `until_through` zurück. Zu messen: ob
+  Graph `endDate` ganz auf der Uhr der Serie zählt, und ob POST und PATCH in
+  `start.timeZone` und `recurrenceTimeZone` den IANA-Namen oder einen
+  Windows-Namen zurückgeben. Ein Windows-Name behält `…T235959Z`, und
+  `map_event` lehnt ihn schon ab. Wichtig wird es erst ganz, wenn der Adapter
+  Serienköpfe liest; bis dahin schneidet Aperio keine Microsoft-365-Serie.
   🚩 **Microsoft 365: „jeden 2. Sonntag“ wird „jeden 14.“** (gefunden bei
   Stufe 5, älter): `rrule_to_recurrence` kennt beim Schreiben keine relative
   Monats- oder Jahresregel. Abgelehnt wird nur eine Monatsregel mit `BYDAY`
@@ -3606,11 +3610,13 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   ↳ **CalDAV und Google räumen nach einem Schnitt bis zum Ende auf der Uhr
   der Serie auf (116a, 2026-11-22):** über `cal_core::series_end_instant`,
   dieselbe Kern-Regel wie Ansichten und Erinnerungen.
-  Offen, mit Stufe 12 als Ganzes: 107b, das Enddatum von Exchange und
-  Microsoft 365 am toten Winkel von 105a (19:00 in New York) als ganzen Tag
-  lesen und ein Ende, das ein Zeitpunkt ist, als sein Datum schreiben,
-  zusammen mit dem Ende-Feld nach 108b. Zwei Teilbauten scheiterten in der
-  Prüfung (DESIGN, 107b).
+  ↳ gebaut (Teil 3 von Stufe 12, 2026-11-23, 140a bis 142a): 107b, das
+  Enddatum von Exchange und Microsoft 365 am toten Winkel von 105a (19:00 in
+  New York) als ganzen Tag lesen (`until_through`, READ_RULE 7) und als Datum
+  schreiben (`written_end_day`), mit dem Ende-Feld nach 108b auf der Uhr der
+  Serie. Ein Ende, das nur die Schutzregel zum Schnitt macht, wird vor jedem
+  Verschieben und Mitnehmen auf seinem Kalender festgelegt (`carriedEnd`,
+  Manifest `recurrence.ends_by_date`).
   ↳ **Die Auswahl „Zeitzone der Serie“ (Stufe 11, Dialoge, 2026-11-22, 130a bis
   132a):** Desktop und Handy haben den Dialog: Suchfeld „Zeitzone suchen“ mit
   dem ersten Fokus, die Zählzeile, die Liste der Gruppen und Städte mit

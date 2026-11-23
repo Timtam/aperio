@@ -111,3 +111,46 @@ describe('RecurrenceSelector end date', () => {
     expect(dateInput().value).toBe('2026-11-04');
   });
 });
+
+// Stage 12, part 3: a stored series' end field reads and writes its day on the
+// series' clock (DESIGN-series-time-zone.md, 140a-142a), and says which clock.
+describe("RecurrenceSelector end on a stored series' clock", () => {
+  const NY = {
+    start: '2026-11-03T00:00:00Z',
+    allDay: false,
+    tzid: 'America/New_York',
+    deviceZone: 'Europe/Berlin',
+  };
+  const NO_START = { ...NY, start: '' };
+  const VALUE = 'FREQ=DAILY;UNTIL=20261111T045959Z';
+
+  it('names the clock and shows the day the end reaches there', () => {
+    render(
+      <RecurrenceSelector value={VALUE} onChange={vi.fn()} startDay="2026-11-02" endFacts={NY} clockName="New York" />,
+    );
+    const input = screen.getByLabelText('Ende-Datum (New York)') as HTMLInputElement;
+    expect(input.value).toBe('2026-11-10');
+  });
+
+  it('keeps the plain label where the fields stand on the device clock', () => {
+    render(<RecurrenceSelector value={VALUE} onChange={vi.fn()} startDay="2026-11-02" endFacts={NY} />);
+    expect((screen.getByLabelText('Ende-Datum') as HTMLInputElement).value).toBe('2026-11-10');
+  });
+
+  it("spells a typed day on the series' clock", () => {
+    const onChange = vi.fn();
+    render(
+      <RecurrenceSelector value={VALUE} onChange={onChange} startDay="2026-11-02" endFacts={NY} clockName="New York" />,
+    );
+    fireEvent.change(screen.getByLabelText('Ende-Datum (New York)'), { target: { value: '2026-11-12' } });
+    expect(onChange).toHaveBeenLastCalledWith('FREQ=DAILY;UNTIL=20261113T045959Z');
+  });
+
+  it('writes nothing and says so where the day cannot be spelled (D6)', () => {
+    const onChange = vi.fn();
+    render(<RecurrenceSelector value={VALUE} onChange={onChange} startDay="2026-11-02" endFacts={NO_START} />);
+    fireEvent.change(screen.getByLabelText('Ende-Datum'), { target: { value: '2026-11-12' } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText(/^Das Ende-Datum lässt sich auf diesem Gerät nicht schreiben\. /)).toBeTruthy();
+  });
+});

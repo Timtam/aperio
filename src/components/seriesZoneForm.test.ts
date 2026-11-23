@@ -201,6 +201,7 @@ describe('a zone this device cannot use', () => {
     const result = chooseZone(form, facts(), fields, 'Europe/Helsinki', {
       rrule: 'FREQ=WEEKLY;BYDAY=MO',
       exceptions: [],
+      endsByDate: false,
     });
     expect(result.change).toMatchObject({ asks: false, startDayBefore: '2026-11-02', startDayAfter: '2026-11-02' });
   });
@@ -214,7 +215,7 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
       start: { date: '2026-09-14', time: '09:00', at: null },
       end: { date: '2026-09-14', time: '10:00', at: null },
     };
-    const result = chooseZone(form, facts(), fields, 'America/New_York', { rrule: 'FREQ=WEEKLY', exceptions: [] });
+    const result = chooseZone(form, facts(), fields, 'America/New_York', { rrule: 'FREQ=WEEKLY', exceptions: [], endsByDate: false });
     expect(result.change).toBeNull();
     expect(result.form.chosen).toBe('America/New_York');
     expect(result.fields).toEqual({
@@ -228,7 +229,7 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
     // A series that lost its Berlin zone: Mondays from Sunday 23:30 UTC.
     const form = openZoneForm('series', null, false);
     const fields = fieldsAt('2026-11-01T23:30:00Z', '2026-11-02T00:30:00Z', { kind: 'series', tzid: null });
-    const result = chooseZone(form, facts(), fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [] });
+    const result = chooseZone(form, facts(), fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [], endsByDate: false });
     expect(result.fields.start).toEqual({ date: '2026-11-02', time: '00:30', at: '2026-11-01T23:30:00Z' });
     expect(result.change).toMatchObject({ asks: true, fit: 'after' });
     // As the rule says, the start stays where it is: the fields do not move.
@@ -241,7 +242,7 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
     // Berlin, a day earlier.
     const form = openZoneForm('series', null, false);
     const fields = fieldsAt('2026-11-01T23:30:00Z', '2026-11-02T00:30:00Z', { kind: 'series', tzid: null });
-    const result = chooseZone(form, facts(), fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=SU', exceptions: [] });
+    const result = chooseZone(form, facts(), fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=SU', exceptions: [], endsByDate: false });
     expect(result.change?.asks).toBe(false);
     const applied = applyClockChange(result.fields, result.change!.asRule)!;
     expect(applied.fields.start).toMatchObject({ date: '2026-11-01', time: '00:30' });
@@ -251,7 +252,7 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
   it('hands on the exceptions the answer moved, for the save', () => {
     const form = openZoneForm('series', 'Europe/Berlin', false);
     const fields = fieldsAt('2026-11-02T08:00:00Z', '2026-11-02T09:00:00Z', { kind: 'series', tzid: 'Europe/Berlin' });
-    const series = { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE', exceptions: ['2027-03-17T08:00:00Z'] };
+    const series = { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE', exceptions: ['2027-03-17T08:00:00Z'], endsByDate: false };
     const result = chooseZone(form, facts(), fields, 'America/New_York', series);
     const applied = applyClockChange(result.fields, result.change!.asNow)!;
     expect(applied.exceptions).toEqual(['2027-03-17T07:00:00Z']);
@@ -265,10 +266,32 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
   it('refuses a change no answer can write, and leaves the zone and the fields', () => {
     const form = openZoneForm('series', 'Europe/Berlin', false);
     const fields = fieldsAt('2026-11-02T08:00:00Z', '2026-11-02T09:00:00Z', { kind: 'series', tzid: 'Europe/Berlin' });
-    const result = chooseZone(form, facts(), fields, 'America/New_York', { rrule: 'FREQ=DAILY;BYHOUR=9', exceptions: [] });
+    const result = chooseZone(form, facts(), fields, 'America/New_York', { rrule: 'FREQ=DAILY;BYHOUR=9', exceptions: [], endsByDate: false });
     expect(result.refused).toBe('time_of_day');
     expect(result.form).toBe(form);
     expect(result.fields).toBe(fields);
+  });
+
+  it("counts a legacy end at New York's blind spot by its calendar (140a, D1)", () => {
+    // Daily 19:00 New York through `20261110T235959Z`: the 105a guard reads
+    // a cut before 10 November. On a calendar that stores the end as a date it
+    // ends on 10 November itself, and the end moves to Chicago so.
+    const form = openZoneForm('series', 'America/New_York', false);
+    const fields = fieldsAt('2026-11-03T00:00:00Z', '2026-11-03T01:00:00Z', {
+      kind: 'series',
+      tzid: 'America/New_York',
+    });
+    const rule = (endsByDate: boolean) => {
+      const result = chooseZone(form, facts(), fields, 'America/Chicago', {
+        rrule: 'FREQ=DAILY;UNTIL=20261110T235959Z',
+        exceptions: [],
+        endsByDate,
+      });
+      const answer = result.change?.asNow;
+      return answer?.outcome === 'changed' ? answer.rrule : null;
+    };
+    expect(rule(true)).toMatch(/UNTIL=20261111T055959Z$/);
+    expect(rule(false)).toMatch(/UNTIL=20261110T055959Z$/);
   });
 
   it('does not ask the core for fields carried as typed', () => {
@@ -278,7 +301,7 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
       'endTime',
       '',
     );
-    const result = chooseZone(form, facts(), fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=SU', exceptions: [] });
+    const result = chooseZone(form, facts(), fields, 'Europe/Berlin', { rrule: 'FREQ=WEEKLY;BYDAY=SU', exceptions: [], endsByDate: false });
     expect(result.change).toBeNull();
     expect(result.fields.start).toMatchObject({ date: '2026-11-01', time: '23:30', carried: true });
   });

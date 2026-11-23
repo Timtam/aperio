@@ -21,6 +21,7 @@ import {
   movedTailRule,
   tailRecurrenceFor,
   TailShiftRefusedError,
+  seriesEndOf,
   seriesFromCut,
   seriesMaybeShownTwice,
   seriesTailMayStand,
@@ -485,7 +486,7 @@ describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', 
   });
 
   it('carries the deleted occurrences as spelled, and brings a changed one back at its time', () => {
-    expect(newSeriesRecurrence(exchange, [changed])).toEqual({
+    expect(newSeriesRecurrence(exchange, [changed], false)).toEqual({
       ...exchange.recurrence,
       exceptions: ['2026-08-10T08:00:00Z', '2026-09-07T08:00:00Z'],
     });
@@ -494,7 +495,7 @@ describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', 
   it("carries an occurrence Google keeps deleted as a cancelled row, and no other series' rows", () => {
     const cancelled = rowOf('2026-08-24T08:00:00Z', undefined, { cancelled: true });
     const elsewhere = rowOf('2026-08-31T08:00:00Z', undefined, { cancelled: true }, 'ev-2');
-    expect(newSeriesRecurrence(weekly, [cancelled, elsewhere])?.exceptions).toEqual([
+    expect(newSeriesRecurrence(weekly, [cancelled, elsewhere], false)?.exceptions).toEqual([
       '2026-08-24T08:00:00.000Z',
     ]);
   });
@@ -504,7 +505,7 @@ describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', 
       ...weekly,
       recurrence: { ...weekly.recurrence, exceptions: ['2026-08-12T08:00:00Z'] },
     };
-    expect(newSeriesRecurrence(stray, [])?.exceptions).toEqual(['2026-08-12T08:00:00Z']);
+    expect(newSeriesRecurrence(stray, [], false)?.exceptions).toEqual(['2026-08-12T08:00:00Z']);
   });
 
   it('keeps every deletion of a rule the expander cannot read', () => {
@@ -517,7 +518,7 @@ describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', 
         exceptions: ['2026-08-10T08:00:00Z', '2026-08-17T08:00:00Z'],
       },
     };
-    expect(newSeriesRecurrence(unread, [])?.exceptions).toEqual([
+    expect(newSeriesRecurrence(unread, [], false)?.exceptions).toEqual([
       '2026-08-10T08:00:00Z',
       '2026-08-17T08:00:00Z',
     ]);
@@ -533,7 +534,7 @@ describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', 
       },
     };
     const before = rowOf('2026-07-27T08:00:00Z');
-    expect(newSeriesRecurrence(deletedFirst, [before])?.exceptions).toEqual([
+    expect(newSeriesRecurrence(deletedFirst, [before], false)?.exceptions).toEqual([
       '2026-08-03T08:00:00Z',
       '2026-08-10T08:00:00Z',
     ]);
@@ -549,7 +550,7 @@ describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', 
         exceptions: ['2026-08-03T08:00:00Z', '2026-08-12T08:00:00Z'],
       },
     };
-    expect(newSeriesRecurrence(offRule, [])?.exceptions).toEqual([
+    expect(newSeriesRecurrence(offRule, [], false)?.exceptions).toEqual([
       '2026-08-03T08:00:00Z',
       '2026-08-12T08:00:00Z',
     ]);
@@ -564,14 +565,14 @@ describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', 
         tzid: 'Europe/Berlin',
       },
     };
-    const written = newSeriesRecurrence(zoned, [changed]);
+    const written = newSeriesRecurrence(zoned, [changed], false);
     expect(written?.rrule).toBe('RRULE:FREQ=WEEKLY;COUNT=10');
     expect(written?.tzid).toBe('Europe/Berlin');
   });
 
   it('leaves an appointment without a rule as it is', () => {
     const single = { ...weekly, recurrence: null };
-    expect(newSeriesRecurrence(single, [])).toBeNull();
+    expect(newSeriesRecurrence(single, [], false)).toBeNull();
   });
 
   it('refuses an occurrence in place of the series, before anything is written', () => {
@@ -581,9 +582,9 @@ describe('newSeriesRecurrence: a whole series written as a new one (224, 259)', 
       series_id: 'ev-1',
       occurrence_start: '2026-08-24T08:00:00.000Z',
     };
-    expect(() => newSeriesRecurrence(occurrence, [changed])).toThrow();
+    expect(() => newSeriesRecurrence(occurrence, [changed], false)).toThrow();
     const override = { ...exchange, id: 'ev-1::rid::2026-08-17T08:00:00Z' };
-    expect(() => newSeriesRecurrence(override, [changed])).toThrow();
+    expect(() => newSeriesRecurrence(override, [changed], false)).toThrow();
   });
 
   it('asNewSeries keeps no exception for a row: the new series owns none', () => {
@@ -1169,6 +1170,7 @@ describe('carrying a future edit to another copy', () => {
       };
     }
     const tailRecurrence = tailRecurrenceFor({
+      endsByDate: false,
       master: current,
       cutoffIso: anchorIso,
       plan,
@@ -1441,6 +1443,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     const master = deleting(mondays, ['2026-08-24T08:00:00.000Z']);
     const plan = planSeriesSplit(master, '2026-08-10T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master,
       cutoffIso: '2026-08-10T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1462,6 +1465,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     };
     const plan = planSeriesSplit(daily, '2026-08-24T18:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: daily,
       cutoffIso: '2026-08-24T18:00:00.000Z',
       plan: cutOf(plan),
@@ -1482,6 +1486,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     const plan = planSeriesSplit(allDay, midnight(24), []);
     const nineOn = (day: number) => new Date(2026, 7, day, 9).toISOString();
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: allDay,
       cutoffIso: midnight(24),
       plan: cutOf(plan),
@@ -1497,6 +1502,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     const master = deleting(mondays, ['2026-08-24T08:00:00.000Z']);
     const plan = planSeriesSplit(master, '2026-08-10T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master,
       cutoffIso: '2026-08-10T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1513,6 +1519,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     const master = deleting(mondays, ['2026-08-24T08:00:00.000Z']);
     const plan = planSeriesSplit(master, '2026-08-10T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master,
       cutoffIso: '2026-08-10T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1528,6 +1535,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     const master = deleting(mondays, ['2026-08-17T08:00:00.000Z', '2026-08-24T08:00:00.000Z']);
     const plan = planSeriesSplit(master, '2026-08-10T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master,
       cutoffIso: '2026-08-10T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1548,6 +1556,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     };
     const plan = planSeriesSplit(named, '2026-08-10T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: named,
       cutoffIso: '2026-08-10T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1565,6 +1574,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     };
     const plan = planSeriesSplit(daily, '2026-01-10T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: daily,
       cutoffIso: '2026-01-10T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1588,6 +1598,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     expect(plan.deleted).toEqual(['2026-08-10T08:00:00Z']);
     expect(plan.standing).toEqual(['2026-08-17T08:00:00Z']);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master,
       cutoffIso: master.start,
       plan,
@@ -1600,6 +1611,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     const plan = planSeriesSplit(mondays, '2026-08-10T08:00:00.000Z', []);
     expect(
       tailRecurrenceFor({
+        endsByDate: false,
         master: mondays,
         cutoffIso: '2026-08-10T08:00:00.000Z',
         plan: cutOf(plan),
@@ -1616,6 +1628,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     const plan = planSeriesSplit(mondays, '2026-08-10T08:00:00.000Z', []);
     expect(
       tailRecurrenceFor({
+        endsByDate: false,
         master: mondays,
         cutoffIso: '2026-08-10T08:00:00.000Z',
         plan: cutOf(plan),
@@ -1638,6 +1651,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     };
     const plan = planSeriesSplit(weekdays, '2026-08-24T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: weekdays,
       cutoffIso: '2026-08-24T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1654,6 +1668,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
     );
     const plan = planSeriesSplit(counted, '2026-08-10T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: counted,
       cutoffIso: '2026-08-10T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1686,6 +1701,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
       const plan = planSeriesSplit(inNewYork, '2026-08-10T08:00:00.000Z', []);
       const tail = inBerlin(() =>
         tailRecurrenceFor({
+          endsByDate: false,
           master: inNewYork,
           cutoffIso: '2026-08-10T08:00:00.000Z',
           plan: cutOf(plan),
@@ -1699,6 +1715,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
       const plan = planSeriesSplit(inNewYork, '2026-08-10T08:00:00.000Z', []);
       const tail = inBerlin(() =>
         tailRecurrenceFor({
+          endsByDate: false,
           master: inNewYork,
           cutoffIso: '2026-08-10T08:00:00.000Z',
           plan: cutOf(plan),
@@ -1725,6 +1742,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
       const tail = inBerlin(() => {
         const plan = planSeriesSplit(newYorkEvenings, '2026-08-31T23:00:00.000Z', []);
         return tailRecurrenceFor({
+          endsByDate: false,
           master: newYorkEvenings,
           cutoffIso: '2026-08-31T23:00:00.000Z',
           plan: cutOf(plan),
@@ -1745,6 +1763,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
       const tail = inBerlin(() => {
         const plan = planSeriesSplit(allDay, '2026-08-09T22:00:00.000Z', []);
         return tailRecurrenceFor({
+          endsByDate: false,
           master: allDay,
           cutoffIso: '2026-08-09T22:00:00.000Z',
           plan: cutOf(plan),
@@ -1777,6 +1796,7 @@ describe('tailRecurrenceFor: deleted occurrences follow the edit (152, 188, 189)
         onDevice('Asia/Calcutta', () => {
           const plan = planSeriesSplit(allDay, '2026-08-09T22:00:00.000Z', []);
           return tailRecurrenceFor({
+            endsByDate: false,
             master: allDay,
             cutoffIso: '2026-08-09T22:00:00.000Z',
             plan: cutOf(plan),
@@ -1805,6 +1825,7 @@ describe('tailRecurrenceFor: the rule moves with a new date (189, 192-194)', () 
   it('moves "every Monday" to Tuesday, and its deletions by their place', () => {
     const plan = planSeriesSplit(named, '2026-08-10T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: named,
       cutoffIso: '2026-08-10T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1826,6 +1847,7 @@ describe('tailRecurrenceFor: the rule moves with a new date (189, 192-194)', () 
     };
     const plan = planSeriesSplit(until, '2026-08-24T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: until,
       cutoffIso: '2026-08-24T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1850,6 +1872,7 @@ describe('tailRecurrenceFor: the rule moves with a new date (189, 192-194)', () 
     let thrown: unknown;
     try {
       tailRecurrenceFor({
+        endsByDate: false,
         master: second,
         cutoffIso: '2026-09-08T08:00:00.000Z',
         plan: cutOf(plan),
@@ -1866,6 +1889,7 @@ describe('tailRecurrenceFor: the rule moves with a new date (189, 192-194)', () 
   it('writes a rule the user set as it is, whatever the date did', () => {
     const plan = planSeriesSplit(named, '2026-08-10T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: named,
       cutoffIso: '2026-08-10T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1880,6 +1904,7 @@ describe('tailRecurrenceFor: the rule moves with a new date (189, 192-194)', () 
   it('moves nothing without the start the edit is read against', () => {
     const plan = planSeriesSplit(named, '2026-08-10T08:00:00.000Z', []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: named,
       cutoffIso: '2026-08-10T08:00:00.000Z',
       plan: cutOf(plan),
@@ -1905,6 +1930,7 @@ describe('tailRecurrenceFor: a whole series moved from its own start (198)', () 
     };
     const plan = planSeriesSplit(offRule, offRule.start, []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: offRule,
       cutoffIso: offRule.start,
       plan: wholeOf(plan),
@@ -1929,6 +1955,7 @@ describe('tailRecurrenceFor: a whole series moved from its own start (198)', () 
     };
     const plan = planSeriesSplit(first, first.start, []);
     const tail = tailRecurrenceFor({
+      endsByDate: false,
       master: first,
       cutoffIso: first.start,
       plan: wholeOf(plan),
@@ -1943,7 +1970,7 @@ describe('tailRecurrenceFor: a whole series moved from its own start (198)', () 
 describe('movedTailRule (189, 192-194)', () => {
   /** An instant of 2026 on UTC, the clock of a series without a zone. */
   const at = (day: string, time = '09:00') => `2026-${day}T${time}:00.000Z`;
-  const utc = { tzid: null, all_day: false };
+  const utc = { tzid: null, all_day: false, endsByDate: false };
   const moved = (
     rrule: string,
     from: string,
@@ -1998,6 +2025,7 @@ describe('movedTailRule (189, 192-194)', () => {
       moved('FREQ=DAILY;UNTIL=20260831', midnight(24), midnight(24), midnight(25), {
         tzid: null,
         all_day: true,
+        endsByDate: false,
       }),
     ).toEqual(shifted('FREQ=DAILY;UNTIL=20260901'));
   });
@@ -2011,6 +2039,7 @@ describe('movedTailRule (189, 192-194)', () => {
       moved('FREQ=MONTHLY;UNTIL=20261025', midnight(9, 25), midnight(9, 25), midnight(10, 2), {
         tzid: null,
         all_day: true,
+        endsByDate: false,
       }),
     ).toEqual(shifted('FREQ=MONTHLY;UNTIL=20261102'));
   });
@@ -2024,7 +2053,7 @@ describe('movedTailRule (189, 192-194)', () => {
     expect(
       movedTailRule({
         rrule: 'FREQ=DAILY;UNTIL=20260831',
-        series: { tzid: null, all_day: true },
+        series: { tzid: null, all_day: true, endsByDate: false },
         from: midnight(26),
         opened: midnight(26),
         tail: { start: evening(8, 27).toISOString(), all_day: false },
@@ -2039,7 +2068,7 @@ describe('movedTailRule (189, 192-194)', () => {
     expect(
       movedTailRule({
         rrule: 'FREQ=DAILY;UNTIL=20260831',
-        series: { tzid: null, all_day: true },
+        series: { tzid: null, all_day: true, endsByDate: false },
         from: new Date(2026, 7, 31).toISOString(),
         opened: new Date(2026, 7, 31).toISOString(),
         tail: { start: at31.toISOString(), all_day: false },
@@ -2056,7 +2085,7 @@ describe('movedTailRule (189, 192-194)', () => {
     expect(
       movedTailRule({
         rrule: 'FREQ=DAILY;UNTIL=20401231',
-        series: { tzid: null, all_day: true },
+        series: { tzid: null, all_day: true, endsByDate: false },
         from: new Date(2026, 9, 5).toISOString(),
         opened: new Date(2026, 9, 5).toISOString(),
         tail: { start: evening(2026, 10, 5).toISOString(), all_day: false },
@@ -2073,7 +2102,7 @@ describe('movedTailRule (189, 192-194)', () => {
     expect(
       movedTailRule({
         rrule: 'FREQ=WEEKLY;BYDAY=MO;UNTIL=20261230',
-        series: { tzid: null, all_day: true },
+        series: { tzid: null, all_day: true, endsByDate: false },
         from: at(5).toISOString(),
         opened: at(5).toISOString(),
         tail: { start: at(5, 9).toISOString(), all_day: false },
@@ -2130,7 +2159,7 @@ describe('movedTailRule (189, 192-194)', () => {
     // Monday 20:00 in New York is 00:00 UTC on Tuesday. Moved to 02:00 New
     // York the next morning, the series' day is Tuesday; moved to 23:00 the
     // same evening, it is still Monday.
-    const newYork = { tzid: 'America/New_York', all_day: false };
+    const newYork = { tzid: 'America/New_York', all_day: false, endsByDate: false };
     const mondayEvening = '2026-08-25T00:00:00.000Z';
     expect(
       moved('FREQ=WEEKLY;BYDAY=MO', mondayEvening, mondayEvening, '2026-08-25T06:00:00.000Z', newYork),
@@ -2213,5 +2242,92 @@ describe('the slot rule, asked once per series', () => {
         seriesClockChangeJson,
       });
     }
+  });
+});
+
+// Stage 12, part 3 (DESIGN-series-time-zone.md, 140a, D1, D4): a legacy end
+// `…T235959Z` at New York's blind spot (19:00 in winter, 00:00 UTC) reads as a
+// cut only through the 105a guard. It is settled on its own calendar before it
+// is moved or carried: through its own date where the calendar stores the end
+// as a date, else as the 106a cut that keeps 105a's reading.
+describe('a legacy end at the blind spot is settled on its calendar first', () => {
+  const NY = 'America/New_York';
+  const legacy = 'FREQ=DAILY;UNTIL=20261110T235959Z';
+  const at1800 = (start: string) => ({ start, allDay: false, tzid: NY });
+  const move = (rrule: string, endsByDate: boolean, from: string, start: string) =>
+    movedTailRule({
+      rrule,
+      series: { tzid: NY, all_day: false, endsByDate },
+      from,
+      opened: from,
+      tail: { start, all_day: false },
+    });
+  const ruleOf = (moved: ReturnType<typeof movedTailRule>) => {
+    expect(moved.outcome).toBe('shifted');
+    return moved.outcome === 'shifted' ? moved.rrule : '';
+  };
+
+  it('movedTailRule of a legacy end at 19:00 New York keeps the real last day on an ends-by-date calendar', () => {
+    const rrule = ruleOf(move(legacy, true, '2026-11-03T00:00:00Z', '2026-11-02T23:00:00Z'));
+    expect(rrule).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+    const end = seriesEndOf(rrule, at1800('2026-11-02T23:00:00Z'), null);
+    expect(end?.endDay).toBe('2026-11-10');
+    expect(end?.endDay).not.toBe('2026-11-09');
+  });
+
+  it('keeps that day for "this and all following" moved to 18:00', () => {
+    const rrule = ruleOf(move(legacy, true, '2026-11-06T00:00:00Z', '2026-11-05T23:00:00Z'));
+    expect(seriesEndOf(rrule, at1800('2026-11-05T23:00:00Z'), null)?.endDay).toBe('2026-11-10');
+  });
+
+  it('keeps the cut 105a reads on any other calendar, and gains no day', () => {
+    const rrule = ruleOf(move(legacy, false, '2026-11-03T00:00:00Z', '2026-11-02T23:00:00Z'));
+    expect(rrule).toBe('FREQ=DAILY;UNTIL=20261110T225958Z');
+    expect(seriesEndOf(rrule, at1800('2026-11-02T23:00:00Z'), null)?.endDay).toBe('2026-11-09');
+  });
+
+  it('moves a canonical end with its day', () => {
+    const rrule = ruleOf(move('FREQ=DAILY;UNTIL=20261111T045959Z', false, '2026-11-03T00:00:00Z', '2026-11-02T23:00:00Z'));
+    expect(seriesEndOf(rrule, at1800('2026-11-02T23:00:00Z'), null)?.endDay).toBe('2026-11-10');
+  });
+
+  it('gives the legacy text back where nothing moved', () => {
+    expect(ruleOf(move(legacy, true, '2026-11-03T00:00:00Z', '2026-11-03T00:00:00Z'))).toBe(legacy);
+  });
+
+  const legacyRow = {
+    id: 'ny-1900',
+    start: '2026-11-03T00:00:00.000Z',
+    end: '2026-11-03T01:00:00.000Z',
+    all_day: false,
+    recurrence: { rrule: legacy, exceptions: ['2026-11-05T00:00:00Z'], tzid: NY as string | null },
+  };
+
+  it("settles the split remainder on the master's calendar", () => {
+    const cutoffIso = '2026-11-07T00:00:00.000Z';
+    const plan = cutOf(planSeriesSplit(legacyRow, cutoffIso, []));
+    const tail = (endsByDate: boolean) =>
+      tailRecurrenceFor({
+        endsByDate,
+        master: legacyRow,
+        cutoffIso,
+        plan,
+        tail: { start: cutoffIso, all_day: false },
+      })?.rrule;
+    expect(tail(true)).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+    expect(tail(false)).toBe('FREQ=DAILY;UNTIL=20261110T235958Z');
+  });
+
+  it('settles a whole series carried as a new one on the calendar it comes from', () => {
+    expect(newSeriesRecurrence(legacyRow, [], true)).toEqual({
+      ...legacyRow.recurrence,
+      rrule: 'FREQ=DAILY;UNTIL=20261111T045959Z',
+      exceptions: ['2026-11-05T00:00:00Z'],
+    });
+    expect(newSeriesRecurrence(legacyRow, [], false)).toEqual({
+      ...legacyRow.recurrence,
+      rrule: 'FREQ=DAILY;UNTIL=20261110T235958Z',
+      exceptions: ['2026-11-05T00:00:00Z'],
+    });
   });
 });

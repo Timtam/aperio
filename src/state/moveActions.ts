@@ -7,6 +7,8 @@ import { differenceInCalendarDays } from 'date-fns';
 
 import {
   afterLanded,
+  carriedEnd,
+  endsByDateOf,
   invitationLocked,
   moveSeriesInstant,
   movedSeriesUntil,
@@ -22,6 +24,7 @@ import {
   createsInSteps,
   removeOriginalAfterCopy,
   writeWithoutWaiting,
+  type EndsByDateCalendar,
   type StepWriteOptions,
 } from '@aperio/shared';
 
@@ -282,13 +285,16 @@ export async function moveTaskToBacklog(task: Task): Promise<Task> {
  *
  * Returns the moved row: where its original could not be deleted, it carries
  * `original_left_in` (decision 277), for the surface to say.
+ *
+ * `steps.source` is the calendar the series is moved from: its end is settled
+ * on that calendar's facts before it goes (`carriedEnd`, 140a).
  */
 export async function moveEventToCalendar(
   event: CalendarEvent,
   targetCalendarId: string,
   steps: StepWriteOptions = {},
 ): Promise<CalendarEvent> {
-  const series = await newSeriesRowOf(event);
+  const series = await newSeriesRowOf(event, endsByDateOf(steps.source));
   // The other calendar creates the series anew: in steps where it writes its
   // deletions so (decisions 227, 265).
   return (steps.wait ?? writeWithoutWaiting)(
@@ -304,8 +310,12 @@ export async function moveEventToCalendar(
  * (`newSeriesRecurrence`). An occurrence changed elsewhere is no deletion: the
  * new series shows it at its usual time. A single event is itself. A read that
  * fails is a series that could not be loaded, and nothing is written.
+ *
+ * `endsByDate` is whether the calendar the series is read from stores its end
+ * as a date (`endsByDateOf`): its end is settled on that before it is written
+ * anywhere (`carriedEnd`, 140a, D1).
  */
-export async function newSeriesRowOf(event: CalendarEvent): Promise<CalendarEvent> {
+export async function newSeriesRowOf(event: CalendarEvent, endsByDate: boolean): Promise<CalendarEvent> {
   const series = await seriesRowOf(event);
   if (!series.recurrence?.rrule) return series;
   let rows: CalendarEvent[];
@@ -314,7 +324,7 @@ export async function newSeriesRowOf(event: CalendarEvent): Promise<CalendarEven
   } catch {
     throw new SeriesNotLoadedError(series.id);
   }
-  return { ...series, recurrence: newSeriesRecurrence(series, rows) };
+  return { ...series, recurrence: newSeriesRecurrence(series, rows, endsByDate) };
 }
 
 /** The row that stands for the whole series `event` belongs to: `event` itself
@@ -369,7 +379,7 @@ export async function moveOrCopyEvent(
     return moveEventToCalendar(event, targetCalendarId, steps);
   }
 
-  const source = asOccurrence ? event : await newSeriesRowOf(event);
+  const source = asOccurrence ? event : await newSeriesRowOf(event, endsByDateOf(steps.source));
   const created = await (steps.wait ?? writeWithoutWaiting)(
     !asOccurrence && createsInSteps(steps.target, source.recurrence),
     () =>
@@ -450,6 +460,10 @@ export interface MoveOptions {
    *  whole series' write goes out with `accepts_exception_loss`, on that one
    *  write only. */
   acceptsLoss?: boolean;
+  /** The calendar the series is stored in: where it stores a series' end as
+   *  a date, an end the 105a guard alone reads as a cut moves as the end of
+   *  its own date (`carriedEnd`, 140a). Not found, the 105a reading. */
+  calendar?: EndsByDateCalendar | null;
 }
 
 /**
@@ -671,7 +685,7 @@ async function moveSeries(
   dropped: string,
   delta: number,
   minute: number | null,
-  { onSeriesSaved, acceptsLoss }: MoveOptions,
+  { onSeriesSaved, acceptsLoss, calendar }: MoveOptions,
 ): Promise<boolean> {
   const seriesId = seriesIdOf(event);
   const master =
@@ -716,12 +730,18 @@ async function moveSeries(
   }
   if (Date.parse(start) === Date.parse(master.start)) return false;
 
-  const answer = shiftSeriesRule(
+  // The end settled on its own calendar first, so it moves as one end (D4).
+  const rrule = carriedEnd(
     recurrence.rrule,
+    { start: master.start, allDay, tzid: tzid ?? null },
+    endsByDateOf(calendar),
+  );
+  const answer = shiftSeriesRule(
+    rrule,
     seriesDayKey(master.start, tzid, allDay),
     days,
     timeChanges,
-    movedSeriesUntil(recurrence.rrule, tzid, allDay, master.start, start),
+    movedSeriesUntil(rrule, tzid, allDay, master.start, start),
   );
   if (answer.outcome === 'refused') {
     throw new SeriesShiftRefusedError(answer.reason);

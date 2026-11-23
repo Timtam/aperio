@@ -308,6 +308,7 @@ export function AgendaView() {
             void duplicateEvent(ev, {
               wait: stepWriteWait((err) => duplicateFailedSentence(err, ev.title, t)),
               target: calendars.find((c) => c.id === ev.calendar_id),
+              source: calendars.find((c) => c.id === ev.calendar_id),
             })
               .then(
                 (source) => {

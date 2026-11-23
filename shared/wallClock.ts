@@ -5,11 +5,13 @@
 // stored name names, or UTC. The core turns a date and a time of day into an
 // instant and back with the tzdata the adapters write with: a time the clock
 // skips (the spring gap) has no instant and says so, a time it shows twice
-// (the autumn fold) takes the earlier reading, a changed repeat end is
-// 23:59:59 of its date on the clock, and a stored one reads through a date or
-// as an instant (`seriesEnd`). The desktop asks through its WebAssembly
-// module, which carries the zones; the phone through its native core. Both
-// answer synchronously, so a form can ask while it renders.
+// (the autumn fold) takes the earlier reading, and a stored repeat end reads
+// through a date or as an instant (`seriesEnd`). Every end Aperio writes is
+// spelled here too: "through day D" (`untilThrough`) and "just before this
+// occurrence" (`cutBefore`), so no end Aperio writes needs the 105a guard to
+// be read right (DESIGN-series-time-zone.md, 142a). The desktop asks through
+// its WebAssembly module, which carries the zones; the phone through its
+// native core. Both answer synchronously, so a form can ask while it renders.
 //
 // Pinned by `crates/cal-core/tests/fixtures/wallClock.json`;
 // `wallClock.contract.test.ts` replays it through this door, and the core and
@@ -87,4 +89,31 @@ export function seriesEnd(
   deviceZone: string | null,
 ): WallClockAnswer | null {
   return askWallClock({ op: 'seriesEnd', rrule, start, allDay, tzid, deviceZone });
+}
+
+/**
+ * The `UNTIL` that ends a series through `date` on its clock
+ * (`cal_core::until_through`): `DT235959Z` where that reads through the date
+ * on these facts, else the date's last instant on the series' clock, as `at`.
+ * No reader needs the 105a guard to read it. `null` for text that names no
+ * date or instant.
+ */
+export function untilThrough(
+  date: string,
+  rrule: string,
+  start: string,
+  allDay: boolean,
+  tzid: string | null,
+): WallClockAnswer | null {
+  return askWallClock({ op: 'untilThrough', date, rrule, start, allDay, tzid });
+}
+
+/**
+ * The `UNTIL` that ends a series just before the occurrence at `at`
+ * (`cal_core::cut_before`, 106a): one second before it, two where one would
+ * spell `…T235959Z`, except in a rule that repeats by the second. `null` for
+ * text that names no instant.
+ */
+export function cutBefore(at: string, rrule: string): WallClockAnswer | null {
+  return askWallClock({ op: 'cutBefore', at, rrule });
 }

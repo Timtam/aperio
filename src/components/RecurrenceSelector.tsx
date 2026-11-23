@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_RECURRENCE_CAPABILITIES } from '@aperio/shared';
 
+import { FocusableNote } from '../a11y/FocusableNote';
 import type { RecurrenceCapabilities, RecurrenceFreq } from '../api/types';
 import {
   buildRRule,
@@ -11,9 +12,10 @@ import {
   parseRRule,
   recurrenceStartDate,
   resolveAgainstDay,
+  UntilNotSpelledError,
   withEndMode,
 } from './rrule';
-import type { EndMode, Freq, MonthlyOption, ParsedRule } from './rrule';
+import type { EndMode, FieldEndFacts, Freq, MonthlyOption, ParsedRule } from './rrule';
 
 /**
  * Recurrence editor for the event dialog.
@@ -52,6 +54,14 @@ export interface RecurrenceSelectorProps {
    *  Absent → full RFC-5545 support (the local store + most
    *  adapters). */
   capabilities?: RecurrenceCapabilities;
+  /** For a STORED series' rule only: the facts its end field reads and
+   *  writes its day on, the series' clock (DESIGN-series-time-zone.md,
+   *  stage 12, part 3). Absent, a typed end stays the day it names,
+   *  `{D}T235959Z`, which the save spells (`settledEnd`). */
+  endFacts?: FieldEndFacts | null;
+  /** The name of the clock the form's fields stand on (`fieldClockName`),
+   *  for the end field's label; `null` where it is the device's own. */
+  clockName?: string | null;
 }
 
 /** Lowercase the selector's `Freq` to the wire `RecurrenceFreq`.
@@ -85,6 +95,8 @@ export function RecurrenceSelector({
   onChange,
   startDay: startDayProp,
   capabilities,
+  endFacts,
+  clockName,
 }: RecurrenceSelectorProps) {
   const { t, i18n } = useTranslation();
   const caps = capabilities ?? DEFAULT_RECURRENCE_CAPABILITIES;
@@ -99,7 +111,7 @@ export function RecurrenceSelector({
     [startDayProp],
   );
   const startDate = useMemo(() => recurrenceStartDate(startDay), [startDay]);
-  const parsed = useMemo(() => parseRRule(value), [value]);
+  const parsed = useMemo(() => parseRRule(value, endFacts ?? undefined), [value, endFacts]);
   // Resolve start-derived defaults so the monthly/yearly controls
   // always have concrete values to show even for a legacy
   // `FREQ=MONTHLY` rule that carried no day specifier. Then clamp
@@ -119,7 +131,24 @@ export function RecurrenceSelector({
     return resolved;
   }, [parsed, startDay, caps]);
 
-  const update = (next: ParsedRule) => onChange(buildRRule(next));
+  // A typed end the core gave no spelling for on the series' facts is not
+  // written (D6): the field shows the end it had and says why.
+  const [untilRefused, setUntilRefused] = useState(false);
+  const update = (next: ParsedRule) => {
+    let built: string | null;
+    try {
+      built = buildRRule(next, endFacts ?? undefined);
+    } catch (e) {
+      if (e instanceof UntilNotSpelledError) {
+        setUntilRefused(true);
+        setUntilDraft(rule.until);
+        return;
+      }
+      throw e;
+    }
+    setUntilRefused(false);
+    onChange(built);
+  };
 
   const isMonthlyish = rule.freq === 'MONTHLY' || rule.freq === 'YEARLY';
   // Relative ("third Wednesday") options are gated per-frequency:
@@ -386,7 +415,9 @@ export function RecurrenceSelector({
           {rule.endMode === 'UNTIL' && (
             <label className="form__field">
               <span className="form__label">
-                {t('dialogs.event.recurrence.untilLabel')}
+                {clockName
+                  ? t('dialogs.event.recurrence.untilLabelWithClock', { clock: clockName })
+                  : t('dialogs.event.recurrence.untilLabel')}
               </span>
               <input
                 type="date"
@@ -395,6 +426,11 @@ export function RecurrenceSelector({
                 onBlur={() => setUntilDraft(rule.until)}
               />
             </label>
+          )}
+          {rule.endMode === 'UNTIL' && untilRefused && (
+            <FocusableNote className="form__hint">
+              {t('dialogs.event.recurrence.untilUnavailable')}
+            </FocusableNote>
           )}
         </>
       )}

@@ -331,6 +331,7 @@ function MoveCopyScreen({
         const row = await moveOrCopyEvent(params.event, targetContainerId, mode, scope, {
           wait: stepWriteWait,
           target: calendars.find((c) => c.id === targetContainerId),
+          source: calendars.find((c) => c.id === params.event.calendar_id),
         });
         if (row != null) moved = [row];
       } else if (task != null) {

@@ -250,6 +250,11 @@ Zeitzone:
 - Weicht sie von der Zeitzone deines Geräts ab, nennen die Felder sie, etwa
   **Startzeit (New York)**. Nach der Endzeit steht dann das Lesefeld **Auf
   diesem Gerät (Berlin)** mit denselben Zeiten auf deiner Uhr.
+- Auch das Ende einer Wiederholung ist ein Tag in der Zeitzone der Serie. Das
+  Feld heißt dann etwa **Ende-Datum (New York)**. Eine Serie bis zum 10.
+  November hat ihren letzten Termin am 10. November in New York, auch wenn das
+  auf deinem Gerät schon der 11. ist. Exchange und Microsoft 365 speichern
+  genau dieses Datum als Ende der Serie.
 - Eine Serie ohne Zeitzone wiederholt sich nach UTC. Ihre Felder heißen dann
   etwa **Startzeit (UTC)**.
 - Eine neue Serie bekommt die Zeitzone deines Geräts. Kann der Kalender diese

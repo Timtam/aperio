@@ -1774,6 +1774,8 @@
         },
         "countLabel": "Anzahl Vorkommen",
         "untilLabel": "Ende-Datum",
+        "untilLabelWithClock": "Ende-Datum ({{clock}})",
+        "untilUnavailable": "Das Ende-Datum lässt sich auf diesem Gerät nicht schreiben. Aktualisiere Aperio und versuche es noch einmal.",
         "by": {
           "label": "Wiederholen am",
           "monthlyOnDay": "am {{day}}.",

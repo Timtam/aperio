@@ -74,6 +74,8 @@ import { formatLongDay } from './intlNames';
 import type { SeriesReach } from './generated/SeriesReach';
 import type { RecurringEventLike } from './recurrence';
 import {
+  carriedEnd,
+  endFacts,
   expandAll,
   expandEvent,
   isExpandedOccurrence,
@@ -439,8 +441,13 @@ export class TailShiftRefusedError extends Error {
 export interface TailRuleMove {
   /** The rule as it stands. */
   rrule: string;
-  /** The clock the series repeats on: its zone, and whether it is all-day. */
-  series: { tzid?: string | null; all_day: boolean };
+  /**
+   * The clock the series repeats on: its zone, and whether it is all-day; and
+   * whether its own calendar stores a series' end as a date
+   * (`endsByDateOf`), which an end the 105a guard reads as a cut is settled
+   * on before it moves (`carriedEnd`, D4).
+   */
+  series: { tzid?: string | null; all_day: boolean; endsByDate: boolean };
   /**
    * The occurrence the rule names first: the cut, or the start the user set
    * the rule at.
@@ -582,7 +589,10 @@ function keepingLength(
  *   `refused`, with the reason the surface says. One that names its times is
  *   refused for a new time of day as well.
  * - Its UNTIL moves so that the new series ends on the occurrence in the place
- *   of the old one's last (194, `keepingLength`).
+ *   of the old one's last (194, `keepingLength`). An end the 105a guard alone
+ *   reads as a cut is settled first on the facts of the series' own calendar
+ *   (`carriedEnd`, D4), so the move, the count and the candidates all see one
+ *   end.
  *
  * Nothing moved gives the rule back as it was written.
  */
@@ -616,14 +626,15 @@ export function movedTailRule({
   if (sameKind && Date.parse(byTime) === Date.parse(from)) {
     return { outcome: 'shifted', rrule };
   }
-  let moved = rrule;
+  const settled = carriedEnd(rrule, { start: from, allDay, tzid }, series.endsByDate);
+  let moved = settled;
   if (days !== 0 || timeChanges) {
     const answer = shiftSeriesRule(
-      rrule,
+      settled,
       seriesDayKey(from, tzid, allDay),
       days,
       timeChanges,
-      movedSeriesUntil(rrule, tzid, allDay, from, byDays),
+      movedSeriesUntil(settled, tzid, allDay, from, byDays),
       { beginsAnew: true },
     );
     if (answer.outcome === 'refused') return answer;
@@ -632,7 +643,7 @@ export function movedTailRule({
   const zone = tailZone(tzid, allDay, tail.all_day, calendarZones);
   const candidates = [moved];
   // The bound moved by the new time of day too, where that is another one.
-  const timedBound = movedSeriesUntil(rrule, tzid, allDay, from, byTime);
+  const timedBound = movedSeriesUntil(settled, tzid, allDay, from, byTime);
   if (timedBound !== undefined && Date.parse(byTime) !== Date.parse(byDays)) {
     candidates.push(withUntil(moved, timedBound));
   }
@@ -654,7 +665,7 @@ export function movedTailRule({
   }
   return {
     outcome: 'shifted',
-    rrule: keepingLength(rrule, candidates, { tzid, all_day: allDay }, from, { ...tail, tzid: zone }),
+    rrule: keepingLength(settled, candidates, { tzid, all_day: allDay }, from, { ...tail, tzid: zone }),
   };
 }
 
@@ -687,8 +698,10 @@ export function movedTailRule({
  * `tail` is the start and the kind of the row being written; `opened` the
  * start the edit is read against — the occurrence an editor was filled from,
  * the copy's own cutoff for a carry; `rule` only an editor passes — a carry
- * never changes the rule. Throws when the door into the core is missing (a
- * phone library older than it), before anything is written.
+ * never changes the rule. `endsByDate` is whether the series' own calendar
+ * stores its end as a date: the series' own rule is settled on it before it
+ * is carried (`carriedEnd`, D1, D4). Throws when the door into the core is
+ * missing (a phone library older than it), before anything is written.
  */
 export function tailRecurrenceFor(input: {
   master: SplittableEvent;
@@ -702,8 +715,11 @@ export function tailRecurrenceFor(input: {
   /** The zones the target calendar stores, for a series that gets a time of
    *  day here; every zone where not given. */
   calendarZones?: CalendarZones;
+  /** Whether the master's own calendar stores a series' end as a date
+   *  (`endsByDateOf`). */
+  endsByDate: boolean;
 }): TailRecurrence | null {
-  const { master, cutoffIso, plan, tail, opened, rule, whole, calendarZones } = input;
+  const { master, cutoffIso, plan, tail, opened, rule, whole, calendarZones, endsByDate } = input;
   const ruleChanged =
     rule !== undefined && (rule.touched === true || rule.form !== rule.opened);
   let rrule = ruleChanged
@@ -711,10 +727,17 @@ export function tailRecurrenceFor(input: {
     : plan.tail.rrule;
   if (!rrule) return null;
   const tzid = tailZone(plan.tail.tzid, master.all_day, tail.all_day, calendarZones);
+  if (!ruleChanged) {
+    rrule = carriedEnd(
+      rrule,
+      { start: cutoffIso, allDay: master.all_day, tzid: master.recurrence?.tzid ?? null },
+      endsByDate,
+    );
+  }
   if (!ruleChanged && opened !== undefined) {
     const moved = movedTailRule({
       rrule,
-      series: { tzid: master.recurrence?.tzid, all_day: master.all_day },
+      series: { tzid: master.recurrence?.tzid, all_day: master.all_day, endsByDate },
       from: cutoffIso,
       opened,
       tail,
@@ -819,17 +842,27 @@ export function asNewSeries<P extends SeriesSplitPlan>(plan: P): P {
  * occurrence is not the series: its id names none of the rows, and every
  * occurrence changed elsewhere would read as deleted. Throws then, before
  * anything is written.
+ *
+ * `endsByDate` is whether the calendar it comes FROM stores a series' end as a
+ * date (`endsByDateOf`): an end the 105a guard alone reads as a cut is settled
+ * on that before it goes anywhere (`carriedEnd`, D1), so a calendar that reads
+ * it otherwise never receives a cut that was really a date.
  */
 export function newSeriesRecurrence<E extends SplittableEvent>(
   master: E,
   rows: readonly RecurringEventLike[],
+  endsByDate: boolean,
 ): E['recurrence'] {
   const recurrence = master.recurrence;
   if (!recurrence?.rrule) return recurrence;
   if (isExpandedOccurrence(master) || overrideSeriesId(master) !== null) {
     throw new Error(`newSeriesRecurrence needs the series' own row, not ${master.id}`);
   }
-  return { ...recurrence, exceptions: deletedSlots(master, rows) };
+  return {
+    ...recurrence,
+    rrule: carriedEnd(recurrence.rrule, endFacts(master), endsByDate),
+    exceptions: deletedSlots(master, rows),
+  };
 }
 
 /**

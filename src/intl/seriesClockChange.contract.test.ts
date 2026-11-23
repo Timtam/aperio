@@ -73,6 +73,7 @@ describe('the days a rule names, against rrule.js', () => {
           exceptions: [],
           fromTzid: null,
           toTzid: null,
+          endsByDate: false,
         });
         const fits = answer?.fit === 'both';
         if (answer?.fit === 'unknown' || fits !== named.has(day)) disagree.push(day);

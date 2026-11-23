@@ -284,6 +284,7 @@ export function MoveCopyDialog({
           const row = await moveOrCopyEvent(target.event, targetContainerId, mode, scope, {
             wait,
             target: calendars.find((c) => c.id === targetContainerId),
+            source: calendars.find((c) => c.id === target.event.calendar_id),
           });
           moved = row ? [row] : [];
         } else {
