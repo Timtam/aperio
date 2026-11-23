@@ -1490,6 +1490,18 @@ describe("an end on the series' clock (140a-142a)", () => {
       expect(endIsADay('FREQ=MINUTELY;UNTIL=20261110T235959Z')).toBe(false);
       expect(endIsADay('FREQ=DAILY;BYMINUTE=0,30')).toBe(false);
     });
+
+    it('settles a guarded end of a rule with several times a day to the cut, so it keeps its moment', () => {
+      // 10:00 and 19:00 New York: the second after the end is the 10
+      // November 19:00 occurrence, which the file leaves out.
+      expect(
+        importedRule({
+          start: '2026-11-03T15:00:00Z',
+          all_day: false,
+          recurrence: { rrule: 'FREQ=DAILY;BYHOUR=10,19;UNTIL=20261110T235959Z', tzid: NY },
+        }),
+      ).toBe('FREQ=DAILY;BYHOUR=10,19;UNTIL=20261110T235958Z');
+    });
   });
 
   it('reads the capability through endsByDateOf only', () => {

@@ -501,6 +501,23 @@ describe('a zone the target calendar cannot store (139a)', () => {
   });
 });
 
+describe('a typed end on a zone choice', () => {
+  it('lets the core move the end of a rule that repeats more than once a day, as a stored one', () => {
+    const series = {
+      rrule: 'FREQ=HOURLY;INTERVAL=6;UNTIL=20261028T143000Z',
+      exceptions: [],
+      endsByDate: false,
+    };
+    const NY = { kind: 'series', tzid: 'America/New_York' } as const;
+    const fields = fieldsAt('2026-10-01T14:00:00Z', '2026-10-01T15:00:00Z', NY);
+    const form = openZoneForm('series', 'America/New_York', false);
+    const typed = chooseZone(form, facts(), fields, 'Europe/Berlin', { ...series, typedEnd: true });
+    const stored = chooseZone(form, facts(), fields, 'Europe/Berlin', series);
+    expect(typed.change).toEqual(stored.change);
+    expect(stored.change?.asNow).toMatchObject({ outcome: 'changed', rrule: 'FREQ=HOURLY;INTERVAL=6;UNTIL=20261028T153000Z' });
+  });
+});
+
 describe('a calendar change (question 8 of stage 12)', () => {
   it('keeps the instant on the device clock, the typed times of an untouched new series, and the instants otherwise', () => {
     const series = zoneFormView(openZoneForm('series', 'Europe/Berlin', false), facts());

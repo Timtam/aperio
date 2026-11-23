@@ -709,7 +709,11 @@ export function asTypedEnd(
   facts: SeriesEndFacts,
   endsByDate: boolean,
 ): string | null {
-  if (rrule === null || facts.allDay || !endIsADay(rrule)) return rrule;
+  if (rrule === null || facts.allDay) return rrule;
+  // A rule that repeats more than once a day keeps a moment as its end; one
+  // the 105a guard alone reads as a cut is settled on its source first, so
+  // the text keeps its meaning when the start or the zone changes later.
+  if (!endIsADay(rrule)) return carriedEnd(rrule, facts, endsByDate);
   if (untilTextOf(rrule) === null || /(?:^|[;:])\s*COUNT=/i.test(rrule)) return rrule;
   const carried = carriedEnd(rrule, facts, endsByDate);
   const day = seriesEndOf(carried, facts, null)?.endDay;

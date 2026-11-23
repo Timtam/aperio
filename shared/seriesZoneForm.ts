@@ -24,7 +24,7 @@ import {
   type ClockFields,
   type FieldClock,
 } from './clockFields';
-import { ruleWithoutUntil, ruleWithUntil, untilTextOf, zoneUsableHere } from './recurrence';
+import { endIsADay, ruleWithoutUntil, ruleWithUntil, untilTextOf, zoneUsableHere } from './recurrence';
 import {
   canonicalZone,
   seriesClockChange,
@@ -461,8 +461,13 @@ export function chooseZone(
   if (start.kind !== 'at' || moved.start.carried) {
     return { form: next, fields: moved, change: null, refused: null };
   }
+  // Only an end that is a day is typed: a rule that repeats more than once a
+  // day keeps a moment as its end, which the core moves with its occurrences
+  // as it does a stored series' (`endIsADay`).
   const typedEnd =
-    form.editing === 'single' || series.typedEnd === true ? untilTextOf(series.rrule) : null;
+    (form.editing === 'single' || series.typedEnd === true) && endIsADay(series.rrule)
+      ? untilTextOf(series.rrule)
+      : null;
   const asked = seriesClockChange({
     rrule: typedEnd === null ? series.rrule : ruleWithoutUntil(series.rrule),
     start: start.at,
