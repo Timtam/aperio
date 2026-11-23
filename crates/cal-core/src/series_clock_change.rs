@@ -519,6 +519,22 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
             NaiveDate::parse_from_str(&end.end_day, "%Y-%m-%d").ok()
         }
     });
+    // The instant an exception counts within the end by, on the old clock:
+    // the end the answer writes. A guarded end counted through its own date
+    // bounds them by that date's last instant there, so a deletion on that
+    // day moves with its occurrence; any other end by its own instant.
+    let guarded_by_date =
+        question.ends_by_date && !several_a_day && end.as_ref().is_some_and(|end| end.guarded);
+    let cancel_bound = match end_day {
+        Some(day) if guarded_by_date => Some(crate::until_through(
+            day,
+            rrule,
+            start,
+            false,
+            question.from_tzid.as_deref(),
+        )),
+        _ => end_at,
+    };
 
     // The end a new series writes: `start_after` is its start, `by_days` how
     // far its days moved on the new clock. One time a day: through its last
@@ -606,7 +622,7 @@ pub fn series_clock_change(question: &ClockChangeQuestion) -> Option<SeriesClock
     // rule repeats on, within its interval and its end. None for an
     // exception that cancels nothing: it stays as written.
     let cancelled = |at: DateTime<Utc>| -> Vec<NaiveDateTime> {
-        if at < start || end_at.is_some_and(|end| at > end) {
+        if at < start || cancel_bound.is_some_and(|end| at > end) {
             return Vec::new();
         }
         let wall = before_zone.wall(at);
@@ -763,6 +779,7 @@ mod contract {
             "moved-start-in-the-spring-gap",
             "a-cut-moves-as-the-end-of-its-last-day",
             "new-york-1900-end-of-utc-day-to-chicago-ends-by-date",
+            "new-york-2000-end-of-utc-day-to-berlin-ends-by-date-moves-the-last-deletion",
             "new-york-1900-end-of-utc-day-to-chicago-reads-as-a-cut",
         ] {
             assert!(

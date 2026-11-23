@@ -307,7 +307,12 @@ pub fn series_end_on_clock(
 /// clock wherever the 105a guard does not turn it into a cut), else the last
 /// instant of `day` on the series' zone. That is the later reading where the
 /// clock shows 23:59:59 twice and the second before a change that skips the
-/// day's end; a day the clock skips whole falls back to `DT235959Z`.
+/// day's end. Where that change also pushes `day`'s last occurrence past the
+/// day's end (Nuuk, whose spring change skips 23:00-24:00, for a series at
+/// 23:00 or later), the second before the change comes before that
+/// occurrence, so the `UNTIL` is the instant the occurrence stands at
+/// instead: the first instant that reads through `day`. A day the clock
+/// skips whole falls back to `DT235959Z`.
 ///
 /// So no `UNTIL` Aperio writes for a typed or carried day needs the guard to
 /// be read right: the views, the repeat sentence and a calendar that stores
@@ -331,24 +336,43 @@ pub fn until_through(
     let has_until = crate::rrule_parts::parse_parts(rrule)
         .ok()
         .is_some_and(|(_, parts)| crate::rrule_parts::part(&parts, "UNTIL").is_some());
-    let probe = if has_until {
-        crate::with_until(rrule, &marker_text)
-    } else {
-        format!("{};UNTIL={marker_text}", rrule.trim().trim_end_matches(';'))
+    let probe = |text: &str| {
+        if has_until {
+            crate::with_until(rrule, text)
+        } else {
+            format!("{};UNTIL={text}", rrule.trim().trim_end_matches(';'))
+        }
     };
-    let reads_through = series_end_on_clock(&probe, start, false, tzid, None)
-        .end
-        .is_some_and(|end| {
-            end.reading == crate::EndReading::ThroughDay
-                && end.end_day == day.format("%Y-%m-%d").to_string()
-        });
-    if reads_through {
+    let day_text = day.format("%Y-%m-%d").to_string();
+    let reads = |text: &str, reading: crate::EndReading| {
+        series_end_on_clock(&probe(text), start, false, tzid, None)
+            .end
+            .is_some_and(|end| end.reading == reading && end.end_day == day_text)
+    };
+    if reads(&marker_text, crate::EndReading::ThroughDay) {
         return marker;
     }
     let (zone, _) = clock_of(tzid);
-    last_at_or_before(zone, last)
-        .filter(|at| zone.wall(*at).date() == day)
-        .unwrap_or(marker)
+    let last_instant = last_at_or_before(zone, last).filter(|at| zone.wall(*at).date() == day);
+    let reads_at =
+        |at: DateTime<Utc>| reads(&crate::rule_until_text(at), crate::EndReading::Instant);
+    if let Some(at) = last_instant.filter(|at| reads_at(*at)) {
+        return at;
+    }
+    // A change that skips the day's end pushes an occurrence of `day` set
+    // after the change past the day's last instant: the `UNTIL` reaches it
+    // where it stands.
+    let pushed = crate::rrule_parts::parse_parts(rrule)
+        .ok()
+        .and_then(|(_, parts)| crate::series_end::rule_times(&parts, zone.wall(start).time()))
+        .and_then(|times| {
+            times
+                .into_iter()
+                .filter_map(|time| zone.to_utc(day.and_time(time), WallPolicy::Rfc5545))
+                .max()
+        })
+        .filter(|at| last_instant.is_some_and(|last| *at > last) && reads_at(*at));
+    pushed.or(last_instant).unwrap_or(marker)
 }
 
 /// The last instant a series' stored `UNTIL` lets an occurrence start at,
@@ -542,6 +566,7 @@ mod contract {
             "until-through-new-york-1900-winter-blind-spot",
             "until-through-berlin-0100-winter-east-blind-spot",
             "until-through-apia-skipped-day-falls-back",
+            "until-through-nuuk-2300-spring-change-pushes-the-last-occurrence",
             "cut-before-blind-spot",
         ] {
             assert!(
@@ -732,8 +757,9 @@ mod tests {
 
     /// Every day `until_through` spells is read through that day by the
     /// views without the guard, and written as that day by a calendar that
-    /// stores a date: around both clock changes of five zones and UTC, at
-    /// every half hour.
+    /// stores a date: around both clock changes of six zones and UTC, at
+    /// every half hour. Nuuk's spring change skips the end of a day, and
+    /// pushes that day's occurrences at 23:00 and later past it.
     #[test]
     fn until_through_spells_a_day_no_reader_needs_the_guard_for() {
         let day = |y: i32, m: u32, d: u32| NaiveDate::from_ymd_opt(y, m, d).expect("a date");
@@ -758,6 +784,10 @@ mod tests {
             (
                 Some("Pacific/Auckland"),
                 [run(day(2026, 4, 4), 3), run(day(2026, 9, 26), 3)].concat(),
+            ),
+            (
+                Some("America/Nuuk"),
+                [run(day(2026, 3, 27), 3), run(day(2026, 10, 23), 3)].concat(),
             ),
             (Some("Asia/Kolkata"), vec![day(2026, 3, 29)]),
             (None, vec![day(2026, 3, 29)]),
@@ -807,7 +837,7 @@ mod tests {
                 }
             }
         }
-        // Anti-silence: 32 days at 48 times, less any start the clock skips.
-        assert!(checked >= 1500, "only {checked} cases ran");
+        // Anti-silence: 39 days at 48 times, less any start the clock skips.
+        assert!(checked >= 1800, "only {checked} cases ran");
     }
 }

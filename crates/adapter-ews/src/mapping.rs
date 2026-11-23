@@ -11922,18 +11922,64 @@ mod tests {
         )
     }
 
+    /// `edit` planned against `before` with nothing known of the copy the
+    /// editor opened (`keep_fields` empty, as after a write with no refresh
+    /// since), on a Berlin device: the rule is written only where the edit's
+    /// differs from the server's as built (`built_rule`, `written_rule`).
+    fn planned_unproven(edit: &Event, before: &Event, stored: &StoredZones) -> UpdatePlan {
+        let mut edit = edit.clone();
+        edit.keep_fields.clear();
+        plan_update_in(
+            &edit,
+            Some(before),
+            stored,
+            None,
+            EventIdKind::RecurringMaster,
+            &crate::test_zone("Europe/Berlin"),
+        )
+        .unwrap()
+    }
+
+    /// A title-only save at the blind spot sends no rule because both ends
+    /// are 10 November, not because the rule was kept: with nothing known of
+    /// the opened copy the comparison decides. The editor's copy that still
+    /// holds the end typed before READ_RULE 7 (`…T235959Z`, its own date,
+    /// 140a) names the same day, so it sends no rule either (its differing
+    /// text writes the zone along, as any changed rule text does). A server
+    /// copy through the 9th is not the edit's, and the rule goes out.
     #[test]
     fn a_title_only_save_at_the_blind_spot_sends_no_recurrence() {
         let before = read_back_at_the_blind_spot();
         let mut edit = before.clone();
         edit.title = "Renamed".into();
-        let (set, _) = saved(
-            &edit,
-            &before,
-            &new_york_zones(),
-            EventIdKind::RecurringMaster,
+        let plan = planned_unproven(&edit, &before, &new_york_zones());
+        assert_eq!(field_uris(&plan.set), ["item:Subject"], "{}", plan.set);
+        assert_eq!(plan.rewrite, None);
+
+        edit.recurrence.as_mut().unwrap().rrule = "FREQ=DAILY;UNTIL=20261110T235959Z".into();
+        let plan = planned_unproven(&edit, &before, &new_york_zones());
+        assert!(
+            !field_uris(&plan.set).contains(&"calendar:Recurrence".to_string()),
+            "{}",
+            plan.set
         );
-        assert_eq!(field_uris(&set), ["item:Subject"], "{set}");
+        assert_eq!(plan.rewrite, None);
+        // The comparison runs: the same save against a server copy that ends
+        // a day earlier writes the edit's end.
+        let server = timed_series(
+            "2026-11-03T00:00:00Z",
+            "FREQ=DAILY;UNTIL=20261110T045959Z",
+            "America/New_York",
+        );
+        let mut edit = before.clone();
+        edit.title = "Renamed".into();
+        let plan = planned_unproven(&edit, &server, &new_york_zones());
+        assert!(
+            field_uris(&plan.set).contains(&"calendar:Recurrence".to_string()),
+            "{}",
+            plan.set
+        );
+        assert_eq!(element(&plan.set, "EndDate"), "2026-11-10", "{}", plan.set);
     }
 
     #[test]
@@ -11970,39 +12016,80 @@ mod tests {
     }
 
     /// The rule built from a read-back end is the rule written for it: a save
-    /// that changes the series elsewhere (here its reminder) sends no rule.
+    /// that changes the series elsewhere (here its location) sends no rule,
+    /// with nothing known of the opened copy, so the comparison decides. The
+    /// end is the one READ_RULE 7 reads Exchange's EndDate 10 November back
+    /// as; the editor's copy holds it or the end typed for that day before
+    /// READ_RULE 7 (`…T235959Z`, its own date, 140a). A server copy through
+    /// the 9th is not the edit's, and the rule goes out ending on the 10th.
     #[test]
     fn an_end_read_back_compares_equal_to_itself() {
-        for (start, until, zones, tzid) in [
+        for (start, windows_zone, until, day_before, zones, tzid) in [
             (
                 "2026-11-03T00:00:00Z",
+                "Eastern Standard Time",
                 "20261111T045959Z",
+                "20261110T045959Z",
                 new_york_zones(),
                 "America/New_York",
             ),
             (
                 "2026-11-03T00:00:00Z",
+                "W. Europe Standard Time",
                 "20261110T225959Z",
+                "20261109T225959Z",
                 w_europe_zones(),
                 "Europe/Berlin",
             ),
             (
                 "2026-11-03T09:00:00Z",
+                "W. Europe Standard Time",
                 "20261110T235959Z",
+                "20261109T235959Z",
                 w_europe_zones(),
                 "Europe/Berlin",
             ),
         ] {
-            let before = timed_series(start, &format!("FREQ=DAILY;UNTIL={until}"), tzid);
+            let rule = format!("FREQ=DAILY;UNTIL={until}");
+            assert_eq!(
+                read_rule(daily_master(
+                    start,
+                    windows_zone,
+                    windows_zone,
+                    false,
+                    end_date("2026-11-10+01:00"),
+                )),
+                rule,
+                "{tzid} {until}: read back"
+            );
+            let before = timed_series(start, &rule, tzid);
+            for copy in [until, "20261110T235959Z"] {
+                let mut edit = before.clone();
+                edit.location = Some("Room 2".into());
+                edit.recurrence.as_mut().unwrap().rrule = format!("FREQ=DAILY;UNTIL={copy}");
+                let plan = planned_unproven(&edit, &before, &zones);
+                assert!(
+                    !field_uris(&plan.set).contains(&"calendar:Recurrence".to_string()),
+                    "{tzid} {until} {copy}: {}",
+                    plan.set
+                );
+                assert_eq!(plan.rewrite, None, "{tzid} {until} {copy}");
+            }
+            let server = timed_series(start, &format!("FREQ=DAILY;UNTIL={day_before}"), tzid);
             let mut edit = before.clone();
             edit.location = Some("Room 2".into());
-            let plan = planned(&edit, &before, &zones, EventIdKind::RecurringMaster);
+            let plan = planned_unproven(&edit, &server, &zones);
             assert!(
-                !field_uris(&plan.set).contains(&"calendar:Recurrence".to_string()),
+                field_uris(&plan.set).contains(&"calendar:Recurrence".to_string()),
                 "{tzid} {until}: {}",
                 plan.set
             );
-            assert_eq!(plan.rewrite, None, "{tzid} {until}");
+            assert_eq!(
+                element(&plan.set, "EndDate"),
+                "2026-11-10",
+                "{tzid} {until}: {}",
+                plan.set
+            );
         }
     }
 

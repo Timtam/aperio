@@ -94,7 +94,9 @@ export function seriesEnd(
 /**
  * The `UNTIL` that ends a series through `date` on its clock
  * (`cal_core::until_through`): `DT235959Z` where that reads through the date
- * on these facts, else the date's last instant on the series' clock, as `at`.
+ * on these facts, else the date's last instant on the series' clock, or the
+ * instant the date's last occurrence stands at where a change that skips the
+ * date's end pushes it past that instant (Nuuk's spring change), as `at`.
  * No reader needs the 105a guard to read it. `null` for text that names no
  * date or instant.
  */

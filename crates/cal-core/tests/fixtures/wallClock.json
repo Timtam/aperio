@@ -1,5 +1,5 @@
 {
-  "about": "Dates and times on the clock a series repeats on (cal_core::wall_clock, DESIGN-series-time-zone.md stage 8, decision 100a). Each question is answered with the clock read (the canonical zone, null for UTC) and: wallOf the date, HH:MM time and seconds an instant shows; instantOf how a typed wall time reads (single, fold with the earlier instant and the later one, gap with the offsets before and after, in seconds east of UTC); untilOn the day's last second on the clock: 23:59:59, or the second before the change where one skips the day's end (Nuuk), absent only where the clock skips the whole day (Apia). seriesEnd how a stored UNTIL reads on the clock the series repeats on (its zone, UTC, or for an all-day series the device's): throughDay, instant or wall, the bound as a wall time, the last instant at or before it, and the last day it reaches; …T235959Z on a zone's clock is through that day unless the second after it is one of the rule's times of day, as after a cut (decisions 101b, 105a-116a). seriesEnd also says whether the end reads as an instant only through that guard (guarded). untilThrough the UNTIL that reads through a date on the series' clock and needs no guard: DT235959Z where that reads through the date, else the date's last instant on the clock (a day the clock skips whole falls back to DT235959Z). cutBefore the UNTIL just before an occurrence: one second before it, two where one would spell …T235959Z, except by the second (106a). null for text that names no instant, date or time. Written by hand from tzdata's rules (Berlin, New York, Lord Howe, Apia 2011, Paris LMT +00:09:21) and checked against Node's ICU zone data; the core and both surfaces read this file.",
+  "about": "Dates and times on the clock a series repeats on (cal_core::wall_clock, DESIGN-series-time-zone.md stage 8, decision 100a). Each question is answered with the clock read (the canonical zone, null for UTC) and: wallOf the date, HH:MM time and seconds an instant shows; instantOf how a typed wall time reads (single, fold with the earlier instant and the later one, gap with the offsets before and after, in seconds east of UTC); untilOn the day's last second on the clock: 23:59:59, or the second before the change where one skips the day's end (Nuuk), absent only where the clock skips the whole day (Apia). seriesEnd how a stored UNTIL reads on the clock the series repeats on (its zone, UTC, or for an all-day series the device's): throughDay, instant or wall, the bound as a wall time, the last instant at or before it, and the last day it reaches; …T235959Z on a zone's clock is through that day unless the second after it is one of the rule's times of day, as after a cut (decisions 101b, 105a-116a). seriesEnd also says whether the end reads as an instant only through that guard (guarded). untilThrough the UNTIL that reads through a date on the series' clock and needs no guard: DT235959Z where that reads through the date, else the date's last instant on the clock, or where a change that skips the date's end pushes the date's last occurrence past that instant (Nuuk's spring change, a series at 23:00 or later), the instant that occurrence stands at (a day the clock skips whole falls back to DT235959Z). cutBefore the UNTIL just before an occurrence: one second before it, two where one would spell …T235959Z, except by the second (106a). null for text that names no instant, date or time. Written by hand from tzdata's rules (Berlin, New York, Lord Howe, Apia 2011, Paris LMT +00:09:21) and checked against Node's ICU zone data; the core and both surfaces read this file.",
   "rows": [
     {
       "name": "wall-berlin-winter",
@@ -1088,6 +1088,57 @@
       "expect": {
         "clock": "Pacific/Apia",
         "at": "2011-12-30T23:59:59Z"
+      }
+    },
+    {
+      "name": "until-through-nuuk-2300-spring-change-pushes-the-last-occurrence",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-03-28",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-03-21T01:00:00Z",
+        "allDay": false,
+        "tzid": "America/Nuuk"
+      },
+      "expect": {
+        "clock": "America/Nuuk",
+        "at": "2026-03-29T01:00:00Z"
+      }
+    },
+    {
+      "name": "until-through-nuuk-2330-spring-change-pushes-the-last-occurrence",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-03-28",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-03-21T01:30:00Z",
+        "allDay": false,
+        "tzid": "America/Nuuk"
+      },
+      "expect": {
+        "clock": "America/Nuuk",
+        "at": "2026-03-29T01:30:00Z"
+      }
+    },
+    {
+      "name": "end-nuuk-2300-pushed-occurrence-reads-through-its-day",
+      "question": {
+        "op": "seriesEnd",
+        "rrule": "FREQ=DAILY;UNTIL=20260329T010000Z",
+        "start": "2026-03-21T01:00:00Z",
+        "allDay": false,
+        "tzid": "America/Nuuk",
+        "deviceZone": null
+      },
+      "expect": {
+        "clock": "America/Nuuk",
+        "end": {
+          "reading": "instant",
+          "wall": "2026-03-29T00:00:00",
+          "at": "2026-03-29T01:00:00Z",
+          "endDay": "2026-03-28",
+          "guarded": false
+        }
       }
     },
     {

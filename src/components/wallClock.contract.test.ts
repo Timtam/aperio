@@ -42,6 +42,7 @@ describe('wallClock contract', () => {
       'until-through-new-york-1900-winter-blind-spot',
       'until-through-berlin-0100-winter-east-blind-spot',
       'until-through-apia-skipped-day-falls-back',
+      'until-through-nuuk-2300-spring-change-pushes-the-last-occurrence',
       'cut-before-blind-spot',
       'cut-before-secondly',
     ]) {
