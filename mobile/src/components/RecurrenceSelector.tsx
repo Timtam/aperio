@@ -93,8 +93,8 @@ export function RecurrenceSelector({
   /** The owning calendar's recurrence capabilities; absent → full RFC-5545. */
   capabilities?: RecurrenceCapabilities;
   /** For a STORED series' rule only: the facts its end field reads and writes
-   *  its day on, the series' clock (DESIGN-series-time-zone.md, stage 12,
-   *  part 3). Absent, a typed end stays the day it names, `{D}T235959Z`, which
+   *  its day on, on the clock the form's fields stand on
+   *  (DESIGN-series-time-zone.md, stage 12, part 3). Absent, a typed end stays the day it names, `{D}T235959Z`, which
    *  the save spells (`settledEnd`). Mirrors the desktop. */
   endFacts?: FieldEndFacts | null;
   /** The name of the clock the form's fields stand on (`fieldClockName`), for
@@ -354,12 +354,14 @@ export function RecurrenceSelector({
                 value={rule.until}
                 onChange={(until) => update({ ...rule, until })}
               />
-              {untilRefused && (
-                <Text style={styles.hint} accessibilityLiveRegion="polite">
-                  {t('dialogs.event.recurrence.untilUnavailable')}
-                </Text>
-              )}
             </View>
+          )}
+          {/* Also after "Bis Datum" was refused in the end chooser, which
+              then still reads the end it had. Mirrors the desktop. */}
+          {untilRefused && (
+            <Text style={styles.hint} accessibilityLiveRegion="polite">
+              {t('dialogs.event.recurrence.untilUnavailable')}
+            </Text>
           )}
         </>
       )}

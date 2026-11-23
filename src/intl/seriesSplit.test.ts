@@ -2318,6 +2318,32 @@ describe('a legacy end at the blind spot is settled on its calendar first', () =
     expect(tail(false)).toBe('FREQ=DAILY;UNTIL=20261110T235958Z');
   });
 
+  it('settles a touched rule on its own calendar where it goes to another (D4)', () => {
+    // "This and all following" from 7 November with the repeat controls
+    // touched (the interval made 2), the legacy end left as it was.
+    const cutoffIso = '2026-11-07T00:00:00.000Z';
+    const plan = cutOf(planSeriesSplit(legacyRow, cutoffIso, []));
+    const touched = 'FREQ=DAILY;INTERVAL=2;UNTIL=20261110T235959Z';
+    const tail = (endsByDate: boolean, intoAnotherCalendar: boolean) =>
+      tailRecurrenceFor({
+        endsByDate,
+        intoAnotherCalendar,
+        master: legacyRow,
+        cutoffIso,
+        plan,
+        tail: { start: cutoffIso, all_day: false },
+        opened: cutoffIso,
+        rule: { form: touched, opened: legacy, touched: true },
+      })?.rrule;
+    // Written to another calendar: through its own date from one that stores
+    // the end as a date, the cut 105a reads from any other.
+    expect(tail(true, true)).toBe('FREQ=DAILY;INTERVAL=2;UNTIL=20261111T045959Z');
+    expect(tail(false, true)).toBe('FREQ=DAILY;INTERVAL=2;UNTIL=20261110T235958Z');
+    // Kept in its own calendar, an end nobody changed goes back as it was.
+    expect(tail(true, false)).toBe(touched);
+    expect(tail(false, false)).toBe(touched);
+  });
+
   it('settles a whole series carried as a new one on the calendar it comes from', () => {
     expect(newSeriesRecurrence(legacyRow, [], true)).toEqual({
       ...legacyRow.recurrence,

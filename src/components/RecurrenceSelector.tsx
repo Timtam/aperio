@@ -55,13 +55,16 @@ export interface RecurrenceSelectorProps {
    *  adapters). */
   capabilities?: RecurrenceCapabilities;
   /** For a STORED series' rule only: the facts its end field reads and
-   *  writes its day on, the series' clock (DESIGN-series-time-zone.md,
-   *  stage 12, part 3). Absent, a typed end stays the day it names,
+   *  writes its day on, on the clock the form's fields stand on
+   *  (DESIGN-series-time-zone.md, stage 12, part 3). Absent, a typed end stays the day it names,
    *  `{D}T235959Z`, which the save spells (`settledEnd`). */
   endFacts?: FieldEndFacts | null;
   /** The name of the clock the form's fields stand on (`fieldClockName`),
    *  for the end field's label; `null` where it is the device's own. */
   clockName?: string | null;
+  /** The editor's announcer: a refused end is said once, where the focus
+   *  is, as the phone says it. */
+  announce?: (message: string) => void;
 }
 
 /** Lowercase the selector's `Freq` to the wire `RecurrenceFreq`.
@@ -97,6 +100,7 @@ export function RecurrenceSelector({
   capabilities,
   endFacts,
   clockName,
+  announce,
 }: RecurrenceSelectorProps) {
   const { t, i18n } = useTranslation();
   const caps = capabilities ?? DEFAULT_RECURRENCE_CAPABILITIES;
@@ -132,7 +136,8 @@ export function RecurrenceSelector({
   }, [parsed, startDay, caps]);
 
   // A typed end the core gave no spelling for on the series' facts is not
-  // written (D6): the field shows the end it had and says why.
+  // written (D6): the field shows the end it had and says why, aloud too —
+  // the note is no live region, and the focus stays where it was.
   const [untilRefused, setUntilRefused] = useState(false);
   const update = (next: ParsedRule) => {
     let built: string | null;
@@ -142,6 +147,7 @@ export function RecurrenceSelector({
       if (e instanceof UntilNotSpelledError) {
         setUntilRefused(true);
         setUntilDraft(rule.until);
+        announce?.(t('dialogs.event.recurrence.untilUnavailable'));
         return;
       }
       throw e;
@@ -427,7 +433,9 @@ export function RecurrenceSelector({
               />
             </label>
           )}
-          {rule.endMode === 'UNTIL' && untilRefused && (
+          {/* Also after "Bis Datum" was refused in the end select, which
+              then still reads the end it had. */}
+          {untilRefused && (
             <FocusableNote className="form__hint">
               {t('dialogs.event.recurrence.untilUnavailable')}
             </FocusableNote>

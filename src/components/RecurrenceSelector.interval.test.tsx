@@ -153,4 +153,42 @@ describe("RecurrenceSelector end on a stored series' clock", () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByText(/^Das Ende-Datum lässt sich auf diesem Gerät nicht schreiben\. /)).toBeTruthy();
   });
+
+  it('says a refused day aloud once, where the focus stays in the field', () => {
+    const announce = vi.fn();
+    render(
+      <RecurrenceSelector
+        value={VALUE}
+        onChange={vi.fn()}
+        startDay="2026-11-02"
+        endFacts={NO_START}
+        announce={announce}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Ende-Datum'), { target: { value: '2026-11-12' } });
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith(
+      expect.stringMatching(/^Das Ende-Datum lässt sich auf diesem Gerät nicht schreiben\. /),
+    );
+  });
+
+  it('shows and says why "Bis Datum" is refused, with the end select still on "Nie"', () => {
+    const onChange = vi.fn();
+    const announce = vi.fn();
+    render(
+      <RecurrenceSelector
+        value="FREQ=DAILY"
+        onChange={onChange}
+        startDay="2026-11-02"
+        endFacts={NO_START}
+        announce={announce}
+      />,
+    );
+    const end = screen.getByRole('combobox', { name: /^ende$/i }) as HTMLSelectElement;
+    fireEvent.change(end, { target: { value: 'UNTIL' } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(end.value).toBe('NEVER');
+    expect(screen.getByText(/^Das Ende-Datum lässt sich auf diesem Gerät nicht schreiben\. /)).toBeTruthy();
+    expect(announce).toHaveBeenCalledTimes(1);
+  });
 });

@@ -100,8 +100,10 @@ import {
   madeNoReminderChoice,
   movedTailRule,
   asTypedEnd,
+  carriedEnd,
   endsByDateOf,
   fieldClockName,
+  fieldClockZone,
   settledEnd,
   type FieldEndFacts,
   newSeriesRecurrence,
@@ -1570,14 +1572,19 @@ function EventEditorScreen({
       return unmoved;
     }
   }, [recurrence, allDay, original, ruleFrame, ruleSetAt, seriesZone, targetZones, seriesEndsByDate]);
-  // A stored series' rule: its end field reads and writes its day on the
-  // series' clock as the form will save it (DESIGN-series-time-zone.md, stage
-  // 12, part 3). Any other rule keeps the typed day until it is saved
-  // (`settledEnd`, 141a). Never the digits of a UTC day for a timed series on
-  // a zone (D6): without a frame, the stored start. Mirrors the desktop.
-  const storedRule = !!original?.recurrence?.rrule && !imported;
-  const endFactsStart = storedRule ? (ruleFrame?.written ?? ruleSetAt ?? original?.start ?? null) : null;
-  const endFactsTzid = storedRule ? zoneToSave(zoneForm, facts) : null;
+  // A stored series' rule, a file's included (136a): its end field reads and
+  // writes its day as the form will save it (DESIGN-series-time-zone.md,
+  // stage 12, part 3), on the clock the fields stand on, which the field's
+  // label names and the views show the series on. Any other rule keeps the
+  // typed day until it is saved (`settledEnd`, 141a). Never the digits of a
+  // UTC day for a timed series on a zone (D6): without a frame, the stored
+  // start. Mirrors the desktop.
+  const endFactsSeries = original ?? imported;
+  const storedRule = !!endFactsSeries?.recurrence?.rrule;
+  const endFactsStart = storedRule
+    ? (ruleFrame?.written ?? ruleSetAt ?? endFactsSeries?.start ?? null)
+    : null;
+  const endFactsTzid = storedRule ? fieldClockZone(fields.clock, deviceZone) : null;
   const endFacts = useMemo(
     (): FieldEndFacts | null =>
       endFactsStart === null
@@ -1804,10 +1811,25 @@ function EventEditorScreen({
     // series made all-day here. An imported series keeps the file's gaps and
     // zone, as a series edited here keeps its own (136a).
     // A rule that is no stored series' own holds its end as the typed day
-    // until here: spelled through that day on the facts saved (141a, D3).
+    // until here: spelled through that day on the facts saved (141a, D3). A
+    // file's rule counts as stored (136a) and comes from a source that stores
+    // no end as a date: an end the 105a guard alone reads as a cut there is
+    // written as the cut (`carriedEnd`, 140a), on the facts the rule stands
+    // on — the file's, or a zone answer's. Mirrors the desktop.
     const savedZone = zoneToSave(zoneForm, facts);
+    const ruleToSave =
+      imported && storedRule
+        ? recurrence &&
+          carriedEnd(
+            recurrence,
+            { start: ruleSetAt ?? imported.start, allDay, tzid: savedZone },
+            false,
+          )
+        : storedRule
+          ? recurrence
+          : settledEnd(recurrence, { start, allDay, tzid: savedZone });
     const recurrenceToSend = savedRecurrence(
-      storedRule ? recurrence : settledEnd(recurrence, { start, allDay, tzid: savedZone }),
+      ruleToSave,
       times.exceptions ?? (original?.recurrence ?? imported?.recurrence)?.exceptions,
       savedZone,
     );
@@ -2010,7 +2032,10 @@ function EventEditorScreen({
       // 193). Mirrors the desktop, also where a series rewritten whole from
       // its first occurrence keeps its own clock's time.
       const tailRecurrenceForEdit = (
-        args: Omit<Parameters<typeof tailRecurrenceFor>[0], 'opened' | 'rule' | 'whole' | 'endsByDate'>,
+        args: Omit<
+          Parameters<typeof tailRecurrenceFor>[0],
+          'opened' | 'rule' | 'whole' | 'endsByDate' | 'intoAnotherCalendar'
+        >,
         opened: string,
         own: { from: string; refused: 'thisAndFuture' | 'series'; whole?: boolean },
       ) => {
@@ -2048,6 +2073,7 @@ function EventEditorScreen({
             // target calendar can store (22a).
             calendarZones: targetZones,
             endsByDate: seriesEndsByDate,
+            intoAnotherCalendar: original != null && calId !== original.calendar_id,
           });
         } catch (err) {
           if (err instanceof TailShiftRefusedError) {

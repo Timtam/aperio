@@ -15,6 +15,7 @@ import {
   fieldsOnView,
   openZoneForm,
   savedRecurrence,
+  settledEnd,
   unusableZoneRefusal,
   withAllDay,
   zoneFormView,
@@ -292,6 +293,62 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
     };
     expect(rule(true)).toMatch(/UNTIL=20261111T055959Z$/);
     expect(rule(false)).toMatch(/UNTIL=20261110T055959Z$/);
+  });
+
+  it('keeps the typed end day of a single event that becomes a series (141a, D3)', () => {
+    // A stored single event on 3 November, 19:00 New York, made daily here
+    // through 10 November: the form holds the typed day. It is no end on any
+    // clock yet, so no guard reads it; the save spells it on the new clock.
+    const typedIn = (deviceZone: string, at: string, zone: string, endsByDate: boolean) => {
+      const form = openZoneForm('single', undefined, false);
+      const fields = fieldsAt(at, new Date(Date.parse(at) + 3_600_000).toISOString(), {
+        kind: 'series',
+        tzid: deviceZone,
+      });
+      const result = chooseZone(form, facts({ deviceZone }), fields, zone, {
+        rrule: 'FREQ=DAILY;UNTIL=20261110T235959Z',
+        exceptions: [],
+        endsByDate,
+      });
+      const answers = [result.change?.asNow, result.change?.asRule];
+      return answers.map((answer) => (answer?.outcome === 'changed' ? answer.rrule : null));
+    };
+    for (const endsByDate of [false, true]) {
+      expect(typedIn('America/New_York', '2026-11-04T00:00:00Z', 'America/Chicago', endsByDate)).toEqual([
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      ]);
+      expect(typedIn('Europe/Berlin', '2026-11-03T00:00:00Z', 'America/New_York', endsByDate)).toEqual([
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      ]);
+    }
+    // Spelled on the clock chosen, it reaches 10 November there.
+    expect(
+      settledEnd('FREQ=DAILY;UNTIL=20261110T235959Z', {
+        start: '2026-11-04T00:00:00Z',
+        allDay: false,
+        tzid: 'America/Chicago',
+      }),
+    ).toBe('FREQ=DAILY;UNTIL=20261111T055959Z');
+  });
+
+  it("gives a weekly single event's answers the typed end beside the days they name", () => {
+    // Mondays 01:00 Berlin become Sundays 19:00 New York as they fall now.
+    const form = openZoneForm('single', undefined, false);
+    const fields = fieldsAt('2026-11-02T00:00:00Z', '2026-11-02T01:00:00Z', {
+      kind: 'series',
+      tzid: 'Europe/Berlin',
+    });
+    const result = chooseZone(form, facts(), fields, 'America/New_York', {
+      rrule: 'FREQ=WEEKLY;BYDAY=MO;UNTIL=20261130T235959Z',
+      exceptions: [],
+      endsByDate: false,
+    });
+    const answer = result.change?.asNow;
+    expect(answer?.outcome === 'changed' ? answer.rrule : null).toBe(
+      'FREQ=WEEKLY;BYDAY=SU;UNTIL=20261130T235959Z',
+    );
   });
 
   it('does not ask the core for fields carried as typed', () => {

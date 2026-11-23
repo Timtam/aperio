@@ -24,7 +24,7 @@ import {
   type ClockFields,
   type FieldClock,
 } from './clockFields';
-import { zoneUsableHere } from './recurrence';
+import { ruleWithoutUntil, ruleWithUntil, untilTextOf, zoneUsableHere } from './recurrence';
 import {
   canonicalZone,
   seriesClockChange,
@@ -435,6 +435,12 @@ export interface ZoneChoiceResult {
  * refused and nothing moves. `series.endsByDate` is whether the series'
  * stored calendar stores its end as a date (`endsByDateOf`): an end the 105a
  * guard alone reads as a cut then counts through its own date (140a, D1).
+ *
+ * A rule that is no stored series' own (a single event that becomes a series
+ * here) holds its end as the day the user typed, `{D}T235959Z`, until it is
+ * saved (141a, D3). That day is no end on any clock yet, so the core is asked
+ * about the rule without it, and every answer gets the typed day back as it
+ * stood: the field and the save keep the typed day, on the new clock.
  */
 export function chooseZone(
   form: SeriesZoneForm,
@@ -453,14 +459,16 @@ export function chooseZone(
   if (start.kind !== 'at' || moved.start.carried) {
     return { form: next, fields: moved, change: null, refused: null };
   }
-  const change = seriesClockChange({
-    rrule: series.rrule,
+  const typedEnd = form.editing === 'single' ? untilTextOf(series.rrule) : null;
+  const asked = seriesClockChange({
+    rrule: typedEnd === null ? series.rrule : ruleWithoutUntil(series.rrule),
     start: start.at,
     exceptions: series.exceptions,
     fromTzid: zoneInEffect(form, facts),
     toTzid: zone,
     endsByDate: series.endsByDate,
   });
+  const change = asked === null || typedEnd === null ? asked : withTypedEnd(asked, typedEnd);
   if (change !== null) {
     const answers = change.asks ? [change.asNow, change.asRule] : [change.asNow];
     const written = answers.find((answer) => answer.outcome === 'changed');
@@ -471,6 +479,14 @@ export function chooseZone(
     }
   }
   return { form: next, fields: moved, change, refused: null };
+}
+
+/** The core's answers with the typed end, `until` as it stood, written back
+ *  into each rule it wrote. */
+function withTypedEnd(change: SeriesClockChange, until: string): SeriesClockChange {
+  const typed = (answer: ClockChangeAnswer): ClockChangeAnswer =>
+    answer.outcome === 'changed' ? { ...answer, rrule: ruleWithUntil(answer.rrule, until) } : answer;
+  return { ...change, asNow: typed(change.asNow), asRule: typed(change.asRule) };
 }
 
 /** The series after an answer of the core: the fields, and the rule and the

@@ -1877,7 +1877,10 @@ Handy im selben PR.
       `written_end_day`.
     - Geschrieben wird „bis Tag D“ mit `until_through` (`DT235959Z`, wo das
       ohne Schutzregel durch D liest, sonst der letzte Moment von D auf der
-      Uhr der Serie) und „kurz vor einem Termin“ mit `cut_before` (106a).
+      Uhr der Serie; schiebt eine Umstellung, die das Ende von D überspringt,
+      den letzten Termin von D darüber hinaus, der Moment, an dem er steht:
+      Nuuk im Frühjahr ab 23:00) und „kurz vor einem Termin“ mit `cut_before`
+      (106a).
       `SeriesEnd.guarded` sagt, wo ein Ende nur durch 105a ein Zeitpunkt ist.
     - Das Manifest nennt `recurrence.ends_by_date`; wahr bei Exchange und
       Microsoft 365, sonst falsch.
@@ -1885,13 +1888,29 @@ Handy im selben PR.
       Zonenwahl und dem Ziehen auf den Angaben seines eigenen Kalenders
       festgelegt (`carriedEnd`): dort bis zu seinem Datum, sonst als Schnitt
       `…T235958Z`. Ein Ziel-Kalender bekommt so nie einen Schnitt, der in
-      Wahrheit ein Datum war.
-    - Eine neue Serie behält den getippten Tag bis zum Speichern (141a); eine
-      gespeicherte liest und schreibt ihr Feld auf ihren Angaben und fällt
-      bei einer Serie mit Uhrzeit auf einer Zone nie auf die UTC-Ziffern
-      zurück. Kann der Kern nicht antworten (eine ältere Bibliothek), bleibt
-      ein unberührtes Ende wie es ist, und ein neues Datum wird mit Grund
-      abgelehnt (D6).
+      Wahrheit ein Datum war. Die Zonenwahl (`series_clock_change`) zählt
+      dabei auch die Ausnahmen bis zu diesem Datum: eine Löschung an seinem
+      Tag wandert mit ihrem Termin. „Diesen und alle folgenden“ mit
+      geänderter Regel in einen anderen Kalender legt das Ende ebenso fest.
+    - Eine neue Serie behält den getippten Tag bis zum Speichern (141a), auch
+      ein einzelner Termin, der hier zur Serie wird, wenn danach eine Zone
+      gewählt wird: der Kern wird dann ohne das Ende gefragt, und der
+      getippte Tag kommt in jede Antwort zurück (`chooseZone`).
+    - Eine gespeicherte Serie liest und schreibt ihr Feld auf ihren Angaben
+      und fällt bei einer Serie mit Uhrzeit auf einer Zone nie auf die
+      UTC-Ziffern zurück. Ein Termin aus einer Datei zählt dabei als
+      gespeichert (136a): das Feld zeigt den Tag auf der Uhr der Datei, ein
+      unberührtes Ende geht Byte für Byte zurück, und beim Speichern wird ein
+      Ende, das nur die Schutzregel als Schnitt liest, als Schnitt
+      `…T235958Z` geschrieben (eine Datei speichert kein Ende als Datum).
+    - Das Feld liest das Ende auf der Uhr, die seine Beschriftung nennt und
+      auf der die Ansichten die Serie zeigen: der Uhr der Felder. Stehen sie
+      auf der Uhr des Geräts (Umfang im Formular), ist es der Tag dort; bei
+      einer Zone, die dieses Gerät nicht kennt, der Tag in UTC.
+    - Kann der Kern nicht antworten (eine ältere Bibliothek), bleibt ein
+      unberührtes Ende wie es ist, und ein neues Datum wird mit Grund
+      abgelehnt (D6), auch die Wahl „Bis Datum“; der Desktop sagt den Grund
+      einmal an, wie das Handy.
     - READ_RULE 7 schreibt auch die Serien östlich von UTC neu, deren Uhrzeit
       Mitternacht UTC ist (Berlin 01:00 im Winter, 02:00 im Sommer).
     - Das Feld heißt mit Uhr „Ende-Datum (New York)“, englisch „Repeat until

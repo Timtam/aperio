@@ -23,10 +23,11 @@ export type EndMode = 'NEVER' | 'COUNT' | 'UNTIL';
 export type MonthlyMode = 'DAY_OF_MONTH' | 'WEEKDAY';
 
 /**
- * What the end field of a STORED series' rule reads and writes its day on
- * (DESIGN-series-time-zone.md, stage 12, part 3): the series' start, whether
- * it is all-day, the zone it is saved with, and the device's zone, which only
- * a series of days reads. An end is a day on the series' clock, and only the
+ * What the end field of a STORED series' rule (a file's included, 136a) reads
+ * and writes its day on (DESIGN-series-time-zone.md, stage 12, part 3): the
+ * series' start, whether it is all-day, the zone of the clock the form's
+ * fields stand on — which the field's label names and the views show the
+ * series on — and the device's zone, which only a series of days reads. An end is a day on the series' clock, and only the
  * core says which day and how to spell it (`cal_core::read_series_end`,
  * `cal_core::until_through`). A rule that is no stored series' own is edited
  * without facts: its end stays the typed day, `{D}T235959Z`, until a save

@@ -569,13 +569,32 @@ export function endsByDateOf(calendar: EndsByDateCalendar | null | undefined): b
 }
 
 /** A rule's UNTIL as written, or `null`. */
-function untilTextOf(rrule: string): string | null {
+export function untilTextOf(rrule: string): string | null {
   return /(?:^|[;:])\s*UNTIL=([^;]*)/i.exec(rrule)?.[1]?.trim() ?? null;
 }
 
 /** The rule with its UNTIL written as `value`; a leading `RRULE:` stays. */
 function replacedUntil(rrule: string, value: string): string {
   return rrule.replace(/((?:^|[;:])\s*UNTIL=)[^;]*/i, `$1${value}`);
+}
+
+/** The rule without its UNTIL: it repeats on for as long as it is read. A
+ *  leading `RRULE:` stays. */
+export function ruleWithoutUntil(rrule: string): string {
+  const [, prefix = '', body = ''] = /^(RRULE:)?(.*)$/is.exec(rrule.trim()) ?? [];
+  return (
+    prefix +
+    body
+      .split(';')
+      .filter((part) => part.trim() !== '' && !/^\s*UNTIL=/i.test(part))
+      .join(';')
+  );
+}
+
+/** The rule ending by the UNTIL `value`: its own replaced, or added last
+ *  where it names none. A leading `RRULE:` stays. */
+export function ruleWithUntil(rrule: string, value: string): string {
+  return untilTextOf(rrule) === null ? `${rrule};UNTIL=${value}` : replacedUntil(rrule, value);
 }
 
 /** `YYYY-MM-DD` from the first eight digits of an UNTIL, or `null`. */

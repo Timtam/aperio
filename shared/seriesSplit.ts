@@ -700,7 +700,8 @@ export function movedTailRule({
  * the copy's own cutoff for a carry; `rule` only an editor passes — a carry
  * never changes the rule. `endsByDate` is whether the series' own calendar
  * stores its end as a date: the series' own rule is settled on it before it
- * is carried (`carriedEnd`, D1, D4). Throws when the door into the core is
+ * is carried (`carriedEnd`, D1, D4), and so is the user's where it is written
+ * to another calendar (`intoAnotherCalendar`). Throws when the door into the core is
  * missing (a phone library older than it), before anything is written.
  */
 export function tailRecurrenceFor(input: {
@@ -718,8 +719,21 @@ export function tailRecurrenceFor(input: {
   /** Whether the master's own calendar stores a series' end as a date
    *  (`endsByDateOf`). */
   endsByDate: boolean;
+  /** Whether the series is written to another calendar than the master's. */
+  intoAnotherCalendar?: boolean;
 }): TailRecurrence | null {
-  const { master, cutoffIso, plan, tail, opened, rule, whole, calendarZones, endsByDate } = input;
+  const {
+    master,
+    cutoffIso,
+    plan,
+    tail,
+    opened,
+    rule,
+    whole,
+    calendarZones,
+    endsByDate,
+    intoAnotherCalendar,
+  } = input;
   const ruleChanged =
     rule !== undefined && (rule.touched === true || rule.form !== rule.opened);
   let rrule = ruleChanged
@@ -731,6 +745,16 @@ export function tailRecurrenceFor(input: {
     rrule = carriedEnd(
       rrule,
       { start: cutoffIso, allDay: master.all_day, tzid: master.recurrence?.tzid ?? null },
+      endsByDate,
+    );
+  } else if (intoAnotherCalendar === true) {
+    // The user's rule, as the field read it from the tail's start on the
+    // series' clock: an end the 105a guard alone reads as a cut there (one
+    // nobody retyped) is settled on the series' own calendar before another
+    // calendar reads it (D4), as every carry is.
+    rrule = carriedEnd(
+      rrule,
+      { start: tail.start, allDay: tail.all_day, tzid: master.recurrence?.tzid ?? null },
       endsByDate,
     );
   }
