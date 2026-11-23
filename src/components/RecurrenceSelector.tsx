@@ -55,12 +55,14 @@ export interface RecurrenceSelectorProps {
    *  adapters). */
   capabilities?: RecurrenceCapabilities;
   /** For a STORED series' rule only: the facts its end field reads and
-   *  writes its day on, on the clock the form's fields stand on
-   *  (DESIGN-series-time-zone.md, stage 12, part 3). Absent, a typed end stays the day it names,
-   *  `{D}T235959Z`, which the save spells (`settledEnd`). */
+   *  writes its day on, the series' zone as it is saved
+   *  (DESIGN-series-time-zone.md, stage 12, part 3). Absent, a typed end
+   *  stays the day it names, `{D}T235959Z`, which the save spells
+   *  (`settledEnd`). */
   endFacts?: FieldEndFacts | null;
-  /** The name of the clock the form's fields stand on (`fieldClockName`),
-   *  for the end field's label; `null` where it is the device's own. */
+  /** The name of the clock the end field reads its day on, the series' zone
+   *  as it is saved (`seriesEndClockName`), for its label; `null` where it is
+   *  the device's own. It may differ from the other fields' clock. */
   clockName?: string | null;
   /** The editor's announcer: a refused end is said once, where the focus
    *  is, as the phone says it. */

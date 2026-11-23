@@ -303,16 +303,6 @@ export function sameClockAsDevice(clock: FieldClock, deviceZone: string | null):
   return canonicalZone(zone) === device;
 }
 
-/**
- * The zone name `clock` reads instants on, as the core takes it: the device's
- * own (`deviceZone`, `null` where it reports none) for the device's clock, the
- * series' stored name, or `null` for UTC — which a series whose zone this
- * device cannot use stands on, as the views show it.
- */
-export function fieldClockZone(clock: FieldClock, deviceZone: string | null): string | null {
-  return clock.kind === 'device' ? deviceZone : clock.tzid;
-}
-
 /** The clock a timed series' fields stand on here, and the zone it stores when
  *  this device cannot use it. */
 export interface SeriesFieldClock {

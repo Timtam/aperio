@@ -700,6 +700,24 @@ export function asTypedEnd(
 }
 
 /**
+ * The rule an editor holds for a series read from a file (136a; DESIGN-
+ * series-time-zone.md, stage 12, part 3): its end read ONCE as a day on the
+ * file's own facts — its start, its kind and its zone — when the editor is
+ * filled (`asTypedEnd`). A file stores no end as a date, so an end the 105a
+ * guard alone reads as a cut counts as the day before it. From then on the end
+ * is the typed day, `{D}T235959Z`, as a new series' (141a, D3), and the save
+ * spells it on the facts it saves (`settledEnd`): a time or zone changed in
+ * the editor keeps the last day.
+ */
+export function importedRule(file: {
+  start: string;
+  all_day?: boolean;
+  recurrence?: { rrule?: string | null; tzid?: string | null } | null;
+}): string | null {
+  return asTypedEnd(file.recurrence?.rrule ?? null, endFacts(file), false);
+}
+
+/**
  * The rule with its UNTIL as the bound the views iterate it against, on the
  * clock they expand the series on: `zoneInUse`, or UTC for `null`.
  *

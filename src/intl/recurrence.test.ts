@@ -18,6 +18,7 @@ import {
   asTypedEnd,
   carriedEnd,
   endsByDateOf,
+  importedRule,
   exceptionsAtSeriesTime,
   movedSeriesUntil,
   seriesEndOf,
@@ -1422,6 +1423,50 @@ describe("an end on the series' clock (140a-142a)", () => {
         'FREQ=DAILY;UNTIL=20261110',
       );
       expect(asTypedEnd(null, at1900, true)).toBeNull();
+    });
+  });
+
+  describe('importedRule', () => {
+    /** A file's daily series on New York's clock from `start`, ending `until`. */
+    const file = (start: string, until: string) => ({
+      start,
+      all_day: false,
+      recurrence: { rrule: `FREQ=DAILY;UNTIL=${until}`, tzid: NY },
+    });
+
+    it("reads a file's end once as the day it reaches on the file's own facts", () => {
+      // 10:00 New York through 10 November, the marker unguarded there.
+      expect(importedRule(file('2026-11-03T15:00:00Z', '20261110T235959Z'))).toBe(
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      );
+      // 19:00 New York: Outlook's midnight UTC and Google's last second.
+      expect(importedRule(file('2026-11-03T00:00:00Z', '20261111T000000Z'))).toBe(
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      );
+      expect(importedRule(file('2026-11-03T00:00:00Z', '20261111T045959Z'))).toBe(
+        'FREQ=DAILY;UNTIL=20261110T235959Z',
+      );
+    });
+
+    it('reads a guarded end as the day before the cut: a file stores no end as a date', () => {
+      // One second before the 10 November occurrence at 19:00 New York.
+      expect(importedRule(file('2026-11-03T00:00:00Z', '20261110T235959Z'))).toBe(
+        'FREQ=DAILY;UNTIL=20261109T235959Z',
+      );
+    });
+
+    it('leaves a rule without an end, an all-day one and none as they are', () => {
+      expect(importedRule({ start: '2026-11-03T00:00:00Z', recurrence: { rrule: 'FREQ=DAILY' } })).toBe(
+        'FREQ=DAILY',
+      );
+      expect(
+        importedRule({
+          start: '2026-11-03T00:00:00Z',
+          all_day: true,
+          recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261110' },
+        }),
+      ).toBe('FREQ=DAILY;UNTIL=20261110');
+      expect(importedRule({ start: '2026-11-03T00:00:00Z', recurrence: null })).toBeNull();
     });
   });
 

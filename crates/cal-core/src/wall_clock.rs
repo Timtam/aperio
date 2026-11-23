@@ -314,6 +314,14 @@ pub fn series_end_on_clock(
 /// instead: the first instant that reads through `day`. A day the clock
 /// skips whole falls back to `DT235959Z`.
 ///
+/// That holds for a rule with one time a day, the only rules Aperio writes
+/// for Exchange and Microsoft 365. A rule with several times a day
+/// (`BYHOUR=10,23`) whose earlier time on `day` already reads through `day`
+/// takes the marker or the last instant before the change and is not
+/// carried on to the pushed occurrence: the day's 23:xx occurrence is lost.
+/// A known limit, reachable only from a CalDAV or file rule with several
+/// times a day in such a zone, ending on the day of its spring change.
+///
 /// So no `UNTIL` Aperio writes for a typed or carried day needs the guard to
 /// be read right: the views, the repeat sentence and a calendar that stores
 /// a date (`recurrence.ends_by_date`) all count it through `day`.

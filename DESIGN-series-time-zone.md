@@ -916,7 +916,9 @@ Uhrzeit die Gerätezone.
 
 **Weicht die Uhr der Felder von der des Geräts ab**, heißen die vier Felder
 „Startdatum (New York)“, „Startzeit (New York)“, „Enddatum (New York)“ und
-„Endzeit (New York)“. Das Enddatum der Wiederholung nennt die Uhr genauso.
+„Endzeit (New York)“. Das Enddatum der Wiederholung nennt die Uhr genauso;
+es nennt immer die Zone der Serie, auch wo die anderen Felder auf der Uhr des
+Geräts oder auf UTC stehen (Stufe 12, Teil 3).
 Verglichen wird mit kanonischen Zonen-Namen, denn V8 meldet alte Namen wie
 `Asia/Calcutta` statt `Asia/Kolkata`.
 
@@ -1880,7 +1882,10 @@ Handy im selben PR.
       Uhr der Serie; schiebt eine Umstellung, die das Ende von D überspringt,
       den letzten Termin von D darüber hinaus, der Moment, an dem er steht:
       Nuuk im Frühjahr ab 23:00) und „kurz vor einem Termin“ mit `cut_before`
-      (106a).
+      (106a). Bekannte Grenze: Eine Regel mit mehreren Uhrzeiten am Tag
+      (`BYHOUR=10,23`, nur aus CalDAV oder einer Datei) verliert an diesem
+      Tag in Nuuk ihren Termin ab 23:00, weil schon die frühere Uhrzeit bis D
+      liest.
       `SeriesEnd.guarded` sagt, wo ein Ende nur durch 105a ein Zeitpunkt ist.
     - Das Manifest nennt `recurrence.ends_by_date`; wahr bei Exchange und
       Microsoft 365, sonst falsch.
@@ -1893,20 +1898,29 @@ Handy im selben PR.
       Tag wandert mit ihrem Termin. „Diesen und alle folgenden“ mit
       geänderter Regel in einen anderen Kalender legt das Ende ebenso fest.
     - Eine neue Serie behält den getippten Tag bis zum Speichern (141a), auch
-      ein einzelner Termin, der hier zur Serie wird, wenn danach eine Zone
-      gewählt wird: der Kern wird dann ohne das Ende gefragt, und der
-      getippte Tag kommt in jede Antwort zurück (`chooseZone`).
+      ein einzelner Termin, der hier zur Serie wird, und eine Serie aus einer
+      Datei, wenn danach eine Zone gewählt wird: der Kern wird dann ohne das
+      Ende gefragt, und der getippte Tag kommt in jede Antwort zurück
+      (`chooseZone`).
     - Eine gespeicherte Serie liest und schreibt ihr Feld auf ihren Angaben
       und fällt bei einer Serie mit Uhrzeit auf einer Zone nie auf die
-      UTC-Ziffern zurück. Ein Termin aus einer Datei zählt dabei als
-      gespeichert (136a): das Feld zeigt den Tag auf der Uhr der Datei, ein
-      unberührtes Ende geht Byte für Byte zurück, und beim Speichern wird ein
-      Ende, das nur die Schutzregel als Schnitt liest, als Schnitt
-      `…T235958Z` geschrieben (eine Datei speichert kein Ende als Datum).
-    - Das Feld liest das Ende auf der Uhr, die seine Beschriftung nennt und
-      auf der die Ansichten die Serie zeigen: der Uhr der Felder. Stehen sie
-      auf der Uhr des Geräts (Umfang im Formular), ist es der Tag dort; bei
-      einer Zone, die dieses Gerät nicht kennt, der Tag in UTC.
+      UTC-Ziffern zurück.
+    - Bei einem Termin aus einer Datei wird das Ende einmal beim Füllen des
+      Editors als Tag gelesen, auf den Angaben der Datei (`importedRule`;
+      eine Datei speichert kein Ende als Datum, ein Ende, das nur die
+      Schutzregel als Schnitt liest, gilt also bis zum Tag davor). Danach ist
+      es ein getippter Tag wie bei einer neuen Serie, und jedes Speichern
+      schreibt ihn mit `settledEnd` auf dem Beginn und der Zone, die
+      gespeichert werden: eine geänderte Uhrzeit behält den letzten Tag. Die
+      Zone zählt weiter als gespeichert (136a).
+    - Das Feld liest und schreibt das Ende immer auf der Zone, mit der die
+      Regel gespeichert wird (gespeichert oder gewählt), denn darauf lesen es
+      die Ansichten, die Anbieter, `carriedEnd` und das Speichern; ein
+      `…T235959Z` heißt auf einer anderen Uhr einen anderen Tag. Die
+      Beschriftung nennt diese Zone, wo sie nicht die des Geräts ist, auch
+      wenn Beginn und Ende auf der Uhr des Geräts stehen (Umfang im Formular)
+      oder auf UTC (eine Zone, die dieses Gerät nicht kennt): „Ende-Datum (New
+      York)“ neben „Startzeit“.
     - Kann der Kern nicht antworten (eine ältere Bibliothek), bleibt ein
       unberührtes Ende wie es ist, und ein neues Datum wird mit Grund
       abgelehnt (D6), auch die Wahl „Bis Datum“; der Desktop sagt den Grund

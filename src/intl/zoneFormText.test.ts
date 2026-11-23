@@ -13,6 +13,7 @@ import {
   keepingInstants,
   openZoneForm,
   repeatClockAnnouncement,
+  seriesEndClockName,
   zoneCityName,
   zoneFormView,
   zoneSaveRefusal,
@@ -65,6 +66,17 @@ describe('the name of a clock', () => {
     expect(fieldClockName({ kind: 'series', tzid: null }, 'UTC')).toBeNull();
     expect(fieldClockName(NEW_YORK, BERLIN)).toBe('New York');
     expect(fieldClockName({ kind: 'series', tzid: null }, BERLIN)).toBe('UTC');
+  });
+
+  it("names the series' zone for the end field, whatever clock the other fields stand on", () => {
+    // The zone the rule is saved with, also where the fields stand on the
+    // device's clock or on UTC: a `…T235959Z` end is a day on that zone.
+    expect(seriesEndClockName('America/New_York', false, BERLIN)).toBe('New York');
+    expect(seriesEndClockName(null, false, BERLIN)).toBe('UTC');
+    expect(seriesEndClockName(BERLIN, false, BERLIN)).toBeNull();
+    expect(seriesEndClockName('Asia/Kolkata', false, 'Asia/Calcutta')).toBeNull();
+    // A series of days ends on a date, which no clock reads.
+    expect(seriesEndClockName('America/New_York', true, BERLIN)).toBeNull();
   });
 
   it('names the clock in the field labels', () => {

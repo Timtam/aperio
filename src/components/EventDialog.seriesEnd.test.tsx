@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-import { DEFAULT_RECURRENCE_CAPABILITIES, occurrenceOfSeries } from '@aperio/shared';
+import { DEFAULT_RECURRENCE_CAPABILITIES, expandEvent, occurrenceOfSeries } from '@aperio/shared';
 
 import type { Calendar, CalendarEvent, ImportedEvent } from '../api/types';
 
@@ -13,9 +13,11 @@ import type { Calendar, CalendarEvent, ImportedEvent } from '../api/types';
  *
  * A new series keeps the day typed in its end field while the form is open,
  * whatever its zone and time become, and is spelled through that day on the
- * facts it is saved with (141a). A stored series' field reads and writes on
- * the series' clock and names it; an end nobody changed goes back byte for
- * byte. With the real repeat controls, which the other editor tests replace.
+ * facts it is saved with (141a); so does a file's, whose end is read once as a
+ * day on the file's facts. A stored series' field reads and writes on the
+ * series' zone and names it, also where the other fields stand on the
+ * device's clock or on UTC; an end nobody changed goes back byte for byte.
+ * With the real repeat controls, which the other editor tests replace.
  *
  * The device is Berlin here, whatever clock the machine runs on.
  */
@@ -309,38 +311,66 @@ describe('EventDialog → a single event that becomes a series keeps its typed e
   });
 });
 
-describe("EventDialog → a file's series counts as stored (136a)", () => {
-  /** A daily series at 19:00 New York from 2 November, ending `until`. With
-   *  no UID, so no calendar is asked whether it holds it already. */
-  const fromFile = (until: string): ImportedEvent => ({
+describe("EventDialog → a file's series: its end is read once as a day (136a, 141a)", () => {
+  /** A daily series at 19:00 New York from 2 November (or from `start`),
+   *  ending `until`. With no UID, so no calendar is asked whether it holds it
+   *  already. */
+  const fromFile = (until: string, start = '2026-11-03T00:00:00Z'): ImportedEvent => ({
     title: 'Abendrunde',
-    start: '2026-11-03T00:00:00Z',
-    end: '2026-11-03T01:00:00Z',
+    start,
+    end: new Date(Date.parse(start) + 3_600_000).toISOString(),
     all_day: false,
     recurrence: { rrule: `FREQ=DAILY;UNTIL=${until}`, exceptions: [], tzid: 'America/New_York' },
     reminders: [],
     attendees: [],
   });
 
-  async function created(): Promise<string> {
+  interface Sent {
+    start: string;
+    end: string;
+    recurrence: { rrule: string; tzid?: string };
+  }
+
+  /** Saves the new series and answers what it was created with. */
+  async function createdSeries(): Promise<Sent> {
     fireEvent.click(screen.getByRole('button', { name: /^anlegen$/i }));
     await waitFor(() => expect(calls('create_event')).toHaveLength(1));
-    return (calls('create_event')[0][1] as { request: { recurrence: { rrule: string } } }).request
-      .recurrence.rrule;
+    return (calls('create_event')[0][1] as { request: Sent }).request;
   }
+  const created = async () => (await createdSeries()).recurrence.rrule;
+
+  /** The last occurrence the views show of a series as it was saved. */
+  const lastOccurrence = (series: Sent) => {
+    const all = expandEvent(
+      {
+        id: 'x',
+        start: series.start,
+        end: series.end,
+        all_day: false,
+        recurrence: { exceptions: [], ...series.recurrence },
+      },
+      { start: new Date('2026-10-01T00:00:00Z'), end: new Date('2027-01-01T00:00:00Z') },
+    );
+    return new Date(all[all.length - 1].start).toISOString();
+  };
+
+  const intoCalDav = () =>
+    fireEvent.change(screen.getByRole('combobox', { name: /kalender/i }), {
+      target: { value: 'cal-dav' },
+    });
 
   it.each([
     ['Outlook', '20261111T000000Z'],
     ['Google', '20261111T045959Z'],
-  ])("shows a %s end's day on the series' clock and saves it untouched byte for byte", async (_, until) => {
+  ])("shows a %s end's day on the series' clock and saves it through that day", async (_, until) => {
     deviceInBerlin();
     await open(null, fromFile(until));
     expect(endField('new york').value).toBe('2026-11-10');
-    expect(await created()).toBe(`FREQ=DAILY;UNTIL=${until}`);
+    expect(await created()).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
   });
 
   it.each(['cal-work', 'cal-dav'])(
-    'writes an end the guard alone reads as a cut as the cut, into %s (140a)',
+    'reads an end the guard alone reads as a cut as the day before it, into %s (140a)',
     async (calendarId) => {
       // `…T235959Z` one second before the 10 November occurrence: the file's
       // series ends on 9 November, as RFC 5545 and 105a read it.
@@ -350,53 +380,67 @@ describe("EventDialog → a file's series counts as stored (136a)", () => {
         target: { value: calendarId },
       });
       expect(endField('new york').value).toBe('2026-11-09');
-      expect(await created()).toBe('FREQ=DAILY;UNTIL=20261110T235958Z');
+      // Through 9 November, 19:00 New York.
+      expect(await created()).toBe('FREQ=DAILY;UNTIL=20261110T045959Z');
     },
   );
 
-  it("spells a day typed in the file's series on its clock, as a stored series'", async () => {
+  it("spells a day typed in the file's series on its clock", async () => {
     deviceInBerlin();
     await open(null, fromFile('20261111T045959Z'));
     fireEvent.change(endField('new york'), { target: { value: '2026-11-12' } });
     expect(endField('new york').value).toBe('2026-11-12');
     expect(await created()).toBe('FREQ=DAILY;UNTIL=20261113T045959Z');
   });
-});
 
-describe('EventDialog → the end field reads on the clock its label names', () => {
-  const SERIES = {
-    id: 'ev-ny',
-    calendar_id: 'cal-work',
-    title: 'Abendrunde',
-    description: null,
-    location: null,
-    start: '2026-11-03T00:00:00.000Z',
-    end: '2026-11-03T01:00:00.000Z',
-    all_day: false,
-    recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261111T045959Z', exceptions: [], tzid: 'America/New_York' },
-    color_label: null,
-    reminders: [],
-    attendees: [],
-  } as unknown as CalendarEvent;
-
-  it("reads the device's day where the fields stand on the device's clock (scope in the form)", async () => {
-    // Opened from a reminder: the scope is asked in the form, and the fields
-    // stand on the device's own clock — the machine's, which the device
-    // clock's fields read. The last occurrence, 10 November 19:00 New York,
-    // is 11 November 01:00 in Berlin, 13:00 in Auckland, 00:00 UTC.
-    seriesById.set('ev-ny', SERIES);
-    await open(occurrenceOfSeries(SERIES, '2026-11-05T00:00:00.000Z') as unknown as CalendarEvent);
-    await settle();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const opened = new Date('2026-11-05T00:00:00Z');
-    const last = new Date('2026-11-11T00:00:00Z');
-    expect(input(/^startzeit$/i).value).toBe(`${pad(opened.getHours())}:${pad(opened.getMinutes())}`);
-    expect(input(/^ende-datum$/i).value).toBe(
-      `${last.getFullYear()}-${pad(last.getMonth() + 1)}-${pad(last.getDate())}`,
-    );
+  it('keeps a typed day while the time moves to the blind spot, on CalDAV', async () => {
+    // 10:00 New York, ending 20 November; moved to 19:00, ending 10 November.
+    deviceInBerlin();
+    await open(null, fromFile('20261120T235959Z', '2026-11-03T15:00:00Z'));
+    intoCalDav();
+    fireEvent.change(input(/^startzeit \(new york\)$/i), { target: { value: '19:00' } });
+    fireEvent.change(endField('new york'), { target: { value: '2026-11-10' } });
+    expect(endField('new york').value).toBe('2026-11-10');
+    const series = await createdSeries();
+    expect(series.start).toBe('2026-11-04T00:00:00.000Z');
+    expect(series.recurrence.rrule).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+    // 10 November, 19:00 New York.
+    expect(lastOccurrence(series)).toBe('2026-11-11T00:00:00.000Z');
   });
 
-  it('reads the day on UTC, as the label says, for a zone this device cannot use', async () => {
+  it("keeps the file's last day untouched while the time moves to the blind spot", async () => {
+    // 10:00 New York through 10 November; moved to 19:00.
+    deviceInBerlin();
+    await open(null, fromFile('20261110T235959Z', '2026-11-03T15:00:00Z'));
+    intoCalDav();
+    expect(endField('new york').value).toBe('2026-11-10');
+    fireEvent.change(input(/^startzeit \(new york\)$/i), { target: { value: '19:00' } });
+    expect(endField('new york').value).toBe('2026-11-10');
+    const series = await createdSeries();
+    expect(series.recurrence.rrule).toBe('FREQ=DAILY;UNTIL=20261111T045959Z');
+    expect(lastOccurrence(series)).toBe('2026-11-11T00:00:00.000Z');
+  });
+
+  it('keeps the day a guarded end means while the time moves out of the blind spot', async () => {
+    // 19:00 New York, guarded: through 9 November. Moved to 10:00, it still
+    // ends on 9 November, not with one more occurrence on the 10th.
+    deviceInBerlin();
+    await open(null, fromFile('20261110T235959Z'));
+    intoCalDav();
+    expect(endField('new york').value).toBe('2026-11-09');
+    fireEvent.change(input(/^startzeit \(new york\)$/i), { target: { value: '10:00' } });
+    expect(endField('new york').value).toBe('2026-11-09');
+    const series = await createdSeries();
+    expect(series.recurrence.rrule).toBe('FREQ=DAILY;UNTIL=20261109T235959Z');
+    // 9 November, 10:00 New York.
+    expect(lastOccurrence(series)).toBe('2026-11-09T15:00:00.000Z');
+  });
+
+  it('saves an untouched end of a zone this device cannot use: the day read is no change', async () => {
+    // Daily 17:00 Arizona (00:00 UTC) through 10 November there, spelled at
+    // midnight UTC as Outlook writes it. The form holds it as a day; that is
+    // the rule the editor was filled with, so the save is not refused as a
+    // changed rule (`unusableZoneRefusal`).
     deviceInBerlin();
     const Real = Intl.DateTimeFormat;
     vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (
@@ -408,19 +452,141 @@ describe('EventDialog → the end field reads on the clock its label names', () 
       }
       return new Real(locales, options);
     } as unknown as typeof Intl.DateTimeFormat);
-    // Daily 17:00 Arizona (00:00 UTC) through 10 November there: on UTC,
-    // where the views show it here, its last occurrence is on the 11th. By a
-    // name the zone picker never asks Intl about, so no formatter is cached.
-    await open({
-      ...SERIES,
-      id: 'ev-cj',
-      recurrence: {
-        rrule: 'FREQ=DAILY;UNTIL=20261111T065959Z',
-        exceptions: [],
-        tzid: 'US/Arizona',
-      },
-    } as unknown as CalendarEvent);
-    expect(input(/^startzeit \(utc\)$/i).value).toBe('00:00');
-    expect(endField('utc').value).toBe('2026-11-11');
+    const file = fromFile('20261111T070000Z');
+    await open(null, { ...file, recurrence: { ...file.recurrence!, tzid: 'US/Arizona' } });
+    expect(input(/^ende-datum \((phoenix|arizona)\)$/i).value).toBe('2026-11-10');
+    // Through 10 November 17:00 Arizona.
+    expect(await created()).toBe('FREQ=DAILY;UNTIL=20261111T065959Z');
+  });
+
+  it('keeps the day when another zone is chosen, and spells it on that clock', async () => {
+    deviceInBerlin();
+    await open(null, fromFile('20261111T045959Z'));
+    intoCalDav();
+    await pick('Chicago', 'Chicago');
+    expect(endField('chicago').value).toBe('2026-11-10');
+    // Through 10 November 18:00 Chicago (11 November 00:00 UTC).
+    expect(await created()).toBe('FREQ=DAILY;UNTIL=20261111T055959Z');
+  });
+});
+
+describe("EventDialog → the end field reads its day on the series' zone, which its label names", () => {
+  /** A daily CalDAV series on `tzid`'s clock from `start`, ending `until`. */
+  const series = (start: string, until: string, tzid = 'America/New_York') =>
+    ({
+      id: 'ev-ny',
+      calendar_id: 'cal-dav',
+      title: 'Abendrunde',
+      description: null,
+      location: null,
+      start,
+      end: new Date(Date.parse(start) + 3_600_000).toISOString(),
+      all_day: false,
+      recurrence: { rrule: `FREQ=DAILY;UNTIL=${until}`, exceptions: [], tzid },
+      color_label: null,
+      reminders: [],
+      attendees: [],
+    }) as unknown as CalendarEvent;
+
+  /** The last occurrence the views show of `ev`. */
+  const lastOccurrence = (ev: CalendarEvent) => {
+    const all = expandEvent(
+      { id: 'x', start: ev.start, end: ev.end, all_day: ev.all_day, recurrence: ev.recurrence },
+      { start: new Date('2026-10-01T00:00:00Z'), end: new Date('2027-01-01T00:00:00Z') },
+    );
+    return new Date(all[all.length - 1].start).toISOString();
+  };
+
+  /** Opens the occurrence of `stored` at `at` as from a reminder: the scope
+   *  is asked in the form, and the other fields stand on the device's clock. */
+  async function openFromReminder(stored: CalendarEvent, at: string) {
+    seriesById.set(stored.id, stored);
+    await open(occurrenceOfSeries(stored, at) as unknown as CalendarEvent);
+    await settle();
+  }
+
+  /** Picks the whole series in the form, types `day` as its end on New York's
+   *  clock and saves: the series as sent. */
+  async function savedThrough(day: string): Promise<CalendarEvent> {
+    fireEvent.click(screen.getByRole('radio', { name: /^ganze serie$/i }));
+    await settle();
+    fireEvent.change(endField('new york'), { target: { value: day } });
+    expect(endField('new york').value).toBe(day);
+    fireEvent.click(screen.getByRole('button', { name: /^speichern$/i }));
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+    return (calls('update_event')[0][1] as { event: CalendarEvent }).event;
+  }
+
+  it("names the series' zone and reads a through-day end there, with the scope in the form", async () => {
+    // 19:30 New York (01:30 in Berlin) through 10 November there, as
+    // `until_through` writes it: the views' last occurrence is 10 November
+    // 19:30 New York, 11 November in Berlin.
+    deviceInBerlin();
+    const stored = series('2026-11-03T00:30:00.000Z', '20261110T235959Z');
+    expect(lastOccurrence(stored)).toBe('2026-11-11T00:30:00.000Z');
+    await openFromReminder(stored, '2026-11-05T00:30:00.000Z');
+    // The other fields stand on the device's clock and name none.
+    expect(screen.getByLabelText(/^startzeit$/i)).toBeInTheDocument();
+    expect(endField('new york').value).toBe('2026-11-10');
+    const sent = await savedThrough('2026-11-12');
+    expect(sent.recurrence?.tzid).toBe('America/New_York');
+    expect(sent.recurrence?.rrule).toBe('FREQ=DAILY;UNTIL=20261112T235959Z');
+    // 12 November, 19:30 New York: the day typed, on the clock named.
+    expect(lastOccurrence(sent)).toBe('2026-11-13T00:30:00.000Z');
+  });
+
+  it("reads and spells an end at the blind spot on the series' zone, with the scope in the form", async () => {
+    // 19:00 New York (01:00 in Berlin) through 10 November there. Read on
+    // Berlin's clock the same end would be 11 November, and a typed day
+    // would be spelled through Berlin's day.
+    deviceInBerlin();
+    const stored = series('2026-11-03T00:00:00.000Z', '20261111T045959Z');
+    await openFromReminder(stored, '2026-11-05T00:00:00.000Z');
+    expect(endField('new york').value).toBe('2026-11-10');
+    const sent = await savedThrough('2026-11-12');
+    expect(sent.recurrence?.rrule).toBe('FREQ=DAILY;UNTIL=20261113T045959Z');
+    // 12 November, 19:00 New York.
+    expect(lastOccurrence(sent)).toBe('2026-11-13T00:00:00.000Z');
+  });
+
+  /** Makes this device's `Intl` refuse US/Arizona, a name the zone picker
+   *  never asks Intl about, so no formatter is cached. */
+  function refuseArizona() {
+    const Real = Intl.DateTimeFormat;
+    vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (
+      locales?: string | string[],
+      options?: Intl.DateTimeFormatOptions,
+    ) {
+      if (options?.timeZone === 'US/Arizona') {
+        throw new RangeError('Invalid time zone specified: US/Arizona');
+      }
+      return new Real(locales, options);
+    } as unknown as typeof Intl.DateTimeFormat);
+  }
+
+  /** The end field of a series on Arizona's clock, by the city the list
+   *  names it with. */
+  const arizonaEndField = () => input(/^ende-datum \((phoenix|arizona)\)$/i);
+
+  it.each([
+    // Through 10 November as `until_through` writes it there, and as an
+    // instant, the last second of that day in Arizona.
+    ['a through-day end', '20261110T235959Z'],
+    ['an instant end', '20261111T065959Z'],
+  ])('reads %s on the stored zone, named, for a zone this device cannot use', async (_, until) => {
+    // Daily 17:30 Arizona (00:30 UTC): the views show it on UTC here, its
+    // last occurrence on 11 November 00:30 UTC, which is 10 November in
+    // Arizona.
+    deviceInBerlin();
+    refuseArizona();
+    const stored = { ...series('2026-11-03T00:30:00.000Z', until, 'US/Arizona'), id: 'ev-az' };
+    expect(lastOccurrence(stored)).toBe('2026-11-11T00:30:00.000Z');
+    await open(stored);
+    expect(input(/^startzeit \(utc\)$/i).value).toBe('00:30');
+    expect(arizonaEndField().value).toBe('2026-11-10');
+    // A typed day reads back as typed. Saving a changed rule is refused for
+    // such a zone (`unusableZoneRefusal`), so nothing is written.
+    fireEvent.change(arizonaEndField(), { target: { value: '2026-11-12' } });
+    expect(arizonaEndField().value).toBe('2026-11-12');
   });
 });

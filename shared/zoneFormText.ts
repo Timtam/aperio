@@ -53,6 +53,25 @@ export function fieldClockName(clock: FieldClock, deviceZone: string | null): st
   return zoneCityName(clock.tzid);
 }
 
+/**
+ * The name of the clock a repeat's end field reads and spells its day on, for
+ * its label („Ende-Datum (New York)“): the zone the rule is saved with
+ * (`zoneToSave`, `null` for UTC), which the views and the providers read its
+ * end on (DESIGN-series-time-zone.md, stage 12, part 3). That is the series'
+ * zone also where the form's other fields stand on the device's clock (the
+ * scope asked in the form) or on UTC (a zone this device cannot use): a
+ * `…T235959Z` end means another day on another clock, so the field names its
+ * own. `null` where that clock is the device's, and for a series of days,
+ * whose end is a date.
+ */
+export function seriesEndClockName(
+  zone: string | null,
+  allDay: boolean,
+  deviceZone: string | null,
+): string | null {
+  return allDay ? null : fieldClockName({ kind: 'series', tzid: zone }, deviceZone);
+}
+
 /** A date or time field's label, naming the clock where it is not the
  *  device's: „Startzeit (New York)“. */
 export function clockFieldLabel(

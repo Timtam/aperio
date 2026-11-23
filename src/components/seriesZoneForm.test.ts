@@ -333,6 +333,28 @@ describe('choosing a zone ("Die Zone wechseln")', () => {
     ).toBe('FREQ=DAILY;UNTIL=20261111T055959Z');
   });
 
+  it("keeps the typed end day of a file's series, which says it holds one (`importedRule`)", () => {
+    // A file's daily series at 19:00 New York, its end read as 10 November
+    // when the editor was filled. Asked as a stored end, the core would read
+    // that day state on New York's clock, guarded, as 9 November.
+    const form = openZoneForm('series', 'America/New_York', false);
+    const fields = fieldsAt('2026-11-03T00:00:00Z', '2026-11-03T01:00:00Z', {
+      kind: 'series',
+      tzid: 'America/New_York',
+    });
+    const result = chooseZone(form, facts({ calendarMoved: true }), fields, 'America/Chicago', {
+      rrule: 'FREQ=DAILY;UNTIL=20261110T235959Z',
+      exceptions: [],
+      endsByDate: false,
+      typedEnd: true,
+    });
+    const answers = [result.change?.asNow, result.change?.asRule];
+    expect(answers.map((answer) => (answer?.outcome === 'changed' ? answer.rrule : null))).toEqual([
+      'FREQ=DAILY;UNTIL=20261110T235959Z',
+      'FREQ=DAILY;UNTIL=20261110T235959Z',
+    ]);
+  });
+
   it("gives a weekly single event's answers the typed end beside the days they name", () => {
     // Mondays 01:00 Berlin become Sundays 19:00 New York as they fall now.
     const form = openZoneForm('single', undefined, false);

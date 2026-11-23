@@ -140,10 +140,9 @@ import {
   answerMovesStart,
   applyClockChange,
   asTypedEnd,
-  carriedEnd,
   endsByDateOf,
-  fieldClockName,
-  fieldClockZone,
+  importedRule,
+  seriesEndClockName,
   settledEnd,
   type FieldEndFacts,
   calendarZonesOf,
@@ -1300,21 +1299,26 @@ export function EventDialog({
     seriesZone,
     seriesEndsByDate,
   ]);
-  // A stored series' rule, a file's included (136a): its end field reads and
-  // writes its day as the form will save it (DESIGN-series-time-zone.md,
-  // stage 12, part 3): from the start the rule is written at, the kind, and
-  // the clock the fields stand on, which the field's label names and the
-  // views show the series on (the series' zone; UTC for one this device
-  // cannot use; the device's where the fields stand on it). Any other rule —
-  // a new series, an event that becomes one, a prefill — keeps the typed day
-  // until it is saved (`settledEnd`, 141a). Never the digits of a UTC day for
-  // a timed series on a zone (D6): without a frame, the stored start.
-  const endFactsSeries = wholeSeriesMaster ?? event ?? imported;
+  // A stored series' rule: its end field reads and writes its day as the form
+  // will save it (DESIGN-series-time-zone.md, stage 12, part 3): from the
+  // start the rule is written at, the kind, and the zone it is saved with —
+  // the stored or chosen one, which the views, the providers and every carry
+  // read its end on. That is the series' zone also where the other fields
+  // stand on the device's clock (the scope asked in the form) or on UTC (a
+  // zone this device cannot use): a `…T235959Z` end means another day on
+  // another clock. The field's label names that zone (`seriesEndClockName`).
+  // Any other rule — a new series, an event that becomes one, a prefill, a
+  // file's (`importedRule`) — keeps the typed day until it is saved
+  // (`settledEnd`, 141a), on the zone the save writes, which the label names
+  // too. Never the digits of a UTC day for a timed series on a zone (D6):
+  // without a frame, the stored start.
+  const endFactsSeries = wholeSeriesMaster ?? event;
   const storedRule = !!endFactsSeries?.recurrence?.rrule;
   const endFactsStart = storedRule
     ? (ruleFrame?.written ?? ruleSetAt ?? endFactsSeries?.start ?? null)
     : null;
-  const endFactsTzid = storedRule ? fieldClockZone(fields.clock, deviceZone) : null;
+  const endZone = zoneToSave(zoneFormOf(form), zoneFactsOf(form));
+  const endFactsTzid = storedRule ? endZone : null;
   const endFacts = useMemo(
     (): FieldEndFacts | null =>
       endFactsStart === null
@@ -1928,6 +1932,8 @@ export function EventDialog({
       rrule: current.rrule ?? '',
       exceptions: current.exceptions ?? storedExceptions,
       endsByDate: seriesEndsByDate,
+      // A file's end is a typed day too (`importedRule`).
+      typedEnd: !storedRule,
     });
     // No answer can be written (20a): the zone stays, and why is said.
     if (result.refused !== null) {
@@ -2011,7 +2017,10 @@ export function EventDialog({
       // zone this device cannot use, a zone the calendar cannot store: said,
       // and nothing is written ("Prüfen und Speichern", 139a).
       const zoneForm = zoneFormOf(form);
-      const openedRule = (event ?? imported)?.recurrence?.rrule ?? null;
+      // A file's rule as the form was filled with it (`importedRule`).
+      const openedRule = imported
+        ? importedRule(imported)
+        : (event?.recurrence?.rrule ?? null);
       const refusal = zoneSaveRefusal({
         fields,
         view,
@@ -2052,23 +2061,14 @@ export function EventDialog({
       const storedExceptions =
         (isOccurrence ? event?.recurrence : (event?.recurrence ?? imported?.recurrence))
           ?.exceptions ?? [];
-      // A rule that is no stored series' own holds its end as the typed day
-      // until here: spelled through that day on the facts saved (141a, D3).
-      // A file's rule counts as stored (136a) and comes from a source that
-      // stores no end as a date: an end the 105a guard alone reads as a cut
-      // there is written as the cut (`carriedEnd`, 140a), on the facts the
-      // rule stands on — the file's, or a zone answer's.
+      // A rule that is no stored series' own — a file's included, whose end
+      // was read once as a day (`importedRule`) — holds its end as the typed
+      // day until here: spelled through that day on the facts saved (141a,
+      // D3), the start saved and the zone saved.
       const savedZone = zoneToSave(zoneForm, zoneFactsOf(form));
-      const ruleToSave = imported && storedRule
-        ? form.rrule &&
-          carriedEnd(
-            form.rrule,
-            { start: ruleSetAt ?? imported.start, allDay: form.allDay, tzid: savedZone },
-            false,
-          )
-        : storedRule
-          ? form.rrule
-          : settledEnd(form.rrule, { start, allDay: form.allDay, tzid: savedZone });
+      const ruleToSave = storedRule
+        ? form.rrule
+        : settledEnd(form.rrule, { start, allDay: form.allDay, tzid: savedZone });
       const recurrence = savedRecurrence(
         ruleToSave,
         form.exceptions ?? storedExceptions,
@@ -3978,7 +3978,7 @@ export function EventDialog({
                 ?.recurrence_capabilities
             }
             endFacts={endFacts}
-            clockName={fieldClockName(fields.clock, deviceZone)}
+            clockName={seriesEndClockName(endZone, form.allDay, deviceZone)}
             announce={announce}
           />
           </div>
@@ -4342,7 +4342,9 @@ function formFromImport(imported: ImportedEvent, calendarId: string): FormState 
     allDay: imported.all_day,
     location: imported.location ?? '',
     description: imported.description ?? '',
-    rrule: imported.recurrence?.rrule ?? null,
+    // Its end read once as a day on the file's facts, then a typed day as a
+    // new series' (`importedRule`, DESIGN-series-time-zone.md, part 3).
+    rrule: importedRule(imported),
     colorLabel: null,
     reminders: imported.reminders.map((r) => ({ ...r, attach: true })),
     attendees: imported.attendees,

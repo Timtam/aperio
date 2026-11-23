@@ -437,17 +437,19 @@ export interface ZoneChoiceResult {
  * guard alone reads as a cut then counts through its own date (140a, D1).
  *
  * A rule that is no stored series' own (a single event that becomes a series
- * here) holds its end as the day the user typed, `{D}T235959Z`, until it is
- * saved (141a, D3). That day is no end on any clock yet, so the core is asked
- * about the rule without it, and every answer gets the typed day back as it
- * stood: the field and the save keep the typed day, on the new clock.
+ * here, a file's series, `importedRule`) holds its end as the day the user
+ * typed, `{D}T235959Z`, until it is saved (141a, D3); `series.typedEnd` says
+ * so, and a single event's form always does. That day is no end on any clock
+ * yet, so the core is asked about the rule without it, and every answer gets
+ * the typed day back as it stood: the field and the save keep the typed day,
+ * on the new clock.
  */
 export function chooseZone(
   form: SeriesZoneForm,
   facts: ZoneFormFacts,
   fields: ClockFields,
   zone: string | null,
-  series: { rrule: string; exceptions: string[]; endsByDate: boolean },
+  series: { rrule: string; exceptions: string[]; endsByDate: boolean; typedEnd?: boolean },
 ): ZoneChoiceResult {
   const next: SeriesZoneForm = { ...form, chosen: zone };
   const clock: FieldClock = { kind: 'series', tzid: zone };
@@ -459,7 +461,8 @@ export function chooseZone(
   if (start.kind !== 'at' || moved.start.carried) {
     return { form: next, fields: moved, change: null, refused: null };
   }
-  const typedEnd = form.editing === 'single' ? untilTextOf(series.rrule) : null;
+  const typedEnd =
+    form.editing === 'single' || series.typedEnd === true ? untilTextOf(series.rrule) : null;
   const asked = seriesClockChange({
     rrule: typedEnd === null ? series.rrule : ruleWithoutUntil(series.rrule),
     start: start.at,
