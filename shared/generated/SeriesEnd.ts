@@ -24,4 +24,19 @@ at: string | null,
  * time, at the earlier reading in a fold). For a rule that repeats by
  * the hour or faster, the bound's day.
  */
-endDay: string, };
+endDay: string, 
+/**
+ * Whether the end reads as an instant only through the 105a guard: the
+ * series repeats on a zone's clock ([`crate::ExpansionClock::Zone`]),
+ * its `UNTIL` spells the end of a UTC day (`…T235959Z`), the rule
+ * repeats by the day or slower, and the second after the `UNTIL`, read
+ * on the clock, is one of the rule's times of day. Without the guard
+ * that text would read through its own date. `false` everywhere else.
+ *
+ * Such an end is settled on its own calendar's facts before it is
+ * counted, moved or carried (DESIGN-series-time-zone.md, 140a): where
+ * the calendar stores a series' end as a date (manifest
+ * `recurrence.ends_by_date`), through its own date; elsewhere as the
+ * 106a cut ([`crate::cut_before`]), which keeps 105a's reading.
+ */
+guarded: boolean, };

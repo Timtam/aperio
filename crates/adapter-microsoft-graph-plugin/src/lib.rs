@@ -714,6 +714,23 @@ mod tests {
     }
 
     #[test]
+    fn the_manifest_says_microsoft_365_stores_a_series_end_as_a_date() {
+        // Microsoft 365 keeps a series' end as a range's endDate, as Exchange
+        // does (its own counting is still to be measured, TODO.md): the core
+        // then counts an unflagged end of a UTC day through its own date
+        // (140a). Every other recurrence axis stays at its default.
+        let manifest = manifest();
+        assert!(manifest.recurrence.ends_by_date);
+        assert_eq!(
+            manifest.recurrence,
+            plugin_sdk::plugin_core::manifest::RecurrenceCapabilities {
+                ends_by_date: true,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
     fn every_schema_field_is_a_key_the_init_config_actually_reads() {
         // The schema and `InitConfig` are two descriptions of the same thing,
         // in two languages, and nothing but this test connects them. A field

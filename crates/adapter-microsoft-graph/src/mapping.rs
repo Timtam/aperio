@@ -569,18 +569,22 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
     } else {
         (entry.start.to_utc()?, entry.end.to_utc()?)
     };
+    // Graph attaches the IANA zone to start/end (it speaks IANA natively);
+    // carry it for a timed recurring master so the frontend expands
+    // DST-correctly. All-day + plain UTC stay on the UTC path. A zone
+    // `Zone::named` does not know in exact case was already refused by
+    // `start.to_utc()` above (as before); only POST/PATCH responses carry
+    // masters.
+    let tzid = (!entry.is_all_day)
+        .then(|| entry.start.time_zone.clone())
+        .filter(|t| !t.is_empty() && t != "UTC");
     let recurrence = match entry.recurrence {
-        Some(r) => recurrence_to_rrule(&r).map(|rrule| EventRecurrence {
-            rrule,
-            exceptions: Vec::new(), // Graph models exceptions separately
-            // Graph attaches the IANA zone to start/end (it speaks IANA
-            // natively); carry it for a timed recurring master so the frontend
-            // expands DST-correctly. All-day + plain UTC stay on the UTC path.
-            tzid: if entry.is_all_day {
-                None
-            } else {
-                Some(entry.start.time_zone.clone()).filter(|t| !t.is_empty() && t != "UTC")
-            },
+        Some(r) => read_back_rrule(&r, start, entry.is_all_day, tzid.as_deref()).map(|rrule| {
+            EventRecurrence {
+                rrule,
+                exceptions: Vec::new(), // Graph models exceptions separately
+                tzid,
+            }
         }),
         None => None,
     };
@@ -755,6 +759,37 @@ pub fn recurrence_to_rrule(r: &RecurrenceObject) -> Option<String> {
     Some(parts.join(";"))
 }
 
+/// A series' rule as Microsoft 365 sends it back, its `endDate` D spelled as
+/// "through D" on the series' clock (`cal_core::until_through`, 107b), as
+/// the Exchange adapter reads an `EndDate` (READ_RULE 7): no reader needs the
+/// 105a guard for it, and [`series_recurrence`] writes it as D again. The
+/// clock is the views' (`until_through` reads the zone as they do), with no
+/// exact-case gate (D7): a Windows name, UTC, an all-day series and a series
+/// without a zone keep `DT235959Z`.
+pub(crate) fn read_back_rrule(
+    r: &RecurrenceObject,
+    start: DateTime<Utc>,
+    all_day: bool,
+    tzid: Option<&str>,
+) -> Option<String> {
+    let rule = recurrence_to_rrule(r)?;
+    if all_day || r.range.kind != "endDate" {
+        return Some(rule);
+    }
+    let Some(day) = r
+        .range
+        .end_date
+        .as_deref()
+        .and_then(|end| NaiveDate::parse_from_str(end, "%Y-%m-%d").ok())
+    else {
+        return Some(rule);
+    };
+    Some(cal_core::with_until(
+        &rule,
+        &cal_core::rule_until_text(cal_core::until_through(day, &rule, start, false, tzid)),
+    ))
+}
+
 /// Inverse: parse an RRULE body into Graph's structured form.
 /// Returns `Err(Protocol)` when the rule uses features Graph can't
 /// represent — e.g. BYSETPOS without a known BYDAY pattern.
@@ -762,9 +797,9 @@ pub fn recurrence_to_rrule(r: &RecurrenceObject) -> Option<String> {
 /// `first_day` is the day the series starts on, on the clock Graph reads the
 /// range in ([`series_recurrence`]): the range's `startDate`, and the
 /// weekday, day of the month and month a rule without BYDAY, BYMONTHDAY or
-/// BYMONTH takes. `end_day` is the day a cut ends on, where the rule has an
-/// `UNTIL` ([`cut_end_day`]); without one the `endDate` is the `UNTIL`'s own
-/// date.
+/// BYMONTH takes. `end_day` is the day the end is counted through on the
+/// series' clock, where the rule has an `UNTIL` ([`series_recurrence`]);
+/// without one (an all-day series) the `endDate` is the `UNTIL`'s own date.
 pub fn rrule_to_recurrence(
     rrule: &str,
     first_day: NaiveDate,
@@ -1162,6 +1197,21 @@ fn write_datetime_in<D: TimeZone>(
 /// Berlin) and for every all-day series there, and the day after for an
 /// evening series west of UTC (20:00 in New York). The same date error
 /// Exchange had before PR 8a (DESIGN-series-time-zone.md, stage 5).
+///
+/// The end, too, is a day on that clock (decisions 235, 140a): every end of
+/// a timed series is written as the day `cal_core::written_end_day` gives on
+/// the clock the start is written on, the last day whose occurrence, at the
+/// master's wall time, starts at or before the `UNTIL`. Graph keeps a
+/// series' end as a date (the manifest's `recurrence.ends_by_date`), and
+/// Exchange, the store behind it, counts that date whole (live round 10a), so
+/// the `UNTIL`'s UTC date mostly kept a cut's day in both series. An
+/// unflagged `…T235959Z` counts as its own date, the day the repeat field has
+/// always written it for; a cut ("this and all following", which sets
+/// `truncate_tail_overrides`, `cut`) is counted as the instant it is. Whether
+/// Graph counts the end date the same way, and which zone it reads it on, is
+/// not measured (TODO.md). An all-day series keeps the date it names (an
+/// all-day cut already names the day before). A cut the clock cannot place
+/// is refused.
 fn series_recurrence<D: TimeZone>(
     rrule: &str,
     start: DateTime<Utc>,
@@ -1176,47 +1226,27 @@ fn series_recurrence<D: TimeZone>(
         Some(zone) => zone.wall(start).date(),
         None => start.date_naive(),
     };
-    let end_day = if cut && !all_day {
-        cut_end_day(rrule, start, zone.unwrap_or(cal_core::Zone::UTC))?
-    } else {
+    let clock = zone.unwrap_or(cal_core::Zone::UTC);
+    let end_day = if all_day {
         None
+    } else {
+        match cal_core::written_end_day(
+            rrule,
+            clock.wall(start).time(),
+            cut,
+            |when| Some(clock.wall(when)),
+            |wall| clock.to_utc(wall, cal_core::WallPolicy::EarlierElseHourLater),
+        ) {
+            Some(day) => Some(day),
+            None if cut && cal_core::utc_until(rrule).is_some() => {
+                return Err(GraphError::Protocol(
+                    cal_core::WriteRefusal::DayZoneUnreadable.message("no-wall"),
+                ));
+            }
+            None => None,
+        }
     };
     rrule_to_recurrence(rrule, first_day, end_day)
-}
-
-/// The day a cut ends the old series on (decision 235), or `None` where the
-/// rule's own `UNTIL` date stands.
-///
-/// A cut ("this and all following", which sets `truncate_tail_overrides`)
-/// ends the old series with an `UNTIL` one second before the occurrence it is
-/// cut at. Graph keeps a series' end as a date on the series' clock, and
-/// Exchange, the store behind it, counts that date whole (live round 10a), so
-/// the `UNTIL`'s UTC date mostly kept the cut's day in both series. The end is
-/// the last day whose occurrence, at the master's wall time on `clock`,
-/// starts at or before the `UNTIL` ([`cal_core::last_day_through`]), as the
-/// Exchange adapter writes it. Whether Graph counts the end date the same
-/// way is not measured (TODO.md). An all-day cut already names the day before
-/// as a date, and an end the user typed keeps the day typed: neither is a
-/// cut of a timed series.
-fn cut_end_day(
-    rrule: &str,
-    start: DateTime<Utc>,
-    clock: cal_core::Zone,
-) -> GraphResult<Option<NaiveDate>> {
-    let Some(until) = cal_core::utc_until(rrule) else {
-        return Ok(None);
-    };
-    let time = clock.wall(start).time();
-    cal_core::last_day_through(
-        until,
-        time,
-        |when| Some(clock.wall(when)),
-        |wall| clock.to_utc(wall, cal_core::WallPolicy::EarlierElseHourLater),
-    )
-    .map(Some)
-    .ok_or_else(|| {
-        GraphError::Protocol(cal_core::WriteRefusal::DayZoneUnreadable.message("no-wall"))
-    })
 }
 
 fn first_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
@@ -2203,6 +2233,155 @@ mod series_clock_tests {
             None,
         );
         assert_eq!(end_date(&ev), "2026-11-15");
+    }
+
+    /// A typed end at the hour the 105a guard reads as a cut (19:00 New York
+    /// in winter, 20:00 in summer) keeps its date, in either spelling: the
+    /// repeat field's `…T235959Z` (its own date, 140a) and the read-back end
+    /// of the day (107b).
+    #[test]
+    fn a_typed_end_keeps_its_date_at_the_blind_spot() {
+        for (start, until, day) in [
+            ("2026-11-03T00:00:00Z", "20261110T235959Z", "2026-11-10"),
+            ("2026-11-03T00:00:00Z", "20261111T045959Z", "2026-11-10"),
+            ("2026-10-20T00:00:00Z", "20261027T235959Z", "2026-10-27"),
+            ("2026-10-20T00:00:00Z", "20261028T035959Z", "2026-10-27"),
+        ] {
+            let mut ev = cut(
+                start,
+                &format!("FREQ=DAILY;UNTIL={until}"),
+                Some("America/New_York"),
+            );
+            ev.truncate_tail_overrides = false;
+            assert_eq!(end_date(&ev), day, "{start} {until}");
+        }
+    }
+
+    /// The 106a cut before 8 November's 19:00 in New York is two seconds
+    /// before it, and ends the series on the 6th.
+    #[test]
+    fn a_cut_two_seconds_before_the_blind_spot_ends_the_day_before() {
+        let ev = cut(
+            "2026-11-03T00:00:00Z",
+            "FREQ=DAILY;UNTIL=20261107T235958Z",
+            Some("America/New_York"),
+        );
+        assert_eq!(end_date(&ev), "2026-11-06");
+    }
+
+    /// A copy of a cut series is a create without the flag: its end is still
+    /// the day it reaches on the series' clock, never the UNTIL's UTC date.
+    #[test]
+    fn a_copy_of_a_cut_series_writes_the_day_before_the_cut() {
+        for (start, until, tzid) in [
+            ("2026-11-02T09:00:00Z", "20261116T085959Z", "Europe/Berlin"),
+            (
+                "2026-11-03T01:00:00Z",
+                "20261117T005959Z",
+                "America/New_York",
+            ),
+        ] {
+            let json = written(
+                &series(
+                    start,
+                    false,
+                    &format!("FREQ=DAILY;UNTIL={until}"),
+                    Some(tzid),
+                ),
+                0,
+            );
+            assert_eq!(
+                json["recurrence"]["range"]["endDate"], "2026-11-15",
+                "{tzid}"
+            );
+        }
+    }
+
+    /// A master as a POST or PATCH response carries it: daily 19:00 in New
+    /// York in winter, ending on 10 November.
+    fn created_master() -> EventEntry {
+        serde_json::from_str(
+            r#"{
+                "id": "ev",
+                "start": { "dateTime": "2026-11-02T19:00:00", "timeZone": "America/New_York" },
+                "end":   { "dateTime": "2026-11-02T20:00:00", "timeZone": "America/New_York" },
+                "isAllDay": false,
+                "recurrence": {
+                    "pattern": { "type": "daily", "interval": 1 },
+                    "range": { "type": "endDate", "startDate": "2026-11-02", "endDate": "2026-11-10" }
+                }
+            }"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_create_response_reads_its_end_back_as_sent() {
+        let ev = map_event(created_master(), "primary").unwrap().unwrap();
+        let rec = ev.recurrence.expect("a master keeps its rule");
+        assert_eq!(rec.rrule, "FREQ=DAILY;UNTIL=20261111T045959Z");
+        assert_eq!(rec.tzid.as_deref(), Some("America/New_York"));
+    }
+
+    #[test]
+    fn an_untouched_update_after_a_read_back_keeps_end_date() {
+        let ev = map_event(created_master(), "primary").unwrap().unwrap();
+        assert!(!ev.truncate_tail_overrides);
+        assert_eq!(end_date(&ev), "2026-11-10");
+    }
+
+    fn ending(day: &str) -> RecurrenceObject {
+        serde_json::from_value(serde_json::json!({
+            "pattern": { "type": "daily", "interval": 1 },
+            "range": { "type": "endDate", "startDate": "2026-11-02", "endDate": day }
+        }))
+        .unwrap()
+    }
+
+    /// A zone tzdata does not name (a Windows name) reads on UTC, as the
+    /// views read it: the digits stay.
+    #[test]
+    fn a_windows_zone_name_keeps_the_digits() {
+        assert_eq!(
+            read_back_rrule(
+                &ending("2026-11-10"),
+                at("2026-11-03T00:00:00Z"),
+                false,
+                Some("Eastern Standard Time"),
+            )
+            .as_deref(),
+            Some("FREQ=DAILY;UNTIL=20261110T235959Z")
+        );
+    }
+
+    /// D7: no exact-case gate. The views read `america/new_york` as New
+    /// York, and so does the read-back.
+    #[test]
+    fn a_lowercase_zone_name_reads_its_end_on_the_zone() {
+        assert_eq!(
+            read_back_rrule(
+                &ending("2026-11-10"),
+                at("2026-11-03T00:00:00Z"),
+                false,
+                Some("america/new_york"),
+            )
+            .as_deref(),
+            Some("FREQ=DAILY;UNTIL=20261111T045959Z")
+        );
+    }
+
+    #[test]
+    fn an_all_day_read_back_keeps_the_digits() {
+        assert_eq!(
+            read_back_rrule(
+                &ending("2026-11-10"),
+                at("2026-11-03T00:00:00Z"),
+                true,
+                None,
+            )
+            .as_deref(),
+            Some("FREQ=DAILY;UNTIL=20261110T235959Z")
+        );
     }
 
     /// An end the user typed keeps its day, and so does an all-day cut, which

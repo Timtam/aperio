@@ -41,4 +41,24 @@ allDay: boolean, tzid: string | null,
  * The device's zone as its runtime reports it, read only for a
  * series of days; the core reads no clock of its own.
  */
-deviceZone: string | null, };
+deviceZone: string | null, } | { "op": "untilThrough", 
+/**
+ * `YYYY-MM-DD`.
+ */
+date: string, 
+/**
+ * The series' rule, with or without `RRULE:`.
+ */
+rrule: string, 
+/**
+ * The series' start, an RFC 3339 instant.
+ */
+start: string, allDay: boolean, tzid: string | null, } | { "op": "cutBefore", 
+/**
+ * The occurrence, an RFC 3339 instant.
+ */
+at: string, 
+/**
+ * The series' rule, with or without `RRULE:`.
+ */
+rrule: string, };

@@ -1,5 +1,5 @@
 {
-  "about": "Dates and times on the clock a series repeats on (cal_core::wall_clock, DESIGN-series-time-zone.md stage 8, decision 100a). Each question is answered with the clock read (the canonical zone, null for UTC) and: wallOf the date, HH:MM time and seconds an instant shows; instantOf how a typed wall time reads (single, fold with the earlier instant and the later one, gap with the offsets before and after, in seconds east of UTC); untilOn the day's last second on the clock: 23:59:59, or the second before the change where one skips the day's end (Nuuk), absent only where the clock skips the whole day (Apia). seriesEnd how a stored UNTIL reads on the clock the series repeats on (its zone, UTC, or for an all-day series the device's): throughDay, instant or wall, the bound as a wall time, the last instant at or before it, and the last day it reaches; …T235959Z on a zone's clock is through that day unless the second after it is one of the rule's times of day, as after a cut (decisions 101b, 105a-116a). null for text that names no instant, date or time. Written by hand from tzdata's rules (Berlin, New York, Lord Howe, Apia 2011, Paris LMT +00:09:21) and checked against Node's ICU zone data; the core and both surfaces read this file.",
+  "about": "Dates and times on the clock a series repeats on (cal_core::wall_clock, DESIGN-series-time-zone.md stage 8, decision 100a). Each question is answered with the clock read (the canonical zone, null for UTC) and: wallOf the date, HH:MM time and seconds an instant shows; instantOf how a typed wall time reads (single, fold with the earlier instant and the later one, gap with the offsets before and after, in seconds east of UTC); untilOn the day's last second on the clock: 23:59:59, or the second before the change where one skips the day's end (Nuuk), absent only where the clock skips the whole day (Apia). seriesEnd how a stored UNTIL reads on the clock the series repeats on (its zone, UTC, or for an all-day series the device's): throughDay, instant or wall, the bound as a wall time, the last instant at or before it, and the last day it reaches; …T235959Z on a zone's clock is through that day unless the second after it is one of the rule's times of day, as after a cut (decisions 101b, 105a-116a). seriesEnd also says whether the end reads as an instant only through that guard (guarded). untilThrough the UNTIL that reads through a date on the series' clock and needs no guard: DT235959Z where that reads through the date, else the date's last instant on the clock (a day the clock skips whole falls back to DT235959Z). cutBefore the UNTIL just before an occurrence: one second before it, two where one would spell …T235959Z, except by the second (106a). null for text that names no instant, date or time. Written by hand from tzdata's rules (Berlin, New York, Lord Howe, Apia 2011, Paris LMT +00:09:21) and checked against Node's ICU zone data; the core and both surfaces read this file.",
   "rows": [
     {
       "name": "wall-berlin-winter",
@@ -412,7 +412,8 @@
           "reading": "instant",
           "wall": "2026-11-30T23:59:59",
           "at": "2026-11-30T23:59:59Z",
-          "endDay": "2026-11-30"
+          "endDay": "2026-11-30",
+          "guarded": false
         }
       }
     },
@@ -432,7 +433,8 @@
           "reading": "throughDay",
           "wall": "2026-05-03T23:59:59",
           "at": "2026-05-03T21:59:59Z",
-          "endDay": "2026-05-03"
+          "endDay": "2026-05-03",
+          "guarded": false
         }
       }
     },
@@ -452,7 +454,8 @@
           "reading": "throughDay",
           "wall": "2026-11-05T23:59:59",
           "at": "2026-11-06T04:59:59Z",
-          "endDay": "2026-11-05"
+          "endDay": "2026-11-05",
+          "guarded": false
         }
       }
     },
@@ -472,7 +475,8 @@
           "reading": "instant",
           "wall": "2026-11-04T18:59:59",
           "at": "2026-11-04T23:59:59Z",
-          "endDay": "2026-11-03"
+          "endDay": "2026-11-03",
+          "guarded": true
         }
       }
     },
@@ -492,7 +496,8 @@
           "reading": "instant",
           "wall": "2026-07-04T19:59:59",
           "at": "2026-07-04T23:59:59Z",
-          "endDay": "2026-07-03"
+          "endDay": "2026-07-03",
+          "guarded": true
         }
       }
     },
@@ -512,7 +517,8 @@
           "reading": "throughDay",
           "wall": "2026-07-04T23:59:59",
           "at": "2026-07-05T03:59:59Z",
-          "endDay": "2026-07-04"
+          "endDay": "2026-07-04",
+          "guarded": false
         }
       }
     },
@@ -532,7 +538,8 @@
           "reading": "instant",
           "wall": "2026-11-04T18:59:59",
           "at": "2026-11-04T23:59:59Z",
-          "endDay": "2026-11-03"
+          "endDay": "2026-11-03",
+          "guarded": true
         }
       }
     },
@@ -552,7 +559,8 @@
           "reading": "instant",
           "wall": "2026-12-01T00:59:59",
           "at": "2026-11-30T23:59:59Z",
-          "endDay": "2026-11-30"
+          "endDay": "2026-11-30",
+          "guarded": true
         }
       }
     },
@@ -572,7 +580,8 @@
           "reading": "instant",
           "wall": "2026-12-01T00:59:59",
           "at": "2026-11-30T23:59:59Z",
-          "endDay": "2026-12-01"
+          "endDay": "2026-12-01",
+          "guarded": false
         }
       }
     },
@@ -592,7 +601,8 @@
           "reading": "throughDay",
           "wall": "2026-12-31T23:59:59",
           "at": "2026-12-31T22:59:59Z",
-          "endDay": "2026-12-31"
+          "endDay": "2026-12-31",
+          "guarded": false
         }
       }
     },
@@ -612,7 +622,8 @@
           "reading": "throughDay",
           "wall": "2026-12-31T23:59:59",
           "at": "2027-01-01T04:59:59Z",
-          "endDay": "2026-12-31"
+          "endDay": "2026-12-31",
+          "guarded": false
         }
       }
     },
@@ -632,7 +643,8 @@
           "reading": "wall",
           "wall": "2026-12-31T12:00:00",
           "at": "2026-12-31T11:00:00Z",
-          "endDay": "2026-12-31"
+          "endDay": "2026-12-31",
+          "guarded": false
         }
       }
     },
@@ -652,7 +664,8 @@
           "reading": "instant",
           "wall": "2026-11-30T23:59:59",
           "at": "2026-12-01T04:59:59Z",
-          "endDay": "2026-11-30"
+          "endDay": "2026-11-30",
+          "guarded": false
         }
       }
     },
@@ -672,7 +685,8 @@
           "reading": "instant",
           "wall": "2026-11-02T08:59:59",
           "at": "2026-11-02T07:59:59Z",
-          "endDay": "2026-11-01"
+          "endDay": "2026-11-01",
+          "guarded": false
         }
       }
     },
@@ -692,7 +706,8 @@
           "reading": "throughDay",
           "wall": "2026-05-03T23:59:59",
           "at": "2026-05-03T21:59:59Z",
-          "endDay": "2026-05-03"
+          "endDay": "2026-05-03",
+          "guarded": false
         }
       }
     },
@@ -712,7 +727,8 @@
           "reading": "throughDay",
           "wall": "2026-11-30T23:59:59",
           "at": "2026-11-30T22:59:59Z",
-          "endDay": "2026-11-30"
+          "endDay": "2026-11-30",
+          "guarded": false
         }
       }
     },
@@ -732,7 +748,8 @@
           "reading": "wall",
           "wall": "2026-11-30T09:00:00",
           "at": "2026-11-30T08:00:00Z",
-          "endDay": "2026-11-30"
+          "endDay": "2026-11-30",
+          "guarded": false
         }
       }
     },
@@ -752,7 +769,8 @@
           "reading": "wall",
           "wall": "2026-10-25T02:30:00",
           "at": "2026-10-25T01:30:00Z",
-          "endDay": "2026-10-24"
+          "endDay": "2026-10-24",
+          "guarded": false
         }
       }
     },
@@ -772,7 +790,8 @@
           "reading": "instant",
           "wall": "2026-11-04T23:59:59",
           "at": "2026-11-04T23:59:59Z",
-          "endDay": "2026-11-04"
+          "endDay": "2026-11-04",
+          "guarded": false
         }
       }
     },
@@ -792,7 +811,8 @@
           "reading": "throughDay",
           "wall": "2011-12-30T23:59:59",
           "at": "2011-12-30T09:59:59Z",
-          "endDay": "2011-12-29"
+          "endDay": "2011-12-29",
+          "guarded": false
         }
       }
     },
@@ -852,7 +872,8 @@
           "reading": "instant",
           "wall": "2026-03-29T03:29:59",
           "at": "2026-03-29T01:29:59Z",
-          "endDay": "2026-03-28"
+          "endDay": "2026-03-28",
+          "guarded": false
         }
       }
     },
@@ -872,7 +893,8 @@
           "reading": "instant",
           "wall": "2026-10-25T02:15:00",
           "at": "2026-10-25T01:15:00Z",
-          "endDay": "2026-10-25"
+          "endDay": "2026-10-25",
+          "guarded": false
         }
       }
     },
@@ -892,7 +914,8 @@
           "reading": "instant",
           "wall": "2026-11-04T19:59:59",
           "at": "2026-11-05T00:59:59Z",
-          "endDay": "2026-11-03"
+          "endDay": "2026-11-03",
+          "guarded": false
         }
       }
     },
@@ -912,8 +935,195 @@
           "reading": "instant",
           "wall": "2026-11-30T07:30:00",
           "at": "2026-11-30T06:30:00Z",
-          "endDay": "2026-11-30"
+          "endDay": "2026-11-30",
+          "guarded": false
         }
+      }
+    },
+    {
+      "name": "until-through-new-york-1900-winter-blind-spot",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-11-10",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-11-03T00:00:00Z",
+        "allDay": false,
+        "tzid": "America/New_York"
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "at": "2026-11-11T04:59:59Z"
+      }
+    },
+    {
+      "name": "until-through-new-york-1800",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-11-10",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-11-02T23:00:00Z",
+        "allDay": false,
+        "tzid": "America/New_York"
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "at": "2026-11-10T23:59:59Z"
+      }
+    },
+    {
+      "name": "until-through-new-york-2000-summer-blind-spot",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-10-27",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-10-20T00:00:00Z",
+        "allDay": false,
+        "tzid": "America/New_York"
+      },
+      "expect": {
+        "clock": "America/New_York",
+        "at": "2026-10-28T03:59:59Z"
+      }
+    },
+    {
+      "name": "until-through-los-angeles-1600-winter-blind-spot",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-11-10",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-11-03T00:00:00Z",
+        "allDay": false,
+        "tzid": "America/Los_Angeles"
+      },
+      "expect": {
+        "clock": "America/Los_Angeles",
+        "at": "2026-11-11T07:59:59Z"
+      }
+    },
+    {
+      "name": "until-through-berlin-0100-winter-east-blind-spot",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-11-10",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-11-03T00:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "at": "2026-11-10T22:59:59Z"
+      }
+    },
+    {
+      "name": "until-through-berlin-1000",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-11-10",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-11-03T09:00:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "at": "2026-11-10T23:59:59Z"
+      }
+    },
+    {
+      "name": "until-through-berlin-0030",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-11-10",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-11-02T23:30:00Z",
+        "allDay": false,
+        "tzid": "Europe/Berlin"
+      },
+      "expect": {
+        "clock": "Europe/Berlin",
+        "at": "2026-11-10T23:59:59Z"
+      }
+    },
+    {
+      "name": "until-through-all-day-by-digits",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-11-10",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-11-02T23:00:00Z",
+        "allDay": true,
+        "tzid": null
+      },
+      "expect": {
+        "clock": null,
+        "at": "2026-11-10T23:59:59Z"
+      }
+    },
+    {
+      "name": "until-through-no-zone-is-utc",
+      "question": {
+        "op": "untilThrough",
+        "date": "2026-11-10",
+        "rrule": "FREQ=DAILY",
+        "start": "2026-11-03T00:00:00Z",
+        "allDay": false,
+        "tzid": null
+      },
+      "expect": {
+        "clock": null,
+        "at": "2026-11-10T23:59:59Z"
+      }
+    },
+    {
+      "name": "until-through-apia-skipped-day-falls-back",
+      "question": {
+        "op": "untilThrough",
+        "date": "2011-12-30",
+        "rrule": "FREQ=DAILY",
+        "start": "2011-12-20T20:00:00Z",
+        "allDay": false,
+        "tzid": "Pacific/Apia"
+      },
+      "expect": {
+        "clock": "Pacific/Apia",
+        "at": "2011-12-30T23:59:59Z"
+      }
+    },
+    {
+      "name": "cut-before-blind-spot",
+      "question": {
+        "op": "cutBefore",
+        "at": "2026-11-08T00:00:00Z",
+        "rrule": "FREQ=DAILY"
+      },
+      "expect": {
+        "clock": null,
+        "at": "2026-11-07T23:59:58Z"
+      }
+    },
+    {
+      "name": "cut-before-ordinary",
+      "question": {
+        "op": "cutBefore",
+        "at": "2026-11-05T07:00:00Z",
+        "rrule": "FREQ=DAILY"
+      },
+      "expect": {
+        "clock": null,
+        "at": "2026-11-05T06:59:59Z"
+      }
+    },
+    {
+      "name": "cut-before-secondly",
+      "question": {
+        "op": "cutBefore",
+        "at": "2026-11-08T00:00:00Z",
+        "rrule": "FREQ=SECONDLY"
+      },
+      "expect": {
+        "clock": null,
+        "at": "2026-11-07T23:59:59Z"
       }
     }
   ]

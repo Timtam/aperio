@@ -18,6 +18,9 @@
     }
   },
   "signed": false,
+  "recurrence": {
+    "ends_by_date": true
+  },
   "account": {
     "fields": [
       {

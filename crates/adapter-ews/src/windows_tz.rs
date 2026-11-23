@@ -92,7 +92,11 @@ use cal_core::windows_zone::{
 /// 6: a series' start zone Exchange defines in full (232) reads as the zone
 /// that runs its clock ([`read_series_definition`]). Before, such a series
 /// repeated in UTC, an hour off in summer.
-pub const READ_RULE: u32 = 6;
+/// 7: a series' end date reads back as the end of that day on the series'
+/// clock (DESIGN-series-time-zone.md 107b), which changes the UNTIL of every
+/// series ending at the hour the 105a guard reads as a cut: New York 19:00
+/// (20:00 in summer), Berlin 01:00 (02:00).
+pub const READ_RULE: u32 = 7;
 
 /// The end zone Exchange stores for a series created without a zone.
 const NO_ZONE_END: &str = "tzone://Microsoft/Utc";

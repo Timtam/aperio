@@ -2015,6 +2015,43 @@ mod tests {
         );
     }
 
+    /// Daily 19:00 New York through 10 November, as READ_RULE 7 reads it
+    /// back (`…T045959Z` of the 11th): the create writes EndDate 10 November,
+    /// and a deletion on the 10th's occurrence, 00:00 UTC on the 11th, lies
+    /// within the series and is deleted, not skipped past its end.
+    #[tokio::test]
+    async fn a_deletion_on_the_last_day_of_a_blind_spot_remainder_is_placed() {
+        let first = at("2026-11-03T00:00:00Z");
+        let slots: Vec<DateTime<Utc>> = (0..9).map(|i| first + chrono::Duration::days(i)).collect();
+        let last = at("2026-11-11T00:00:00Z");
+        assert_eq!(slots.last(), Some(&last));
+        let shape = Shape {
+            slots,
+            pattern: "<t:DailyRecurrence><t:Interval>1</t:Interval></t:DailyRecurrence>",
+            start_date: "2026-11-02-05:00",
+            start_zone: "Eastern Standard Time",
+            end_zone: "Eastern Standard Time",
+            ..mondays()
+        };
+        let fake = Fake::new(shape, Vec::new());
+        let mut event = series(vec![last], false);
+        event.start = first;
+        event.end = first + chrono::Duration::hours(1);
+        let rec = event.recurrence.as_mut().unwrap();
+        rec.rrule = "FREQ=DAILY;UNTIL=20261111T045959Z".into();
+        rec.tzid = Some("America/New_York".into());
+        let created = run(&fake, event).await.unwrap();
+        let creates = fake.bodies(Create);
+        assert_eq!(creates.len(), 1);
+        assert!(
+            creates[0].contains("<t:EndDate>2026-11-10</t:EndDate>"),
+            "{}",
+            creates[0]
+        );
+        assert_eq!(fake.deleted(), vec![9]);
+        assert_eq!(created.recurrence.unwrap().exceptions, vec![last]);
+    }
+
     #[tokio::test]
     async fn a_slot_the_stored_rule_makes_no_occurrence_at_is_skipped() {
         let shape = mondays();

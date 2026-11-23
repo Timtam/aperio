@@ -23,4 +23,12 @@ fromTzid: string | null,
 /**
  * The zone it is to repeat on; `None` for UTC.
  */
-toTzid: string | null, };
+toTzid: string | null, 
+/**
+ * The series' own calendar stores its end as a date (manifest
+ * `recurrence.ends_by_date`). An unflagged `…T235959Z` that the 105a
+ * guard reads as a cut ([`crate::SeriesEnd::guarded`]) then counts
+ * through its own date (DESIGN-series-time-zone.md, 140a, D1). JSON
+ * without the field reads `false`.
+ */
+endsByDate: boolean, };
