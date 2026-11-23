@@ -661,6 +661,22 @@ export function carriedEnd(rrule: string, facts: SeriesEndFacts, endsByDate: boo
 }
 
 /**
+ * Whether `rrule` repeats at most once a day, the only rules whose end is a
+ * day (DESIGN-series-time-zone.md, part 3 of stage 12): not hourly or faster,
+ * and at most one value in each of BYHOUR, BYMINUTE and BYSECOND. The end of
+ * any other rule is a moment, and the day state (`{D}T235959Z`) would stretch
+ * it to the whole day: such a rule keeps its end as written.
+ */
+export function endIsADay(rrule: string): boolean {
+  const freq = /(?:^|[;:])\s*FREQ=([A-Z]+)/i.exec(rrule)?.[1]?.toUpperCase();
+  if (freq === 'HOURLY' || freq === 'MINUTELY' || freq === 'SECONDLY') return false;
+  return ['BYHOUR', 'BYMINUTE', 'BYSECOND'].every((part) => {
+    const value = new RegExp(`(?:^|[;:])\\s*${part}=([^;]*)`, 'i').exec(rrule)?.[1];
+    return value === undefined || !value.includes(',');
+  });
+}
+
+/**
  * The rule a new series is saved with (DESIGN-series-time-zone.md, 141a, D3).
  * A rule that is not a stored series' own keeps its end as the day the user
  * typed, `{D}T235959Z`, while the form is open; on save it is spelled through
@@ -670,7 +686,7 @@ export function carriedEnd(rrule: string, facts: SeriesEndFacts, endsByDate: boo
  * the core leave the rule as it is.
  */
 export function settledEnd(rrule: string | null, facts: SeriesEndFacts): string | null {
-  if (rrule === null || facts.allDay) return rrule;
+  if (rrule === null || facts.allDay || !endIsADay(rrule)) return rrule;
   const until = untilTextOf(rrule);
   if (until === null || !/^\d{8}T235959Z$/i.test(until)) return rrule;
   const day = untilDigitsDay(until);
@@ -684,15 +700,16 @@ export function settledEnd(rrule: string | null, facts: SeriesEndFacts): string 
  * end settled on its source (`carriedEnd`), then turned into the day it
  * reaches on the source's clock, in day state, `{D}T235959Z`, which the save
  * spells on the new event's facts (`settledEnd`). All-day rules, rules
- * without an UNTIL and rules with a COUNT stay as they are; an end the core
- * gives no day for stays as carried.
+ * without an UNTIL, rules with a COUNT and rules whose end is a moment, not a
+ * day (`endIsADay`), stay as they are; an end the core gives no day for stays
+ * as carried.
  */
 export function asTypedEnd(
   rrule: string | null,
   facts: SeriesEndFacts,
   endsByDate: boolean,
 ): string | null {
-  if (rrule === null || facts.allDay) return rrule;
+  if (rrule === null || facts.allDay || !endIsADay(rrule)) return rrule;
   if (untilTextOf(rrule) === null || /(?:^|[;:])\s*COUNT=/i.test(rrule)) return rrule;
   const carried = carriedEnd(rrule, facts, endsByDate);
   const day = seriesEndOf(carried, facts, null)?.endDay;

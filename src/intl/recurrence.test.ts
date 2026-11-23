@@ -17,6 +17,7 @@ import type { CalendarEvent } from '../api/types';
 import {
   asTypedEnd,
   carriedEnd,
+  endIsADay,
   endsByDateOf,
   importedRule,
   exceptionsAtSeriesTime,
@@ -1467,6 +1468,27 @@ describe("an end on the series' clock (140a-142a)", () => {
         }),
       ).toBe('FREQ=DAILY;UNTIL=20261110');
       expect(importedRule({ start: '2026-11-03T00:00:00Z', recurrence: null })).toBeNull();
+    });
+
+    it('keeps the end of a rule that repeats more than once a day as written: it is a moment, not a day', () => {
+      const tzFile = (rrule: string) => ({
+        start: '2026-11-03T15:00:00Z',
+        all_day: false,
+        recurrence: { rrule, tzid: NY },
+      });
+      for (const rrule of [
+        'FREQ=HOURLY;INTERVAL=6;UNTIL=20261110T120000Z',
+        'FREQ=DAILY;BYHOUR=10,15;BYMINUTE=0;UNTIL=20261110T180000Z',
+        'FREQ=HOURLY;UNTIL=20261110T235959Z',
+      ]) {
+        expect(importedRule(tzFile(rrule)), rrule).toBe(rrule);
+        // And a save leaves it so.
+        expect(settledEnd(rrule, { start: '2026-11-03T15:00:00Z', allDay: false, tzid: NY }), rrule).toBe(rrule);
+      }
+      expect(endIsADay('FREQ=DAILY;UNTIL=20261110T235959Z')).toBe(true);
+      expect(endIsADay('FREQ=WEEKLY;BYDAY=MO,WE;BYHOUR=9;UNTIL=20261110T235959Z')).toBe(true);
+      expect(endIsADay('FREQ=MINUTELY;UNTIL=20261110T235959Z')).toBe(false);
+      expect(endIsADay('FREQ=DAILY;BYMINUTE=0,30')).toBe(false);
     });
   });
 
