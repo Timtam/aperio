@@ -1004,6 +1004,12 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **iPhone: schreibgeschützte Termine lassen sich nicht öffnen** (Toni,
+      2026-11-23): Ein Termin aus einem nur lesbaren Kalender, etwa einem
+      iCal-Abo, öffnet am iPhone beim Antippen nichts; es passiert gar
+      nichts, auch keine Ansage. Er sollte sich zum Ansehen öffnen,
+      schreibgeschützt, wie eine fremde Einladung (77a). Android noch
+      prüfen.
 - [ ] **Serien, die in der Frühjahrslücke enden: drei kleine Reste** (zweite
       Prüfrunde von Stufe 8, Schritt 6, 2026-11-22; keiner neu, alle selten):
       `occurrenceCount` antwortet `limit + 1`, wenn genau `limit` Termine
