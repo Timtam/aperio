@@ -208,6 +208,12 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  no instant (`cal_core::series_clock_change`). Synchronous. */
   seriesClockChange(questionJson: string): string;
 
+  /** Where the changed occurrences (`RECURRENCE-ID`s) of a series moved onto
+   *  a new clock now stand, as JSON: the slots that move, from and to; `null`
+   *  for a start that names no instant (`cal_core::moved_slots`).
+   *  Synchronous. */
+  movedSlots(questionJson: string): string;
+
   /** The parts a repeat rule takes from a `YYYY-MM-DD` day, as JSON, or
    *  `null` for a key that names no day (`cal_core::day_parts`). Synchronous. */
   dayParts(dayKey: string): string;

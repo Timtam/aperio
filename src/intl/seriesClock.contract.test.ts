@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import contract from '../../crates/cal-core/tests/fixtures/seriesClock.json';
-import { canonicalZone, seriesClockZone } from '@aperio/shared';
+import slotContract from '../../crates/cal-core/tests/fixtures/movedSlots.json';
+import { canonicalZone, movedSlots, seriesClockZone, type SlotMoveQuestion } from '@aperio/shared';
 
 interface ClockRow {
   tzid: string | null;
@@ -66,6 +67,37 @@ describe('seriesClock contract (WebAssembly door and shared shell)', () => {
 
 });
 
+/**
+ * Where a series' changed occurrences stand on its new clock (stage 13, 95a),
+ * pinned by `crates/cal-core/tests/fixtures/movedSlots.json`: every row through
+ * the real WebAssembly door. The core and the phone's door read the same file;
+ * `seriesClockChange.contract.test.ts` replays the clock-change answers, with
+ * the `movedMinutes` these slots move by.
+ */
+describe('movedSlots contract (WebAssembly door and shared shell)', () => {
+  // Anti-silence: the rows the rule turns on, by name.
+  it('still carries the rows the rule turns on', () => {
+    const names = new Set(slotContract.rows.map((row) => row.name));
+    for (const needed of [
+      'as-now-in-the-other-half-year',
+      'lost-berlin-zone-monday-rule-as-the-rule-says',
+      'every-other-week',
+      'a-slot-that-names-no-occurrence',
+      'a-slot-after-the-end',
+      'a-slot-moved-into-the-spring-gap',
+      'a-start-that-names-no-instant',
+    ]) {
+      expect(names, `fixture lost ${needed}`).toContain(needed);
+    }
+  });
+
+  for (const row of slotContract.rows) {
+    it(`moves ${row.name}`, () => {
+      expect(movedSlots(row.question as SlotMoveQuestion), row.note).toEqual(row.expect);
+    });
+  }
+});
+
 describe('the shell around the door', () => {
   // A module graph of its own, with a door that answers every zone in one
   // spelling of its own: the shell must still hand on the name the surface
@@ -78,6 +110,7 @@ describe('the shell around the door', () => {
       canonicalZone: () => '',
       expansionClock: () => 'zone',
       seriesClockChangeJson: () => 'null',
+      movedSlotsJson: () => 'null',
     });
     expect(shell.seriesClockZone('europe/berlin')).toBe('europe/berlin');
     expect(shell.seriesClockZone(null)).toBeNull();

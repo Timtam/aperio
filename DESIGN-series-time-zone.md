@@ -1958,6 +1958,15 @@ Handy im selben PR.
     Zonenwechsel die heutige Mitnahme von Beginn und Ende; das Angebot nach dem
     Speichern nennt die Zone; Kopien, die ablehnen, werden mit Grund genannt. Die
     offenen Punkte aus dem Abschnitt 23b werden hier entschieden.
+    Entschieden 2026-11-23: 143a bis 146a. Gebaut, Teil 1 (2026-11-27, ohne
+    Verhaltensänderung): `series_clock_change` verschiebt eine Serie über
+    einen Verschieber (`ClockMove::moved_by`) um eine Wanduhr-Verschiebung auf
+    die neue Uhr: Beginn, Regel, streichende Ausnahmen und Ende gemeinsam.
+    Jede geschriebene Antwort sagt, wie weit ihre Termine rücken
+    (`movedMinutes`). Die neue Tür `movedSlots` verschiebt die Plätze einzeln
+    geänderter Termine (RECURRENCE-ID) um dieselbe Verschiebung, mit derselben
+    Zuordnung wie die Ausnahmen (94a). Ganze Minuten: Eine Zone, deren Versatz
+    Sekunden hatte (vor 1972, etwa Monrovia), verliert sie dort.
 14. **Optional: lesbare Sync-Konflikte bei reiner Zonenänderung** — `feat(sync): say what changed when only a series' zone differs`.
 
 ## Risiken

@@ -1,5 +1,5 @@
 {
-  "about": "Changing the clock a series repeats on (cal_core::series_clock_change, DESIGN-series-time-zone.md stage 9; decisions 15a, 20a, 24a). Each question is a series as it is stored (rule, start, exceptions, its zone or none) and the zone chosen (or none for UTC). The answer says whether the editors ask which days to keep, the start's day on the old and the new clock, which of them the rule's named days fit, and the two answers: as they fall now (the start stays, the rule names the days the occurrences fall on on the new clock) and as the rule says (the rule's text stays, the start moves back onto its old day where the rule fits only that one), each written or refused with a reason. An exception that cancels an occurrence moves with it in wall time, as every occurrence does; one that cancels nothing stays. On a rule with one time a day, an end moves as the end of its last day on the new clock; on an hourly rule or one with several times a day, a cut moves in wall time with the occurrences. Where the series' own calendar stores its end as a date (endsByDate, manifest recurrence.ends_by_date; absent reads false), an end of a UTC day that the 105a guard reads as a cut counts through its own date (D1), and an exception on that date moves with its occurrence. null for a start that names no instant. Written by hand from tzdata's rules; the core and both surfaces read this file.",
+  "about": "Changing the clock a series repeats on (cal_core::series_clock_change, DESIGN-series-time-zone.md stage 9; decisions 15a, 20a, 24a). Each question is a series as it is stored (rule, start, exceptions, its zone or none) and the zone chosen (or none for UTC). The answer says whether the editors ask which days to keep, the start's day on the old and the new clock, which of them the rule's named days fit, and the two answers: as they fall now (the start stays, the rule names the days the occurrences fall on on the new clock) and as the rule says (the rule's text stays, the start moves back onto its old day where the rule fits only that one), each written or refused with a reason. An exception that cancels an occurrence moves with it in wall time, as every occurrence does; one that cancels nothing stays. On a rule with one time a day, an end moves as the end of its last day on the new clock; on an hourly rule or one with several times a day, a cut moves in wall time with the occurrences. Where the series' own calendar stores its end as a date (endsByDate, manifest recurrence.ends_by_date; absent reads false), an end of a UTC day that the 105a guard reads as a cut counts through its own date (D1), and an exception on that date moves with its occurrence. A written answer says how far, in wall minutes, every occurrence moves from the old clock to the new one (movedMinutes, stage 13): as they fall now, the start's wall time after minus before; as the rule says, the same minus 1440 for each day the start's day moved. null for a start that names no instant. Written by hand from tzdata's rules; the core and both surfaces read this file.",
   "rows": [
     {
       "name": "lost-berlin-zone-monday-rule",
@@ -20,13 +20,15 @@
           "outcome": "changed",
           "rrule": "FREQ=WEEKLY;BYDAY=TU",
           "start": "2026-11-01T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 60
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=WEEKLY;BYDAY=MO",
           "start": "2026-11-01T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -1380
         }
       }
     },
@@ -49,13 +51,15 @@
           "outcome": "changed",
           "rrule": "FREQ=WEEKLY;BYDAY=MO",
           "start": "2026-11-01T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 60
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=WEEKLY;BYDAY=SU",
           "start": "2026-10-31T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -1380
         }
       }
     },
@@ -84,7 +88,8 @@
           "exceptions": [
             "2027-03-17T07:00:00Z",
             "2026-11-11T07:00:00Z"
-          ]
+          ],
+          "movedMinutes": -360
         },
         "asRule": {
           "outcome": "changed",
@@ -93,7 +98,8 @@
           "exceptions": [
             "2027-03-17T07:00:00Z",
             "2026-11-11T07:00:00Z"
-          ]
+          ],
+          "movedMinutes": -360
         }
       }
     },
@@ -120,7 +126,8 @@
           "outcome": "changed",
           "rrule": "FREQ=MONTHLY",
           "start": "2026-10-30T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -1380
         }
       }
     },
@@ -168,7 +175,8 @@
           "outcome": "changed",
           "rrule": "FREQ=WEEKLY;BYDAY=MO",
           "start": "2027-03-29T00:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 540
         },
         "asRule": {
           "outcome": "refused",
@@ -195,13 +203,15 @@
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20261109T235959Z",
           "start": "2026-11-02T08:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -360
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20261109T235959Z",
           "start": "2026-11-02T08:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -360
         }
       }
     },
@@ -224,13 +234,15 @@
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20261106T235959Z",
           "start": "2026-11-01T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 60
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20261105T235959Z",
           "start": "2026-10-31T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -1380
         }
       }
     },
@@ -253,13 +265,15 @@
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20260502T235959Z",
           "start": "2026-04-01T22:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -120
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20260503T235959Z",
           "start": "2026-04-02T22:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 1320
         }
       }
     },
@@ -286,7 +300,8 @@
           "outcome": "changed",
           "rrule": "FREQ=MONTHLY;BYDAY=1MO",
           "start": "2026-11-01T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -1380
         }
       }
     },
@@ -313,7 +328,8 @@
           "outcome": "changed",
           "rrule": "FREQ=MONTHLY;BYMONTHDAY=-1",
           "start": "2026-11-29T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -1380
         }
       }
     },
@@ -361,13 +377,15 @@
           "outcome": "changed",
           "rrule": "FREQ=WEEKLY;BYDAY=MO",
           "start": "2026-11-02T08:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 0
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=WEEKLY;BYDAY=MO",
           "start": "2026-11-02T08:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 0
         }
       }
     },
@@ -402,13 +420,15 @@
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20261105T235959Z",
           "start": "2026-11-01T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 60
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20261104T235959Z",
           "start": "2026-10-31T23:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -1380
         }
       }
     },
@@ -431,13 +451,15 @@
           "outcome": "changed",
           "rrule": "FREQ=HOURLY;UNTIL=20261105T120000Z",
           "start": "2026-11-02T08:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -360
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=HOURLY;UNTIL=20261105T120000Z",
           "start": "2026-11-02T08:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -360
         }
       }
     },
@@ -460,13 +482,15 @@
           "outcome": "changed",
           "rrule": "FREQ=DAILY;BYHOUR=9,17;UNTIL=20261110T155959Z",
           "start": "2026-11-02T08:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 0
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=DAILY;BYHOUR=9,17;UNTIL=20261110T155959Z",
           "start": "2026-11-02T08:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 0
         }
       }
     },
@@ -489,13 +513,15 @@
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20270601T035959Z",
           "start": "2026-11-02T01:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -840
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20270602T035959Z",
           "start": "2026-11-03T01:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": 600
         }
       }
     },
@@ -522,7 +548,8 @@
           "start": "2027-03-01T01:30:00Z",
           "exceptions": [
             "2027-03-28T00:30:00Z"
-          ]
+          ],
+          "movedMinutes": -360
         },
         "asRule": {
           "outcome": "changed",
@@ -530,7 +557,8 @@
           "start": "2027-03-02T01:30:00Z",
           "exceptions": [
             "2027-03-29T00:30:00Z"
-          ]
+          ],
+          "movedMinutes": 1080
         }
       }
     },
@@ -557,7 +585,8 @@
           "start": "2027-03-01T01:30:00Z",
           "exceptions": [
             "2027-03-28T01:30:00Z"
-          ]
+          ],
+          "movedMinutes": 60
         },
         "asRule": {
           "outcome": "changed",
@@ -565,7 +594,8 @@
           "start": "2027-03-01T01:30:00Z",
           "exceptions": [
             "2027-03-28T01:30:00Z"
-          ]
+          ],
+          "movedMinutes": 60
         }
       }
     },
@@ -619,7 +649,8 @@
           "exceptions": [
             "2027-06-03T08:00:00Z",
             "2027-06-04T16:00:00Z"
-          ]
+          ],
+          "movedMinutes": 0
         },
         "asRule": {
           "outcome": "changed",
@@ -628,7 +659,8 @@
           "exceptions": [
             "2027-06-03T08:00:00Z",
             "2027-06-04T16:00:00Z"
-          ]
+          ],
+          "movedMinutes": 0
         }
       }
     },
@@ -655,7 +687,8 @@
           "start": "2027-03-01T09:00:00Z",
           "exceptions": [
             "2027-06-03T10:00:00Z"
-          ]
+          ],
+          "movedMinutes": 0
         },
         "asRule": {
           "outcome": "changed",
@@ -663,7 +696,8 @@
           "start": "2027-03-01T09:00:00Z",
           "exceptions": [
             "2027-06-03T10:00:00Z"
-          ]
+          ],
+          "movedMinutes": 0
         }
       }
     },
@@ -690,7 +724,8 @@
           "start": "2026-11-02T08:00:00Z",
           "exceptions": [
             "2027-03-15T07:00:00Z"
-          ]
+          ],
+          "movedMinutes": -360
         },
         "asRule": {
           "outcome": "changed",
@@ -698,7 +733,8 @@
           "start": "2026-11-02T08:00:00Z",
           "exceptions": [
             "2027-03-15T07:00:00Z"
-          ]
+          ],
+          "movedMinutes": -360
         }
       }
     },
@@ -725,7 +761,8 @@
           "start": "2026-11-04T09:00:00Z",
           "exceptions": [
             "2027-06-27T08:00:00Z"
-          ]
+          ],
+          "movedMinutes": 60
         },
         "asRule": {
           "outcome": "changed",
@@ -733,7 +770,8 @@
           "start": "2026-11-04T09:00:00Z",
           "exceptions": [
             "2027-06-27T08:00:00Z"
-          ]
+          ],
+          "movedMinutes": 60
         }
       }
     },
@@ -764,7 +802,8 @@
           "start": "2026-03-02T23:30:00Z",
           "exceptions": [
             "2027-03-08T23:30:00Z"
-          ]
+          ],
+          "movedMinutes": -1380
         }
       }
     },
@@ -791,7 +830,8 @@
           "start": "2027-03-01T09:30:00Z",
           "exceptions": [
             "2027-03-28T01:30:00Z"
-          ]
+          ],
+          "movedMinutes": 60
         },
         "asRule": {
           "outcome": "changed",
@@ -799,7 +839,8 @@
           "start": "2027-03-01T09:30:00Z",
           "exceptions": [
             "2027-03-28T01:30:00Z"
-          ]
+          ],
+          "movedMinutes": 60
         }
       }
     },
@@ -826,7 +867,8 @@
           "start": "2026-03-10T01:30:00Z",
           "exceptions": [
             "2027-03-28T01:30:00Z"
-          ]
+          ],
+          "movedMinutes": 60
         },
         "asRule": {
           "outcome": "changed",
@@ -834,7 +876,8 @@
           "start": "2026-03-10T01:30:00Z",
           "exceptions": [
             "2027-03-28T01:30:00Z"
-          ]
+          ],
+          "movedMinutes": 60
         }
       }
     },
@@ -857,13 +900,15 @@
           "outcome": "changed",
           "rrule": "FREQ=HOURLY;UNTIL=20261101T052959Z",
           "start": "2026-07-01T12:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -240
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=HOURLY;UNTIL=20261101T052959Z",
           "start": "2026-07-01T12:30:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -240
         }
       }
     },
@@ -890,7 +935,8 @@
           "start": "2027-03-01T09:00:00Z",
           "exceptions": [
             "2027-06-03T10:00:00Z"
-          ]
+          ],
+          "movedMinutes": 0
         },
         "asRule": {
           "outcome": "changed",
@@ -898,7 +944,8 @@
           "start": "2027-03-01T09:00:00Z",
           "exceptions": [
             "2027-06-03T10:00:00Z"
-          ]
+          ],
+          "movedMinutes": 0
         }
       }
     },
@@ -926,7 +973,8 @@
           "exceptions": [
             "2027-03-28T01:00:00Z",
             "2027-03-28T02:00:00Z"
-          ]
+          ],
+          "movedMinutes": -60
         },
         "asRule": {
           "outcome": "changed",
@@ -935,7 +983,8 @@
           "exceptions": [
             "2027-03-28T01:00:00Z",
             "2027-03-28T02:00:00Z"
-          ]
+          ],
+          "movedMinutes": -60
         }
       }
     },
@@ -962,7 +1011,8 @@
           "start": "2026-08-31T13:30:00Z",
           "exceptions": [
             "2026-10-03T14:30:00Z"
-          ]
+          ],
+          "movedMinutes": 90
         },
         "asRule": {
           "outcome": "changed",
@@ -970,7 +1020,8 @@
           "start": "2026-08-31T13:30:00Z",
           "exceptions": [
             "2026-10-03T14:30:00Z"
-          ]
+          ],
+          "movedMinutes": 90
         }
       }
     },
@@ -994,13 +1045,15 @@
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20261111T055959Z",
           "start": "2026-11-03T00:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -60
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20261111T055959Z",
           "start": "2026-11-03T00:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -60
         }
       }
     },
@@ -1030,7 +1083,8 @@
           "exceptions": [
             "2026-10-29T01:00:00Z",
             "2026-10-27T01:00:00Z"
-          ]
+          ],
+          "movedMinutes": 360
         },
         "asRule": {
           "outcome": "changed",
@@ -1039,7 +1093,8 @@
           "exceptions": [
             "2026-10-28T01:00:00Z",
             "2026-10-26T01:00:00Z"
-          ]
+          ],
+          "movedMinutes": -1080
         }
       }
     },
@@ -1063,13 +1118,15 @@
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20261110T055959Z",
           "start": "2026-11-03T00:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -60
         },
         "asRule": {
           "outcome": "changed",
           "rrule": "FREQ=DAILY;UNTIL=20261110T055959Z",
           "start": "2026-11-03T00:00:00Z",
-          "exceptions": []
+          "exceptions": [],
+          "movedMinutes": -60
         }
       }
     }

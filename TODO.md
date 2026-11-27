@@ -3629,8 +3629,10 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Markierungen, „dieser Kalender kann … nicht speichern“. Noch an keinen Knopf
   gebunden; das kommt mit den Editoren (Stufe 12). Die Handy-Teile sind ohne
   Build gebaut und warten auf die gesammelte Prüfung.
-  🚩 Vor dem nächsten Handy-Build: die native Bibliothek neu vendoren (die
-  Tür `zoneGroups` ist neu), sonst scheitert der Dialog beim Öffnen.
+  🚩 Vor dem nächsten Handy-Build: die native Bibliothek neu vendoren (neu
+  sind die Türen `zoneGroups` und `movedSlots` sowie `untilThrough`,
+  `cutBefore` und `SeriesEnd.guarded` an der Wanduhr-Tür), sonst scheitern die
+  Zonen-Auswahl und das Ende-Feld beim Öffnen.
   ↳ **Zeiten auf der Uhr der Serie (Stufe 12, Teil 1, 2026-11-22, 134a bis
   136a, 139a):** Beide Editoren zeigen und lesen Beginn und Ende einer Serie
   auf ihrer Uhr, mit „Startzeit (New York)“, dem Lesefeld „Auf diesem

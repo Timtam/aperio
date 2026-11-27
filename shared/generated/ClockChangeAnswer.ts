@@ -12,4 +12,14 @@ start: string,
 /**
  * RFC 3339, in the order they came.
  */
-exceptions: Array<string>, } | { "outcome": "refused", reason: ClockChangeRefusal, };
+exceptions: Array<string>, 
+/**
+ * How far, in wall minutes, every occurrence moves from the old
+ * clock to the new one: the start's own move as they fall now, its
+ * change in time of day alone as the rule says. A changed
+ * occurrence's slot moves by it too ([`moved_slots`]). Whole
+ * minutes: a zone whose offset had seconds (before 1972, such as
+ * Monrovia's −00:44:30) loses them here, and its slots move by that
+ * many seconds less than its occurrences.
+ */
+movedMinutes: number, } | { "outcome": "refused", reason: ClockChangeRefusal, };

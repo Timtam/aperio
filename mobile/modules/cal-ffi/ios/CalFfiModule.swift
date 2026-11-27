@@ -543,6 +543,11 @@ public class CalFfiModule: Module {
       try seriesClockChange(questionJson: questionJson)
     }
 
+    // Where a series' changed occurrences stand on its new clock.
+    Function("movedSlots") { (questionJson: String) -> String in
+      try movedSlots(questionJson: questionJson)
+    }
+
     // Dates and times on a series' clock: wallOf, instantOf, untilOn.
     Function("wallClock") { (questionJson: String) -> String in
       try wallClock(questionJson: questionJson)

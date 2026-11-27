@@ -1,0 +1,159 @@
+{
+  "about": "Moving the slots of a series' changed occurrences (their RECURRENCE-IDs) onto the series' new clock (cal_core::moved_slots, DESIGN-series-time-zone.md stage 13, 95a). Each question is a series as it is stored on its old clock (rule, start, its zone or none), the zone it moves to (or none for UTC), how far its occurrences move in wall minutes (movedMinutes, the clock-change answer's own), and the slots. A slot names an occurrence as an exception does (94a): on a day the rule repeats on, in its interval, within its end, at one of its times on the old clock. It moves to that occurrence's wall time plus movedMinutes on the new clock, placed as the expanders place it (past a gap, at the earlier of two readings), so it is never refused. A slot that names no occurrence, or that does not move, is left out; from is the slot as given, to an RFC 3339 instant in UTC. null for a start that names no instant. Written by hand from tzdata's rules; the core and both surfaces read this file.",
+  "rows": [
+    {
+      "name": "as-now-in-the-other-half-year",
+      "note": "Mondays 09:00 Berlin, to New York as they fall now: 03:00 there, 360 minutes earlier in wall time. On 15 March 2027 New York is already on summer time and Berlin not yet: the slot moves from 08:00 to 07:00 UTC. In June both are on summer time and in November both on winter time: 09:00 Berlin and 03:00 New York are the same instant, so those slots do not move and are left out.",
+      "question": {
+        "rrule": "FREQ=WEEKLY;BYDAY=MO",
+        "start": "2026-11-02T08:00:00Z",
+        "fromTzid": "Europe/Berlin",
+        "toTzid": "America/New_York",
+        "movedMinutes": -360,
+        "slots": [
+          "2027-03-15T08:00:00Z",
+          "2027-06-07T07:00:00Z",
+          "2026-11-30T08:00:00Z"
+        ]
+      },
+      "expect": [
+        {
+          "from": "2027-03-15T08:00:00Z",
+          "to": "2027-03-15T07:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "lost-berlin-zone-monday-rule-as-the-rule-says",
+      "note": "DESIGN, \"Die Wochentag-Frage\": a series that lost its Berlin zone, Mondays 23:30 UTC from Sunday 1 November. Berlin as the rule says moves every occurrence by -1380 minutes: Monday 23:30 UTC becomes Monday 00:30 Berlin (Sunday 23:30 UTC in winter, 22:30 UTC in summer). Each slot stays on its own Monday; none shifts by one occurrence. The start itself is off the rule before (a Sunday) and names no occurrence, so a slot on it is left out; it would not move anyway (Monday 00:30 Berlin is the same instant).",
+      "question": {
+        "rrule": "FREQ=WEEKLY;BYDAY=MO",
+        "start": "2026-11-01T23:30:00Z",
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin",
+        "movedMinutes": -1380,
+        "slots": [
+          "2026-11-09T23:30:00Z",
+          "2027-06-14T23:30:00Z",
+          "2026-11-01T23:30:00Z"
+        ]
+      },
+      "expect": [
+        {
+          "from": "2026-11-09T23:30:00Z",
+          "to": "2026-11-08T23:30:00Z"
+        },
+        {
+          "from": "2027-06-14T23:30:00Z",
+          "to": "2027-06-13T22:30:00Z"
+        }
+      ]
+    },
+    {
+      "name": "every-other-week",
+      "note": "Every other Wednesday 09:00 Berlin from 4 November 2026, to UTC: 08:00 there, 60 minutes earlier in wall time. 16 June 2027 is 32 weeks on, a week the rule repeats in: 09:00 summer time (07:00 UTC) moves to 08:00 UTC. 9 June is 31 weeks on, a week it skips: the slot names no occurrence and is left out.",
+      "question": {
+        "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=WE",
+        "start": "2026-11-04T08:00:00Z",
+        "fromTzid": "Europe/Berlin",
+        "toTzid": null,
+        "movedMinutes": -60,
+        "slots": [
+          "2027-06-16T07:00:00Z",
+          "2027-06-09T07:00:00Z"
+        ]
+      },
+      "expect": [
+        {
+          "from": "2027-06-16T07:00:00Z",
+          "to": "2027-06-16T08:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "a-slot-that-names-no-occurrence",
+      "note": "Daily 09:00 Berlin, to New York (-360). 16 March 2027 08:00 UTC is 09:00 Berlin and moves to 03:00 New York summer time (07:00 UTC). A slot at 10:00 Berlin, one before the start and one that is no instant name no occurrence and are left out. A slot written with an offset is named as it was given.",
+      "question": {
+        "rrule": "FREQ=DAILY",
+        "start": "2026-11-02T08:00:00Z",
+        "fromTzid": "Europe/Berlin",
+        "toTzid": "America/New_York",
+        "movedMinutes": -360,
+        "slots": [
+          "2027-03-16T08:00:00Z",
+          "2027-03-16T09:00:00Z",
+          "2026-10-30T08:00:00Z",
+          "not a time",
+          "2027-03-17T09:00:00+01:00"
+        ]
+      },
+      "expect": [
+        {
+          "from": "2027-03-16T08:00:00Z",
+          "to": "2027-03-16T07:00:00Z"
+        },
+        {
+          "from": "2027-03-17T09:00:00+01:00",
+          "to": "2027-03-17T07:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "a-slot-after-the-end",
+      "note": "Daily 09:00 Berlin until 20 March 2027 23:59:59 Berlin, to New York (-360). 19 March moves to 03:00 New York (07:00 UTC); 22 March is after the end, names no occurrence and is left out.",
+      "question": {
+        "rrule": "FREQ=DAILY;UNTIL=20270320T225959Z",
+        "start": "2026-11-02T08:00:00Z",
+        "fromTzid": "Europe/Berlin",
+        "toTzid": "America/New_York",
+        "movedMinutes": -360,
+        "slots": [
+          "2027-03-19T08:00:00Z",
+          "2027-03-22T08:00:00Z"
+        ]
+      },
+      "expect": [
+        {
+          "from": "2027-03-19T08:00:00Z",
+          "to": "2027-03-19T07:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "a-slot-moved-into-the-spring-gap",
+      "note": "Daily 20:30 New York from 2 November 2026, to Berlin as they fall now: 02:30 the next day there, 360 minutes later in wall time. The slot on 27 March 2027 (20:30 New York summer time, 00:30 UTC) moves to 28 March 02:30 Berlin, which the spring change skips: it is placed past the gap, at 03:30 summer time (01:30 UTC), as the expanders place it. The slot a day later lands on 02:30 Berlin summer time, the same instant, and is left out.",
+      "question": {
+        "rrule": "FREQ=DAILY",
+        "start": "2026-11-03T01:30:00Z",
+        "fromTzid": "America/New_York",
+        "toTzid": "Europe/Berlin",
+        "movedMinutes": 360,
+        "slots": [
+          "2027-03-28T00:30:00Z",
+          "2027-03-29T00:30:00Z"
+        ]
+      },
+      "expect": [
+        {
+          "from": "2027-03-28T00:30:00Z",
+          "to": "2027-03-28T01:30:00Z"
+        }
+      ]
+    },
+    {
+      "name": "a-start-that-names-no-instant",
+      "note": "Nothing can be matched without a start: null.",
+      "question": {
+        "rrule": "FREQ=DAILY",
+        "start": "not a time",
+        "fromTzid": "Europe/Berlin",
+        "toTzid": null,
+        "movedMinutes": 0,
+        "slots": [
+          "2027-03-16T08:00:00Z"
+        ]
+      },
+      "expect": null
+    }
+  ]
+}
