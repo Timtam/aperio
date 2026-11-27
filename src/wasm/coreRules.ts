@@ -67,6 +67,7 @@ import init, {
   canonicalZone as wasmCanonicalZone,
   expansionClock as wasmExpansionClock,
   seriesClockChange as wasmSeriesClockChange,
+  movedSlots as wasmMovedSlots,
   zoneLabels as wasmZoneLabels,
   zoneSearch as wasmZoneSearch,
   zoneChoice as wasmZoneChoice,
@@ -393,6 +394,12 @@ export function canonicalZoneThroughCore(name: string): string {
 export function seriesClockChangeJson(questionJson: string): string {
   assertReady();
   return wasmSeriesClockChange(questionJson);
+}
+
+/** See `cal_core::moved_slots_json`. */
+export function movedSlotsJson(questionJson: string): string {
+  assertReady();
+  return wasmMovedSlots(questionJson);
 }
 
 /** See `cal_core::expansion_clock`: `device-days`, `zone` or `utc`. */

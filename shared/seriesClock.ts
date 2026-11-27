@@ -13,14 +13,19 @@
 // Choosing another zone for a series is a rule too (stage 9,
 // `cal_core::series_clock_change`): whether the editors ask which days to
 // keep (15a, 24a), and the two answers, written or refused with a reason.
+// Each written answer says how far its occurrences move, and the slots of the
+// series' changed occurrences move by that much (stage 13,
+// `cal_core::moved_slots`).
 
 import type { ClockChangeQuestion } from './generated/ClockChangeQuestion';
 import type { SeriesClockChange } from './generated/SeriesClockChange';
+import type { SlotMove } from './generated/SlotMove';
+import type { SlotMoveQuestion } from './generated/SlotMoveQuestion';
 
 export type { ClockChangeAnswer } from './generated/ClockChangeAnswer';
 export type { ClockChangeRefusal } from './generated/ClockChangeRefusal';
 export type { RuleFit } from './generated/RuleFit';
-export type { ClockChangeQuestion, SeriesClockChange };
+export type { ClockChangeQuestion, SeriesClockChange, SlotMove, SlotMoveQuestion };
 
 /** This surface's door into `cal_core::series_clock`. The empty string stands
  *  for "none", in both directions. */
@@ -35,6 +40,10 @@ export interface SeriesClockRules {
   /** Changing the clock a series repeats on: a question as JSON in, the
    *  answer as JSON out, JSON `null` for a start that names no instant. */
   seriesClockChangeJson(questionJson: string): string;
+  /** Where a series' changed occurrences stand on its new clock: a question
+   *  as JSON in, the slots that move as JSON out, JSON `null` for a start
+   *  that names no instant. */
+  movedSlotsJson(questionJson: string): string;
 }
 
 /** The clock a series' rule is read on — the core's answer (decision 48a). */
@@ -110,4 +119,16 @@ export function expansionClock(
  */
 export function seriesClockChange(question: ClockChangeQuestion): SeriesClockChange | null {
   return JSON.parse(rules().seriesClockChangeJson(JSON.stringify(question))) as SeriesClockChange | null;
+}
+
+/**
+ * Where the changed occurrences (their `RECURRENCE-ID` slots) of a series
+ * moved onto a new clock now stand: each slot that names an occurrence on the
+ * old clock moves by `movedMinutes` in wall time on the new one, placed as the
+ * expanders place it (95a). Slots that name no occurrence, or that do not
+ * move, are left out. `null` for a start that names no instant. A door that
+ * throws is at fault and stays loud.
+ */
+export function movedSlots(question: SlotMoveQuestion): SlotMove[] | null {
+  return JSON.parse(rules().movedSlotsJson(JSON.stringify(question))) as SlotMove[] | null;
 }

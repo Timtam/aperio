@@ -605,6 +605,18 @@ pub fn series_clock_change(question_json: String) -> Result<String, StoreError> 
     })
 }
 
+/// Where the changed occurrences (`RECURRENCE-ID`s) of a series moved onto a
+/// new clock now stand, as JSON, `null` for a start that names no instant
+/// (cal_core::moved_slots): the desktop asks the same rule through
+/// WebAssembly.
+#[uniffi::export]
+pub fn moved_slots(question_json: String) -> Result<String, StoreError> {
+    cal_core::moved_slots_json(&question_json).map_err(|e| StoreError::InvalidField {
+        field: "moved slots question".into(),
+        detail: e.to_string(),
+    })
+}
+
 /// The parts a repeat rule takes from the day a series starts on, as JSON,
 /// and JSON `null` for a key that names no day (cal_core::day_parts): the
 /// desktop asks the same rule through WebAssembly.
@@ -957,6 +969,33 @@ mod tests {
         match series_clock_change("not json".to_string()) {
             Err(StoreError::InvalidField { field, .. }) => {
                 assert_eq!(field, "series clock change question")
+            }
+            other => panic!("expected an invalid-field error, got {other:?}"),
+        }
+    }
+
+    /// Every row of the core's moved-slots table through the phone's door;
+    /// JSON that is no question at all is the field error the bridge throws.
+    #[test]
+    fn moved_slots_door_answers_every_contract_row() {
+        const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/movedSlots.json");
+        let doc: serde_json::Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let rows = doc["rows"].as_array().expect("rows");
+        assert!(
+            rows.iter()
+                .any(|r| r["name"] == "lost-berlin-zone-monday-rule-as-the-rule-says"),
+            "the contract lost its rows"
+        );
+        for row in rows {
+            let answer: serde_json::Value = serde_json::from_str(
+                &moved_slots(row["question"].to_string()).expect("a question"),
+            )
+            .expect("json");
+            assert_eq!(answer, row["expect"], "{}", row["name"]);
+        }
+        match moved_slots("not json".to_string()) {
+            Err(StoreError::InvalidField { field, .. }) => {
+                assert_eq!(field, "moved slots question")
             }
             other => panic!("expected an invalid-field error, got {other:?}"),
         }

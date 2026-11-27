@@ -252,6 +252,14 @@ pub fn series_clock_change(question_json: &str) -> Result<String, JsValue> {
     rules::series_clock_change(question_json).map_err(to_js)
 }
 
+/// Where the changed occurrences (`RECURRENCE-ID`s) of a series moved onto a
+/// new clock now stand, as JSON: the slots that move, from and to; `null` for
+/// a start that names no instant. See `cal_core::moved_slots`.
+#[wasm_bindgen(js_name = movedSlots)]
+pub fn moved_slots(question_json: &str) -> Result<String, JsValue> {
+    rules::moved_slots(question_json).map_err(to_js)
+}
+
 /// The IANA tzdata release this module's zones were built from, which the
 /// desktop compares with its host's at startup (decision 104a).
 #[wasm_bindgen(js_name = tzdataVersion)]

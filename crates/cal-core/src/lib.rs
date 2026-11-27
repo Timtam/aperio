@@ -172,8 +172,9 @@ pub use series_clock::{
 };
 #[cfg(feature = "zones")]
 pub use series_clock_change::{
-    rule_names_day, series_clock_change, series_clock_change_json, ClockChangeAnswer,
-    ClockChangeQuestion, ClockChangeRefusal, RuleFit, SeriesClockChange,
+    moved_slots, moved_slots_json, rule_names_day, series_clock_change, series_clock_change_json,
+    ClockChangeAnswer, ClockChangeQuestion, ClockChangeRefusal, RuleFit, SeriesClockChange,
+    SlotMove, SlotMoveQuestion,
 };
 pub use series_end::{
     cut_before, last_day_through, read_series_end, utc_until, written_end_day, EndReading,

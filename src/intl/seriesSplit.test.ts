@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   canonicalZoneThroughCore,
   expansionClockThroughCore,
+  movedSlotsJson,
   seriesClockChangeJson,
   seriesClockZoneThroughCore,
 } from '../wasm/coreRules';
@@ -2204,6 +2205,7 @@ describe('the slot rule, asked once per series', () => {
         return expansionClockThroughCore(allDay, tzid);
       },
       seriesClockChangeJson,
+      movedSlotsJson,
     });
     try {
       const daily = {
@@ -2240,6 +2242,7 @@ describe('the slot rule, asked once per series', () => {
         canonicalZone: canonicalZoneThroughCore,
         expansionClock: expansionClockThroughCore,
         seriesClockChangeJson,
+        movedSlotsJson,
       });
     }
   });
