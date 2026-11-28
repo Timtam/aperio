@@ -1958,6 +1958,18 @@ Serie, nur dieses Vorkommen, dieses und alle folgenden), Erkennung samt
 Vorschlagszeile mit endgültigem „Nein", das Meeting an der Gruppe und die
 Selbstheilung nach Kennungswechseln. Nichts davon lief bisher auf einem Gerät.
 
+🚩 Gefunden im Handtest 2026-11-28: Toni öffnete eine Exchange-Serie aus der
+Gruppen-Ansicht, stellte die Wiederholung von täglich auf wöchentlich um und
+speicherte. Zurück in der Gruppen-Ansicht meldete ein Klick auf den
+Exchange-Termin, er sei nicht zu finden, und danach, „107b Neu“ sei derzeit
+nicht gruppiert. Über „Gruppierung“ im Kontextmenü stand die Gruppe wieder.
+Vermutung: Exchange lieferte nach dem Speichern eine neue Kennung; die
+Mitgliedschaft wird nur bei einem Kalenderwechsel nachgeführt (`relocate`),
+nicht beim Speichern am Ort, und erst das nächste Öffnen der Gruppierung heilt
+sie über die Signatur. Die offene Gruppen-Ansicht müsste nach dem Speichern
+die Mitglieder neu lesen (und heilen), oder das Speichern die neue Kennung
+gleich nachführen.
+
 Als **Entwurf** liegt daneben Stufe 4: die Meeting-Kalender als echte Kalender
 sichtbar machen und ihre Zeilen automatisch mit dem Termin gruppieren, zu dem
 sie gehören — über die Beitritts-URL, also über eine Kennung statt über eine
