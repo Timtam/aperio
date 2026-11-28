@@ -1234,7 +1234,8 @@
         "title": "Title",
         "notes": "Notes",
         "priority": "Priority",
-        "recurrence": "Recurrence"
+        "recurrence": "Recurrence",
+        "seriesZone": "Series time zone"
       },
       "listLabel": "Open sync conflicts",
       "resolved": "Conflict resolved.",

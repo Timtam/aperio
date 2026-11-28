@@ -18,7 +18,9 @@ import {
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
 import {
+  decodeConflictValue,
   groupSyncConflicts,
+  seriesZoneConflict,
   type ConflictGroup,
 } from '@aperio/shared';
 import { Modal } from './Modal';
@@ -490,9 +492,14 @@ function ConflictFieldRow({
   const localId = useId();
   const remoteId = useId();
   const saveBothHintId = useId();
-  const fieldLabel = t(`dialogs.syncConflicts.fieldName.${conflict.field}`, {
-    defaultValue: conflict.field,
-  });
+  // A repeat that differs only in its zone is named as the series' time
+  // zone, by city, instead of two blocks of JSON (stage 14).
+  const zone = seriesZoneConflict(conflict);
+  const fieldLabel = zone
+    ? t('dialogs.syncConflicts.fieldName.seriesZone')
+    : t(`dialogs.syncConflicts.fieldName.${conflict.field}`, {
+        defaultValue: conflict.field,
+      });
   // Per-field context: item name + THIS field, so a per-field button doesn't
   // read identically to the group action or the sibling fields.
   const fieldContext = t('dialogs.syncConflicts.fieldActionAriaContext', {
@@ -519,13 +526,13 @@ function ConflictFieldRow({
           <span className="sync-conflict-field__valueLabel">
             {t('dialogs.syncConflicts.localValueLabel')}
           </span>
-          <code>{decodeForDisplay(conflict.local_value)}</code>
+          <code>{zone ? zone.local : decodeConflictValue(conflict.local_value)}</code>
         </div>
         <div id={remoteId}>
           <span className="sync-conflict-field__valueLabel">
             {t('dialogs.syncConflicts.remoteValueLabel')}
           </span>
-          <code>{decodeForDisplay(conflict.remote_value)}</code>
+          <code>{zone ? zone.remote : decodeConflictValue(conflict.remote_value)}</code>
         </div>
       </div>
       <div className="sync-conflict-field__actions">
@@ -593,32 +600,19 @@ function conflictsToText(
       })}`,
     );
     g.conflicts.forEach((c) => {
-      const fieldLabel = t(`dialogs.syncConflicts.fieldName.${c.field}`, {
-        defaultValue: c.field,
-      });
+      const zone = seriesZoneConflict(c);
+      const fieldLabel = zone
+        ? t('dialogs.syncConflicts.fieldName.seriesZone')
+        : t(`dialogs.syncConflicts.fieldName.${c.field}`, {
+            defaultValue: c.field,
+          });
       lines.push(
         `    ${t('dialogs.syncConflicts.fieldLabel')}: ${fieldLabel}`,
-        `        ${t('dialogs.syncConflicts.localValueLabel')}: ${decodeForDisplay(c.local_value)}`,
-        `        ${t('dialogs.syncConflicts.remoteValueLabel')}: ${decodeForDisplay(c.remote_value)}`,
+        `        ${t('dialogs.syncConflicts.localValueLabel')}: ${zone ? zone.local : decodeConflictValue(c.local_value)}`,
+        `        ${t('dialogs.syncConflicts.remoteValueLabel')}: ${zone ? zone.remote : decodeConflictValue(c.remote_value)}`,
       );
     });
     lines.push('');
   });
   return lines.join('\n').trimEnd() + '\n';
-}
-
-/** Decode the JSON-encoded backend value into something readable. */
-function decodeForDisplay(raw: string | null): string {
-  if (raw === null) return '—';
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed === null || parsed === undefined) return '—';
-    if (typeof parsed === 'string') return parsed;
-    if (typeof parsed === 'number' || typeof parsed === 'boolean') {
-      return String(parsed);
-    }
-    return JSON.stringify(parsed);
-  } catch {
-    return raw;
-  }
 }

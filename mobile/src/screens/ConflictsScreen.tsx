@@ -12,8 +12,10 @@ import {
 
 import {
   type ConflictGroup,
+  decodeConflictValue,
   groupSyncConflicts,
   readErrorMessage,
+  seriesZoneConflict,
   writeErrorMessage,
 } from '@aperio/shared';
 
@@ -48,17 +50,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // label carries the item NAME + (per-field) the field, so a button never reads
 // identically to its siblings. Reading order per card: heading → group actions →
 // per-field details. No Tauri event bus on mobile → re-fetch after each resolve.
-
-/** Conflict values are JSON-encoded scalars; decode for display, null → em-dash. */
-function decodeForDisplay(raw: string | null): string {
-  if (raw == null) return '—';
-  try {
-    const v = JSON.parse(raw);
-    return v == null ? '—' : String(v);
-  } catch {
-    return raw;
-  }
-}
 
 /** Resolve each group's owning row to its human name, limited to the kinds the
  *  mobile client can fetch: `task` (getTaskById) + `task_list` (listTaskLists).
@@ -443,9 +434,15 @@ function ConflictFieldRow({
   busy,
   onResolve,
 }: ConflictFieldRowProps) {
-  const fieldLabel = t(`dialogs.syncConflicts.fieldName.${conflict.field}`, {
-    defaultValue: conflict.field,
-  });
+  // A repeat that differs only in its zone is named as the series' time
+  // zone, by city, instead of two blocks of JSON (stage 14). Mirrors the
+  // desktop.
+  const zone = seriesZoneConflict(conflict);
+  const fieldLabel = zone
+    ? t('dialogs.syncConflicts.fieldName.seriesZone')
+    : t(`dialogs.syncConflicts.fieldName.${conflict.field}`, {
+        defaultValue: conflict.field,
+      });
   // Per-field context: item name + THIS field, so a per-field button doesn't
   // read identically to the group action or the sibling fields.
   const fieldContext = t('dialogs.syncConflicts.fieldActionAriaContext', {
@@ -458,10 +455,12 @@ function ConflictFieldRow({
         {t('dialogs.syncConflicts.fieldLabel')}: {fieldLabel}
       </Text>
       <Text style={styles.cardValue} accessibilityRole="text">
-        {t('dialogs.syncConflicts.localValueLabel')}: {decodeForDisplay(conflict.local_value)}
+        {t('dialogs.syncConflicts.localValueLabel')}:{' '}
+        {zone ? zone.local : decodeConflictValue(conflict.local_value)}
       </Text>
       <Text style={styles.cardValue} accessibilityRole="text">
-        {t('dialogs.syncConflicts.remoteValueLabel')}: {decodeForDisplay(conflict.remote_value)}
+        {t('dialogs.syncConflicts.remoteValueLabel')}:{' '}
+        {zone ? zone.remote : decodeConflictValue(conflict.remote_value)}
       </Text>
       <View style={styles.actions}>
         <Pressable
