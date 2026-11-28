@@ -1336,9 +1336,11 @@ der Serie (21a), der Rest behält die Zone der ganzen Serie.
 ### Nach dem Speichern
 
 Ansichten, Agenda, Widget, Erinnerungen, Benachrichtigungen und Ansagen bleiben
-auf der Uhr des Geräts. Ein Sync-Konflikt, bei dem sich nur die Zone
-unterscheidet, zeigt weiter die rohen Daten, solange die optionale letzte Stufe
-nicht gebaut ist.
+auf der Uhr des Geräts. Ein Sync-Konflikt, bei dem sich die Wiederholung
+einer Serie nur in ihrer Zone unterscheidet, heißt im Konfliktdialog „Zeitzone
+der Serie“ und nennt auf jeder Seite die Stadt („Berlin“, „New York“, „UTC“)
+statt der rohen Daten (Stufe 14). Zwei Schreibweisen derselben Uhr (UTC und
+keine Zone, ein Alias und seine Zone) sind gar kein Konflikt mehr.
 
 ### Hilfe
 
@@ -1361,7 +1363,7 @@ Englisch):
    Termine“.
 9. Kopien in anderen Kalendern (23b).
 10. Grenzen: Microsoft-365-Serien, Handy-Kalender, Exchange, Anzeigen auf der
-    Geräte-Uhr, Sync-Konflikte.
+    Geräte-Uhr.
 
 In „Fehlersuche & Protokolle“: Eine Serie, die ihre Zone verloren hat, zeigt
 UTC-Zeiten. Ganze Serie öffnen, Zone wählen, bei einer Serie nahe Mitternacht die
@@ -2111,6 +2113,18 @@ Handy im selben PR.
     bekommt ebenfalls nur die Textfelder, ohne Zeile. Die
     Exchange-Verlustfrage bleibt die der bestehenden Mitnahme.
 14. **Optional: lesbare Sync-Konflikte bei reiner Zonenänderung** — `feat(sync): say what changed when only a series' zone differs`.
+    Gebaut (2026-11-28): Die Sync-Engine vergleicht die Zone einer Serie nach
+    ihrer Uhr (`canonicalize_recurrence`, auch beim nachträglichen Aufräumen
+    alter Konflikte, `conflict_still_genuine`): Jeder Name von UTC und keine
+    Zone sind eine Uhr, ein Alias ist seine Zone (120a); ein Name, den tzdata
+    nicht kennt, bleibt, wie er geschrieben ist, damit zwei verschiedene
+    unbekannte Namen weiter ein Konflikt sind. Unterscheidet sich ein Konflikt
+    auf der Wiederholung eines Termins nur in der Zone (`seriesZoneConflict`
+    in `shared/syncConflictZone.ts`: alles andere gleich, mit sortierten
+    Schlüsseln und ohne leere Teile gelesen), zeigen Desktop und Handy das Feld
+    „Zeitzone der Serie“ mit der Stadt jeder Seite, und der kopierte Text am
+    Desktop nennt es ebenso. Jeder andere Konflikt zeigt seine Werte wie
+    bisher.
 
 ## Risiken
 

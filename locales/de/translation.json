@@ -1231,7 +1231,8 @@
         "title": "Titel",
         "notes": "Notizen",
         "priority": "Priorität",
-        "recurrence": "Wiederholung"
+        "recurrence": "Wiederholung",
+        "seriesZone": "Zeitzone der Serie"
       },
       "listLabel": "Offene Sync-Konflikte",
       "resolved": "Konflikt gelöst.",

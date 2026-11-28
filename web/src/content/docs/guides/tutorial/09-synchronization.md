@@ -75,6 +75,10 @@ it over a share on the local network.
 - You can also trigger a reconciliation **manually**.
 - If two devices edit the same entry, Aperio detects the **conflict** and
   resolves it in a comprehensible way, or asks which version should win.
+- Where a series differs only in its time zone, the conflict dialog calls the
+  field **Series time zone** and shows the city on each side, such as
+  "Berlin" or "New York". Two spellings of the same zone (such as UTC and no
+  zone) are no conflict.
 - **Settings** travel too, and they arrive while the app is running: change a
   task setting on your phone and the open desktop window picks it up with the
   next reconciliation, no restart. If the settings page happens to be open, the

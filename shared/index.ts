@@ -12,6 +12,7 @@ export * from './taskGrouping';
 export * from './taskDay';
 export * from './dayGridLayout';
 export * from './syncConflictGroups';
+export * from './syncConflictZone';
 export * from './taskRecurrence';
 export * from './expandTaskOccurrences';
 export * from './recurrence';

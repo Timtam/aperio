@@ -14,6 +14,7 @@ import {
   type ConflictGroup,
   groupSyncConflicts,
   readErrorMessage,
+  seriesZoneConflict,
   writeErrorMessage,
 } from '@aperio/shared';
 
@@ -443,9 +444,15 @@ function ConflictFieldRow({
   busy,
   onResolve,
 }: ConflictFieldRowProps) {
-  const fieldLabel = t(`dialogs.syncConflicts.fieldName.${conflict.field}`, {
-    defaultValue: conflict.field,
-  });
+  // A repeat that differs only in its zone is named as the series' time
+  // zone, by city, instead of two blocks of JSON (stage 14). Mirrors the
+  // desktop.
+  const zone = seriesZoneConflict(conflict);
+  const fieldLabel = zone
+    ? t('dialogs.syncConflicts.fieldName.seriesZone')
+    : t(`dialogs.syncConflicts.fieldName.${conflict.field}`, {
+        defaultValue: conflict.field,
+      });
   // Per-field context: item name + THIS field, so a per-field button doesn't
   // read identically to the group action or the sibling fields.
   const fieldContext = t('dialogs.syncConflicts.fieldActionAriaContext', {
@@ -458,10 +465,12 @@ function ConflictFieldRow({
         {t('dialogs.syncConflicts.fieldLabel')}: {fieldLabel}
       </Text>
       <Text style={styles.cardValue} accessibilityRole="text">
-        {t('dialogs.syncConflicts.localValueLabel')}: {decodeForDisplay(conflict.local_value)}
+        {t('dialogs.syncConflicts.localValueLabel')}:{' '}
+        {zone ? zone.local : decodeForDisplay(conflict.local_value)}
       </Text>
       <Text style={styles.cardValue} accessibilityRole="text">
-        {t('dialogs.syncConflicts.remoteValueLabel')}: {decodeForDisplay(conflict.remote_value)}
+        {t('dialogs.syncConflicts.remoteValueLabel')}:{' '}
+        {zone ? zone.remote : decodeForDisplay(conflict.remote_value)}
       </Text>
       <View style={styles.actions}>
         <Pressable

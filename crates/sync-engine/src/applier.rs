@@ -81,6 +81,13 @@ const METADATA_FIELDS: &[&str] = &["updated_at", "created_at", "etag", "ical_uid
 /// "default present" vs "absent" raises a spurious conflict. Returns the value
 /// unchanged if it can't be parsed as the expected type (so a genuinely
 /// malformed/foreign value still compares by its raw form).
+///
+/// An event's series zone is compared by the clock it names
+/// (DESIGN-series-time-zone.md, stage 14; 120a): every name of UTC and none
+/// are one clock, and an alias is its zone (`Asia/Calcutta` is
+/// `Asia/Kolkata`). Two devices that spell one clock differently raise no
+/// conflict. A name tzdata does not know stays as written, so two different
+/// unknown names still conflict.
 fn canonicalize_recurrence(kind: ConflictKind, value: &Value) -> Value {
     let canon = match kind {
         ConflictKind::Task => {
@@ -91,11 +98,29 @@ fn canonicalize_recurrence(kind: ConflictKind, value: &Value) -> Value {
         ConflictKind::Event => {
             serde_json::from_value::<Option<cal_core::EventRecurrence>>(value.clone())
                 .ok()
-                .and_then(|r| serde_json::to_value(r).ok())
+                .and_then(|r| {
+                    serde_json::to_value(r.map(|mut r| {
+                        r.tzid = series_clock_name(r.tzid.as_deref());
+                        r
+                    }))
+                    .ok()
+                })
         }
         _ => None,
     };
     canon.unwrap_or_else(|| value.clone())
+}
+
+/// The clock a stored series zone names, spelled once: `None` for every name
+/// of UTC and for none, the canonical zone for a name tzdata knows, and the
+/// name as written for one it does not.
+fn series_clock_name(tzid: Option<&str>) -> Option<String> {
+    let tzid = tzid?;
+    match cal_core::canonical_zone(tzid) {
+        Some("Etc/UTC" | "Etc/GMT") => None,
+        Some(zone) => Some(zone.to_string()),
+        None => Some(tzid.to_string()),
+    }
 }
 
 /// Whether a STORED conflict is still a genuine field difference under the
@@ -1528,6 +1553,39 @@ mod tests {
             "status",
             &json!("completed"),
             &json!("open"),
+        ));
+    }
+
+    /// A series' zone is compared by its clock (stage 14): two spellings of
+    /// one clock raise no conflict, two zones do, and two names tzdata does
+    /// not know are compared as written.
+    #[test]
+    fn a_series_zone_is_compared_by_its_clock() {
+        let repeat = |tzid: Value| json!({ "rrule": "FREQ=WEEKLY;BYDAY=MO", "exceptions": [], "tzid": tzid });
+        let genuine = |a: Value, b: Value| {
+            conflict_still_genuine(ConflictKind::Event, "recurrence", &repeat(a), &repeat(b))
+        };
+        // Every name of UTC and none are one clock.
+        assert!(!genuine(json!("UTC"), Value::Null));
+        assert!(!genuine(json!("Etc/UTC"), json!("GMT")));
+        // An alias is its zone, in any ASCII case.
+        assert!(!genuine(json!("Asia/Calcutta"), json!("Asia/Kolkata")));
+        assert!(!genuine(json!("europe/berlin"), json!("Europe/Berlin")));
+        // Two zones conflict, and a zone against UTC does.
+        assert!(genuine(json!("Europe/Berlin"), json!("America/New_York")));
+        assert!(genuine(json!("Europe/Berlin"), Value::Null));
+        // Zones with the same rules are still two zones.
+        assert!(genuine(json!("Europe/Vienna"), json!("Europe/Berlin")));
+        // Names tzdata does not know stay as written.
+        assert!(genuine(json!("Mars/Olympus"), json!("Mars/Tharsis")));
+        assert!(!genuine(json!("Mars/Olympus"), json!("Mars/Olympus")));
+        // A rule that differs still conflicts, whatever the zones.
+        let weekly_tu = json!({ "rrule": "FREQ=WEEKLY;BYDAY=TU", "exceptions": [], "tzid": "UTC" });
+        assert!(conflict_still_genuine(
+            ConflictKind::Event,
+            "recurrence",
+            &repeat(Value::Null),
+            &weekly_tu
         ));
     }
 
