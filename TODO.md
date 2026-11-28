@@ -3647,9 +3647,20 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   gebunden; das kommt mit den Editoren (Stufe 12). Die Handy-Teile sind ohne
   Build gebaut und warten auf die gesammelte Prüfung.
   🚩 Vor dem nächsten Handy-Build: die native Bibliothek neu vendoren (neu
-  sind die Türen `zoneGroups` und `movedSlots` sowie `untilThrough`,
-  `cutBefore` und `SeriesEnd.guarded` an der Wanduhr-Tür), sonst scheitern die
-  Zonen-Auswahl und das Ende-Feld beim Öffnen.
+  sind die Türen `zoneGroups`, `movedSlots` und `zoneCarry` sowie
+  `untilThrough`, `cutBefore` und `SeriesEnd.guarded` an der Wanduhr-Tür),
+  sonst scheitern die Zonen-Auswahl und das Ende-Feld beim Öffnen.
+  ↳ **Kopien nehmen die Zone mit, Kern (Stufe 13, Teil 3, 2026-11-28, 143a
+  bis 146a):** Die Kern-Regel `zone_carry` sagt für jede Kopie, ob sie bleibt,
+  wie sie auf die neue Uhr kommt (Regel, Beginn, Ende, Löschungen, Zone, wie
+  weit ihre Termine rücken) oder warum sie die Zone nicht bekommt; die
+  Gruppen-Mitnahme kennt das Feld Zeitzone, und `zoneOffer` fasst das
+  Angebot für beide Oberflächen zusammen. Noch an keinen Dialog gebunden; das
+  kommt mit Teil 4.
+  🚩 Toni prüft mit dem Textstapel: Eine Kopie, deren Termine 12 Stunden
+  oder mehr von den Terminen der Serie liegen (vorher und nachher), gilt als
+  „nicht an den Tagen der Serie“ und bekommt die Zone nicht. Die 12 Stunden
+  hat Claude gewählt (DESIGN, Stufe 13, Teil 3).
   ↳ **Zeiten auf der Uhr der Serie (Stufe 12, Teil 1, 2026-11-22, 134a bis
   136a, 139a):** Beide Editoren zeigen und lesen Beginn und Ende einer Serie
   auf ihrer Uhr, mit „Startzeit (New York)“, dem Lesefeld „Auf diesem

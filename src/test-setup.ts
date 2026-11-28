@@ -80,6 +80,7 @@ import {
   occurrenceCarryFieldsJson,
   futureCarryFieldsJson,
   carryOntoFieldsJson,
+  zoneCarryJson,
   groupTasksJson,
   tasksOnDaysJson,
   backlogWeeksJson,
@@ -158,6 +159,7 @@ installGroupCarryRules({
   occurrenceCarryFieldsJson,
   futureCarryFieldsJson,
   carryOntoFieldsJson,
+  zoneCarryJson,
 });
 installTaskGroupingRules({ groupTasksJson, languageTag: () => 'de' });
 installTaskDayRules({

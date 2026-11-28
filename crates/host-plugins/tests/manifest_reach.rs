@@ -355,12 +355,12 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// anything, which is an allowlist that quietly widens itself every time one of
 /// those files grows a second include.
 ///
-/// All but eight read `shared/contracts/`, the directory holding the contracts
+/// All but nine read `shared/contracts/`, the directory holding the contracts
 /// that BOTH languages check themselves against. The exceptions are the phone's
 /// series-clock, zone-list, repeat-summary, tail-exceptions, day-parts,
-/// wall-clock, clock-change and moved-slots doors, which read cal-core's own
-/// fixtures; cal-ffi never leaves this repository, so those reaches hold as
-/// long as cal-core stays beside it.
+/// wall-clock, clock-change, moved-slots and zone-carry doors, which read
+/// cal-core's own fixtures; cal-ffi never leaves this repository, so those
+/// reaches hold as long as cal-core stays beside it.
 /// All but the last are the app reading a file in its own checkout and are
 /// correct as they stand.
 ///
@@ -373,7 +373,7 @@ fn no_crate_embeds_a_file_from_outside_itself() {
 /// fix — a crate that owns the contracts and hands out their bytes — is the
 /// same move every `plugin.json` already made, and it is worth making once the
 /// mechanism is chosen rather than twice.
-const KNOWN_REACHES: [(&str, &str); 16] = [
+const KNOWN_REACHES: [(&str, &str); 17] = [
     // The app reading its own file: the near end of the chain, a stored pref
     // parsing into reminders.
     (
@@ -475,6 +475,12 @@ const KNOWN_REACHES: [(&str, &str); 16] = [
     (
         "crates/cal-ffi/src/lib.rs",
         "cal-core/tests/fixtures/movedSlots.json",
+    ),
+    // And for the zone-carry door (stage 13): the rows through the phone's
+    // door prove it carries a series' zone to a copy as the core does.
+    (
+        "crates/cal-ffi/src/lib.rs",
+        "cal-core/tests/fixtures/groupZoneCarry.json",
     ),
     // THE ONE THAT IS DEBT. The far end of the chain — a reminder becoming a
     // VALARM a CalDAV server stores — asserted from the app's own numbers, by

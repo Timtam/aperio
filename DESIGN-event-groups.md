@@ -169,9 +169,17 @@ genannt, nicht still übersprungen.
 Die Regel liegt seit 2026-09-10 in `cal_core::group_carry` — erreicht über die
 synchrone Tür, weil der Editor beim Speichern entscheidet, ob die Frage
 überhaupt gestellt wird. Der Kern antwortet mit FELDWERTEN, nie mit fertigen
-Zeilen: die Zeile einer Kopie trägt weit mehr als die sechs Felder, und was der
+Zeilen: die Zeile einer Kopie trägt weit mehr als diese Felder, und was der
 Kern nicht kennt, kann er auch nicht überschreiben — das ist zugleich, was die
 Erinnerung einer Kopie unangetastet lässt.
+
+Seit der Zeitzonen-Stufe 13 (Kern 2026-11-28, DESIGN-series-time-zone.md,
+23b, 143a bis 146a) kennt die Mitnahme auch die Zeitzone einer Serie mit
+Uhrzeit: Sie steht zuerst in der Liste der Änderungen und wird nie auf eine
+Kopie kopiert. Jede Kopie wird einzeln gefragt, wie sie die Zone bekommt
+(`cal_core::zone_carry`), mit ihrer eigenen Regel und ihren eigenen Zeiten.
+Eine reine Zonenänderung ist auch dann ein Angebot wert, wenn jede andere
+Kopie nur lesbar ist: Sie werden genannt. Die Dialoge folgen mit Teil 4.
 
 Und ein Schnittpunkt, der sich nicht lesen lässt, trägt jetzt NICHTS statt zu
 werfen: die betroffene Kopie wird gemeldet wie eine, die nach dem Schnitt nichts

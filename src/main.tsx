@@ -48,6 +48,7 @@ import {
   occurrenceCarryFieldsJson,
   futureCarryFieldsJson,
   carryOntoFieldsJson,
+  zoneCarryJson,
   groupTasksJson,
   tasksOnDaysJson,
   backlogWeeksJson,
@@ -177,6 +178,7 @@ initCoreRules()
       occurrenceCarryFieldsJson,
       futureCarryFieldsJson,
       carryOntoFieldsJson,
+      zoneCarryJson,
     });
 
     // Grouping the task view.

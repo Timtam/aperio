@@ -448,17 +448,14 @@ pub(crate) enum StartMove {
     Keep,
     /// The start moves in wall time with every occurrence; a time the new
     /// clock skips refuses.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "first caller: zone_carry, stage 13 PR 3")
-    )]
     Shift,
 }
 
 /// A series read for a move from its old clock onto a new one: everything
 /// the answers share. [`ClockMove::moved_by`] moves it by any wall shift, so
-/// a series and each copy of it can move by the shift that is theirs.
-struct ClockMove<'a> {
+/// a series and each copy of it can move by the shift that is theirs
+/// ([`crate::group_zone_carry`]).
+pub(crate) struct ClockMove<'a> {
     question: &'a ClockChangeQuestion,
     rrule: &'a str,
     start: DateTime<Utc>,
@@ -496,7 +493,7 @@ struct ClockMove<'a> {
 impl<'a> ClockMove<'a> {
     /// The series a question names; `None` for a start that names no
     /// instant and for a rule that cannot be read.
-    fn read(question: &'a ClockChangeQuestion) -> Option<ClockMove<'a>> {
+    pub(crate) fn read(question: &'a ClockChangeQuestion) -> Option<ClockMove<'a>> {
         use crate::rrule_parts::parse_interval;
         use cal_zone::WallPolicy;
 
@@ -645,16 +642,44 @@ impl<'a> ClockMove<'a> {
     /// The time of day the rule's occurrences start at on the old clock, for
     /// a rule with one time a day; `None` for several a day or by the hour or
     /// faster.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "first caller: zone_carry, stage 13 PR 3")
-    )]
     pub(crate) fn occurrence_time(&self) -> Option<NaiveTime> {
         if self.several_a_day {
             None
         } else {
             self.times.first().copied()
         }
+    }
+
+    /// The start's day on the old clock.
+    pub(crate) fn start_day(&self) -> NaiveDate {
+        self.day_before
+    }
+
+    /// The rule's `INTERVAL`, at least 1.
+    pub(crate) fn interval(&self) -> u32 {
+        self.interval
+    }
+
+    /// The old clock.
+    pub(crate) fn old_clock(&self) -> Zone {
+        self.before_zone
+    }
+
+    /// The instant the rule's occurrence on `day` of the old clock stands
+    /// at, for a rule with one time a day, placed as the expanders place it
+    /// (past a gap, at the earlier of two readings); `None` where the rule
+    /// does not repeat on `day` or repeats several times a day. The rule's
+    /// days reach past its start and its end: this names where an
+    /// occurrence would stand.
+    pub(crate) fn occurrence_on(&self, day: NaiveDate) -> Option<DateTime<Utc>> {
+        use cal_zone::WallPolicy;
+
+        let time = self.occurrence_time()?;
+        if !self.repeats_on(day) {
+            return None;
+        }
+        self.before_zone
+            .to_utc(NaiveDateTime::new(day, time), WallPolicy::Rfc5545)
     }
 
     /// By the hour or faster, whether `nominal` is one of the rule's times:

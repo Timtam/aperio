@@ -214,6 +214,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  Synchronous. */
   movedSlots(questionJson: string): string;
 
+  /** What one copy of a series gets when the series' zone change is carried
+   *  to it, as JSON: unchanged, the copy as written on its new clock, or
+   *  refused with a reason (`cal_core::zone_carry`). Synchronous. */
+  zoneCarry(questionJson: string): string;
+
   /** The parts a repeat rule takes from a `YYYY-MM-DD` day, as JSON, or
    *  `null` for a key that names no day (`cal_core::day_parts`). Synchronous. */
   dayParts(dayKey: string): string;

@@ -548,6 +548,11 @@ public class CalFfiModule: Module {
       try movedSlots(questionJson: questionJson)
     }
 
+    // What a copy gets when its series' zone change is carried to it.
+    Function("zoneCarry") { (questionJson: String) -> String in
+      try zoneCarry(questionJson: questionJson)
+    }
+
     // Dates and times on a series' clock: wallOf, instantOf, untilOn.
     Function("wallClock") { (questionJson: String) -> String in
       try wallClock(questionJson: questionJson)

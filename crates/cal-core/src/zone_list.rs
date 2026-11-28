@@ -41,6 +41,8 @@ mod groups;
 mod prominence;
 
 #[cfg(feature = "zones")]
+pub(crate) use groups::same_rules;
+#[cfg(feature = "zones")]
 pub use groups::{zone_groups, zone_groups_json};
 pub use groups::{
     GroupClock, GroupPick, HeadEntry, HeadKind, PickSource, ZoneGroup, ZoneGroups,

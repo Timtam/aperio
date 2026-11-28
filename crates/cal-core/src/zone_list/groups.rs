@@ -211,6 +211,8 @@ pub struct ZoneGroups {
 }
 
 #[cfg(feature = "zones")]
+pub(crate) use compute::same_rules;
+#[cfg(feature = "zones")]
 pub use compute::{year_standard_seconds, zone_groups, zone_groups_json};
 
 #[cfg(feature = "zones")]
@@ -245,6 +247,28 @@ mod compute {
                 .map(|change| (change.at.timestamp(), change.to.local_minus_utc()))
                 .collect(),
         }
+    }
+
+    /// Whether two zones have the same rules from `today` on: the same total
+    /// offset at every instant in the window the list groups by
+    /// ([`GROUP_HORIZON_DAYS`], 123a), change instants included. The same
+    /// test that puts two listed zones in one group (118a), so a series
+    /// cannot tell them apart in that time and one counts as the other's
+    /// clock (120a). `a` and `b` are canonical tzdata names in exact case; a
+    /// name the bundled tzdata does not know has no rules and matches only
+    /// itself.
+    pub(crate) fn same_rules(a: &str, b: &str, today: DateTime<Utc>) -> bool {
+        if a == b {
+            return true;
+        }
+        if cal_zone::Zone::named(a).is_none() || cal_zone::Zone::named(b).is_none() {
+            return false;
+        }
+        let (a, b) = (
+            zone_rules(a, today, GROUP_HORIZON_DAYS),
+            zone_rules(b, today, GROUP_HORIZON_DAYS),
+        );
+        a.now == b.now && a.changes == b.changes
     }
 
     /// The standard offset as of `today` (29a): the smallest total offset in
@@ -559,5 +583,47 @@ mod compute {
     pub fn zone_groups_json(input_json: &str) -> Result<String, serde_json::Error> {
         let question: ZoneGroupsQuestion = serde_json::from_str(input_json)?;
         serde_json::to_string(&zone_groups(&question))
+    }
+}
+
+/// Two zones' rules from today on, as the groups compare them (120a, 123a).
+#[cfg(all(test, feature = "zones"))]
+mod same_rules_tests {
+    use super::same_rules;
+
+    fn today() -> chrono::DateTime<chrono::Utc> {
+        "2026-11-28T12:00:00Z".parse().expect("an instant")
+    }
+
+    #[test]
+    fn zones_of_one_group_have_the_same_rules() {
+        assert!(same_rules("Europe/Vienna", "Europe/Berlin", today()));
+        assert!(same_rules("Europe/Berlin", "Europe/Berlin", today()));
+        assert!(same_rules("Asia/Kolkata", "Asia/Colombo", today()));
+    }
+
+    #[test]
+    fn zones_of_two_groups_do_not() {
+        assert!(!same_rules("Europe/London", "Europe/Berlin", today()));
+        // The same offset today, not the same summer time.
+        assert!(!same_rules(
+            "Africa/Johannesburg",
+            "Europe/Helsinki",
+            today()
+        ));
+        assert!(!same_rules("Asia/Kolkata", "Asia/Kathmandu", today()));
+    }
+
+    /// A name the bundled tzdata does not know has no rules: it matches
+    /// itself only, and asking never aborts.
+    #[test]
+    fn an_unknown_name_matches_only_itself() {
+        assert!(!same_rules("Mars/Olympus_Mons", "Europe/Berlin", today()));
+        assert!(!same_rules("Europe/Berlin", "Mars/Olympus_Mons", today()));
+        assert!(same_rules(
+            "Mars/Olympus_Mons",
+            "Mars/Olympus_Mons",
+            today()
+        ));
     }
 }
