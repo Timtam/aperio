@@ -507,7 +507,10 @@ pub fn zone_carry(q: &ZoneCarryQuestion) -> ZoneCarry {
     let pairs_at_start = series.occurrence_time().is_none()
         || copy.occurrence_time().is_none()
         || !series.follows_its_days();
-    let paired: Option<Pairing> = if pairs_at_start {
+    // A copy identical to the series as it stood moves exactly as the series
+    // did, unpaired: pairing it could read a clock change inside the week
+    // as another distance (review sweep, Tokyo to Auckland).
+    let paired: Option<Pairing> = if identical || pairs_at_start {
         None
     } else {
         let moved_by = |x: DateTime<Utc>, shift: Duration| {
@@ -568,9 +571,13 @@ pub fn zone_carry(q: &ZoneCarryQuestion) -> ZoneCarry {
             (None, None) => return refused(ZoneCarryRefusal::OffPattern),
         }
     };
-    let shift = paired
-        .as_ref()
-        .map_or_else(|| wall_shift_at(copy_start), |pairing| pairing.shift);
+    let shift = if identical {
+        series_shift
+    } else {
+        paired
+            .as_ref()
+            .map_or_else(|| wall_shift_at(copy_start), |pairing| pairing.shift)
+    };
 
     let own_length = (copy_end - copy_start).num_milliseconds().max(0);
     let length = q.new_length_ms.map_or(own_length, |ms| ms.max(0));
