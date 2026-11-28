@@ -650,6 +650,13 @@ impl<'a> ClockMove<'a> {
         }
     }
 
+    /// Whether the rule's days can be followed day by day: `false` for a set
+    /// position, a week number or a day of the year, and for a rule that
+    /// cannot be read.
+    pub(crate) fn follows_its_days(&self) -> bool {
+        rule_names_day(self.rrule, self.day_before).is_some()
+    }
+
     /// The start's day on the old clock.
     pub(crate) fn start_day(&self) -> NaiveDate {
         self.day_before

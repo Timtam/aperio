@@ -290,15 +290,15 @@ export function textFields(changed: readonly CarryField[]): CarryField[] {
 export interface ZoneOffer {
   /** The copies the carry goes to: every writable copy but those it would
    *  write nothing to — one already standing as the series does
-   *  (`unchanged`) with no text field changed, and one that is no series
-   *  there when nothing but the zone changed. A refused series stays: it
-   *  gets the text fields, or its reason is reported. */
+   *  (`unchanged`) or that is no series there, with no text field changed.
+   *  A refused series stays: it gets the text fields, or its reason is
+   *  reported. */
   targets: CarryTarget[];
   /** The series that do not get the zone, with their verdict (146a). */
   refused: { target: CarryTarget; verdict: ZoneSeriesRefused }[];
   /** The writable copies that are no series there: the zone does not apply
-   *  to them, and the offer says so once. Those with something else to
-   *  carry are targets too. */
+   *  to them, and the offer says so once. Those with a changed text field
+   *  are targets too. */
   notASeries: CarryTarget[];
   /** How far the written copies' occurrences move for the zone, in days,
    *  grouped, earliest first: one sentence each (negative is earlier, "vor",
@@ -317,14 +317,15 @@ export interface ZoneOffer {
  * A copy without a verdict (its read failed) counts as a target that would
  * be written; the carry asks again once it has read it.
  *
- * A copy that is no series there gets every change but the zone, as without
- * one (146a). When nothing but the zone changed it gets nothing: it is named
+ * A copy that is no series there gets its title, location and description
+ * (146a), never the series' start or end: those are instants of the series,
+ * and a single event elsewhere would land on the series' first day, or end
+ * before it starts. Without a changed text field it gets nothing: it is named
  * in `notASeries` only, never in `targets`, and counts as not written, so a
  * zone-only save with a single-event copy offers no carry and writes nothing.
  */
 export function zoneOffer(plan: CarryPlan, verdicts: ReadonlyMap<string, ZoneCarry>): ZoneOffer {
   const texts = textFields(plan.changed).length > 0;
-  const beyondZone = plan.changed.some((field) => field !== 'zone');
   const targets: CarryTarget[] = [];
   const refused: ZoneOffer['refused'] = [];
   const notASeries: CarryTarget[] = [];
@@ -356,7 +357,7 @@ export function zoneOffer(plan: CarryPlan, verdicts: ReadonlyMap<string, ZoneCar
         everyUnchanged = false;
         if (verdict.reason === 'not_a_series') {
           notASeries.push(target);
-          if (beyondZone) {
+          if (texts) {
             targets.push(target);
             written += 1;
           }

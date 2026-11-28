@@ -175,11 +175,20 @@ describe('the offer after a zone change (zoneOffer)', () => {
     expect(offer.silent).toBe(false);
   });
 
-  it('carries everything but the zone to a copy that is no series there', () => {
+  it('carries the text fields to a copy that is no series there', () => {
     const offer = zoneOffer(plan(['zone', 'start', 'title'], [d]), verdicts([[d, notASeries]]));
     expect(offer.notASeries).toEqual([d]);
     expect(offer.targets).toEqual([d]);
     expect(offer.nothingToCarry).toBe(false);
+  });
+
+  // PR 4 review round 1: the series' start and end are its instants, and a
+  // single event elsewhere took them as its own.
+  it('carries no start or end to a copy that is no series there', () => {
+    const offer = zoneOffer(plan(['zone', 'start', 'end'], [d]), verdicts([[d, notASeries]]));
+    expect(offer.notASeries).toEqual([d]);
+    expect(offer.targets).toEqual([]);
+    expect(offer.nothingToCarry).toBe(true);
   });
 
   it('groups the day moves by how far, earliest first', () => {

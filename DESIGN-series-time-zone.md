@@ -2013,17 +2013,30 @@ Handy im selben PR.
       Zonen-Antworten stand (vor einer Datums- oder Uhrzeit-Änderung danach),
       steht die Kopie schon, wo die Serie jetzt steht: Sie behält ihre
       Zeitpunkte und bekommt nur diese spätere Änderung mit. Passen beide
-      Paarungen, entscheidet eine Woche beider Muster: die Paarung, bei der
-      weniger Vorkommen nur auf einer Seite stehen, dann die nähere, dann
-      die, die die Kopie weniger verschiebt, dann „schon da“. Eine Regel mit
-      Nachbartagen (täglich, Montag bis Freitag) steht nahe an beiden
-      Mustern; erst ihre ganze Woche trennt eine Kopie der alten Serie von
-      einer schon reparierten (Prüfrunde 1). Passt keine, „liegt nicht an
-      den Tagen der Serie“; ebenso eine Kopie, deren Tage der Leser nicht
-      verfolgen kann (letzter Freitag im Monat, Tag des Jahres, Wochennummer).
+      Paarungen, entscheidet zuerst eine Woche beider Muster, nach Wandtagen
+      auf jeder Uhr und mit zwei Stunden Spielraum für eine Zeitumstellung:
+      die Paarung, bei der weniger Vorkommen nur auf einer Seite stehen. Eine
+      Regel mit Nachbartagen (Montag bis Freitag) steht nahe an beiden
+      Mustern; erst ihre Woche trennt eine Kopie der alten Serie von einer
+      schon reparierten (Prüfrunde 1). Kann die Woche es nicht sagen (eine
+      Regel an jedem Tag, ein Tag pro Woche), entscheidet die Uhr der Kopie:
+      Auf der alten Uhr der Serie folgt sie der alten Serie, auf der neuen
+      steht sie schon wie die Serie (Prüfrunde 2). Dann die nähere Paarung,
+      dann die, die die Kopie weniger verschiebt. Passt keine, „liegt nicht
+      an den Tagen der Serie“; ebenso eine Kopie, deren Tage der Leser nicht
+      verfolgen kann (eine Position in der Auswahl wie „letzter Werktag im
+      Monat“, ein Tag des Jahres, eine Wochennummer) neben einer Serie, deren
+      Tage er verfolgen kann. Eine Serie mit solchen Tagen, und eine Regel mit
+      mehreren Uhrzeiten am Tag, paaren am eigenen Beginn der Kopie, ohne
+      Tagesprüfung. Zuletzt muss die Verschiebung aufgehen: Das gepaarte
+      Vorkommen der Serie landet auf der gespeicherten Serie, das der Kopie
+      auf ihrer neuen Regel. Wo eine Antwort die Wochen einer Regel neu
+      verankert (jede zweite Woche, ab einem Beginn, der auf einer Uhr kein
+      Vorkommen ist), geht sie nicht auf, und die Kopie wird mit Grund
+      genannt, statt eine Woche daneben geschrieben zu werden. Eine Kopie, die
+      genau die Serie vor dem Speichern ist, bekommt die Antwort der Serie.
       Die 12 Stunden sind Claudes technische Entscheidung; Toni prüft sie mit
-      dem Textstapel (TODO.md). Regeln mit mehreren Uhrzeiten am Tag paaren
-      am eigenen Beginn der Kopie, ohne Tagesprüfung.
+      dem Textstapel (TODO.md).
     - Die Kopie behält ihre Uhr, wo sie die neue Uhr der Serie ist: beide
       UTC, dieselbe kanonische Zone oder dieselben Regeln ab heute (120a,
       wie die Gruppen der Liste); Wien bleibt Wien neben Berlin. Dort ist sie
@@ -2050,9 +2063,9 @@ Handy im selben PR.
     und nie auf eine Kopie kopiert; eine reine Zonenänderung ist ein Angebot
     wert, solange es eine andere Kopie gibt, auch nur lesbare, damit sie
     genannt werden. `zoneOffer` fasst das Angebot für beide Oberflächen
-    zusammen: Ziele, abgelehnte Serien, Kopien ohne Serie (bei einer reinen
-    Zonenänderung kein Ziel), Tagesrückungen, „nichts mitzunehmen“ und
-    „still“. Fixture `groupZoneCarry.json`, Kern, Handy-Tür und WebAssembly
+    zusammen: Ziele, abgelehnte Serien, Kopien ohne Serie (nur mit
+    geänderten Textfeldern ein Ziel, nie mit Beginn oder Ende der Serie),
+    Tagesrückungen, „nichts mitzunehmen“ und „still“. Fixture `groupZoneCarry.json`, Kern, Handy-Tür und WebAssembly
     lesen sie.
 14. **Optional: lesbare Sync-Konflikte bei reiner Zonenänderung** — `feat(sync): say what changed when only a series' zone differs`.
 

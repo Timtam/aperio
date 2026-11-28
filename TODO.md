@@ -3661,6 +3661,18 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   oder mehr von den Terminen der Serie liegen (vorher und nachher), gilt als
   „nicht an den Tagen der Serie“ und bekommt die Zone nicht. Die 12 Stunden
   hat Claude gewählt (DESIGN, Stufe 13, Teil 3).
+  🚩 Gefunden in Prüfrunde 2 von Stufe 13, Teil 3 (älter, aus Stufe 9): Bei
+  einer Serie mit Intervall (jede zweite Woche), deren Beginn auf einer der
+  beiden Uhren kein Vorkommen ist oder in eine andere Woche fällt, verankert
+  die Antwort des Kerns die Wochen neu. Beispiel: jeden zweiten Montag 23:30
+  UTC ab einem Sonntag, nach Berlin „wie die Regel sagt“: vorher Dienstag 10.
+  und 24.11. um 0:30 Berlin, nachher Montag 2., 16. und 30.11. statt 9. und
+  23.11. `movedMinutes` beschreibt dann nicht, wohin die Termine rücken; bei
+  CalDAV fänden einzeln geänderte Termine ihre neuen Plätze nicht (95a). Die
+  Mitnahme lehnt solche Kopien ab (außer der echten Kopie); die Serie selbst
+  nimmt die Antwort an. Zu klären im Kern (`series_clock_change`): die
+  Wochen-Parität halten (WKST oder Beginn auf das erste Vorkommen) oder die
+  Antwort ablehnen.
   ↳ **Zeiten auf der Uhr der Serie (Stufe 12, Teil 1, 2026-11-22, 134a bis
   136a, 139a):** Beide Editoren zeigen und lesen Beginn und Ende einer Serie
   auf ihrer Uhr, mit „Startzeit (New York)“, dem Lesefeld „Auf diesem

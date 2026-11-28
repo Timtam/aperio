@@ -29,18 +29,30 @@
 //!   nearest it, as above. The copy already sits where the series now sits:
 //!   it keeps its instants and takes `Δ` alone,
 //!   `S_C = wall_zT(x) + Δ − wall_zC(x)`.
-//! - Where both pair, a week of each pattern decides: the pairing under which
-//!   fewer of the series' and the copy's occurrences stand on one side only,
-//!   then the closer one, then the one that moves the copy less, then
-//!   "after". A rule that repeats on neighbouring days (daily, Monday to
+//! - Where both pair, a week of each pattern decides first: the pairing
+//!   under which fewer of the series' and the copy's occurrences stand on one
+//!   side only, compared by wall days on each clock with two hours' room for
+//!   a clock change. A rule that repeats on neighbouring days (Monday to
 //!   Friday) stands near both patterns; only its whole week tells a copy of
-//!   the old series from one already repaired.
+//!   the old series from one already repaired. Where the weeks cannot tell (a
+//!   rule on every day, one day a week), the copy's clock does: on the
+//!   series' old clock it follows the old series, on the new one it already
+//!   stands as the series does. Then the closer pairing, then the one that
+//!   moves the copy less, then "after".
 //! - Neither: its occurrences are not on the series' days, and it is refused.
 //!   So is a copy whose days the reader cannot follow (a set position, a week
-//!   number, a day of the year). The 12 hours are Claude's technical choice
-//!   (DESIGN, stage 13, for Toni's collected check).
-//! - A rule with several times a day on either side pairs at the copy's own
-//!   start, with no day check.
+//!   number, a day of the year) beside a series whose days it can. The 12
+//!   hours are Claude's technical choice (DESIGN, stage 13, for Toni's
+//!   collected check).
+//! - A rule with several times a day on either side, or a series whose days
+//!   the reader cannot follow, pairs at the copy's own start, with no day
+//!   check.
+//! - The move must then land: the series' paired occurrence, moved, on the
+//!   saved series, and the copy's on its new rule. Where an answer re-anchors
+//!   a rule's weeks (every other week from a start that is no occurrence on
+//!   one clock), it would not, and the copy is refused rather than written a
+//!   week off. A copy identical to the series as it stood takes the series'
+//!   own answer and ends as the series.
 //!
 //! # What it answers
 //!
@@ -60,8 +72,8 @@
 //!
 //! Pinned by `tests/fixtures/groupZoneCarry.json`; the surfaces replay it.
 
-use cal_zone::{WallPolicy, Zone};
-use chrono::{DateTime, Duration, NaiveDate, SecondsFormat, Utc};
+use cal_zone::WallPolicy;
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::series_clock_change::{ClockMove, StartMove};
@@ -260,56 +272,126 @@ fn nearest(copy: &ClockMove, y: DateTime<Utc>) -> Option<DateTime<Utc>> {
         .map(|(_, x)| x)
 }
 
-/// How many days of two patterns a pairing compares.
+/// How many wall days of two patterns a pairing compares.
 const WEEK: i64 = 7;
 
-/// `at` moved back by `back` in wall time on `clock`, placed as the
-/// expanders place it; `at` itself for no move.
-fn moved_back(clock: Zone, at: DateTime<Utc>, back: Duration) -> Option<DateTime<Utc>> {
-    if back.is_zero() {
-        return Some(at);
-    }
-    clock.to_utc(
-        clock.wall(at).checked_sub_signed(back)?,
-        WallPolicy::Rfc5545,
-    )
-}
+/// How far two occurrences may stand apart and still count as one: a clock
+/// change inside the week moves one pattern by up to an hour against another
+/// (two at Antarctica/Troll), never by a day.
+const SAME_OCCURRENCE_MINUTES: i64 = 120;
 
-/// The occurrences `pattern` names in the week from `at` on, each moved
-/// back by `back` in wall time on its clock.
-fn week_of(pattern: &ClockMove, at: DateTime<Utc>, back: Duration) -> Vec<DateTime<Utc>> {
+/// The instants `pattern` names on its clock's wall days `from_day` to
+/// `from_day + days - 1`, each placed after moving its NOMINAL wall time back
+/// by `back`: the series' new pattern as it stood before a move made after
+/// the zone choice. Placing the nominal time, not the instant a gap pushed
+/// it to, keeps an occurrence in the spring gap where it belongs.
+fn occurrences_from(
+    pattern: &ClockMove,
+    from_day: NaiveDate,
+    days: i64,
+    back: Duration,
+) -> Vec<DateTime<Utc>> {
     let clock = pattern.old_clock();
-    let day = clock.wall(at).date();
-    let Some(until) = at.checked_add_signed(Duration::days(WEEK)) else {
+    let Some(time) = pattern.occurrence_time() else {
         return Vec::new();
     };
-    (-1..=WEEK + 1)
-        .filter_map(|k| day.checked_add_signed(Duration::days(k)))
-        .filter_map(|day| pattern.occurrence_on(day))
-        .filter(|p| *p >= at && *p < until)
-        .filter_map(|p| moved_back(clock, p, back))
+    (0..days)
+        .filter_map(|k| from_day.checked_add_signed(Duration::days(k)))
+        .filter(|day| pattern.occurrence_on(*day).is_some())
+        .filter_map(|day| {
+            let nominal = NaiveDateTime::new(day, time).checked_sub_signed(back)?;
+            clock.to_utc(nominal, WallPolicy::Rfc5545)
+        })
         .collect()
+}
+
+/// The day an instant `pattern` names stands on, as nominal wall time on its
+/// clock: the day of `at` or, where a gap pushed it past midnight, the one
+/// before.
+fn occurrence_day(pattern: &ClockMove, at: DateTime<Utc>) -> Option<NaiveDate> {
+    let day = pattern.old_clock().wall(at).date();
+    [Some(day), day.pred_opt()]
+        .into_iter()
+        .flatten()
+        .find(|day| pattern.occurrence_on(*day) == Some(at))
+}
+
+/// Whether `pattern`, moved back by `back`, names an occurrence within
+/// [`SAME_OCCURRENCE_MINUTES`] of `at`.
+fn stands_near(pattern: &ClockMove, at: DateTime<Utc>, back: Duration) -> bool {
+    let clock = pattern.old_clock();
+    let Some(day) = clock
+        .wall(at)
+        .checked_add_signed(back)
+        .map(|wall| wall.date())
+    else {
+        return false;
+    };
+    let Some(first) = day.pred_opt() else {
+        return false;
+    };
+    occurrences_from(pattern, first, 3, back)
+        .into_iter()
+        .any(|p| (p - at).num_minutes().abs() <= SAME_OCCURRENCE_MINUTES)
+}
+
+/// How many occurrences of one week stand in only one of two patterns: the
+/// series' from `series_first` (moved back by `back`), moved by the distance
+/// from `y` to `x`, and the copy's from `x`. Compared by wall days on each
+/// clock and with room for a clock change, so a change inside the week counts
+/// for neither.
+fn one_sided(
+    series: &ClockMove,
+    series_first: DateTime<Utc>,
+    back: Duration,
+    copy: &ClockMove,
+    y: DateTime<Utc>,
+    x: DateTime<Utc>,
+) -> Option<usize> {
+    let apart = x - y;
+    let series_week = occurrences_from(series, occurrence_day(series, series_first)?, WEEK, back);
+    let copy_week = occurrences_from(copy, occurrence_day(copy, x)?, WEEK, Duration::zero());
+    let lone_series = series_week
+        .iter()
+        .filter_map(|s| s.checked_add_signed(apart))
+        .filter(|s| !stands_near(copy, *s, Duration::zero()))
+        .count();
+    let lone_copy = copy_week
+        .iter()
+        .filter_map(|c| c.checked_sub_signed(apart))
+        .filter(|c| !stands_near(series, *c, back))
+        .count();
+    Some(lone_series + lone_copy)
 }
 
 /// One way the copy pairs with the series, and what it would write.
 struct Pairing {
-    /// How many occurrences of a week stand in the series' pattern (moved
-    /// to the copy) or in the copy's, but not in both.
+    /// How many occurrences of a week stand in only one of the two patterns:
+    /// the series' (moved by the pairing's distance) or the copy's, compared
+    /// by wall days, with room for a clock change.
     misses: usize,
+    /// Whether the copy stands on the clock this pairing reads the series on:
+    /// the series' old clock for "before", its new one for "after". Where the
+    /// weeks cannot tell (a rule on every day, one day a week across a clock
+    /// change), a copy on the old clock follows the old series, and one on the
+    /// new clock already stands as the series does.
+    own_clock: bool,
     /// How far the paired occurrences stand apart.
     gap: Duration,
     /// How far, in minutes, the copy's paired occurrence moves in time.
     moved: i64,
-    /// The copy's wall shift.
+    /// The copy's paired occurrence, and its wall shift.
+    x: DateTime<Utc>,
     shift: Duration,
-    /// The part of `shift` that is the move made after the zone choice.
-    delta_taken: Duration,
+    /// Where the series' paired occurrence stands once saved, for a "before"
+    /// pairing: it must be one of the saved series' occurrences.
+    series_after: Option<DateTime<Utc>>,
 }
 
 impl Pairing {
     /// The order in which two pairings are weighed: the smaller wins.
-    fn weight(&self) -> (usize, Duration, i64) {
-        (self.misses, self.gap, self.moved)
+    fn weight(&self) -> (usize, bool, Duration, i64) {
+        (self.misses, !self.own_clock, self.gap, self.moved)
     }
 }
 
@@ -394,92 +476,99 @@ pub fn zone_carry(q: &ZoneCarryQuestion) -> ZoneCarry {
         return unreadable;
     };
 
+    // The series as saved, on its new clock: the "after" pairing reads its
+    // pattern, and a "before" pairing must land on it.
+    let after_question = ClockChangeQuestion {
+        rrule: q.anchor_after.rrule.clone(),
+        start: q.anchor_after.start.clone(),
+        exceptions: Vec::new(),
+        from_tzid: q.anchor_after.tzid.clone(),
+        to_tzid: q.anchor_after.tzid.clone(),
+        ends_by_date: false,
+    };
+    let saved_series = ClockMove::read(&after_question);
+    // A copy that is the series as it stood before the save (same rule, same
+    // start, same clock) ends as the series: it takes the series' own answer.
+    let identical = copy_rule == q.anchor_before.rrule.trim()
+        && instant(&q.anchor_before.start) == Some(copy_start)
+        && same_clock(
+            q.copy.tzid.as_deref(),
+            q.anchor_before.tzid.as_deref(),
+            q.today,
+        );
+
     // (4) Pair the copy with the series by instants, before or after (see
-    // the module's doc). `x` is the copy's paired occurrence.
+    // the module's doc). A rule with several times a day on either side, or
+    // a series whose days the reader cannot follow, pairs at the copy's own
+    // start.
     let wall_shift_at = |x: DateTime<Utc>| series_old.wall(x) + series_shift - copy_old.wall(x);
-    let (shift, delta_taken) =
-        if series.occurrence_time().is_none() || copy.occurrence_time().is_none() {
-            (wall_shift_at(copy_start), delta)
-        } else {
-            let pairing = |y: DateTime<Utc>,
-                           x: DateTime<Utc>,
-                           series_week: Vec<DateTime<Utc>>,
-                           shift: Duration| {
-                let apart = x - y;
-                let series_week: Vec<DateTime<Utc>> = series_week
-                    .into_iter()
-                    .filter_map(|s| s.checked_add_signed(apart))
-                    .collect();
-                let copy_week = week_of(&copy, x, Duration::zero());
-                let misses = series_week
-                    .iter()
-                    .filter(|s| !copy_week.contains(s))
-                    .count()
-                    + copy_week
-                        .iter()
-                        .filter(|c| !series_week.contains(c))
-                        .count();
-                let moved = copy_old
-                    .wall(x)
-                    .checked_add_signed(shift)
-                    .and_then(|wall| target.to_utc(wall, WallPolicy::Rfc5545))
-                    .map_or(i64::MAX, |to| (to - x).num_minutes().abs());
-                Pairing {
-                    misses,
-                    gap: apart.abs(),
-                    moved,
-                    shift,
-                    delta_taken: delta,
-                }
-            };
-            // Before: the copy follows the series' old occurrences, moved
-            // as they moved.
-            let before = first_occurrence(&series).and_then(|y| {
-                let x = nearest(&copy, y)?;
-                Some(pairing(
-                    y,
-                    x,
-                    week_of(&series, y, Duration::zero()),
-                    wall_shift_at(x),
-                ))
-            });
-            // After: the copy already stands where the series stood once its
-            // zone answers were applied; it keeps its instants and takes the
-            // move made after the choice alone.
-            let after_question = ClockChangeQuestion {
-                rrule: q.anchor_after.rrule.clone(),
-                start: q.anchor_after.start.clone(),
-                exceptions: Vec::new(),
-                from_tzid: q.anchor_after.tzid.clone(),
-                to_tzid: q.anchor_after.tzid.clone(),
-                ends_by_date: false,
-            };
-            let saved_series = ClockMove::read(&after_question);
-            let after = saved_series.as_ref().and_then(|saved_series| {
-                let first_new = first_occurrence(saved_series)?;
-                let y = moved_back(series_new, first_new, delta)?;
-                let x = nearest(&copy, y)?;
-                let shift = target.wall(x) + delta - copy_old.wall(x);
-                Some(pairing(
-                    y,
-                    x,
-                    week_of(saved_series, first_new, delta),
-                    shift,
-                ))
-            });
-            let chosen = match (before, after) {
-                (Some(before), Some(after)) => {
-                    if before.weight() < after.weight() {
-                        before
-                    } else {
-                        after
-                    }
-                }
-                (Some(pairing), None) | (None, Some(pairing)) => pairing,
-                (None, None) => return refused(ZoneCarryRefusal::OffPattern),
-            };
-            (chosen.shift, chosen.delta_taken)
+    let pairs_at_start = series.occurrence_time().is_none()
+        || copy.occurrence_time().is_none()
+        || !series.follows_its_days();
+    let paired: Option<Pairing> = if pairs_at_start {
+        None
+    } else {
+        let moved_by = |x: DateTime<Utc>, shift: Duration| {
+            copy_old
+                .wall(x)
+                .checked_add_signed(shift)
+                .and_then(|wall| target.to_utc(wall, WallPolicy::Rfc5545))
+                .map_or(i64::MAX, |to| (to - x).num_minutes().abs())
         };
+        // Before: the copy follows the series' old occurrences, moved as they
+        // moved.
+        let before = first_occurrence(&series).and_then(|y| {
+            let x = nearest(&copy, y)?;
+            let shift = wall_shift_at(x);
+            Some(Pairing {
+                misses: one_sided(&series, y, Duration::zero(), &copy, y, x)?,
+                own_clock: same_clock(
+                    q.copy.tzid.as_deref(),
+                    q.anchor_before.tzid.as_deref(),
+                    q.today,
+                ),
+                gap: (x - y).abs(),
+                moved: moved_by(x, shift),
+                x,
+                shift,
+                series_after: series_old
+                    .wall(y)
+                    .checked_add_signed(series_shift)
+                    .and_then(|wall| series_new.to_utc(wall, WallPolicy::Rfc5545)),
+            })
+        });
+        // After: the copy already stands where the series stood once its zone
+        // answers were applied; it keeps its instants and takes the move made
+        // after the choice alone.
+        let after = saved_series.as_ref().and_then(|saved_series| {
+            let first_new = first_occurrence(saved_series)?;
+            let day = occurrence_day(saved_series, first_new)?;
+            let y = *occurrences_from(saved_series, day, 1, delta).first()?;
+            let x = nearest(&copy, y)?;
+            let shift = target.wall(x) + delta - copy_old.wall(x);
+            Some(Pairing {
+                misses: one_sided(saved_series, first_new, delta, &copy, y, x)?,
+                own_clock: keeps_clock,
+                gap: (x - y).abs(),
+                moved: moved_by(x, shift),
+                x,
+                shift,
+                series_after: None,
+            })
+        });
+        match (before, after) {
+            (Some(before), Some(after)) => Some(if before.weight() < after.weight() {
+                before
+            } else {
+                after
+            }),
+            (Some(pairing), None) | (None, Some(pairing)) => Some(pairing),
+            (None, None) => return refused(ZoneCarryRefusal::OffPattern),
+        }
+    };
+    let shift = paired
+        .as_ref()
+        .map_or_else(|| wall_shift_at(copy_start), |pairing| pairing.shift);
 
     let own_length = (copy_end - copy_start).num_milliseconds().max(0);
     let length = q.new_length_ms.map_or(own_length, |ms| ms.max(0));
@@ -539,6 +628,39 @@ pub fn zone_carry(q: &ZoneCarryQuestion) -> ZoneCarry {
         None => return unreadable,
     };
 
+    // (8b) The move must land the copy as the pairing says: the series'
+    // paired occurrence, moved, on the saved series, and the copy's, moved,
+    // on its new rule. Where a move re-anchors a rule's weeks (every other
+    // week, from a start that is no occurrence on one clock), it would not,
+    // and the copy is named instead of being written a week off. A copy
+    // identical to the series ends as the series and is not checked.
+    if let Some(pairing) = paired.as_ref().filter(|_| !identical) {
+        let series_lands = pairing.series_after.is_none_or(|at| {
+            saved_series
+                .as_ref()
+                .is_some_and(|saved| stands_near(saved, at, Duration::zero()))
+        });
+        let moved_copy = ClockChangeQuestion {
+            rrule: rrule.clone(),
+            start: start.clone(),
+            exceptions: Vec::new(),
+            from_tzid: written_tzid.clone(),
+            to_tzid: written_tzid.clone(),
+            ends_by_date: false,
+        };
+        let copy_lands = copy_old
+            .wall(pairing.x)
+            .checked_add_signed(shift)
+            .and_then(|wall| target.to_utc(wall, WallPolicy::Rfc5545))
+            .is_some_and(|at| {
+                ClockMove::read(&moved_copy)
+                    .is_some_and(|moved| stands_near(&moved, at, Duration::zero()))
+            });
+        if !series_lands || !copy_lands {
+            return refused(ZoneCarryRefusal::OffPattern);
+        }
+    }
+
     // (9) The end: the saved length, or the copy's own.
     let Some(end) = instant(&start).and_then(end_after) else {
         return unreadable;
@@ -547,7 +669,7 @@ pub fn zone_carry(q: &ZoneCarryQuestion) -> ZoneCarry {
     // (10) How far its first occurrence moves for the zone, read on the new
     // clock before and after.
     let first = first_occurrence(&copy).unwrap_or(copy_start);
-    let moved = copy_old.wall(first) + shift - delta_taken;
+    let moved = copy_old.wall(first) + shift - delta;
     let zone_days = (moved.date() - target.wall(first).date()).num_days();
 
     // (11) Written as the target clock is spelled; UTC as none.
@@ -669,6 +791,22 @@ mod contract {
         "a-copy-equal-to-the-saved-series-from-the-fold",
         "a-copy-on-a-day-of-the-year-is-off-pattern",
         "a-copy-on-a-set-position-is-off-pattern",
+        // Review round 2: weeks compared by wall days, the copy's clock before
+        // the distance, and a move that must land.
+        "a-copy-an-hour-after-keeps-it-across-a-change",
+        "a-copy-half-an-hour-after-keeps-it-across-a-change",
+        "a-copy-on-the-new-clock-near-the-series-stays",
+        "a-copy-at-the-applied-series-takes-a-day-earlier",
+        "every-other-week-re-anchored-is-refused",
+        "every-other-week-re-anchored-an-hour-later-is-refused",
+        "every-other-week-a-true-copy-ends-as-the-series",
+        "a-true-every-day-copy-takes-the-series-answer",
+        "a-copy-three-hours-later-across-spring",
+        "a-utc-copy-of-a-berlin-series-across-autumn",
+        "a-copy-two-hours-later-across-autumn",
+        "a-true-copy-of-a-set-position-series",
+        "a-copy-at-the-applied-series-in-the-spring-gap",
+        "a-true-yearly-copy-takes-the-series-answer",
     ];
 
     #[test]
