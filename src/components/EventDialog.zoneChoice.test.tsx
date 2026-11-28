@@ -728,6 +728,36 @@ describe('EventDialog → the carry to the group after a zone change (143a)', ()
     if (verdict?.outcome === 'changed') expect(verdict.shiftMinutes).toBe(-1380 + 60);
   });
 
+  // PR 4 review round 1: the gate before stage 13 counted a zone chosen and
+  // then left behind (repeat off) as a zone change, and offered nothing.
+  it('offers the plain carry where the repeat was turned off after a zone choice', async () => {
+    deviceInBerlin();
+    inGroup();
+    // Stored on New York: the old gate read "no zone now" against it as a
+    // zone change.
+    await open({
+      ...UTC_SERIES,
+      recurrence: { ...UTC_SERIES.recurrence!, tzid: 'America/New_York' },
+    } as CalendarEvent);
+    await pick('Berlin', 'Berlin');
+    const { dialog } = await question();
+    fireEvent.click(within(dialog).getByRole('button', { name: /wie die regel sagt/i }));
+    await settle();
+    fireEvent.change(screen.getByRole('combobox', { name: /^wiederholung$/i }), {
+      target: { value: 'NONE' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: /^titel$/i }), {
+      target: { value: 'Abendrunde neu' },
+    });
+    save();
+    await waitFor(() => expect(openEventGroupCarry).toHaveBeenCalledTimes(1));
+    const { after, zoneMove, zoneVerdicts } = payload();
+    expect(zoneMove ?? null).toBeNull();
+    expect(zoneVerdicts ?? null).toBeNull();
+    expect(after.zone).toBeUndefined();
+    expect(after.title).toBe('Abendrunde neu');
+  });
+
   it('offers none where every copy already stands as the series does and nothing else changed', async () => {
     deviceInBerlin();
     const change = seriesClockChange({

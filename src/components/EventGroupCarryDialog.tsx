@@ -753,11 +753,12 @@ export function EventGroupCarryDialog({
                 target.calendar_id,
               );
             } else if (verdict.reason === 'not_a_series') {
-              // No series there: every change but the zone, as without one.
-              const rest = plan.changed.filter((field) => field !== 'zone');
-              if (rest.length === 0) continue;
+              // No series there: its text only (146a). The series' start and
+              // end are instants of the series; a single event elsewhere
+              // would land on the series' first day, or end before it starts.
+              if (texts.length === 0) continue;
               noteBack(
-                await updateEvent(carryOnto(copyRow, after, rest), target.calendar_id),
+                await updateEvent(carryOnto(copyRow, after, texts), target.calendar_id),
                 target.calendar_id,
               );
             } else {

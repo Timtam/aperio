@@ -302,7 +302,8 @@ Zeitzone:
   Eine Kopie, die schon so liegt, bleibt, wie sie ist. Kann eine Kopie die
   Zeitzone nicht bekommen, bleiben ihre Zeiten; Titel, Ort und Beschreibung
   gehen trotzdem mit, und Aperio nennt den Grund. Eine Kopie, die dort keine
-  Serie ist, bekommt die übrigen Änderungen; die Zeitzone gilt für sie nicht.
+  Serie ist, bekommt Titel, Ort und Beschreibung; Zeitzone, Beginn und Ende
+  der Serie gelten für sie nicht.
 - Gibt es eine getippte Uhrzeit an diesem Tag in der Zeitzone der Serie nicht,
   weil die Uhren vorgestellt werden, sagt Aperio es am Feld. Gespeichert wird
   erst mit einer anderen Uhrzeit.

@@ -279,8 +279,8 @@ series' date and time in its time zone:
   year. If it was at a different time before, it keeps that distance. A copy
   that already lies that way stays as it is. If a copy cannot take the time
   zone, its times stay; title, location and description still go along, and
-  Aperio says why. A copy that is not a series there gets the other changes;
-  the time zone does not apply to it.
+  Aperio says why. A copy that is not a series there gets the title, location
+  and description; the series' time zone, start and end do not apply to it.
 - Where a time you typed does not exist on that day in the series' time zone,
   because the clocks go forward, Aperio says so at the field. It saves only
   with another time.

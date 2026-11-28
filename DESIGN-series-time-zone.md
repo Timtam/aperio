@@ -1189,9 +1189,12 @@ Frage liest Aperio jede beschreibbare Kopie und fragt den Kern
   kann nicht rücken), bleiben ihre Zeiten und ihre Zone; Titel, Ort und
   Beschreibung gehen trotzdem mit (146a). Die Frage nennt sie mit Grund, der
   Bericht danach noch einmal; sie wird nicht erneut versucht.
-- Eine Kopie, die dort keine Serie ist, bekommt die übrigen Änderungen; die
-  Zone gilt für sie nicht, und die Frage sagt das. Ändert sich sonst nichts,
-  wird sie nicht geschrieben.
+- Eine Kopie, die dort keine Serie ist, bekommt Titel, Ort und Beschreibung;
+  die Zone gilt für sie nicht, und die Frage sagt das. Beginn und Ende der
+  Serie bekommt sie nicht: Es sind Zeitpunkte der Serie, und ein Einzeltermin
+  an einem anderen Tag landete auf ihrem ersten Tag oder endete vor seinem
+  Beginn (Prüfrunde 1 von Teil 4). Ändert sich kein Textfeld, wird sie nicht
+  geschrieben.
 - Die Frage sagt, um wie viele Tage die Termine der Kopien rücken (138a:
   „vor“ ist früher) und wie viele Kopien die Zone nicht bekommen. Kann keine
   Kopie etwas bekommen, bleibt nur „Schließen“.
@@ -2103,8 +2106,9 @@ Handy im selben PR.
     der Kern sie schrieb, mit `occurrence_shift_minutes` für ihre einzeln
     geänderten Termine (95a), und Titel, Ort, Beschreibung. Eine Serie ohne
     die Zone bekommt nur diese Textfelder und eine Zeile im Bericht, die
-    nicht erneut versucht wird (146a). Die Exchange-Verlustfrage bleibt die
-    der bestehenden Mitnahme.
+    nicht erneut versucht wird (146a). Eine Kopie, die dort keine Serie ist,
+    bekommt ebenfalls nur die Textfelder, ohne Zeile. Die
+    Exchange-Verlustfrage bleibt die der bestehenden Mitnahme.
 14. **Optional: lesbare Sync-Konflikte bei reiner Zonenänderung** — `feat(sync): say what changed when only a series' zone differs`.
 
 ## Risiken

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import {
   carryTargetKey,
@@ -26,21 +26,25 @@ import type { Calendar, CalendarEvent } from '../api/types';
  * change it can only close.
  */
 
-const { invokeMock, rows, announced } = vi.hoisted(() => {
+const { invokeMock, rows, announced, refusals } = vi.hoisted(() => {
   /** The copies as `get_event_by_id` reads them, by id. */
   const rows: Record<string, unknown> = {};
   const announced: string[] = [];
+  /** What the next `update_event` calls fail with, in order. */
+  const refusals: unknown[] = [];
   const invokeMock = vi.fn((command: string, payload?: unknown) => {
     if (command === 'get_event_by_id') {
       return Promise.resolve(rows[(payload as { id: string }).id] ?? null);
     }
     if (command === 'update_event') {
+      const refusal = refusals.shift();
+      if (refusal !== undefined) return Promise.reject(refusal);
       return Promise.resolve((payload as { event: unknown }).event);
     }
     if (command === 'event_groups_for_events') return Promise.resolve([]);
     return Promise.resolve(null);
   });
-  return { invokeMock, rows, announced };
+  return { invokeMock, rows, announced, refusals };
 });
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -79,7 +83,11 @@ const STORED = {
   start: '2026-11-22T23:30:00.000Z',
   end: '2026-11-23T00:30:00.000Z',
   all_day: false,
-  recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=SU,WE', exceptions: [], tzid: null },
+  recurrence: {
+    rrule: 'FREQ=WEEKLY;BYDAY=SU,WE',
+    exceptions: ['2026-11-25T23:30:00.000Z'],
+    tzid: null,
+  },
   color_label: null,
   reminders: [],
   attendees: [],
@@ -103,7 +111,7 @@ function moved(which: 'asRule' | 'asNow', title = STORED.title) {
   const change = seriesClockChange({
     rrule: STORED.recurrence!.rrule,
     start: STORED.start,
-    exceptions: [],
+    exceptions: STORED.recurrence!.exceptions,
     fromTzid: null,
     toTzid: 'Europe/Berlin',
     endsByDate: false,
@@ -185,6 +193,7 @@ afterEach(() => {
   invokeMock.mockClear();
   for (const id of Object.keys(rows)) delete rows[id];
   announced.length = 0;
+  refusals.length = 0;
 });
 
 describe('EventGroupCarryDialog → a series\' zone carried to its copies (stage 13)', () => {
@@ -199,9 +208,43 @@ describe('EventGroupCarryDialog → a series\' zone carried to its copies (stage
     const { event } = sent()[0];
     expect(event.recurrence?.rrule).toBe(m.answer.rrule);
     expect(Date.parse(event.start)).toBe(Date.parse(m.answer.start));
+    expect(Date.parse(event.end)).toBe(Date.parse(m.saved.end));
+    // The deletion moved with its occurrence, as the series' did.
+    expect(m.answer.exceptions).toHaveLength(1);
+    expect(Date.parse(m.answer.exceptions[0])).not.toBe(
+      Date.parse(STORED.recurrence!.exceptions[0]),
+    );
     expect(event.recurrence?.exceptions).toEqual(m.answer.exceptions);
     expect(event.recurrence?.tzid).toBe('Europe/Berlin');
     expect(event.occurrence_shift_minutes).toBe(m.answer.movedMinutes);
+  });
+
+  it('carries a changed title with the zone to a copy that takes it', async () => {
+    const m = moved('asRule', 'Abendrunde neu');
+    await openDialog([copyIn('private', 'ev-b')], m);
+    const message = screen.getByText(/^Diese Verabredung liegt noch ein weiteres Mal vor/);
+    expect(message.textContent).toContain('Die Änderung (Zeitzone: Berlin, Titel) mitziehen?');
+    fireEvent.click(await carryButton());
+    await waitFor(() => expect(sent()).toHaveLength(1));
+    const { event } = sent()[0];
+    expect(event.title).toBe('Abendrunde neu');
+    expect(event.recurrence?.tzid).toBe('Europe/Berlin');
+    expect(event.recurrence?.rrule).toBe(m.answer.rrule);
+  });
+
+  it('asks the loss question for a copy that takes the zone, and writes it again with the consent', async () => {
+    const m = moved('asRule');
+    refusals.push({ code: 'forbidden', message: 'exceptions-would-be-lost: slot:1:0' });
+    await openDialog([copyIn('private', 'ev-b')], m);
+    fireEvent.click(await carryButton());
+    const question = await screen.findByRole('dialog', { name: 'Vorkommen gehen verloren' });
+    fireEvent.click(within(question).getByRole('button', { name: /^trotzdem übertragen$/i }));
+    await waitFor(() => expect(sent()).toHaveLength(2));
+    const [first, second] = sent().map((call) => call.event);
+    expect(first.accepts_exception_loss).toBeUndefined();
+    expect(second.accepts_exception_loss).toBe(true);
+    expect(second.recurrence?.tzid).toBe('Europe/Berlin');
+    expect(second.occurrence_shift_minutes).toBe(m.answer.movedMinutes);
   });
 
   it('leaves a copy alone that already stands as the series does, and does not count it', async () => {
@@ -217,6 +260,8 @@ describe('EventGroupCarryDialog → a series\' zone carried to its copies (stage
     await openDialog([vienna, trueCopy], m);
     const message = screen.getByText(/^Diese Verabredung liegt noch ein weiteres Mal vor/);
     expect(message.textContent).toContain('(Zeitzone: Berlin)');
+    // As they fall now, the occurrences keep their instants: no day move.
+    expect(message.textContent).not.toMatch(/rücken/);
     fireEvent.click(await carryButton());
     await waitFor(() => expect(sent()).toHaveLength(1));
     expect(sent()[0].event.id).toBe('ev-b');
@@ -260,6 +305,21 @@ describe('EventGroupCarryDialog → a series\' zone carried to its copies (stage
     const { event } = sent()[0];
     expect(event.title).toBe('Abendrunde neu');
     expect(event.recurrence ?? null).toBeNull();
+    // The series' start is an instant of the series, not this event's.
+    expect(event.start).toBe(STORED.start);
+  });
+
+  it('offers only to close where nothing but the zone changed and the copy is no series', async () => {
+    const m = moved('asNow');
+    const single = copyIn('device', 'ev-s', { recurrence: null } as Partial<CalendarEvent>);
+    await openDialog([single], m);
+    const close = screen.getByRole('button', { name: /^schließen$/i });
+    await waitFor(() => expect(document.activeElement).toBe(close));
+    expect(screen.queryByRole('button', { name: /^mitziehen$/i })).toBeNull();
+    expect(screen.getByText(/^Keine Kopie kann die Änderung bekommen\./).textContent).toContain(
+      'Die Kopie in Gerät ist dort keine Serie; die Zeitzone gilt für sie nicht.',
+    );
+    expect(sent()).toHaveLength(0);
   });
 
   it('can only close where no copy can take the change, with the reason in its message', async () => {
