@@ -1013,11 +1013,9 @@ Vorschläge sind nicht aufgenommen.
       Regel mit einer Uhrzeit am Tag ist das eine gleichmäßige Verschiebung,
       die `occurrence_shift_minutes` mittragen könnte; Regeln mit mehreren
       Uhrzeiten am Tag brauchen eine eigene Zuordnung.
-      ↳ 🚩 95a ist gegen iCloud ungemessen: Zonenwechsel einer iCloud-Serie
-      mit geänderten Terminen (eine RECURRENCE-ID in UTC, eine mit TZID), mit
-      dem iCloud-Live-Testprogramm, das Toni startet. Lesen sich die
-      umgeschriebenen RECURRENCE-IDs zurück, ohne doppelten Tag, auch in UTC
-      neben einem DTSTART mit TZID (Herbst-Stunde)?
+      ↳ 95a gegen iCloud gemessen (2026-11-28, `icloud-zones` 55/55 und
+      Tonis iPhone-Blick): umgeschriebene RECURRENCE-IDs ohne doppelten Tag,
+      auch in UTC neben einem DTSTART mit TZID (DESIGN, „Gemessen“).
       ↳ 🚩 Google ungemessen (246): Was der Server mit geänderten
       Einzelterminen macht, wenn sich die `timeZone` des Masters ändert. Der
       Google-Adapter übergeht `occurrence_shift_minutes`.
