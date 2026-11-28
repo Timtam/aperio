@@ -1507,7 +1507,7 @@
       "zoneRefusedCount_other": "{{count}} copies will not get the time zone.",
       "zoneRefused": "The copy in {{calendar}} will not get the time zone: {{reason}}. Its times stay as they are.",
       "zoneNotASeries": "The copy in {{calendar}} is not a series there; the time zone does not apply to it.",
-      "zoneNotASeriesTimes": "The copy in {{calendar}} is not a series there; it gets only the title, location and description, not the time zone, start and end.",
+      "zoneNotASeriesTimes": "The copy in {{calendar}} is not a series there; the series' time zone, start and end do not apply to it.",
       "zoneRefusal": {
         "zone_not_storable": "that calendar cannot store the time zone {{zone}}",
         "off_pattern": "its occurrences are not on the series' days",

@@ -329,7 +329,7 @@ describe('EventGroupCarryDialog → a series\' zone carried to its copies (stage
     expect(message.textContent).toMatch(/Zeitzone: Berlin.*Beginn/);
     expect(
       screen.getByText(
-        'Die Kopie in Gerät ist dort keine Serie; sie bekommt nur Titel, Ort und Beschreibung, nicht Zeitzone, Beginn und Ende.',
+        'Die Kopie in Gerät ist dort keine Serie; Zeitzone, Beginn und Ende der Serie gelten für sie nicht.',
       ),
     ).toBeTruthy();
     fireEvent.click(await carryButton());
@@ -343,6 +343,22 @@ describe('EventGroupCarryDialog → a series\' zone carried to its copies (stage
     expect(written.get('ev-x')?.start).toBe(STORED.start);
     expect(written.get('ev-x')?.end).toBe(STORED.end);
     expect(written.get('ev-x')?.recurrence?.tzid ?? null).toBeNull();
+  });
+
+  // PR 4 review round 3: with no text field changed, nothing is written to
+  // such a copy, and the sentence must not say it gets anything.
+  it('offers only to close where only the times changed and the copy is no series', async () => {
+    const week = 7 * 24 * 60 * 60_000;
+    const m = moved('asRule', STORED.title, week);
+    const single = copyIn('device', 'ev-s', { recurrence: null } as Partial<CalendarEvent>);
+    await openDialog([single], m);
+    const message = screen.getByText(/^Keine Kopie kann die Änderung bekommen\./);
+    expect(message.textContent).toContain(
+      'Die Kopie in Gerät ist dort keine Serie; Zeitzone, Beginn und Ende der Serie gelten für sie nicht.',
+    );
+    expect(message.textContent).not.toMatch(/bekommt nur/);
+    expect(screen.queryByRole('button', { name: /^mitziehen$/i })).toBeNull();
+    expect(sent()).toHaveLength(0);
   });
 
   it('offers only to close where nothing but the zone changed and the copy is no series', async () => {
