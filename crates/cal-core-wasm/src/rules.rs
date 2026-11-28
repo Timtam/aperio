@@ -388,6 +388,11 @@ pub fn moved_slots(question_json: &str) -> Result<String, WireError> {
     cal_core::moved_slots_json(question_json).map_err(|e| WireError::BadJson(e.to_string()))
 }
 
+/// See [`crate::zoneCarry`].
+pub fn zone_carry(question_json: &str) -> Result<String, WireError> {
+    cal_core::zone_carry_json(question_json).map_err(|e| WireError::BadJson(e.to_string()))
+}
+
 /// See [`crate::calendarWeeks`].
 pub fn calendar_weeks(input_json: &str) -> Result<String, WireError> {
     cal_core::calendar_weeks_json(input_json).map_err(|e| WireError::BadJson(e.to_string()))

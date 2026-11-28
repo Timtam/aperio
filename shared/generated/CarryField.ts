@@ -3,4 +3,4 @@
 /**
  * One of the fields that travel.
  */
-export type CarryField = "title" | "start" | "end" | "all_day" | "location" | "description";
+export type CarryField = "zone" | "title" | "start" | "end" | "all_day" | "location" | "description";

@@ -260,6 +260,14 @@ pub fn moved_slots(question_json: &str) -> Result<String, JsValue> {
     rules::moved_slots(question_json).map_err(to_js)
 }
 
+/// What one copy of a series gets when the series' zone change is carried to
+/// it, as JSON: unchanged, the copy as written on its new clock, or refused
+/// with a reason. See `cal_core::zone_carry`.
+#[wasm_bindgen(js_name = zoneCarry)]
+pub fn zone_carry(question_json: &str) -> Result<String, JsValue> {
+    rules::zone_carry(question_json).map_err(to_js)
+}
+
 /// The IANA tzdata release this module's zones were built from, which the
 /// desktop compares with its host's at startup (decision 104a).
 #[wasm_bindgen(js_name = tzdataVersion)]

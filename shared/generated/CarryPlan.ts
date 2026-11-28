@@ -19,7 +19,10 @@ targets: Array<CarryTarget>,
  */
 skipped: Array<CarryTarget>, 
 /**
- * Whether the plan is worth asking the user about at all.
+ * Whether the plan is worth asking the user about at all: something
+ * changed and some copy can be written, or the zone changed and some
+ * copy exists — a zone change names its read-only copies even where
+ * none can be written (stage 13).
  *
  * Part of the plan rather than a separate call: it is two comparisons, and
  * crossing a door for them would be silly — but writing them out on the

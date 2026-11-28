@@ -36,6 +36,7 @@ import init, {
   occurrenceCarryFields as wasmOccurrenceCarryFields,
   futureCarryFields as wasmFutureCarryFields,
   carryOntoFields as wasmCarryOntoFields,
+  zoneCarry as wasmZoneCarry,
   groupTasks as wasmGroupTasks,
   tasksOnDays as wasmTasksOnDays,
   backlogWeeks as wasmBacklogWeeks,
@@ -216,6 +217,12 @@ export function futureCarryFieldsJson(inputJson: string): string {
 export function carryOntoFieldsJson(inputJson: string): string {
   assertReady();
   return wasmCarryOntoFields(inputJson);
+}
+
+/** See `cal_core::group_zone_carry::zone_carry_json`. */
+export function zoneCarryJson(questionJson: string): string {
+  assertReady();
+  return wasmZoneCarry(questionJson);
 }
 
 /** See `cal_core::task_grouping::group_tasks_json`. */

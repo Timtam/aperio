@@ -617,6 +617,18 @@ pub fn moved_slots(question_json: String) -> Result<String, StoreError> {
     })
 }
 
+/// What one copy of a series gets when the series' zone change is carried to
+/// it, as JSON: unchanged, the copy as written on its new clock, or refused
+/// with a reason (cal_core::zone_carry): the desktop asks the same rule
+/// through WebAssembly.
+#[uniffi::export]
+pub fn zone_carry(question_json: String) -> Result<String, StoreError> {
+    cal_core::zone_carry_json(&question_json).map_err(|e| StoreError::InvalidField {
+        field: "zone carry question".into(),
+        detail: e.to_string(),
+    })
+}
+
 /// The parts a repeat rule takes from the day a series starts on, as JSON,
 /// and JSON `null` for a key that names no day (cal_core::day_parts): the
 /// desktop asks the same rule through WebAssembly.
@@ -996,6 +1008,39 @@ mod tests {
         match moved_slots("not json".to_string()) {
             Err(StoreError::InvalidField { field, .. }) => {
                 assert_eq!(field, "moved slots question")
+            }
+            other => panic!("expected an invalid-field error, got {other:?}"),
+        }
+    }
+
+    /// Every row of the core's zone-carry table through the phone's door;
+    /// JSON that is no question at all is the field error the bridge throws.
+    #[test]
+    fn zone_carry_door_answers_every_contract_row() {
+        const CONTRACT: &str = include_str!("../../cal-core/tests/fixtures/groupZoneCarry.json");
+        let doc: serde_json::Value = serde_json::from_str(CONTRACT).expect("the contract parses");
+        let rows = doc["rows"].as_array().expect("rows");
+        for needed in [
+            "a-true-copy-as-the-rule-says",
+            "copy-in-june-anchor-in-january-as-they-fall-now",
+            "a-copy-an-hour-later-keeps-its-distance",
+            "a-copy-in-vienna-keeps-vienna",
+            "troll-on-a-calendar-that-cannot-store-it",
+        ] {
+            assert!(
+                rows.iter().any(|r| r["name"] == needed),
+                "the contract lost {needed}"
+            );
+        }
+        for row in rows {
+            let answer: serde_json::Value =
+                serde_json::from_str(&zone_carry(row["question"].to_string()).expect("a question"))
+                    .expect("json");
+            assert_eq!(answer, row["expect"], "{}", row["name"]);
+        }
+        match zone_carry("not json".to_string()) {
+            Err(StoreError::InvalidField { field, .. }) => {
+                assert_eq!(field, "zone carry question")
             }
             other => panic!("expected an invalid-field error, got {other:?}"),
         }

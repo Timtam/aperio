@@ -21,13 +21,19 @@
 //!
 //! # What this answers with
 //!
-//! FIELD VALUES, not rows. A caller's own row carries far more than the six
+//! FIELD VALUES, not rows. A caller's own row carries far more than the
 //! fields here — its reminders, its colour, its calendar — and the core has no
-//! business knowing about them. So the row-shaped rules answer with the six
+//! business knowing about them. So the row-shaped rules answer with the
 //! fields to write, and the caller lays them over what it already holds. That
 //! is also what keeps a copy's reminder, the reason it exists, untouched.
+//!
+//! A series' ZONE is named here and never written: a copy takes it with its
+//! own rule and times, or not at all (`crate::group_zone_carry`, stage 13 of
+//! DESIGN-series-time-zone.md).
 
 use serde::{Deserialize, Serialize};
+
+use crate::{canonical_zone, series_clock_zone};
 
 /// The fields a change is carried in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +45,21 @@ pub struct CarryableFields {
     pub all_day: bool,
     pub location: Option<String>,
     pub description: Option<String>,
+    /// The zone a timed series repeats on (DESIGN-series-time-zone.md, stage
+    /// 13, 143a); absent for anything else: a single event, an all-day
+    /// series. A change of it is named, never copied: each copy is asked how
+    /// it takes the zone (`cal_core::zone_carry`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
+    pub zone: Option<CarriedZone>,
+}
+
+/// The zone of a timed series, as [`CarryableFields::zone`] carries it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
+pub struct CarriedZone {
+    /// The zone name it stores; `None` for none (UTC).
+    pub tzid: Option<String>,
 }
 
 /// One of the fields that travel.
@@ -46,6 +67,9 @@ pub struct CarryableFields {
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "snake_case")]
 pub enum CarryField {
+    /// The zone of a timed series (143a): first, so the offer names it first
+    /// ("Zeitzone: New York, Titel").
+    Zone,
     Title,
     Start,
     End,
@@ -55,7 +79,8 @@ pub enum CarryField {
 }
 
 /// The order they are reported in, which is the order they are declared in.
-const CARRIED: [CarryField; 6] = [
+const CARRIED: [CarryField; 7] = [
+    CarryField::Zone,
     CarryField::Title,
     CarryField::Start,
     CarryField::End,
@@ -86,7 +111,10 @@ pub struct CarryPlan {
     pub targets: Vec<CarryTarget>,
     /// Members it must leave alone, and the user has to be told about.
     pub skipped: Vec<CarryTarget>,
-    /// Whether the plan is worth asking the user about at all.
+    /// Whether the plan is worth asking the user about at all: something
+    /// changed and some copy can be written, or the zone changed and some
+    /// copy exists — a zone change names its read-only copies even where
+    /// none can be written (stage 13).
     ///
     /// Part of the plan rather than a separate call: it is two comparisons, and
     /// crossing a door for them would be silly — but writing them out on the
@@ -130,14 +158,27 @@ fn field_of(fields: &CarryableFields, field: CarryField) -> Option<&str> {
         CarryField::Title => Some(fields.title.as_str()),
         CarryField::Start => Some(fields.start.as_str()),
         CarryField::End => Some(fields.end.as_str()),
-        CarryField::AllDay => None,
+        CarryField::Zone | CarryField::AllDay => None,
         CarryField::Location => fields.location.as_deref(),
         CarryField::Description => fields.description.as_deref(),
     }
 }
 
+/// The clock a carried zone names, canonically: `None` for UTC under any of
+/// its names, for none, and for a name tzdata does not know, as a series
+/// repeats on it ([`series_clock_zone`]); an alias is its zone.
+fn zone_clock(zone: &CarriedZone) -> Option<&'static str> {
+    series_clock_zone(zone.tzid.as_deref()).and_then(canonical_zone)
+}
+
 fn differs(before: &CarryableFields, after: &CarryableFields, field: CarryField) -> bool {
     match field {
+        // Only between two timed series: turning the repeat off or all-day
+        // on leaves one side without a zone, and that is no zone change.
+        CarryField::Zone => match (&before.zone, &after.zone) {
+            (Some(before), Some(after)) => zone_clock(before) != zone_clock(after),
+            _ => false,
+        },
         CarryField::Start => !same_instant(&before.start, &after.start),
         CarryField::End => !same_instant(&before.end, &after.end),
         CarryField::AllDay => before.all_day != after.all_day,
@@ -150,7 +191,9 @@ fn differs(before: &CarryableFields, after: &CarryableFields, field: CarryField)
 /// Decided from the data, before the question is even asked: with nothing
 /// changed there is nothing to carry and no reason to ask, and with every other
 /// member read-only the honest answer is "this cannot be carried" rather than a
-/// dialog that does nothing.
+/// dialog that does nothing. A change of a series' zone is the exception
+/// (stage 13): it is worth offering while any other copy exists, so the
+/// copies that cannot take it — read-only ones included — are named.
 ///
 /// `members` is the group's membership, already annotated by the caller with the
 /// name to show and whether Aperio may write there — two things only a surface
@@ -179,7 +222,9 @@ pub fn plan_carry(
         }
     }
     let changed: Vec<CarryField> = changed;
-    let worth_carrying = !changed.is_empty() && !targets.is_empty();
+    let zone_changed = changed.contains(&CarryField::Zone);
+    let worth_carrying =
+        !changed.is_empty() && (!targets.is_empty() || (zone_changed && !skipped.is_empty()));
     CarryPlan {
         changed,
         targets,
@@ -191,7 +236,9 @@ pub fn plan_carry(
 /// Apply the carried fields onto one member's own current values.
 ///
 /// A member keeps everything else it has — its calendar, its colour, and above
-/// all its reminders. Only what the appointment IS travels.
+/// all its reminders. Only what the appointment IS travels. Its zone is never
+/// copied: a copy takes a series' zone with its own rule and times, or not at
+/// all (`cal_core::zone_carry`).
 pub fn carry_onto(
     member: &CarryableFields,
     after: &CarryableFields,
@@ -200,6 +247,7 @@ pub fn carry_onto(
     let mut next = member.clone();
     for &field in changed {
         match field {
+            CarryField::Zone => {}
             CarryField::Title => next.title = after.title.clone(),
             CarryField::Start => next.start = after.start.clone(),
             CarryField::End => next.end = after.end.clone(),
@@ -355,11 +403,11 @@ pub fn future_carry_fields(
     };
     // Everything else travels as it does everywhere else; start and end were
     // just decided above and must not be overwritten with the anchor's
-    // instants.
+    // instants, and a zone is never copied.
     let rest: Vec<CarryField> = changed
         .iter()
         .copied()
-        .filter(|&f| f != CarryField::Start && f != CarryField::End)
+        .filter(|&f| !matches!(f, CarryField::Zone | CarryField::Start | CarryField::End))
         .collect();
     Some(carry_onto(&row, after, &rest))
 }
@@ -439,11 +487,177 @@ mod tests {
             all_day: false,
             location: None,
             description: None,
+            zone: None,
         }
     }
 
     fn base() -> CarryableFields {
         fields("2026-08-10T08:00:00Z", "2026-08-10T09:00:00Z")
+    }
+
+    /// A timed series on `tzid`, as a surface hands it for a zone change.
+    fn on_zone(tzid: Option<&str>) -> CarryableFields {
+        CarryableFields {
+            zone: Some(CarriedZone {
+                tzid: tzid.map(str::to_string),
+            }),
+            ..base()
+        }
+    }
+
+    // ── the zone of a series (stage 13, 143a) ────────────────────────────
+
+    /// A save that changed only the zone is still a change worth offering:
+    /// the copies are told, and asked.
+    #[test]
+    fn a_zone_only_change_is_worth_offering() {
+        let plan = plan_carry(
+            &members(),
+            ("work", "ev-a"),
+            &on_zone(None),
+            &on_zone(Some("Europe/Berlin")),
+        );
+        assert_eq!(plan.changed, vec![CarryField::Zone]);
+        assert!(plan.worth_carrying);
+    }
+
+    /// One zone under two names is no change: an alias and its zone, and
+    /// every UTC name and none.
+    #[test]
+    fn one_zone_by_two_names_is_no_change() {
+        for (before, after) in [
+            (Some("Asia/Calcutta"), Some("Asia/Kolkata")),
+            (Some("UTC"), Some("Etc/UTC")),
+            (Some("Etc/UTC"), None),
+            (None, Some("UTC")),
+            (Some("europe/berlin"), Some("Europe/Berlin")),
+        ] {
+            let plan = plan_carry(
+                &members(),
+                ("work", "ev-a"),
+                &on_zone(before),
+                &on_zone(after),
+            );
+            assert!(plan.changed.is_empty(), "{before:?} -> {after:?}");
+            assert!(!plan.worth_carrying, "{before:?} -> {after:?}");
+        }
+    }
+
+    /// A zone change names the copies that cannot take it, read-only ones
+    /// too, even where no copy can be written; with no other copy at all
+    /// there is nobody to name.
+    #[test]
+    fn a_zone_change_with_every_copy_read_only_is_worth_offering() {
+        let read_only = vec![
+            member("work", "ev-a", true),
+            member("private", "ev-b", false),
+            member("colleague", "ev-c", false),
+        ];
+        let plan = plan_carry(
+            &read_only,
+            ("work", "ev-a"),
+            &on_zone(None),
+            &on_zone(Some("America/New_York")),
+        );
+        assert!(plan.targets.is_empty());
+        assert_eq!(plan.skipped.len(), 2);
+        assert!(plan.worth_carrying);
+
+        let alone = vec![member("work", "ev-a", true)];
+        let plan = plan_carry(
+            &alone,
+            ("work", "ev-a"),
+            &on_zone(None),
+            &on_zone(Some("America/New_York")),
+        );
+        assert!(!plan.worth_carrying);
+    }
+
+    /// A zone counts only between two timed series: turning the repeat off,
+    /// or all-day on, leaves the saved side without one, and that is no zone
+    /// change (the other fields still are).
+    #[test]
+    fn a_side_without_a_zone_is_no_zone_change() {
+        let mut all_day = base();
+        all_day.all_day = true;
+        for after in [base(), all_day] {
+            let plan = plan_carry(
+                &members(),
+                ("work", "ev-a"),
+                &on_zone(Some("Europe/Berlin")),
+                &after,
+            );
+            assert!(!plan.changed.contains(&CarryField::Zone), "{after:?}");
+        }
+        let plan = plan_carry(
+            &members(),
+            ("work", "ev-a"),
+            &base(),
+            &on_zone(Some("Europe/Berlin")),
+        );
+        assert!(plan.changed.is_empty());
+    }
+
+    /// The offer names the zone first: "Zeitzone: New York, Titel".
+    #[test]
+    fn the_zone_is_named_first() {
+        let mut after = on_zone(Some("America/New_York"));
+        after.title = "Neu".into();
+        after.description = Some("Agenda".into());
+        let plan = plan_carry(&members(), ("work", "ev-a"), &on_zone(None), &after);
+        assert_eq!(
+            plan.changed,
+            vec![CarryField::Zone, CarryField::Title, CarryField::Description]
+        );
+    }
+
+    /// A zone is never copied onto a copy: it takes the series' zone with its
+    /// own rule and times (`zone_carry`), or keeps its own.
+    #[test]
+    fn carrying_never_touches_the_zone() {
+        let mine = on_zone(Some("Europe/Vienna"));
+        let mut after = on_zone(Some("America/New_York"));
+        after.title = "Neu".into();
+        let carried = carry_onto(&mine, &after, &[CarryField::Zone, CarryField::Title]);
+        assert_eq!(carried.zone, mine.zone);
+        assert_eq!(carried.title, "Neu");
+
+        let row = future_carry_fields(
+            &mine,
+            "2026-08-10T08:00:00Z",
+            &on_zone(None),
+            &after,
+            &[CarryField::Zone, CarryField::Title],
+        )
+        .expect("a readable cut point");
+        assert_eq!(row.zone, mine.zone);
+        let row = occurrence_carry_fields(
+            &mine,
+            "2026-08-10T08:00:00Z",
+            &after,
+            &[CarryField::Zone, CarryField::Title],
+        )
+        .expect("a readable occurrence");
+        assert_eq!(row.zone, mine.zone);
+    }
+
+    /// The wire leaves an absent zone out, and reads JSON without one.
+    #[test]
+    fn an_absent_zone_stays_off_the_wire() {
+        let json = serde_json::to_value(base()).expect("json");
+        assert!(json.get("zone").is_none(), "{json}");
+        let read: CarryableFields = serde_json::from_value(serde_json::json!({
+            "title": "Wochenplanung",
+            "start": "2026-08-10T08:00:00Z",
+            "end": "2026-08-10T09:00:00Z",
+            "all_day": false,
+            "location": null,
+            "description": null,
+        }))
+        .expect("fields without a zone");
+        assert_eq!(read, base());
+        let json = serde_json::to_value(on_zone(None)).expect("json");
+        assert_eq!(json["zone"], serde_json::json!({ "tzid": null }));
     }
 
     fn member(calendar_id: &str, event_id: &str, writable: bool) -> CarryTarget {

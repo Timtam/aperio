@@ -112,6 +112,7 @@ installGroupCarryRules({
   occurrenceCarryFieldsJson: (inputJson) => CalFfi.occurrenceCarryFields(inputJson),
   futureCarryFieldsJson: (inputJson) => CalFfi.futureCarryFields(inputJson),
   carryOntoFieldsJson: (inputJson) => CalFfi.carryOntoFields(inputJson),
+  zoneCarryJson: (questionJson) => CalFfi.zoneCarry(questionJson),
 });
 
 // Grouping the task view. Synchronous: the screen asks inside `useMemo`

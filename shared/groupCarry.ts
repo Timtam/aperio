@@ -21,21 +21,35 @@
 // produces exactly the contradiction it set out to prevent.
 //
 // The core answers with FIELD VALUES, never with rows: a caller's own row
-// carries far more than these six fields, and the core has no business knowing
+// carries far more than these fields, and the core has no business knowing
 // about them. The door lays the answer over what the caller already holds,
-// which is also what keeps a copy's reminder untouched.
+// which is also what keeps a copy's reminder untouched. A series' zone is
+// named and never copied: each copy is asked how it takes it (`zoneCarry`,
+// below).
 
 import type { EventGroup } from './eventGroups';
+import { zoneCityName } from './zoneFormText';
 
 // The wire types are generated from `cal_core::group_carry` by
 // `cargo xtask ts-types`; nothing here mirrors them by hand, so a field the
 // Rust side renames is a type error on this side, not a silent `undefined`.
 export type { CarryableFields } from './generated/CarryableFields';
+export type { CarriedZone } from './generated/CarriedZone';
 export type { CarryField } from './generated/CarryField';
 export type { CarryTarget } from './generated/CarryTarget';
 export type { CarryPlan } from './generated/CarryPlan';
+export type { CopyFacts } from './generated/CopyFacts';
+export type { SeriesFacts } from './generated/SeriesFacts';
+export type { ZoneCarry } from './generated/ZoneCarry';
+export type { ZoneCarryQuestion } from './generated/ZoneCarryQuestion';
+export type { ZoneCarryRefusal } from './generated/ZoneCarryRefusal';
 import type { CarryableFields } from './generated/CarryableFields';
+import type { CarryField } from './generated/CarryField';
 import type { CarryPlan } from './generated/CarryPlan';
+import type { CarryTarget } from './generated/CarryTarget';
+import type { ZoneCarry } from './generated/ZoneCarry';
+import type { ZoneCarryQuestion } from './generated/ZoneCarryQuestion';
+import type { ZoneCarryRefusal } from './generated/ZoneCarryRefusal';
 
 /**
  * Which occurrences an edit — and therefore its carry — is about.
@@ -57,6 +71,10 @@ export interface GroupCarryRules {
   occurrenceCarryFieldsJson(inputJson: string): string;
   futureCarryFieldsJson(inputJson: string): string;
   carryOntoFieldsJson(inputJson: string): string;
+  /** What one copy gets when a series' zone change is carried to it
+   *  (`cal_core::zone_carry`): a question as JSON in, the answer as JSON
+   *  out. */
+  zoneCarryJson(questionJson: string): string;
 }
 
 let installedRules: GroupCarryRules | null = null;
@@ -80,7 +98,9 @@ function rules(): GroupCarryRules {
   return installedRules;
 }
 
-/** The six fields, and nothing of the caller's own row. */
+/** The carried fields, and nothing of the caller's own row. The zone of a
+ *  timed series goes only where the caller set it (stage 13); a row without
+ *  one sends none. */
 function onlyCarryable(fields: CarryableFields): CarryableFields {
   return {
     title: fields.title,
@@ -89,6 +109,7 @@ function onlyCarryable(fields: CarryableFields): CarryableFields {
     all_day: fields.all_day,
     location: fields.location ?? null,
     description: fields.description ?? null,
+    ...(fields.zone ? { zone: { tzid: fields.zone.tzid ?? null } } : {}),
   };
 }
 
@@ -220,4 +241,156 @@ export function carryOnto<T extends CarryableFields>(
     }),
   );
   return { ...member, ...(JSON.parse(answer) as CarryableFields) } as T;
+}
+
+// ─── A series' zone, carried to its copies (stage 13) ─────────────────────
+//
+// DESIGN-series-time-zone.md, section 23b; decisions 143a to 146a. The zone
+// goes in the one carry question, first among the changes (143a). Each
+// writable copy is asked of the core before the offer opens, and again in
+// the carry loop: how it takes the zone, or why it cannot. A copy that
+// cannot still gets its title, location and description (146a).
+
+/** A copy's refusal of the zone, `not_a_series` included. */
+export type ZoneCarryRefused = Extract<ZoneCarry, { outcome: 'refused' }>;
+
+/** A refusal the offer names with its reason: a series that does not get
+ *  the zone (146a). A copy that is no series there is named apart
+ *  (`ZoneOffer.notASeries`). */
+export type ZoneSeriesRefused = ZoneCarryRefused & {
+  reason: Exclude<ZoneCarryRefusal, 'not_a_series'>;
+};
+
+/**
+ * What one copy gets when a series' zone change is carried to it
+ * (`cal_core::zone_carry`): unchanged, the copy as written on its new clock
+ * with how far its occurrences move (`shiftMinutes`) and how many days for
+ * the zone (`zoneDays`, negative is earlier), or refused with a reason.
+ * One rule for the offer and the carry, so both name the same reason.
+ */
+export function zoneCarry(question: ZoneCarryQuestion): ZoneCarry {
+  return JSON.parse(rules().zoneCarryJson(JSON.stringify(question))) as ZoneCarry;
+}
+
+/** The key a copy's verdict is kept under, for `zoneOffer`. */
+export function carryTargetKey(target: { calendar_id: string; event_id: string }): string {
+  return JSON.stringify([target.calendar_id, target.event_id]);
+}
+
+const TEXT_FIELDS: readonly CarryField[] = ['title', 'location', 'description'];
+
+/** The changed fields that go to a copy whatever its zone does (146a):
+ *  title, location and description, in the plan's order. */
+export function textFields(changed: readonly CarryField[]): CarryField[] {
+  return changed.filter((field) => TEXT_FIELDS.includes(field));
+}
+
+/** What the offer after a zone change says and does, from the plan and each
+ *  copy's verdict. */
+export interface ZoneOffer {
+  /** The copies the carry goes to: every writable copy but those it would
+   *  write nothing to — one already standing as the series does
+   *  (`unchanged`) or that is no series there, with no text field changed.
+   *  A refused series stays: it gets the text fields, or its reason is
+   *  reported. */
+  targets: CarryTarget[];
+  /** The series that do not get the zone, with their verdict (146a). */
+  refused: { target: CarryTarget; verdict: ZoneSeriesRefused }[];
+  /** The writable copies that are no series there: the zone does not apply
+   *  to them, and the offer says so once. Those with a changed text field
+   *  are targets too. */
+  notASeries: CarryTarget[];
+  /** How far the written copies' occurrences move for the zone, in days,
+   *  grouped, earliest first: one sentence each (negative is earlier, "vor",
+   *  138a). Copies whose days stay are left out. */
+  days: { days: number; count: number }[];
+  /** No copy would be written: the offer can only close. */
+  nothingToCarry: boolean;
+  /** Nothing to say at all: every copy already stands as the series does,
+   *  no text field changed, and no copy was skipped. No dialog opens. */
+  silent: boolean;
+}
+
+/**
+ * The offer after a series' zone change (stage 13), for both surfaces: from
+ * the plan and the verdict of each writable copy, keyed by `carryTargetKey`.
+ * A copy without a verdict (its read failed) counts as a target that would
+ * be written; the carry asks again once it has read it.
+ *
+ * A copy that is no series there gets its title, location and description
+ * (146a), never the series' start or end: those are instants of the series,
+ * and a single event elsewhere would land on the series' first day, or end
+ * before it starts. Without a changed text field it gets nothing: it is named
+ * in `notASeries` only, never in `targets`, and counts as not written, so a
+ * zone-only save with a single-event copy offers no carry and writes nothing.
+ */
+export function zoneOffer(plan: CarryPlan, verdicts: ReadonlyMap<string, ZoneCarry>): ZoneOffer {
+  const texts = textFields(plan.changed).length > 0;
+  const targets: CarryTarget[] = [];
+  const refused: ZoneOffer['refused'] = [];
+  const notASeries: CarryTarget[] = [];
+  const days = new Map<number, number>();
+  let written = 0;
+  let everyUnchanged = true;
+  for (const target of plan.targets) {
+    const verdict = verdicts.get(carryTargetKey(target));
+    if (verdict === undefined) {
+      everyUnchanged = false;
+      targets.push(target);
+      written += 1;
+      continue;
+    }
+    switch (verdict.outcome) {
+      case 'unchanged':
+        if (texts) {
+          targets.push(target);
+          written += 1;
+        }
+        break;
+      case 'changed':
+        everyUnchanged = false;
+        targets.push(target);
+        written += 1;
+        if (verdict.zoneDays !== 0) days.set(verdict.zoneDays, (days.get(verdict.zoneDays) ?? 0) + 1);
+        break;
+      case 'refused':
+        everyUnchanged = false;
+        if (verdict.reason === 'not_a_series') {
+          notASeries.push(target);
+          if (texts) {
+            targets.push(target);
+            written += 1;
+          }
+        } else {
+          refused.push({ target, verdict: verdict as ZoneSeriesRefused });
+          targets.push(target);
+          if (texts) written += 1;
+        }
+        break;
+    }
+  }
+  return {
+    targets,
+    refused,
+    notASeries,
+    days: [...days].sort(([a], [b]) => a - b).map(([moved, count]) => ({ days: moved, count })),
+    nothingToCarry: written === 0,
+    silent: everyUnchanged && !texts && plan.skipped.length === 0,
+  };
+}
+
+type Translate = (key: string, values?: Record<string, unknown>) => string;
+
+/**
+ * Why a series does not get the zone, as the clause the offer and the report
+ * put after "bekommt die Zeitzone nicht:". `zone` is the series' new zone,
+ * named by its city. A rule that cannot move says the rule's own reason, as
+ * the zone question does (`dialogs.moveScope.refusal.*`).
+ */
+export function zoneRefusalText(verdict: ZoneSeriesRefused, zone: string | null, t: Translate): string {
+  const city = zoneCityName(zone);
+  if (verdict.reason === 'rule_cannot_move') {
+    return t(`dialogs.moveScope.refusal.${verdict.rule ?? 'unreadable'}`, { clock: city });
+  }
+  return t(`dialogs.eventGroupCarry.zoneRefusal.${verdict.reason}`, { zone: city });
 }

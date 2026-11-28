@@ -60,6 +60,7 @@ import uniffi.cal_ffi.dayParts as uniffiDayParts
 import uniffi.cal_ffi.wallClock as uniffiWallClock
 import uniffi.cal_ffi.seriesClockChange as uniffiSeriesClockChange
 import uniffi.cal_ffi.movedSlots as uniffiMovedSlots
+import uniffi.cal_ffi.zoneCarry as uniffiZoneCarry
 import uniffi.cal_ffi.seriesShift as uniffiSeriesShift
 import uniffi.cal_ffi.tailExceptions as uniffiTailExceptions
 import uniffi.cal_ffi.collapseEventGroups as uniffiCollapseEventGroups
@@ -688,6 +689,11 @@ class CalFfiModule : Module() {
     // Where a series' changed occurrences stand on its new clock.
     Function("movedSlots") { questionJson: String ->
       uniffiMovedSlots(questionJson)
+    }
+
+    // What a copy gets when its series' zone change is carried to it.
+    Function("zoneCarry") { questionJson: String ->
+      uniffiZoneCarry(questionJson)
     }
 
     Function("wallClock") { questionJson: String ->

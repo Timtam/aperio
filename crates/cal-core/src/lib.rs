@@ -26,6 +26,10 @@ pub mod extras;
 pub mod file_import;
 pub mod group_carry;
 pub mod group_suggestion;
+// Carrying a series' zone change to its copies (stage 13): moves series on
+// tzdata's clocks, so behind `zones` with cal-zone.
+#[cfg(feature = "zones")]
+pub mod group_zone_carry;
 pub mod invitation;
 pub mod live_activity;
 pub mod meeting_events;
@@ -142,12 +146,17 @@ pub use extras::{
 pub use file_import::{FileImport, ImportedEvent, SkippedKind, SkippedPart};
 pub use group_carry::{
     carry_onto, carry_onto_json, future_carry_fields, future_carry_fields_json,
-    occurrence_carry_fields, occurrence_carry_fields_json, plan_carry, plan_carry_json, CarryField,
-    CarryPlan, CarryTarget, CarryableFields,
+    occurrence_carry_fields, occurrence_carry_fields_json, plan_carry, plan_carry_json,
+    CarriedZone, CarryField, CarryPlan, CarryTarget, CarryableFields,
 };
 pub use group_suggestion::{
     find_group_suggestions, find_group_suggestions_json, is_meeting_calendar, suggest_group_mate,
     suggest_group_mate_json, GroupSuggestion, SuggestibleEvent, MEETINGS_CALENDAR_SUFFIX,
+};
+#[cfg(feature = "zones")]
+pub use group_zone_carry::{
+    zone_carry, zone_carry_json, CopyFacts, SeriesFacts, ZoneCarry, ZoneCarryQuestion,
+    ZoneCarryRefusal,
 };
 pub use invitation::{reply_only_change, reply_only_verdict, ReplyOnlyVerdict};
 pub use meeting_events::{

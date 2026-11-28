@@ -1994,6 +1994,84 @@ Handy im selben PR.
     Plätzen der neuen Uhr (`zoneSlotMoves`, `rowsWithMovedSlots`), damit ein
     geänderter Termin nicht als Löschung gilt. Der Datums-Teil bleibt offen
     wie bei 198 (TODO.md).
+    Gebaut, Teil 3 (2026-11-28, Kern, noch an keinen Dialog gebunden):
+    `feat(core): carry a series' zone change to a copy`. Die Kern-Regel
+    `zone_carry` (`cal_core::group_zone_carry`, Tür `zoneCarry` auf Desktop
+    und Handy) beantwortet für eine Kopie, was die Mitnahme schreibt:
+    - Sie paart die Kopie über Zeitpunkte mit der Serie: Das Vorkommen x der
+      Kopie, das dem ersten Vorkommen y der Serie (altes Muster) am nächsten
+      liegt und weniger als 12 Stunden entfernt ist, beide Muster über Beginn
+      und Ende hinaus verlängert. Die Kopie rückt dann um eine Wanduhr-
+      Verschiebung S_C: x auf der alten Uhr der Serie gelesen, plus die
+      eigene Verschiebung der Serie (die `movedMinutes` der Zonen-Antworten
+      und eine Datums- oder Uhrzeit-Änderung danach, auf der neuen Uhr),
+      minus x auf der Uhr der Kopie. So landet eine echte Kopie genau auf der
+      Serie, eine aus dem anderen Halbjahr auf ihrer Uhrzeit mit derselben
+      Tagesrückung (144a), eine zu anderer Uhrzeit behält ihren Abstand
+      (145a). Liegt ein Vorkommen der Kopie innerhalb von 12 Stunden an der
+      Stelle, an der das erste neue Vorkommen der Serie nach den
+      Zonen-Antworten stand (vor einer Datums- oder Uhrzeit-Änderung danach),
+      steht die Kopie schon, wo die Serie jetzt steht: Sie behält ihre
+      Zeitpunkte und bekommt nur diese spätere Änderung mit. Passen beide
+      Paarungen, entscheidet zuerst eine Woche beider Muster, nach Wandtagen
+      auf jeder Uhr und mit zwei Stunden Spielraum für eine Zeitumstellung:
+      die Paarung, bei der weniger Vorkommen nur auf einer Seite stehen. Eine
+      Regel mit Nachbartagen (Montag bis Freitag) steht nahe an beiden
+      Mustern; erst ihre Woche trennt eine Kopie der alten Serie von einer
+      schon reparierten (Prüfrunde 1). Kann die Woche es nicht sagen (eine
+      Regel an jedem Tag, ein Tag pro Woche), entscheidet die Uhr der Kopie:
+      Auf der alten Uhr der Serie folgt sie der alten Serie, auf der neuen
+      steht sie schon wie die Serie (Prüfrunde 2). Dann die nähere Paarung,
+      dann die, die die Kopie weniger verschiebt. Passt keine, „liegt nicht
+      an den Tagen der Serie“; ebenso eine Kopie, deren Tage der Leser nicht
+      verfolgen kann (eine Position in der Auswahl wie „letzter Werktag im
+      Monat“, ein Tag des Jahres, eine Wochennummer) neben einer Serie, deren
+      Tage er verfolgen kann. Eine Serie mit solchen Tagen, und eine Regel mit
+      mehreren Uhrzeiten am Tag, paaren am eigenen Beginn der Kopie, ohne
+      Tagesprüfung. Zuletzt muss die Verschiebung aufgehen: Das gepaarte
+      Vorkommen der Serie landet auf der gespeicherten Serie, das der Kopie
+      auf ihrer neuen Regel. Wo eine Antwort die Wochen einer Regel neu
+      verankert (jede zweite Woche, ab einem Beginn, der auf einer Uhr kein
+      Vorkommen ist), geht sie nicht auf, und die Kopie wird mit Grund
+      genannt, statt eine Woche daneben geschrieben zu werden. Eine Kopie, die
+      genau die Serie vor dem Speichern ist, bekommt die Antwort der Serie.
+      Die 12 Stunden sind Claudes technische Entscheidung; Toni prüft sie mit
+      dem Textstapel (TODO.md).
+    - Die Kopie behält ihre Uhr, wo sie die neue Uhr der Serie ist: beide
+      UTC, dieselbe kanonische Zone oder dieselben Regeln ab heute (120a,
+      wie die Gruppen der Liste); Wien bleibt Wien neben Berlin. Dort ist sie
+      unverändert, wenn S_C null ist und ihre Länge stimmt; ändert das
+      Speichern nur die Länge, bekommt sie ihre eigene Regel und ihren
+      Beginn mit dem neuen Ende. Sonst bekommt sie die Zone der Serie (UTC
+      als keine Zone). Ihre Verschiebung setzt sich zusammen wie die der
+      Serie: Für den Zonen-Teil (ohne eine Änderung nach der Zonenwahl)
+      bekommt sie ihre eigene Antwort „wie die Regel sagt“ oder „wo die
+      Termine jetzt liegen“, wo er eine davon ist, sonst rückt sie als Ganzes;
+      danach zieht die spätere Änderung sie auf der neuen Uhr, wie der Editor
+      die Serie zog. Als eine einzige Verschiebung verglichen, konnte ein Tag
+      Ziehen ihrer Antwort „wie die Regel sagt“ gleichen und ihren Beginn
+      stehen lassen (Prüfrunde 3).
+    - Abgelehnt mit Grund (146a), Zeilen-Gründe vor Kalender-Gründen: keine
+      Serie, ganztägig, liegt nicht an den Tagen der Serie, der Kalender kann
+      die Zone nicht speichern, die Regel kann nicht rücken (mit dem Grund
+      der Regel, etwa eine übersprungene Uhrzeit).
+    - Wie weit die Termine dabei rücken (`zoneDays`), wird an ihrem ersten
+      Vorkommen gemessen, vorher und nachher auf der neuen Uhr gelesen, ohne
+      eine Datums-Änderung nach der Zonenwahl: 0 für „wo die Termine jetzt
+      liegen“ und jede Kopie, die ihre Zeitpunkte behält, −1 („vor“) für die
+      Reparatur „wie die Regel sagt“, −1 für eine Juni-Kopie um 00:30 Berlin,
+      die auf 23:30 kommt (144a). Gemessen am ersten Vorkommen der Kopie,
+      nicht am gepaarten x: x kann vor ihrem Beginn liegen, im anderen
+      Halbjahr.
+    Die Gruppen-Mitnahme kennt das Feld Zeitzone, nur zwischen zwei Serien
+    mit Uhrzeit und kanonisch verglichen, zuerst in der Liste der Änderungen
+    und nie auf eine Kopie kopiert; eine reine Zonenänderung ist ein Angebot
+    wert, solange es eine andere Kopie gibt, auch nur lesbare, damit sie
+    genannt werden. `zoneOffer` fasst das Angebot für beide Oberflächen
+    zusammen: Ziele, abgelehnte Serien, Kopien ohne Serie (nur mit
+    geänderten Textfeldern ein Ziel, nie mit Beginn oder Ende der Serie),
+    Tagesrückungen, „nichts mitzunehmen“ und „still“. Fixture `groupZoneCarry.json`, Kern, Handy-Tür und WebAssembly
+    lesen sie.
 14. **Optional: lesbare Sync-Konflikte bei reiner Zonenänderung** — `feat(sync): say what changed when only a series' zone differs`.
 
 ## Risiken
