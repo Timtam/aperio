@@ -2303,6 +2303,25 @@ wieder entfernt:
 Der Handteil in Aperio (das Ende-Feld mit NVDA, Speichern im Editor) kommt
 mit der gesammelten Prüfung.
 
+**Desktop von Hand, 2026-11-28 (Teil B von 107b, Stufen 11 bis 13).** Toni mit
+NVDA im Windows-Build der CI von #211, gegen seinen Exchange-Server. Alles
+wie erwartet:
+- Teil B: Eine Serie um 19:00 New York mit Ende 10.11. zeigt ihren letzten
+  Termin am 11.11. um 01:00 Berlin; das Ende-Feld liest „Ende-Datum (New
+  York)“, 10.11.2026. Eine reine Titeländerung, ein getipptes Ende 12.11.,
+  das Teilen ab dem 7.11. (Kopf bis 6.11., Rest bis 12.11., kein Tag doppelt)
+  und das Verschieben der Uhrzeit auf 18:00 und auf 19:00 schreiben das
+  erwartete Enddatum. Ein neuer Termin hält sein getipptes Ende, wenn danach
+  New York gewählt wird.
+- Die Wochentag-Frage (138a) kommt mit Titel, Nachricht, Fokus auf „Zeitzone
+  nicht ändern“ und den drei Knöpfen wie entworfen; eine Regel, die nur den
+  Tag des Beginns nennt, fragt nicht (24a).
+- Die Mitnahme (143a): Die Frage nennt „Zeitzone: Berlin“ zuerst, ohne Satz
+  über rückende Tage, wo die Termine ihre Zeitpunkte behalten, und mit „Bei
+  einer Kopie rücken die Termine dabei einen Tag vor“ nach „wie die Regel
+  sagt“; danach „Eine Kopie aktualisiert.“, und die Kopie steht auf der
+  neuen Zone.
+
 **iCloud, 2026-11-28 (95a und das Serienende, Stufe 13, Teil 2).** Das
 Programm `icloud-zones` lief über Aperios eigenen CalDAV-Adapter gegen Tonis
 iCloud (gestartet von Claude, mit Tonis Erlaubnis für diese Nacht). 55 von 55
