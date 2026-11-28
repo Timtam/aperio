@@ -42,6 +42,11 @@ describe('zoneCarry contract (WebAssembly door and shared shell)', () => {
       'every-other-week-in-the-other-parity',
       'a-move-into-the-spring-gap',
       'zone-then-a-date-says-only-the-zone-days',
+      'a-repaired-copy-takes-a-later-time',
+      'a-repaired-weekday-copy-is-unchanged',
+      'a-true-weekday-copy-follows-the-series',
+      'a-copy-equal-to-the-saved-series-across-autumn',
+      'a-copy-on-a-set-position-is-off-pattern',
     ]) {
       expect(names, `fixture lost ${needed}`).toContain(needed);
     }

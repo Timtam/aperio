@@ -2008,13 +2008,22 @@ Handy im selben PR.
       minus x auf der Uhr der Kopie. So landet eine echte Kopie genau auf der
       Serie, eine aus dem anderen Halbjahr auf ihrer Uhrzeit mit derselben
       Tagesrückung (144a), eine zu anderer Uhrzeit behält ihren Abstand
-      (145a). Liegt kein x so nah, aber ein Vorkommen innerhalb von 12
-      Stunden am ersten neuen Vorkommen der Serie, steht die Kopie schon, wo
-      die Serie jetzt steht, und behält ihre Zeitpunkte; sonst „liegt nicht
-      an den Tagen der Serie“. Die 12 Stunden sind Claudes technische
-      Entscheidung; Toni prüft sie mit dem Textstapel (TODO.md). Regeln mit
-      mehreren Uhrzeiten am Tag paaren am eigenen Beginn der Kopie, ohne
-      Tagesprüfung.
+      (145a). Liegt ein Vorkommen der Kopie innerhalb von 12 Stunden an der
+      Stelle, an der das erste neue Vorkommen der Serie nach den
+      Zonen-Antworten stand (vor einer Datums- oder Uhrzeit-Änderung danach),
+      steht die Kopie schon, wo die Serie jetzt steht: Sie behält ihre
+      Zeitpunkte und bekommt nur diese spätere Änderung mit. Passen beide
+      Paarungen, entscheidet eine Woche beider Muster: die Paarung, bei der
+      weniger Vorkommen nur auf einer Seite stehen, dann die nähere, dann
+      die, die die Kopie weniger verschiebt, dann „schon da“. Eine Regel mit
+      Nachbartagen (täglich, Montag bis Freitag) steht nahe an beiden
+      Mustern; erst ihre ganze Woche trennt eine Kopie der alten Serie von
+      einer schon reparierten (Prüfrunde 1). Passt keine, „liegt nicht an
+      den Tagen der Serie“; ebenso eine Kopie, deren Tage der Leser nicht
+      verfolgen kann (letzter Freitag im Monat, Tag des Jahres, Wochennummer).
+      Die 12 Stunden sind Claudes technische Entscheidung; Toni prüft sie mit
+      dem Textstapel (TODO.md). Regeln mit mehreren Uhrzeiten am Tag paaren
+      am eigenen Beginn der Kopie, ohne Tagesprüfung.
     - Die Kopie behält ihre Uhr, wo sie die neue Uhr der Serie ist: beide
       UTC, dieselbe kanonische Zone oder dieselben Regeln ab heute (120a,
       wie die Gruppen der Liste); Wien bleibt Wien neben Berlin. Dort ist sie

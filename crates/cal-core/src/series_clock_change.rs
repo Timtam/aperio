@@ -670,12 +670,14 @@ impl<'a> ClockMove<'a> {
     /// (past a gap, at the earlier of two readings); `None` where the rule
     /// does not repeat on `day` or repeats several times a day. The rule's
     /// days reach past its start and its end: this names where an
-    /// occurrence would stand.
+    /// occurrence would stand. A rule whose days this cannot follow (a set
+    /// position, a week number, a day of the year) names none here: a
+    /// pairing must not stand on a day the rule may never repeat on.
     pub(crate) fn occurrence_on(&self, day: NaiveDate) -> Option<DateTime<Utc>> {
         use cal_zone::WallPolicy;
 
         let time = self.occurrence_time()?;
-        if !self.repeats_on(day) {
+        if rule_names_day(self.rrule, day) != Some(true) || !self.repeats_on(day) {
             return None;
         }
         self.before_zone
