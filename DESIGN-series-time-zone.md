@@ -2123,10 +2123,12 @@ Handy im selben PR.
     in `shared/syncConflictZone.ts`: alles andere gleich, mit sortierten
     Schlüsseln und ohne leere Teile gelesen), zeigen Desktop und Handy das Feld
     „Zeitzone der Serie“ mit der Stadt jeder Seite, und der kopierte Text am
-    Desktop nennt es ebenso. Jeder andere Konflikt zeigt seine Werte wie
-    bisher, auf beiden Oberflächen durch dieselbe Lesart
-    (`decodeConflictValue`): Das Handy las ein Objekt auf beiden Seiten als
-    „[object Object]“ (Prüfrunde 1).
+    Desktop nennt es ebenso. Jeder andere Konflikt zeigt seine Werte auf
+    beiden Oberflächen durch dieselbe Lesart (`decodeConflictValue`): Text
+    als Text, Zahlen und wahr/falsch wie geschrieben, nichts als Strich,
+    Objekte und Listen als JSON, wie der Desktop es schon tat. Das Handy las
+    ein Objekt auf beiden Seiten als „[object Object]“ und eine Liste durch
+    Kommas getrennt (Prüfrunde 1).
 
 ## Risiken
 
