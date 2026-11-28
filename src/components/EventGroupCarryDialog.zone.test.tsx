@@ -21,7 +21,8 @@ import type { Calendar, CalendarEvent } from '../api/types';
  * asked of the core as it is now and written once — a true copy ends as the
  * series; one already right is left alone; a series that cannot take the
  * zone gets its text only and is named, outside retry; a copy that is no
- * series gets every change but the zone. The offer says how far the copies
+ * series gets its title, location and description only, never the series'
+ * times. The offer says how far the copies
  * move and how many do not get the zone, and where no copy can take the
  * change it can only close.
  */
@@ -107,7 +108,7 @@ const member = (calendar_id: string, event_id: string) => ({
 
 /** The series moved to Berlin with one of the core's answers, the save the
  *  editor makes, and what it hands the dialog. */
-function moved(which: 'asRule' | 'asNow', title = STORED.title) {
+function moved(which: 'asRule' | 'asNow', title = STORED.title, laterMs = 0) {
   const change = seriesClockChange({
     rrule: STORED.recurrence!.rrule,
     start: STORED.start,
@@ -119,7 +120,10 @@ function moved(which: 'asRule' | 'asNow', title = STORED.title) {
   const answer = change?.[which];
   if (answer?.outcome !== 'changed') throw new Error('the core refused the test series');
   const zoneAnswer = nextZoneAnswer(null, answer);
-  const saved = { ...zoneAppliedSeries(STORED, zoneAnswer, 'Europe/Berlin'), title };
+  const applied = zoneAppliedSeries(STORED, zoneAnswer, 'Europe/Berlin');
+  // A date moved after the zone choice, on the new clock.
+  const later = (iso: string) => new Date(Date.parse(iso) + laterMs).toISOString();
+  const saved = { ...applied, start: later(applied.start), end: later(applied.end), title };
   const move = zoneMoveOf(STORED, saved, zoneAnswer) as ZoneMove;
   const fields = (ev: CalendarEvent): CarryableFields => ({
     title: ev.title,
@@ -291,7 +295,7 @@ describe('EventGroupCarryDialog → a series\' zone carried to its copies (stage
     expect(screen.queryByRole('button', { name: /erneut/i })).toBeNull();
   });
 
-  it('gives a copy that is no series the other changes, and says the zone does not apply', async () => {
+  it('gives a copy that is no series only its text, and says the zone does not apply', async () => {
     const m = moved('asNow', 'Abendrunde neu');
     const single = copyIn('device', 'ev-s', { recurrence: null } as Partial<CalendarEvent>);
     await openDialog([single], m);
@@ -307,6 +311,38 @@ describe('EventGroupCarryDialog → a series\' zone carried to its copies (stage
     expect(event.recurrence ?? null).toBeNull();
     // The series' start is an instant of the series, not this event's.
     expect(event.start).toBe(STORED.start);
+  });
+
+  // PR 4 review round 2: the question named Beginn and Ende, the copy kept
+  // its own, and nothing said so.
+  it('keeps the times of a copy that is no series, and says so, where a date moved after the zone', async () => {
+    const week = 7 * 24 * 60 * 60_000;
+    const m = moved('asRule', 'Abendrunde neu', week);
+    const single = copyIn('device', 'ev-s', {
+      start: '2026-12-02T09:00:00.000Z',
+      end: '2026-12-02T09:30:00.000Z',
+      recurrence: null,
+    } as Partial<CalendarEvent>);
+    const exchange = copyIn('exchange', 'ev-x');
+    await openDialog([single, exchange], m);
+    const message = screen.getByText(/^Diese Verabredung liegt noch 2 weitere Male vor/);
+    expect(message.textContent).toMatch(/Zeitzone: Berlin.*Beginn/);
+    expect(
+      screen.getByText(
+        'Die Kopie in Gerät ist dort keine Serie; sie bekommt nur Titel, Ort und Beschreibung, nicht Zeitzone, Beginn und Ende.',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(await carryButton());
+    await waitFor(() => expect(sent()).toHaveLength(2));
+    const written = new Map(sent().map(({ event }) => [event.id, event]));
+    expect(written.get('ev-s')?.title).toBe('Abendrunde neu');
+    expect(written.get('ev-s')?.start).toBe('2026-12-02T09:00:00.000Z');
+    expect(written.get('ev-s')?.end).toBe('2026-12-02T09:30:00.000Z');
+    // A series that cannot take the zone keeps its times and zone too.
+    expect(written.get('ev-x')?.title).toBe('Abendrunde neu');
+    expect(written.get('ev-x')?.start).toBe(STORED.start);
+    expect(written.get('ev-x')?.end).toBe(STORED.end);
+    expect(written.get('ev-x')?.recurrence?.tzid ?? null).toBeNull();
   });
 
   it('offers only to close where nothing but the zone changed and the copy is no series', async () => {

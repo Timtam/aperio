@@ -277,7 +277,8 @@ series' date and time in its time zone:
   new time zone and afterwards lies like the series: at the same time of day
   and moved by the same days, even if it starts in the other half of the
   year. If it was at a different time before, it keeps that distance. A copy
-  that already lies that way stays as it is. If a copy cannot take the time
+  that already lies that way keeps its times and gets only a changed title,
+  location or description. If a copy cannot take the time
   zone, its times stay; title, location and description still go along, and
   Aperio says why. A copy that is not a series there gets the title, location
   and description; the series' time zone, start and end do not apply to it.

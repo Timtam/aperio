@@ -1182,8 +1182,9 @@ Frage liest Aperio jede beschreibbare Kopie und fragt den Kern
   Uhr, auch aus dem anderen Halbjahr (144a), mit ihrem bisherigen Abstand zur
   Serie (145a). Ihre Regel, ihre Löschungen, ihr Ende und ihre einzeln
   geänderten Termine (bei CalDAV, 95a) rücken mit.
-- Eine Kopie, die schon so liegt, bleibt, wie sie ist, und wird nicht
-  geschrieben. Stehen alle so und ändert sich sonst nichts, kommt keine Frage.
+- Eine Kopie, die schon so liegt, behält ihre Zeiten und ihre Zone;
+  geschrieben wird sie nur, wenn sich Titel, Ort oder Beschreibung geändert
+  haben. Stehen alle so und ändert sich sonst nichts, kommt keine Frage.
 - Kann eine Serie die Zone nicht bekommen (ganztägig, der Kalender speichert
   die Zone nicht, ihre Termine liegen nicht an den Tagen der Serie, ihre Regel
   kann nicht rücken), bleiben ihre Zeiten und ihre Zone; Titel, Ort und

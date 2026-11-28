@@ -1504,6 +1504,7 @@
       "zoneRefusedCount_other": "{{count}} Kopien bekommen die Zeitzone nicht.",
       "zoneRefused": "Die Kopie in {{calendar}} bekommt die Zeitzone nicht: {{reason}}. Ihre Zeiten bleiben.",
       "zoneNotASeries": "Die Kopie in {{calendar}} ist dort keine Serie; die Zeitzone gilt für sie nicht.",
+      "zoneNotASeriesTimes": "Die Kopie in {{calendar}} ist dort keine Serie; sie bekommt nur Titel, Ort und Beschreibung, nicht Zeitzone, Beginn und Ende.",
       "zoneRefusal": {
         "zone_not_storable": "dieser Kalender kann die Zeitzone {{zone}} nicht speichern",
         "off_pattern": "ihre Termine liegen nicht an den Tagen der Serie",

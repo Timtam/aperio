@@ -299,7 +299,8 @@ Zeitzone:
   kommt auf die neue Zeitzone und liegt danach wie die Serie: zur selben
   Uhrzeit und um dieselben Tage gerückt, auch wenn sie im anderen Halbjahr
   beginnt. Lag sie vorher zu einer anderen Uhrzeit, behält sie diesen Abstand.
-  Eine Kopie, die schon so liegt, bleibt, wie sie ist. Kann eine Kopie die
+  Eine Kopie, die schon so liegt, behält ihre Zeiten und bekommt nur einen
+  geänderten Titel, Ort oder eine geänderte Beschreibung. Kann eine Kopie die
   Zeitzone nicht bekommen, bleiben ihre Zeiten; Titel, Ort und Beschreibung
   gehen trotzdem mit, und Aperio nennt den Grund. Eine Kopie, die dort keine
   Serie ist, bekommt Titel, Ort und Beschreibung; Zeitzone, Beginn und Ende

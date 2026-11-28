@@ -264,14 +264,20 @@ function EventGroupCarryScreen({
                 reason: zoneRefusalText(verdict, zoneTo, t),
               }),
             ),
+            // Where the save also changed the series' times, the sentence says
+            // the copy does not get them: a single event elsewhere keeps its
+            // own (146a).
             ...offer.notASeries.map((target) =>
-              t('dialogs.eventGroupCarry.zoneNotASeries', {
-                calendar: calendarName(target.calendar_id),
-              }),
+              t(
+                plan.changed.some((field) => TIME_FIELDS.includes(field))
+                  ? 'dialogs.eventGroupCarry.zoneNotASeriesTimes'
+                  : 'dialogs.eventGroupCarry.zoneNotASeries',
+                { calendar: calendarName(target.calendar_id) },
+              ),
             ),
           ]
         : [],
-    [offer, t, calendarName, zoneTo],
+    [offer, plan.changed, t, calendarName, zoneTo],
   );
   /** The offer's message: the question, then how far the copies move and how
    *  many do not get the zone. */
@@ -700,7 +706,12 @@ function EventGroupCarryScreen({
               noteBack(savedSeries, target.calendar_id);
             } else if (verdict.outcome === 'unchanged') {
               // Already as the series stands: only its text, if that changed.
-              if (texts.length === 0) continue;
+              // On a retry the copy was outstanding: its earlier write landed
+              // after all, so it counts as written.
+              if (texts.length === 0) {
+                if (pending !== null) done += 1;
+                continue;
+              }
               noteBack(
                 await updateEvent(carryOnto(copyRow, after, texts), target.calendar_id),
                 target.calendar_id,
@@ -1213,6 +1224,10 @@ function EventGroupCarryScreen({
     </FormScrollView>
   );
 }
+
+/** The changed fields that are the series' times: a copy that is no series
+ *  there does not get them. Mirrors the desktop. */
+const TIME_FIELDS: readonly CarryField[] = ['start', 'end', 'all_day'];
 
 /** One copy, as a key: its calendar and its id. */
 function targetKey(target: CarryTarget): string {
