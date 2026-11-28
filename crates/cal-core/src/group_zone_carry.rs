@@ -59,10 +59,12 @@
 //! The copy's target clock is its own where that is the series' new clock
 //! (both UTC, the same canonical zone, or the same rules from today on, 120a),
 //! else the series' new zone. On its own clock with `S_C` zero and its length
-//! right it is [`ZoneCarry::Unchanged`] and is not written. A shift equal to
-//! the copy's own "as the rule says" or "as they fall now" gives exactly that
-//! answer, so an identical copy ends identical to the series; any other moves
-//! it as a whole, like a drag.
+//! right it is [`ZoneCarry::Unchanged`] and is not written. Otherwise its move
+//! is composed as the series' was: for the zone part of its shift (without
+//! `Δ`) it takes its own "as the rule says" or "as they fall now" where the
+//! part is one of them, so an identical copy ends identical to the series,
+//! and any other part moves it as a whole; then `Δ` drags it on its new clock,
+//! as the editor dragged the series.
 //!
 //! A copy that is no series there, is all-day there, cannot store the zone,
 //! is off the series' days or whose rule cannot move is refused with that
@@ -608,14 +610,21 @@ pub fn zone_carry(q: &ZoneCarryQuestion) -> ZoneCarry {
         }
     }
 
-    // (8) The move: the copy's own answer where the shift is one of them, so
-    // an identical copy ends identical to the series; else as a whole.
-    let answer = if shift == copy.rule_shift() {
+    // (8) The move, composed as the series' was: first the zone, then the
+    // move made after the choice. For the zone part of the shift the copy
+    // takes its own answer where the part is one of them ("as the rule says"
+    // or "as they fall now"), so an identical copy ends identical to the
+    // series; any other part moves it as a whole. The move made after the
+    // choice then drags it on its new clock, as the editor dragged the
+    // series. Compared as one shift, a drag of a day could equal the copy's
+    // "as the rule says" and keep a start the series moved (review round 3).
+    let zone_shift = shift - delta;
+    let answer = if zone_shift == copy.rule_shift() {
         series_clock_change(&copy_question).map(|change| change.as_rule)
-    } else if shift == copy.wall_shift() {
-        Some(copy.moved_by(shift, StartMove::Keep))
+    } else if zone_shift == copy.wall_shift() {
+        Some(copy.moved_by(zone_shift, StartMove::Keep))
     } else {
-        Some(copy.moved_by(shift, StartMove::Shift))
+        Some(copy.moved_by(zone_shift, StartMove::Shift))
     };
     let (rrule, start, exceptions) = match answer {
         Some(ClockChangeAnswer::Changed {
@@ -626,6 +635,30 @@ pub fn zone_carry(q: &ZoneCarryQuestion) -> ZoneCarry {
         }) => (rrule, start, exceptions),
         Some(ClockChangeAnswer::Refused { reason }) => return cannot_move(reason),
         None => return unreadable,
+    };
+    let (rrule, start, exceptions) = if delta.is_zero() {
+        (rrule, start, exceptions)
+    } else {
+        let answered = ClockChangeQuestion {
+            rrule,
+            start,
+            exceptions,
+            from_tzid: target_tzid.map(str::to_string),
+            to_tzid: target_tzid.map(str::to_string),
+            ends_by_date: q.ends_by_date,
+        };
+        let Some(answered_copy) = ClockMove::read(&answered) else {
+            return unreadable;
+        };
+        match answered_copy.moved_by(delta, StartMove::Shift) {
+            ClockChangeAnswer::Changed {
+                rrule,
+                start,
+                exceptions,
+                ..
+            } => (rrule, start, exceptions),
+            ClockChangeAnswer::Refused { reason } => return cannot_move(reason),
+        }
     };
 
     // (8b) The move must land the copy as the pairing says: the series'
@@ -807,6 +840,13 @@ mod contract {
         "a-true-copy-of-a-set-position-series",
         "a-copy-at-the-applied-series-in-the-spring-gap",
         "a-true-yearly-copy-takes-the-series-answer",
+        // Review round 3: the zone answer, then the move made after the
+        // choice as a drag.
+        "a-true-weekday-copy-as-now-then-a-day-earlier",
+        "a-true-weekday-copy-to-new-york-then-a-day-later",
+        "an-offset-weekday-copy-as-now-then-a-day-earlier",
+        "every-other-week-a-true-copy-then-an-hour-later",
+        "a-copy-from-the-other-half-year-then-an-hour-later",
     ];
 
     #[test]

@@ -1070,7 +1070,7 @@
     },
     {
       "name": "zone-then-a-date-says-only-the-zone-days",
-      "note": "The lost-zone repair as the rule says (-1380), then a day later (Tuesday 00:30 Berlin): 60 minutes in all, which is the true copy's own as-they-fall-now. Its first occurrence moves a day earlier for the zone (-1380 alone), so zoneDays is -1; the date move is the user's own.",
+      "note": "The lost-zone repair as the rule says (-1380), then a day later (Tuesday 00:30 Berlin): 60 minutes in all. The true copy takes the series' answer for the zone and the day as a drag, as the series did, and ends as the saved series, its start on the series' first Tuesday (review round 3). Its first occurrence moves a day earlier for the zone (-1380 alone), so zoneDays is -1; the date move is the user's own.",
       "question": {
         "anchorBefore": {
           "rrule": "FREQ=WEEKLY;BYDAY=MO",
@@ -1100,8 +1100,8 @@
       "expect": {
         "outcome": "changed",
         "rrule": "FREQ=WEEKLY;BYDAY=TU",
-        "start": "2026-11-01T23:30:00Z",
-        "end": "2026-11-02T00:30:00Z",
+        "start": "2026-11-02T23:30:00Z",
+        "end": "2026-11-03T00:30:00Z",
         "exceptions": [],
         "tzid": "Europe/Berlin",
         "shiftMinutes": 60,
@@ -2197,6 +2197,206 @@
         "tzid": null,
         "shiftMinutes": 1380,
         "zoneDays": 1
+      }
+    },
+    {
+      "name": "a-true-weekday-copy-as-now-then-a-day-earlier",
+      "note": "Monday to Friday 23:30 UTC to Berlin as they fall now (+60), then a day earlier. In all the copy moves -1380, which is also its own as-the-rule-says; taken as one shift it kept its start and lost its first occurrence (review round 3). Composed as the series' was, zone answer then the day as a drag, it ends as the saved series.",
+      "question": {
+        "anchorBefore": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+          "start": "2027-01-13T23:30:00Z",
+          "tzid": null
+        },
+        "anchorAfter": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+          "start": "2027-01-12T23:30:00Z",
+          "tzid": "Europe/Berlin"
+        },
+        "appliedStart": "2027-01-13T23:30:00Z",
+        "movedMinutes": 60,
+        "newLengthMs": null,
+        "copy": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+          "start": "2027-01-13T23:30:00Z",
+          "end": "2027-01-14T00:30:00Z",
+          "exceptions": [],
+          "tzid": null,
+          "allDay": false
+        },
+        "timeZones": "all",
+        "endsByDate": false,
+        "today": "2026-11-28T12:00:00Z"
+      },
+      "expect": {
+        "outcome": "changed",
+        "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+        "start": "2027-01-12T23:30:00Z",
+        "end": "2027-01-13T00:30:00Z",
+        "exceptions": [],
+        "tzid": "Europe/Berlin",
+        "shiftMinutes": -1380,
+        "zoneDays": 0
+      }
+    },
+    {
+      "name": "a-true-weekday-copy-to-new-york-then-a-day-later",
+      "note": "The same to New York (-300), then a day later: it ends as the saved series, with no occurrence left at its old instant.",
+      "question": {
+        "anchorBefore": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+          "start": "2027-01-13T00:30:00Z",
+          "tzid": null
+        },
+        "anchorAfter": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+          "start": "2027-01-14T00:30:00Z",
+          "tzid": "America/New_York"
+        },
+        "appliedStart": "2027-01-13T00:30:00Z",
+        "movedMinutes": -300,
+        "newLengthMs": null,
+        "copy": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+          "start": "2027-01-13T00:30:00Z",
+          "end": "2027-01-13T01:30:00Z",
+          "exceptions": [],
+          "tzid": null,
+          "allDay": false
+        },
+        "timeZones": "all",
+        "endsByDate": false,
+        "today": "2026-11-28T12:00:00Z"
+      },
+      "expect": {
+        "outcome": "changed",
+        "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+        "start": "2027-01-14T00:30:00Z",
+        "end": "2027-01-14T01:30:00Z",
+        "exceptions": [],
+        "tzid": "America/New_York",
+        "shiftMinutes": 1140,
+        "zoneDays": 0
+      }
+    },
+    {
+      "name": "an-offset-weekday-copy-as-now-then-a-day-earlier",
+      "note": "The Berlin case with a copy half an hour earlier: it keeps its distance (145a), its start half an hour before the saved series'.",
+      "question": {
+        "anchorBefore": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+          "start": "2027-01-13T23:30:00Z",
+          "tzid": null
+        },
+        "anchorAfter": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+          "start": "2027-01-12T23:30:00Z",
+          "tzid": "Europe/Berlin"
+        },
+        "appliedStart": "2027-01-13T23:30:00Z",
+        "movedMinutes": 60,
+        "newLengthMs": null,
+        "copy": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+          "start": "2027-01-13T23:00:00Z",
+          "end": "2027-01-14T00:00:00Z",
+          "exceptions": [],
+          "tzid": null,
+          "allDay": false
+        },
+        "timeZones": "all",
+        "endsByDate": false,
+        "today": "2026-11-28T12:00:00Z"
+      },
+      "expect": {
+        "outcome": "changed",
+        "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+        "start": "2027-01-12T23:00:00Z",
+        "end": "2027-01-13T00:00:00Z",
+        "exceptions": [],
+        "tzid": "Europe/Berlin",
+        "shiftMinutes": -1380,
+        "zoneDays": 0
+      }
+    },
+    {
+      "name": "every-other-week-a-true-copy-then-an-hour-later",
+      "note": "Every other Monday repaired to Berlin as the rule says, then an hour later. The true copy takes the series' answer and the hour as a drag, and ends as the saved series, weeks included.",
+      "question": {
+        "anchorBefore": {
+          "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+          "start": "2026-11-01T23:30:00Z",
+          "tzid": null
+        },
+        "anchorAfter": {
+          "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+          "start": "2026-11-02T00:30:00Z",
+          "tzid": "Europe/Berlin"
+        },
+        "appliedStart": "2026-11-01T23:30:00Z",
+        "movedMinutes": -1380,
+        "newLengthMs": null,
+        "copy": {
+          "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+          "start": "2026-11-01T23:30:00Z",
+          "end": "2026-11-02T00:30:00Z",
+          "exceptions": [],
+          "tzid": null,
+          "allDay": false
+        },
+        "timeZones": "all",
+        "endsByDate": false,
+        "today": "2026-11-28T12:00:00Z"
+      },
+      "expect": {
+        "outcome": "changed",
+        "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+        "start": "2026-11-02T00:30:00Z",
+        "end": "2026-11-02T01:30:00Z",
+        "exceptions": [],
+        "tzid": "Europe/Berlin",
+        "shiftMinutes": -1320,
+        "zoneDays": -1
+      }
+    },
+    {
+      "name": "a-copy-from-the-other-half-year-then-an-hour-later",
+      "note": "Mondays 08:00 UTC from January to Berlin as they fall now (09:00 Berlin), then an hour later. A copy from June comes to the series' hour, 10:00 Berlin (144a).",
+      "question": {
+        "anchorBefore": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO",
+          "start": "2027-01-04T08:00:00Z",
+          "tzid": null
+        },
+        "anchorAfter": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO",
+          "start": "2027-01-04T09:00:00Z",
+          "tzid": "Europe/Berlin"
+        },
+        "appliedStart": "2027-01-04T08:00:00Z",
+        "movedMinutes": 60,
+        "newLengthMs": null,
+        "copy": {
+          "rrule": "FREQ=WEEKLY;BYDAY=MO",
+          "start": "2027-06-07T08:00:00Z",
+          "end": "2027-06-07T09:00:00Z",
+          "exceptions": [],
+          "tzid": null,
+          "allDay": false
+        },
+        "timeZones": "all",
+        "endsByDate": false,
+        "today": "2026-11-28T12:00:00Z"
+      },
+      "expect": {
+        "outcome": "changed",
+        "rrule": "FREQ=WEEKLY;BYDAY=MO",
+        "start": "2027-06-07T08:00:00Z",
+        "end": "2027-06-07T09:00:00Z",
+        "exceptions": [],
+        "tzid": "Europe/Berlin",
+        "shiftMinutes": 120,
+        "zoneDays": 0
       }
     }
   ]

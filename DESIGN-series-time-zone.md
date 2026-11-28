@@ -2043,9 +2043,14 @@ Handy im selben PR.
       unverändert, wenn S_C null ist und ihre Länge stimmt; ändert das
       Speichern nur die Länge, bekommt sie ihre eigene Regel und ihren
       Beginn mit dem neuen Ende. Sonst bekommt sie die Zone der Serie (UTC
-      als keine Zone), und ist S_C ihre eigene Antwort „wie die Regel sagt“
-      oder „wo die Termine jetzt liegen“, genau diese; jede andere
-      Verschiebung rückt sie als Ganzes wie ein Ziehen.
+      als keine Zone). Ihre Verschiebung setzt sich zusammen wie die der
+      Serie: Für den Zonen-Teil (ohne eine Änderung nach der Zonenwahl)
+      bekommt sie ihre eigene Antwort „wie die Regel sagt“ oder „wo die
+      Termine jetzt liegen“, wo er eine davon ist, sonst rückt sie als Ganzes;
+      danach zieht die spätere Änderung sie auf der neuen Uhr, wie der Editor
+      die Serie zog. Als eine einzige Verschiebung verglichen, konnte ein Tag
+      Ziehen ihrer Antwort „wie die Regel sagt“ gleichen und ihren Beginn
+      stehen lassen (Prüfrunde 3).
     - Abgelehnt mit Grund (146a), Zeilen-Gründe vor Kalender-Gründen: keine
       Serie, ganztägig, liegt nicht an den Tagen der Serie, der Kalender kann
       die Zone nicht speichern, die Regel kann nicht rücken (mit dem Grund
