@@ -2303,6 +2303,36 @@ wieder entfernt:
 Der Handteil in Aperio (das Ende-Feld mit NVDA, Speichern im Editor) kommt
 mit der gesammelten Prüfung.
 
+**iCloud, 2026-11-28 (95a und das Serienende, Stufe 13, Teil 2).** Das
+Programm `icloud-zones` lief über Aperios eigenen CalDAV-Adapter gegen Tonis
+iCloud (gestartet von Claude, mit Tonis Erlaubnis für diese Nacht). 55 von 55
+Prüfungen passten, alle 16 Testserien wurden danach wieder entfernt:
+- Ein Zonenwechsel (nach Tokio, nach New York mit beiden Antworten der
+  Wochentag-Frage) schreibt die RECURRENCE-ID jedes geänderten Termins auf
+  den neuen Platz seines Vorkommens; DTSTART, DTEND, Erinnerung und eigene
+  Eigenschaften bleiben Zeichen für Zeichen, Löschungen wandern mit, kein
+  Tag ist doppelt. Das gilt für Termine, die das iPhone geändert hat
+  (RECURRENCE-ID mit TZID), und für einen, den Aperio geändert hat.
+- Fällt der neue Platz in die doppelte Stunde der Herbst-Umstellung, steht
+  die RECURRENCE-ID in UTC neben einem DTSTART mit TZID; iCloud behält diese
+  Form, und der Tag ist nicht doppelt.
+- Beide Ablehnungen (zwei geänderte Termine auf einem Platz, eine
+  Verschiebung, die keine Uhr fassen kann) lassen die Ressource unverändert
+  (gleicher ETag, gleicher Inhalt). Eine reine Titeländerung danach lässt die
+  RECURRENCE-IDs Zeichen für Zeichen stehen.
+- Das Serienende: 19:00 New York bis 10.11. behält seinen letzten Termin, ein
+  altes `…T235959Z` endet bei Aperio und iCloud am selben Tag, ein Schnitt
+  nennt jeden Tag genau einmal, ganztägig, Sommerzeit und 01:00 Berlin
+  passen, ebenso ein Zonenwechsel mit Ende.
+- iCloud klappt Serien mit `<C:expand>` nicht selbst auf, und es sortiert die
+  Teile einer Regel um (`UNTIL` vor `BYDAY`); Aperio liest beides richtig.
+  Nach einem PUT nennt iCloud den neuen ETag.
+Toni sah danach am iPhone nach: Die Serien mit geänderten Terminen (Tokio,
+Wochentag-Frage, Herbst-Stunde) und die beiden Enden um 19:00 New York zeigt
+das iPhone genau so, wie Aperio sie liest. Ein geänderter Termin, dessen
+RECURRENCE-ID kein Vorkommen nennt, erscheint am iPhone als eigener Termin,
+wie bei Aperio.
+
 ## Ungeprüft
 
 - Wie VoiceOver „Startzeit (New York)“ und ganze Einträge in einer langen
