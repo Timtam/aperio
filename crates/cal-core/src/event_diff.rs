@@ -344,6 +344,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             deletions_not_restored: Vec::new(),
             created_at: at,
             updated_at: at,
@@ -533,6 +534,25 @@ mod tests {
         assert!(json.get("keep_fields").is_none(), "{json}");
         let read: Event = serde_json::from_value(json).unwrap();
         assert!(read.keep_fields.is_empty());
+    }
+
+    /// The shift a zone change made (95a) rides only the update that sets it:
+    /// no field on the wire when there is none, and a payload without it reads
+    /// as none.
+    #[test]
+    fn the_occurrence_shift_travels_only_when_set() {
+        let json = serde_json::to_value(opened()).unwrap();
+        assert!(json.get("occurrence_shift_minutes").is_none(), "{json}");
+        let read: Event = serde_json::from_value(json).unwrap();
+        assert_eq!(read.occurrence_shift_minutes, None);
+        let json = serde_json::to_value(Event {
+            occurrence_shift_minutes: Some(-1380),
+            ..opened()
+        })
+        .unwrap();
+        assert_eq!(json["occurrence_shift_minutes"], serde_json::json!(-1380));
+        let read: Event = serde_json::from_value(json).unwrap();
+        assert_eq!(read.occurrence_shift_minutes, Some(-1380));
     }
 
     #[test]

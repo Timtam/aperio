@@ -74,6 +74,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
+        occurrence_shift_minutes: None,
         deletions_not_restored: Vec::new(),
         created_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
         updated_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
@@ -1515,6 +1516,34 @@ fn the_write_guard_clears_a_repeat_only_from_the_copy_it_read() {
     moved.clear_recurrence = false;
     let _ = crate::event_write::guard_update(&store, ACC, "other-cal", &mut moved);
     assert!(!moved.clear_recurrence);
+}
+
+/// Stage 13, 95a: the shift a zone change made reaches the adapter as the
+/// editor sent it. The guard compares nothing about it and must not drop it,
+/// or a CalDAV series' changed occurrences stay on their old slots.
+#[test]
+fn the_write_guard_keeps_the_occurrence_shift() {
+    let store = setup();
+    let mut read = event("ev-1", 9, 10);
+    read.recurrence = Some(EventRecurrence {
+        rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+        exceptions: vec![],
+        tzid: None,
+    });
+    store.upsert_event(ACC, CAL, &read).unwrap();
+
+    let mut zoned = read.clone();
+    zoned.recurrence = Some(EventRecurrence {
+        tzid: Some("Europe/Berlin".into()),
+        ..read.recurrence.clone().unwrap()
+    });
+    zoned.occurrence_shift_minutes = Some(-1380);
+    let _ = crate::event_write::guard_update(&store, ACC, CAL, &mut zoned);
+    assert_eq!(zoned.occurrence_shift_minutes, Some(-1380));
+
+    // Nothing cached to compare with: still kept.
+    let _ = crate::event_write::guard_update(&store, ACC, "other-cal", &mut zoned);
+    assert_eq!(zoned.occurrence_shift_minutes, Some(-1380));
 }
 
 /// A whole-calendar refresh through the SWR path, answered with `rows`.

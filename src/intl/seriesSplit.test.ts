@@ -16,6 +16,10 @@ import {
   occurrenceOfSeries,
   planSeriesSplit,
   readSeriesRows,
+  rowsWithMovedSlots,
+  seriesClockChange,
+  zoneAppliedSeries,
+  zoneSlotMoves,
   ruleFromCut,
   defaultSeriesZone,
   deviceZoneName,
@@ -2358,5 +2362,83 @@ describe('a legacy end at the blind spot is settled on its calendar first', () =
       rrule: 'FREQ=DAILY;UNTIL=20261110T235958Z',
       exceptions: ['2026-11-05T00:00:00Z'],
     });
+  });
+});
+
+// Stage 13, 95a: a whole-series save that changed the zone and then the date
+// ("Zone, dann Datum") reads the series' rows at the slots their occurrences
+// have on the new clock before it plans.
+describe('rowsWithMovedSlots (95a)', () => {
+  it('names a moved row at its new slot, compared as an instant, and leaves the others', () => {
+    const moved = rowOf('2026-11-09T23:30:00Z', undefined, { title: 'Moved' } as Partial<RecurringRow>);
+    const kept = rowOf('2026-11-16T23:30:00Z');
+    const master = { ...weekly, id: 'ev-1' };
+    const out = rowsWithMovedSlots([moved, kept, master], [
+      { from: '2026-11-10T00:30:00+01:00', to: '2026-11-08T23:30:00Z' },
+    ]);
+    expect(out[0]).toEqual({ ...moved, id: 'ev-1::rid::2026-11-08T23:30:00Z' });
+    expect(out[1]).toBe(kept);
+    expect(out[2]).toBe(master);
+    // Nothing moves without a move.
+    expect(rowsWithMovedSlots([moved], [])).toEqual([moved]);
+  });
+
+  /** A series that lost its Berlin zone: Mondays 23:30 UTC from 2 November.
+   *  The 16 November occurrence was changed, and Exchange lists its slot
+   *  among the exceptions; the 23 November one was deleted, kept as a
+   *  cancelled row as Google keeps it. */
+  const lost = {
+    id: 'ev-1',
+    start: '2026-11-02T23:30:00.000Z',
+    end: '2026-11-03T00:00:00.000Z',
+    all_day: false,
+    recurrence: {
+      rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      exceptions: ['2026-11-16T23:30:00.000Z'],
+      tzid: null as string | null,
+    },
+  };
+  const rows = [
+    rowOf('2026-11-16T23:30:00Z', {
+      start: '2026-11-17T08:00:00.000Z',
+      end: '2026-11-17T08:30:00.000Z',
+    }),
+    rowOf('2026-11-23T23:30:00Z', undefined, { cancelled: true }),
+  ];
+
+  it('keeps a changed occurrence from being read as a deletion on the new clock', () => {
+    // Berlin as the rule says: every occurrence 1380 wall minutes back, onto
+    // Monday 00:30 Berlin.
+    const answer = seriesClockChange({
+      rrule: lost.recurrence.rrule,
+      start: lost.start,
+      exceptions: lost.recurrence.exceptions,
+      fromTzid: null,
+      toTzid: 'Europe/Berlin',
+      endsByDate: false,
+    })?.asRule;
+    if (answer?.outcome !== 'changed') throw new Error('the core gave no answer');
+    expect(answer.movedMinutes).toBe(-1380);
+    expect(answer.exceptions).toEqual(['2026-11-15T23:30:00Z']);
+    const series = zoneAppliedSeries(lost, answer, 'Europe/Berlin');
+    const moves = zoneSlotMoves(lost, rows, 'Europe/Berlin', answer.movedMinutes, false);
+    expect(moves).toEqual([
+      { from: '2026-11-16T23:30:00Z', to: '2026-11-15T23:30:00Z' },
+      { from: '2026-11-23T23:30:00Z', to: '2026-11-22T23:30:00Z' },
+    ]);
+    const plan = wholeOf(planSeriesSplit(series, series.start, rowsWithMovedSlots(rows, moves)));
+    // The changed occurrence's slot is no deletion; the cancelled one is, at
+    // its occurrence's new slot.
+    expect(plan.deleted).toEqual(['2026-11-22T23:30:00.000Z']);
+    expect(plan.standing).toEqual(['2026-11-15T23:30:00Z']);
+    // Read at the slots they had, the changed occurrence was a deletion and
+    // the cancelled one named no occurrence of the series.
+    const unmoved = wholeOf(planSeriesSplit(series, series.start, rows));
+    expect(unmoved.deleted).toContain('2026-11-15T23:30:00Z');
+  });
+
+  it('moves nothing for a master without a rule, or rows that name no slot', () => {
+    expect(zoneSlotMoves({ ...lost, recurrence: null }, rows, 'Europe/Berlin', -1380, false)).toEqual([]);
+    expect(zoneSlotMoves(lost, [{ ...lost, recurrence: null }], 'Europe/Berlin', -1380, false)).toEqual([]);
   });
 });

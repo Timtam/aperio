@@ -289,6 +289,10 @@ Zeitzone:
   danach lässt sich die Zeitzone wählen. Andersherum geht es in einem Schritt:
   erst die Zeitzone, dann das Datum. Haben Beginn oder Ende keine gültige
   Uhrzeit, sagt der Knopf das, statt die Liste zu öffnen.
+- In iCloud und anderen CalDAV-Kalendern ziehen einzeln geänderte Termine mit,
+  wenn du die Zeitzone einer Serie wechselst: Jeder bleibt zu seiner Zeit und
+  ersetzt weiter den Termin der Serie, für den er geändert wurde. Verschiebst
+  du die Serie danach auch auf ein anderes Datum, gilt der Kasten unten.
 - Nach einem Wechsel der Zeitzone bietet Aperio nicht an, die Änderung auf die
   Kopien des Termins in anderen Kalendern mitzunehmen; das kommt später.
 - Gibt es eine getippte Uhrzeit an diesem Tag in der Zeitzone der Serie nicht,

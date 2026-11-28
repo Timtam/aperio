@@ -31,9 +31,10 @@ use crate::ical_raw::{
 };
 use crate::identity::OwnIdentity;
 use crate::mapping::{
-    decode_event_id, event_to_ical_preserving, format_utc_compact, mint_recurrence_id,
-    new_event_to_ical, override_recurrence_id, override_to_vevent, parse_calendar_data_as,
-    same_calendar_user, strip_mailto_scheme, PriorAlarms, SlotRefusal,
+    decode_event_id, dtstart_form, event_to_ical_preserving, format_utc_compact,
+    mint_recurrence_id, new_event_to_ical, override_recurrence_id, override_to_vevent,
+    parse_calendar_data_as, same_calendar_user, strip_mailto_scheme, PriorAlarms, SlotForm,
+    SlotRefusal,
 };
 use crate::scheduling::{
     apply_to_block, attendee_copy, attendee_line, invitees_of, plan_block,
@@ -241,6 +242,7 @@ pub async fn create_event(
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
+        occurrence_shift_minutes: None,
         deletions_not_restored: Vec::new(),
         id,
         calendar_id: calendar_url.to_string(),
@@ -420,7 +422,9 @@ fn splice_into_vevent(vcal: &str, lines: &str) -> String {
 /// UNTIL and its local-midnight RECURRENCE-IDs cannot be compared exactly, so
 /// their cross-client cleanup stays a known gap rather than a guess. A series
 /// made single ([`Event::clear_recurrence`], decision 280) drops every
-/// override.
+/// override. A series moved onto another zone
+/// ([`Event::occurrence_shift_minutes`], 95a) moves each override to its
+/// occurrence's new slot, see [`merge_with_overrides`].
 pub async fn update_event(
     client: &Client,
     event: Event,
@@ -521,6 +525,15 @@ async fn update_master(
             ..event
         });
     }
+    // A zone change moved every occurrence by one wall shift (95a): each
+    // changed occurrence goes to its occurrence's new slot, mapped from the
+    // server's own copy of the series.
+    let moves = override_slot_moves(&master.event, &event, &blocks).ok_or_else(|| {
+        refused(
+            "override-slot",
+            "the changed occurrences cannot be moved with the series",
+        )
+    })?;
     let master_vcal = splice_into_vevent(
         &event_to_ical_preserving(&event, PriorAlarms::read(&body)),
         &plan.lines,
@@ -530,13 +543,22 @@ async fn update_master(
         &master_vcal,
         cal_url.as_str(),
         |rid| cutoff.is_none_or(|until| rid <= until),
+        |rid| {
+            moves
+                .iter()
+                .find_map(|(from, to)| (*from == rid).then_some(*to))
+        },
         |block| apply_to_block(block, &plan.change),
     )
-    .ok_or_else(|| {
-        refused(
+    .map_err(|why| match why {
+        MergeRefusal::Unreadable => refused(
             "unreadable-blocks",
             "its resource cannot be read block by block",
-        )
+        ),
+        MergeRefusal::OverrideSlot => refused(
+            "override-slot",
+            "a changed occurrence cannot be named at its new slot",
+        ),
     })?;
     let new_body = with_apples_silent_alarm(new_body, ctx);
     let if_match = event.etag.as_deref().or(server_etag.as_deref());
@@ -1040,17 +1062,24 @@ fn vevent_blocks(body: &str, calendar_id: &str, own: &OwnIdentity) -> Option<Vec
 /// The RECURRENCE-ID property of one VEVENT block, as the block spells it:
 /// the property line, its folded continuation lines and their line endings.
 fn recurrence_id_lines(block: &str) -> Option<String> {
-    let mut out = String::new();
-    let mut inside = false;
+    recurrence_id_range(block).map(|range| block[range].to_string())
+}
+
+/// Where [`recurrence_id_lines`] stands in `block`.
+fn recurrence_id_range(block: &str) -> Option<Range<usize>> {
+    let mut found: Option<Range<usize>> = None;
+    let mut offset = 0;
     for line in block.split_inclusive('\n') {
+        let at = offset;
+        offset += line.len();
         // A continuation line starts with a space or a tab (RFC 5545 §3.1).
         let continued = line.starts_with(' ') || line.starts_with('\t');
-        if inside && continued {
-            out.push_str(line);
+        if let Some(range) = found.as_mut() {
+            if !continued {
+                break;
+            }
+            range.end = offset;
             continue;
-        }
-        if inside {
-            break;
         }
         let name = line
             .split([';', ':'])
@@ -1058,11 +1087,94 @@ fn recurrence_id_lines(block: &str) -> Option<String> {
             .unwrap_or("")
             .trim_end_matches(['\r', '\n']);
         if !continued && name.eq_ignore_ascii_case("RECURRENCE-ID") {
-            inside = true;
-            out.push_str(line);
+            found = Some(at..offset);
         }
     }
-    (!out.is_empty()).then_some(out)
+    found
+}
+
+/// Where each changed occurrence of the series stands once `edit` is
+/// written, as (old slot, new slot) pairs: empty unless the edit says its
+/// occurrences moved ([`Event::occurrence_shift_minutes`], 95a). The slots
+/// are those of every override in `blocks`, mapped by the core
+/// ([`cal_core::moved_slots`]) from `server`, the series as the server
+/// stores it now, onto the edit's zone: matched to their occurrence as an
+/// exception is, never by position. A slot that names no occurrence, or does
+/// not move, is left out and keeps its line. `None` when the core cannot map
+/// at all (a shift no clock can hold); the caller then writes nothing.
+fn override_slot_moves(
+    server: &Event,
+    edit: &Event,
+    blocks: &[VeventBlock],
+) -> Option<Vec<(DateTime<Utc>, DateTime<Utc>)>> {
+    let Some(moved_minutes) = edit.occurrence_shift_minutes else {
+        return Some(Vec::new());
+    };
+    let (Some(stored), Some(written)) = (&server.recurrence, &edit.recurrence) else {
+        return Some(Vec::new());
+    };
+    let slots: Vec<String> = blocks
+        .iter()
+        .filter_map(|b| override_recurrence_id(&b.event.id))
+        .map(|slot| slot.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .collect();
+    if slots.is_empty() {
+        return Some(Vec::new());
+    }
+    let question = cal_core::SlotMoveQuestion {
+        rrule: stored.rrule.clone(),
+        start: server
+            .start
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        from_tzid: stored.tzid.clone(),
+        to_tzid: written.tzid.clone(),
+        // CalDAV ends a series at an instant (`UNTIL` with a time).
+        ends_by_date: false,
+        moved_minutes,
+        slots,
+    };
+    let instant = |text: &str| {
+        DateTime::parse_from_rfc3339(text)
+            .ok()
+            .map(|at| at.with_timezone(&Utc))
+    };
+    cal_core::moved_slots(&question)?
+        .into_iter()
+        .map(|moved| Some((instant(&moved.from)?, instant(&moved.to)?)))
+        .collect()
+}
+
+/// The `RECURRENCE-ID` line for an override moved to `slot` (95a), in the
+/// form the new master's `DTSTART` uses, folded with `ending`. Where that
+/// form is a zone and `slot` falls in the hour the zone repeats (the autumn
+/// overlap), its wall time would name two instants: the line then names the
+/// slot in UTC, which RFC 5545 allows beside a zoned `DTSTART` and which
+/// reads back exactly. `None` where the slot cannot be named at all (no
+/// start, a zone this build cannot read).
+fn moved_recurrence_id(master_block: &str, slot: DateTime<Utc>, ending: &str) -> Option<String> {
+    match mint_recurrence_id(master_block, slot, ending) {
+        Ok(line) => Some(line),
+        Err(SlotRefusal::AmbiguousLocalTime)
+            if matches!(dtstart_form(master_block), Some(SlotForm::Zoned(_))) =>
+        {
+            Some(fold(
+                &format!("RECURRENCE-ID:{}", format_utc_compact(slot)),
+                ending,
+            ))
+        }
+        Err(_) => None,
+    }
+}
+
+/// Why [`merge_with_overrides`] built no resource.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MergeRefusal {
+    /// The parsed events and the raw blocks do not correspond one to one (an
+    /// unmappable VEVENT, an odd shape).
+    Unreadable,
+    /// A moved override cannot be named at its new slot, or would stand in
+    /// the same slot as another one.
+    OverrideSlot,
 }
 
 /// Rebuild a resource around a rewritten master: `master_vcal` (a VCALENDAR
@@ -1072,37 +1184,78 @@ fn recurrence_id_lines(block: &str) -> Option<String> {
 /// keeps the overrides up to its cutoff; `transform` carries a change to the
 /// meeting's guests into every occurrence (see `scheduling::apply_to_block`).
 ///
+/// An override whose slot `rekey` maps to another (its series moved onto a
+/// new clock, 95a) gets a new `RECURRENCE-ID` line naming that slot in the
+/// new master's form (see [`moved_recurrence_id`]); its own `DTSTART` and
+/// `DTEND` keep their instants. `keep` sees the slot as the server has it.
+///
 /// Overrides are identified from the MAPPED events (so a `TZID`/all-day
 /// RECURRENCE-ID is zone-resolved correctly) but their raw VEVENT text is kept
-/// byte-for-byte apart from what `transform` changes, so per-instance edits /
-/// VALARMs / X-props survive intact. A kept override may name a zone the new
-/// master does not, so every VTIMEZONE of `body` that `master_vcal` lacks comes
-/// along with them, byte-for-byte too. Returns `None` when the parsed events
-/// and raw blocks don't correspond 1:1 (an unmappable VEVENT, an odd shape).
+/// byte-for-byte apart from what `rekey` and `transform` change, so
+/// per-instance edits / VALARMs / X-props survive intact. A kept override may
+/// name a zone the new master does not, so every VTIMEZONE of `body` that
+/// `master_vcal` lacks comes along with them, byte-for-byte too: a moved
+/// override's `DTSTART` still names its old zone. Nothing is built when a
+/// moved slot cannot be named, or when a moved override would then stand in
+/// the same slot as another: one occurrence would be doubled, another lost.
 fn merge_with_overrides(
     body: &str,
     master_vcal: &str,
     calendar_id: &str,
     keep: impl Fn(DateTime<Utc>) -> bool,
+    rekey: impl Fn(DateTime<Utc>) -> Option<DateTime<Utc>>,
     transform: impl Fn(&str) -> String,
-) -> Option<String> {
+) -> Result<String, MergeRefusal> {
     // Only the RECURRENCE-IDs matter here, not who organizes.
-    let blocks = vevent_blocks(body, calendar_id, &OwnIdentity::default())?;
-    let kept: Vec<String> = blocks
-        .iter()
-        .filter_map(|b| match override_recurrence_id(&b.event.id) {
-            // Master VEVENT → replaced by the new master in `master_vcal`.
-            None => None,
-            Some(rid) if keep(rid) => Some(transform(&body[b.range.clone()])),
-            Some(_) => None,
-        })
-        .collect();
+    let blocks = vevent_blocks(body, calendar_id, &OwnIdentity::default())
+        .ok_or(MergeRefusal::Unreadable)?;
+    let new_master = component_ranges(master_vcal, "VEVENT")
+        .into_iter()
+        .next()
+        .map(|range| &master_vcal[range]);
+    let mut slots: Vec<DateTime<Utc>> = Vec::new();
+    let mut moved_any = false;
+    let mut kept: Vec<String> = Vec::new();
+    for b in &blocks {
+        // Master VEVENT → replaced by the new master in `master_vcal`.
+        let Some(rid) = override_recurrence_id(&b.event.id) else {
+            continue;
+        };
+        if !keep(rid) {
+            continue;
+        }
+        let raw = &body[b.range.clone()];
+        let block = match rekey(rid) {
+            None => {
+                slots.push(rid);
+                raw.to_string()
+            }
+            Some(slot) => {
+                let lines = recurrence_id_range(raw).ok_or(MergeRefusal::OverrideSlot)?;
+                let master_block = new_master.ok_or(MergeRefusal::OverrideSlot)?;
+                let line = moved_recurrence_id(master_block, slot, line_ending(raw))
+                    .ok_or(MergeRefusal::OverrideSlot)?;
+                slots.push(slot);
+                moved_any = true;
+                format!("{}{}{}", &raw[..lines.start], line, &raw[lines.end..])
+            }
+        };
+        kept.push(transform(&block));
+    }
+    if moved_any {
+        let mut distinct = slots.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        if distinct.len() != slots.len() {
+            return Err(MergeRefusal::OverrideSlot);
+        }
+    }
     if kept.is_empty() {
-        return Some(master_vcal.to_string());
+        return Ok(master_vcal.to_string());
     }
     let refs: Vec<&str> = kept.iter().map(String::as_str).collect();
     let merged = splice_overrides_before_end(master_vcal, &refs);
-    Some(with_missing_vtimezones(merged, body))
+    Ok(with_missing_vtimezones(merged, body))
 }
 
 /// Split a raw VCALENDAR body into its top-level `VEVENT` blocks (each retaining
@@ -2787,6 +2940,7 @@ END:VCALENDAR\r
             send_invitations: false,
             truncate_tail_overrides: false,
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             deletions_not_restored: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -4023,6 +4177,7 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
             send_invitations: false,
             truncate_tail_overrides: true,
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             deletions_not_restored: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -4041,6 +4196,7 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
             &master_vcal,
             "https://example.com/cal/",
             |rid| rid <= until,
+            |_| None,
             str::to_string,
         )
         .expect("body parses cleanly");
@@ -4100,9 +4256,10 @@ BEGIN:VEVENT\r\nDTSTART:20260803T090000Z\r\nSUMMARY:No UID\r\nEND:VEVENT\r\nEND:
                 "MASTER",
                 "https://example.com/cal/",
                 |rid| rid <= until,
+                |_| None,
                 str::to_string,
             ),
-            None,
+            Err(MergeRefusal::Unreadable),
         );
     }
 
@@ -4467,6 +4624,369 @@ SUMMARY:Later\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         assert!(
             sent.find(zone).unwrap() < sent.find("BEGIN:VEVENT").unwrap(),
             "before the components that name it: {sent}"
+        );
+    }
+
+    /// A series that lost its Berlin zone, as a server holds it: Mondays
+    /// 23:30 UTC from 2 November 2026 (00:30 Berlin, Tuesday), one deleted
+    /// occurrence, and three overrides. The first names its slot in UTC and
+    /// was moved later; the second names its slot in Berlin's form (an iPhone
+    /// edited it), 14 June 2027 23:30 UTC; the third stands on a Wednesday,
+    /// a slot the rule never names.
+    const LOST_ZONE_BODY: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+PRODID:-//Apple Inc.//iPhone OS 18//EN\r\n\
+BEGIN:VTIMEZONE\r\nTZID:Europe/Berlin\r\n\
+BEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\n\
+TZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nTZNAME:CET\r\nEND:STANDARD\r\n\
+BEGIN:DAYLIGHT\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\n\
+TZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nTZNAME:CEST\r\nEND:DAYLIGHT\r\n\
+END:VTIMEZONE\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\n\
+DTSTART:20261102T233000Z\r\nDTEND:20261103T000000Z\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\nEXDATE:20261116T233000Z\r\nSUMMARY:Late call\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID:20261109T233000Z\r\n\
+DTSTART:20261110T010000Z\r\nDTEND:20261110T013000Z\r\n\
+SUMMARY:Moved later\r\nX-CUSTOM-PROP:kept byte for byte\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID;TZID=Europe/Berlin:20270615T013000\r\n\
+DTSTART;TZID=Europe/Berlin:20270615T020000\r\nDTEND;TZID=Europe/Berlin:20270615T023000\r\n\
+SUMMARY:Summer change\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID:20261111T233000Z\r\n\
+DTSTART:20261111T233000Z\r\nDTEND:20261112T000000Z\r\n\
+SUMMARY:On no occurrence\r\nEND:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+    /// The master of `body`, as the caller holds it before a save.
+    fn series_master(body: &str, cal_url: &Url) -> Event {
+        let mut master = crate::mapping::parse_calendar_data_with_href(
+            body,
+            cal_url.as_str(),
+            Some("/calendars/alice/work/series.ics"),
+        )
+        .unwrap()
+        .remove(0);
+        master.etag = None;
+        master
+    }
+
+    /// `edit` applied to the master of `body`, written; the body the server
+    /// was sent.
+    async fn sent_after(body: &'static str, edit: impl FnOnce(&mut Event)) -> String {
+        let mut server = Server::new_async().await;
+        let (seen, _get, put) = serve_series(&mut server, body, "\"server-etag\"", 1).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut master = series_master(body, &cal_url);
+        edit(&mut master);
+        update_event(
+            &client(),
+            master,
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap();
+        put.assert_async().await;
+        let sent = seen.lock().unwrap()[0].clone();
+        sent
+    }
+
+    /// Berlin "as the rule says" (DESIGN, "Die Wochentag-Frage"): the lost
+    /// zone comes back and every occurrence moves 1380 wall minutes back,
+    /// Monday 23:30 UTC to Monday 00:30 Berlin. The start and the deletion
+    /// move with it, as the editor's answer moved them.
+    fn berlin_as_the_rule_says(master: &mut Event) {
+        master.start = Utc.with_ymd_and_hms(2026, 11, 1, 23, 30, 0).unwrap();
+        master.end = master.start + chrono::Duration::minutes(30);
+        master.recurrence = Some(EventRecurrence {
+            rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+            exceptions: vec![Utc.with_ymd_and_hms(2026, 11, 15, 23, 30, 0).unwrap()],
+            tzid: Some("Europe/Berlin".into()),
+        });
+        master.occurrence_shift_minutes = Some(-1380);
+    }
+
+    /// The block of `body` holding `marker`, with its RECURRENCE-ID line
+    /// `from` written as `to` and every other byte as it was.
+    fn rekeyed(body: &str, marker: &str, from: &str, to: &str) -> String {
+        let block = block_of(body, marker);
+        assert_eq!(block.matches(from).count(), 1, "{block}");
+        block.replacen(from, to, 1)
+    }
+
+    /// The RECURRENCE-IDs a read of `sent` gives, in document order.
+    fn slots_read(sent: &str) -> Vec<String> {
+        crate::mapping::parse_calendar_data_with_href(
+            sent,
+            "https://example.com/cal/",
+            Some("/calendars/alice/work/series.ics"),
+        )
+        .unwrap()
+        .iter()
+        .filter_map(|e| override_recurrence_id(&e.id))
+        .map(|slot| slot.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .collect()
+    }
+
+    /// 95a: a zone change moves each changed occurrence to the slot its
+    /// occurrence now has, in the new master's form, whatever form it named
+    /// its slot in before. Its own start and end keep their instants, byte
+    /// for byte, and no override is doubled or dropped.
+    #[tokio::test]
+    async fn a_zone_change_moves_each_changed_occurrence_to_its_new_slot() {
+        let sent = sent_after(LOST_ZONE_BODY, berlin_as_the_rule_says).await;
+        assert!(
+            sent.contains("DTSTART;TZID=Europe/Berlin:20261102T003000\r\n"),
+            "{sent}"
+        );
+        assert!(
+            sent.contains(&rekeyed(
+                LOST_ZONE_BODY,
+                "SUMMARY:Moved later",
+                "RECURRENCE-ID:20261109T233000Z\r\n",
+                "RECURRENCE-ID;TZID=Europe/Berlin:20261109T003000\r\n",
+            )),
+            "the UTC-form slot, on Berlin's clock: {sent}"
+        );
+        assert!(
+            sent.contains(&rekeyed(
+                LOST_ZONE_BODY,
+                "SUMMARY:Summer change",
+                "RECURRENCE-ID;TZID=Europe/Berlin:20270615T013000\r\n",
+                "RECURRENCE-ID;TZID=Europe/Berlin:20270614T003000\r\n",
+            )),
+            "the zoned slot, a day back on its own Monday: {sent}"
+        );
+        assert_eq!(sent.matches("BEGIN:VEVENT").count(), 4, "{sent}");
+        assert_eq!(
+            slots_read(&sent),
+            [
+                "2026-11-08T23:30:00Z",
+                "2027-06-13T22:30:00Z",
+                "2026-11-11T23:30:00Z"
+            ],
+            "{sent}"
+        );
+        assert_eq!(
+            sent.matches("TZID:Europe/Berlin\r\n").count(),
+            1,
+            "the zone once: {sent}"
+        );
+    }
+
+    /// An override on a slot the rule never names has no occurrence to move
+    /// with: its line stays as it was.
+    #[tokio::test]
+    async fn an_override_on_no_occurrence_keeps_its_line() {
+        let sent = sent_after(LOST_ZONE_BODY, berlin_as_the_rule_says).await;
+        assert!(
+            sent.contains(block_of(LOST_ZONE_BODY, "SUMMARY:On no occurrence")),
+            "{sent}"
+        );
+    }
+
+    /// Berlin "as they fall now": the start keeps its instant and every
+    /// occurrence moves 60 wall minutes on, onto Tuesday 00:30 Berlin. In
+    /// winter that is the instant it had, so that slot keeps its line; in
+    /// summer it is an hour earlier, and that slot moves.
+    #[tokio::test]
+    async fn a_zone_change_as_they_fall_now_moves_only_the_slots_that_move() {
+        let sent = sent_after(LOST_ZONE_BODY, |master| {
+            master.recurrence = Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=TU".into(),
+                exceptions: vec![Utc.with_ymd_and_hms(2026, 11, 16, 23, 30, 0).unwrap()],
+                tzid: Some("Europe/Berlin".into()),
+            });
+            master.occurrence_shift_minutes = Some(60);
+        })
+        .await;
+        assert!(
+            sent.contains(block_of(LOST_ZONE_BODY, "SUMMARY:Moved later")),
+            "{sent}"
+        );
+        assert!(
+            sent.contains(&rekeyed(
+                LOST_ZONE_BODY,
+                "SUMMARY:Summer change",
+                "RECURRENCE-ID;TZID=Europe/Berlin:20270615T013000\r\n",
+                "RECURRENCE-ID;TZID=Europe/Berlin:20270615T003000\r\n",
+            )),
+            "{sent}"
+        );
+        assert_eq!(
+            slots_read(&sent),
+            [
+                "2026-11-09T23:30:00Z",
+                "2027-06-14T22:30:00Z",
+                "2026-11-11T23:30:00Z"
+            ],
+            "{sent}"
+        );
+    }
+
+    /// Without the editor's word that the occurrences moved, a save writes
+    /// the overrides back as they were, as before 95a.
+    #[tokio::test]
+    async fn without_a_shift_every_override_keeps_its_slot() {
+        let sent = sent_after(LOST_ZONE_BODY, |master| {
+            berlin_as_the_rule_says(master);
+            master.occurrence_shift_minutes = None;
+        })
+        .await;
+        for marker in [
+            "SUMMARY:Moved later",
+            "SUMMARY:Summer change",
+            "SUMMARY:On no occurrence",
+        ] {
+            assert!(sent.contains(block_of(LOST_ZONE_BODY, marker)), "{sent}");
+        }
+    }
+
+    /// A zone change from Berlin to New York "as the rule says": 09:00 stays
+    /// 09:00, so every slot moves six hours on. The changed occurrence names
+    /// its new slot in New York's form, while its own start still names
+    /// Berlin, whose definition stays in the resource beside New York's.
+    #[tokio::test]
+    async fn a_moved_override_keeps_the_zone_its_own_start_names() {
+        let sent = sent_after(SERIES_BODY, |master| {
+            master.start = Utc.with_ymd_and_hms(2026, 6, 8, 13, 0, 0).unwrap();
+            master.end = master.start + chrono::Duration::minutes(30);
+            master.recurrence = Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+                exceptions: Vec::new(),
+                tzid: Some("America/New_York".into()),
+            });
+            master.occurrence_shift_minutes = Some(0);
+        })
+        .await;
+        assert!(
+            sent.contains(&rekeyed(
+                SERIES_BODY,
+                "SUMMARY:Moved far",
+                "RECURRENCE-ID;TZID=Europe/Berlin:20260615T090000\r\n",
+                "RECURRENCE-ID;TZID=America/New_York:20260615T090000\r\n",
+            )),
+            "{sent}"
+        );
+        assert!(
+            sent.contains("DTSTART;TZID=Europe/Berlin:20260618T140000\r\n"),
+            "{sent}"
+        );
+        assert_eq!(sent.matches("TZID:Europe/Berlin\r\n").count(), 1, "{sent}");
+        assert_eq!(
+            sent.matches("TZID:America/New_York\r\n").count(),
+            1,
+            "{sent}"
+        );
+        assert_eq!(
+            slots_read(&sent),
+            ["2026-06-15T13:00:00Z", "2026-06-22T13:00:00Z"],
+            "{sent}"
+        );
+    }
+
+    /// The autumn overlap: a slot moved into the hour Berlin repeats has a
+    /// wall time that names two instants. The write goes ahead and names that
+    /// slot in UTC, which reads back as exactly that occurrence.
+    #[tokio::test]
+    async fn a_slot_moved_into_the_repeated_hour_is_named_in_utc() {
+        const BODY: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\n\
+DTSTART:20270103T013000Z\r\nDTEND:20270103T020000Z\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=SU\r\nSUMMARY:Night shift\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID:20271031T013000Z\r\n\
+DTSTART:20271031T050000Z\r\nDTEND:20271031T053000Z\r\n\
+SUMMARY:Later that night\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        // Berlin as they fall now: Sundays 02:30 Berlin, 60 wall minutes on.
+        // 31 October 2027 is the last Sunday of October: 02:30 happens twice
+        // there, and the slot stands at the first, 00:30 UTC.
+        let sent = sent_after(BODY, |master| {
+            master.recurrence = Some(EventRecurrence {
+                tzid: Some("Europe/Berlin".into()),
+                ..master.recurrence.clone().unwrap()
+            });
+            master.occurrence_shift_minutes = Some(60);
+        })
+        .await;
+        assert!(
+            sent.contains("DTSTART;TZID=Europe/Berlin:20270103T023000\r\n"),
+            "{sent}"
+        );
+        assert!(
+            sent.contains(&rekeyed(
+                BODY,
+                "SUMMARY:Later that night",
+                "RECURRENCE-ID:20271031T013000Z\r\n",
+                "RECURRENCE-ID:20271031T003000Z\r\n",
+            )),
+            "{sent}"
+        );
+        assert_eq!(slots_read(&sent), ["2027-10-31T00:30:00Z"], "{sent}");
+    }
+
+    /// A moved override that would land on the slot another one already
+    /// holds: one occurrence would be doubled and another lost, so nothing is
+    /// sent, said as a refusal of Aperio's own.
+    #[tokio::test]
+    async fn an_override_moved_onto_another_refuses_with_nothing_sent() {
+        const BODY: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\n\
+DTSTART:20261102T233000Z\r\nDTEND:20261103T000000Z\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Late call\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID:20261109T233000Z\r\n\
+DTSTART:20261110T010000Z\r\nDTEND:20261110T013000Z\r\nSUMMARY:Moved later\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID:20261108T233000Z\r\n\
+DTSTART:20261108T233000Z\r\nDTEND:20261109T000000Z\r\nSUMMARY:Sunday stray\r\nEND:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let mut server = Server::new_async().await;
+        let (_seen, _get, put) = serve_series(&mut server, BODY, "\"server-etag\"", 0).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut master = series_master(BODY, &cal_url);
+        master.start = Utc.with_ymd_and_hms(2026, 11, 1, 23, 30, 0).unwrap();
+        master.end = master.start + chrono::Duration::minutes(30);
+        master.recurrence = Some(EventRecurrence {
+            rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
+            exceptions: Vec::new(),
+            tzid: Some("Europe/Berlin".into()),
+        });
+        master.occurrence_shift_minutes = Some(-1380);
+        let err = update_event(
+            &client(),
+            master,
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap_err();
+        put.assert_async().await;
+        assert!(
+            matches!(&err, CaldavError::Forbidden(m) if m.contains("override-slot")),
+            "{err:?}"
+        );
+    }
+
+    /// A slot that cannot be named in the new master's form at all, here a
+    /// series made all-day in the same save, whose moved slot is no day's
+    /// start: nothing is sent.
+    #[tokio::test]
+    async fn an_unnameable_moved_slot_refuses_with_nothing_sent() {
+        let mut server = Server::new_async().await;
+        let (_seen, _get, put) =
+            serve_series(&mut server, LOST_ZONE_BODY, "\"server-etag\"", 0).await;
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let mut master = series_master(LOST_ZONE_BODY, &cal_url);
+        berlin_as_the_rule_says(&mut master);
+        master.all_day = true;
+        let err = update_event(
+            &client(),
+            master,
+            &creds(&server.url()),
+            &WriteCtx::default(),
+        )
+        .await
+        .unwrap_err();
+        put.assert_async().await;
+        assert!(
+            matches!(&err, CaldavError::Forbidden(m) if m.contains("override-slot")),
+            "{err:?}"
         );
     }
 

@@ -267,6 +267,10 @@ series' date and time in its time zone:
   round works in one go: the time zone first, then the date. Where the start
   or the end has no valid time, the button says so instead of opening the
   list.
+- In iCloud and other CalDAV calendars, occurrences changed on their own move
+  along when you change a series' time zone: each keeps its time and goes on
+  replacing the occurrence of the series it was changed for. If you also move
+  the series to another date, the box below applies.
 - After a change of time zone, Aperio does not offer to carry the change to
   the appointment's copies in other calendars; that comes later.
 - Where a time you typed does not exist on that day in the series' time zone,

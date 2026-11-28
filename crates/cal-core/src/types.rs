@@ -218,6 +218,17 @@ pub struct Event {
     /// NOT persisted and meaningless on a read.
     #[serde(default, skip_serializing_if = "is_false")]
     pub accepts_exception_loss: bool,
+    /// Transient write-only signal on an update of a series: every occurrence
+    /// moved by this many wall minutes from the clock the provider stores to
+    /// the one written, because the user chose another zone for it (stage 13,
+    /// 95a; the answer's `moved_minutes`). An adapter whose provider keeps a
+    /// changed occurrence under the slot it replaces (CalDAV's
+    /// `RECURRENCE-ID`) moves that slot with its occurrence
+    /// (`moved_slots`, behind `zones`), so it is not left on a slot the series no
+    /// longer has. Other adapters ignore it. NOT persisted and meaningless on
+    /// a read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence_shift_minutes: Option<i64>,
     /// Transient read-only result of an update: occurrences of the series the
     /// user had deleted, which the provider brought back when the update wrote
     /// the series again, and which the adapter could not delete again (decision

@@ -23,6 +23,7 @@ import {
   zoneFacts,
   zoneChoiceWait,
   zoneToSave,
+  nextZoneAnswer,
   type ZoneFormFacts,
 } from '@aperio/shared';
 
@@ -594,5 +595,34 @@ describe('when a zone choice waits (zoneChoiceWait)', () => {
     expect(zoneChoiceWait(openZoneForm('new', undefined, false), moved, null)).toBeNull();
     expect(zoneChoiceWait(openZoneForm('single', undefined, false), moved, stored)).toBeNull();
     expect(zoneChoiceWait(series, moved, null)).toBeNull();
+  });
+});
+
+describe('the zone answers of one session (nextZoneAnswer, 95a)', () => {
+  const answer = (start: string, movedMinutes: number) => ({
+    outcome: 'changed' as const,
+    rrule: `FREQ=WEEKLY;DTSTART=${start}`,
+    start,
+    exceptions: [start],
+    movedMinutes,
+  });
+
+  it('takes the first answer as it is', () => {
+    expect(nextZoneAnswer(null, answer('2026-11-23T08:00:00Z', -360))).toEqual({
+      start: '2026-11-23T08:00:00Z',
+      rrule: 'FREQ=WEEKLY;DTSTART=2026-11-23T08:00:00Z',
+      exceptions: ['2026-11-23T08:00:00Z'],
+      movedMinutes: -360,
+    });
+  });
+
+  it('sums how far the occurrences moved, and keeps the rest of the latest', () => {
+    const first = nextZoneAnswer(null, answer('2026-11-23T08:00:00Z', -360));
+    expect(nextZoneAnswer(first, answer('2026-11-22T08:00:00Z', -1380))).toEqual({
+      start: '2026-11-22T08:00:00Z',
+      rrule: 'FREQ=WEEKLY;DTSTART=2026-11-22T08:00:00Z',
+      exceptions: ['2026-11-22T08:00:00Z'],
+      movedMinutes: -1740,
+    });
   });
 });

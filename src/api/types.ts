@@ -65,6 +65,12 @@ export interface CalendarEvent {
    *  delete again afterwards (decisions 243, 246, 252, 253). Set only on the
    *  write sent again after the question; never on a row that is kept. */
   accepts_exception_loss?: boolean;
+  /** Transient signal on one update of a series: every occurrence moved by
+   *  this many wall minutes because the user chose another zone for it
+   *  (stage 13, 95a; the zone answers' `movedMinutes`). CalDAV moves the
+   *  series' changed occurrences with it; other providers ignore it. Set
+   *  only on the editor's whole-series write; never on a row that is kept. */
+  occurrence_shift_minutes?: number;
   /** Transient result of an update: deleted occurrences of the series that
    *  came back and could not be deleted again (decision 253), as instants. */
   deletions_not_restored?: string[];

@@ -558,6 +558,40 @@ export function fieldsOnView(
 }
 
 /**
+ * The zone answers this editing session applied, as one: the start, rule and
+ * exceptions of the latest, and how far the occurrences moved in all, in wall
+ * minutes (stage 13). A whole-series save measures the edit against it
+ * (`zoneAppliedSeries`) and sends the shift, so a provider that keeps a
+ * changed occurrence under its slot (CalDAV's `RECURRENCE-ID`) moves that
+ * slot with it (95a).
+ */
+export interface ZoneAnswer {
+  start: string;
+  rrule: string;
+  exceptions: string[];
+  movedMinutes: number;
+}
+
+/**
+ * The session's zone answer after one more (`nextZoneAnswer(null, answer)` for
+ * the first). Every answer moves each occurrence by its own wall shift from
+ * the clock it was asked on to the one chosen, so two choices move them by
+ * the sum: Berlin to New York and on to Tokyo is one move from Berlin to
+ * Tokyo.
+ */
+export function nextZoneAnswer(
+  prev: ZoneAnswer | null,
+  answer: Extract<ClockChangeAnswer, { outcome: 'changed' }>,
+): ZoneAnswer {
+  return {
+    start: answer.start,
+    rrule: answer.rrule,
+    exceptions: answer.exceptions,
+    movedMinutes: (prev?.movedMinutes ?? 0) + answer.movedMinutes,
+  };
+}
+
+/**
  * The series as a zone answer leaves it (question 12 of stage 12): the
  * answer's start, the end keeping the length the series had, its rule and
  * exceptions, and the new zone. A whole-series save measures the edit against

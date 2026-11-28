@@ -83,6 +83,7 @@ import {
   moveSeriesInstant,
   nthOccurrence,
   occurrenceCount,
+  overrideIdFor,
   overrideRecurrenceIso,
   overrideSeriesId,
   deviceZoneName,
@@ -91,6 +92,7 @@ import {
   slotMatcher,
   splitRRuleForEdit,
 } from './recurrence';
+import { movedSlots, type SlotMove } from './seriesClock';
 import { defaultSeriesZone, type CalendarZones } from './seriesZoneForm';
 import { shiftSeriesRule, type SeriesShift, type ShiftRefusal } from './seriesShift';
 import { tailExceptions } from './tailExceptions';
@@ -227,6 +229,60 @@ export async function readSeriesRows<
     rows: answer.rows.filter((row) => overrideSeriesId(row) === master.id),
     reach: answer.reach,
   };
+}
+
+/**
+ * Where the slots of a stored series' changed and cancelled occurrences
+ * (`rows`, as `readSeriesRows` gives them) stand once a zone answer moved the
+ * series onto `toTzid` (`null` for UTC) by `movedMinutes` in wall time (95a):
+ * the core's `movedSlots`, from the series as stored. Rows that name no slot
+ * are not asked about; a start that names no instant moves nothing.
+ */
+export function zoneSlotMoves(
+  stored: RecurringEventLike,
+  rows: readonly RecurringEventLike[],
+  toTzid: string | null,
+  movedMinutes: number,
+  endsByDate: boolean,
+): SlotMove[] {
+  const rrule = stored.recurrence?.rrule;
+  if (!rrule) return [];
+  const slots = rows
+    .map((row) => overrideRecurrenceIso(row))
+    .filter((slot): slot is string => slot !== null);
+  if (slots.length === 0) return [];
+  return (
+    movedSlots({
+      rrule,
+      start: stored.start,
+      fromTzid: stored.recurrence?.tzid ?? null,
+      toTzid,
+      endsByDate,
+      movedMinutes,
+      slots,
+    }) ?? []
+  );
+}
+
+/**
+ * `rows` with each row whose slot a move names (compared as instants) standing
+ * in for the slot the move gives, written as the adapters write a slot
+ * (`overrideIdFor`); every other row as it was. A whole-series save that
+ * changed the zone and then the date (95a, "Zone, dann Datum") reads the
+ * series' rows through it before `planSeriesSplit`, so a changed occurrence
+ * is matched to its occurrence on the new clock and not read as a deletion.
+ */
+export function rowsWithMovedSlots<E extends RecurringEventLike>(
+  rows: readonly E[],
+  moves: readonly SlotMove[],
+): E[] {
+  return rows.map((row) => {
+    const slot = Date.parse(overrideRecurrenceIso(row) ?? '');
+    const series = overrideSeriesId(row);
+    if (!Number.isFinite(slot) || series === null) return row;
+    const move = moves.find((m) => Date.parse(m.from) === slot);
+    return move === undefined ? row : { ...row, id: overrideIdFor(series, move.to) };
+  });
 }
 
 /**

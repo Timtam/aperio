@@ -1004,6 +1004,23 @@ von denen der 21. aus der Liste fällt. Seitdem stehen alle hier (Toni,
 2026-10-15). Jeder Punkt wurde am 2026-10-15 gegen main geprüft; erledigte
 Vorschläge sind nicht aufgenommen.
 
+- [ ] **CalDAV: geänderte Termine nach einem Datumswechsel der ganzen Serie**
+      (Zeitzonen-Bogen, Stufe 13, Teil 2, 2026-11-28): Verschiebt das
+      Speichern der ganzen Serie sie auf ein anderes Datum oder eine andere
+      Uhrzeit (198), bleiben ihre einzeln geänderten Termine in iCloud und
+      CalDAV auf ihren alten RECURRENCE-IDs; ebenso der Datums-Teil von
+      „Zone, dann Datum“, dessen Zonen-Teil seit 95a mitwandert. Für eine
+      Regel mit einer Uhrzeit am Tag ist das eine gleichmäßige Verschiebung,
+      die `occurrence_shift_minutes` mittragen könnte; Regeln mit mehreren
+      Uhrzeiten am Tag brauchen eine eigene Zuordnung.
+      ↳ 🚩 95a ist gegen iCloud ungemessen: Zonenwechsel einer iCloud-Serie
+      mit geänderten Terminen (eine RECURRENCE-ID in UTC, eine mit TZID), mit
+      dem iCloud-Live-Testprogramm, das Toni startet. Lesen sich die
+      umgeschriebenen RECURRENCE-IDs zurück, ohne doppelten Tag, auch in UTC
+      neben einem DTSTART mit TZID (Herbst-Stunde)?
+      ↳ 🚩 Google ungemessen (246): Was der Server mit geänderten
+      Einzelterminen macht, wenn sich die `timeZone` des Masters ändert. Der
+      Google-Adapter übergeht `occurrence_shift_minutes`.
 - [ ] **iPhone: schreibgeschützte Termine lassen sich nicht öffnen** (Toni,
       2026-11-23): Ein Termin aus einem nur lesbaren Kalender, etwa einem
       iCal-Abo, öffnet am iPhone beim Antippen nichts; es passiert gar
