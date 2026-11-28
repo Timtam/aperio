@@ -1473,7 +1473,8 @@
         "end": "end",
         "all_day": "all-day",
         "location": "location",
-        "description": "description"
+        "description": "description",
+        "zone": "time zone: {{zone}}"
       },
       "carry": "Carry over",
       "keep": "Leave the others",
@@ -1495,7 +1496,26 @@
       "standaloneMayStand": "In {{calendar}}, the appointment may now show twice on {{date}}: whether its single copy was created is unclear ({{reason}}). Please check it there.",
       "shiftRefused": "In {{calendar}}, the repeat cannot move with the new date or time: {{reason}}.",
       "unsureCut": "In {{calendar}}, the series may show twice from {{date}}: its new part was created, but whether the old one now ends before it is unclear. Please check it there.",
-      "skippedInvitation": "The copy in {{calendar}} was not changed — someone else organizes it."
+      "skippedInvitation": "The copy in {{calendar}} was not changed — someone else organizes it.",
+      "zoneDaysEarlier_one": "For one copy, the occurrences move {{days}} earlier.",
+      "zoneDaysEarlier_other": "For {{count}} copies, the occurrences move {{days}} earlier.",
+      "zoneDaysLater_one": "For one copy, the occurrences move {{days}} later.",
+      "zoneDaysLater_other": "For {{count}} copies, the occurrences move {{days}} later.",
+      "dayCount_one": "one day",
+      "dayCount_other": "{{count}} days",
+      "zoneRefusedCount_one": "One copy will not get the time zone.",
+      "zoneRefusedCount_other": "{{count}} copies will not get the time zone.",
+      "zoneRefused": "The copy in {{calendar}} will not get the time zone: {{reason}}. Its times stay as they are.",
+      "zoneNotASeries": "The copy in {{calendar}} is not a series there; the time zone does not apply to it.",
+      "zoneNotASeriesTimes": "The copy in {{calendar}} is not a series there; the series' time zone, start and end do not apply to it.",
+      "zoneRefusal": {
+        "zone_not_storable": "that calendar cannot store the time zone {{zone}}",
+        "off_pattern": "its occurrences are not on the series' days",
+        "all_day": "it is all-day there"
+      },
+      "nothingToCarry": "No copy can take the change.",
+      "changedWithoutZone": "The copy in {{calendar}} was changed without the time zone: {{reason}}.",
+      "notChangedReason": "The copy in {{calendar}} was not changed: {{reason}}."
     },
     "eventGroup": {
       "title": "Same appointment",

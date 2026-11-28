@@ -31,6 +31,15 @@ import {
   type ExceptionsLoss,
   carvedOccurrenceKeptSentence,
   removeOriginalAfterCopy,
+  textFields,
+  zoneCityName,
+  zoneOffer,
+  zoneRefusalText,
+  zoneVerdictFor,
+  type CarryField,
+  type ZoneCarry,
+  type ZoneMove,
+  type ZoneSeriesRefused,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -108,6 +117,16 @@ export interface EventGroupCarryDialogProps {
    * once the carry is done, and this is the anchor's half of that.
    */
   successor?: NewGroupMember | null;
+  /**
+   * A whole-series save that moved the series onto another zone (stage 13,
+   * 143a), and each copy's verdict as read before the offer opened, keyed by
+   * `carryTargetKey`. With both, and the zone among the changes, the offer
+   * leaves out the copies already right, says how far the others move, and
+   * names the ones that cannot take the zone (146a); the carry asks each
+   * copy again as it writes it.
+   */
+  zoneMove?: ZoneMove | null;
+  zoneVerdicts?: Record<string, ZoneCarry> | null;
   onChanged?: () => void;
 }
 
@@ -121,6 +140,8 @@ export function EventGroupCarryDialog({
   scope = 'series',
   occurrence,
   successor,
+  zoneMove = null,
+  zoneVerdicts = null,
   onChanged,
 }: EventGroupCarryDialogProps) {
   const { t, i18n } = useTranslation();
@@ -151,6 +172,10 @@ export function EventGroupCarryDialog({
    *  across a retry: they are written and not offered again, so this is the
    *  only place they are still named. */
   const [doubts, setDoubts] = useState<string[]>([]);
+  /** What a pass said about copies that did not get the zone (146a), kept
+   *  across a retry: such a copy is not offered again, so this is where it
+   *  is still named. */
+  const [zoneNotes, setZoneNotes] = useState<string[]>([]);
   /**
    * Copies whose series would lose occurrences the user changed or deleted
    * on their own (decisions 243-253), asked about once, after every other
@@ -223,6 +248,7 @@ export function EventGroupCarryDialog({
     setPending(null);
     setCreatedRows([]);
     setDoubts([]);
+    setZoneNotes([]);
     setLossAsk(null);
     queueMicrotask(() => closeRef.current?.focus());
   }, [isOpen]);
@@ -238,8 +264,85 @@ export function EventGroupCarryDialog({
     if (outcome && !lossAsk && !busy) queueMicrotask(() => outcomeRef.current?.focus());
   }, [outcome, lossAsk, busy]);
 
+  // A series' zone carried to its copies (stage 13): the offer from each
+  // copy's verdict as read before the dialog opened.
+  const zoneTo = zoneMove?.anchorAfter.tzid ?? null;
+  const offer = useMemo(
+    () =>
+      scope === 'series' && zoneMove && zoneVerdicts && plan.changed.includes('zone')
+        ? zoneOffer(plan, new Map(Object.entries(zoneVerdicts)))
+        : null,
+    [scope, zoneMove, zoneVerdicts, plan],
+  );
+  /** A changed field as the message names it: the zone by the city of the
+   *  series' new zone, first (143a). */
+  const fieldName = useCallback(
+    (field: CarryField) =>
+      field === 'zone'
+        ? t('dialogs.eventGroupCarry.field.zone', { zone: zoneCityName(zoneTo) })
+        : t(`dialogs.eventGroupCarry.field.${field}`),
+    [t, zoneTo],
+  );
+  /** Why each copy that does not get the zone does not, as the offer says it
+   *  before the carry: the series refused with their reason, then the copies
+   *  that are no series there. */
+  const zoneReasons = useMemo(
+    () =>
+      offer
+        ? [
+            ...offer.refused.map(({ target, verdict }) =>
+              t('dialogs.eventGroupCarry.zoneRefused', {
+                calendar: calendarName(target.calendar_id),
+                reason: zoneRefusalText(verdict, zoneTo, t),
+              }),
+            ),
+            // Where the save also changed the series' times, the sentence says
+            // the copy does not get them: a single event elsewhere keeps its
+            // own (146a).
+            ...offer.notASeries.map((target) =>
+              t(
+                plan.changed.some((field) => TIME_FIELDS.includes(field))
+                  ? 'dialogs.eventGroupCarry.zoneNotASeriesTimes'
+                  : 'dialogs.eventGroupCarry.zoneNotASeries',
+                { calendar: calendarName(target.calendar_id) },
+              ),
+            ),
+          ]
+        : [],
+    [offer, plan.changed, t, calendarName, zoneTo],
+  );
+  /** The offer's message: the question, then how far the copies move and how
+   *  many do not get the zone. One element, so the dialog's description says
+   *  all of it. */
+  const offerMessage = useMemo(() => {
+    const question = t('dialogs.eventGroupCarry.message', {
+      count: offer ? offer.targets.length : plan.targets.length,
+      fields: plan.changed.map(fieldName).join(', '),
+    });
+    if (!offer) return question;
+    const days = offer.days.map(({ days: moved, count }) =>
+      t(
+        moved < 0
+          ? 'dialogs.eventGroupCarry.zoneDaysEarlier'
+          : 'dialogs.eventGroupCarry.zoneDaysLater',
+        {
+          count,
+          days: t('dialogs.eventGroupCarry.dayCount', { count: Math.abs(moved) }),
+        },
+      ),
+    );
+    const refusedCount = offer.refused.length + plan.skipped.length;
+    const refused =
+      refusedCount > 0
+        ? [t('dialogs.eventGroupCarry.zoneRefusedCount', { count: refusedCount })]
+        : [];
+    return [question, ...days, ...refused].join(' ');
+  }, [offer, plan, fieldName, t]);
+
   // After a partial carry, only what is still outstanding.
-  const targets = pending ?? plan.targets;
+  const targets = pending ?? offer?.targets ?? plan.targets;
+  /** No copy can take the change (stage 13): the offer can only close. */
+  const nothingToCarry = !outcome && offer !== null && offer.nothingToCarry;
   // A regroup that failed is retried on its own — there are no copies left to
   // write, and the button must not look like it does nothing.
   const canRetry = targets.length > 0 || outcome?.kind === 'regroup';
@@ -284,6 +387,11 @@ export function EventGroupCarryDialog({
     // Copies somebody else organizes: among the ones that did not change, and
     // the report says why (77a).
     const lockedOut: CarryTarget[] = [];
+    // Copies that did not get the zone, with their reason (146a): written
+    // without it, or not changed. Named in the report, never retried.
+    const zoneLines: string[] = [];
+    // The day this pass asks each copy on, for the rule groups (120a).
+    const today = new Date().toISOString();
     // The last failure shown, which a question asked after the loop would
     // otherwise cut off: said again with the report the question holds.
     let lastError = '';
@@ -605,6 +713,84 @@ export function EventGroupCarryDialog({
                 starts_at: tail.start,
               });
             }
+          } else if (offer && zoneMove) {
+            // The series' zone, carried (stage 13): the copy is asked again as
+            // it is now, and gets one write — or none, where it already stands
+            // as the series does and nothing else changed.
+            const verdict = zoneVerdictFor(
+              zoneMove,
+              current,
+              calendars.find((c) => c.id === target.calendar_id),
+              today,
+            );
+            const texts = textFields(plan.changed);
+            const copyRow = current as CalendarEvent & CarryableFields;
+            if (verdict.outcome === 'changed') {
+              // Its rule, start, end, deletions and zone as the core wrote them
+              // on the new clock; its changed occurrences move with it where
+              // its calendar keeps them by slot (95a).
+              const write: CalendarEvent = {
+                ...carryOnto(copyRow, after, texts),
+                start: verdict.start,
+                end: verdict.end,
+                recurrence: {
+                  ...(current.recurrence ?? { exceptions: [] }),
+                  rrule: verdict.rrule,
+                  exceptions: verdict.exceptions,
+                  tzid: verdict.tzid,
+                },
+                ...(verdict.shiftMinutes !== 0
+                  ? { occurrence_shift_minutes: verdict.shiftMinutes }
+                  : {}),
+                send_invitations: false,
+              };
+              askable = true;
+              const savedSeries = await updateEvent(
+                agreed ? { ...write, accepts_exception_loss: true } : write,
+                target.calendar_id,
+              );
+              askable = false;
+              noteBack(savedSeries, target.calendar_id);
+            } else if (verdict.outcome === 'unchanged') {
+              // Already as the series stands: only its text, if that changed.
+              // On a retry the copy was outstanding: its earlier write landed
+              // after all, so it counts as written.
+              if (texts.length === 0) {
+                if (pending !== null) done += 1;
+                continue;
+              }
+              noteBack(
+                await updateEvent(carryOnto(copyRow, after, texts), target.calendar_id),
+                target.calendar_id,
+              );
+            } else if (verdict.reason === 'not_a_series') {
+              // No series there: its text only (146a). The series' start and
+              // end are instants of the series; a single event elsewhere
+              // would land on the series' first day, or end before it starts.
+              if (texts.length === 0) continue;
+              noteBack(
+                await updateEvent(carryOnto(copyRow, after, texts), target.calendar_id),
+                target.calendar_id,
+              );
+            } else {
+              // A series that cannot take the zone keeps its times and zone,
+              // and still gets its text (146a); either way it is named.
+              const reason = zoneRefusalText(verdict as ZoneSeriesRefused, zoneTo, t);
+              const calendar = calendarName(target.calendar_id);
+              if (texts.length === 0) {
+                zoneLines.push(
+                  t('dialogs.eventGroupCarry.notChangedReason', { calendar, reason }),
+                );
+                continue;
+              }
+              noteBack(
+                await updateEvent(carryOnto(copyRow, after, texts), target.calendar_id),
+                target.calendar_id,
+              );
+              zoneLines.push(
+                t('dialogs.eventGroupCarry.changedWithoutZone', { calendar, reason }),
+              );
+            }
           } else {
             const next = carryOnto(
               current as CalendarEvent & CarryableFields,
@@ -775,16 +961,21 @@ export function EventGroupCarryDialog({
       // said (210), as nothing else will. And the views read again: closing
       // the dialog made them read before the last copy and the grouping were
       // written.
-      if (unsure.length > 0) announce(unsure.join(' '));
+      // So is a copy that did not get the zone (146a).
+      const spoken = [...zoneLines, ...unsure];
+      if (spoken.length > 0) announce(spoken.join(' '));
       onChanged?.();
       return;
     }
     setCreatedRows(created);
     const allDoubts = [...doubts, ...unsure];
     setDoubts(allDoubts);
+    const allZoneNotes = [...zoneNotes, ...zoneLines];
+    setZoneNotes(allZoneNotes);
     // Said once, with whatever else this pass reports: the live region keeps
     // only the last of two announcements in the same frame.
     const doubtful = unsure.length === 0 ? '' : ` ${unsure.join(' ')}`;
+    const zoneSaid = zoneLines.length === 0 ? '' : ` ${zoneLines.join(' ')}`;
     // Why the copies somebody else organizes were not changed (77a).
     const why = lockedOut
       .map((target) =>
@@ -795,7 +986,7 @@ export function EventGroupCarryDialog({
       .join(' ');
     // What this pass says after its first sentence: the earlier pass's rest
     // first, as its copies come first among the ones not changed.
-    const reportTail = `${earlier}${why === '' ? '' : ` ${why}`}${doubtful}`;
+    const reportTail = `${earlier}${why === '' ? '' : ` ${why}`}${zoneSaid}${doubtful}`;
     setBusy(false);
     onChanged?.();
     // The whole point of the dialog: say what actually happened, including
@@ -817,7 +1008,7 @@ export function EventGroupCarryDialog({
       if (asked.length > 0) {
         const rest = `${earlier}${lastError === '' ? '' : ` ${lastError}`}${
           why === '' ? '' : ` ${why}`
-        }${doubtful}`;
+        }${zoneSaid}${doubtful}`;
         lossYes.current = false;
         setLossAsk({ asked, said: `${partly}${rest}`, rest });
         return;
@@ -840,9 +1031,9 @@ export function EventGroupCarryDialog({
       announce(`${t('dialogs.eventGroupCarry.regroupFailed', { count: done })}${reportTail}`);
       return;
     }
-    if (allDoubts.length > 0) {
-      // No copy is left to offer again, but some may show twice: closing
-      // would take the only words that say which ones.
+    if (allDoubts.length > 0 || allZoneNotes.length > 0) {
+      // No copy is left to offer again, but some may show twice, or did not
+      // get the zone: closing would take the only words that say which ones.
       setOutcome({ kind: 'written', done });
       setPending([]);
       announce(`${t('dialogs.eventGroupCarry.done', { count: done })}${reportTail}`);
@@ -877,14 +1068,23 @@ export function EventGroupCarryDialog({
                     .join(', '),
                 })}
         </FocusableNote>
+      ) : nothingToCarry ? (
+        // No copy can take the change: the dialog can only close, and says
+        // why in one message, each copy's reason included.
+        <FocusableNote id={messageId} className="form__message">
+          {[
+            t('dialogs.eventGroupCarry.nothingToCarry'),
+            ...zoneReasons,
+            ...plan.skipped.map((target) =>
+              t('dialogs.eventGroupCarry.skipped', {
+                calendar: calendarName(target.calendar_id),
+              }),
+            ),
+          ].join(' ')}
+        </FocusableNote>
       ) : (
         <FocusableNote id={messageId} className="form__message">
-          {t('dialogs.eventGroupCarry.message', {
-            count: plan.targets.length,
-            fields: plan.changed
-              .map((field) => t(`dialogs.eventGroupCarry.field.${field}`))
-              .join(', '),
-          })}
+          {offerMessage}
         </FocusableNote>
       )}
 
@@ -903,36 +1103,56 @@ export function EventGroupCarryDialog({
       {/* Named by their calendar. The title is the same on every copy — that
           is what made them a group — and the stored one is the title the copy
           had when it JOINED, which an edit since then has already outdated. */}
-      {targets.map((target) => (
-        <FocusableNote
-          key={`${target.calendar_id} ${target.event_id}`}
-          className="form__message"
-        >
-          {t('dialogs.eventGroupCarry.target', {
-            calendar: calendarName(target.calendar_id),
-          })}
-        </FocusableNote>
-      ))}
+      {!nothingToCarry &&
+        targets.map((target) => (
+          <FocusableNote
+            key={`${target.calendar_id} ${target.event_id}`}
+            className="form__message"
+          >
+            {t('dialogs.eventGroupCarry.target', {
+              calendar: calendarName(target.calendar_id),
+            })}
+          </FocusableNote>
+        ))}
+
+      {/* The copies that will not get the zone, each with its reason (146a),
+          before the user decides — as the read-only ones below. */}
+      {!outcome &&
+        !nothingToCarry &&
+        zoneReasons.map((reason) => (
+          <FocusableNote key={reason} className="form__hint form__hint--warning">
+            {reason}
+          </FocusableNote>
+        ))}
 
       {/* The copies it may not write. Said BEFORE the user decides, because
           "carry to all" that silently means "to some" is the contradiction
           this feature exists to prevent. */}
-      {plan.skipped.map((target) => (
-        <FocusableNote
-          key={`skip ${target.calendar_id} ${target.event_id}`}
-          className="form__hint form__hint--warning"
-        >
-          {t('dialogs.eventGroupCarry.skipped', {
-            calendar: calendarName(target.calendar_id),
-          })}
-        </FocusableNote>
-      ))}
+      {!nothingToCarry &&
+        plan.skipped.map((target) => (
+          <FocusableNote
+            key={`skip ${target.calendar_id} ${target.event_id}`}
+            className="form__hint form__hint--warning"
+          >
+            {t('dialogs.eventGroupCarry.skipped', {
+              calendar: calendarName(target.calendar_id),
+            })}
+          </FocusableNote>
+        ))}
 
       {/* The copies written whose series may show twice. Each is its own
           note, so the list is read one copy at a time. */}
       {doubts.map((doubt) => (
         <FocusableNote key={doubt} className="form__hint form__hint--warning">
           {doubt}
+        </FocusableNote>
+      ))}
+
+      {/* The copies that did not get the zone, as the passes said them: never
+          offered again, so named here. */}
+      {zoneNotes.map((note) => (
+        <FocusableNote key={note} className="form__hint form__hint--warning">
+          {note}
         </FocusableNote>
       ))}
 
@@ -950,13 +1170,14 @@ export function EventGroupCarryDialog({
           className="form__action"
         >
           {t(
-            outcome
+            outcome || nothingToCarry
               ? 'dialogs.eventGroupCarry.dismiss'
               : 'dialogs.eventGroupCarry.keep',
           )}
         </button>
-        {/* Nothing is left to try once no copy is outstanding. */}
-        {outcome?.kind !== 'written' && (
+        {/* Nothing is left to try once no copy is outstanding, and nothing to
+            carry where no copy can take the change. */}
+        {outcome?.kind !== 'written' && !nothingToCarry && (
           <button
             type="button"
             onClick={() => void carry()}
@@ -1005,6 +1226,10 @@ export function EventGroupCarryDialog({
     </>
   );
 }
+
+/** The changed fields that are the series' times: a copy that is no series
+ *  there does not get them. */
+const TIME_FIELDS: readonly CarryField[] = ['start', 'end', 'all_day'];
 
 /** One copy, as a key: its calendar and its id. */
 function targetKey(target: CarryTarget): string {

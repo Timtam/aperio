@@ -271,8 +271,17 @@ series' date and time in its time zone:
   along when you change a series' time zone: each keeps its time and goes on
   replacing the occurrence of the series it was changed for. If you also move
   the series to another date, the box below applies.
-- After a change of time zone, Aperio does not offer to carry the change to
-  the appointment's copies in other calendars; that comes later.
+- If the series is in an event group, Aperio asks after saving, as for any
+  change, whether the other copies should take it; the time zone is then
+  listed first among the changes. Every copy that is a series moves to the
+  new time zone and afterwards lies like the series: at the same time of day
+  and moved by the same days, even if it starts in the other half of the
+  year. If it was at a different time before, it keeps that distance. A copy
+  that already lies that way keeps its times and gets only a changed title,
+  location or description. If a copy cannot take the time
+  zone, its times stay; title, location and description still go along, and
+  Aperio says why. A copy that is not a series there gets the title, location
+  and description; the series' time zone, start and end do not apply to it.
 - Where a time you typed does not exist on that day in the series' time zone,
   because the clocks go forward, Aperio says so at the field. It saves only
   with another time.
