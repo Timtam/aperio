@@ -204,8 +204,15 @@ import {
   privateReminderWrites,
   seriesIdOf,
   worthCarrying,
+  carryTargetKey,
+  seriesZoneChanged,
+  zoneMoveOf,
+  zoneOffer,
+  zoneVerdictFor,
   type CarryableFields,
   type CarryScope,
+  type ZoneCarry,
+  type ZoneMove,
   createRunsInSteps,
   createsInSteps,
   eventWriteLeftover,
@@ -1337,6 +1344,11 @@ function EventEditorScreen({
       // touch from its own copy (decision 106), and that is not a change of
       // theirs to offer the other copies.
       edited: CalendarEvent = next,
+      // A whole-series save that moved the series onto another zone (stage
+      // 13): the zone is named first among the changes (143a), and each copy
+      // is asked of the core how it takes it before the offer opens. Mirrors
+      // the desktop.
+      zoneMove: ZoneMove | null = null,
     ): Promise<boolean> => {
       const fieldsOf = (ev: CalendarEvent): CarryableFields => ({
         title: ev.title,
@@ -1357,8 +1369,24 @@ function EventEditorScreen({
           calendar_id: saved.calendar_id,
           event_id: seriesIdOf(saved),
         };
-        const before = fieldsOf(saved);
-        const after = fieldsOf(edited);
+        // After a zone move the edit is measured against the series as its
+        // zone answers left it, as the save measured it: a start the answer
+        // moved is no change of the user's, and the copies take it with the
+        // zone. Only a move made after the choice is named as Start.
+        const before: CarryableFields = zoneMove
+          ? {
+              ...fieldsOf(saved),
+              start: zoneMove.appliedStart,
+              end: new Date(
+                Date.parse(zoneMove.appliedStart) +
+                  (Date.parse(saved.end) - Date.parse(saved.start)),
+              ).toISOString(),
+              zone: { tzid: zoneMove.anchorBefore.tzid },
+            }
+          : fieldsOf(saved);
+        const after: CarryableFields = zoneMove
+          ? { ...fieldsOf(edited), zone: { tzid: zoneMove.anchorAfter.tzid } }
+          : fieldsOf(edited);
         const plan = planCarry(
           group,
           anchor,
@@ -1371,6 +1399,36 @@ function EventEditorScreen({
           (_cal, ev) => ev,
         );
         if (!worthCarrying(plan)) return false;
+        // Each copy as it is now, asked how it takes the zone, before the
+        // offer opens: the offer leaves out the copies already right and names
+        // the ones that cannot take it (146a). A copy whose read fails has no
+        // verdict and counts as one to write; the carry reads it again.
+        let zoneVerdicts: Record<string, ZoneCarry> | null = null;
+        if (zoneMove && plan.changed.includes('zone')) {
+          const today = new Date().toISOString();
+          const verdicts = new Map<string, ZoneCarry>();
+          for (const target of plan.targets) {
+            try {
+              const copy = await getEventById(target.event_id, target.calendar_id);
+              if (copy == null) continue;
+              verdicts.set(
+                carryTargetKey(target),
+                zoneVerdictFor(
+                  zoneMove,
+                  copy,
+                  cals.find((c) => c.id === target.calendar_id),
+                  today,
+                ),
+              );
+            } catch {
+              // No verdict: the carry reads this copy again.
+            }
+          }
+          // Every copy already stands as the series does and nothing else
+          // changed: there is nothing to ask.
+          if (zoneOffer(plan, verdicts).silent) return false;
+          zoneVerdicts = Object.fromEntries(verdicts);
+        }
         // The carry screen lives on the CALENDAR stack only. The editor is
         // also reachable from Tasks and Settings (search results, a task's
         // linked event), and replacing with a route this navigator does not
@@ -1406,6 +1464,8 @@ function EventEditorScreen({
                   title: next.title,
                   starts_at: next.start,
                 },
+          zoneMove: zoneVerdicts ? zoneMove : null,
+          zoneVerdicts,
         });
         return true;
       } catch {
@@ -2505,14 +2565,20 @@ function EventEditorScreen({
         // all following" that rewrote the whole series asks as what the user
         // chose: each copy is cut at the same point, and one with earlier
         // occurrences keeps them.
-        // Not after a save that changed the series' zone, until stage 13
-        // (137a): the offer would write start and end to the copies without
-        // their zone and rule, and they could slip by an hour or a day.
-        const zoneChanged =
-          zoneForm.chosen !== undefined &&
-          zoneToSave(zoneForm, facts) !== (original.recurrence?.tzid ?? null);
+        // A save that moved the series onto another zone carries the zone to
+        // the copies in the one question (stage 13, 143a; it replaces 137a):
+        // each copy is asked of the core how it takes it. A zone change the
+        // core was never asked about (no answer), or one made in a "this and
+        // all following" save, still offers no carry: the carry would write
+        // start and end without zone and rule, and the copies could slip by an
+        // hour or a day. Mirrors the desktop.
+        const zoneMove =
+          wholeFromCut === null && !isOccurrence
+            ? zoneMoveOf(original, sent, zoneAnswer)
+            : null;
+        const zoneChanged = seriesZoneChanged(original, sent);
         const carry = () =>
-          zoneChanged
+          zoneChanged && zoneMove === null
             ? Promise.resolve(false)
             : wholeFromCut && occurrence != null
               ? offerToCarry(
@@ -2522,7 +2588,7 @@ function EventEditorScreen({
                   occurrence,
                   sent,
                 )
-              : offerToCarry(original, updated, 'series', null, sent);
+              : offerToCarry(original, updated, 'series', null, sent, zoneMove);
         // Deleted occurrences the provider brought back and Aperio could not
         // delete again (253): the save stands, and the days are said on screen,
         // focused, before the editor goes on. Mirrors the desktop.

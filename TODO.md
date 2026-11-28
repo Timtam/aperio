@@ -3655,8 +3655,28 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   wie sie auf die neue Uhr kommt (Regel, Beginn, Ende, Löschungen, Zone, wie
   weit ihre Termine rücken) oder warum sie die Zone nicht bekommt; die
   Gruppen-Mitnahme kennt das Feld Zeitzone, und `zoneOffer` fasst das
-  Angebot für beide Oberflächen zusammen. Noch an keinen Dialog gebunden; das
-  kommt mit Teil 4.
+  Angebot für beide Oberflächen zusammen.
+  ↳ **Kopien nehmen die Zone mit, Dialoge (Stufe 13, Teil 4, 2026-11-28):**
+  Nach dem Speichern der ganzen Serie nennt die Mitnahme-Frage die Zeitzone
+  zuerst, sagt die Tagesrückung und wie viele Kopien die Zone nicht bekommen,
+  nennt jede davon mit Grund und schreibt jede Kopie einmal; eine Serie ohne
+  die Zone bekommt Titel, Ort und Beschreibung und eine Zeile im Bericht.
+  137a gilt nur noch ohne Antwort des Kerns und für „dieser und alle
+  folgenden“. Die Handy-Teile sind ohne Build gebaut. Ungeprüft mit NVDA und
+  VoiceOver: die längere Beschreibung der Frage, der Fokus, wenn nur
+  „Schließen“ bleibt, und die neuen Zeilen am Handy.
+  Offen (gefunden beim Bau, älter als Stufe 13):
+  - Die Mitnahme am Handy überspringt Kopien, die jemand anderes
+    organisiert, nicht (77a), wie es der Desktop tut.
+  - Scheitert am Handy das Lesen der Kalender, gilt jede Kopie als nur
+    lesbar.
+  - Das Handy bietet die Mitnahme nur aus dem Kalender-Stapel an, nicht aus
+    Aufgaben oder Einstellungen.
+  - Die Mitnahme ohne Zonenwechsel schreibt Beginn und Ende als Zeitpunkte
+    auf eine Kopie mit anderem Beginn, auch wenn nur das Ende geändert wurde.
+  - Scheitern mehrere Kopien, zeigt der Dialog nur den letzten Fehler.
+  - Microsoft-365-Kopien sind Vorkommen-Zeilen: der Titel landet auf einem
+    Vorkommen statt auf der Serie.
   🚩 Toni prüft mit dem Textstapel: Eine Kopie, deren Termine 12 Stunden
   oder mehr von den Terminen der Serie liegen (vorher und nachher), gilt als
   „nicht an den Tagen der Serie“ und bekommt die Zone nicht. Die 12 Stunden
@@ -3685,8 +3705,8 @@ Signatur, wenn ein Anbieter eine Kennung neu vergibt.
   Uhrzeiten), die Wochentag-Frage kommt, wo der Beginn auf der neuen Uhr auf
   einen anderen Tag fällt und die Regel Tage nennt. Wurde der Beginn einer
   gespeicherten Serie zuerst geändert, wartet die Wahl auf ein Speichern.
-  Kein Mitnahme-Angebot nach einem Zonenwechsel bis Stufe 13. Die Handy-Teile
-  sind ohne Build gebaut.
+  Kein Mitnahme-Angebot nach einem Zonenwechsel bis Stufe 13 (seit Teil 4
+  gebaut, siehe oben). Die Handy-Teile sind ohne Build gebaut.
   Offen: Eine Exchange-Serie nennt die Plätze einzeln geänderter Vorkommen
   unter ihren Ausnahmen. Nach „wie die Regel sagt“ und einem Kalenderwechsel
   wandert so ein Platz wie eine Löschung mit, und das Vorkommen ist im neuen

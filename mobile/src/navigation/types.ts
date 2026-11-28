@@ -1,6 +1,12 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import type { CarryableFields, CarryScope, EventGroup } from '@aperio/shared';
+import type {
+  CarryableFields,
+  CarryScope,
+  EventGroup,
+  ZoneCarry,
+  ZoneMove,
+} from '@aperio/shared';
 import type { FileImport, ImportedEvent, Task } from '@aperio/shared';
 import type { CalendarEvent } from '../api/calendar';
 import type { NewGroupMember } from '../api/eventGroups';
@@ -88,6 +94,11 @@ export type RootStackParamList = {
      *  "and all following" edit does not quietly undo the grouping from that
      *  point on. */
     successor?: NewGroupMember | null;
+    /** A whole-series save that moved the series onto another zone (stage
+     *  13), and each copy's verdict as read before the offer opened, keyed by
+     *  `carryTargetKey`. Both or neither; both are plain data. */
+    zoneMove?: ZoneMove | null;
+    zoneVerdicts?: Record<string, ZoneCarry> | null;
   };
   Lists: undefined;
   ListEditor: { listId: string };

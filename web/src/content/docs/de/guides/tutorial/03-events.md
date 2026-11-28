@@ -293,8 +293,16 @@ Zeitzone:
   wenn du die Zeitzone einer Serie wechselst: Jeder bleibt zu seiner Zeit und
   ersetzt weiter den Termin der Serie, für den er geändert wurde. Verschiebst
   du die Serie danach auch auf ein anderes Datum, gilt der Kasten unten.
-- Nach einem Wechsel der Zeitzone bietet Aperio nicht an, die Änderung auf die
-  Kopien des Termins in anderen Kalendern mitzunehmen; das kommt später.
+- Liegt die Serie in einer Termingruppe, fragt Aperio nach dem Speichern wie
+  bei jeder Änderung, ob die anderen Kopien sie mitnehmen; die Zeitzone steht
+  dann zuerst in der Liste der Änderungen. Jede Kopie, die eine Serie ist,
+  kommt auf die neue Zeitzone und liegt danach wie die Serie: zur selben
+  Uhrzeit und um dieselben Tage gerückt, auch wenn sie im anderen Halbjahr
+  beginnt. Lag sie vorher zu einer anderen Uhrzeit, behält sie diesen Abstand.
+  Eine Kopie, die schon so liegt, bleibt, wie sie ist. Kann eine Kopie die
+  Zeitzone nicht bekommen, bleiben ihre Zeiten; Titel, Ort und Beschreibung
+  gehen trotzdem mit, und Aperio nennt den Grund. Eine Kopie, die dort keine
+  Serie ist, bekommt die übrigen Änderungen; die Zeitzone gilt für sie nicht.
 - Gibt es eine getippte Uhrzeit an diesem Tag in der Zeitzone der Serie nicht,
   weil die Uhren vorgestellt werden, sagt Aperio es am Feld. Gespeichert wird
   erst mit einer anderen Uhrzeit.

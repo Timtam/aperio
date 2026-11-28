@@ -13,7 +13,13 @@ import {
   seriesIdOf,
   type StepWriteWait,
 } from '@aperio/shared';
-import type { CarryableFields, CarryScope, EventGroup } from '@aperio/shared';
+import type {
+  CarryableFields,
+  CarryScope,
+  EventGroup,
+  ZoneCarry,
+  ZoneMove,
+} from '@aperio/shared';
 
 import { getEventById, type NewGroupMember } from '../api/client';
 import type {
@@ -165,6 +171,11 @@ export type DialogMode =
        * other once the carry is done, and this is the anchor's half of it.
        */
       successor?: NewGroupMember | null;
+      /** A whole-series save that moved the series onto another zone (stage
+       *  13), and each copy's verdict as read before the offer opened, keyed
+       *  by `carryTargetKey`. Both or neither. */
+      zoneMove?: ZoneMove | null;
+      zoneVerdicts?: Record<string, ZoneCarry> | null;
     }
   | { kind: 'planTask'; task: Task }
   | { kind: 'sectionEdit'; listId: string; section: Section | null }
@@ -355,6 +366,9 @@ export interface DialogStateValue {
     occurrence?: string | null;
     /** The anchor's new row, when the edit made one — see the frame type. */
     successor?: NewGroupMember | null;
+    /** A zone move and the copies' verdicts — see the frame type. */
+    zoneMove?: ZoneMove | null;
+    zoneVerdicts?: Record<string, ZoneCarry> | null;
   }) => void;
   openPlanTask: (task: Task) => void;
   /** Open the create/rename section dialog. Pass `section=null` (or omit)
@@ -750,6 +764,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       occurrence?: string | null;
       /** The anchor's new row, when the edit made one — see the frame type. */
       successor?: NewGroupMember | null;
+      zoneMove?: ZoneMove | null;
+      zoneVerdicts?: Record<string, ZoneCarry> | null;
     }) => push({ kind: 'eventGroupCarry', ...payload }),
     [push],
   );

@@ -28,6 +28,8 @@
 // below).
 
 import type { EventGroup } from './eventGroups';
+import { endsByDateOf } from './recurrence';
+import { calendarZonesOf, type ZoneMove } from './seriesZoneForm';
 import { zoneCityName } from './zoneFormText';
 
 // The wire types are generated from `cal_core::group_carry` by
@@ -270,6 +272,44 @@ export type ZoneSeriesRefused = ZoneCarryRefused & {
  */
 export function zoneCarry(question: ZoneCarryQuestion): ZoneCarry {
   return JSON.parse(rules().zoneCarryJson(JSON.stringify(question))) as ZoneCarry;
+}
+
+/** A copy as the carry reads it, and the calendar it is in. */
+interface CopyRow {
+  start: string;
+  end: string;
+  all_day: boolean;
+  recurrence?: { rrule: string; exceptions?: string[] | null; tzid?: string | null } | null;
+}
+type CopyCalendar = Parameters<typeof calendarZonesOf>[0] & Parameters<typeof endsByDateOf>[0];
+
+/**
+ * What one copy, as just read, gets from a series' zone move: the core's
+ * verdict (`zoneCarry`) on the copy's own facts and its calendar's (the
+ * zones it stores, whether it stores an end as a date). The offer asks it of
+ * every copy before it opens, the carry again of the copy it is about to
+ * write, so both name the same reason. `today` is the surface's clock.
+ */
+export function zoneVerdictFor(
+  move: ZoneMove,
+  copy: CopyRow,
+  calendar: CopyCalendar,
+  today: string,
+): ZoneCarry {
+  return zoneCarry({
+    ...move,
+    copy: {
+      rrule: copy.recurrence?.rrule ?? null,
+      start: copy.start,
+      end: copy.end,
+      exceptions: copy.recurrence?.exceptions ?? [],
+      tzid: copy.recurrence?.tzid ?? null,
+      allDay: copy.all_day,
+    },
+    timeZones: calendarZonesOf(calendar),
+    endsByDate: endsByDateOf(calendar),
+    today,
+  });
 }
 
 /** The key a copy's verdict is kept under, for `zoneOffer`. */

@@ -24,6 +24,8 @@ import {
   zoneChoiceWait,
   zoneToSave,
   nextZoneAnswer,
+  seriesZoneChanged,
+  zoneMoveOf,
   type ZoneFormFacts,
 } from '@aperio/shared';
 
@@ -624,5 +626,58 @@ describe('the zone answers of one session (nextZoneAnswer, 95a)', () => {
       exceptions: ['2026-11-22T08:00:00Z'],
       movedMinutes: -1740,
     });
+  });
+});
+
+describe('the zone move a whole-series save made (zoneMoveOf, stage 13)', () => {
+  const stored = {
+    start: '2026-11-22T23:30:00.000Z',
+    end: '2026-11-23T00:30:00.000Z',
+    all_day: false,
+    recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=SU,WE', tzid: null as string | null },
+  };
+  const answer = {
+    start: '2026-11-21T23:30:00.000Z',
+    rrule: 'FREQ=WEEKLY;BYDAY=SU,WE',
+    exceptions: [],
+    movedMinutes: -1380,
+  };
+  const saved = {
+    ...stored,
+    start: answer.start,
+    end: '2026-11-22T00:30:00.000Z',
+    recurrence: { rrule: answer.rrule, tzid: 'Europe/Berlin' },
+  };
+
+  it('is the series before and after, where the answers left its start, and how far', () => {
+    expect(zoneMoveOf(stored, saved, answer)).toEqual({
+      anchorBefore: { rrule: 'FREQ=WEEKLY;BYDAY=SU,WE', start: stored.start, tzid: null },
+      anchorAfter: { rrule: answer.rrule, start: answer.start, tzid: 'Europe/Berlin' },
+      appliedStart: answer.start,
+      movedMinutes: -1380,
+      newLengthMs: null,
+    });
+  });
+
+  it('carries a new length only where the save changed it', () => {
+    const longer = { ...saved, end: '2026-11-22T01:30:00.000Z' };
+    expect(zoneMoveOf(stored, longer, answer)?.newLengthMs).toBe(2 * 60 * 60_000);
+  });
+
+  it('is none without an answer, or where the zone is the same clock', () => {
+    expect(zoneMoveOf(stored, saved, null)).toBeNull();
+    // Every UTC name is one clock, and an alias is its zone.
+    const utc = { ...saved, recurrence: { ...saved.recurrence, tzid: 'Etc/UTC' } };
+    expect(seriesZoneChanged(stored, utc)).toBe(false);
+    expect(zoneMoveOf(stored, utc, answer)).toBeNull();
+    const calcutta = { ...stored, recurrence: { ...stored.recurrence, tzid: 'Asia/Calcutta' } };
+    const kolkata = { ...stored, recurrence: { ...stored.recurrence, tzid: 'Asia/Kolkata' } };
+    expect(seriesZoneChanged(calcutta, kolkata)).toBe(false);
+  });
+
+  it('is no zone change where the save turned the repeat off or made the series all-day', () => {
+    expect(seriesZoneChanged(stored, { ...saved, recurrence: null })).toBe(false);
+    expect(seriesZoneChanged(stored, { ...saved, all_day: true })).toBe(false);
+    expect(seriesZoneChanged(stored, saved)).toBe(true);
   });
 });

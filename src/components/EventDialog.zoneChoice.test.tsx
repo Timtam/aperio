@@ -2,7 +2,16 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-import { DEFAULT_RECURRENCE_CAPABILITIES, fieldInstant, seriesClockChange } from '@aperio/shared';
+import {
+  DEFAULT_RECURRENCE_CAPABILITIES,
+  carryTargetKey,
+  fieldInstant,
+  seriesClockChange,
+  zoneAppliedSeries,
+  type CarryableFields,
+  type ZoneCarry,
+  type ZoneMove,
+} from '@aperio/shared';
 
 import type { Calendar, CalendarEvent } from '../api/types';
 
@@ -16,8 +25,9 @@ import type { Calendar, CalendarEvent } from '../api/types';
  * closed, with the focus on "Zeitzone nicht ändern". Afterwards the focus is
  * on the button and one announcement says what happened. The whole-series
  * save is measured against the series as the answer leaves it, so the answer
- * is applied once; and a save that changed the zone offers no carry to the
- * group's copies (137a).
+ * is applied once; and a save that changed the zone offers the carry to the
+ * group's copies with the zone and each copy's verdict (143a), or none where
+ * every copy already stands as the series does.
  *
  * The device is Berlin here, whatever clock the machine runs on.
  */
@@ -27,7 +37,11 @@ const { invokeMock, onFile, answers, announced, announce, openEventGroupCarry } 
   const announce = (message: string) => {
     announced.push(message);
   };
-  const onFile: { groups: unknown[]; seriesRows: unknown[] } = { groups: [], seriesRows: [] };
+  const onFile: { groups: unknown[]; seriesRows: unknown[]; events: Record<string, unknown> } = {
+    groups: [],
+    seriesRows: [],
+    events: {},
+  };
   /** What each `update_event` answers, in order; then the event as sent. */
   const answers: Array<(event: unknown) => Promise<unknown>> = [];
   const openEventGroupCarry = vi.fn();
@@ -46,6 +60,9 @@ const { invokeMock, onFile, answers, announced, announce, openEventGroupCarry } 
     }
     if (command === 'event_groups_for_events') {
       return Promise.resolve(onFile.groups);
+    }
+    if (command === 'get_event_by_id') {
+      return Promise.resolve(onFile.events[(payload as { id: string }).id] ?? null);
     }
     if (command === 'calendar_current_user_email' || command === 'get_user_pref') {
       return Promise.resolve(null);
@@ -123,6 +140,7 @@ afterEach(() => {
   openEventGroupCarry.mockClear();
   onFile.groups = [];
   onFile.seriesRows = [];
+  onFile.events = {};
   answers.length = 0;
   announced.length = 0;
   vi.restoreAllMocks();
@@ -636,8 +654,8 @@ describe('EventDialog → the changed occurrences move with the zone (95a)', () 
   });
 });
 
-describe('EventDialog → no carry to the group after a zone change (137a)', () => {
-  const inGroup = () => {
+describe('EventDialog → the carry to the group after a zone change (143a)', () => {
+  const inGroup = (copy: CalendarEvent = { ...UTC_SERIES, id: 'ev-copy' } as CalendarEvent) => {
     onFile.groups = [
       {
         id: 'g1',
@@ -649,7 +667,16 @@ describe('EventDialog → no carry to the group after a zone change (137a)', () 
         ],
       },
     ];
+    onFile.events = { 'ev-copy': copy };
   };
+  const payload = () =>
+    openEventGroupCarry.mock.calls[0][0] as {
+      before: CarryableFields;
+      after: CarryableFields;
+      zoneMove: ZoneMove | null;
+      zoneVerdicts: Record<string, ZoneCarry> | null;
+    };
+  const COPY_KEY = carryTargetKey({ calendar_id: 'cal-work', event_id: 'ev-copy' });
 
   it('offers the carry for a moved start without a zone change', async () => {
     deviceInBerlin();
@@ -658,9 +685,11 @@ describe('EventDialog → no carry to the group after a zone change (137a)', () 
     fireEvent.change(input(/^startzeit \(utc\)$/i), { target: { value: '22:30' } });
     save();
     await waitFor(() => expect(openEventGroupCarry).toHaveBeenCalledTimes(1));
+    expect(payload().zoneMove ?? null).toBeNull();
+    expect(payload().after.zone).toBeUndefined();
   });
 
-  it('offers none where the answer moved the start to another zone', async () => {
+  it('offers it with the zone and not the start where the answer moved the start', async () => {
     deviceInBerlin();
     inGroup();
     await open(UTC_SERIES);
@@ -669,9 +698,61 @@ describe('EventDialog → no carry to the group after a zone change (137a)', () 
     fireEvent.click(within(dialog).getByRole('button', { name: /wie die regel sagt/i }));
     await settle();
     save();
+    await waitFor(() => expect(openEventGroupCarry).toHaveBeenCalledTimes(1));
+    const { before, after, zoneMove, zoneVerdicts } = payload();
+    expect(before.zone).toEqual({ tzid: null });
+    expect(after.zone).toEqual({ tzid: 'Europe/Berlin' });
+    // Measured against the series as the answer left it: the start the
+    // answer moved is no change of the user's.
+    expect(Date.parse(before.start)).toBe(Date.parse(after.start));
+    expect(zoneMove?.movedMinutes).toBe(-1380);
+    expect(zoneVerdicts?.[COPY_KEY]?.outcome).toBe('changed');
+  });
+
+  it('names the start too where a time was moved after the zone', async () => {
+    deviceInBerlin();
+    inGroup();
+    await open(UTC_SERIES);
+    await pick('Berlin', 'Berlin');
+    const { dialog } = await question();
+    fireEvent.click(within(dialog).getByRole('button', { name: /wie die regel sagt/i }));
+    await settle();
+    // On the device's own zone the field names no clock.
+    fireEvent.change(input(/^startzeit( \(berlin\))?$/i), { target: { value: '01:30' } });
+    save();
+    await waitFor(() => expect(openEventGroupCarry).toHaveBeenCalledTimes(1));
+    const { before, after, zoneVerdicts } = payload();
+    expect(Date.parse(after.start) - Date.parse(before.start)).toBe(60 * 60_000);
+    const verdict = zoneVerdicts?.[COPY_KEY];
+    expect(verdict?.outcome).toBe('changed');
+    if (verdict?.outcome === 'changed') expect(verdict.shiftMinutes).toBe(-1380 + 60);
+  });
+
+  it('offers none where every copy already stands as the series does and nothing else changed', async () => {
+    deviceInBerlin();
+    const change = seriesClockChange({
+      rrule: 'FREQ=WEEKLY;BYDAY=SU,WE',
+      start: SUNDAY_LATE,
+      exceptions: [],
+      fromTzid: null,
+      toTzid: 'Europe/Berlin',
+      endsByDate: false,
+    });
+    const answer = change?.asRule;
+    if (answer?.outcome !== 'changed') throw new Error('the core refused the test series');
+    inGroup({
+      ...zoneAppliedSeries(UTC_SERIES, answer, 'Europe/Berlin'),
+      id: 'ev-copy',
+    } as CalendarEvent);
+    await open(UTC_SERIES);
+    await pick('Berlin', 'Berlin');
+    const { dialog } = await question();
+    fireEvent.click(within(dialog).getByRole('button', { name: /wie die regel sagt/i }));
+    await settle();
+    save();
     await waitFor(() => expect(calls('update_event')).toHaveLength(1));
     await waitFor(() => expect(announced.at(-1)).toMatch(/Abendrunde.*wurde aktualisiert\.$/));
-    expect(calls('event_groups_for_events')).toHaveLength(0);
+    await waitFor(() => expect(calls('get_event_by_id').length).toBeGreaterThan(0));
     expect(openEventGroupCarry).not.toHaveBeenCalled();
   });
 });

@@ -148,6 +148,8 @@ export function DialogHost() {
           scope={mode.scope}
           occurrence={mode.occurrence}
           successor={mode.successor}
+          zoneMove={mode.zoneMove ?? null}
+          zoneVerdicts={mode.zoneVerdicts ?? null}
           onChanged={invalidateData}
         />
       );

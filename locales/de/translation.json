@@ -1470,7 +1470,8 @@
         "end": "Ende",
         "all_day": "ganztägig",
         "location": "Ort",
-        "description": "Beschreibung"
+        "description": "Beschreibung",
+        "zone": "Zeitzone: {{zone}}"
       },
       "carry": "Mitziehen",
       "keep": "Andere unverändert lassen",
@@ -1492,7 +1493,25 @@
       "standaloneMayStand": "In {{calendar}} steht der Termin am {{date}} möglicherweise doppelt: Ob seine Einzelkopie angelegt wurde, ist unklar ({{reason}}). Bitte dort prüfen.",
       "shiftRefused": "In {{calendar}} kann die Wiederholung nicht mit dem neuen Datum oder der neuen Uhrzeit wandern: {{reason}}.",
       "unsureCut": "In {{calendar}} steht die Serie ab {{date}} möglicherweise doppelt: Ihr neuer Teil ist angelegt, aber ob der alte jetzt davor endet, ist unklar. Bitte dort prüfen.",
-      "skippedInvitation": "Die Kopie in {{calendar}} wurde nicht geändert – sie organisiert jemand anderes."
+      "skippedInvitation": "Die Kopie in {{calendar}} wurde nicht geändert – sie organisiert jemand anderes.",
+      "zoneDaysEarlier_one": "Bei einer Kopie rücken die Termine dabei {{days}} vor.",
+      "zoneDaysEarlier_other": "Bei {{count}} Kopien rücken die Termine dabei {{days}} vor.",
+      "zoneDaysLater_one": "Bei einer Kopie rücken die Termine dabei {{days}} zurück.",
+      "zoneDaysLater_other": "Bei {{count}} Kopien rücken die Termine dabei {{days}} zurück.",
+      "dayCount_one": "einen Tag",
+      "dayCount_other": "{{count}} Tage",
+      "zoneRefusedCount_one": "Eine Kopie bekommt die Zeitzone nicht.",
+      "zoneRefusedCount_other": "{{count}} Kopien bekommen die Zeitzone nicht.",
+      "zoneRefused": "Die Kopie in {{calendar}} bekommt die Zeitzone nicht: {{reason}}. Ihre Zeiten bleiben.",
+      "zoneNotASeries": "Die Kopie in {{calendar}} ist dort keine Serie; die Zeitzone gilt für sie nicht.",
+      "zoneRefusal": {
+        "zone_not_storable": "dieser Kalender kann die Zeitzone {{zone}} nicht speichern",
+        "off_pattern": "ihre Termine liegen nicht an den Tagen der Serie",
+        "all_day": "sie ist dort ganztägig"
+      },
+      "nothingToCarry": "Keine Kopie kann die Änderung bekommen.",
+      "changedWithoutZone": "Die Kopie in {{calendar}} wurde ohne die Zeitzone geändert: {{reason}}.",
+      "notChangedReason": "Die Kopie in {{calendar}} wurde nicht geändert: {{reason}}."
     },
     "eventGroup": {
       "title": "Derselbe Termin",

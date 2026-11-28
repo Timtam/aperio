@@ -24,6 +24,7 @@ import {
   type ClockFields,
   type FieldClock,
 } from './clockFields';
+import type { SeriesFacts } from './generated/SeriesFacts';
 import { endIsADay, ruleWithoutUntil, ruleWithUntil, untilTextOf, zoneUsableHere } from './recurrence';
 import {
   canonicalZone,
@@ -588,6 +589,85 @@ export function nextZoneAnswer(
     rrule: answer.rrule,
     exceptions: answer.exceptions,
     movedMinutes: (prev?.movedMinutes ?? 0) + answer.movedMinutes,
+  };
+}
+
+/** A series as the carry reads it: its times, whether it is all-day, and
+ *  its rule with its zone. */
+interface SeriesLike {
+  start: string;
+  end: string;
+  all_day: boolean;
+  recurrence?: { rrule: string; tzid?: string | null } | null;
+}
+
+/** Whether a row is a series with times of day: the only kind a zone is
+ *  carried between (stage 13). */
+function timedSeries(row: SeriesLike): boolean {
+  return !row.all_day && !!row.recurrence?.rrule;
+}
+
+/** The clock a stored zone names, canonically: every UTC name, none, and a
+ *  name tzdata does not know are one clock (UTC), and an alias is its zone. */
+function clockOf(tzid: string | null | undefined): string | null {
+  const zone = seriesClockZone(tzid ?? null);
+  return zone === null ? null : (canonicalZone(zone) ?? zone);
+}
+
+/**
+ * Whether a whole-series save moved a series onto another zone: stored and
+ * saved are both series with times of day, and their zones are different
+ * clocks. A save that turned the repeat off or made the series all-day is
+ * no zone change; the carry offers what it offers without one.
+ */
+export function seriesZoneChanged(stored: SeriesLike, saved: SeriesLike): boolean {
+  return (
+    timedSeries(stored) &&
+    timedSeries(saved) &&
+    clockOf(stored.recurrence?.tzid) !== clockOf(saved.recurrence?.tzid)
+  );
+}
+
+/**
+ * How a whole-series save moved a series onto another zone, for the carry to
+ * its copies (stage 13, 143a; `cal_core::zone_carry`): the series as stored
+ * and as saved, where the session's zone answers left its start, how far they
+ * moved its occurrences, and the saved length where the save changed it.
+ */
+export interface ZoneMove {
+  anchorBefore: SeriesFacts;
+  anchorAfter: SeriesFacts;
+  appliedStart: string;
+  movedMinutes: number;
+  newLengthMs: number | null;
+}
+
+/**
+ * The zone move a whole-series save made, or `null` where it made none the
+ * carry can follow: unless the zone changed (`seriesZoneChanged`) and an
+ * answer was given. A zone change without an answer is the edge where the
+ * core was never asked; the editors offer no carry for it, as before
+ * stage 13.
+ */
+export function zoneMoveOf(
+  stored: SeriesLike,
+  saved: SeriesLike,
+  answer: ZoneAnswer | null,
+): ZoneMove | null {
+  if (answer === null || !seriesZoneChanged(stored, saved)) return null;
+  const facts = (row: SeriesLike): SeriesFacts => ({
+    rrule: row.recurrence?.rrule ?? '',
+    start: row.start,
+    tzid: row.recurrence?.tzid ?? null,
+  });
+  const storedLength = Date.parse(stored.end) - Date.parse(stored.start);
+  const savedLength = Date.parse(saved.end) - Date.parse(saved.start);
+  return {
+    anchorBefore: facts(stored),
+    anchorAfter: facts(saved),
+    appliedStart: answer.start,
+    movedMinutes: answer.movedMinutes,
+    newLengthMs: savedLength === storedLength ? null : savedLength,
   };
 }
 

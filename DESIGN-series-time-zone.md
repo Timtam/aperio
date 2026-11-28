@@ -745,7 +745,9 @@ Desktop-Messungen und einer Bestandsaufnahme beider Editoren:
 - **137a — nach einem Zonenwechsel bietet Aperio bis Stufe 13 nicht an, die
   Kopien einer Termingruppe mitzunehmen;** das Angebot schriebe Beginn und
   Ende ohne Zone und Regel, und die Kopien könnten um eine Stunde oder einen
-  Tag verrutschen.
+  Tag verrutschen. Mit Stufe 13 ersetzt durch 143a bis 146a; es gilt nur
+  noch für eine Zonenänderung ohne Antwort des Kerns und eine in „dieser und
+  alle folgenden“.
 - **138a — die Wochentag-Frage spricht aus, was mit den Terminen geschieht**
   (die alten Texte waren Toni unklar): Titel „Welcher Wochentag soll
   gelten?“, Nachricht „In {Uhr} fällt der Beginn auf {Tag}, {Uhrzeit}; die
@@ -1169,20 +1171,33 @@ Fokus liegt auf dem Titel der Frage.
 Liegt die Serie in einer Termingruppe, bietet Aperio nach dem Speichern an, die
 Zone auf die Kopien mitzunehmen. Diese Frage kommt nie vor dem Speichern.
 
-Heute trägt die Gruppe nur Titel, Beginn, Ende, Ganztägig, Ort und Beschreibung.
-Eine Zonenänderung, bei der der Beginn seinen Zeitpunkt behält, löst heute kein
-Angebot aus. Wandert der Beginn mit „wie in der Regel“, bietet die heutige
-Mitnahme dagegen an, Beginn und Ende auf die Kopien zu schreiben, ohne deren Zone
-und Regel. Stufe 13 legt fest, wie die Zonen-Mitnahme das ersetzt.
+Entschieden (2026-11-23) und gebaut mit Stufe 13: Die Zone geht in die
+bestehende Mitnahme-Frage, zuerst in der Liste der Änderungen, etwa „Die
+Änderung (Zeitzone: New York, Titel) mitziehen?“ (143a). Gefragt wird nach
+dem Speichern der ganzen Serie, wenn die Serie vorher und nachher Uhrzeiten hat,
+ihre Zone eine andere Uhr ist und die Zonen-Antwort des Kerns vorliegt. Vor der
+Frage liest Aperio jede beschreibbare Kopie und fragt den Kern
+(`cal_core::zone_carry`), wie sie die Zone bekommt:
+- Eine Kopie folgt der Serie: dieselbe Uhrzeit und Tagesrückung auf der neuen
+  Uhr, auch aus dem anderen Halbjahr (144a), mit ihrem bisherigen Abstand zur
+  Serie (145a). Ihre Regel, ihre Löschungen, ihr Ende und ihre einzeln
+  geänderten Termine (bei CalDAV, 95a) rücken mit.
+- Eine Kopie, die schon so liegt, bleibt, wie sie ist, und wird nicht
+  geschrieben. Stehen alle so und ändert sich sonst nichts, kommt keine Frage.
+- Kann eine Serie die Zone nicht bekommen (ganztägig, der Kalender speichert
+  die Zone nicht, ihre Termine liegen nicht an den Tagen der Serie, ihre Regel
+  kann nicht rücken), bleiben ihre Zeiten und ihre Zone; Titel, Ort und
+  Beschreibung gehen trotzdem mit (146a). Die Frage nennt sie mit Grund, der
+  Bericht danach noch einmal; sie wird nicht erneut versucht.
+- Eine Kopie, die dort keine Serie ist, bekommt die übrigen Änderungen; die
+  Zone gilt für sie nicht, und die Frage sagt das. Ändert sich sonst nichts,
+  wird sie nicht geschrieben.
+- Die Frage sagt, um wie viele Tage die Termine der Kopien rücken (138a:
+  „vor“ ist früher) und wie viele Kopien die Zone nicht bekommen. Kann keine
+  Kopie etwas bekommen, bleibt nur „Schließen“.
 
-Nimmt Toni das Angebot an, bekommt jede beschreibbare Kopie dieselbe Zone, mit
-derselben Antwort wie in der Wochentag-Frage. Eine Kopie, deren Regel diese
-Antwort ablehnt oder deren Kalender die Zone nicht speichern kann, wird nicht
-geändert und mit Grund genannt. Entschieden (2026-11-23): Die Zone geht in
-die bestehende Mitnahme-Frage (143a). Eine Kopie folgt der Serie: dieselbe
-Uhrzeit und Tagesrückung auf der neuen Uhr, auch aus dem anderen Halbjahr
-(144a), mit ihrem bisherigen Abstand zur Serie (145a). Kann sie die Zone nicht
-bekommen, gehen Titel, Ort und Beschreibung trotzdem mit (146a).
+Eine Zonenänderung ohne Antwort des Kerns, und eine in einem Speichern „dieser
+und alle folgenden“, bietet weiter keine Mitnahme an (137a für diesen Rand).
 
 ### Wiederholung, Ganztägig, Umfänge
 
@@ -2072,10 +2087,36 @@ Handy im selben PR.
     geänderten Textfeldern ein Ziel, nie mit Beginn oder Ende der Serie),
     Tagesrückungen, „nichts mitzunehmen“ und „still“. Fixture `groupZoneCarry.json`, Kern, Handy-Tür und WebAssembly
     lesen sie.
+    Gebaut, Teil 4 (2026-11-28): `feat(groups): carry a series' time zone to
+    its copies`. Beide Editoren reichen nach dem Speichern der ganzen Serie
+    den Zonenwechsel (`zoneMoveOf`: Serie vorher und nachher, wo die
+    Zonen-Antworten den Beginn ließen, ihre Verschiebung, eine neue Länge)
+    an die bestehende Mitnahme-Frage; 137a fällt bis auf seinen Rand (keine
+    Antwort, „dieser und alle folgenden“). Vor der Frage liest der Editor
+    jede beschreibbare Kopie und fragt den Kern (`zoneVerdictFor`); stehen
+    alle schon wie die Serie und ändert sich sonst nichts, kommt keine Frage.
+    Die Frage nennt die Zone zuerst, sagt in ihrer Beschreibung die
+    Tagesrückung und wie viele Kopien die Zone nicht bekommen, und nennt
+    jede davon mit Grund; kann keine Kopie etwas bekommen, bleibt nur
+    „Schließen“. Die Mitnahme fragt jede Kopie beim Schreiben noch einmal
+    und schreibt sie einmal: Regel, Beginn, Ende, Löschungen und Zone wie
+    der Kern sie schrieb, mit `occurrence_shift_minutes` für ihre einzeln
+    geänderten Termine (95a), und Titel, Ort, Beschreibung. Eine Serie ohne
+    die Zone bekommt nur diese Textfelder und eine Zeile im Bericht, die
+    nicht erneut versucht wird (146a). Die Exchange-Verlustfrage bleibt die
+    der bestehenden Mitnahme.
 14. **Optional: lesbare Sync-Konflikte bei reiner Zonenänderung** — `feat(sync): say what changed when only a series' zone differs`.
 
 ## Risiken
 
+- **Die Paarung einer Kopie innerhalb von 12 Stunden (Stufe 13).** Eine
+  Kopie, deren Termine 12 Stunden oder weiter von denen der Serie liegen,
+  vor und nach dem Wechsel, gilt als „nicht an den Tagen der Serie“ und
+  bekommt die Zone nicht. Claudes technische Entscheidung; Toni prüft sie
+  mit dem Textstapel. Ebenso misst die Tagesrückung im Angebot das erste
+  Vorkommen einer Kopie: Läuft eine Kopie nahe Mitternacht durch beide
+  Halbjahre, können ihre Termine im anderen Halbjahr um einen anderen Tag
+  rücken, als die Frage sagt.
 - **Zwei Zonen-Datenbanken.** Der Versatz kommt aus Aperios tzdata (jiff-tzdb,
   2026f), Anzeige und Aufklappen aus Intl des Geräts, und die Geräte-Uhr
   (`chrono::Local`: der Rückfall der Erinnerungen, das schwebende UNTIL in
