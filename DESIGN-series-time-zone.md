@@ -2122,6 +2122,12 @@ Handy im selben PR.
   Vorkommen einer Kopie: Läuft eine Kopie nahe Mitternacht durch beide
   Halbjahre, können ihre Termine im anderen Halbjahr um einen anderen Tag
   rücken, als die Frage sagt.
+  Ein Sweep über rund 400 000 Kopien (sechs Zonen, beide Antworten, drei
+  spätere Änderungen) fand nach Prüfrunde 3 von Teil 3 nur noch 23 Kopien,
+  die nicht im Abstand zur gespeicherten Serie liegen: eine Regel an jedem
+  Tag, „wie die Regel sagt“ mit einer Stunde danach, nahe einer
+  Zeitumstellung, und eine Kopie auf einer anderen Uhr, Stunden neben der
+  Serie.
 - **Zwei Zonen-Datenbanken.** Der Versatz kommt aus Aperios tzdata (jiff-tzdb,
   2026f), Anzeige und Aufklappen aus Intl des Geräts, und die Geräte-Uhr
   (`chrono::Local`: der Rückfall der Erinnerungen, das schwebende UNTIL in
