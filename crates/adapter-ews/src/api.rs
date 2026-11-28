@@ -996,6 +996,7 @@ pub async fn update_event(
                 .or_else(|| event.etag.clone()),
             updated_at: Utc::now(),
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             ..event.clone()
         });
     }
@@ -1132,6 +1133,7 @@ pub async fn update_event(
         // The consent was for this write; the event that comes back is reused
         // for later ones (the carry offer), which must ask again.
         accepts_exception_loss: false,
+        occurrence_shift_minutes: None,
         deletions_not_restored,
         ..event.clone()
     })
@@ -2111,6 +2113,7 @@ pub(crate) fn build_event_from_new(
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
+        occurrence_shift_minutes: None,
         deletions_not_restored: Vec::new(),
         id: aperio_id,
         calendar_id: calendar_id.to_string(),
@@ -2739,6 +2742,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             deletions_not_restored: Vec::new(),
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
@@ -3230,6 +3234,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             deletions_not_restored: Vec::new(),
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
@@ -3360,6 +3365,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             deletions_not_restored: Vec::new(),
             created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
@@ -3546,6 +3552,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             deletions_not_restored: Vec::new(),
             created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
@@ -3686,6 +3693,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             deletions_not_restored: Vec::new(),
             created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
@@ -3855,6 +3863,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             deletions_not_restored: Vec::new(),
             created_at: "2026-09-18T00:00:00Z".parse().unwrap(),
             updated_at: "2026-09-18T00:00:00Z".parse().unwrap(),
@@ -4076,6 +4085,7 @@ mod tests {
             send_invitations: false,
             truncate_tail_overrides: false,
             accepts_exception_loss: false,
+            occurrence_shift_minutes: None,
             deletions_not_restored: Vec::new(),
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),

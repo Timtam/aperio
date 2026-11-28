@@ -378,6 +378,7 @@ fn map_event(d: DeviceEvent) -> Result<Event> {
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
+        occurrence_shift_minutes: None,
         deletions_not_restored: Vec::new(),
         created_at,
         updated_at,

@@ -27,7 +27,7 @@ const { invokeMock, onFile, answers, announced, announce, openEventGroupCarry } 
   const announce = (message: string) => {
     announced.push(message);
   };
-  const onFile: { groups: unknown[] } = { groups: [] };
+  const onFile: { groups: unknown[]; seriesRows: unknown[] } = { groups: [], seriesRows: [] };
   /** What each `update_event` answers, in order; then the event as sent. */
   const answers: Array<(event: unknown) => Promise<unknown>> = [];
   const openEventGroupCarry = vi.fn();
@@ -42,7 +42,7 @@ const { invokeMock, onFile, answers, announced, announce, openEventGroupCarry } 
       return Promise.resolve({ ...request, id: 'created-1' });
     }
     if (command === 'get_series_rows') {
-      return Promise.resolve({ rows: [], reach: { kind: 'complete' } });
+      return Promise.resolve({ rows: onFile.seriesRows, reach: { kind: 'complete' } });
     }
     if (command === 'event_groups_for_events') {
       return Promise.resolve(onFile.groups);
@@ -122,6 +122,7 @@ afterEach(() => {
   invokeMock.mockClear();
   openEventGroupCarry.mockClear();
   onFile.groups = [];
+  onFile.seriesRows = [];
   answers.length = 0;
   announced.length = 0;
   vi.restoreAllMocks();
@@ -492,6 +493,146 @@ describe('EventDialog → the whole-series save after a zone answer (question 12
     expect(first.accepts_exception_loss).toBeFalsy();
     expect(second.accepts_exception_loss).toBe(true);
     expect(second.recurrence?.tzid).toBe('Europe/Berlin');
+  });
+});
+
+describe('EventDialog → the changed occurrences move with the zone (95a)', () => {
+  it.each([
+    ['as they fall now', /wo die termine jetzt liegen$/i, 'asNow' as const],
+    ['as the rule says', /wie die regel sagt/i, 'asRule' as const],
+  ])('sends how far the answer moved the occurrences, %s', async (_how, name, which) => {
+    deviceInBerlin();
+    await open(UTC_SERIES);
+    await pick('Berlin', 'Berlin');
+    const { dialog } = await question();
+    fireEvent.click(within(dialog).getByRole('button', { name }));
+    await settle();
+    save();
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+    const answer = seriesClockChange({
+      rrule: 'FREQ=WEEKLY;BYDAY=SU,WE',
+      start: SUNDAY_LATE,
+      exceptions: [],
+      fromTzid: null,
+      toTzid: 'Europe/Berlin',
+      endsByDate: false,
+    })?.[which];
+    if (answer?.outcome !== 'changed') throw new Error('the core gave no answer');
+    expect(updatesSent()[0].occurrence_shift_minutes).toBe(answer.movedMinutes);
+    expect(answer.movedMinutes).toBe(which === 'asNow' ? 60 : -1380);
+  });
+
+  it('sends the sum of two choices', async () => {
+    deviceInBerlin();
+    // Mondays 09:00 in Berlin: New York (03:00 there) and on to Chicago
+    // (02:00), on the same Monday each time, so nothing asks.
+    const start = '2026-11-23T08:00:00.000Z';
+    await open({
+      ...UTC_SERIES,
+      start,
+      end: '2026-11-23T09:00:00.000Z',
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [], tzid: 'Europe/Berlin' },
+    } as unknown as CalendarEvent);
+    await pick('New York', 'new york');
+    await settle();
+    await pick('Chicago', 'chicago');
+    await settle();
+    expect(screen.queryByRole('dialog', { name: 'Welcher Wochentag soll gelten?' })).toBeNull();
+    save();
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+    const first = seriesClockChange({
+      rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      start,
+      exceptions: [],
+      fromTzid: 'Europe/Berlin',
+      toTzid: 'America/New_York',
+      endsByDate: false,
+    });
+    const second = seriesClockChange({
+      rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      start,
+      exceptions: [],
+      fromTzid: 'America/New_York',
+      toTzid: 'America/Chicago',
+      endsByDate: false,
+    });
+    expect(first?.asks).toBe(false);
+    expect(second?.asks).toBe(false);
+    if (first?.asNow.outcome !== 'changed' || second?.asNow.outcome !== 'changed') {
+      throw new Error('the core gave no answer');
+    }
+    expect(updatesSent()[0].occurrence_shift_minutes).toBe(
+      first.asNow.movedMinutes + second.asNow.movedMinutes,
+    );
+    expect(updatesSent()[0].occurrence_shift_minutes).toBe(-420);
+    expect(updatesSent()[0].recurrence?.tzid).toBe('America/Chicago');
+  });
+
+  it('sends none without a zone change', async () => {
+    deviceInBerlin();
+    await open(UTC_SERIES);
+    fireEvent.change(screen.getByRole('combobox', { name: /^titel$/i }), {
+      target: { value: 'Abendrunde neu' },
+    });
+    save();
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+    expect(updatesSent()[0]).not.toHaveProperty('occurrence_shift_minutes');
+  });
+
+  it('sends none where all-day is switched on after the zone', async () => {
+    deviceInBerlin();
+    await open({
+      ...UTC_SERIES,
+      start: '2026-11-23T08:00:00.000Z',
+      end: '2026-11-23T09:00:00.000Z',
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [], tzid: 'Europe/Berlin' },
+    } as unknown as CalendarEvent);
+    await pick('New York', 'new york');
+    await settle();
+    fireEvent.click(screen.getByRole('checkbox', { name: /ganztägig/i }));
+    save();
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+    expect(updatesSent()[0].all_day).toBe(true);
+    expect(updatesSent()[0]).not.toHaveProperty('occurrence_shift_minutes');
+  });
+
+  it('reads a changed occurrence at its new slot when the date moves after the zone', async () => {
+    deviceInBerlin();
+    // The Wednesday 9 December occurrence was changed, and its slot is listed
+    // among the exceptions, as Exchange lists it.
+    const changedSlot = '2026-12-09T23:30:00.000Z';
+    await open(withRule('FREQ=WEEKLY;BYDAY=SU,WE', [changedSlot]));
+    onFile.seriesRows = [
+      {
+        ...UTC_SERIES,
+        id: 'ev-utc::rid::2026-12-09T23:30:00Z',
+        start: '2026-12-10T08:00:00.000Z',
+        end: '2026-12-10T09:00:00.000Z',
+        recurrence: null,
+      },
+    ];
+    // Berlin as the rule says: every occurrence 1380 wall minutes back, onto
+    // 00:30 Berlin on the rule's own days.
+    await pick('Berlin', 'Berlin');
+    const { dialog } = await question();
+    fireEvent.click(within(dialog).getByRole('button', { name: /wie die regel sagt/i }));
+    await settle();
+    expect(input(/^startdatum$/i).value).toBe('2026-11-22');
+    // Then a week later.
+    fireEvent.change(input(/^startdatum$/i), { target: { value: '2026-11-29' } });
+    save();
+    await waitFor(() => expect(calls('update_event')).toHaveLength(1));
+    expect(calls('get_series_rows')).toHaveLength(1);
+    const sent = updatesSent()[0];
+    expect(sent.start).toBe('2026-11-28T23:30:00.000Z');
+    // The changed occurrence's slot on Berlin's clock, Wednesday 9 December
+    // 00:30, stays an exception the row stands in for. Read at its old slot,
+    // it was a deletion and moved with the date.
+    expect((sent.recurrence?.exceptions ?? []).map((x) => Date.parse(x))).toEqual([
+      Date.parse('2026-12-08T23:30:00Z'),
+    ]);
+    // The zone part of the move rides along; the date part does not (TODO.md).
+    expect(sent.occurrence_shift_minutes).toBe(-1380);
   });
 });
 

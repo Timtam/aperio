@@ -459,6 +459,9 @@ wieder aufgenommen wurde (97a bis 99a später am Tag, zu den Stufen 6 und 7):
   neuen Zeitpunkt ihres Vorkommens umgeschrieben, bevor der Wechsel den Server
   erreicht, mit derselben Zuordnung wie 94a. Das ergänzt 16b, das sonst nur in der
   Hilfe warnt; ohne es erschienen sie im anderen Halbjahr doppelt.
+  Gebaut mit Stufe 13, Teil 2 (2026-11-28): Das Speichern der ganzen Serie
+  schickt die Verschiebung der Zonen-Antworten mit (`occurrence_shift_minutes`),
+  und der CalDAV-Adapter schreibt jede RECURRENCE-ID danach um.
 - **96a — erst neue Zeitzonendaten.** Vor den Stufen 6 und 11 wird tzdata
   2025b abgelöst (32a). Welcher Weg, entscheidet eine eigene Recherche.
 - **97a — eine Liste im Manifest** (Stufe 6). Ein Kalender
@@ -1967,6 +1970,30 @@ Handy im selben PR.
     geänderter Termine (RECURRENCE-ID) um dieselbe Verschiebung, mit derselben
     Zuordnung wie die Ausnahmen (94a). Ganze Minuten: Eine Zone, deren Versatz
     Sekunden hatte (vor 1972, etwa Monrovia), verliert sie dort.
+    Gebaut, Teil 2 (2026-11-28, 95a): `fix(caldav): move changed occurrences
+    with a series' zone`. Ein `Event` trägt beim Schreiben
+    `occurrence_shift_minutes`, ein flüchtiges Signal wie
+    `accepts_exception_loss`: Alle Termine der Serie rücken um so viele
+    Wanduhr-Minuten. Beide Editoren halten die Zonen-Antworten einer Sitzung als
+    eine (`nextZoneAnswer`, die Verschiebungen addiert) und schicken sie beim
+    Speichern der ganzen Serie mit, wenn die Serie vorher und nachher Uhrzeiten
+    hat, im selben Kalender bleibt und eine Regel hat; nur an diesen einen
+    Schreibvorgang, nie an die Kopien. Der CalDAV-Adapter fragt `moved_slots`
+    mit Regel, Beginn und Zone der Serie, wie der Server sie hat, und schreibt
+    die RECURRENCE-ID jedes geänderten Termins, dessen Platz wandert, in der
+    Form des neuen DTSTART neu; DTSTART und DTEND des geänderten Termins und
+    alle anderen Bytes bleiben, ebenso jede VTIMEZONE, die er noch nennt. Ein
+    Platz, der kein Vorkommen nennt oder nicht wandert, behält seine Zeile.
+    Fällt der neue Platz in die doppelte Stunde der Herbst-Umstellung, steht
+    die RECURRENCE-ID in UTC (RFC 5545 erlaubt das neben einem DTSTART mit
+    TZID); abgelehnt wird nur, was gar nicht zu benennen ist, und ein
+    geänderter Termin, der auf den Platz eines anderen fiele. Dann geht nichts
+    an den Server (`override-slot`). Andere Adapter übergehen das Feld.
+    „Zone, dann Datum“: Der Anker schickt den Zonen-Teil der Verschiebung mit,
+    und die Editoren lesen die Zeilen der Serie vor `planSeriesSplit` an den
+    Plätzen der neuen Uhr (`zoneSlotMoves`, `rowsWithMovedSlots`), damit ein
+    geänderter Termin nicht als Löschung gilt. Der Datums-Teil bleibt offen
+    wie bei 198 (TODO.md).
 14. **Optional: lesbare Sync-Konflikte bei reiner Zonenänderung** — `feat(sync): say what changed when only a series' zone differs`.
 
 ## Risiken

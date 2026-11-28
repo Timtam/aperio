@@ -379,6 +379,7 @@ fn map_event(
         send_invitations: false,
         truncate_tail_overrides: false,
         accepts_exception_loss: false,
+        occurrence_shift_minutes: None,
         deletions_not_restored: Vec::new(),
         id,
         calendar_id: calendar_id.to_string(),

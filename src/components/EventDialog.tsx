@@ -174,6 +174,9 @@ import {
   zoneSentences,
   zoneToSave,
   zoneAppliedSeries,
+  zoneSlotMoves,
+  rowsWithMovedSlots,
+  nextZoneAnswer,
   zoneChoiceAnnouncement,
   zoneChoiceEntry,
   zoneOffsets,
@@ -188,6 +191,7 @@ import {
   type SeriesClockChange,
   type SeriesZoneForm,
   type WeekdayQuestionText,
+  type ZoneAnswer,
   type ZoneFormView,
   type ZonePick,
 } from '@aperio/shared';
@@ -347,12 +351,13 @@ interface FormState {
   /** The series' exceptions as a zone change moved them; `null` while they
    *  are the stored ones. */
   exceptions: string[] | null;
-  /** The last answer of the core this session applied for a zone change: its
-   *  start, rule and exceptions. A whole-series save measures the edit
-   *  against the series as it leaves it (`zoneAppliedSeries`, question 12 of
-   *  stage 12), so the answer is never applied twice. `null` while no zone
-   *  was changed with an answer. */
-  zoneAnswer: { start: string; rrule: string; exceptions: string[] } | null;
+  /** The answers of the core this session applied for a zone change, as one
+   *  (`nextZoneAnswer`): the last one's start, rule and exceptions, and how
+   *  far they moved the occurrences in all. A whole-series save measures the
+   *  edit against the series as it leaves it (`zoneAppliedSeries`, question
+   *  12 of stage 12), so the answer is never applied twice, and sends the
+   *  shift (95a). `null` while no zone was changed with an answer. */
+  zoneAnswer: ZoneAnswer | null;
 }
 
 /** Nothing chosen about the zone yet. */
@@ -1899,7 +1904,7 @@ export function EventDialog({
       rrule: applied.rrule,
       exceptions: applied.exceptions,
       zoneChoice: { ...prev.zoneChoice, chosen: zone },
-      zoneAnswer: { start: answer.start, rrule: answer.rrule, exceptions: answer.exceptions },
+      zoneAnswer: nextZoneAnswer(prev.zoneAnswer, answer),
     }));
     setRuleSetAt(answer.start);
     announce(
@@ -2799,10 +2804,37 @@ export function EventDialog({
             form.allDay !== series.all_day ||
             // A rule the user set at another start moves to this one.
             (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start));
-          const seriesRows =
+          // How far the zone answers moved every occurrence (95a), for a
+          // whole series whose zone was chosen here with an answer.
+          const zoneShift =
+            !wholeFromCut &&
+            !isOccurrence &&
+            form.zoneChoice.chosen !== undefined &&
+            form.zoneAnswer !== null &&
+            loadedRecurrence?.rrule
+              ? form.zoneAnswer.movedMinutes
+              : null;
+          const storedRows =
             !wholeFromCut && series.recurrence?.rrule && (rewritesFromStart || movesCalendar)
               ? (await readSeriesRows(series, series.start, getSeriesRows)).rows
               : null;
+          // The rows name their slots on the stored clock, the series stands
+          // on the answered one ("Zone, dann Datum"): each changed occurrence
+          // is read at its occurrence's new slot, so the plan does not take it
+          // for a deletion.
+          const seriesRows =
+            storedRows && zoneShift !== null
+              ? rowsWithMovedSlots(
+                  storedRows,
+                  zoneSlotMoves(
+                    loadedSeries,
+                    storedRows,
+                    answeredZone(zoneForm),
+                    zoneShift,
+                    seriesEndsByDate,
+                  ),
+                )
+              : storedRows;
           const wholePlan =
             seriesRows && rewritesFromStart
               ? planSeriesSplit(series, series.start, seriesRows)
@@ -2884,6 +2916,18 @@ export function EventDialog({
           consentSent = acceptsLoss && sentSave === askedSaveRef.current;
           // Another calendar creates the series anew there: in steps where the
           // target writes its deletions so (decisions 227, 265).
+          // The zone answers' shift rides this one write too, for a series
+          // timed before and after, written in place (95a): CalDAV moves its
+          // changed occurrences by it. A date moved after the answer is not in
+          // it; those occurrences stay where a date move leaves them (TODO.md).
+          const shiftSent =
+            zoneShift !== null &&
+            !movesCalendar &&
+            !form.allDay &&
+            !loadedSeries.all_day &&
+            !!updated.recurrence?.rrule
+              ? { occurrence_shift_minutes: zoneShift }
+              : {};
           const saved = await wait(
             form.calendarId !== event.calendar_id &&
               createsInSteps(
@@ -2892,7 +2936,10 @@ export function EventDialog({
               ),
             () =>
               apiUpdateEvent(
-                consentSent ? { ...updated, accepts_exception_loss: true } : updated,
+                {
+                  ...(consentSent ? { ...updated, accepts_exception_loss: true } : updated),
+                  ...shiftSent,
+                },
                 event.calendar_id,
               ),
           );

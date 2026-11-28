@@ -25,6 +25,7 @@ import type {
   Reminder,
   SeriesZoneForm,
   WeekdayQuestionText,
+  ZoneAnswer,
   ZoneChoiceResult,
   ZoneEditing,
   ZoneFormFacts,
@@ -65,6 +66,9 @@ import {
   zoneToSave,
   weekdayQuestion,
   zoneAppliedSeries,
+  zoneSlotMoves,
+  rowsWithMovedSlots,
+  nextZoneAnswer,
   zoneChoiceAnnouncement,
   zoneChoiceEntry,
   zoneOffsets,
@@ -941,14 +945,13 @@ function EventEditorScreen({
   /** The start the user set the repeat rule at, once they changed it in the
    *  field; `null` while it is the rule the editor was filled with. */
   const [ruleSetAt, setRuleSetAt] = useState<string | null>(null);
-  /** The core's answer a zone choice applied in this session (question 12 of
-   *  stage 12): the whole-series save measures the edit against the series
-   *  as the answer left it (`zoneAppliedSeries`), so the answer is never
-   *  applied a second time. `null` while no answer was applied here. */
-  const [zoneAnswer, setZoneAnswer] = useState<Extract<
-    ClockChangeAnswer,
-    { outcome: 'changed' }
-  > | null>(null);
+  /** The core's answers the zone choices applied in this session, as one
+   *  (`nextZoneAnswer`, question 12 of stage 12): the whole-series save
+   *  measures the edit against the series as the answer left it
+   *  (`zoneAppliedSeries`), so the answer is never applied a second time,
+   *  and sends how far it moved the occurrences (95a). `null` while no
+   *  answer was applied here. */
+  const [zoneAnswer, setZoneAnswer] = useState<ZoneAnswer | null>(null);
   // Free-form attendee strings ("Name <email>" / bare email) + whether to send
   // invitations (only meaningful on an external calendar with attendees).
   const [attendees, setAttendees] = useState<string[]>([]);
@@ -2355,10 +2358,37 @@ function EventEditorScreen({
           allDay !== base.all_day ||
           // A rule the user set at another start moves to this one.
           (ruleSetAt !== null && Date.parse(ruleSetAt) !== Date.parse(times.start));
-        const seriesRows =
+        // How far the zone answers moved every occurrence (95a), for a whole
+        // series whose zone was chosen here with an answer. Mirrors the
+        // desktop.
+        const zoneShift =
+          wholeFromCut === null &&
+          !isOccurrence &&
+          zoneAnswer !== null &&
+          original.recurrence?.rrule
+            ? zoneAnswer.movedMinutes
+            : null;
+        const storedRows =
           !wholeCut && base.recurrence?.rrule && (rewritesFromStart || movesCalendar)
             ? (await readSeriesRows(base, base.start, getSeriesRows)).rows
             : null;
+        // The rows name their slots on the stored clock, the series stands on
+        // the answered one ("Zone, dann Datum"): each changed occurrence is
+        // read at its occurrence's new slot, so the plan does not take it for
+        // a deletion.
+        const seriesRows =
+          storedRows && zoneShift !== null
+            ? rowsWithMovedSlots(
+                storedRows,
+                zoneSlotMoves(
+                  original,
+                  storedRows,
+                  answeredZone(zoneForm),
+                  zoneShift,
+                  seriesEndsByDate,
+                ),
+              )
+            : storedRows;
         const wholePlan =
           seriesRows && rewritesFromStart ? planSeriesSplit(base, base.start, seriesRows) : null;
         const keptRecurrence =
@@ -2434,6 +2464,18 @@ function EventEditorScreen({
         consentSent = acceptsLoss && sentSave === askedSaveRef.current;
         // Another calendar creates the series anew there: in steps where the
         // target writes its deletions so (decisions 227, 265).
+        // The zone answers' shift rides this one write too, for a series
+        // timed before and after, written in place (95a): CalDAV moves its
+        // changed occurrences by it. A date moved after the answer is not in
+        // it; those occurrences stay where a date move leaves them (TODO.md).
+        const shiftSent =
+          zoneShift !== null &&
+          !movesCalendar &&
+          !allDay &&
+          !original.all_day &&
+          !!sent.recurrence?.rrule
+            ? { occurrence_shift_minutes: zoneShift }
+            : {};
         const updated = await stepWriteWait(
           calId !== original.calendar_id &&
             createsInSteps(
@@ -2442,7 +2484,10 @@ function EventEditorScreen({
             ),
           () =>
             updateEvent(
-              consentSent ? { ...sent, accepts_exception_loss: true } : sent,
+              {
+                ...(consentSent ? { ...sent, accepts_exception_loss: true } : sent),
+                ...shiftSent,
+              },
               original.calendar_id,
             ),
         );
@@ -2875,7 +2920,7 @@ function EventEditorScreen({
     });
     if (applied.rrule !== recurrence) setRecurrence(applied.rrule);
     setRuleSetAt(answer.start);
-    setZoneAnswer(answer);
+    setZoneAnswer((prev) => nextZoneAnswer(prev, answer));
     afterZoneDialog(
       zoneChoiceAnnouncement({
         kind: answerMovesStart(answer, asked.start) ? 'startMoved' : 'sameInstant',

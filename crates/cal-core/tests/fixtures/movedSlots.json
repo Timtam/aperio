@@ -141,6 +141,27 @@
       ]
     },
     {
+      "name": "a-slot-moved-into-the-autumn-overlap",
+      "note": "Sundays 01:30 UTC from 3 January 2027, a series without a zone, to Berlin as they fall now: 02:30 there in winter, 60 minutes later in wall time. On 31 October 2027 Berlin's clocks go back at 03:00, so 02:30 happens twice: the slot is placed at the earlier reading, 02:30 summer time (00:30 UTC), as the expanders place it. Its wall time names two instants, so a writer that names slots on Berlin's clock names this one in UTC (CalDAV, 95a). The slot on 10 January lands on 02:30 winter time, the same instant, and is left out.",
+      "question": {
+        "rrule": "FREQ=WEEKLY;BYDAY=SU",
+        "start": "2027-01-03T01:30:00Z",
+        "fromTzid": null,
+        "toTzid": "Europe/Berlin",
+        "movedMinutes": 60,
+        "slots": [
+          "2027-10-31T01:30:00Z",
+          "2027-01-10T01:30:00Z"
+        ]
+      },
+      "expect": [
+        {
+          "from": "2027-10-31T01:30:00Z",
+          "to": "2027-10-31T00:30:00Z"
+        }
+      ]
+    },
+    {
       "name": "a-start-that-names-no-instant",
       "note": "Nothing can be matched without a start: null.",
       "question": {

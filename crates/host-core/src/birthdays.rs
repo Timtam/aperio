@@ -185,6 +185,7 @@ pub fn events_for_contacts(
                 send_invitations: false,
                 truncate_tail_overrides: false,
                 accepts_exception_loss: false,
+                occurrence_shift_minutes: None,
                 deletions_not_restored: Vec::new(),
                 id: format!("{BIRTHDAY_EVENT_PREFIX}{}:{}", contact.id, year),
                 calendar_id: calendar_id.to_string(),
