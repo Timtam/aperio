@@ -2124,7 +2124,9 @@ Handy im selben PR.
     Schlüsseln und ohne leere Teile gelesen), zeigen Desktop und Handy das Feld
     „Zeitzone der Serie“ mit der Stadt jeder Seite, und der kopierte Text am
     Desktop nennt es ebenso. Jeder andere Konflikt zeigt seine Werte wie
-    bisher.
+    bisher, auf beiden Oberflächen durch dieselbe Lesart
+    (`decodeConflictValue`): Das Handy las ein Objekt auf beiden Seiten als
+    „[object Object]“ (Prüfrunde 1).
 
 ## Risiken
 

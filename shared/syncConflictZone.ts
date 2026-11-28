@@ -16,6 +16,26 @@ export interface ZoneConflictLike {
   remote_value: string | null;
 }
 
+/**
+ * A conflict's stored value as the dialog shows it: a JSON string as its
+ * text, a number or truth value as written, an object or a list as JSON,
+ * and nothing as an em dash. One decode for both surfaces: the phone read
+ * an object as "[object Object]" on both sides, so a screen reader user
+ * could not tell the two versions apart.
+ */
+export function decodeConflictValue(raw: string | null): string {
+  if (raw === null) return '—';
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || parsed === undefined) return '—';
+    if (typeof parsed === 'string') return parsed;
+    if (typeof parsed === 'number' || typeof parsed === 'boolean') return String(parsed);
+    return JSON.stringify(parsed);
+  } catch {
+    return raw;
+  }
+}
+
 /** A repeat as the conflict stores it: JSON with a rule and maybe a zone. */
 type StoredRepeat = Record<string, unknown> & { rrule: string; tzid?: string | null };
 

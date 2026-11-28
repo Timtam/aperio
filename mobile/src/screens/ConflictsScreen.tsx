@@ -12,6 +12,7 @@ import {
 
 import {
   type ConflictGroup,
+  decodeConflictValue,
   groupSyncConflicts,
   readErrorMessage,
   seriesZoneConflict,
@@ -49,17 +50,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // label carries the item NAME + (per-field) the field, so a button never reads
 // identically to its siblings. Reading order per card: heading → group actions →
 // per-field details. No Tauri event bus on mobile → re-fetch after each resolve.
-
-/** Conflict values are JSON-encoded scalars; decode for display, null → em-dash. */
-function decodeForDisplay(raw: string | null): string {
-  if (raw == null) return '—';
-  try {
-    const v = JSON.parse(raw);
-    return v == null ? '—' : String(v);
-  } catch {
-    return raw;
-  }
-}
 
 /** Resolve each group's owning row to its human name, limited to the kinds the
  *  mobile client can fetch: `task` (getTaskById) + `task_list` (listTaskLists).
@@ -466,11 +456,11 @@ function ConflictFieldRow({
       </Text>
       <Text style={styles.cardValue} accessibilityRole="text">
         {t('dialogs.syncConflicts.localValueLabel')}:{' '}
-        {zone ? zone.local : decodeForDisplay(conflict.local_value)}
+        {zone ? zone.local : decodeConflictValue(conflict.local_value)}
       </Text>
       <Text style={styles.cardValue} accessibilityRole="text">
         {t('dialogs.syncConflicts.remoteValueLabel')}:{' '}
-        {zone ? zone.remote : decodeForDisplay(conflict.remote_value)}
+        {zone ? zone.remote : decodeConflictValue(conflict.remote_value)}
       </Text>
       <View style={styles.actions}>
         <Pressable

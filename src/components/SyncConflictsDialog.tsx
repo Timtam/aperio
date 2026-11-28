@@ -18,6 +18,7 @@ import {
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
 import {
+  decodeConflictValue,
   groupSyncConflicts,
   seriesZoneConflict,
   type ConflictGroup,
@@ -525,13 +526,13 @@ function ConflictFieldRow({
           <span className="sync-conflict-field__valueLabel">
             {t('dialogs.syncConflicts.localValueLabel')}
           </span>
-          <code>{zone ? zone.local : decodeForDisplay(conflict.local_value)}</code>
+          <code>{zone ? zone.local : decodeConflictValue(conflict.local_value)}</code>
         </div>
         <div id={remoteId}>
           <span className="sync-conflict-field__valueLabel">
             {t('dialogs.syncConflicts.remoteValueLabel')}
           </span>
-          <code>{zone ? zone.remote : decodeForDisplay(conflict.remote_value)}</code>
+          <code>{zone ? zone.remote : decodeConflictValue(conflict.remote_value)}</code>
         </div>
       </div>
       <div className="sync-conflict-field__actions">
@@ -607,27 +608,11 @@ function conflictsToText(
           });
       lines.push(
         `    ${t('dialogs.syncConflicts.fieldLabel')}: ${fieldLabel}`,
-        `        ${t('dialogs.syncConflicts.localValueLabel')}: ${zone ? zone.local : decodeForDisplay(c.local_value)}`,
-        `        ${t('dialogs.syncConflicts.remoteValueLabel')}: ${zone ? zone.remote : decodeForDisplay(c.remote_value)}`,
+        `        ${t('dialogs.syncConflicts.localValueLabel')}: ${zone ? zone.local : decodeConflictValue(c.local_value)}`,
+        `        ${t('dialogs.syncConflicts.remoteValueLabel')}: ${zone ? zone.remote : decodeConflictValue(c.remote_value)}`,
       );
     });
     lines.push('');
   });
   return lines.join('\n').trimEnd() + '\n';
-}
-
-/** Decode the JSON-encoded backend value into something readable. */
-function decodeForDisplay(raw: string | null): string {
-  if (raw === null) return '—';
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed === null || parsed === undefined) return '—';
-    if (typeof parsed === 'string') return parsed;
-    if (typeof parsed === 'number' || typeof parsed === 'boolean') {
-      return String(parsed);
-    }
-    return JSON.stringify(parsed);
-  } catch {
-    return raw;
-  }
 }

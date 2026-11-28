@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { seriesZoneConflict } from '@aperio/shared';
+import { decodeConflictValue, seriesZoneConflict } from '@aperio/shared';
 
 /**
  * A sync conflict on a series' repeat that differs only in its zone is named
@@ -15,6 +15,24 @@ const conflict = (local: string | null, remote: string | null, extra: { row_kind
   local_value: local,
   remote_value: remote,
   ...extra,
+});
+
+describe('decodeConflictValue', () => {
+  it('reads a string as its text, a scalar as written, and nothing as a dash', () => {
+    expect(decodeConflictValue(JSON.stringify('Abendrunde'))).toBe('Abendrunde');
+    expect(decodeConflictValue('3')).toBe('3');
+    expect(decodeConflictValue('true')).toBe('true');
+    expect(decodeConflictValue('null')).toBe('—');
+    expect(decodeConflictValue(null)).toBe('—');
+    expect(decodeConflictValue('not json')).toBe('not json');
+  });
+
+  // Stage 14 review: the phone read every object as "[object Object]".
+  it('reads an object as JSON, never as [object Object]', () => {
+    const value = JSON.stringify({ rrule: 'FREQ=WEEKLY;BYDAY=MO', tzid: 'Europe/Berlin' });
+    expect(decodeConflictValue(value)).toBe(value);
+    expect(decodeConflictValue('[1,2]')).toBe('[1,2]');
+  });
 });
 
 describe('seriesZoneConflict', () => {
